@@ -78,6 +78,9 @@ function Operations({ events }: { events: readonly BoardEvent[] }) {
             <span className="text-board-muted">{timeAgo(event.ts)}</span>
             <span className={event.type === "turn.failed" ? "text-rose-300" : "text-emerald-300"}>
               {event.actor} · {stringOf(event.payload["trigger"])}
+              {stringOf(event.payload["model"]) === ""
+                ? ""
+                : ` · ${stringOf(event.payload["model"])}`}
             </span>
             <span className="truncate text-board-muted">
               {stringOf(event.payload["summary"]) || stringOf(event.payload["error"])}
@@ -357,6 +360,11 @@ export function SocietyPage() {
                 <td className="py-1.5 pr-2 font-semibold">{agent.name}</td>
                 <td className="py-1.5 pr-2">{agent.role}</td>
                 <td className="py-1.5 pr-2 text-board-muted">{agent.cli}</td>
+                <td className="py-1.5 pr-2 text-xs text-board-muted">
+                  {roster.data?.find((m) => m.name === agent.name)?.lastModel ??
+                    agent.model ??
+                    "cli default"}
+                </td>
                 <td className="py-1.5 pr-2 text-board-muted">
                   {agent.memberships.join(", ") || "no projects"}
                 </td>

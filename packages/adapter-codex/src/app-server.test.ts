@@ -178,6 +178,8 @@ describe("Codex app-server resident sessions", () => {
     expect(first.exitReason).toBe("completed");
     expect(first.status?.summary).toBe("answered turn 1");
     expect(first.session).toBe("thread-7");
+    expect(first.model).toBe("gpt-5");
+    expect(first.events[0]).toMatchObject({ type: "turn_started", model: "gpt-5" });
     expect(first.events.map((e) => e.type)).toEqual([
       "turn_started",
       "tool_call",

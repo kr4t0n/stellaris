@@ -286,6 +286,8 @@ export class CodexExecBackend implements AgentBackend {
       exitReason,
       ...(error === undefined ? {} : { error }),
       ...(threadId === undefined ? {} : { session: threadId }),
+      // The exec stream never names the model, so the configured one is the best report available.
+      model: request.spec.model ?? this.options.model,
     };
   }
 

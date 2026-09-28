@@ -38,6 +38,7 @@ class FakeRunner implements TurnRunner {
       usage: null,
       costUsd: 0,
       toolCalls: 0,
+      model: null,
     };
   }
 

@@ -275,6 +275,8 @@ interface TurnCollector {
 
 export class CodexAppServerSession implements ResidentSession {
   session: SessionId;
+  /** The model the app server reported when the thread opened. */
+  model: string | undefined;
   private readonly client: JsonRpcClient;
   private active: TurnCollector | null = null;
   private closed = false;
@@ -379,6 +381,7 @@ export class CodexAppServerSession implements ResidentSession {
     if (id === undefined) {
       throw new Error("codex app-server returned no thread id");
     }
+    this.model = isDict(response) ? str(response["model"]) : undefined;
     return id;
   }
 
@@ -483,6 +486,7 @@ export class CodexAppServerSession implements ResidentSession {
       agent: this.spec.agent,
       session: this.session,
       runner: this.options.runnerName ?? "local",
+      ...(this.model === undefined ? {} : { model: this.model }),
     });
 
     let timedOut = false;
@@ -545,6 +549,7 @@ export class CodexAppServerSession implements ResidentSession {
       exitReason,
       ...(turn.error === undefined ? {} : { error: turn.error }),
       session: this.session,
+      ...(this.model === undefined ? {} : { model: this.model }),
     };
   }
 

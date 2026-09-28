@@ -159,6 +159,7 @@ export class LocalRunner {
       usage: null,
       costUsd: 0,
       toolCalls: 0,
+      model: agent.model ?? null,
     };
 
     if (agent.status === "retired") {
@@ -322,6 +323,7 @@ export class LocalRunner {
       usage: result.usage,
       costUsd: result.costUsd,
       toolCalls: result.events.filter((event) => event.type === "tool_call").length,
+      model: result.model ?? agent.model ?? null,
     };
 
     if (result.exitReason === "completed" || result.exitReason === "blocked") {

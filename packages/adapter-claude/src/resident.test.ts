@@ -70,6 +70,7 @@ function scripted(stallOn: number | null = null) {
         type: "system",
         subtype: "init",
         session_id: start.session,
+        model: "claude-test-model",
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       } as unknown as SDKMessage;
       let turn = 0;
@@ -111,6 +112,9 @@ describe("Claude resident sessions", () => {
 
     const second = await session.runTurn("again");
     expect(second.status?.summary).toBe("turn 2");
+    // The init message arrives once per session; every turn after it knows the model.
+    expect(second.model).toBe("claude-test-model");
+    expect(second.events[0]).toMatchObject({ type: "turn_started", model: "claude-test-model" });
     // The SDK reports a running total; the session hands back the delta.
     expect(second.costUsd).toBeCloseTo(0.1);
     expect(second.usage).toEqual({

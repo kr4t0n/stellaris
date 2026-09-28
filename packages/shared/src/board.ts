@@ -129,6 +129,10 @@ export const MemberSchema = z.object({
   homeRunner: NameSchema,
   status: AgentStatusSchema,
   resident: z.boolean().default(false),
+  /** The model configured on the record, if any; the CLI's own default applies otherwise. */
+  model: z.string().optional(),
+  /** The model the CLI reported on the citizen's last turn. */
+  lastModel: z.string().optional(),
   memberships: z.array(NameSchema),
   subscriptions: z.array(ChannelRefSchema),
   claimsHeld: z.number().int().nonnegative().default(0),

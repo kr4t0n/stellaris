@@ -82,6 +82,8 @@ interface TurnState {
   exitReason: TurnExitReason;
   error: string | undefined;
   sawResult: boolean;
+  /** The model the CLI announced on its init message. */
+  model: string | undefined;
 }
 
 interface HandlerContext {
@@ -91,7 +93,7 @@ interface HandlerContext {
   readonly announceOnInit: boolean;
 }
 
-function freshState(): TurnState {
+function freshState(model?: string): TurnState {
   return {
     usage: ZERO_USAGE,
     totalCostUsd: 0,
@@ -100,6 +102,7 @@ function freshState(): TurnState {
     exitReason: "error",
     error: undefined,
     sawResult: false,
+    model,
   };
 }
 
@@ -163,13 +166,17 @@ function handleMessage(
 ): void {
   switch (message.type) {
     case "system": {
-      if (context.announceOnInit && "subtype" in message && message.subtype === "init") {
-        emit({
-          type: "turn_started",
-          agent: context.agent,
-          session: message.session_id,
-          runner: context.runnerName,
-        });
+      if ("subtype" in message && message.subtype === "init") {
+        state.model = message.model;
+        if (context.announceOnInit) {
+          emit({
+            type: "turn_started",
+            agent: context.agent,
+            session: message.session_id,
+            runner: context.runnerName,
+            model: message.model,
+          });
+        }
       }
       return;
     }
@@ -262,6 +269,7 @@ function finishTurn(
     status,
     exitReason: state.exitReason,
     ...(state.error === undefined ? {} : { error: state.error }),
+    ...(state.model === undefined ? {} : { model: state.model }),
   };
 }
 
@@ -333,6 +341,7 @@ class ClaudeResident implements ResidentSession {
   private ended = false;
   private endedWith: string | undefined;
   private lastTotalCostUsd = 0;
+  private model: string | undefined;
 
   constructor(
     private readonly context: HandlerContext,
@@ -356,6 +365,7 @@ class ClaudeResident implements ResidentSession {
         }
         if (message.type === "system" && "subtype" in message && message.subtype === "init") {
           this.session = message.session_id;
+          this.model = message.model;
         }
         const turn = this.active;
         if (turn === null) {
@@ -394,7 +404,7 @@ class ClaudeResident implements ResidentSession {
       events.push(event);
       onEvent?.(event);
     };
-    const state = freshState();
+    const state = freshState(this.model);
     const { promise: done, resolve } = Promise.withResolvers<void>();
     const settle = (): void => {
       this.active = null;
@@ -406,6 +416,7 @@ class ClaudeResident implements ResidentSession {
       agent: this.context.agent,
       session: this.session,
       runner: this.context.runnerName,
+      ...(this.model === undefined ? {} : { model: this.model }),
     });
 
     let timedOut = false;

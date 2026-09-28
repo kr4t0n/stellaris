@@ -102,6 +102,7 @@ describe("Board runtime support", () => {
       usage: null,
       costUsd: 0,
       toolCalls: 0,
+      model: null,
     };
     await board.beginTurn(record);
     await board.finishTurn({

@@ -60,6 +60,8 @@ export interface TurnResult {
    * that assign their own ids on the first turn; the runner records it for the next turn.
    */
   readonly session?: SessionId | undefined;
+  /** The model the CLI reported running for this turn, when it reports one. */
+  readonly model?: string | undefined;
 }
 
 /** What a resident session needs at start: everything a turn needs except the prompt. */

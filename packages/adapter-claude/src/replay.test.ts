@@ -69,6 +69,8 @@ describe("ClaudeAgentBackend replay", () => {
     const result = await backend.runTurn(request);
 
     expect(result.exitReason).toBe("completed");
+    expect(result.model).toBe("claude-opus-5-5");
+    expect(result.events[0]).toMatchObject({ type: "turn_started", model: "claude-opus-5-5" });
     expect(result.costUsd).toBeCloseTo(0.1922);
     expect(result.usage).toEqual({
       inputTokens: 4,

@@ -43,6 +43,7 @@ describe("buildTurnPrompt", () => {
         usage: null,
         costUsd: 0,
         toolCalls: 3,
+        model: null,
       },
       onboarding: null,
     });
@@ -119,6 +120,7 @@ describe("buildTurnPrompt", () => {
             resident: false,
             memberships: ["demo"],
             subscriptions: ["general", "demo/general"],
+            lastModel: "gpt-5-codex",
             claimsHeld: 1,
             tasksDone: 3,
             lastTurnAt: "2026-09-28T11:00:00.000Z",
@@ -134,7 +136,7 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("## The society");
     expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1');
     expect(prompt).toContain(
-      "- eng-1: engineer on codex; active; projects demo; follows general, demo/general; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
+      "- eng-1: engineer on codex (gpt-5-codex); active; projects demo; follows general, demo/general; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
     );
   });
 

@@ -1524,6 +1524,7 @@ export class Board {
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
         toolCalls: parsed.toolCalls,
+        model: parsed.model,
         summary: parsed.status?.summary ?? null,
         needsOwnerDecision: parsed.status?.needsOwnerDecision ?? false,
         error: parsed.error,
@@ -1742,6 +1743,7 @@ export class Board {
     }
     let lastTurnAt: string | undefined;
     let lastTurnOutcome: string | undefined;
+    let lastModel: string | undefined;
     for (const scope of await listDirs(this.paths.agentProjects(name))) {
       const turn = await this.readLastTurn(name, scope);
       const at = turn?.endedAt ?? turn?.startedAt;
@@ -1750,6 +1752,7 @@ export class Board {
         lastTurnOutcome = `${turn.trigger.kind} on ${scope}: ${turn.exitReason ?? "running"}${
           turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
         }`;
+        lastModel = turn.model ?? undefined;
       }
     }
     const member = MemberSchema.parse({
@@ -1759,6 +1762,8 @@ export class Board {
       homeRunner: agent.homeRunner,
       status: agent.status,
       resident: charter.resident,
+      ...(agent.model === undefined ? {} : { model: agent.model }),
+      ...(lastModel === undefined ? {} : { lastModel }),
       memberships: agent.memberships,
       subscriptions: agent.subscriptions,
       claimsHeld,

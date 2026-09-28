@@ -101,12 +101,13 @@ agent
   .description("Add an agent and print its board token once")
   .requiredOption("--role <role>", "role charter name, for example engineer or reviewer")
   .option("--cli <cli>", "claude or codex")
+  .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
   .option("--runner <name>", "home runner", "local")
   .option("-p, --project <slug...>", "project memberships")
   .action(
     async (
       name: string,
-      opts: { role: string; cli?: string; runner: string; project?: string[] },
+      opts: { role: string; cli?: string; model?: string; runner: string; project?: string[] },
     ) => {
       const board = await open();
       const cli = opts.cli === undefined ? null : CliKindSchema.parse(opts.cli);
@@ -114,6 +115,7 @@ agent
         name,
         role: opts.role,
         cli,
+        ...(opts.model === undefined ? {} : { model: opts.model }),
         homeRunner: opts.runner,
         memberships: opts.project ?? [],
       });
@@ -129,8 +131,15 @@ agent
   .action(async () => {
     const board = await open();
     const agents = await board.listAgents();
+    const members = await board.listMembers();
     print(agents, () =>
-      agents.map((a) => `${a.name}\t${a.role}\t${a.cli ?? "human"}\t${a.status}`).join("\n"),
+      agents
+        .map((a) => {
+          const model =
+            members.find((m) => m.name === a.name)?.lastModel ?? a.model ?? "cli default";
+          return `${a.name}\t${a.role}\t${a.cli ?? "human"}\t${model}\t${a.status}`;
+        })
+        .join("\n"),
     );
   });
 

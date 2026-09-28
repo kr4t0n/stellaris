@@ -54,6 +54,8 @@ export const TurnRecordSchema = z.object({
   usage: UsageSchema.nullable(),
   costUsd: z.number().nonnegative().default(0),
   toolCalls: z.number().int().nonnegative().default(0),
+  /** The model the CLI reported for this turn, else the model configured for the agent, else null. */
+  model: z.string().nullable().default(null),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 

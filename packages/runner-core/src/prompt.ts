@@ -40,8 +40,9 @@ function profileLine(profile: string): string {
 }
 
 function rosterLine(member: Member): string {
+  const model = member.lastModel ?? member.model;
   const parts = [
-    `${member.role} on ${member.cli ?? "no CLI"}`,
+    `${member.role} on ${member.cli ?? "no CLI"}${model === undefined ? "" : ` (${model})`}`,
     member.status,
     member.resident ? "resident" : "",
     member.memberships.length === 0 ? "no projects" : `projects ${member.memberships.join(", ")}`,

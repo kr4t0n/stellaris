@@ -12,7 +12,7 @@ function Line({ item }: { item: LiveTurnEvent }) {
       return (
         <li className="flex gap-2 text-emerald-300">
           {time}
-          <span>turn started</span>
+          <span>turn started{event.model === undefined ? "" : ` · ${event.model}`}</span>
         </li>
       );
     case "text":

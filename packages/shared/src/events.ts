@@ -79,6 +79,8 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
     agent: NameSchema,
     session: z.string(),
     runner: NameSchema,
+    /** The model the CLI reports running, when it reports one. */
+    model: z.string().optional(),
   }),
   z.object({ type: z.literal("text"), delta: z.string() }),
   z.object({ type: z.literal("tool_call"), name: z.string(), input: z.unknown() }),

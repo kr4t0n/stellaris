@@ -478,6 +478,38 @@ describe("Board", () => {
     const after = (await board.listMembers()).find((m) => m.name === "eng-1");
     expect(after).toMatchObject({ claimsHeld: 0, tasksDone: 1 });
 
+    // The roster carries the configured model and the model the last turn reported.
+    await board.addAgent(OWNER, { name: "eng-3", role: "engineer", cli: "codex", model: "gpt-5" });
+    expect((await board.listMembers()).find((m) => m.name === "eng-3")).toMatchObject({
+      model: "gpt-5",
+    });
+    const turn = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "local",
+      cli: "claude" as const,
+      session: "s",
+      trigger: { kind: "manual" as const, fromOwner: true, reason: "dev" },
+      startedAt: "2026-09-28T10:05:00.000Z",
+      endedAt: "2026-09-28T10:06:00.000Z",
+      exitReason: "completed" as const,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0.2,
+      toolCalls: 1,
+      model: "claude-opus-5-5",
+    };
+    await board.beginTurn(turn);
+    await board.finishTurn(turn);
+    expect((await board.listMembers()).find((m) => m.name === "eng-1")).toMatchObject({
+      lastModel: "claude-opus-5-5",
+    });
+    const completedEvent = (await board.readEvents(null)).findLast(
+      (event) => event.type === "turn.completed",
+    );
+    expect(completedEvent?.payload["model"]).toBe("claude-opus-5-5");
+
     // Society-scope wakes are for roles that may work outside projects.
     await expect(
       board.requestWake(OWNER, { agent: "desk", project: "society", reason: "dev" }),

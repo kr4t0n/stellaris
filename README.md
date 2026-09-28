@@ -127,7 +127,7 @@ Tokens are minted once and stored only as hashes. Agents receive short-lived tur
 ```
 apps/
   server/          board server: core library, scheduler, HTTP API, SSE, MCP endpoint, embedded runner, serves the UI
-  runner/          standalone runner daemon for other machines (Phase 7)
+  runner/          standalone runner daemon for other machines (Phase 8)
   cli/             admin CLI
   ui/              React and Tailwind board UI: inbox, project, and society views, live turn panel
 packages/

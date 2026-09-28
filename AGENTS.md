@@ -23,7 +23,7 @@ One long-running process, the board server, hosts the only writer of the data di
 | `packages/adapter-codex`  | `AgentBackend` for Codex through `codex exec --json`: argument building, JSONL event parsing, resume-or-create by thread id, stream recording. The app-server client is a stub.                                                                                              | Leak Codex item shapes past the adapter.            |
 | `apps/server`             | Composes the above; HTTP routes, SSE feeds for board events and live turns, the in-memory turn hub, MCP mount, static UI serving, startup and shutdown.                                                                                                                      | Contain business rules; those live in the packages. |
 | `apps/cli`                | Owner and developer operations against `board-core` directly.                                                                                                                                                                                                                | Be used by agents.                                  |
-| `apps/runner`             | Standalone runner daemon (Phase 7).                                                                                                                                                                                                                                          |                                                     |
+| `apps/runner`             | Standalone runner daemon (Phase 8).                                                                                                                                                                                                                                          |                                                     |
 | `apps/ui`                 | The board UI: TanStack Router pages, a TanStack Query data layer over `/api`, fetch-based SSE for board events and live turns, markdown with Mermaid. Served by the board server.                                                                                            | Touch storage, or talk to anything but `/api`.      |
 
 ## Conventions
@@ -95,11 +95,13 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ## Where the next work goes
 
-- **Phase 5:** memory tiers in practice: the archive and its search, skills and their promotion to the society level, scheduled reflection turns, and shared project knowledge.
-- **A UI polish pass** after Phase 5 has settled what the screens must show: loading and error states, a real reject dialog, responsive layout, keyboard and accessibility work, and a scripted browser session.
+- **Phase 5:** memory tiers in practice: the archive and its search, skills and their promotion to the society level, scheduled reflection turns, shared project knowledge, and the `write_knowledge` verb so knowledge is written through the board from any machine.
+- **Phase 6:** the UI polish pass: loading and error states, a real reject dialog, responsive layout, keyboard and accessibility work, component tests, and a scripted browser session in CI, which closes the browser-testing debt from Phase 3.
+- **Phase 7:** metrics views and charter iteration.
+- **Phase 8:** remote runners, with the runner's own data directory, home sync as a file API around each turn, the projection mirror, and the board server serving its clones as git remotes.
 - **Deferred from Phase 2:** the Codex app-server client over the generated bindings, which would give resident threads, interrupts, and mid-turn steering.
-- **Deferred from Phase 3:** a scripted browser session over the UI, and component tests.
-- Later phases and the deferred list are in PLAN.md sections 12 and 13.
+- **Deferred:** an `update_dashboard` verb; the dashboard stays a file only agents on the server's machine can edit until it is known whether they edit it at all.
+- The build order and the deferred list are in PLAN.md sections 12 and 13.
 
 ## Technical debt, known
 

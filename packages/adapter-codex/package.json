@@ -17,6 +17,7 @@
     "@stellaris/runner-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
     "execa": "10.0.1",
-    "vscode-jsonrpc": "9.0.3"
+    "vscode-jsonrpc": "9.0.3",
+    "zod": "4.6.5"
   }
 }

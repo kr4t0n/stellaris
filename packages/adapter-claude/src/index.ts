@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { appendFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 import {
   getSessionInfo,
   query,
@@ -7,6 +9,7 @@ import {
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  parseTurnStatus,
   ZERO_USAGE,
   type AgentBackend,
   type SessionId,
@@ -15,12 +18,15 @@ import {
 } from "@stellaris/runner-core";
 import {
   AGENT_TOKEN_ENV,
-  TurnStatusSchema,
   type AgentEvent,
   type TurnExitReason,
-  type TurnStatus,
   type Usage,
 } from "@stellaris/shared";
+
+export { parseTurnStatus };
+
+/** The SDK entry point, injectable so tests can replay recorded message streams. */
+export type QueryFn = (params: { prompt: string; options?: Options }) => AsyncIterable<SDKMessage>;
 
 export interface ClaudeBackendOptions {
   readonly model?: string | undefined;
@@ -33,6 +39,10 @@ export interface ClaudeBackendOptions {
   readonly stderr?: ((line: string) => void) | undefined;
   readonly pathToClaudeCodeExecutable?: string | undefined;
   readonly runnerName?: string | undefined;
+  /** Directory to append raw SDK message streams to, one file per turn, for fixtures. */
+  readonly recordDir?: string | undefined;
+  readonly queryFn?: QueryFn | undefined;
+  readonly sessionExists?: ((session: SessionId, cwd: string) => Promise<boolean>) | undefined;
 }
 
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
@@ -46,6 +56,16 @@ export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
   "Bash(git:*)",
   "Bash(ls:*)",
   "Bash(cat:*)",
+  "Bash(cd:*)",
+  "Bash(find:*)",
+  "Bash(head:*)",
+  "Bash(tail:*)",
+  "Bash(grep:*)",
+  "Bash(wc:*)",
+  "Bash(echo:*)",
+  "Bash(pwd)",
+  "Bash(diff:*)",
+  "Bash(mkdir:*)",
   "Bash(pnpm:*)",
   "Bash(npm:*)",
   "Bash(node:*)",
@@ -96,36 +116,6 @@ function usageOf(raw: unknown): Usage {
   };
 }
 
-/** The status object from the SDK's structured output, or from a JSON block in the final text as a fallback. */
-export function parseTurnStatus(structured: unknown, finalText: string): TurnStatus | null {
-  const direct = TurnStatusSchema.safeParse(structured);
-  if (direct.success) {
-    return direct.data;
-  }
-  const fenced = /```json\s*([\s\S]*?)```/g;
-  let match: RegExpExecArray | null;
-  let last: unknown = null;
-  while ((match = fenced.exec(finalText)) !== null) {
-    try {
-      last = JSON.parse(match[1] ?? "");
-    } catch {
-      // keep looking
-    }
-  }
-  if (last === null) {
-    const brace = finalText.lastIndexOf("{");
-    if (brace !== -1) {
-      try {
-        last = JSON.parse(finalText.slice(brace));
-      } catch {
-        return null;
-      }
-    }
-  }
-  const parsed = TurnStatusSchema.safeParse(last);
-  return parsed.success ? parsed.data : null;
-}
-
 /** The subprocess environment: inherit, add the board token, and drop nested-session markers. */
 export function subprocessEnv(
   base: Readonly<Record<string, string | undefined>>,
@@ -143,6 +133,14 @@ export function subprocessEnv(
   return env;
 }
 
+async function defaultSessionExists(session: SessionId, cwd: string): Promise<boolean> {
+  try {
+    return (await getSessionInfo(session, { dir: cwd })) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Claude Code through the Claude Agent SDK: one SDK call per wakeup, resuming the pair's session.
  * Instructions, permissions, and the board's MCP endpoint travel as options, so no user-level
@@ -150,8 +148,13 @@ export function subprocessEnv(
  */
 export class ClaudeAgentBackend implements AgentBackend {
   readonly kind = "claude" as const;
+  private readonly queryFn: QueryFn;
+  private readonly sessionExists: (session: SessionId, cwd: string) => Promise<boolean>;
 
-  constructor(private readonly options: ClaudeBackendOptions = {}) {}
+  constructor(private readonly options: ClaudeBackendOptions = {}) {
+    this.queryFn = options.queryFn ?? ((params) => query(params));
+    this.sessionExists = options.sessionExists ?? defaultSessionExists;
+  }
 
   /** The session id is chosen up front so the runner can record it before the turn starts. */
   newSession(): Promise<SessionId> {
@@ -167,6 +170,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), request.limits.timeoutMs);
     const toolNames = new Map<string, string>();
+    const recorded: string[] = [];
     const state: TurnState = {
       usage: ZERO_USAGE,
       costUsd: 0,
@@ -184,10 +188,13 @@ export class ClaudeAgentBackend implements AgentBackend {
       : await this.sessionExists(request.session, request.spec.cwd);
 
     try {
-      for await (const message of query({
+      for await (const message of this.queryFn({
         prompt: request.prompt,
         options: this.buildOptions(request, abort, resumable),
       })) {
+        if (this.options.recordDir !== undefined) {
+          recorded.push(JSON.stringify(message));
+        }
         this.handle(message, request, emit, toolNames, state);
       }
     } catch (caught) {
@@ -199,6 +206,9 @@ export class ClaudeAgentBackend implements AgentBackend {
       clearTimeout(timer);
     }
 
+    if (this.options.recordDir !== undefined && recorded.length > 0) {
+      await this.record(request, recorded);
+    }
     if (abort.signal.aborted) {
       state.exitReason = "timeout";
       state.error = `turn exceeded ${request.limits.timeoutMs} ms`;
@@ -230,12 +240,15 @@ export class ClaudeAgentBackend implements AgentBackend {
     };
   }
 
-  private async sessionExists(session: SessionId, cwd: string): Promise<boolean> {
-    try {
-      return (await getSessionInfo(session, { dir: cwd })) !== undefined;
-    } catch {
-      return false;
-    }
+  private async record(request: TurnRequest, lines: readonly string[]): Promise<void> {
+    const dir = this.options.recordDir ?? ".";
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await appendFile(
+      path.join(dir, `claude-${request.spec.agent}-${stamp}.jsonl`),
+      `${lines.join("\n")}\n`,
+      "utf8",
+    );
   }
 
   private buildOptions(request: TurnRequest, abort: AbortController, resumable: boolean): Options {

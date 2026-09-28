@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
-import { CodexExecBackend } from "@stellaris/adapter-codex";
+import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { Board } from "@stellaris/board-core";
 import { LocalRunner } from "@stellaris/runner-core";
 import { Scheduler } from "@stellaris/scheduler";
@@ -21,8 +21,16 @@ const runner = new LocalRunner({
   backends: {
     claude: new ClaudeAgentBackend({
       stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
+      recordDir: process.env["STELLARIS_RECORD_DIR"],
     }),
-    codex: new CodexExecBackend(),
+    codex: new CodexExecBackend({
+      stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
+      recordDir: process.env["STELLARIS_RECORD_DIR"],
+      // Codex's Linux sandbox needs user namespaces; containers without them must run unsandboxed.
+      sandbox: CodexSandboxSchema.parse(
+        process.env["STELLARIS_CODEX_SANDBOX"] ?? "workspace-write",
+      ),
+    }),
   },
   log,
   onEvent: (agent, project, event) => log.debug({ agent, project, event }, "agent event"),

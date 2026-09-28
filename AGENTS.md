@@ -20,7 +20,7 @@ One long-running process, the board server, hosts the only writer of the data di
 | `packages/scheduler`      | The wake rule, the `Scheduler` loop: event consumption, debouncing, heartbeats, unclaimed-task checks, lease sweeps, dispatch, merge requests.                                  | Read message content to make decisions.             |
 | `packages/runner-core`    | `AgentBackend` and `TurnRequest`, instruction and prompt rendering, git repositories and worktrees, merges, `LocalRunner`.                                                      | Touch the board's storage directly.                 |
 | `packages/adapter-claude` | `AgentBackend` for Claude Code through the Agent SDK: options, event mapping, status parsing, session resume-or-create.                                                         | Leak SDK message shapes past the adapter.           |
-| `packages/adapter-codex`  | `AgentBackend` for Codex (Phase 2).                                                                                                                                             |                                                     |
+| `packages/adapter-codex`  | `AgentBackend` for Codex through `codex exec --json`: argument building, JSONL event parsing, resume-or-create by thread id, stream recording. The app-server client is a stub. | Leak Codex item shapes past the adapter.            |
 | `apps/server`             | Composes the above; HTTP routes, SSE, MCP mount, startup and shutdown.                                                                                                          | Contain business rules; those live in the packages. |
 | `apps/cli`                | Owner and developer operations against `board-core` directly.                                                                                                                   | Be used by agents.                                  |
 | `apps/runner`             | Standalone runner daemon (Phase 7).                                                                                                                                             |                                                     |
@@ -60,19 +60,29 @@ One long-running process, the board server, hosts the only writer of the data di
 - **Leases, not locks.** A claim held past its lease is treated as open by `claim_task` and by the sweep. Turns renew the leases of claims they still hold on completion.
 - **Thread messages are stored under `threads/<task-id>/`**, not under the channel directory. The inbox includes them only for participants: the claimer, the creator, prior posters, and anyone mentioned.
 - **`oxfmt` reformats `package.json` and markdown.** Running `pnpm fmt` touches more than TypeScript; after it runs, exact-match edits against long lines will miss.
-- **Costs.** With the default model, observed turns cost between a tenth and a third of a dollar; a full two-agent task with review ran about one dollar including failed attempts. Set `STELLARIS_LOG_LEVEL=debug` to see every tool call and the CLI's stderr in the server log.
+- **Costs.** With the default model, observed Claude turns cost between a tenth and a third of a dollar; a full two-agent task with review ran about one dollar. Codex reports tokens but no price, so its turns are metered at zero cost until a price table exists. Set `STELLARIS_LOG_LEVEL=debug` to see every tool call and the CLI's stderr in the server log.
+- **Codex exec reads extra input from a non-terminal stdin.** It prints "Reading additional input from stdin" and waits for EOF. The adapter spawns it with stdin ignored; a probe that forgets this hangs.
+- **Codex options go before the `resume` subcommand.** `codex exec --json --sandbox ... resume <thread> <prompt>` works; putting options after `resume` is an argument error.
+- **Codex assigns thread ids itself.** `newSession` returns a placeholder with the pending prefix; the first turn's `thread.started` event carries the real id, which the adapter returns in `TurnResult.session` and the runner records. A resume of an unknown id fails with "no rollout found", and the adapter starts a fresh thread instead.
+- **Codex MCP calls need explicit approval config.** Non-interactive runs use approval policy `never`, which rejects every MCP call unless the server carries `default_tools_approval_mode = "approve"`. The adapter passes it as a config override for the board server.
+- **Codex's Linux sandbox needs user namespaces.** In a container without them every shell command fails with a bubblewrap namespace error. `STELLARIS_CODEX_SANDBOX=danger-full-access` disables the sandbox for Codex turns; there is no permission allowlist on that path, so this trusts the agent with the machine.
+- **Codex worktrees need the canonical clone writable.** A linked worktree keeps its index and objects under the repository's `.git`, so the adapter passes the repository directory as an additional writable directory alongside the agent home and the board projection.
+- **Codex is not isolated from the user's own configuration.** It reads `~/.codex/config.toml` and its login from the default home; the model comes from there unless the agent record sets one. Instructions travel in the prompt because exec mode has no system-prompt append.
+- **Recorded streams are fixtures.** `STELLARIS_RECORD_DIR` makes both adapters append each turn's raw stream to a file. Scan a recording for token-like strings before committing it under `packages/*/fixtures`; the streams carry tool outputs, not credentials, but check anyway.
+- **The Codex app-server bindings are generated on demand**, with `codex app-server generate-ts --out packages/adapter-codex/src/generated --experimental`, and are not committed until a client consumes them. The exec backend is the shipping path.
 
 ## Where the next work goes
 
-- **Phase 2:** Codex app-server adapter with generated bindings, the exec fallback, recorded fixtures for both adapters.
 - **Phase 3:** the three UI views over the API and SSE, including live turn events, which the runner already exposes through `onEvent`.
+- **Deferred from Phase 2:** the Codex app-server client over the generated bindings, which would give resident threads, interrupts, and mid-turn steering.
 - Later phases and the deferred list are in PLAN.md sections 12 and 13.
 
 ## Technical debt, known
 
 - `search` is a linear scan over files. Fine at this scale; the plan names SQLite with FTS as the upgrade when metrics or search need it.
 - `findTask` scans projects for a task id. An index arrives with the search upgrade.
-- The Codex adapters reject every call until Phase 2.
+- The Codex app-server backend is a stub; only the exec backend is implemented.
+- Codex turns are metered at zero cost; a token price table is needed.
 - Merges are local only. Pull-request integration through `gh` for projects with a hosting platform is not implemented.
 - Agent events stream to the log only; the SSE feed carries board events, not live tool calls, until Phase 3.
 - The `--as` flag in the CLI has no audit trail beyond the event log's actor field.

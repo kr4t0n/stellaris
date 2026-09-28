@@ -15,6 +15,8 @@ export interface AgentSpec {
   readonly cli: CliKind;
   /** The agent-project worktree. */
   readonly cwd: string;
+  /** The project's canonical clone the worktree hangs off; git writes its metadata there. */
+  readonly repoDir: string;
   /** The agent's home directory: memory, skills, notes, and the rendered CLI config directories. */
   readonly configHome: string;
   /** The board's read-only markdown projection on this runner. */
@@ -53,6 +55,11 @@ export interface TurnResult {
   readonly status: TurnStatus | null;
   readonly exitReason: TurnExitReason;
   readonly error?: string | undefined;
+  /**
+   * The session the CLI actually used. Set when it differs from the requested one, for CLIs
+   * that assign their own ids on the first turn; the runner records it for the next turn.
+   */
+  readonly session?: SessionId | undefined;
 }
 
 /** One interface for every CLI. Implemented per CLI inside a runner. */

@@ -333,6 +333,9 @@ importers:
       vscode-jsonrpc:
         specifier: 9.0.3
         version: 9.0.3
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/board-core:
     dependencies:

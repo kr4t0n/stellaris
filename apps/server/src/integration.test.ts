@@ -131,10 +131,11 @@ describe("Phase 1 exit criterion", () => {
   it("two agents complete a task end to end with a reviewed merge, with the owner participating by mention", async () => {
     const { board } = await Board.init(dir, { name: "e2e" });
     await board.addProject(OWNER, { slug: "demo" });
+    // One agent per CLI: the board must not care which body a citizen runs on.
     await board.addAgent(OWNER, {
       name: "eng-1",
       role: "engineer",
-      cli: "claude",
+      cli: "codex",
       memberships: ["demo"],
     });
     await board.addAgent(OWNER, {
@@ -148,7 +149,7 @@ describe("Phase 1 exit criterion", () => {
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
       board,
-      backends: { claude: backend },
+      backends: { claude: backend, codex: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
     });
     const scheduler = new Scheduler({

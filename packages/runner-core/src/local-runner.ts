@@ -143,13 +143,14 @@ export class LocalRunner {
       return this.fail(base, `no backend registered for ${agent.cli}`);
     }
 
-    const { worktree } = await this.prepare(agent.name, dispatch.project);
+    const { worktree, repoDir } = await this.prepare(agent.name, dispatch.project);
     const sessions = await this.board.readSessions(agent.name, dispatch.project);
     const spec = {
       agent: agent.name,
       project: dispatch.project,
       cli: agent.cli,
       cwd: worktree,
+      repoDir,
       configHome: this.board.paths.agent(agent.name),
       boardDir: this.board.paths.board,
       ...(agent.model === undefined ? {} : { model: agent.model }),
@@ -243,8 +244,15 @@ export class LocalRunner {
       };
     }
 
+    // CLIs that assign their own session ids report the real one after the first turn.
+    if (result.session !== undefined && result.session !== session) {
+      await this.board.writeSession(agent.name, dispatch.project, agent.cli, result.session);
+      session = result.session;
+    }
+
     const finished: TurnRecord = {
       ...record,
+      session,
       endedAt: this.now().toISOString(),
       exitReason: result.exitReason,
       status: result.status,

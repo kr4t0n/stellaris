@@ -13,6 +13,7 @@ import { Scheduler } from "@stellaris/scheduler";
 import { execa } from "execa";
 import type { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createApp } from "./app.js";
 
 const OWNER = { name: "owner", role: "owner" } as const;
@@ -69,6 +70,25 @@ class ScriptedBackend implements AgentBackend {
       }
       return body;
     };
+
+    // The steward reads operations signals and proposes; it never touches tasks.
+    if (request.spec.agent === "stew-1") {
+      if (request.prompt.includes("Trigger: ops_event") && request.prompt.includes("**backlog**")) {
+        await verb("propose", {
+          kind: "member",
+          charter: {
+            name: "eng-2",
+            role: "engineer",
+            cli: "codex",
+            memberships: ["demo"],
+            seedInstructions: "Start with the oldest open task.",
+          },
+          rationale: "The backlog per engineer on demo reached the threshold.",
+        });
+        return done("proposed a second engineer for demo");
+      }
+      return done("nothing to do");
+    }
 
     // A claim event names the task; a mention carries it in the message body.
     const taskId =
@@ -225,5 +245,128 @@ describe("Phase 1 exit criterion", () => {
     // The owner's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readInbox({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
+  });
+});
+
+describe("Phase 4 exit criterion", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-gov-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("the steward proposes a member from operations signals and the owner approves over the API", async () => {
+    const { board, ownerToken } = await Board.init(dir, { name: "gov" });
+    await board.addProject(OWNER, { slug: "demo" });
+    for (const [name, role, cli] of [
+      ["eng-1", "engineer", "codex"],
+      ["rev-1", "reviewer", "claude"],
+      ["stew-1", "steward", "claude"],
+    ] as const) {
+      await board.addAgent(OWNER, { name, role, cli, memberships: ["demo"] });
+    }
+    const app = createApp({ board, version: "test" });
+    const backend = new ScriptedBackend(app);
+    const runner = new LocalRunner({
+      board,
+      backends: { claude: backend, codex: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    const scheduler = new Scheduler({
+      board,
+      runner,
+      concurrency: 3,
+      timings: {
+        debounceMs: 0,
+        ownerDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        unclaimedTaskMs: 3_600_000,
+        opsIntervalMs: 1,
+      },
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+    const get = async (route: string): Promise<unknown> =>
+      (await app.request(route, { headers: owner })).json();
+
+    await settle();
+    expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(3);
+
+    // Three open tasks for one engineer: depth three, the seed threshold.
+    for (const title of ["Add hello.txt", "Add README", "Add a test"]) {
+      await board.createTask(OWNER, { project: "demo", title, body: "Small." });
+    }
+    await settle(); // the operations pass publishes the backlog signal
+    await settle(); // the signal wakes the steward, which proposes
+    const proposals = z
+      .array(
+        z.object({ id: z.string(), kind: z.string(), status: z.string(), proposedBy: z.string() }),
+      )
+      .parse(await get("/api/proposals"));
+    expect(proposals).toEqual([
+      expect.objectContaining({ kind: "member", status: "proposed", proposedBy: "stew-1" }),
+    ]);
+    const proposalId = proposals[0]?.id ?? "";
+    expect((await board.listChannel("governance")).at(-1)?.body).toContain(
+      "member eng-2 as engineer on codex for demo",
+    );
+    const stewardTurn = await board.readLastTurn("stew-1", "demo");
+    expect(stewardTurn?.trigger.kind).toBe("ops_event");
+
+    // The owner approves through the same interface the UI uses.
+    const approved = await app.request("/api/verbs/approve", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ proposal_id: proposalId }),
+    });
+    expect(approved.status).toBe(200);
+    expect(
+      z.object({ status: z.string() }).parse(await get(`/api/proposals/${proposalId}`)),
+    ).toEqual(expect.objectContaining({ status: "provisioned" }));
+    const agents = z
+      .array(z.object({ name: z.string(), status: z.string(), memberships: z.array(z.string()) }))
+      .parse(await get("/api/agents"));
+    expect(agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "eng-2", status: "active", memberships: ["demo"] }),
+      ]),
+    );
+    expect(await board.readAgentRoleBody("eng-2")).toContain("Start with the oldest open task.");
+    expect((await board.listChannel("decisions")).at(-1)?.body).toContain(
+      "Approved member proposal",
+    );
+
+    // The new member onboards through the usual dispatch, then the owner retires it over the API.
+    await settle();
+    expect(
+      backend.prompts.filter((p) => p.includes("This is your first turn as eng-2")).length,
+    ).toBe(1);
+    const retired = await app.request("/api/agents/eng-2/retire", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ reason: "demo over" }),
+    });
+    expect(retired.status).toBe(200);
+    expect((await board.readAgent("eng-2")).status).toBe("retired");
+    expect((await board.readProject("demo")).members).not.toContain("eng-2");
+
+    const types = (await board.readEvents(null)).map((e) => e.type);
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "ops.signal",
+        "proposal.created",
+        "proposal.decided",
+        "proposal.provisioned",
+        "agent.retired",
+      ]),
+    );
+    expect(types).not.toContain("turn.failed");
   });
 });

@@ -4,22 +4,26 @@ import type { Proposal } from "@stellaris/shared";
 import { useState, type FormEvent } from "react";
 import { api } from "../api/client.js";
 import { Composer, MessageList } from "../components/Messages.js";
-import { Button, Empty, ErrorNote, Field, inputClass, Panel, Pill } from "../components/ui.js";
+import {
+  Button,
+  CharterRows,
+  Empty,
+  ErrorNote,
+  Field,
+  inputClass,
+  Panel,
+  Pill,
+} from "../components/ui.js";
 import { shortId, timeAgo } from "../lib/format.js";
 
 function ProposalCard({ proposal }: { proposal: Proposal }) {
   const queryClient = useQueryClient();
+  const [reason, setReason] = useState("");
   const decide = useMutation({
-    mutationFn: (outcome: "approve" | "reject") => {
-      if (outcome === "approve") {
-        return api.verb("approve", { proposal_id: proposal.id });
-      }
-      const reason = window.prompt("Reason for rejecting this proposal");
-      if (reason === null || reason.trim().length === 0) {
-        return Promise.resolve(null);
-      }
-      return api.verb("reject", { proposal_id: proposal.id, reason });
-    },
+    mutationFn: (outcome: "approve" | "reject") =>
+      outcome === "approve"
+        ? api.verb("approve", { proposal_id: proposal.id })
+        : api.verb("reject", { proposal_id: proposal.id, reason: reason.trim() }),
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   return (
@@ -27,21 +31,30 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
       <div className="mb-1 flex items-center gap-2 text-xs text-board-muted">
         <Pill className="border-amber-800 text-amber-300">{proposal.kind}</Pill>
         <span>proposed by @{proposal.proposedBy}</span>
+        <span>{shortId(proposal.id)}</span>
         <span className="ml-auto">{timeAgo(proposal.createdAt)}</span>
       </div>
-      <pre className="my-2 overflow-x-auto rounded bg-board-bg p-2 text-xs">
-        {JSON.stringify(proposal.charter, null, 2)}
-      </pre>
+      <CharterRows charter={proposal.charter} />
       {proposal.body.length > 0 ? <p className="text-sm">{proposal.body}</p> : null}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button tone="primary" onClick={() => decide.mutate("approve")} disabled={decide.isPending}>
-          Approve
+          Approve and provision
         </Button>
-        <Button tone="danger" onClick={() => decide.mutate("reject")} disabled={decide.isPending}>
+        <input
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Reason, if rejecting"
+          className={`${inputClass} min-w-56`}
+        />
+        <Button
+          tone="danger"
+          onClick={() => decide.mutate("reject")}
+          disabled={decide.isPending || reason.trim().length === 0}
+        >
           Reject
         </Button>
-        <ErrorNote error={decide.error} />
       </div>
+      <ErrorNote error={decide.error} />
     </li>
   );
 }

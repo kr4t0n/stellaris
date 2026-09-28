@@ -38,4 +38,10 @@ describe("decideWake", () => {
     expect(decideWake({ ...base, trigger: trigger("reflection") }).wake).toBe(true);
     expect(decideWake({ ...base, trigger: trigger("onboarding") }).wake).toBe(true);
   });
+
+  it("wakes on operations signals in the background", () => {
+    expect(
+      decideWake({ trigger: trigger("ops_event"), digestSize: 0, claimsHeld: 0, paused: false }),
+    ).toEqual({ wake: true, reason: "operations signal", priority: 0 });
+  });
 });

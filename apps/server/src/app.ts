@@ -1,6 +1,11 @@
 import { isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import { handleMcpRequest } from "@stellaris/board-mcp";
-import { VerbNameSchema, WakeRequestSchema } from "@stellaris/shared";
+import {
+  NameSchema,
+  RoleCharterSchema,
+  VerbNameSchema,
+  WakeRequestSchema,
+} from "@stellaris/shared";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
@@ -40,6 +45,13 @@ const InboxQuerySchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+});
+
+const RetireBodySchema = z.object({ reason: z.string().min(1) });
+const ChannelBodySchema = z.object({
+  project: NameSchema.nullable().default(null),
+  name: NameSchema,
+  purpose: z.string().min(1),
 });
 
 function bearer(c: Context<Env>): string | null {
@@ -90,6 +102,31 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
+  api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
+  api.get("/signals", async (c) =>
+    c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
+  );
+
+  // Governance the owner does directly: retirement, charters, channels. Proposals cover the rest.
+  api.post("/agents/:name/retire", async (c) => {
+    const body = RetireBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.retireAgent(c.get("actor"), {
+      name: c.req.param("name"),
+      reason: body.reason,
+    });
+    return c.json(agent);
+  });
+  api.put("/roles/:name", async (c) => {
+    const charter = RoleCharterSchema.parse({
+      ...z.record(z.string(), z.unknown()).parse(await c.req.json()),
+      name: c.req.param("name"),
+    });
+    return c.json(await board.setRoleCharter(c.get("actor"), charter));
+  });
+  api.post("/channels", async (c) => {
+    const body = ChannelBodySchema.parse(await c.req.json());
+    return c.json({ channel: await board.addChannel(c.get("actor"), body) });
+  });
 
   // Projects, tasks, channels, threads
   api.get("/projects", async (c) => c.json(await board.listProjects()));

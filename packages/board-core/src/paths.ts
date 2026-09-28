@@ -1,9 +1,18 @@
 import path from "node:path";
 import { parseChannelRef, type ChannelRef, type Name, type Ulid } from "@stellaris/shared";
 
-/** Every path under the data directory, in one place, matching the layout in PLAN.md section 4.2. */
+/**
+ * Every path under the data directory, in one place, matching the layout in PLAN.md section 4.2.
+ * The data directory is made absolute here: paths reach git commands that run inside a project's
+ * clone and CLI processes that run inside a worktree, and a relative path would resolve against
+ * those directories instead of the server's.
+ */
 export class BoardPaths {
-  constructor(readonly dataDir: string) {}
+  readonly dataDir: string;
+
+  constructor(dataDir: string) {
+    this.dataDir = path.resolve(dataDir);
+  }
 
   // Board projection. In v1 this is also the storage of record; only the core library writes it.
   get board(): string {

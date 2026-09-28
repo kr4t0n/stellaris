@@ -72,7 +72,9 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   get_task: "Read a task with its body and notes.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
-  propose: "Propose a new role, member, channel, or reallocation for governance review.",
-  approve: "Approve a proposal. Owner and steward only.",
-  reject: "Reject a proposal with a reason. Owner and steward only.",
+  propose:
+    "Propose a member, role, channel, reallocation, or retirement. The charter shape per kind is in your instructions; approval provisions it.",
+  approve:
+    "Approve a proposal; the board then provisions it. Owner and steward only, never on your own proposal.",
+  reject: "Reject a proposal with a reason. Owner and steward only, never on your own proposal.",
 };

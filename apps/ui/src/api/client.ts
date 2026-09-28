@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   BoardEvent,
   Message,
+  OpsSignal,
   Project,
   Proposal,
   RoleCharter,
@@ -40,6 +41,12 @@ export interface Dashboard {
 export interface Inbox {
   readonly messages: readonly Message[];
   readonly cursor: string | null;
+}
+
+export interface SignalRecord {
+  readonly id: string;
+  readonly ts: string;
+  readonly signal: OpsSignal;
 }
 
 export class ApiError extends Error {
@@ -92,7 +99,7 @@ export function isLiveTurnEvent(value: unknown): value is LiveTurnEvent {
 
 async function request<T>(
   path: string,
-  method: "GET" | "POST" = "GET",
+  method: "GET" | "POST" | "PUT" = "GET",
   body?: unknown,
 ): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -120,6 +127,14 @@ export const api = {
   roles: () => request<RoleCharter[]>("/roles"),
   runners: () => request<Runner[]>("/runners"),
   proposals: () => request<Proposal[]>("/proposals"),
+  proposal: (id: string) => request<Proposal>(`/proposals/${id}`),
+  signals: (limit = 100) => request<SignalRecord[]>(`/signals?limit=${limit}`),
+  retire: (name: string, reason: string) =>
+    request<PublicAgent>(`/agents/${name}/retire`, "POST", { reason }),
+  setRole: (name: string, charter: RoleCharter) =>
+    request<RoleCharter>(`/roles/${name}`, "PUT", charter),
+  addChannel: (project: string | null, name: string, purpose: string) =>
+    request<{ channel: string }>("/channels", "POST", { project, name, purpose }),
   projects: () => request<Project[]>("/projects"),
   project: (slug: string) => request<Project>(`/projects/${slug}`),
   tasks: (slug: string) => request<Task[]>(`/projects/${slug}/tasks`),

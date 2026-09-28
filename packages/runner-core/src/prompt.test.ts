@@ -76,4 +76,27 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("This is your first turn as eng-1");
     expect(prompt).toContain("Nothing new.");
   });
+
+  it("frames a turn triggered by operations signals as a decision about proposing", () => {
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "stew-1",
+        project: "demo",
+        trigger: TriggerSchema.parse({
+          kind: "ops_event",
+          from: "board",
+          reason: "demo: 4 open or claimed task(s) for 1 engineer(s)",
+        }),
+        priority: 0,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(prompt).toContain("Trigger: ops_event from board. demo: 4 open");
+    expect(prompt).toContain("Operations signals arrived");
+    expect(prompt).toContain("propose");
+  });
 });

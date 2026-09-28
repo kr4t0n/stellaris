@@ -68,7 +68,7 @@ describe("Scheduler", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function setup(options: { concurrency?: number } = {}) {
+  async function setup(options: { concurrency?: number; timings?: Record<string, number> } = {}) {
     const { board } = await Board.init(dir, { name: "sched" }, { now, leaseMs: 60_000 });
     await board.addProject(OWNER, { slug: "demo" });
     await board.addAgent(OWNER, {
@@ -95,6 +95,7 @@ describe("Scheduler", () => {
         heartbeatMs: 10_000,
         unclaimedTaskMs: 5_000,
         leaseSweepMs: 1_000,
+        ...options.timings,
       },
     });
     // Run the onboarding turns from the agent.added events until nothing is queued, whatever the cap.
@@ -251,5 +252,157 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.priority])).toEqual([
       ["rev-1", "manual", 2],
     ]);
+  });
+
+  it("publishes a backlog signal and wakes the steward on it, once per condition", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(OWNER, {
+      name: "stew-1",
+      role: "steward",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    await scheduler.drain(); // stew-1 onboarding
+    runner.dispatches.length = 0;
+    for (const title of ["a", "b", "c"]) {
+      await board.createTask(OWNER, { project: "demo", title });
+    }
+    // The operations pass runs on its own cadence: nothing until the interval elapses.
+    await scheduler.tick();
+    expect((await board.listSignals()).map((s) => s.signal.kind)).toEqual([]);
+    advance(5 * 60_000);
+    await scheduler.tick();
+    const signals = await board.listSignals();
+    expect(signals.map((s) => [s.signal.kind, s.signal.key])).toEqual([
+      ["backlog", "backlog:demo:engineer"],
+    ]);
+    expect(signals[0]?.signal.value).toBe(3);
+    expect((await board.listChannel("ops")).at(-1)?.body).toContain("**backlog** demo: 3 open");
+    // The signal event wakes the steward after the debounce; the engineer is not charted for it.
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["stew-1/demo"]);
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.priority])).toEqual([
+      ["stew-1", "ops_event", 0],
+    ]);
+    expect(runner.dispatches[0]?.trigger.reason).toContain("depth 3.0");
+    // The condition persists but is not re-posted before the repeat window.
+    advance(5 * 60_000);
+    await scheduler.tick();
+    expect(await board.listSignals()).toHaveLength(1);
+    // Once the backlog clears the key is forgotten, so a recurrence posts at once.
+    for (const task of await board.listTasks("demo")) {
+      await board.updateTask(OWNER, { task_id: task.id, status: "abandoned" });
+    }
+    advance(5 * 60_000);
+    await scheduler.tick();
+    await board.createTask(OWNER, { project: "demo", title: "d" });
+    await board.createTask(OWNER, { project: "demo", title: "e" });
+    await board.createTask(OWNER, { project: "demo", title: "f" });
+    advance(5 * 60_000);
+    await scheduler.tick();
+    expect((await board.listSignals()).map((s) => s.signal.kind)).toEqual(["backlog", "backlog"]);
+  });
+
+  it("signals role gaps, churn, unclosed threads, idle members, and missing capabilities", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.retireAgent(OWNER, { name: "rev-1", reason: "test" });
+    const task = await board.createTask(OWNER, {
+      project: "demo",
+      title: "needs gpu",
+      required_capabilities: ["gpu"],
+    });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.releaseTask(ENG, { task_id: task.id });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.releaseTask(ENG, { task_id: task.id });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.updateTask(ENG, { task_id: task.id, status: "in_review" });
+    const closed = await board.createTask(OWNER, { project: "demo", title: "done but open" });
+    await board.openThread(ENG, { task_id: closed.id });
+    await board.claimTask(ENG, { task_id: closed.id });
+    await board.updateTask(ENG, { task_id: closed.id, status: "abandoned" });
+    advance(3 * 24 * 3_600_000 + 5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const kinds = (await board.listSignals()).map((s) => [s.signal.kind, s.signal.key]);
+    expect(kinds).toEqual(
+      expect.arrayContaining([
+        ["role_gap", "role_gap:demo:reviewer"],
+        ["churn", `churn:${task.id}`],
+        ["stale_thread", `stale_thread:${closed.id}`],
+        ["blocked_capability", `blocked_capability:${task.id}`],
+        ["idle_member", "idle_member:eng-1"],
+      ]),
+    );
+    expect(kinds.map(([kind]) => kind)).not.toContain("backlog");
+    // No steward is charted for signals here, so nobody woke on them; the retired reviewer never will.
+    expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
+    expect(runner.dispatches.map((d) => d.agent)).not.toContain("rev-1");
+    expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("scales a role within its replica cap when the backlog per member reaches the threshold", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    for (const title of ["a", "b", "c"]) {
+      await board.createTask(OWNER, { project: "demo", title });
+    }
+    advance(5 * 60_000);
+    await scheduler.tick();
+    expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-2");
+
+    await board.setRoleCharter(OWNER, {
+      ...(await board.readRole("engineer")),
+      maxReplicas: 2,
+      backlogThreshold: 3,
+    });
+    advance(5 * 60_000);
+    await scheduler.tick();
+    const replica = await board.readAgent("eng-2");
+    expect(replica.role).toBe("engineer");
+    expect(replica.memberships).toEqual(["demo"]);
+    expect((await board.listSignals()).map((s) => s.signal.kind)).toEqual(["backlog", "scaled"]);
+    // The replica's onboarding turn goes through the usual dispatch.
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["eng-2", "onboarding"],
+    ]);
+    // The cap holds: three tasks over two engineers is under the threshold, and two is the cap anyway.
+    for (const title of ["d", "e", "f", "g"]) {
+      await board.createTask(OWNER, { project: "demo", title });
+    }
+    advance(3_600_000 + 5 * 60_000);
+    await scheduler.tick();
+    expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-3");
+  });
+
+  it("drops a retired member's queued turn and keeps the queue across a restart", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.setPaused(OWNER, true);
+    await board.postMessage(OWNER, { channel: "demo/general", body: "@eng-1 and @rev-1 go" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    await board.retireAgent(OWNER, { name: "rev-1", reason: "test" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
+
+    const restarted = new Scheduler({
+      board,
+      runner,
+      now,
+      timings: { debounceMs: 0, ownerDebounceMs: 0 },
+    });
+    await board.setPaused(OWNER, false);
+    await restarted.tick();
+    await restarted.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-1", "mention"]]);
   });
 });

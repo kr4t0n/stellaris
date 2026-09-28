@@ -63,7 +63,8 @@ async function must(args: readonly string[], cwd?: string): Promise<string> {
 }
 
 export class ExecaGit implements GitOps {
-  async ensureRepo(project: Project, dir: string): Promise<string> {
+  async ensureRepo(project: Project, requestedDir: string): Promise<string> {
+    const dir = path.resolve(requestedDir);
     if (await exists(path.join(dir, ".git"))) {
       return dir;
     }
@@ -77,12 +78,18 @@ export class ExecaGit implements GitOps {
     return dir;
   }
 
+  /**
+   * The worktree path is made absolute before git sees it: `git worktree add` runs inside the
+   * clone, so a relative path would create the worktree inside the repository, and the CLI
+   * would later be started in a directory that does not exist.
+   */
   async ensureWorktree(
     repoDir: string,
-    worktreeDir: string,
+    requestedDir: string,
     branch: string,
     base: string,
   ): Promise<string> {
+    const worktreeDir = path.resolve(requestedDir);
     if (await exists(path.join(worktreeDir, ".git"))) {
       return worktreeDir;
     }

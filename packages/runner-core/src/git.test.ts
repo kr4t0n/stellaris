@@ -69,6 +69,19 @@ describe("ExecaGit", () => {
     expect(await git.ensureWorktree(repoDir, worktree, "agent/eng-1", "main")).toBe(worktree);
   });
 
+  it("places a worktree given by a relative path next to the server, never inside the clone", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    // Relative to the process, as the documented default data directory `./data` is.
+    const relative = path.relative(process.cwd(), path.join(dir, "wt", "rel", "demo"));
+    expect(path.isAbsolute(relative)).toBe(false);
+    const worktree = await git.ensureWorktree(repoDir, relative, "agent/rel", "main");
+    expect(worktree).toBe(path.join(dir, "wt", "rel", "demo"));
+    const list = await execa("git", ["worktree", "list", "--porcelain"], { cwd: repoDir });
+    expect(list.stdout).toContain(`worktree ${path.join(dir, "wt", "rel", "demo")}`);
+    expect(list.stdout).not.toContain(path.join(repoDir, "tmp"));
+    expect(await git.ensureWorktree(repoDir, relative, "agent/rel", "main")).toBe(worktree);
+  });
+
   it("reports missing branches and aborts conflicting merges cleanly", async () => {
     const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
     expect(await git.merge(repoDir, "main", "agent/nobody")).toMatchObject({ ok: false });

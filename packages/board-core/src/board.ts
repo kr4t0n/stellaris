@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { monotonicFactory } from "ulid";
 import { z } from "zod";
@@ -6,8 +6,12 @@ import {
   AgentSchema,
   canTransition,
   channelRef,
+  ChannelProposalSchema,
   DecisionSchema,
+  MemberProposalSchema,
   MessageFrontmatterSchema,
+  NameSchema,
+  OpsSignalSchema,
   OWNER_NAME,
   OWNER_ROLE,
   parseChannelRef,
@@ -15,6 +19,8 @@ import {
   ProjectSchema,
   ProposalCharterSchemas,
   ProposalFrontmatterSchema,
+  ReallocationProposalSchema,
+  RetirementProposalSchema,
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
@@ -27,12 +33,17 @@ import {
   type ChannelRef,
   type CliKind,
   type Decision,
+  type MemberProposal,
   type Message,
   type MessageFrontmatter,
   type Name,
+  type OpsSignal,
   type Project,
   type Proposal,
+  type ProposalKind,
+  type ProposalStatus,
   type RoleCharter,
+  type RoleCharterInput,
   type Runner,
   type Society,
   type Task,
@@ -102,6 +113,37 @@ export interface AddAgentInput {
   readonly homeRunner?: Name | undefined;
   readonly memberships?: readonly Name[] | undefined;
   readonly subscriptions?: readonly ChannelRef[] | undefined;
+  /** Direction from a member proposal, written into the agent's role file under the charter. */
+  readonly seedInstructions?: string | undefined;
+}
+
+export interface RetireAgentInput {
+  readonly name: Name;
+  readonly reason: string;
+}
+
+export interface AddChannelInput {
+  /** The project, or null for a society channel. */
+  readonly project: Name | null;
+  readonly name: Name;
+  readonly purpose: string;
+}
+
+export interface AddReplicaInput {
+  readonly project: Name;
+  readonly role: Name;
+}
+
+export interface RunnerPatch {
+  readonly status?: Runner["status"] | undefined;
+  readonly clis?: readonly CliKind[] | undefined;
+  readonly capabilities?: readonly string[] | undefined;
+}
+
+export interface SignalRecord {
+  readonly id: Ulid;
+  readonly ts: string;
+  readonly signal: OpsSignal;
 }
 
 export interface InboxResult {
@@ -128,13 +170,76 @@ const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 const LOCAL_RUNNER: Name = "local";
 
-const ROLE_KIND_APPROVERS: Readonly<Record<string, readonly Name[]>> = {
-  // Tool-set changes and hiring always require the owner; the steward may decide the rest.
+const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
+  // Tool-set changes, hiring, and retirement always require the owner; the steward may decide the rest.
   role: [OWNER_ROLE],
   member: [OWNER_ROLE],
+  retirement: [OWNER_ROLE],
   channel: [OWNER_ROLE, "steward"],
   reallocation: [OWNER_ROLE, "steward"],
 };
+
+/** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
+const OPS_WAKE_TRIGGER = "ops_event";
+
+/** A plain rendering of a provisioning summary value for a post, without falling back to `[object Object]`. */
+function plain(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(plain).join(", ");
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value);
+}
+
+/** One line for a proposal's charter, as posted to the governance and decisions channels. */
+function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): string {
+  switch (kind) {
+    case "member": {
+      const parsed = MemberProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      const { name, role, cli, memberships } = parsed.data;
+      const where = memberships.length === 0 ? "" : ` for ${memberships.join(", ")}`;
+      return `member ${name} as ${role} on ${cli}${where}`;
+    }
+    case "role": {
+      const parsed = RoleCharterSchema.safeParse(charter);
+      if (!parsed.success) break;
+      const { name, verbs, repoPermission, maxReplicas } = parsed.data;
+      return `role ${name} (${verbs.length} verbs, repo ${repoPermission}, up to ${maxReplicas} per project)`;
+    }
+    case "channel": {
+      const parsed = ChannelProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `channel ${channelRef(parsed.data.project, parsed.data.name)}: ${parsed.data.purpose}`;
+    }
+    case "retirement": {
+      const parsed = RetirementProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `retirement of ${parsed.data.agent}: ${parsed.data.reason}`;
+    }
+    case "reallocation": {
+      const parsed = ReallocationProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `reallocation: ${parsed.data.description}`;
+    }
+    default:
+      break;
+  }
+  return `${kind} ${JSON.stringify(charter)}`;
+}
+
+function memberToAgentInput(member: MemberProposal): AddAgentInput {
+  return {
+    name: member.name,
+    role: member.role,
+    cli: member.cli,
+    ...(member.model === undefined ? {} : { model: member.model }),
+    homeRunner: member.homeRunner,
+    memberships: member.memberships,
+    subscriptions: member.subscriptions,
+    ...(member.seedInstructions === undefined ? {} : { seedInstructions: member.seedInstructions }),
+  };
+}
 
 function extractMentions(body: string): Name[] {
   const found = new Set<Name>();
@@ -441,47 +546,139 @@ export class Board {
   async addAgent(actor: Actor, input: AddAgentInput): Promise<{ agent: Agent; token: string }> {
     this.assertAdmin(actor);
     return this.mutex.run(async () => {
-      if (await exists(this.paths.agentFile(input.name))) {
-        throw new BoardError("ALREADY_EXISTS", `agent ${input.name} already exists`);
-      }
-      const charter = await this.readRole(input.role);
-      const memberships = [...(input.memberships ?? [])];
-      for (const slug of memberships) {
-        await this.readProject(slug);
-      }
-      const defaultSubscriptions: ChannelRef[] = [
-        "general",
-        ...memberships.map((slug) => channelRef(slug, "general")),
-      ];
-      const subscriptions = [...new Set([...defaultSubscriptions, ...(input.subscriptions ?? [])])];
-      for (const ref of subscriptions) {
-        await this.assertChannelExists(ref);
-      }
-      const token = mintToken();
-      const agent: Agent = AgentSchema.parse({
-        name: input.name,
-        role: input.role,
-        cli: input.cli,
-        ...(input.model === undefined ? {} : { model: input.model }),
-        homeRunner: input.homeRunner ?? LOCAL_RUNNER,
-        memberships,
-        subscriptions,
-        status: "active",
-        createdAt: this.now().toISOString(),
-        tokenHash: hashToken(token),
-      });
-      await this.writeAgentHome(agent, charter);
-      for (const slug of memberships) {
-        await this.updateProjectMembers(slug, agent.name);
-      }
-      await this.events.append("agent.added", actor.name, {
-        name: agent.name,
-        role: agent.role,
-        cli: agent.cli,
-        memberships,
-      });
-      return { agent, token };
+      await this.validateAddAgent(input);
+      return this.addAgentUnlocked(actor.name, input, {});
     });
+  }
+
+  /**
+   * Retires a member: no more wakes, claims released, token revoked, sessions archived.
+   * The decision is the owner's, directly here or by approving a retirement proposal.
+   */
+  async retireAgent(actor: Actor, input: RetireAgentInput): Promise<Agent> {
+    this.assertOwner(actor, "only the owner may retire a member");
+    return this.mutex.run(async () => {
+      await this.validateRetire(input.name);
+      return (await this.retireUnlocked(actor.name, input.name, input.reason, {})).agent;
+    });
+  }
+
+  /** Writes a role charter directly. Charters otherwise change by role proposal; the owner is the exception. */
+  async setRoleCharter(actor: Actor, charter: RoleCharterInput): Promise<RoleCharter> {
+    this.assertOwner(actor, "only the owner may write a role charter directly");
+    const parsed = RoleCharterSchema.parse(charter);
+    return this.mutex.run(async () => {
+      this.validateRole(parsed);
+      return (await this.writeRoleUnlocked(actor.name, parsed, {})).charter;
+    });
+  }
+
+  /** Adds a channel to a project or to the society. Also what an approved channel proposal executes. */
+  async addChannel(actor: Actor, input: AddChannelInput): Promise<ChannelRef> {
+    this.assertAdmin(actor);
+    return this.mutex.run(async () => {
+      await this.validateAddChannel(input);
+      return this.addChannelUnlocked(actor.name, input, {});
+    });
+  }
+
+  /**
+   * The scaling rule's execution: one more member of an existing role on a project, cloned from the
+   * newest active member of that role. Mechanism rather than hiring; the charter's replica cap bounds it.
+   */
+  async addReplica(actor: Actor, input: AddReplicaInput): Promise<Agent> {
+    this.assertAdmin(actor);
+    return this.mutex.run(async () => {
+      await this.readProject(input.project);
+      await this.readRole(input.role);
+      const candidates = (await this.listAgents())
+        .filter(
+          (agent): agent is Agent & { cli: CliKind } =>
+            agent.status === "active" && agent.cli !== null && agent.role === input.role,
+        )
+        .toSorted((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      const template =
+        candidates.find((agent) => agent.memberships.includes(input.project)) ?? candidates[0];
+      if (template === undefined) {
+        throw new BoardError("NOT_FOUND", `no active ${input.role} exists to replicate`);
+      }
+      const base = template.name.replace(/-\d+$/, "");
+      let index = 2;
+      while (await exists(this.paths.agentFile(`${base}-${index}`))) {
+        index += 1;
+      }
+      const { agent } = await this.addAgentUnlocked(
+        actor.name,
+        {
+          name: NameSchema.parse(`${base}-${index}`),
+          role: template.role,
+          cli: template.cli,
+          ...(template.model === undefined ? {} : { model: template.model }),
+          homeRunner: template.homeRunner,
+          memberships: [input.project],
+        },
+        { scaledFrom: template.name },
+      );
+      return agent;
+    });
+  }
+
+  /** Records a runner's connection state and what it offers. A change of state is an operations signal. */
+  async markRunner(name: Name, patch: RunnerPatch): Promise<Runner> {
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const next: Runner = RunnerSchema.parse({
+        ...doc.data,
+        ...(patch.status === undefined ? {} : { status: patch.status }),
+        ...(patch.clis === undefined ? {} : { clis: [...patch.clis] }),
+        ...(patch.capabilities === undefined ? {} : { capabilities: [...patch.capabilities] }),
+        lastSeen: this.now().toISOString(),
+      });
+      await writeMarkdown(file, next, doc.body);
+      await this.events.append("runner.changed", SYSTEM_ACTOR.name, {
+        name,
+        status: next.status,
+        clis: next.clis,
+        capabilities: next.capabilities,
+      });
+      if (doc.data.status !== next.status) {
+        const clis = next.clis.length === 0 ? "" : ` with ${next.clis.join(", ")}`;
+        const capabilities =
+          next.capabilities.length === 0 ? "" : ` and capabilities ${next.capabilities.join(", ")}`;
+        await this.publishSignalUnlocked({
+          kind: "runner",
+          key: `runner:${name}`,
+          summary: `runner ${name} is ${next.status}${clis}${capabilities}`,
+          value: next.status === "connected" ? 1 : 0,
+        });
+      }
+      return next;
+    });
+  }
+
+  /** Publishes an operations signal: a post in the ops channel plus an `ops.signal` event. */
+  async publishSignal(signal: OpsSignal): Promise<BoardEvent> {
+    return this.mutex.run(() => this.publishSignalUnlocked(signal));
+  }
+
+  /** The most recent operations signals from the event log, oldest first. */
+  async listSignals(limit = 100): Promise<SignalRecord[]> {
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    const records: SignalRecord[] = [];
+    for (const event of events) {
+      if (event.type !== "ops.signal") {
+        continue;
+      }
+      const parsed = OpsSignalSchema.safeParse(event.payload);
+      if (parsed.success) {
+        records.push({ id: event.id, ts: event.ts, signal: parsed.data });
+      }
+    }
+    return records.slice(-limit);
   }
 
   async setPaused(actor: Actor, paused: boolean): Promise<void> {
@@ -528,37 +725,9 @@ export class Board {
   async postMessage(actor: Actor, input: VerbInput<"post_message">): Promise<Message> {
     const args = VerbInputs.post_message.parse(input);
     await this.authorize(actor, "post_message");
-    return this.mutex.run(async () => {
-      await this.assertChannelExists(args.channel);
-      let dir = this.paths.channelDir(args.channel);
-      if (args.thread_id !== undefined) {
-        const location = await this.findTask(args.thread_id);
-        if (location.task.thread !== "open") {
-          throw new BoardError("INVALID_STATE", `thread for task ${args.thread_id} is not open`);
-        }
-        dir = this.paths.thread(location.project, args.thread_id);
-      }
-      const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
-        id: this.newId(),
-        author: actor.name,
-        channel: args.channel,
-        ...(args.thread_id === undefined ? {} : { thread: args.thread_id }),
-        ts: this.now().toISOString(),
-        mentions: extractMentions(args.body),
-      });
-      await writeMarkdown(
-        this.paths.messageFile(dir, frontmatter.id, actor.name),
-        frontmatter,
-        args.body,
-      );
-      await this.events.append("message.posted", actor.name, {
-        id: frontmatter.id,
-        channel: frontmatter.channel,
-        thread: frontmatter.thread ?? null,
-        mentions: frontmatter.mentions,
-      });
-      return { ...frontmatter, body: args.body };
-    });
+    return this.mutex.run(() =>
+      this.appendMessage(actor.name, args.channel, args.body, args.thread_id),
+    );
   }
 
   async readInbox(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<InboxResult> {
@@ -972,11 +1141,21 @@ export class Board {
         }),
         body: args.rationale,
       };
+      // What approval would provision must be possible now, so nobody decides a doomed proposal.
+      await this.validateProvision(proposal.kind, proposal.charter);
       await this.writeProposal(proposal);
       await this.events.append("proposal.created", actor.name, {
         proposalId: proposal.id,
         kind: proposal.kind,
       });
+      const rationale = args.rationale.trim();
+      await this.appendMessage(
+        actor.name,
+        "governance",
+        `Proposal ${proposal.id}: ${describeCharter(proposal.kind, proposal.charter)}.${
+          rationale.length === 0 ? "" : `\n\n${rationale}`
+        }`,
+      );
       return proposal;
     });
   }
@@ -1195,6 +1374,14 @@ export class Board {
     return runners;
   }
 
+  async readRunner(name: Name): Promise<Runner> {
+    const file = this.paths.runner(name);
+    if (!(await exists(file))) {
+      throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+    }
+    return (await readMarkdown(file, RunnerSchema)).data;
+  }
+
   private async writeTurnRecord(record: TurnRecord): Promise<void> {
     const dir = this.paths.agentProject(record.agent, record.project);
     await ensureDir(dir);
@@ -1276,14 +1463,20 @@ export class Board {
     return ownerToken;
   }
 
-  private async writeAgentHome(agent: Agent, charter: RoleCharter): Promise<void> {
+  private async writeAgentHome(
+    agent: Agent,
+    charter: RoleCharter,
+    seedInstructions?: string,
+  ): Promise<void> {
     await writeJson(this.paths.agentFile(agent.name), agent);
+    const seed = seedInstructions?.trim() ?? "";
     await writeMarkdown(
       this.paths.agentRole(agent.name),
       { role: charter.name, agent: agent.name },
       `# ${agent.name}, ${charter.name}\n\n${charter.purpose}\n\n` +
         `Route every lesson with one question: about me, my craft, or the owner, it goes in memory/core.md; ` +
-        `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n`,
+        `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n` +
+        (seed.length === 0 ? "" : `\n## Seed instructions\n\n${seed}\n`),
     );
     await ensureDir(this.paths.agentMemory(agent.name));
     if (!(await exists(this.paths.agentMemoryCore(agent.name)))) {
@@ -1327,17 +1520,356 @@ export class Board {
     return next;
   }
 
-  private async updateProjectMembers(slug: Name, member: Name): Promise<void> {
-    const project = await this.readProject(slug);
-    const next: Project = { ...project, members: [...new Set([...project.members, member])] };
+  private async updateProject(slug: Name, mutate: (project: Project) => Project): Promise<Project> {
     const doc = await readMarkdown(this.paths.projectFile(slug), ProjectSchema);
+    const next = ProjectSchema.parse(mutate(doc.data));
     await writeMarkdown(this.paths.projectFile(slug), next, doc.body);
+    return next;
   }
 
   private assertAdmin(actor: Actor): void {
     if (actor.role !== OWNER_ROLE && actor.role !== "steward") {
       throw new BoardError("FORBIDDEN", "only the owner or the steward may administer the society");
     }
+  }
+
+  private assertOwner(actor: Actor, message: string): void {
+    if (actor.role !== OWNER_ROLE) {
+      throw new BoardError("FORBIDDEN", message);
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Provisioning: what an approval executes. Validation never writes; execution assumes it passed.
+  // ---------------------------------------------------------------------------------------------
+
+  private async validateProvision(
+    kind: ProposalKind,
+    charter: Record<string, unknown>,
+  ): Promise<void> {
+    switch (kind) {
+      case "member":
+        await this.validateAddAgent(memberToAgentInput(MemberProposalSchema.parse(charter)));
+        return;
+      case "channel":
+        await this.validateAddChannel(ChannelProposalSchema.parse(charter));
+        return;
+      case "role":
+        this.validateRole(RoleCharterSchema.parse(charter));
+        return;
+      case "retirement":
+        await this.validateRetire(RetirementProposalSchema.parse(charter).agent);
+        return;
+      case "reallocation":
+        return;
+      default:
+        return;
+    }
+  }
+
+  private async executeProvision(
+    by: Name,
+    proposal: Proposal,
+  ): Promise<Record<string, unknown> | undefined> {
+    const meta = { proposalId: proposal.id };
+    switch (proposal.kind) {
+      case "member": {
+        const input = memberToAgentInput(MemberProposalSchema.parse(proposal.charter));
+        const { agent } = await this.addAgentUnlocked(by, input, meta);
+        return {
+          agent: agent.name,
+          role: agent.role,
+          cli: agent.cli,
+          memberships: agent.memberships,
+        };
+      }
+      case "channel": {
+        const channel = await this.addChannelUnlocked(
+          by,
+          ChannelProposalSchema.parse(proposal.charter),
+          meta,
+        );
+        return { channel };
+      }
+      case "role": {
+        const { charter, replaced } = await this.writeRoleUnlocked(
+          by,
+          RoleCharterSchema.parse(proposal.charter),
+          meta,
+        );
+        return { role: charter.name, replaced };
+      }
+      case "retirement": {
+        const input = RetirementProposalSchema.parse(proposal.charter);
+        const { agent, releasedTasks } = await this.retireUnlocked(
+          by,
+          input.agent,
+          input.reason,
+          meta,
+        );
+        return { agent: agent.name, releasedTasks };
+      }
+      case "reallocation":
+        return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private async validateAddAgent(input: AddAgentInput): Promise<void> {
+    if (await exists(this.paths.agentFile(input.name))) {
+      throw new BoardError("ALREADY_EXISTS", `agent ${input.name} already exists`);
+    }
+    await this.readRole(input.role);
+    await this.readRunner(input.homeRunner ?? LOCAL_RUNNER);
+    for (const slug of input.memberships ?? []) {
+      await this.readProject(slug);
+    }
+    for (const ref of input.subscriptions ?? []) {
+      await this.assertChannelExists(ref);
+    }
+  }
+
+  private async addAgentUnlocked(
+    by: Name,
+    input: AddAgentInput,
+    meta: Record<string, unknown>,
+  ): Promise<{ agent: Agent; token: string }> {
+    const charter = await this.readRole(input.role);
+    const memberships = [...(input.memberships ?? [])];
+    const defaultSubscriptions: ChannelRef[] = [
+      "general",
+      ...memberships.map((slug) => channelRef(slug, "general")),
+      // Roles woken by operations signals follow the channels where signals and proposals land.
+      ...(charter.wakeTriggers.includes(OPS_WAKE_TRIGGER) ? ["ops", "governance"] : []),
+    ];
+    const subscriptions = [...new Set([...defaultSubscriptions, ...(input.subscriptions ?? [])])];
+    const token = mintToken();
+    const agent: Agent = AgentSchema.parse({
+      name: input.name,
+      role: input.role,
+      cli: input.cli,
+      ...(input.model === undefined ? {} : { model: input.model }),
+      homeRunner: input.homeRunner ?? LOCAL_RUNNER,
+      memberships,
+      subscriptions,
+      status: "active",
+      createdAt: this.now().toISOString(),
+      tokenHash: hashToken(token),
+    });
+    await this.writeAgentHome(agent, charter, input.seedInstructions);
+    for (const slug of memberships) {
+      await this.updateProject(slug, (project) => ({
+        ...project,
+        members: [...new Set([...project.members, agent.name])],
+      }));
+    }
+    await this.events.append("agent.added", by, {
+      name: agent.name,
+      role: agent.role,
+      cli: agent.cli,
+      memberships,
+      ...meta,
+    });
+    return { agent, token };
+  }
+
+  private async validateAddChannel(input: AddChannelInput): Promise<void> {
+    if (input.project === null) {
+      if ((await this.society()).channels.includes(input.name)) {
+        throw new BoardError("ALREADY_EXISTS", `society channel ${input.name} already exists`);
+      }
+      return;
+    }
+    const project = await this.readProject(input.project);
+    if (project.channels.includes(input.name)) {
+      throw new BoardError(
+        "ALREADY_EXISTS",
+        `channel ${channelRef(input.project, input.name)} already exists`,
+      );
+    }
+  }
+
+  private async addChannelUnlocked(
+    by: Name,
+    input: AddChannelInput,
+    meta: Record<string, unknown>,
+  ): Promise<ChannelRef> {
+    const ref = channelRef(input.project, input.name);
+    if (input.project === null) {
+      const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
+      await writeMarkdown(
+        this.paths.societyFile(),
+        { ...doc.data, channels: [...doc.data.channels, input.name] },
+        doc.body,
+      );
+      await ensureDir(this.paths.societyChannel(input.name));
+      // The owner follows every society channel.
+      await this.updateAgent(OWNER_NAME, (owner) => ({
+        ...owner,
+        subscriptions: [...new Set([...owner.subscriptions, ref])],
+      }));
+    } else {
+      const project = input.project;
+      await this.updateProject(project, (current) => ({
+        ...current,
+        channels: [...current.channels, input.name],
+      }));
+      await ensureDir(this.paths.projectChannel(project, input.name));
+    }
+    await this.events.append("channel.added", by, {
+      channel: ref,
+      purpose: input.purpose,
+      ...meta,
+    });
+    await this.appendMessage(by, ref, `Channel ${ref} opened: ${input.purpose}`);
+    return ref;
+  }
+
+  private validateRole(charter: RoleCharter): void {
+    if (charter.name === OWNER_ROLE) {
+      throw new BoardError("FORBIDDEN", "the owner charter is not subject to proposals");
+    }
+  }
+
+  private async writeRoleUnlocked(
+    by: Name,
+    charter: RoleCharter,
+    meta: Record<string, unknown>,
+  ): Promise<{ charter: RoleCharter; replaced: boolean }> {
+    const file = this.paths.role(charter.name);
+    const replaced = await exists(file);
+    await writeMarkdown(file, charter, `# ${charter.name}\n\n${charter.purpose}\n`);
+    this.roleCache.set(charter.name, charter);
+    await this.events.append("role.added", by, {
+      name: charter.name,
+      replaced,
+      verbs: charter.verbs,
+      maxReplicas: charter.maxReplicas,
+      backlogThreshold: charter.backlogThreshold,
+      ...meta,
+    });
+    return { charter, replaced };
+  }
+
+  private async validateRetire(name: Name): Promise<void> {
+    const agent = await this.readAgent(name);
+    if (agent.role === OWNER_ROLE) {
+      throw new BoardError("FORBIDDEN", "the owner cannot be retired");
+    }
+    if (agent.status === "retired") {
+      throw new BoardError("INVALID_STATE", `${name} is already retired`);
+    }
+  }
+
+  private async retireUnlocked(
+    by: Name,
+    name: Name,
+    reason: string,
+    meta: Record<string, unknown>,
+  ): Promise<{ agent: Agent; releasedTasks: Ulid[] }> {
+    const current = await this.readAgent(name);
+    const ts = this.now().toISOString();
+    const releasedTasks: Ulid[] = [];
+    for (const task of await this.heldClaims(name)) {
+      await this.writeTask(task.project, {
+        ...task,
+        status: "open",
+        claimedBy: undefined,
+        leaseExpiresAt: undefined,
+        updatedAt: ts,
+      });
+      await this.events.append("task.released", by, {
+        taskId: task.id,
+        project: task.project,
+        releasedFrom: name,
+        reason: "retired",
+      });
+      releasedTasks.push(task.id);
+    }
+    const agent = await this.updateAgent(name, (a) => ({
+      ...a,
+      status: "retired",
+      retiredAt: ts,
+      retiredReason: reason,
+    }));
+    for (const slug of agent.memberships) {
+      await this.updateProject(slug, (project) => ({
+        ...project,
+        members: project.members.filter((member) => member !== name),
+      }));
+      const sessions = path.join(this.paths.agentProject(name, slug), "sessions.json");
+      if (await exists(sessions)) {
+        const archived = `sessions.archived.${ts.replace(/[:.]/g, "-")}.json`;
+        await rename(sessions, path.join(this.paths.agentProject(name, slug), archived));
+      }
+    }
+    this.tokenIndex.delete(current.tokenHash);
+    await this.events.append("agent.retired", by, {
+      name,
+      role: agent.role,
+      reason,
+      releasedTasks,
+      ...meta,
+    });
+    const released =
+      releasedTasks.length === 0
+        ? ""
+        : ` Released ${releasedTasks.length} claimed task(s) back to open.`;
+    await this.appendMessage(
+      by,
+      "general",
+      `Retired ${name} (${agent.role}): ${reason}.${released}`,
+    );
+    return { agent, releasedTasks };
+  }
+
+  /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
+  private async appendMessage(
+    author: Name,
+    channel: ChannelRef,
+    body: string,
+    threadId?: Ulid,
+  ): Promise<Message> {
+    await this.assertChannelExists(channel);
+    let dir = this.paths.channelDir(channel);
+    if (threadId !== undefined) {
+      const location = await this.findTask(threadId);
+      if (location.task.thread !== "open") {
+        throw new BoardError("INVALID_STATE", `thread for task ${threadId} is not open`);
+      }
+      dir = this.paths.thread(location.project, threadId);
+    }
+    const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
+      id: this.newId(),
+      author,
+      channel,
+      ...(threadId === undefined ? {} : { thread: threadId }),
+      ts: this.now().toISOString(),
+      mentions: extractMentions(body),
+    });
+    await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);
+    await this.events.append("message.posted", author, {
+      id: frontmatter.id,
+      channel: frontmatter.channel,
+      thread: frontmatter.thread ?? null,
+      mentions: frontmatter.mentions,
+    });
+    return { ...frontmatter, body };
+  }
+
+  private async publishSignalUnlocked(signal: OpsSignal): Promise<BoardEvent> {
+    const parsed = OpsSignalSchema.parse(signal);
+    const meta = Object.entries(parsed)
+      .filter(([key]) => key !== "summary")
+      .map(([key, value]) => `${key}=${plain(value)}`)
+      .join(" ");
+    await this.appendMessage(
+      SYSTEM_ACTOR.name,
+      "ops",
+      `**${parsed.kind}** ${parsed.summary}\n\n\`${meta}\``,
+    );
+    return this.events.append("ops.signal", SYSTEM_ACTOR.name, parsed);
   }
 
   private async assertChannelExists(ref: ChannelRef): Promise<void> {
@@ -1427,6 +1959,11 @@ export class Board {
     );
   }
 
+  /**
+   * Records a decision and, on approval, provisions what the proposal asked for in the same
+   * transaction: the member exists, the channel is open, the charter is written, the agent is
+   * retired. Validation runs before any write, so an impossible provision fails the decision.
+   */
   private async decide(
     actor: Actor,
     proposalId: Ulid,
@@ -1444,12 +1981,15 @@ export class Board {
       if (proposal.proposedBy === actor.name) {
         throw new BoardError("FORBIDDEN", "a proposer never decides its own proposal");
       }
-      const approvers = ROLE_KIND_APPROVERS[proposal.kind] ?? [OWNER_ROLE];
+      const approvers = ROLE_KIND_APPROVERS[proposal.kind];
       if (!approvers.includes(actor.role)) {
         throw new BoardError(
           "FORBIDDEN",
           `a ${proposal.kind} proposal requires one of: ${approvers.join(", ")}`,
         );
+      }
+      if (outcome === "approved") {
+        await this.validateProvision(proposal.kind, proposal.charter);
       }
       const ts = this.now().toISOString();
       const decision: Decision = DecisionSchema.parse({
@@ -1461,18 +2001,43 @@ export class Board {
         ts,
       });
       await writeMarkdown(this.paths.decision(decision.id), decision, reason ?? "");
+      const provision =
+        outcome === "approved" ? await this.executeProvision(actor.name, proposal) : undefined;
+      const status: ProposalStatus =
+        outcome === "rejected" ? "rejected" : provision === undefined ? "approved" : "provisioned";
       await this.writeProposal({
         ...proposal,
-        status: outcome,
+        status,
         decidedBy: actor.name,
         decidedAt: ts,
         ...(reason === undefined ? {} : { reason }),
+        ...(provision === undefined ? {} : { provisionedAt: ts, provision }),
       });
       await this.events.append("proposal.decided", actor.name, {
         proposalId,
         outcome,
         kind: proposal.kind,
       });
+      if (provision !== undefined) {
+        await this.events.append("proposal.provisioned", actor.name, {
+          proposalId,
+          kind: proposal.kind,
+          ...provision,
+        });
+      }
+      const verdict = outcome === "approved" ? "Approved" : "Rejected";
+      const why = reason === undefined ? "" : ` Reason: ${reason}.`;
+      const result =
+        provision === undefined
+          ? ""
+          : ` Provisioned: ${Object.entries(provision)
+              .map(([key, value]) => `${key} ${plain(value)}`)
+              .join(", ")}.`;
+      await this.appendMessage(
+        actor.name,
+        "decisions",
+        `${verdict} ${proposal.kind} proposal ${proposalId} by ${proposal.proposedBy}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`,
+      );
       return decision;
     });
   }

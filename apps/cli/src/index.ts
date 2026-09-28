@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { Board, BoardError, type Actor } from "@stellaris/board-core";
-import { CliKindSchema, TaskStatusSchema } from "@stellaris/shared";
+import {
+  CliKindSchema,
+  parseChannelRef,
+  ProposalKindSchema,
+  TaskStatusSchema,
+} from "@stellaris/shared";
 
 const program = new Command();
 
 program
   .name("stellaris")
-  .description("Admin CLI for a Stellaris society: setup, posting, tasks, and control")
+  .description("Admin CLI for a Stellaris society: setup, posting, tasks, governance, and control")
   .version("0.0.0")
   .option("-d, --data <dir>", "data directory", process.env["STELLARIS_DATA_DIR"] ?? "./data")
   .option("--json", "print JSON instead of text", false);
@@ -31,6 +36,18 @@ async function open(): Promise<Board> {
 
 async function actorFor(board: Board, as: string | undefined): Promise<Actor> {
   return as === undefined ? board.ownerActor() : board.actorFor(as);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseCharter(json: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(json);
+  if (!isRecord(parsed)) {
+    throw new BoardError("VALIDATION", "a charter must be a JSON object");
+  }
+  return parsed;
 }
 
 program
@@ -114,6 +131,177 @@ agent
     const agents = await board.listAgents();
     print(agents, () =>
       agents.map((a) => `${a.name}\t${a.role}\t${a.cli ?? "human"}\t${a.status}`).join("\n"),
+    );
+  });
+
+agent
+  .command("retire <name>")
+  .description("Retire a member: no more wakes, claims released, token revoked, sessions archived")
+  .requiredOption("--reason <text>", "why")
+  .action(async (name: string, opts: { reason: string }) => {
+    const board = await open();
+    const retired = await board.retireAgent(board.ownerActor(), { name, reason: opts.reason });
+    print(retired, () => `Agent ${retired.name} retired: ${opts.reason}`);
+  });
+
+const proposal = program.command("proposal").description("Governance proposals");
+
+proposal
+  .command("list")
+  .description("List proposals")
+  .action(async () => {
+    const board = await open();
+    const proposals = await board.listProposals();
+    print(proposals, () =>
+      proposals.length === 0
+        ? "No proposals."
+        : proposals.map((p) => `${p.id}\t${p.kind}\t${p.status}\tby ${p.proposedBy}`).join("\n"),
+    );
+  });
+
+proposal
+  .command("show <id>")
+  .description("Show a proposal with its charter and rationale")
+  .action(async (id: string) => {
+    const board = await open();
+    const found = await board.readProposal(id);
+    print(found, () =>
+      [
+        `${found.id}  ${found.kind}  ${found.status}  by ${found.proposedBy}`,
+        JSON.stringify(found.charter, null, 2),
+        found.body.trim(),
+        found.provision === undefined ? "" : `provisioned: ${JSON.stringify(found.provision)}`,
+      ]
+        .filter((line) => line.length > 0)
+        .join("\n"),
+    );
+  });
+
+proposal
+  .command("create")
+  .description("Propose a member, role, channel, reallocation, or retirement")
+  .requiredOption("--kind <kind>", "member, role, channel, reallocation, or retirement")
+  .requiredOption("--charter <json>", "the charter as a JSON object")
+  .option("--rationale <text>", "why", "")
+  .option("--as <agent>", "act as this agent instead of the owner")
+  .action(async (opts: { kind: string; charter: string; rationale: string; as?: string }) => {
+    const board = await open();
+    const created = await board.propose(await actorFor(board, opts.as), {
+      kind: ProposalKindSchema.parse(opts.kind),
+      charter: parseCharter(opts.charter),
+      rationale: opts.rationale,
+    });
+    print(created, () => `Proposal ${created.id} (${created.kind}) is ${created.status}`);
+  });
+
+proposal
+  .command("approve <id>")
+  .description("Approve a proposal; the board provisions it")
+  .option("--reason <text>", "a note for the record")
+  .option("--as <agent>", "act as this agent instead of the owner")
+  .action(async (id: string, opts: { reason?: string; as?: string }) => {
+    const board = await open();
+    const decision = await board.approve(await actorFor(board, opts.as), {
+      proposal_id: id,
+      ...(opts.reason === undefined ? {} : { reason: opts.reason }),
+    });
+    const after = await board.readProposal(id);
+    print(
+      { decision, proposal: after },
+      () => `Proposal ${id} approved; it is now ${after.status}`,
+    );
+  });
+
+proposal
+  .command("reject <id>")
+  .description("Reject a proposal with a reason")
+  .requiredOption("--reason <text>", "why")
+  .option("--as <agent>", "act as this agent instead of the owner")
+  .action(async (id: string, opts: { reason: string; as?: string }) => {
+    const board = await open();
+    const decision = await board.reject(await actorFor(board, opts.as), {
+      proposal_id: id,
+      reason: opts.reason,
+    });
+    print(decision, () => `Proposal ${id} rejected`);
+  });
+
+const role = program.command("role").description("Role charters");
+
+role
+  .command("list")
+  .description("List role charters")
+  .action(async () => {
+    const board = await open();
+    const roles = await board.listRoles();
+    print(roles, () =>
+      roles
+        .map(
+          (r) =>
+            `${r.name}\trepo ${r.repoPermission}\treplicas up to ${r.maxReplicas}\tbacklog threshold ${r.backlogThreshold}\twakes on ${r.wakeTriggers.join(", ") || "nothing"}`,
+        )
+        .join("\n"),
+    );
+  });
+
+role
+  .command("set <name>")
+  .description("Change a charter directly as the owner: scaling cap, threshold, or purpose")
+  .option("--max-replicas <n>", "active members of the role per project the scheduler may reach")
+  .option("--backlog-threshold <n>", "load per member that adds a replica")
+  .option("--purpose <text>", "the charter's purpose")
+  .action(
+    async (
+      name: string,
+      opts: { maxReplicas?: string; backlogThreshold?: string; purpose?: string },
+    ) => {
+      const board = await open();
+      const current = await board.readRole(name);
+      const updated = await board.setRoleCharter(board.ownerActor(), {
+        ...current,
+        ...(opts.maxReplicas === undefined ? {} : { maxReplicas: Number(opts.maxReplicas) }),
+        ...(opts.backlogThreshold === undefined
+          ? {}
+          : { backlogThreshold: Number(opts.backlogThreshold) }),
+        ...(opts.purpose === undefined ? {} : { purpose: opts.purpose }),
+      });
+      print(
+        updated,
+        () =>
+          `Role ${updated.name}: replicas up to ${updated.maxReplicas}, backlog threshold ${updated.backlogThreshold}`,
+      );
+    },
+  );
+
+const channelCommand = program.command("channel").description("Channels");
+
+channelCommand
+  .command("add <ref>")
+  .description("Open a channel: <name> for the society or <project>/<name>")
+  .requiredOption("--purpose <text>", "what the channel is for")
+  .option("--as <agent>", "act as this agent instead of the owner")
+  .action(async (ref: string, opts: { purpose: string; as?: string }) => {
+    const board = await open();
+    const parsed = parseChannelRef(ref);
+    const added = await board.addChannel(await actorFor(board, opts.as), {
+      project: parsed.project,
+      name: parsed.channel,
+      purpose: opts.purpose,
+    });
+    print({ channel: added }, () => `Channel ${added} opened`);
+  });
+
+program
+  .command("signals")
+  .description("Recent operations signals, oldest first")
+  .option("--limit <n>", "how many", "50")
+  .action(async (opts: { limit: string }) => {
+    const board = await open();
+    const signals = await board.listSignals(Number(opts.limit));
+    print(signals, () =>
+      signals.length === 0
+        ? "No signals yet."
+        : signals.map((s) => `[${s.ts}] ${s.signal.kind}\t${s.signal.summary}`).join("\n"),
     );
   });
 

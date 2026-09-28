@@ -56,6 +56,52 @@ export function ProjectPage() {
   );
 }
 
+function NewChannel({ slug }: { slug: string }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.addChannel(slug, name.trim(), purpose.trim()),
+    onSuccess: () => {
+      setName("");
+      setPurpose("");
+      void queryClient.invalidateQueries({ queryKey: ["project", slug] });
+    },
+  });
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    if (name.trim().length > 0 && purpose.trim().length > 0) create.mutate();
+  };
+  return (
+    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+      <Field label="Channel name">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="design"
+          className={inputClass}
+        />
+      </Field>
+      <div className="min-w-64 flex-1">
+        <Field label="Purpose">
+          <input
+            value={purpose}
+            onChange={(event) => setPurpose(event.target.value)}
+            className={`${inputClass} w-full`}
+          />
+        </Field>
+      </div>
+      <Button
+        type="submit"
+        disabled={create.isPending || name.trim().length === 0 || purpose.trim().length === 0}
+      >
+        Open channel
+      </Button>
+      <ErrorNote error={create.error} />
+    </form>
+  );
+}
+
 export function ProjectOverview() {
   const { slug } = projectRoute.useParams();
   const tasks = useQuery({ queryKey: ["tasks", slug], queryFn: () => api.tasks(slug) });
@@ -86,6 +132,9 @@ export function ProjectOverview() {
       <Panel title="#general, latest">
         <MessageList messages={(general.data ?? []).slice(-5).toReversed()} />
         <Composer channel={`${slug}/general`} />
+      </Panel>
+      <Panel title="New channel">
+        <NewChannel slug={slug} />
       </Panel>
     </div>
   );

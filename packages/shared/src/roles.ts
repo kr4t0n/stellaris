@@ -25,7 +25,12 @@ export type VerbName = z.infer<typeof VerbNameSchema>;
 export const RepoPermissionSchema = z.enum(["none", "read", "write", "merge"]);
 export type RepoPermission = z.infer<typeof RepoPermissionSchema>;
 
-/** A role charter: purpose, granted verbs, repository permission, wake triggers, and a review date. */
+/**
+ * A role charter: purpose, granted verbs, repository permission, wake triggers, a review date,
+ * and the scaling rule the scheduler may apply mechanically: up to `maxReplicas` active members
+ * of the role per project, adding one whenever the load per member reaches `backlogThreshold`.
+ * A cap of one means the role never scales on its own; hiring stays a proposal.
+ */
 export const RoleCharterSchema = z.object({
   name: NameSchema,
   purpose: z.string().min(1),
@@ -33,8 +38,11 @@ export const RoleCharterSchema = z.object({
   repoPermission: RepoPermissionSchema,
   wakeTriggers: z.array(z.string()),
   reviewDate: z.string().optional(),
+  maxReplicas: z.number().int().min(1).default(1),
+  backlogThreshold: z.number().positive().default(3),
 });
 export type RoleCharter = z.infer<typeof RoleCharterSchema>;
+export type RoleCharterInput = z.input<typeof RoleCharterSchema>;
 
 export const OWNER_ROLE = "owner";
 export const OWNER_NAME = "owner";
@@ -66,6 +74,8 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS],
     repoPermission: "merge",
     wakeTriggers: [],
+    maxReplicas: 1,
+    backlogThreshold: 3,
   },
   {
     name: "engineer",
@@ -74,6 +84,8 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     verbs: [...MEMBER_VERBS],
     repoPermission: "write",
     wakeTriggers: ["mention", "claim_event", "unclaimed_task", "heartbeat"],
+    maxReplicas: 1,
+    backlogThreshold: 3,
   },
   {
     name: "reviewer",
@@ -82,13 +94,17 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     verbs: [...MEMBER_VERBS],
     repoPermission: "merge",
     wakeTriggers: ["mention", "claim_event", "heartbeat"],
+    maxReplicas: 1,
+    backlogThreshold: 3,
   },
   {
     name: "steward",
     purpose:
-      "Watches the operations channel and the task board for capacity, skill, and capability gaps. Drafts proposals and curates society knowledge and skills.",
+      "Watches the ops channel and the task board for capacity, skill, and capability gaps, and turns signals into proposals: a member when a role is missing or a backlog persists, a retirement when a member has been idle for a long time, a channel when a topic needs one. Prefers scaling an existing role over inventing a new one; justifies a new role by repeated unclaimed work of its kind. Never approves its own proposals; hiring, roles, and retirements are decided by the owner, channels and reallocations the steward may decide. Curates society knowledge and skills.",
     verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS],
     repoPermission: "read",
     wakeTriggers: ["mention", "ops_event", "heartbeat"],
+    maxReplicas: 1,
+    backlogThreshold: 3,
   },
 ];

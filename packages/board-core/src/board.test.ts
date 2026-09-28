@@ -187,7 +187,7 @@ describe("Board", () => {
       code: "FORBIDDEN",
     });
     expect((await board.approve(OWNER, { proposal_id: hire.id })).outcome).toBe("approved");
-    expect((await board.readProposal(hire.id)).status).toBe("approved");
+    expect((await board.readProposal(hire.id)).status).toBe("provisioned");
     await expect(
       board.reject(OWNER, { proposal_id: hire.id, reason: "late" }),
     ).rejects.toMatchObject({ code: "INVALID_STATE" });
@@ -197,6 +197,204 @@ describe("Board", () => {
       charter: { project: "demo", name: "design", purpose: "Design discussion" },
     });
     expect((await board.approve(STEW, { proposal_id: channel.id })).outcome).toBe("approved");
+  });
+
+  it("provisions what an approval asked for: members, channels, roles, retirements", async () => {
+    const { board, eng } = await society();
+    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    expect((await board.readAgent("stew")).subscriptions).toEqual(
+      expect.arrayContaining(["ops", "governance"]),
+    );
+
+    // A member proposal becomes an agent with a home, memberships, and seed instructions.
+    const hire = await board.propose(STEW, {
+      kind: "member",
+      charter: {
+        name: "eng-2",
+        role: "engineer",
+        cli: "codex",
+        memberships: ["demo"],
+        seedInstructions: "Focus on the API layer first.",
+      },
+      rationale: "Backlog depth is above threshold.",
+    });
+    expect((await board.listChannel("governance")).at(-1)?.body).toContain(
+      `Proposal ${hire.id}: member eng-2 as engineer on codex for demo`,
+    );
+    await board.approve(OWNER, { proposal_id: hire.id });
+    const provisioned = await board.readProposal(hire.id);
+    expect(provisioned.status).toBe("provisioned");
+    expect(provisioned.provision).toMatchObject({ agent: "eng-2", memberships: ["demo"] });
+    const eng2 = await board.readAgent("eng-2");
+    expect(eng2.memberships).toEqual(["demo"]);
+    expect((await board.readProject("demo")).members).toContain("eng-2");
+    expect(await board.readAgentRoleBody("eng-2")).toContain("Focus on the API layer first.");
+    const added = (await board.readEvents(null)).find(
+      (event) => event.type === "agent.added" && event.payload["name"] === "eng-2",
+    );
+    expect(added?.payload["proposalId"]).toBe(hire.id);
+    expect((await board.listChannel("decisions")).at(-1)?.body).toContain(
+      "Approved member proposal",
+    );
+
+    // A channel proposal opens the channel with its purpose as the first message.
+    const channel = await board.propose(ENG, {
+      kind: "channel",
+      charter: { project: "demo", name: "design", purpose: "Design discussion" },
+    });
+    await board.approve(STEW, { proposal_id: channel.id });
+    expect((await board.readProject("demo")).channels).toContain("design");
+    expect((await board.listChannel("demo/design"))[0]?.body).toContain("Design discussion");
+    expect((await board.readProposal(channel.id)).status).toBe("provisioned");
+
+    // A role proposal writes the charter, and the role is usable at once.
+    const role = await board.propose(STEW, {
+      kind: "role",
+      charter: {
+        name: "designer",
+        purpose: "Owns the visual language.",
+        verbs: ["post_message", "read_inbox", "search"],
+        repoPermission: "read",
+        wakeTriggers: ["mention"],
+      },
+    });
+    await board.approve(OWNER, { proposal_id: role.id });
+    expect((await board.readRole("designer")).maxReplicas).toBe(1);
+    expect((await board.listRoles()).map((r) => r.name)).toContain("designer");
+
+    // A retirement releases claims, revokes the token, and leaves the projection.
+    const task = await board.createTask(OWNER, { project: "demo", title: "t" });
+    await board.claimTask(ENG, { task_id: task.id });
+    const retirement = await board.propose(STEW, {
+      kind: "retirement",
+      charter: { agent: "eng-1", reason: "idle for a week" },
+    });
+    await expect(board.approve(STEW, { proposal_id: retirement.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await board.approve(OWNER, { proposal_id: retirement.id });
+    const retired = await board.readAgent("eng-1");
+    expect(retired.status).toBe("retired");
+    expect(retired.retiredReason).toBe("idle for a week");
+    expect((await board.getTask(OWNER, { task_id: task.id })).status).toBe("open");
+    expect(board.resolveToken(eng.token)).toBeNull();
+    expect((await board.readProject("demo")).members).not.toContain("eng-1");
+    expect((await board.projectMembers("demo")).map((a) => a.name)).toEqual([
+      "eng-2",
+      "owner",
+      "rev-1",
+    ]);
+    expect((await board.listChannel("general")).at(-1)?.body).toContain("Retired eng-1");
+    expect((await board.readProposal(retirement.id)).provision).toMatchObject({
+      agent: "eng-1",
+      releasedTasks: [task.id],
+    });
+
+    // A reallocation has nothing to provision; it stays approved on the record.
+    const reallocation = await board.propose(STEW, {
+      kind: "reallocation",
+      charter: { description: "Move rev-1 to the api project." },
+    });
+    await board.approve(OWNER, { proposal_id: reallocation.id });
+    expect((await board.readProposal(reallocation.id)).status).toBe("approved");
+  });
+
+  it("refuses proposals that could not be provisioned, and guards direct administration", async () => {
+    const { board } = await society();
+    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    await expect(
+      board.propose(STEW, {
+        kind: "member",
+        charter: { name: "eng-1", role: "engineer", cli: "claude" },
+      }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    await expect(
+      board.propose(STEW, {
+        kind: "member",
+        charter: { name: "eng-9", role: "wizard", cli: "claude" },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      board.propose(STEW, { kind: "retirement", charter: { agent: "owner", reason: "no" } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      board.propose(STEW, {
+        kind: "channel",
+        charter: { project: "demo", name: "general", purpose: "dup" },
+      }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+
+    // Direct administration: the owner retires and edits charters; the steward may not.
+    await expect(board.retireAgent(STEW, { name: "eng-1", reason: "x" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      board.setRoleCharter(STEW, { ...(await board.readRole("engineer")), maxReplicas: 2 }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const engineer = await board.setRoleCharter(OWNER, {
+      ...(await board.readRole("engineer")),
+      maxReplicas: 3,
+      backlogThreshold: 2,
+    });
+    expect(engineer.maxReplicas).toBe(3);
+    expect((await board.readRole("engineer")).backlogThreshold).toBe(2);
+
+    // A replica is cloned from the newest active member of the role on the project.
+    const replica = await board.addReplica(OWNER, { project: "demo", role: "engineer" });
+    expect(replica.name).toBe("eng-2");
+    expect(replica.cli).toBe("claude");
+    expect(replica.memberships).toEqual(["demo"]);
+    const scaled = (await board.readEvents(null)).find(
+      (event) => event.type === "agent.added" && event.payload["name"] === "eng-2",
+    );
+    expect(scaled?.payload["scaledFrom"]).toBe("eng-1");
+    await board.retireAgent(OWNER, { name: "eng-2", reason: "demo" });
+    expect((await board.addReplica(OWNER, { project: "demo", role: "engineer" })).name).toBe(
+      "eng-3",
+    );
+    // A society-wide member of the role is the fallback template; a role with none cannot scale.
+    expect((await board.addReplica(OWNER, { project: "demo", role: "steward" })).name).toBe(
+      "stew-2",
+    );
+    await board.setRoleCharter(OWNER, {
+      name: "designer",
+      purpose: "Owns the visual language.",
+      verbs: ["post_message"],
+      repoPermission: "read",
+      wakeTriggers: ["mention"],
+    });
+    await expect(
+      board.addReplica(OWNER, { project: "demo", role: "designer" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Channels can be added directly by the owner or the steward.
+    expect(
+      await board.addChannel(STEW, { project: null, name: "random", purpose: "Off topic" }),
+    ).toBe("random");
+    expect((await board.society()).channels).toContain("random");
+    expect((await board.readAgent("owner")).subscriptions).toContain("random");
+
+    // Runner state changes are recorded and signalled; signals are readable back.
+    const runner = await board.markRunner("local", { status: "connected", clis: ["claude"] });
+    expect(runner.status).toBe("connected");
+    await board.publishSignal({
+      kind: "backlog",
+      key: "backlog:demo:engineer",
+      summary: "demo: 4 open or claimed tasks for 1 engineer",
+      value: 4,
+      threshold: 3,
+      project: "demo",
+      role: "engineer",
+    });
+    const signals = await board.listSignals();
+    expect(signals.map((record) => record.signal.kind)).toEqual(["runner", "backlog"]);
+    expect((await board.listChannel("ops")).at(-1)?.body).toContain("**backlog** demo: 4 open");
+    const types = (await board.readEvents(null)).map((event) => event.type);
+    expect(types).toEqual(
+      expect.arrayContaining(["runner.changed", "ops.signal", "role.added", "channel.added"]),
+    );
   });
 
   it("searches messages and tasks, and only the owner can pause", async () => {
@@ -218,5 +416,17 @@ describe("Board", () => {
     await expect(Board.open(path.join(dir, "nowhere"))).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+  });
+
+  it("resolves a relative data directory, so worktree and home paths never depend on a cwd", async () => {
+    const relative = path.relative(process.cwd(), dir);
+    expect(path.isAbsolute(relative)).toBe(false);
+    const { board } = await Board.init(relative, { name: "relative" });
+    expect(board.paths.dataDir).toBe(dir);
+    expect(path.isAbsolute(board.paths.worktree("eng-1", "demo"))).toBe(true);
+    expect(board.paths.repo("demo")).toBe(path.join(dir, "repos", "demo"));
+    expect((await Board.open(relative)).paths.agent("eng-1")).toBe(
+      path.join(dir, "agents", "eng-1"),
+    );
   });
 });

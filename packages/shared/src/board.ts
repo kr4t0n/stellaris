@@ -105,6 +105,8 @@ export const AgentSchema = z.object({
   status: AgentStatusSchema,
   createdAt: IsoDateTimeSchema,
   tokenHash: z.string().min(1),
+  retiredAt: IsoDateTimeSchema.optional(),
+  retiredReason: z.string().optional(),
 });
 export type Agent = z.infer<typeof AgentSchema>;
 
@@ -119,7 +121,13 @@ export const RunnerSchema = z.object({
 });
 export type Runner = z.infer<typeof RunnerSchema>;
 
-export const ProposalKindSchema = z.enum(["role", "member", "channel", "reallocation"]);
+export const ProposalKindSchema = z.enum([
+  "role",
+  "member",
+  "channel",
+  "reallocation",
+  "retirement",
+]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 
 export const ProposalStatusSchema = z.enum([
@@ -131,23 +139,33 @@ export const ProposalStatusSchema = z.enum([
 ]);
 export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
 
+/** A member proposal: the role, the CLI and model, the home runner, seed instructions, and subscriptions. */
 export const MemberProposalSchema = z.object({
   name: NameSchema,
   role: NameSchema,
   cli: CliKindSchema,
+  model: z.string().optional(),
   homeRunner: NameSchema.default("local"),
   memberships: z.array(NameSchema).default([]),
   subscriptions: z.array(ChannelRefSchema).default([]),
   seedInstructions: z.string().optional(),
 });
+export type MemberProposal = z.infer<typeof MemberProposalSchema>;
 export const ChannelProposalSchema = z.object({
   project: NameSchema.nullable().default(null),
   name: NameSchema,
   purpose: z.string().min(1),
 });
+export type ChannelProposal = z.infer<typeof ChannelProposalSchema>;
 export const ReallocationProposalSchema = z.object({
   description: z.string().min(1),
 });
+/** Retirement mirrors hiring: the decision is policy, the execution is mechanical. */
+export const RetirementProposalSchema = z.object({
+  agent: NameSchema,
+  reason: z.string().min(1),
+});
+export type RetirementProposal = z.infer<typeof RetirementProposalSchema>;
 
 /** Charter schema per proposal kind. */
 export const ProposalCharterSchemas = {
@@ -155,6 +173,7 @@ export const ProposalCharterSchemas = {
   member: MemberProposalSchema,
   channel: ChannelProposalSchema,
   reallocation: ReallocationProposalSchema,
+  retirement: RetirementProposalSchema,
 } as const;
 
 export const ProposalFrontmatterSchema = z.object({
@@ -167,6 +186,9 @@ export const ProposalFrontmatterSchema = z.object({
   decidedAt: IsoDateTimeSchema.optional(),
   reason: z.string().optional(),
   charter: z.record(z.string(), z.unknown()),
+  /** What approval created, for kinds the board provisions: the agent, channel, role, or retirement. */
+  provisionedAt: IsoDateTimeSchema.optional(),
+  provision: z.record(z.string(), z.unknown()).optional(),
 });
 export type ProposalFrontmatter = z.infer<typeof ProposalFrontmatterSchema>;
 export interface Proposal extends ProposalFrontmatter {

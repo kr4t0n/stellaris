@@ -15,6 +15,8 @@ describe("config-home rendering", () => {
     expect(base).toContain("(empty)");
     expect(base).toContain("/data/agents/eng-1");
     expect(base).toContain("/data/board");
+    expect(base).toContain("## Governance");
+    expect(base).toContain('retirement: {"agent", "reason"}');
     expect(base).not.toContain("## First turn");
 
     const first = renderInstructions({

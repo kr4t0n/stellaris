@@ -27,6 +27,19 @@ const TURN_CONTRACT = [
   "- End every turn with the status object: summary, claims held, what is blocked, whether the owner must decide.",
 ].join("\n");
 
+/** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
+const GOVERNANCE = [
+  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The owner decides members, roles, and retirements; the steward may also decide channels and reallocations. Nobody decides their own proposal.",
+  "- Charter shapes, as JSON objects:",
+  '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
+  '  - role: {"name", "purpose", "verbs": [board verbs], "repoPermission": "none", "read", "write", or "merge", "wakeTriggers": [trigger kinds], "maxReplicas"?, "backlogThreshold"?}',
+  '  - channel: {"project": slug or null, "name", "purpose"}',
+  '  - retirement: {"agent", "reason"}',
+  '  - reallocation: {"description"}',
+  "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
+  "- Operations signals arrive in the ops channel as posts by the board: unclaimed tasks, backlog per member, role gaps, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
+].join("\n");
+
 /** The onboarding preamble. It appears on an agent's first turn and never again. */
 export function renderOnboardingPreamble(context: OnboardingContext): string {
   return [
@@ -63,6 +76,10 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     "## Turn contract",
     "",
     TURN_CONTRACT,
+    "",
+    "## Governance",
+    "",
+    GOVERNANCE,
   ];
   if (input.onboarding !== undefined) {
     sections.push("", "## First turn", "", renderOnboardingPreamble(input.onboarding));

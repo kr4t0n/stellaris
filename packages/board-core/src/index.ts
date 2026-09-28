@@ -2,11 +2,16 @@ export { Board, SYSTEM_ACTOR } from "./board.js";
 export type {
   Actor,
   AddAgentInput,
+  AddChannelInput,
   AddProjectInput,
+  AddReplicaInput,
   BoardOptions,
   InboxResult,
   InitInput,
+  RetireAgentInput,
+  RunnerPatch,
   SearchHit,
+  SignalRecord,
   TaskLocation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";

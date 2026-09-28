@@ -129,18 +129,69 @@ describe("board server routes for the UI", () => {
       { name: "eng-1", role: "engineer" },
       { channel: "demo/general", body: "@owner please decide" },
     );
+    // The owner follows every society channel, so the proposal's governance post is unread too.
     const inbox = z.object({ messages: z.array(z.object({ body: z.string() })) });
     expect(
       inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     // A plain read does not advance the cursor; an explicit advance does.
     expect(
       inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     await app.request("/api/inbox?advance=true", { headers });
     expect(
       inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
     ).toHaveLength(0);
+  });
+
+  it("retires members, edits charters, opens channels, and lists signals", async () => {
+    const app = createApp({ board, version: "t" });
+    const charter = await app.request("/api/roles/engineer", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ ...(await board.readRole("engineer")), maxReplicas: 2 }),
+    });
+    expect(charter.status).toBe(200);
+    expect(z.object({ maxReplicas: z.number() }).parse(await charter.json()).maxReplicas).toBe(2);
+
+    const channel = await app.request("/api/channels", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ project: "demo", name: "design", purpose: "Design talk" }),
+    });
+    expect(await channel.json()).toEqual({ channel: "demo/design" });
+    expect((await board.readProject("demo")).channels).toContain("design");
+
+    const engToken = (
+      await board.addAgent(OWNER, { name: "eng-2", role: "engineer", cli: "claude" })
+    ).token;
+    const forbidden = await app.request("/api/agents/eng-1/retire", {
+      method: "POST",
+      headers: { authorization: `Bearer ${engToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ reason: "no" }),
+    });
+    expect(forbidden.status).toBe(403);
+    const retired = await app.request("/api/agents/eng-1/retire", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ reason: "idle" }),
+    });
+    expect(retired.status).toBe(200);
+    const payload: unknown = await retired.json();
+    const agent = z.object({ status: z.string(), retiredReason: z.string() }).parse(payload);
+    expect(agent).toEqual({ status: "retired", retiredReason: "idle" });
+    expect(JSON.stringify(payload)).not.toContain("tokenHash");
+
+    await board.publishSignal({
+      kind: "idle_member",
+      key: "idle_member:eng-1",
+      summary: "eng-1 has not completed a turn for 3d",
+      value: 3,
+    });
+    const signals = z
+      .array(z.object({ signal: z.object({ kind: z.string() }) }))
+      .parse(await (await app.request("/api/signals?limit=5", { headers })).json());
+    expect(signals.map((record) => record.signal.kind)).toEqual(["idle_member"]);
   });
 
   it("replays and streams live turn events", async () => {

@@ -45,6 +45,15 @@ export function describeToolInput(input: unknown): string {
   return "";
 }
 
+/** A readable rendering of an unknown value, for charter fields and provisioning summaries. */
+export function plainValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(plainValue).join(", ");
+  return JSON.stringify(value) ?? "";
+}
+
 /** A message for any thrown value, without falling back to "[object Object]". */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

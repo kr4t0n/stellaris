@@ -135,6 +135,9 @@ export class LocalRunner {
       toolCalls: 0,
     };
 
+    if (agent.status === "retired") {
+      return this.fail(base, `${agent.name} is retired`);
+    }
     if (agent.cli === null) {
       return this.fail(base, `${agent.name} has no CLI binding`);
     }

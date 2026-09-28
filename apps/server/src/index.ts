@@ -5,7 +5,7 @@ import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { Board } from "@stellaris/board-core";
 import { LocalRunner } from "@stellaris/runner-core";
-import { Scheduler } from "@stellaris/scheduler";
+import { parseTimings, Scheduler } from "@stellaris/scheduler";
 import { loadServerConfig } from "@stellaris/shared";
 import pino from "pino";
 import { createApp } from "./app.js";
@@ -44,7 +44,9 @@ const runner = new LocalRunner({
 });
 
 const concurrency = Number(process.env["STELLARIS_CONCURRENCY"] ?? "2");
-const scheduler = new Scheduler({ board, runner, log, concurrency });
+// Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
+const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
+const scheduler = new Scheduler({ board, runner, log, concurrency, timings });
 
 // The built UI ships next to the server in the monorepo; serve it when it exists.
 const uiDist =
@@ -61,12 +63,21 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   );
 });
 
+// The embedded runner is this machine. Its record is what capability signals are computed against.
+const capabilities = (process.env["STELLARIS_CAPABILITIES"] ?? "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter((item) => item.length > 0);
+await board.markRunner("local", { status: "connected", clis: ["claude", "codex"], capabilities });
 await scheduler.start();
-log.info({ concurrency }, "scheduler started");
+log.info({ concurrency, timings }, "scheduler started");
 
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns");
   await scheduler.stop();
+  await board.markRunner("local", { status: "disconnected" }).catch((error: unknown) => {
+    log.warn({ error: String(error) }, "could not record runner shutdown");
+  });
   server.close();
   process.exit(0);
 };

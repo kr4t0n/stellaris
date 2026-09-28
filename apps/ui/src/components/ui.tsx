@@ -1,5 +1,19 @@
-import type { ReactNode } from "react";
-import { errorMessage } from "../lib/format.js";
+import { Fragment, type ReactNode } from "react";
+import { errorMessage, plainValue } from "../lib/format.js";
+
+/** Key-value rows for a charter or a provisioning summary. */
+export function CharterRows({ charter }: { charter: Record<string, unknown> }) {
+  return (
+    <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+      {Object.entries(charter).map(([key, value]) => (
+        <Fragment key={key}>
+          <dt className="text-board-muted">{key}</dt>
+          <dd className="break-words">{plainValue(value)}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
 
 export function Panel({
   title,

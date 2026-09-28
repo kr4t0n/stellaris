@@ -29,6 +29,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (dispatch.trigger.taskId !== undefined) {
     lines.push(`Task in question: ${dispatch.trigger.taskId}`);
   }
+  if (dispatch.trigger.kind === "ops_event") {
+    lines.push(
+      "Operations signals arrived; the ops posts below carry them. Decide whether a proposal is warranted, and stay silent if not.",
+    );
+  }
 
   if (input.onboarding !== null) {
     lines.push("", "## First turn", "", renderOnboardingPreamble(input.onboarding));
@@ -77,7 +82,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   lines.push(
     "## What to do",
     "",
-    "Act on the inbox and your claims through the board tools. Post replies with post_message, claim work with claim_task, and submit with update_task. Silence is allowed when nothing needs a reply. End with the status object.",
+    "Act on the inbox and your claims through the board tools. Post replies with post_message, claim work with claim_task, submit with update_task, and ask for what the society lacks with propose. Silence is allowed when nothing needs a reply. End with the status object.",
   );
   return `${lines.join("\n")}\n`;
 }

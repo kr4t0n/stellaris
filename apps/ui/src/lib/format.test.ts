@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeToolInput, shortId, timeAgo } from "./format.js";
+import { describeToolInput, plainValue, shortId, timeAgo } from "./format.js";
 
 describe("format helpers", () => {
   it("renders relative times", () => {
@@ -16,5 +16,12 @@ describe("format helpers", () => {
     expect(describeToolInput({ task_id: "x", note: "n" })).toBe("x");
     expect(describeToolInput("plain")).toBe("plain");
     expect(describeToolInput(null)).toBe("");
+  });
+
+  it("renders charter values as readable text", () => {
+    expect(plainValue(["demo", "api"])).toBe("demo, api");
+    expect(plainValue(3)).toBe("3");
+    expect(plainValue(null)).toBe("");
+    expect(plainValue({ a: 1 })).toBe('{"a":1}');
   });
 });

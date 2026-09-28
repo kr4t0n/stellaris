@@ -41,7 +41,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - **Tests live beside the code** as `*.test.ts` and run with Vitest from the root. `board-core` and scheduler tests use a temporary data directory and an injected clock. `apps/server/src/integration.test.ts` runs the whole loop with a scripted backend standing in for the CLI.
 - **Exact dependency versions.** No caret ranges. CI installs with a frozen lockfile.
 - **Lint and format with oxlint and oxfmt.** This is a deliberate exception to the ESLint standard elsewhere; do not add ESLint or Prettier. Type-aware linting needs the build's declaration files, so build before lint. Keep lint warning-free; use type guards or Zod instead of assertions.
-- **Commits** follow Conventional Commits. Feature work happens on `feat/*` branches.
+- **Commits** follow Conventional Commits and land directly on `main` in a linear history. Development is single-threaded for now, so there are no feature branches and no merge commits; the earlier merge commits were rebased away.
 
 ## Gotchas
 

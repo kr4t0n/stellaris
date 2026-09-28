@@ -1,4 +1,4 @@
-export { Board } from "./board.js";
+export { Board, SYSTEM_ACTOR } from "./board.js";
 export type {
   Actor,
   AddAgentInput,

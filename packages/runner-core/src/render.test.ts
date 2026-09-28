@@ -1,21 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { renderClaudeMcpConfig, renderCodexMcpConfig, renderInstructions } from "./index.js";
 
+const places = { homeDir: "/data/agents/eng-1", boardDir: "/data/board" };
+
 describe("config-home rendering", () => {
   it("renders instructions from role and memory, with the onboarding preamble only when asked", () => {
     const base = renderInstructions({
       agentName: "eng-1",
       roleCharter: "# engineer\n\nBuilds things.",
       memoryCore: "",
+      ...places,
     });
     expect(base).toContain("## Role");
     expect(base).toContain("(empty)");
+    expect(base).toContain("/data/agents/eng-1");
+    expect(base).toContain("/data/board");
     expect(base).not.toContain("## First turn");
 
     const first = renderInstructions({
       agentName: "eng-1",
       roleCharter: "# engineer",
       memoryCore: "- The owner prefers small pull requests.",
+      ...places,
       onboarding: {
         agentName: "eng-1",
         roleSummary: "Builds things.",

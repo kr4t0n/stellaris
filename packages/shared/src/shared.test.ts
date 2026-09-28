@@ -6,8 +6,18 @@ import {
   loadServerConfig,
   parseChannelRef,
   SEED_ROLES,
+  turnStatusJsonSchema,
   VerbInputs,
 } from "./index.js";
+
+describe("turn status schema", () => {
+  it("is a draft-7 object schema without a dialect reference, as the CLI validator requires", () => {
+    const schema = turnStatusJsonSchema();
+    expect(schema["$schema"]).toBeUndefined();
+    expect(schema["type"]).toBe("object");
+    expect(schema["properties"]).toHaveProperty("summary");
+  });
+});
 
 describe("channel references", () => {
   it("parses society and project channels", () => {

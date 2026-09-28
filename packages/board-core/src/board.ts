@@ -41,6 +41,13 @@ import {
   type Ulid,
   type VerbInput,
   type VerbName,
+  SessionsFileSchema,
+  TurnRecordSchema,
+  WakeRequestSchema,
+  type BoardEvent as BoardLogEvent,
+  type SessionsFile,
+  type TurnRecord,
+  type WakeRequestInput,
 } from "@stellaris/shared";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
@@ -63,6 +70,9 @@ export interface Actor {
   readonly name: Name;
   readonly role: Name;
 }
+
+/** The board itself, for posts and events produced by infrastructure rather than a member. */
+export const SYSTEM_ACTOR: Actor = { name: "board", role: OWNER_ROLE };
 
 export interface BoardOptions {
   /** Lease duration for claims. Renewed by every turn that touches the task. */
@@ -163,6 +173,7 @@ export class Board {
   private readonly now: () => Date;
   private readonly roleCache = new Map<Name, RoleCharter>();
   private readonly tokenIndex = new Map<string, Actor>();
+  private readonly turnTokens = new Map<string, { actor: Actor; expiresAt: number }>();
 
   private constructor(dataDir: string, options: BoardOptions) {
     this.paths = new BoardPaths(dataDir);
@@ -200,7 +211,33 @@ export class Board {
 
   /** Maps a bearer token to an actor, or null when unknown. Constant work per call after load. */
   resolveToken(token: string): Actor | null {
-    return this.tokenIndex.get(hashToken(token)) ?? null;
+    const hash = hashToken(token);
+    const persistent = this.tokenIndex.get(hash);
+    if (persistent !== undefined) {
+      return persistent;
+    }
+    const temporary = this.turnTokens.get(hash);
+    if (temporary === undefined) {
+      return null;
+    }
+    if (temporary.expiresAt <= this.now().getTime()) {
+      this.turnTokens.delete(hash);
+      return null;
+    }
+    return temporary.actor;
+  }
+
+  /**
+   * A short-lived token for one turn, handed to the CLI by the runner. Only its hash is kept,
+   * in memory, until it expires, so no raw agent token ever needs to exist at rest.
+   */
+  issueTurnToken(agent: Name, role: Name, ttlMs: number): string {
+    const token = mintToken();
+    this.turnTokens.set(hashToken(token), {
+      actor: { name: agent, role },
+      expiresAt: this.now().getTime() + ttlMs,
+    });
+    return token;
   }
 
   ownerActor(): Actor {
@@ -954,6 +991,196 @@ export class Board {
     const args = VerbInputs.reject.parse(input);
     await this.authorize(actor, "reject");
     return this.decide(actor, args.proposal_id, "rejected", args.reason);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Runtime support for the scheduler and runners: dispatch, wakes, turns, sessions, state
+  // ---------------------------------------------------------------------------------------------
+
+  /** Dispatches any verb by name. Shared by the HTTP route and the MCP endpoint. */
+  async invoke(actor: Actor, verb: VerbName, input: unknown): Promise<unknown> {
+    switch (verb) {
+      case "post_message":
+        return this.postMessage(actor, VerbInputs.post_message.parse(input));
+      case "read_inbox":
+        return this.readInbox(actor, VerbInputs.read_inbox.parse(input));
+      case "search":
+        return this.search(actor, VerbInputs.search.parse(input));
+      case "open_thread":
+        return this.openThread(actor, VerbInputs.open_thread.parse(input));
+      case "close_thread":
+        return this.closeThread(actor, VerbInputs.close_thread.parse(input));
+      case "create_task":
+        return this.createTask(actor, VerbInputs.create_task.parse(input));
+      case "claim_task":
+        return this.claimTask(actor, VerbInputs.claim_task.parse(input));
+      case "release_task":
+        return this.releaseTask(actor, VerbInputs.release_task.parse(input));
+      case "update_task":
+        return this.updateTask(actor, VerbInputs.update_task.parse(input));
+      case "get_task":
+        return this.getTask(actor, VerbInputs.get_task.parse(input));
+      case "subscribe":
+        return this.subscribe(actor, VerbInputs.subscribe.parse(input));
+      case "unsubscribe":
+        return this.unsubscribe(actor, VerbInputs.unsubscribe.parse(input));
+      case "propose":
+        return this.propose(actor, VerbInputs.propose.parse(input));
+      case "approve":
+        return this.approve(actor, VerbInputs.approve.parse(input));
+      case "reject":
+        return this.reject(actor, VerbInputs.reject.parse(input));
+      default:
+        throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
+    }
+  }
+
+  /** The admin CLI's manual wake. It becomes a `wake.requested` event the scheduler consumes. */
+  async requestWake(actor: Actor, input: WakeRequestInput): Promise<BoardLogEvent> {
+    this.assertAdmin(actor);
+    const args = WakeRequestSchema.parse(input);
+    const agent = await this.readAgent(args.agent);
+    await this.readProject(args.project);
+    if (!agent.memberships.includes(args.project)) {
+      throw new BoardError("VALIDATION", `${args.agent} is not a member of ${args.project}`);
+    }
+    return this.mutex.run(() =>
+      this.events.append("wake.requested", actor.name, {
+        agent: args.agent,
+        project: args.project,
+        reason: args.reason,
+      }),
+    );
+  }
+
+  async projectMembers(project: Name): Promise<Agent[]> {
+    const agents = await this.listAgents();
+    return agents.filter(
+      (agent) => agent.status === "active" && agent.memberships.includes(project),
+    );
+  }
+
+  async membersWithRole(project: Name, role: Name): Promise<Agent[]> {
+    return (await this.projectMembers(project)).filter((agent) => agent.role === role);
+  }
+
+  /** Tasks an agent currently holds, across every project. */
+  async heldClaims(agent: Name): Promise<Task[]> {
+    const held: Task[] = [];
+    for (const project of await listDirs(this.paths.projects())) {
+      for (const task of await this.listTasks(project)) {
+        if (task.status === "claimed" && task.claimedBy === agent) {
+          held.push(task);
+        }
+      }
+    }
+    return held;
+  }
+
+  async openTasks(project: Name): Promise<Task[]> {
+    return (await this.listTasks(project)).filter((task) => task.status === "open");
+  }
+
+  async readAgentRoleBody(agent: Name): Promise<string> {
+    const file = this.paths.agentRole(agent);
+    return (await exists(file))
+      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
+      : "";
+  }
+
+  async readMemoryCore(agent: Name): Promise<string> {
+    const file = this.paths.agentMemoryCore(agent);
+    return (await exists(file))
+      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
+      : "";
+  }
+
+  async setInboxCursor(agent: Name, cursor: Ulid | null): Promise<void> {
+    await this.mutex.run(() => writeJson(this.paths.agentCursors(agent), { inbox: cursor }));
+  }
+
+  async readSessions(agent: Name, project: Name): Promise<SessionsFile> {
+    const file = path.join(this.paths.agentProject(agent, project), "sessions.json");
+    return (await exists(file)) ? readJson(file, SessionsFileSchema) : {};
+  }
+
+  async writeSession(agent: Name, project: Name, cli: CliKind, sessionId: string): Promise<void> {
+    await this.mutex.run(async () => {
+      const dir = this.paths.agentProject(agent, project);
+      await ensureDir(dir);
+      const file = path.join(dir, "sessions.json");
+      const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
+      await writeJson(file, { ...current, [cli]: sessionId });
+    });
+  }
+
+  async readLastTurn(agent: Name, project: Name): Promise<TurnRecord | null> {
+    const file = path.join(this.paths.agentProject(agent, project), "last-turn.json");
+    return (await exists(file)) ? readJson(file, TurnRecordSchema) : null;
+  }
+
+  /** Records a turn's start so a crash leaves evidence for the next turn. */
+  async beginTurn(record: TurnRecord): Promise<void> {
+    const parsed = TurnRecordSchema.parse(record);
+    await this.mutex.run(async () => {
+      await this.writeTurnRecord(parsed);
+      await this.events.append("turn.started", parsed.agent, {
+        project: parsed.project,
+        trigger: parsed.trigger.kind,
+        session: parsed.session,
+        runner: parsed.runner,
+      });
+    });
+  }
+
+  /** Records a turn's end. Timeouts and errors become `turn.failed`; everything else `turn.completed`. */
+  async finishTurn(record: TurnRecord): Promise<void> {
+    const parsed = TurnRecordSchema.parse(record);
+    const failed = parsed.exitReason === "error" || parsed.exitReason === "timeout";
+    await this.mutex.run(async () => {
+      await this.writeTurnRecord(parsed);
+      await this.events.append(failed ? "turn.failed" : "turn.completed", parsed.agent, {
+        project: parsed.project,
+        trigger: parsed.trigger.kind,
+        session: parsed.session,
+        exitReason: parsed.exitReason,
+        costUsd: parsed.costUsd,
+        toolCalls: parsed.toolCalls,
+        summary: parsed.status?.summary ?? null,
+        needsOwnerDecision: parsed.status?.needsOwnerDecision ?? false,
+        error: parsed.error,
+      });
+    });
+  }
+
+  async recordMerge(
+    actor: Actor,
+    input: { project: Name; taskId: Ulid; branch: string; ok: boolean; detail: string },
+  ): Promise<void> {
+    await this.mutex.run(async () => {
+      await this.events.append(input.ok ? "merge.completed" : "merge.failed", actor.name, {
+        project: input.project,
+        taskId: input.taskId,
+        branch: input.branch,
+        detail: input.detail,
+      });
+    });
+  }
+
+  /** Small named state files under data/state, for cursors the scheduler must keep across restarts. */
+  async readState<T>(name: string, schema: z.ZodType<T>, fallback: T): Promise<T> {
+    const file = path.join(this.paths.state(), `${name}.json`);
+    return (await exists(file)) ? readJson(file, schema) : fallback;
+  }
+
+  async writeState(name: string, value: unknown): Promise<void> {
+    await this.mutex.run(() => writeJson(path.join(this.paths.state(), `${name}.json`), value));
+  }
+
+  private async writeTurnRecord(record: TurnRecord): Promise<void> {
+    const dir = this.paths.agentProject(record.agent, record.project);
+    await ensureDir(dir);
+    await writeJson(path.join(dir, "last-turn.json"), record);
   }
 
   // ---------------------------------------------------------------------------------------------

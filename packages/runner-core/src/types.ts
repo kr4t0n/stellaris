@@ -1,0 +1,71 @@
+import type {
+  AgentEvent,
+  CliKind,
+  Name,
+  TurnExitReason,
+  TurnStatus,
+  Usage,
+} from "@stellaris/shared";
+
+export type SessionId = string;
+
+export interface AgentSpec {
+  readonly agent: Name;
+  readonly project: Name;
+  readonly cli: CliKind;
+  /** The agent-project worktree. */
+  readonly cwd: string;
+  /** The agent's home directory: memory, skills, notes, and the rendered CLI config directories. */
+  readonly configHome: string;
+  /** The board's read-only markdown projection on this runner. */
+  readonly boardDir: string;
+  readonly model?: string | undefined;
+}
+
+export interface TurnLimits {
+  readonly timeoutMs: number;
+  readonly maxTurns?: number | undefined;
+  readonly maxBudgetUsd?: number | undefined;
+}
+
+/** Everything a CLI needs for one turn, in CLI-agnostic terms. */
+export interface TurnRequest {
+  readonly spec: AgentSpec;
+  readonly session: SessionId;
+  /** True when the session id was just chosen and nothing exists to resume. */
+  readonly newSession: boolean;
+  readonly prompt: string;
+  /** The rendered role charter plus memory core, appended to the CLI's own system prompt. */
+  readonly instructions: string;
+  readonly mcp: { readonly url: string; readonly token: string };
+  readonly limits: TurnLimits;
+  /** JSON Schema for the structured status the turn must end with. */
+  readonly statusSchema: Record<string, unknown>;
+  /** Extra environment for the CLI process, for example git identity. */
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export interface TurnResult {
+  readonly events: readonly AgentEvent[];
+  readonly finalText: string;
+  readonly usage: Usage;
+  readonly costUsd: number;
+  readonly status: TurnStatus | null;
+  readonly exitReason: TurnExitReason;
+  readonly error?: string | undefined;
+}
+
+/** One interface for every CLI. Implemented per CLI inside a runner. */
+export interface AgentBackend {
+  readonly kind: CliKind;
+  newSession(spec: AgentSpec): Promise<SessionId>;
+  runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult>;
+  interrupt?(session: SessionId): Promise<void>;
+}
+
+export const ZERO_USAGE: Usage = Object.freeze({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+});

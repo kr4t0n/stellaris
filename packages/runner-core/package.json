@@ -2,7 +2,7 @@
   "name": "@stellaris/runner-core",
   "version": "0.0.0",
   "private": true,
-  "description": "Runner internals: adapter registry, config-home rendering, worktrees, projection mirror",
+  "description": "Runner internals: adapter interface, config-home rendering, git worktrees, prompt building, the local runner",
   "files": [
     "dist"
   ],
@@ -14,6 +14,7 @@
     }
   },
   "dependencies": {
+    "@stellaris/board-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
     "execa": "10.0.1"
   }

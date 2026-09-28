@@ -311,9 +311,19 @@ program
   .command("run <agent>")
   .description("Enqueue a manual wake for an agent on a project")
   .requiredOption("--project <slug>", "project to act on")
-  .action(() => {
-    console.error("turn run: the scheduler dispatch arrives in Phase 1. See PLAN.md section 5.6.");
-    process.exitCode = 2;
+  .option("--reason <text>", "why", "manual wake from the admin CLI")
+  .action(async (agentName: string, opts: { project: string; reason: string }) => {
+    const board = await open();
+    const event = await board.requestWake(board.ownerActor(), {
+      agent: agentName,
+      project: opts.project,
+      reason: opts.reason,
+    });
+    print(
+      event,
+      () =>
+        `Wake requested for ${agentName} on ${opts.project} (event ${event.id}). A running board server dispatches it.`,
+    );
   });
 
 try {

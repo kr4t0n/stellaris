@@ -18,6 +18,12 @@ export const BOARD_EVENT_TYPES = [
   "proposal.created",
   "proposal.decided",
   "paused.changed",
+  "wake.requested",
+  "turn.started",
+  "turn.completed",
+  "turn.failed",
+  "merge.completed",
+  "merge.failed",
 ] as const;
 export const BoardEventTypeSchema = z.enum(BOARD_EVENT_TYPES);
 export type BoardEventType = z.infer<typeof BoardEventTypeSchema>;

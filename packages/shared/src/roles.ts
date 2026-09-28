@@ -78,7 +78,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
   {
     name: "reviewer",
     purpose:
-      "Gates merges to main. Adversarial by charter: the definition of done is passing tests and a reviewed diff, never sentiment.",
+      "Gates what lands on main. Adversarial by charter: the definition of done is passing tests and a reviewed diff, never sentiment. Approve by moving the task to done; the board then lands the claimer's branch on main. Never merge or fast-forward main yourself.",
     verbs: [...MEMBER_VERBS],
     repoPermission: "merge",
     wakeTriggers: ["mention", "claim_event", "heartbeat"],

@@ -30,9 +30,10 @@ const runner = new LocalRunner({
     codex: new CodexExecBackend({
       stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
       recordDir: process.env["STELLARIS_RECORD_DIR"],
-      // Codex's Linux sandbox needs user namespaces; containers without them must run unsandboxed.
+      // Full access by default: no sandbox, no approvals. A runner that wants Codex's own
+      // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
       sandbox: CodexSandboxSchema.parse(
-        process.env["STELLARIS_CODEX_SANDBOX"] ?? "workspace-write",
+        process.env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access",
       ),
     }),
   },

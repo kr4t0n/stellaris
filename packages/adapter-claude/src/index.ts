@@ -31,8 +31,13 @@ export type QueryFn = (params: { prompt: string; options?: Options }) => AsyncIt
 export interface ClaudeBackendOptions {
   readonly model?: string | undefined;
   readonly effort?: Options["effort"] | undefined;
+  /**
+   * Defaults to `bypassPermissions`: nobody is at the terminal, so nothing may ask. This is the
+   * society's decision in PLAN.md section 5.2; a runner that must restrict its agents may set
+   * another mode here, and with it an allowlist, as its own posture.
+   */
   readonly permissionMode?: PermissionMode | undefined;
-  /** Permission rules auto-allowed without a prompt. Board tools and git are the minimum. */
+  /** Permission rules auto-allowed without a prompt. Only meaningful with a mode that asks. */
   readonly allowedTools?: readonly string[] | undefined;
   readonly disallowedTools?: readonly string[] | undefined;
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;
@@ -44,32 +49,6 @@ export interface ClaudeBackendOptions {
   readonly queryFn?: QueryFn | undefined;
   readonly sessionExists?: ((session: SessionId, cwd: string) => Promise<boolean>) | undefined;
 }
-
-export const DEFAULT_ALLOWED_TOOLS: readonly string[] = [
-  "mcp__board",
-  "Read",
-  "Edit",
-  "Write",
-  "MultiEdit",
-  "Glob",
-  "Grep",
-  "Bash(git:*)",
-  "Bash(ls:*)",
-  "Bash(cat:*)",
-  "Bash(cd:*)",
-  "Bash(find:*)",
-  "Bash(head:*)",
-  "Bash(tail:*)",
-  "Bash(grep:*)",
-  "Bash(wc:*)",
-  "Bash(echo:*)",
-  "Bash(pwd)",
-  "Bash(diff:*)",
-  "Bash(mkdir:*)",
-  "Bash(pnpm:*)",
-  "Bash(npm:*)",
-  "Bash(node:*)",
-];
 
 interface Block {
   type?: unknown;
@@ -253,6 +232,7 @@ export class ClaudeAgentBackend implements AgentBackend {
 
   private buildOptions(request: TurnRequest, abort: AbortController, resumable: boolean): Options {
     const model = request.spec.model ?? this.options.model;
+    const permissionMode = this.options.permissionMode ?? "bypassPermissions";
     return {
       cwd: request.spec.cwd,
       // The home holds memory and skills the agent authors; the board projection is what it searches.
@@ -274,9 +254,13 @@ export class ClaudeAgentBackend implements AgentBackend {
         },
       },
       strictMcpConfig: true,
-      permissionMode: this.options.permissionMode ?? "acceptEdits",
+      // Every permission is granted; the SDK accepts bypass mode only with the explicit flag.
+      permissionMode,
+      ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       permissionPrompts: "none",
-      allowedTools: [...(this.options.allowedTools ?? DEFAULT_ALLOWED_TOOLS)],
+      ...(this.options.allowedTools === undefined
+        ? {}
+        : { allowedTools: [...this.options.allowedTools] }),
       ...(this.options.disallowedTools === undefined
         ? {}
         : { disallowedTools: [...this.options.disallowedTools] }),

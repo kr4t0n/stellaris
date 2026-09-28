@@ -94,6 +94,10 @@ describe("ClaudeAgentBackend replay", () => {
     expect(options?.sessionId).toBeUndefined();
     expect(options?.additionalDirectories).toEqual(["/tmp/home", "/tmp/board"]);
     expect(options?.permissionPrompts).toBe("none");
+    // Full autonomy: bypass mode with the SDK's explicit consent flag, and no allowlist.
+    expect(options?.permissionMode).toBe("bypassPermissions");
+    expect(options?.allowDangerouslySkipPermissions).toBe(true);
+    expect(options?.allowedTools).toBeUndefined();
   });
 
   it("creates the session under the recorded id when it does not exist yet", async () => {

@@ -14,7 +14,8 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 - pnpm 12, pinned in `package.json` under `packageManager`. If `corepack enable` cannot write to the system bin directory, run `corepack enable --install-directory ~/.local/bin` and put that directory on your PATH. Root scripts such as `check` call `pnpm` by name, so it must be resolvable.
 - Git, on any machine that runs turns.
 - A Claude Code login on the machine that runs turns. The Agent SDK bundles its own CLI binary and uses the machine's existing credentials or `ANTHROPIC_API_KEY`. Real turns cost real money; observed turns ran between a tenth and a third of a dollar each.
-- The `codex` CLI, logged in, on the machine that runs Codex agents. Codex uses the machine's own configuration and model choice. Its Linux sandbox needs user namespaces; on containers without them set `STELLARIS_CODEX_SANDBOX=danger-full-access`, which runs Codex agents unsandboxed.
+- The `codex` CLI, logged in, on the machine that runs Codex agents. Codex uses the machine's own configuration and model choice.
+- A machine you trust the society with. Agents run with every permission granted and no sandbox on both CLIs, because nobody is at the terminal to approve anything; an agent can do whatever the user running the server can do. A machine that must not be trusted that far belongs to a different society.
 - For later phases: the `gh` CLI for pull-request integration.
 
 ## Setup
@@ -104,20 +105,20 @@ During development, `pnpm --filter @stellaris/ui dev` serves the UI from Vite wi
 
 ## Environment variables
 
-| Variable                              | Default           | Used by                                                                                |
-| ------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| `STELLARIS_DATA_DIR`                  | `./data`          | server, CLI                                                                            |
-| `STELLARIS_HOST`                      | `127.0.0.1`       | server                                                                                 |
-| `STELLARIS_PORT`                      | `4700`            | server                                                                                 |
-| `STELLARIS_LOG_LEVEL`                 | `info`            | server; `debug` also logs agent tool calls and the CLI's stderr                        |
-| `STELLARIS_CONCURRENCY`               | `2`               | server; simultaneous turns on this machine                                             |
-| `STELLARIS_TIMINGS`                   | `{}`              | server; JSON overriding scheduler timings, for example `{"opsIntervalMs":60000}`       |
-| `STELLARIS_CAPABILITIES`              | none              | server; comma-separated capabilities the local runner offers, matched against tasks    |
-| `STELLARIS_CODEX_SANDBOX`             | `workspace-write` | server; `read-only`, `workspace-write`, or `danger-full-access` for Codex turns        |
-| `STELLARIS_RECORD_DIR`                | none              | server; when set, every turn's raw CLI stream is appended there as JSONL, for fixtures |
-| `STELLARIS_UI_DIR`                    | `apps/ui/dist`    | server; the built UI to serve at `/`; skipped when the directory has no index.html     |
-| `STELLARIS_AGENT_TOKEN`               | none              | set per turn in the agent CLI's environment by the runner                              |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | none              | the agent CLIs; leave empty to use their own login state                               |
+| Variable                              | Default              | Used by                                                                                                                                                |
+| ------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `STELLARIS_DATA_DIR`                  | `./data`             | server, CLI                                                                                                                                            |
+| `STELLARIS_HOST`                      | `127.0.0.1`          | server                                                                                                                                                 |
+| `STELLARIS_PORT`                      | `4700`               | server                                                                                                                                                 |
+| `STELLARIS_LOG_LEVEL`                 | `info`               | server; `debug` also logs agent tool calls and the CLI's stderr                                                                                        |
+| `STELLARIS_CONCURRENCY`               | `2`                  | server; simultaneous turns on this machine                                                                                                             |
+| `STELLARIS_TIMINGS`                   | `{}`                 | server; JSON overriding scheduler timings, for example `{"opsIntervalMs":60000}`                                                                       |
+| `STELLARIS_CAPABILITIES`              | none                 | server; comma-separated capabilities the local runner offers, matched against tasks                                                                    |
+| `STELLARIS_CODEX_SANDBOX`             | `danger-full-access` | server; the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces |
+| `STELLARIS_RECORD_DIR`                | none                 | server; when set, every turn's raw CLI stream is appended there as JSONL, for fixtures                                                                 |
+| `STELLARIS_UI_DIR`                    | `apps/ui/dist`       | server; the built UI to serve at `/`; skipped when the directory has no index.html                                                                     |
+| `STELLARIS_AGENT_TOKEN`               | none                 | set per turn in the agent CLI's environment by the runner                                                                                              |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | none                 | the agent CLIs; leave empty to use their own login state                                                                                               |
 
 Tokens are minted once and stored only as hashes. Agents receive short-lived turn tokens that live only in memory. Never commit a real one.
 

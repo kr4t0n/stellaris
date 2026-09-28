@@ -89,6 +89,9 @@ describe("CodexExecBackend", () => {
     const run = runs[0];
     if (run === undefined) throw new Error("no run");
     expect(run.args.slice(0, 2)).toEqual(["exec", "--json"]);
+    // Full autonomy by default: no sandbox, no approvals.
+    expect(run.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(run.args).not.toContain("--sandbox");
     expect(run.args).toContain("--output-schema");
     expect(run.args).toContain(`mcp_servers.board.url="http://127.0.0.1:4700/mcp"`);
     expect(run.args).toContain('mcp_servers.board.default_tools_approval_mode="approve"');
@@ -134,8 +137,20 @@ describe("CodexExecBackend", () => {
     const resumeAt = args.indexOf("resume");
     expect(resumeAt).toBeGreaterThan(0);
     expect(args[resumeAt + 1]).toBe("01a0e800-6f38-7b22-9e19-5a945e0af2a6");
-    expect(args.indexOf("--sandbox")).toBeLessThan(resumeAt);
+    expect(args.indexOf("--dangerously-bypass-approvals-and-sandbox")).toBeLessThan(resumeAt);
     expect(args.indexOf("-m")).toBeLessThan(resumeAt);
+  });
+
+  it("keeps Codex's own sandbox when a runner asks for one", async () => {
+    const stream = await readFile(path.join(fixtures, "exec-structured-ok.jsonl"), "utf8");
+    const { spawn, runs } = replay(stream);
+    await new CodexExecBackend({ spawn, sandbox: "workspace-write" }).runTurn(request());
+    const args = runs[0]?.args ?? [];
+    expect(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2)).toEqual([
+      "--sandbox",
+      "workspace-write",
+    ]);
+    expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 
   it("starts a fresh thread when the recorded session no longer exists", async () => {

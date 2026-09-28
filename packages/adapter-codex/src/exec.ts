@@ -40,6 +40,10 @@ export type SpawnCodex = (
 export interface CodexExecOptions {
   readonly codexPath?: string | undefined;
   readonly model?: string | undefined;
+  /**
+   * Defaults to `danger-full-access`: no sandbox and no approvals, the society's decision in
+   * PLAN.md section 5.2. The other modes keep Codex's own sandbox for a runner that wants one.
+   */
   readonly sandbox?: CodexSandbox | undefined;
   /** Extra `-c key=value` overrides appended to every invocation. */
   readonly extraConfig?: readonly string[] | undefined;
@@ -259,11 +263,15 @@ export class CodexExecBackend implements AgentBackend {
 
   private buildArgs(request: TurnRequest, resume: boolean, schemaFile: string): string[] {
     const model = request.spec.model ?? this.options.model;
+    const sandbox = this.options.sandbox ?? "danger-full-access";
     const args = [
       "exec",
       "--json",
-      "--sandbox",
-      this.options.sandbox ?? "workspace-write",
+      // Full access skips every confirmation and runs commands unsandboxed. The other modes
+      // keep Codex's sandbox, which on Linux needs user namespaces.
+      ...(sandbox === "danger-full-access"
+        ? ["--dangerously-bypass-approvals-and-sandbox"]
+        : ["--sandbox", sandbox]),
       "-C",
       request.spec.cwd,
       "--add-dir",

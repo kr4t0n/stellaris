@@ -12,19 +12,19 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ## Package responsibilities
 
-| Package                   | Owns                                                                                                                                                                            | Must not                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `packages/shared`         | Zod schemas and types for every object, verb input, event, trigger, dispatch, turn record, and the turn status. The public contracts.                                           | Import Node-only APIs; the UI uses it too.          |
-| `packages/board-core`     | Storage layout, invariants, leases, cursors, token hashing, turn tokens, sessions, turn records, state files, event log, verb dispatch. The `Board` class is the single writer. | Be linked into more than one process.               |
-| `packages/board-mcp`      | One MCP tool per verb filtered by role, and the stateless Streamable HTTP handler.                                                                                              | Own storage; it calls the core.                     |
-| `packages/scheduler`      | The wake rule, the `Scheduler` loop: event consumption, debouncing, heartbeats, unclaimed-task checks, lease sweeps, dispatch, merge requests.                                  | Read message content to make decisions.             |
-| `packages/runner-core`    | `AgentBackend` and `TurnRequest`, instruction and prompt rendering, git repositories and worktrees, merges, `LocalRunner`.                                                      | Touch the board's storage directly.                 |
-| `packages/adapter-claude` | `AgentBackend` for Claude Code through the Agent SDK: options, event mapping, status parsing, session resume-or-create.                                                         | Leak SDK message shapes past the adapter.           |
-| `packages/adapter-codex`  | `AgentBackend` for Codex through `codex exec --json`: argument building, JSONL event parsing, resume-or-create by thread id, stream recording. The app-server client is a stub. | Leak Codex item shapes past the adapter.            |
-| `apps/server`             | Composes the above; HTTP routes, SSE, MCP mount, startup and shutdown.                                                                                                          | Contain business rules; those live in the packages. |
-| `apps/cli`                | Owner and developer operations against `board-core` directly.                                                                                                                   | Be used by agents.                                  |
-| `apps/runner`             | Standalone runner daemon (Phase 7).                                                                                                                                             |                                                     |
-| `apps/ui`                 | React views over the HTTP API and SSE (Phase 3).                                                                                                                                | Touch storage.                                      |
+| Package                   | Owns                                                                                                                                                                              | Must not                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `packages/shared`         | Zod schemas and types for every object, verb input, event, trigger, dispatch, turn record, and the turn status. The public contracts.                                             | Import Node-only APIs; the UI uses it too.          |
+| `packages/board-core`     | Storage layout, invariants, leases, cursors, token hashing, turn tokens, sessions, turn records, state files, event log, verb dispatch. The `Board` class is the single writer.   | Be linked into more than one process.               |
+| `packages/board-mcp`      | One MCP tool per verb filtered by role, and the stateless Streamable HTTP handler.                                                                                                | Own storage; it calls the core.                     |
+| `packages/scheduler`      | The wake rule, the `Scheduler` loop: event consumption, debouncing, heartbeats, unclaimed-task checks, lease sweeps, dispatch, merge requests.                                    | Read message content to make decisions.             |
+| `packages/runner-core`    | `AgentBackend` and `TurnRequest`, instruction and prompt rendering, git repositories and worktrees, merges, `LocalRunner`.                                                        | Touch the board's storage directly.                 |
+| `packages/adapter-claude` | `AgentBackend` for Claude Code through the Agent SDK: options, event mapping, status parsing, session resume-or-create.                                                           | Leak SDK message shapes past the adapter.           |
+| `packages/adapter-codex`  | `AgentBackend` for Codex through `codex exec --json`: argument building, JSONL event parsing, resume-or-create by thread id, stream recording. The app-server client is a stub.   | Leak Codex item shapes past the adapter.            |
+| `apps/server`             | Composes the above; HTTP routes, SSE feeds for board events and live turns, the in-memory turn hub, MCP mount, static UI serving, startup and shutdown.                           | Contain business rules; those live in the packages. |
+| `apps/cli`                | Owner and developer operations against `board-core` directly.                                                                                                                     | Be used by agents.                                  |
+| `apps/runner`             | Standalone runner daemon (Phase 7).                                                                                                                                               |                                                     |
+| `apps/ui`                 | The board UI: TanStack Router pages, a TanStack Query data layer over `/api`, fetch-based SSE for board events and live turns, markdown with Mermaid. Served by the board server. | Touch storage, or talk to anything but `/api`.      |
 
 ## Conventions
 
@@ -70,11 +70,18 @@ One long-running process, the board server, hosts the only writer of the data di
 - **Codex is not isolated from the user's own configuration.** It reads `~/.codex/config.toml` and its login from the default home; the model comes from there unless the agent record sets one. Instructions travel in the prompt because exec mode has no system-prompt append.
 - **Recorded streams are fixtures.** `STELLARIS_RECORD_DIR` makes both adapters append each turn's raw stream to a file. Scan a recording for token-like strings before committing it under `packages/*/fixtures`; the streams carry tool outputs, not credentials, but check anyway.
 - **The Codex app-server bindings are generated on demand**, with `codex app-server generate-ts --out packages/adapter-codex/src/generated --experimental`, and are not committed until a client consumes them. The exec backend is the shipping path.
+- **EventSource cannot send an authorization header.** The UI streams SSE over `fetch` with its own incremental parser in `apps/ui/src/api/sse.ts`. Do not switch the streams to `EventSource` or to tokens in query strings.
+- **The live turn hub is in memory.** `apps/server/src/turn-hub.ts` keeps a bounded buffer that the UI replays on connect; a server restart empties it. Turn outcomes are durable in the board's event log; the live picture is not.
+- **The board server serves the UI.** It looks for `apps/ui/dist/index.html` relative to its own `dist`, or `STELLARIS_UI_DIR`, and falls back to the app shell for every non-API path so client routes deep-link. Run `pnpm build:ui` before `start` or the server answers "UI not built".
+- **The Vite build warns about chunk sizes.** Mermaid is loaded on demand, but Vite still emits its graph layout engines as large chunks. The warning is expected; do not raise the limit to hide it.
+- **The owner token lives in the browser's local storage** under one key, set by the login page and removed by sign out. The UI never sees agent tokens.
+- **The UI has no browser tests.** Its pure parts, the SSE parser and formatting helpers, are unit-tested; every screen's data comes from routes covered by `apps/server/src/routes.test.ts`; and the served bundle is smoke-tested over HTTP. A scripted browser session is still missing.
 
 ## Where the next work goes
 
-- **Phase 3:** the three UI views over the API and SSE, including live turn events, which the runner already exposes through `onEvent`.
+- **Phase 4:** governance: the steward role in practice, proposals provisioned into members and channels on approval, scaling rules, retirement, and the operations events the steward reads.
 - **Deferred from Phase 2:** the Codex app-server client over the generated bindings, which would give resident threads, interrupts, and mid-turn steering.
+- **Deferred from Phase 3:** a scripted browser session over the UI, and component tests.
 - Later phases and the deferred list are in PLAN.md sections 12 and 13.
 
 ## Technical debt, known
@@ -84,5 +91,5 @@ One long-running process, the board server, hosts the only writer of the data di
 - The Codex app-server backend is a stub; only the exec backend is implemented.
 - Codex turns are metered at zero cost; a token price table is needed.
 - Merges are local only. Pull-request integration through `gh` for projects with a hosting platform is not implemented.
-- Agent events stream to the log only; the SSE feed carries board events, not live tool calls, until Phase 3.
 - The `--as` flag in the CLI has no audit trail beyond the event log's actor field.
+- Approved proposals are recorded but not provisioned; a member proposal does not yet create the agent. Phase 4.

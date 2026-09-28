@@ -1177,6 +1177,24 @@ export class Board {
     await this.mutex.run(() => writeJson(path.join(this.paths.state(), `${name}.json`), value));
   }
 
+  /** The project's editable dashboard: frontmatter plus markdown body. Empty when none exists. */
+  async readDashboard(slug: Name): Promise<{ data: Record<string, unknown>; body: string }> {
+    await this.readProject(slug);
+    const file = this.paths.dashboard(slug);
+    if (!(await exists(file))) {
+      return { data: { project: slug }, body: "" };
+    }
+    return readMarkdown(file, z.record(z.string(), z.unknown()));
+  }
+
+  async listRunners(): Promise<Runner[]> {
+    const runners: Runner[] = [];
+    for (const file of await listFiles(this.paths.runners())) {
+      runners.push((await readMarkdown(path.join(this.paths.runners(), file), RunnerSchema)).data);
+    }
+    return runners;
+  }
+
   private async writeTurnRecord(record: TurnRecord): Promise<void> {
     const dir = this.paths.agentProject(record.agent, record.project);
     await ensureDir(dir);

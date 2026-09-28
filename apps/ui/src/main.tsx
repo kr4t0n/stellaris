@@ -1,7 +1,13 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.js";
+import { router } from "./router.js";
 import "./index.css";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 2_000, refetchOnWindowFocus: true, retry: 1 } },
+});
 
 const root = document.getElementById("root");
 if (root === null) {
@@ -10,6 +16,8 @@ if (root === null) {
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );

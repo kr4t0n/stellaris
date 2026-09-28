@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { serve } from "@hono/node-server";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
@@ -7,6 +9,7 @@ import { Scheduler } from "@stellaris/scheduler";
 import { loadServerConfig } from "@stellaris/shared";
 import pino from "pino";
 import { createApp } from "./app.js";
+import { TurnHub } from "./turn-hub.js";
 
 const VERSION = "0.0.0";
 
@@ -14,6 +17,7 @@ const config = loadServerConfig(process.env);
 const log = pino({ level: config.logLevel });
 const board = await Board.open(config.dataDir);
 const mcpUrl = `http://${config.host}:${config.port}/mcp`;
+const turns = new TurnHub();
 
 const runner = new LocalRunner({
   board,
@@ -33,26 +37,32 @@ const runner = new LocalRunner({
     }),
   },
   log,
-  onEvent: (agent, project, event) => log.debug({ agent, project, event }, "agent event"),
+  onEvent: (agent, project, event) => {
+    turns.push(agent, project, event);
+    log.debug({ agent, project, event }, "agent event");
+  },
 });
 
-const scheduler = new Scheduler({
-  board,
-  runner,
-  log,
-  concurrency: Number(process.env["STELLARIS_CONCURRENCY"] ?? "2"),
-});
+const concurrency = Number(process.env["STELLARIS_CONCURRENCY"] ?? "2");
+const scheduler = new Scheduler({ board, runner, log, concurrency });
 
-const app = createApp({ board, version: VERSION });
+// The built UI ships next to the server in the monorepo; serve it when it exists.
+const uiDist =
+  process.env["STELLARIS_UI_DIR"] ?? path.resolve(import.meta.dirname, "../../ui/dist");
+const staticDir = await access(path.join(uiDist, "index.html"))
+  .then(() => uiDist)
+  .catch(() => undefined);
+
+const app = createApp({ board, version: VERSION, turns, scheduler, staticDir });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
-    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl },
+    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl, ui: staticDir ?? null },
     "board server listening",
   );
 });
 
 await scheduler.start();
-log.info({ concurrency: Number(process.env["STELLARIS_CONCURRENCY"] ?? "2") }, "scheduler started");
+log.info({ concurrency }, "scheduler started");
 
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns");

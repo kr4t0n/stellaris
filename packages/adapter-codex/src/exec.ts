@@ -7,6 +7,9 @@ import {
   parseTurnStatus,
   ZERO_USAGE,
   type AgentBackend,
+  type AgentSpec,
+  type ResidentSession,
+  type ResidentStart,
   type SessionId,
   type TurnRequest,
   type TurnResult,
@@ -19,6 +22,7 @@ import {
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { z } from "zod";
+import { CodexAppServerSession, type SpawnAppServer } from "./app-server.js";
 import { parseExecLine } from "./events.js";
 
 export const CodexSandboxSchema = z.enum(["read-only", "workspace-write", "danger-full-access"]);
@@ -53,6 +57,8 @@ export interface CodexExecOptions {
   readonly recordDir?: string | undefined;
   readonly runnerName?: string | undefined;
   readonly spawn?: SpawnCodex | undefined;
+  /** Spawns `codex app-server` for resident sessions; injectable for tests. */
+  readonly spawnAppServer?: SpawnAppServer | undefined;
 }
 
 const SESSION_NOT_FOUND =
@@ -114,6 +120,28 @@ export class CodexExecBackend implements AgentBackend {
   /** Codex picks thread ids itself; the placeholder is replaced by the id the first turn reports. */
   newSession(): Promise<SessionId> {
     return Promise.resolve(`${PENDING_SESSION_PREFIX}${randomUUID()}`);
+  }
+
+  /** A warm thread over `codex app-server`, for roles the runner keeps resident. */
+  async startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
+    return CodexAppServerSession.start(
+      {
+        ...(this.options.spawnAppServer === undefined
+          ? {}
+          : { spawn: this.options.spawnAppServer }),
+        ...(this.options.codexPath === undefined ? {} : { codexPath: this.options.codexPath }),
+        ...(this.options.model === undefined ? {} : { model: this.options.model }),
+        sandbox: this.options.sandbox ?? "danger-full-access",
+        ...(this.options.extraConfig === undefined
+          ? {}
+          : { extraConfig: this.options.extraConfig }),
+        ...(this.options.env === undefined ? {} : { env: this.options.env }),
+        ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),
+        ...(this.options.runnerName === undefined ? {} : { runnerName: this.options.runnerName }),
+      },
+      spec,
+      start,
+    );
   }
 
   async runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {

@@ -12,10 +12,12 @@ import { z, ZodError } from "zod";
 import { spaHandler } from "./static.js";
 import type { LiveTurnEvent, TurnHub } from "./turn-hub.js";
 
-/** What the API shows of the scheduler. The Scheduler class satisfies it structurally. */
+/** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
 export interface SchedulerView {
   readonly pendingPairs: string[];
   readonly runningPairs: string[];
+  /** Agent-scope pairs with a warm session on the embedded runner. */
+  readonly residentPairs?: string[] | undefined;
 }
 
 export interface AppDependencies {
@@ -99,6 +101,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/agents", async (c) =>
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
+  api.get("/members", async (c) => c.json(await board.listMembers()));
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
@@ -174,6 +177,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       paused: await board.isPaused(),
       running: scheduler?.runningPairs ?? [],
       pending: scheduler?.pendingPairs ?? [],
+      resident: scheduler?.residentPairs ?? [],
     }),
   );
   api.post("/pause", async (c) => {

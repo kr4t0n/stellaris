@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { SYSTEM_ACTOR, type Actor, type Board } from "@stellaris/board-core";
 import {
   OWNER_NAME,
+  SOCIETY_SCOPE,
   turnStatusJsonSchema,
   type AgentEvent,
   type CliKind,
@@ -13,14 +14,20 @@ import {
   type Ulid,
 } from "@stellaris/shared";
 import { ExecaGit, type GitOps } from "./git.js";
-import { buildTurnPrompt } from "./prompt.js";
+import { buildTurnPrompt, type SocietyView } from "./prompt.js";
 import {
   renderClaudeMcpConfig,
   renderCodexMcpConfig,
   renderInstructions,
   type OnboardingContext,
 } from "./render.js";
-import { ZERO_USAGE, type AgentBackend, type TurnResult } from "./types.js";
+import {
+  ZERO_USAGE,
+  type AgentBackend,
+  type AgentSpec,
+  type ResidentSession,
+  type TurnResult,
+} from "./types.js";
 
 export interface RunnerLog {
   info(context: object, message: string): void;
@@ -36,6 +43,8 @@ export interface LocalRunnerOptions {
   readonly runnerName?: Name | undefined;
   readonly turnTimeoutMs?: number | undefined;
   readonly maxTurns?: number | undefined;
+  /** How long a resident session stays warm after its last turn before the runner lets it go cold. */
+  readonly residentIdleMs?: number | undefined;
   readonly git?: GitOps | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: RunnerLog | undefined;
@@ -45,11 +54,20 @@ export interface LocalRunnerOptions {
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_MAX_TURNS = 60;
+const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
+const OWNER_POST_TRIGGER = "owner_post";
+
+interface Resident {
+  readonly session: ResidentSession;
+  readonly token: string;
+  timer: ReturnType<typeof setTimeout> | null;
+}
 
 /**
  * The embedded runner: ensures the worktree, renders the config home, builds the prompt,
  * runs the turn through the CLI's adapter, then records the outcome on the board.
- * Remote runners will do the same behind a WebSocket; the board never knows the difference.
+ * Resident roles keep a warm session between turns; the society scope runs a turn in the
+ * agent's home, outside any project. Remote runners will do the same behind a WebSocket.
  */
 export class LocalRunner {
   private readonly board: Board;
@@ -58,11 +76,13 @@ export class LocalRunner {
   private readonly runnerName: Name;
   private readonly turnTimeoutMs: number;
   private readonly maxTurns: number;
+  private readonly residentIdleMs: number;
   private readonly git: GitOps;
   private readonly now: () => Date;
   private readonly log: RunnerLog;
   private readonly onEvent: ((agent: Name, project: Name, event: AgentEvent) => void) | undefined;
   private readonly prepareLocks = new Map<Name, Promise<void>>();
+  private readonly residents = new Map<string, Resident>();
 
   constructor(options: LocalRunnerOptions) {
     this.board = options.board;
@@ -71,10 +91,16 @@ export class LocalRunner {
     this.runnerName = options.runnerName ?? "local";
     this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
     this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+    this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
     this.git = options.git ?? new ExecaGit();
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? SILENT;
     this.onEvent = options.onEvent;
+  }
+
+  /** Agent-scope pairs with a warm session right now, as `agent/scope`. */
+  get residentPairs(): string[] {
+    return [...this.residents.keys()].toSorted();
   }
 
   /** Clones the project once and adds the pair's worktree. Idempotent. */
@@ -145,16 +171,25 @@ export class LocalRunner {
     if (backend === undefined) {
       return this.fail(base, `no backend registered for ${agent.cli}`);
     }
+    const charter = await this.board.readRole(agent.role);
+    const societyScope = dispatch.project === SOCIETY_SCOPE;
+    if (societyScope && !charter.societyScope) {
+      return this.fail(base, `${agent.role} cannot take society-scope turns`);
+    }
 
-    const { worktree, repoDir } = await this.prepare(agent.name, dispatch.project);
+    // The society scope has no repository: the agent's home is its working directory.
+    const home = this.board.paths.agent(agent.name);
+    const { worktree, repoDir } = societyScope
+      ? { worktree: home, repoDir: home }
+      : await this.prepare(agent.name, dispatch.project);
     const sessions = await this.board.readSessions(agent.name, dispatch.project);
-    const spec = {
+    const spec: AgentSpec = {
       agent: agent.name,
       project: dispatch.project,
       cli: agent.cli,
       cwd: worktree,
       repoDir,
-      configHome: this.board.paths.agent(agent.name),
+      configHome: home,
       boardDir: this.board.paths.board,
       ...(agent.model === undefined ? {} : { model: agent.model }),
     };
@@ -171,7 +206,6 @@ export class LocalRunner {
     const held = await this.board.heldClaims(agent.name);
     const roleCharter = await this.board.readAgentRoleBody(agent.name);
     const memoryCore = await this.board.readMemoryCore(agent.name);
-    const charter = await this.board.readRole(agent.role);
     const onboarding: OnboardingContext | null =
       dispatch.onboarding || newSession
         ? {
@@ -190,51 +224,76 @@ export class LocalRunner {
       ...(onboarding === null ? {} : { onboarding }),
     });
     await this.renderConfigHome(agent.name, instructions);
+    // Roles that route for the owner get the roster and the project list in every digest.
+    const societyView: SocietyView | null = charter.wakeTriggers.includes(OWNER_POST_TRIGGER)
+      ? { projects: await this.board.listProjects(), members: await this.board.listMembers() }
+      : null;
     const prompt = buildTurnPrompt({
       dispatch,
       messages: inbox.messages,
       heldClaims: held,
       lastTurn,
       onboarding,
+      societyView,
     });
-    const token = this.board.issueTurnToken(
-      agent.name,
-      agent.role,
-      this.turnTimeoutMs + 5 * 60_000,
-    );
+    const env = {
+      GIT_AUTHOR_NAME: agent.name,
+      GIT_AUTHOR_EMAIL: `${agent.name}@stellaris.local`,
+      GIT_COMMITTER_NAME: agent.name,
+      GIT_COMMITTER_EMAIL: `${agent.name}@stellaris.local`,
+    };
+    const limits = { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns };
+    const statusSchema = turnStatusJsonSchema();
 
     const record: TurnRecord = { ...base, session };
     await this.board.beginTurn(record);
+    const resident = charter.resident && backend.startResident !== undefined;
     this.log.info(
-      { agent: agent.name, project: dispatch.project, session, newSession },
+      { agent: agent.name, project: dispatch.project, session, newSession, resident },
       "turn starting",
     );
 
-    let result: TurnResult;
     const events: AgentEvent[] = [];
+    const onEvent = (event: AgentEvent): void => {
+      events.push(event);
+      this.onEvent?.(agent.name, dispatch.project, event);
+    };
+    let result: TurnResult;
     try {
-      result = await backend.runTurn(
-        {
-          spec,
+      if (resident && backend.startResident !== undefined) {
+        result = await this.runResidentTurn(backend, spec, {
+          key: `${agent.name}/${dispatch.project}`,
+          agent: { name: agent.name, role: agent.role },
           session,
           newSession,
-          prompt,
           instructions,
-          mcp: { url: this.mcpUrl, token },
-          limits: { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns },
-          statusSchema: turnStatusJsonSchema(),
-          env: {
-            GIT_AUTHOR_NAME: agent.name,
-            GIT_AUTHOR_EMAIL: `${agent.name}@stellaris.local`,
-            GIT_COMMITTER_NAME: agent.name,
-            GIT_COMMITTER_EMAIL: `${agent.name}@stellaris.local`,
+          prompt,
+          limits,
+          statusSchema,
+          env,
+          onEvent,
+        });
+      } else {
+        const token = this.board.issueTurnToken(
+          agent.name,
+          agent.role,
+          this.turnTimeoutMs + 5 * 60_000,
+        );
+        result = await backend.runTurn(
+          {
+            spec,
+            session,
+            newSession,
+            prompt,
+            instructions,
+            mcp: { url: this.mcpUrl, token },
+            limits,
+            statusSchema,
+            env,
           },
-        },
-        (event) => {
-          events.push(event);
-          this.onEvent?.(agent.name, dispatch.project, event);
-        },
-      );
+          onEvent,
+        );
+      }
     } catch (error) {
       result = {
         events,
@@ -285,6 +344,90 @@ export class LocalRunner {
       "turn finished",
     );
     return finished;
+  }
+
+  /**
+   * One turn on a warm session: start it on first use, extend its token, run the prompt, then
+   * either keep it warm until the idle timeout or recycle it when its instructions went stale.
+   */
+  private async runResidentTurn(
+    backend: AgentBackend,
+    spec: AgentSpec,
+    input: {
+      key: string;
+      agent: { name: Name; role: Name };
+      session: string;
+      newSession: boolean;
+      instructions: string;
+      prompt: string;
+      limits: { timeoutMs: number; maxTurns: number };
+      statusSchema: Record<string, unknown>;
+      env: Readonly<Record<string, string>>;
+      onEvent: (event: AgentEvent) => void;
+    },
+  ): Promise<TurnResult> {
+    if (backend.startResident === undefined) {
+      throw new Error("backend cannot host resident sessions");
+    }
+    const ttl = this.residentIdleMs + this.turnTimeoutMs + 60_000;
+    let resident = this.residents.get(input.key);
+    if (resident === undefined) {
+      const token = this.board.issueTurnToken(input.agent.name, input.agent.role, ttl);
+      const session = await backend.startResident(spec, {
+        session: input.session,
+        newSession: input.newSession,
+        instructions: input.instructions,
+        mcp: { url: this.mcpUrl, token },
+        limits: input.limits,
+        statusSchema: input.statusSchema,
+        env: input.env,
+      });
+      resident = { session, token, timer: null };
+      this.residents.set(input.key, resident);
+      this.log.info({ pair: input.key, session: session.session }, "resident session started");
+    } else {
+      this.board.extendTurnToken(resident.token, ttl);
+    }
+    if (resident.timer !== null) {
+      clearTimeout(resident.timer);
+      resident.timer = null;
+    }
+    const result = await resident.session.runTurn(input.prompt, input.onEvent);
+    const stale = result.status?.memoryUpdated === true || result.exitReason !== "completed";
+    if (stale) {
+      // The instructions carry the memory core; a changed memory or a broken turn means a fresh start next time.
+      await this.closeResident(input.key, "instructions changed or turn failed");
+    } else {
+      const active = resident;
+      active.timer = setTimeout(() => {
+        void this.closeResident(input.key, "idle");
+      }, this.residentIdleMs);
+      active.timer.unref?.();
+    }
+    return { ...result, session: resident.session.session };
+  }
+
+  private async closeResident(key: string, reason: string): Promise<void> {
+    const resident = this.residents.get(key);
+    if (resident === undefined) {
+      return;
+    }
+    this.residents.delete(key);
+    if (resident.timer !== null) {
+      clearTimeout(resident.timer);
+    }
+    this.board.revokeTurnToken(resident.token);
+    try {
+      await resident.session.close();
+    } catch (error) {
+      this.log.warn({ pair: key, error: String(error) }, "resident session did not close cleanly");
+    }
+    this.log.info({ pair: key, reason }, "resident session closed");
+  }
+
+  /** Lets every warm session go: called on shutdown. */
+  async close(): Promise<void> {
+    await Promise.all([...this.residents.keys()].map((key) => this.closeResident(key, "shutdown")));
   }
 
   /** Lands the claimer's branch on the default branch after a reviewer marks a task done. */

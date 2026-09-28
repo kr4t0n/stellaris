@@ -4,6 +4,7 @@ import {
   OWNER_NAME,
   OWNER_ROLE,
   parseChannelRef,
+  SOCIETY_SCOPE,
   TriggerSchema,
   TurnDispatchSchema,
   type Agent,
@@ -150,6 +151,7 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
 const UNCLAIMED_TRIGGER = "unclaimed_task";
 const CLAIM_TRIGGER = "claim_event";
 const OPS_TRIGGER = "ops_event";
+const OWNER_POST_TRIGGER = "owner_post";
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -318,13 +320,14 @@ export class Scheduler {
           if (agent === null) {
             continue;
           }
-          const project = this.projectFor(agent, channel);
-          if (project === null) {
+          const charter = await this.board.readRole(agent.role);
+          const scope = this.scopeFor(agent, charter, channel);
+          if (scope === null) {
             continue;
           }
           this.enqueue(
             agent.name,
-            project,
+            scope,
             {
               kind: "mention",
               from: event.actor,
@@ -334,6 +337,9 @@ export class Scheduler {
             },
             now,
           );
+        }
+        if (event.actor === OWNER_NAME) {
+          await this.wakeFrontDesk(channel, messageId, now);
         }
         return;
       }
@@ -429,6 +435,24 @@ export class Scheduler {
         }
         return;
       }
+      case "agent.joined": {
+        const name = stringOf(payload["name"]);
+        const project = stringOf(payload["project"]);
+        const cli = payload["cli"];
+        if (name === null || project === null || cli === null || cli === undefined) {
+          return;
+        }
+        this.enqueue(name, project, { kind: "onboarding", reason: "joined the project" }, now);
+        return;
+      }
+      case "agent.left": {
+        const name = stringOf(payload["name"]);
+        const project = stringOf(payload["project"]);
+        if (name !== null && project !== null) {
+          this.pending.delete(`${name}/${project}`);
+        }
+        return;
+      }
       case "ops.signal": {
         const parsed = OpsSignalSchema.safeParse(payload);
         if (!parsed.success || !WAKING_SIGNALS.has(parsed.data.kind)) {
@@ -452,21 +476,54 @@ export class Scheduler {
       if (!charter.wakeTriggers.includes(OPS_TRIGGER)) {
         continue;
       }
-      const project =
-        signal.project !== undefined && agent.memberships.includes(signal.project)
-          ? signal.project
-          : agent.memberships[0];
-      if (project === undefined) {
+      const scope = this.scopeForProject(agent, charter, signal.project ?? null);
+      if (scope === null) {
         continue;
       }
       this.enqueue(
         agent.name,
-        project,
+        scope,
         {
           kind: "ops_event",
           from,
           reason: signal.summary,
           ...(signal.taskId === undefined ? {} : { taskId: signal.taskId }),
+        },
+        now,
+      );
+    }
+  }
+
+  /**
+   * The front desk: roles charted for `owner_post` wake on every post by the owner, mentioned or
+   * not, at owner priority and without debounce. The only trigger that fires without a mention.
+   */
+  private async wakeFrontDesk(
+    channel: string | null,
+    messageId: string | undefined,
+    now: number,
+  ): Promise<void> {
+    for (const agent of await this.board.listAgents()) {
+      if (agent.status !== "active" || agent.cli === null) {
+        continue;
+      }
+      const charter = await this.board.readRole(agent.role);
+      if (!charter.wakeTriggers.includes(OWNER_POST_TRIGGER)) {
+        continue;
+      }
+      const scope = this.scopeFor(agent, charter, channel);
+      if (scope === null) {
+        continue;
+      }
+      this.enqueue(
+        agent.name,
+        scope,
+        {
+          kind: "owner_post",
+          from: OWNER_NAME,
+          fromOwner: true,
+          reason: `the owner posted in ${channel ?? "a channel"}`,
+          ...(messageId === undefined ? {} : { messageId }),
         },
         now,
       );
@@ -502,15 +559,20 @@ export class Scheduler {
     }
   }
 
-  /** A turn needs a project for its working directory: the channel's project if the agent belongs, else its first membership. */
-  private projectFor(agent: Agent, channel: string | null): Name | null {
-    if (channel !== null) {
-      const parsed = parseChannelRef(channel);
-      if (parsed.project !== null && agent.memberships.includes(parsed.project)) {
-        return parsed.project;
-      }
+  /**
+   * A turn needs a scope: the channel's project if the agent belongs, else its first membership,
+   * else the society scope for roles allowed to work outside projects, else nothing.
+   */
+  private scopeFor(agent: Agent, charter: RoleCharter, channel: string | null): Name | null {
+    const project = channel === null ? null : parseChannelRef(channel).project;
+    return this.scopeForProject(agent, charter, project);
+  }
+
+  private scopeForProject(agent: Agent, charter: RoleCharter, project: Name | null): Name | null {
+    if (project !== null && agent.memberships.includes(project)) {
+      return project;
     }
-    return agent.memberships[0] ?? null;
+    return agent.memberships[0] ?? (charter.societyScope ? SOCIETY_SCOPE : null);
   }
 
   private enqueue(agent: Name, project: Name, input: TriggerInput, now: number): void {
@@ -557,6 +619,8 @@ export class Scheduler {
       case "claim_event":
       case "ops_event":
         return this.timings.debounceMs;
+      case "owner_post":
+        return 0;
       default:
         return 0;
     }
@@ -567,7 +631,14 @@ export class Scheduler {
       if (agent.status !== "active" || agent.cli === null) {
         continue;
       }
-      for (const project of agent.memberships) {
+      const charter = await this.board.readRole(agent.role);
+      const scopes =
+        agent.memberships.length > 0
+          ? agent.memberships
+          : charter.societyScope
+            ? [SOCIETY_SCOPE]
+            : [];
+      for (const project of scopes) {
         const key = `${agent.name}/${project}`;
         const last = this.state.lastHeartbeat[key];
         if (last === undefined) {
@@ -813,7 +884,7 @@ export class Scheduler {
         continue;
       }
       let last = Date.parse(agent.createdAt);
-      for (const project of agent.memberships) {
+      for (const project of [...agent.memberships, SOCIETY_SCOPE]) {
         const turn = await this.board.readLastTurn(agent.name, project);
         const ended = turn?.endedAt ?? turn?.startedAt;
         if (ended !== undefined) {

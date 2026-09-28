@@ -9,6 +9,7 @@ import {
   ChannelProposalSchema,
   DecisionSchema,
   MemberProposalSchema,
+  MemberSchema,
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
@@ -25,6 +26,7 @@ import {
   RunnerSchema,
   SEED_ROLES,
   SOCIETY_CHANNELS,
+  SOCIETY_SCOPE,
   SocietySchema,
   TaskFrontmatterSchema,
   VerbInputs,
@@ -33,6 +35,7 @@ import {
   type ChannelRef,
   type CliKind,
   type Decision,
+  type Member,
   type MemberProposal,
   type Message,
   type MessageFrontmatter,
@@ -182,6 +185,12 @@ const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
+/** Roles that may add a citizen to a project or remove one, beyond the citizen itself. */
+const REALLOCATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward", "concierge"];
+
+const PROFILE_TEMPLATE =
+  "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n";
+
 /** A plain rendering of a provisioning summary value for a post, without falling back to `[object Object]`. */
 function plain(value: unknown): string {
   if (typeof value === "string") return value;
@@ -306,8 +315,37 @@ export class Board {
     if (!(await exists(board.paths.societyFile()))) {
       throw new BoardError("NOT_FOUND", `no society found in ${dataDir}; run init first`);
     }
+    await board.mutex.run(() => board.ensureSeedRoles());
     await board.loadTokenIndex();
     return board;
+  }
+
+  /**
+   * A society created by an older build lacks the seed roles added since. Opening it writes the
+   * missing charters, untouched otherwise, so a new role such as the concierge is available at once.
+   */
+  private async ensureSeedRoles(): Promise<void> {
+    await ensureDir(this.paths.roles());
+    await ensureDir(this.paths.members());
+    for (const charter of SEED_ROLES) {
+      if (await exists(this.paths.role(charter.name))) {
+        continue;
+      }
+      await writeMarkdown(
+        this.paths.role(charter.name),
+        charter,
+        `# ${charter.name}\n\n${charter.purpose}\n`,
+      );
+      this.roleCache.set(charter.name, charter);
+      await this.events.append("role.added", OWNER_NAME, {
+        name: charter.name,
+        replaced: false,
+        verbs: charter.verbs,
+        maxReplicas: charter.maxReplicas,
+        backlogThreshold: charter.backlogThreshold,
+        seeded: true,
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -343,6 +381,20 @@ export class Board {
       expiresAt: this.now().getTime() + ttlMs,
     });
     return token;
+  }
+
+  /** Pushes a turn token's expiry out, for a resident session that keeps using it across turns. */
+  extendTurnToken(token: string, ttlMs: number): boolean {
+    const entry = this.turnTokens.get(hashToken(token));
+    if (entry === undefined) {
+      return false;
+    }
+    entry.expiresAt = this.now().getTime() + ttlMs;
+    return true;
+  }
+
+  revokeTurnToken(token: string): void {
+    this.turnTokens.delete(hashToken(token));
   }
 
   ownerActor(): Actor {
@@ -474,6 +526,23 @@ export class Board {
     return this.events.readSince(since, limit);
   }
 
+  /** The roster as projected: every citizen with identity, reach, availability, and profile. */
+  async listMembers(): Promise<Member[]> {
+    const members: Member[] = [];
+    for (const file of await listFiles(this.paths.members())) {
+      const doc = await readMarkdown(path.join(this.paths.members(), file), MemberSchema);
+      members.push({ ...doc.data, profile: doc.body });
+    }
+    return members;
+  }
+
+  async readProfile(name: Name): Promise<string> {
+    const file = this.paths.agentProfile(name);
+    return (await exists(file))
+      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
+      : "";
+  }
+
   async isPaused(): Promise<boolean> {
     const file = this.paths.pausedFile();
     if (!(await exists(file))) {
@@ -500,46 +569,52 @@ export class Board {
 
   async addProject(actor: Actor, input: AddProjectInput): Promise<Project> {
     this.assertAdmin(actor);
-    return this.mutex.run(async () => {
-      const file = this.paths.projectFile(input.slug);
-      if (await exists(file)) {
-        throw new BoardError("ALREADY_EXISTS", `project ${input.slug} already exists`);
-      }
-      const project: Project = ProjectSchema.parse({
-        slug: input.slug,
-        name: input.name ?? input.slug,
-        repo: input.repo ?? null,
-        defaultBranch: input.defaultBranch ?? "main",
-        channels: [...(input.channels ?? PROJECT_DEFAULT_CHANNELS)],
-        members: [],
-        approvers: [OWNER_NAME],
-        requiredCapabilities: [...(input.requiredCapabilities ?? [])],
-        createdAt: this.now().toISOString(),
-      });
-      await writeMarkdown(file, project, `# ${project.name}\n`);
-      for (const channel of project.channels) {
-        await ensureDir(this.paths.projectChannel(project.slug, channel));
-      }
-      await ensureDir(this.paths.tasks(project.slug));
-      await ensureDir(this.paths.threads(project.slug));
-      await ensureDir(this.paths.projectKnowledge(project.slug));
-      await writeMarkdown(
-        this.paths.dashboard(project.slug),
-        { project: project.slug, updatedAt: this.now().toISOString() },
-        `# ${project.name} dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n`,
-      );
-      // The owner follows every project's general channel by default.
-      await this.updateAgent(OWNER_NAME, (owner) => ({
-        ...owner,
-        memberships: [...new Set([...owner.memberships, project.slug])],
-        subscriptions: [...new Set([...owner.subscriptions, channelRef(project.slug, "general")])],
-      }));
-      await this.events.append("project.added", actor.name, {
-        slug: project.slug,
-        name: project.name,
-      });
-      return project;
+    return this.mutex.run(() => this.createProjectUnlocked(actor.name, input));
+  }
+
+  private async createProjectUnlocked(by: Name, input: AddProjectInput): Promise<Project> {
+    if (input.slug === SOCIETY_SCOPE) {
+      throw new BoardError("VALIDATION", `${SOCIETY_SCOPE} is the society scope, not a project`);
+    }
+    const file = this.paths.projectFile(input.slug);
+    if (await exists(file)) {
+      throw new BoardError("ALREADY_EXISTS", `project ${input.slug} already exists`);
+    }
+    const project: Project = ProjectSchema.parse({
+      slug: input.slug,
+      name: input.name ?? input.slug,
+      repo: input.repo ?? null,
+      defaultBranch: input.defaultBranch ?? "main",
+      channels: [...(input.channels ?? PROJECT_DEFAULT_CHANNELS)],
+      members: [],
+      approvers: [OWNER_NAME],
+      requiredCapabilities: [...(input.requiredCapabilities ?? [])],
+      createdAt: this.now().toISOString(),
     });
+    await writeMarkdown(file, project, `# ${project.name}\n`);
+    for (const channel of project.channels) {
+      await ensureDir(this.paths.projectChannel(project.slug, channel));
+    }
+    await ensureDir(this.paths.tasks(project.slug));
+    await ensureDir(this.paths.threads(project.slug));
+    await ensureDir(this.paths.projectKnowledge(project.slug));
+    await writeMarkdown(
+      this.paths.dashboard(project.slug),
+      { project: project.slug, updatedAt: this.now().toISOString() },
+      `# ${project.name} dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n`,
+    );
+    // The owner follows every project's general channel by default.
+    await this.updateAgent(OWNER_NAME, (owner) => ({
+      ...owner,
+      memberships: [...new Set([...owner.memberships, project.slug])],
+      subscriptions: [...new Set([...owner.subscriptions, channelRef(project.slug, "general")])],
+    }));
+    await this.refreshMember(OWNER_NAME);
+    await this.events.append("project.added", by, {
+      slug: project.slug,
+      name: project.name,
+    });
+    return project;
   }
 
   /** Adds a member. Returns the bearer token once; only its hash is stored. */
@@ -988,6 +1063,7 @@ export class Board {
         leaseExpiresAt: this.leaseEnd(now),
         updatedAt: now.toISOString(),
       });
+      await this.refreshMember(actor.name);
       await this.events.append("task.claimed", actor.name, {
         taskId: task.id,
         project: location.project,
@@ -1071,6 +1147,9 @@ export class Board {
       }
 
       const task = await this.writeTask(location.project, next);
+      if (task.status !== current.status && task.claimedBy !== undefined) {
+        await this.refreshMember(task.claimedBy);
+      }
       await this.events.append("task.updated", actor.name, {
         taskId: task.id,
         project: location.project,
@@ -1097,6 +1176,7 @@ export class Board {
         ...a,
         subscriptions: [...new Set([...a.subscriptions, args.channel])],
       }));
+      await this.refreshMember(actor.name);
       await this.events.append("subscription.changed", actor.name, {
         channel: args.channel,
         subscribed: true,
@@ -1113,6 +1193,7 @@ export class Board {
         ...a,
         subscriptions: a.subscriptions.filter((ref) => ref !== args.channel),
       }));
+      await this.refreshMember(actor.name);
       await this.events.append("subscription.changed", actor.name, {
         channel: args.channel,
         subscribed: false,
@@ -1172,6 +1253,110 @@ export class Board {
     return this.decide(actor, args.proposal_id, "rejected", args.reason);
   }
 
+  /** The front desk's verb: a project on the spot, with its default channels. */
+  async createProject(actor: Actor, input: VerbInput<"create_project">): Promise<Project> {
+    const args = VerbInputs.create_project.parse(input);
+    await this.authorize(actor, "create_project");
+    return this.mutex.run(() =>
+      this.createProjectUnlocked(actor.name, {
+        slug: args.slug,
+        ...(args.name === undefined ? {} : { name: args.name }),
+        repo: args.repo,
+        defaultBranch: args.default_branch,
+      }),
+    );
+  }
+
+  /**
+   * Membership as a verb: a citizen joins a project itself, or the front desk, the steward, or
+   * the owner adds one. The pair gets its project directory and, through the event, an onboarding turn.
+   */
+  async joinProject(actor: Actor, input: VerbInput<"join_project">): Promise<Agent> {
+    const args = VerbInputs.join_project.parse(input);
+    await this.authorize(actor, "join_project");
+    const target = args.agent ?? actor.name;
+    this.assertMayReallocate(actor, target);
+    return this.mutex.run(async () => {
+      await this.readProject(args.project);
+      const current = await this.readAgent(target);
+      if (current.status !== "active") {
+        throw new BoardError("INVALID_STATE", `${target} is retired`);
+      }
+      if (current.memberships.includes(args.project)) {
+        return current;
+      }
+      const agent = await this.updateAgent(target, (a) => ({
+        ...a,
+        memberships: [...a.memberships, args.project],
+        subscriptions: [...new Set([...a.subscriptions, channelRef(args.project, "general")])],
+      }));
+      await this.ensureAgentProject(target, args.project);
+      await this.updateProject(args.project, (project) => ({
+        ...project,
+        members: [...new Set([...project.members, target])],
+      }));
+      await this.refreshMember(target);
+      await this.events.append("agent.joined", actor.name, {
+        name: target,
+        project: args.project,
+        cli: agent.cli,
+      });
+      return agent;
+    });
+  }
+
+  async leaveProject(actor: Actor, input: VerbInput<"leave_project">): Promise<Agent> {
+    const args = VerbInputs.leave_project.parse(input);
+    await this.authorize(actor, "leave_project");
+    const target = args.agent ?? actor.name;
+    this.assertMayReallocate(actor, target);
+    return this.mutex.run(async () => {
+      await this.readProject(args.project);
+      const current = await this.readAgent(target);
+      if (!current.memberships.includes(args.project)) {
+        return current;
+      }
+      const released: Ulid[] = [];
+      for (const task of await this.heldClaims(target)) {
+        if (task.project !== args.project) {
+          continue;
+        }
+        await this.writeTask(task.project, {
+          ...task,
+          status: "open",
+          claimedBy: undefined,
+          leaseExpiresAt: undefined,
+          updatedAt: this.now().toISOString(),
+        });
+        await this.events.append("task.released", actor.name, {
+          taskId: task.id,
+          project: task.project,
+          releasedFrom: target,
+          reason: "left the project",
+        });
+        released.push(task.id);
+      }
+      const agent = await this.updateAgent(target, (a) => ({
+        ...a,
+        memberships: a.memberships.filter((slug) => slug !== args.project),
+        subscriptions: a.subscriptions.filter(
+          (ref) => parseChannelRef(ref).project !== args.project,
+        ),
+      }));
+      await this.updateProject(args.project, (project) => ({
+        ...project,
+        members: project.members.filter((member) => member !== target),
+      }));
+      await this.refreshMember(target);
+      await this.events.append("agent.left", actor.name, {
+        name: target,
+        project: args.project,
+        releasedTasks: released,
+      });
+      return agent;
+    });
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Runtime support for the scheduler and runners: dispatch, wakes, turns, sessions, state
   // ---------------------------------------------------------------------------------------------
@@ -1209,6 +1394,12 @@ export class Board {
         return this.approve(actor, VerbInputs.approve.parse(input));
       case "reject":
         return this.reject(actor, VerbInputs.reject.parse(input));
+      case "create_project":
+        return this.createProject(actor, VerbInputs.create_project.parse(input));
+      case "join_project":
+        return this.joinProject(actor, VerbInputs.join_project.parse(input));
+      case "leave_project":
+        return this.leaveProject(actor, VerbInputs.leave_project.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -1219,9 +1410,16 @@ export class Board {
     this.assertAdmin(actor);
     const args = WakeRequestSchema.parse(input);
     const agent = await this.readAgent(args.agent);
-    await this.readProject(args.project);
-    if (!agent.memberships.includes(args.project)) {
-      throw new BoardError("VALIDATION", `${args.agent} is not a member of ${args.project}`);
+    if (args.project === SOCIETY_SCOPE) {
+      const charter = await this.readRole(agent.role);
+      if (!charter.societyScope) {
+        throw new BoardError("VALIDATION", `${args.agent} cannot take society-scope turns`);
+      }
+    } else {
+      await this.readProject(args.project);
+      if (!agent.memberships.includes(args.project)) {
+        throw new BoardError("VALIDATION", `${args.agent} is not a member of ${args.project}`);
+      }
     }
     return this.mutex.run(() =>
       this.events.append("wake.requested", actor.name, {
@@ -1318,6 +1516,7 @@ export class Board {
     const failed = parsed.exitReason === "error" || parsed.exitReason === "timeout";
     await this.mutex.run(async () => {
       await this.writeTurnRecord(parsed);
+      await this.refreshMember(parsed.agent);
       await this.events.append(failed ? "turn.failed" : "turn.completed", parsed.agent, {
         project: parsed.project,
         trigger: parsed.trigger.kind,
@@ -1405,6 +1604,7 @@ export class Board {
       this.paths.proposals(),
       this.paths.decisions(),
       this.paths.runners(),
+      this.paths.members(),
       this.paths.societyKnowledge(),
       this.paths.projects(),
       this.paths.agents(),
@@ -1486,22 +1686,98 @@ export class Board {
         `# Core memory\n\nShort, curated, loaded on every turn. Keep entries that change future behavior and hold across tasks.\n`,
       );
     }
+    if (!(await exists(this.paths.agentProfile(agent.name)))) {
+      await writeMarkdown(
+        this.paths.agentProfile(agent.name),
+        { agent: agent.name, updatedAt: agent.createdAt },
+        PROFILE_TEMPLATE,
+      );
+    }
     await ensureDir(this.paths.agentSkills(agent.name));
     for (const slug of agent.memberships) {
-      const dir = this.paths.agentProject(agent.name, slug);
-      await ensureDir(dir);
-      if (!(await exists(path.join(dir, "sessions.json")))) {
-        await writeJson(path.join(dir, "sessions.json"), {});
-      }
-      if (!(await exists(path.join(dir, "notes.md")))) {
-        await writeMarkdown(
-          path.join(dir, "notes.md"),
-          { project: slug },
-          `# Working notes for ${slug}\n`,
-        );
-      }
+      await this.ensureAgentProject(agent.name, slug);
     }
     this.tokenIndex.set(agent.tokenHash, { name: agent.name, role: agent.role });
+    await this.refreshMember(agent.name);
+  }
+
+  private async ensureAgentProject(name: Name, slug: Name): Promise<void> {
+    const dir = this.paths.agentProject(name, slug);
+    await ensureDir(dir);
+    if (!(await exists(path.join(dir, "sessions.json")))) {
+      await writeJson(path.join(dir, "sessions.json"), {});
+    }
+    if (!(await exists(path.join(dir, "notes.md")))) {
+      await writeMarkdown(
+        path.join(dir, "notes.md"),
+        { project: slug },
+        `# Working notes for ${slug}\n`,
+      );
+    }
+  }
+
+  /**
+   * Rewrites a citizen's roster entry from its record, its claims, its task history, its last
+   * turn, and its profile. Called wherever any of those change; cheap at this scale.
+   */
+  private async refreshMember(name: Name): Promise<void> {
+    if (!(await exists(this.paths.agentFile(name)))) {
+      return;
+    }
+    const agent = await this.readAgent(name);
+    const charter = await this.readRole(agent.role);
+    let claimsHeld = 0;
+    let tasksDone = 0;
+    for (const project of await listDirs(this.paths.projects())) {
+      for (const task of await this.listTasks(project)) {
+        if (task.claimedBy !== name) {
+          continue;
+        }
+        if (task.status === "claimed") {
+          claimsHeld += 1;
+        } else if (task.status === "done") {
+          tasksDone += 1;
+        }
+      }
+    }
+    let lastTurnAt: string | undefined;
+    let lastTurnOutcome: string | undefined;
+    for (const scope of await listDirs(this.paths.agentProjects(name))) {
+      const turn = await this.readLastTurn(name, scope);
+      const at = turn?.endedAt ?? turn?.startedAt;
+      if (turn !== null && at !== undefined && (lastTurnAt === undefined || at > lastTurnAt)) {
+        lastTurnAt = at;
+        lastTurnOutcome = `${turn.trigger.kind} on ${scope}: ${turn.exitReason ?? "running"}${
+          turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
+        }`;
+      }
+    }
+    const member = MemberSchema.parse({
+      name: agent.name,
+      role: agent.role,
+      cli: agent.cli,
+      homeRunner: agent.homeRunner,
+      status: agent.status,
+      resident: charter.resident,
+      memberships: agent.memberships,
+      subscriptions: agent.subscriptions,
+      claimsHeld,
+      tasksDone,
+      ...(lastTurnAt === undefined ? {} : { lastTurnAt }),
+      ...(lastTurnOutcome === undefined ? {} : { lastTurnOutcome }),
+      createdAt: agent.createdAt,
+      ...(agent.retiredAt === undefined ? {} : { retiredAt: agent.retiredAt }),
+    });
+    await writeMarkdown(this.paths.member(name), member, await this.readProfile(name));
+  }
+
+  private assertMayReallocate(actor: Actor, target: Name): void {
+    if (target !== actor.name && !REALLOCATING_ROLES.includes(actor.role)) {
+      throw new BoardError(
+        "FORBIDDEN",
+        "only the owner, the steward, or the concierge may move another citizen",
+      );
+    }
   }
 
   private async loadTokenIndex(): Promise<void> {
@@ -1805,6 +2081,7 @@ export class Board {
       }
     }
     this.tokenIndex.delete(current.tokenHash);
+    await this.refreshMember(name);
     await this.events.append("agent.retired", by, {
       name,
       role: agent.role,

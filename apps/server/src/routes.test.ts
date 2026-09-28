@@ -112,7 +112,7 @@ describe("board server routes for the UI", () => {
       z
         .array(z.object({ name: z.string() }))
         .parse(await (await app.request("/api/roles", { headers })).json()),
-    ).toHaveLength(4);
+    ).toHaveLength(5);
 
     await board.propose(
       { name: "eng-1", role: "engineer" },
@@ -192,6 +192,24 @@ describe("board server routes for the UI", () => {
       .array(z.object({ signal: z.object({ kind: z.string() }) }))
       .parse(await (await app.request("/api/signals?limit=5", { headers })).json());
     expect(signals.map((record) => record.signal.kind)).toEqual(["idle_member"]);
+  });
+
+  it("serves the roster with profiles and the runner's resident pairs", async () => {
+    const app = createApp({
+      board,
+      version: "t",
+      scheduler: { pendingPairs: [], runningPairs: [], residentPairs: ["desk/society"] },
+    });
+    const members = z
+      .array(z.object({ name: z.string(), role: z.string(), profile: z.string() }))
+      .parse(await (await app.request("/api/members", { headers })).json());
+    expect(members.map((m) => m.name).toSorted()).toEqual(["eng-1", "owner"]);
+    expect(members.find((m) => m.name === "eng-1")?.profile).toContain("# Profile");
+    expect(JSON.stringify(members)).not.toContain("tokenHash");
+    const state = z
+      .object({ resident: z.array(z.string()) })
+      .parse(await (await app.request("/api/scheduler", { headers })).json());
+    expect(state.resident).toEqual(["desk/society"]);
   });
 
   it("replays and streams live turn events", async () => {

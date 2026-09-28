@@ -6,6 +6,9 @@ import {
   LocalRunner,
   ZERO_USAGE,
   type AgentBackend,
+  type AgentSpec,
+  type ResidentSession,
+  type ResidentStart,
   type TurnRequest,
   type TurnResult,
 } from "@stellaris/runner-core";
@@ -44,6 +47,8 @@ function done(summary: string): TurnResult {
 class ScriptedBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly prompts: string[] = [];
+  readonly residentStarts: string[] = [];
+  readonly residentCloses: string[] = [];
 
   constructor(
     private readonly app: Hono<{ Variables: { actor: { name: string; role: string } } }>,
@@ -51,6 +56,32 @@ class ScriptedBackend implements AgentBackend {
 
   newSession(): Promise<string> {
     return Promise.resolve(`session-${this.prompts.length + 1}`);
+  }
+
+  /** The same script over a warm session, so resident roles exercise the runner's resident path. */
+  startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
+    const key = `${spec.agent}/${spec.project}`;
+    this.residentStarts.push(key);
+    const session: ResidentSession = {
+      session: start.session,
+      runTurn: (prompt) =>
+        this.runTurn({
+          spec,
+          session: start.session,
+          newSession: start.newSession,
+          prompt,
+          instructions: start.instructions,
+          mcp: start.mcp,
+          limits: start.limits,
+          statusSchema: start.statusSchema,
+          env: start.env,
+        }),
+      close: () => {
+        this.residentCloses.push(key);
+        return Promise.resolve();
+      },
+    };
+    return Promise.resolve(session);
   }
 
   async runTurn(request: TurnRequest): Promise<TurnResult> {
@@ -70,6 +101,37 @@ class ScriptedBackend implements AgentBackend {
       }
       return body;
     };
+
+    // The front desk routes the owner's posts: a task for an existing project, or a new project.
+    if (request.spec.agent === "desk") {
+      if (!request.prompt.includes("Trigger: owner_post")) {
+        return done("nothing to do");
+      }
+      if (request.prompt.includes("health endpoint")) {
+        const task = z.object({ id: z.string() }).parse(
+          await verb("create_task", {
+            project: "demo",
+            title: "Add a health endpoint",
+            body: "Requested by the owner at the front desk.",
+          }),
+        );
+        await verb("post_message", {
+          channel: "demo/general",
+          body: `@eng-1 please take task ${task.id}: add a health endpoint.`,
+        });
+        return done("routed the request to eng-1 as a task on demo");
+      }
+      if (request.prompt.includes("new project called api")) {
+        await verb("create_project", { slug: "api", name: "Public API" });
+        await verb("propose", {
+          kind: "member",
+          charter: { name: "eng-2", role: "engineer", cli: "codex", memberships: ["api"] },
+          rationale: "The owner opened a project with no engineer on it.",
+        });
+        return done("created the api project and proposed its first engineer");
+      }
+      return done("answered");
+    }
 
     // The steward reads operations signals and proposes; it never touches tasks.
     if (request.spec.agent === "stew-1") {
@@ -245,6 +307,110 @@ describe("Phase 1 exit criterion", () => {
     // The owner's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readInbox({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
+  });
+});
+
+describe("Phase 5 exit criterion", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-desk-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("the owner posts naming no project and no citizen, and a resident concierge routes it", async () => {
+    const { board, ownerToken } = await Board.init(dir, { name: "desk" });
+    await board.addProject(OWNER, { slug: "demo" });
+    await board.addAgent(OWNER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "codex",
+      memberships: ["demo"],
+    });
+    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
+    const app = createApp({ board, version: "test" });
+    const backend = new ScriptedBackend(app);
+    const runner = new LocalRunner({
+      board,
+      backends: { claude: backend, codex: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+      residentIdleMs: 60_000,
+    });
+    const scheduler = new Scheduler({
+      board,
+      runner,
+      timings: {
+        debounceMs: 0,
+        ownerDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        unclaimedTaskMs: 3_600_000,
+      },
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+
+    // Only the engineer onboards; the desk belongs to no project and waits for the owner.
+    await settle();
+    expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(1);
+
+    // A request that names nobody: the desk wakes at once, in the society scope, on a warm session.
+    await board.postMessage(OWNER, {
+      channel: "general",
+      body: "Can someone add a health endpoint? The demo service has none.",
+    });
+    await settle();
+    expect(backend.residentStarts).toEqual(["desk/society"]);
+    const deskPrompt = backend.prompts.at(-1) ?? "";
+    expect(deskPrompt).toContain("Trigger: owner_post from owner");
+    expect(deskPrompt).toContain("## The society");
+    expect(deskPrompt).toContain("- eng-1: engineer on codex");
+    const tasks = await board.listTasks("demo");
+    expect(tasks.map((t) => t.title)).toEqual(["Add a health endpoint"]);
+    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain(
+      "@eng-1 please take task",
+    );
+    await settle(); // the mention wakes eng-1, which claims and submits
+    expect((await board.getTask(OWNER, { task_id: tasks[0]?.id ?? "" })).status).toBe("in_review");
+
+    // A request that needs a project the society does not have: the same warm session takes it.
+    await board.postMessage(OWNER, {
+      channel: "general",
+      body: "Let's start a new project called api for the public API.",
+    });
+    await settle();
+    expect(backend.residentStarts).toEqual(["desk/society"]);
+    expect(backend.residentCloses).toEqual([]);
+    expect((await board.readProject("api")).channels).toEqual(["general", "dev"]);
+    const proposals = await board.listProposals();
+    expect(proposals).toEqual([
+      expect.objectContaining({ kind: "member", proposedBy: "desk", status: "proposed" }),
+    ]);
+    const desk = (await board.listMembers()).find((m) => m.name === "desk");
+    expect(desk?.lastTurnOutcome).toContain("owner_post on society: completed");
+
+    // The owner approves over the API, as the UI does, and the new engineer onboards on api.
+    const approved = await app.request("/api/verbs/approve", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ proposal_id: proposals[0]?.id }),
+    });
+    expect(approved.status).toBe(200);
+    await settle();
+    expect(
+      backend.prompts.filter((p) => p.includes("This is your first turn as eng-2")).length,
+    ).toBe(1);
+    expect((await board.readAgent("eng-2")).memberships).toEqual(["api"]);
+    expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("owner_post");
+    const types = (await board.readEvents(null)).map((e) => e.type);
+    expect(types).not.toContain("turn.failed");
+    await runner.close();
+    expect(backend.residentCloses).toEqual(["desk/society"]);
   });
 });
 

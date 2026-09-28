@@ -1,5 +1,11 @@
-import type { Message, Task, TurnDispatch, TurnRecord } from "@stellaris/shared";
+import type { Member, Message, Project, Task, TurnDispatch, TurnRecord } from "@stellaris/shared";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
+
+/** What the front desk reads to route: every project with its channels, every citizen with its roster line. */
+export interface SocietyView {
+  readonly projects: readonly Project[];
+  readonly members: readonly Member[];
+}
 
 export interface TurnPromptInput {
   readonly dispatch: TurnDispatch;
@@ -7,9 +13,12 @@ export interface TurnPromptInput {
   readonly heldClaims: readonly Task[];
   readonly lastTurn: TurnRecord | null;
   readonly onboarding: OnboardingContext | null;
+  /** Present for roles that route on behalf of the owner; absent for everyone else. */
+  readonly societyView?: SocietyView | null | undefined;
 }
 
 const MAX_BODY_CHARS = 1_500;
+const MAX_PROFILE_CHARS = 200;
 
 function clip(text: string): string {
   const trimmed = text.trim();
@@ -18,11 +27,39 @@ function clip(text: string): string {
     : `${trimmed.slice(0, MAX_BODY_CHARS)}\n[... truncated]`;
 }
 
+/** The first line of a profile that is not a heading, clipped. */
+function profileLine(profile: string): string {
+  const line = profile
+    .split("\n")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0 && !entry.startsWith("#"));
+  if (line === undefined) {
+    return "no profile yet";
+  }
+  return line.length <= MAX_PROFILE_CHARS ? line : `${line.slice(0, MAX_PROFILE_CHARS)}…`;
+}
+
+function rosterLine(member: Member): string {
+  const parts = [
+    `${member.role} on ${member.cli ?? "no CLI"}`,
+    member.status,
+    member.resident ? "resident" : "",
+    member.memberships.length === 0 ? "no projects" : `projects ${member.memberships.join(", ")}`,
+    member.subscriptions.length === 0 ? "" : `follows ${member.subscriptions.join(", ")}`,
+    `${member.claimsHeld} claim(s) held`,
+    `${member.tasksDone} done`,
+    member.lastTurnOutcome === undefined
+      ? "no turn yet"
+      : `last turn ${member.lastTurnAt ?? ""} ${member.lastTurnOutcome}`.trim(),
+  ].filter((part) => part.length > 0);
+  return `- ${member.name}: ${parts.join("; ")}. Profile: ${profileLine(member.profile)}`;
+}
+
 /** The digest injected into every turn. This is the only push channel from the board to an agent. */
 export function buildTurnPrompt(input: TurnPromptInput): string {
   const { dispatch } = input;
   const lines: string[] = [];
-  lines.push(`# Turn for ${dispatch.agent} on project ${dispatch.project}`);
+  lines.push(`# Turn for ${dispatch.agent} on ${dispatch.project}`);
   lines.push("");
   const from = dispatch.trigger.from === undefined ? "" : ` from ${dispatch.trigger.from}`;
   lines.push(`Trigger: ${dispatch.trigger.kind}${from}. ${dispatch.trigger.reason}`.trim());
@@ -32,6 +69,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (dispatch.trigger.kind === "ops_event") {
     lines.push(
       "Operations signals arrived; the ops posts below carry them. Decide whether a proposal is warranted, and stay silent if not.",
+    );
+  }
+  if (dispatch.trigger.kind === "owner_post") {
+    lines.push(
+      "The owner posted. Route it: answer in the same channel, or create the task, thread, or project it needs and mention the citizens who will do it, adding them to the project first when they are not members. Stay silent when the owner already addressed a citizen and nothing else is needed.",
     );
   }
 
@@ -48,6 +90,25 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`,
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
     );
+  }
+
+  const society = input.societyView;
+  if (society !== undefined && society !== null) {
+    lines.push("", "## The society", "", "### Projects", "");
+    if (society.projects.length === 0) {
+      lines.push("None yet.");
+    }
+    for (const project of society.projects) {
+      lines.push(
+        `- ${project.slug} "${project.name}": channels ${project.channels.join(", ")}; members ${
+          project.members.length === 0 ? "none" : project.members.join(", ")
+        }`,
+      );
+    }
+    lines.push("", "### Citizens", "");
+    for (const member of society.members) {
+      lines.push(rosterLine(member));
+    }
   }
 
   lines.push("", "## Claims you hold", "");

@@ -28,7 +28,10 @@ interface RecordedCall {
 function replaying(messages: readonly SDKMessage[]): { queryFn: QueryFn; calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
   const queryFn: QueryFn = (params) => {
-    calls.push({ prompt: params.prompt, options: params.options });
+    calls.push({
+      prompt: typeof params.prompt === "string" ? params.prompt : "<stream>",
+      options: params.options,
+    });
     return (async function* () {
       for (const message of messages) {
         yield message;

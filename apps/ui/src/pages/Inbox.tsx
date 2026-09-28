@@ -133,6 +133,10 @@ export function InboxPage() {
     queryKey: ["channel", "decisions"],
     queryFn: () => api.channel("decisions"),
   });
+  const general = useQuery({
+    queryKey: ["channel", "general"],
+    queryFn: () => api.channel("general"),
+  });
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const society = useQuery({ queryKey: ["society"], queryFn: api.society });
   const markRead = useMutation({
@@ -153,6 +157,18 @@ export function InboxPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <h1 className="text-2xl font-semibold">Inbox</h1>
+
+      <Panel title="Ask the society">
+        <p className="mb-2 text-xs text-board-muted">
+          Post without naming a project or a citizen; the front desk answers here or routes the
+          request to the citizens who will do it.
+        </p>
+        <MessageList
+          messages={(general.data ?? []).slice(-4).toReversed()}
+          emptyText="Nothing asked yet."
+        />
+        <Composer channel="general" placeholder="What do you need?" />
+      </Panel>
 
       <Panel title={`Needs your decision (${pending.length})`}>
         {pending.length === 0 ? <Empty>Nothing waiting on you.</Empty> : null}

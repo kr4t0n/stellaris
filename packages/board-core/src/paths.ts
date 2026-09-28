@@ -57,6 +57,12 @@ export class BoardPaths {
   runner(name: Name): string {
     return path.join(this.runners(), `${name}.md`);
   }
+  members(): string {
+    return path.join(this.society, "members");
+  }
+  member(name: Name): string {
+    return path.join(this.members(), `${name}.md`);
+  }
 
   projects(): string {
     return path.join(this.board, "projects");
@@ -115,6 +121,9 @@ export class BoardPaths {
   }
   agentRole(name: Name): string {
     return path.join(this.agent(name), "role.md");
+  }
+  agentProfile(name: Name): string {
+    return path.join(this.agent(name), "profile.md");
   }
   agentMemory(name: Name): string {
     return path.join(this.agent(name), "memory");

@@ -18,6 +18,9 @@ export const VERB_NAMES = [
   "propose",
   "approve",
   "reject",
+  "create_project",
+  "join_project",
+  "leave_project",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -40,6 +43,10 @@ export const RoleCharterSchema = z.object({
   reviewDate: z.string().optional(),
   maxReplicas: z.number().int().min(1).default(1),
   backlogThreshold: z.number().positive().default(3),
+  /** The runner keeps a session alive between turns so the role answers in seconds. */
+  resident: z.boolean().default(false),
+  /** The role may take turns in the society scope, outside any project, with its home as the working directory. */
+  societyScope: z.boolean().default(false),
 });
 export type RoleCharter = z.infer<typeof RoleCharterSchema>;
 export type RoleCharterInput = z.input<typeof RoleCharterSchema>;
@@ -61,9 +68,12 @@ const MEMBER_VERBS: readonly VerbName[] = [
   "subscribe",
   "unsubscribe",
   "propose",
+  "join_project",
+  "leave_project",
 ];
 
 const GOVERNANCE_VERBS: readonly VerbName[] = ["approve", "reject"];
+const FRONT_DESK_VERBS: readonly VerbName[] = ["create_project"];
 
 /** Seed roles written at society initialization. Their charters are iterated after the infrastructure exists. */
 export const SEED_ROLES: readonly RoleCharter[] = [
@@ -71,11 +81,13 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     name: OWNER_ROLE,
     purpose:
       "The human owner. Approves merges to main, hiring, tool grants, and reallocation. Interacts by mention and watches turns live.",
-    verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS],
+    verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS, ...FRONT_DESK_VERBS],
     repoPermission: "merge",
     wakeTriggers: [],
     maxReplicas: 1,
     backlogThreshold: 3,
+    resident: false,
+    societyScope: true,
   },
   {
     name: "engineer",
@@ -86,6 +98,8 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     wakeTriggers: ["mention", "claim_event", "unclaimed_task", "heartbeat"],
     maxReplicas: 1,
     backlogThreshold: 3,
+    resident: false,
+    societyScope: false,
   },
   {
     name: "reviewer",
@@ -96,6 +110,8 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     wakeTriggers: ["mention", "claim_event", "heartbeat"],
     maxReplicas: 1,
     backlogThreshold: 3,
+    resident: false,
+    societyScope: false,
   },
   {
     name: "steward",
@@ -106,5 +122,19 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     wakeTriggers: ["mention", "ops_event", "heartbeat"],
     maxReplicas: 1,
     backlogThreshold: 3,
+    resident: false,
+    societyScope: true,
+  },
+  {
+    name: "concierge",
+    purpose:
+      "The society's front desk. Wakes on every post the owner makes and routes it: a question gets an answer in the same channel; work for an existing project gets a task or a thread there with the citizens who will do it mentioned; something new gets a project, created on the spot, and a member proposal for the owner to approve. Reads the roster in every digest to choose citizens by role, reach, availability, and profile, and adds a citizen to a project when the work needs it. Mentions a citizen with @ only to hand it work, since a mention wakes it and costs a turn; lists and describes citizens by plain name. Stays silent when the owner already addressed a citizen and nothing else is needed. Never does the work itself and never decides hiring.",
+    verbs: [...MEMBER_VERBS, ...FRONT_DESK_VERBS],
+    repoPermission: "read",
+    wakeTriggers: ["owner_post", "mention", "heartbeat"],
+    maxReplicas: 1,
+    backlogThreshold: 3,
+    resident: true,
+    societyScope: true,
   },
 ];

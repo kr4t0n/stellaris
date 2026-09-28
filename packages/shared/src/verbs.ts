@@ -51,6 +51,14 @@ export const VerbInputs = {
   }),
   approve: z.object({ proposal_id: UlidSchema, reason: z.string().optional() }),
   reject: z.object({ proposal_id: UlidSchema, reason: z.string().min(1) }),
+  create_project: z.object({
+    slug: NameSchema,
+    name: z.string().min(1).optional(),
+    repo: z.string().min(1).nullable().default(null),
+    default_branch: z.string().min(1).default("main"),
+  }),
+  join_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
+  leave_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -77,4 +85,9 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   approve:
     "Approve a proposal; the board then provisions it. Owner and steward only, never on your own proposal.",
   reject: "Reject a proposal with a reason. Owner and steward only, never on your own proposal.",
+  create_project:
+    "Create a project with its default channels. Give it a slug, a display name, and a git remote when one exists.",
+  join_project:
+    "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
+  leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
 };

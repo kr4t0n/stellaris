@@ -384,6 +384,59 @@ describe("Scheduler", () => {
     expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-3");
   });
 
+  it("wakes the front desk on every owner post, in the society scope until it joins a project", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]); // no membership, so no onboarding turn yet
+
+    // An owner post without a mention wakes only the concierge, at owner priority, at once.
+    await board.postMessage(OWNER, {
+      channel: "demo/general",
+      body: "can someone add a health check?",
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.priority])).toEqual([
+      ["desk", "society", "owner_post", 2],
+    ]);
+    expect(runner.dispatches[0]?.trigger.reason).toBe("the owner posted in demo/general");
+
+    // A citizen's post does not; the owner's mention wakes both the citizen and the desk.
+    runner.dispatches.length = 0;
+    await board.postMessage(ENG, { channel: "demo/general", body: "on it" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    await board.postMessage(OWNER, { channel: "demo/general", body: "@rev-1 please review" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(
+      runner.dispatches
+        .map((d) => `${d.agent}:${d.trigger.kind}`)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["desk:owner_post", "rev-1:mention"]);
+
+    // Joining a project fires an onboarding turn there, and later posts route to that project.
+    runner.dispatches.length = 0;
+    await board.joinProject(OWNER, { project: "demo", agent: "desk" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["desk", "demo", "onboarding"],
+    ]);
+    runner.dispatches.length = 0;
+    await board.postMessage(OWNER, { channel: "general", body: "status?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["desk", "demo", "owner_post"],
+    ]);
+  });
+
   it("drops a retired member's queued turn and keeps the queue across a restart", async () => {
     const { board, runner, scheduler } = await setup();
     await board.setPaused(OWNER, true);

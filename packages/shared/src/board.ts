@@ -5,6 +5,13 @@ import { RoleCharterSchema } from "./roles.js";
 export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
 
+/**
+ * The scope of a turn that belongs to no project: the front desk answering the owner, the
+ * steward reading signals. Dispatches, sessions, and turn records use it in place of a project
+ * slug, and the runner uses the agent's home as the working directory. No project may take the name.
+ */
+export const SOCIETY_SCOPE = "society";
+
 export const CliKindSchema = z.enum(["claude", "codex"]);
 export type CliKind = z.infer<typeof CliKindSchema>;
 
@@ -109,6 +116,32 @@ export const AgentSchema = z.object({
   retiredReason: z.string().optional(),
 });
 export type Agent = z.infer<typeof AgentSchema>;
+
+/**
+ * The roster entry the board projects for every citizen, what dispatch reads: identity, reach
+ * (memberships and subscriptions), and availability (claims, tasks done, the last turn).
+ * The body of the file is the citizen's own profile. Never the token hash.
+ */
+export const MemberSchema = z.object({
+  name: NameSchema,
+  role: NameSchema,
+  cli: CliKindSchema.nullable(),
+  homeRunner: NameSchema,
+  status: AgentStatusSchema,
+  resident: z.boolean().default(false),
+  memberships: z.array(NameSchema),
+  subscriptions: z.array(ChannelRefSchema),
+  claimsHeld: z.number().int().nonnegative().default(0),
+  tasksDone: z.number().int().nonnegative().default(0),
+  lastTurnAt: IsoDateTimeSchema.optional(),
+  lastTurnOutcome: z.string().optional(),
+  createdAt: IsoDateTimeSchema,
+  retiredAt: IsoDateTimeSchema.optional(),
+});
+export type MemberFrontmatter = z.infer<typeof MemberSchema>;
+export interface Member extends MemberFrontmatter {
+  readonly profile: string;
+}
 
 export const RunnerOsSchema = z.enum(["linux", "windows", "darwin"]);
 export const RunnerSchema = z.object({

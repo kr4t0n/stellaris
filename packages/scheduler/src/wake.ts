@@ -43,6 +43,8 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "unclaimed task", priority: 0 };
     case "ops_event":
       return { wake: true, reason: "operations signal", priority: 0 };
+    case "owner_post":
+      return { wake: true, reason: "owner post", priority: 2 };
     case "heartbeat":
       break;
   }

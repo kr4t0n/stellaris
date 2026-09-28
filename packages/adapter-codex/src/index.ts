@@ -7,4 +7,9 @@ export {
 export type { CodexExecOptions, CodexSandbox, SpawnCodex, SpawnedCodex } from "./exec.js";
 export { parseExecLine, usageOf } from "./events.js";
 export type { ParsedExecLine } from "./events.js";
-export { CodexAppServerBackend } from "./app-server.js";
+export {
+  CodexAppServerSession,
+  defaultSpawnAppServer,
+  PENDING_THREAD_PREFIX,
+} from "./app-server.js";
+export type { AppServerProcess, AppServerSessionOptions, SpawnAppServer } from "./app-server.js";

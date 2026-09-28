@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentEvent,
   BoardEvent,
+  Member,
   Message,
   OpsSignal,
   Project,
@@ -23,6 +24,7 @@ export interface SchedulerState {
   readonly paused: boolean;
   readonly running: readonly string[];
   readonly pending: readonly string[];
+  readonly resident?: readonly string[] | undefined;
 }
 
 export interface LiveTurnEvent {
@@ -124,6 +126,7 @@ export const api = {
   me: () => request<{ name: string; role: string }>("/me"),
   society: () => request<Society>("/society"),
   agents: () => request<PublicAgent[]>("/agents"),
+  members: () => request<Member[]>("/members"),
   roles: () => request<RoleCharter[]>("/roles"),
   runners: () => request<Runner[]>("/runners"),
   proposals: () => request<Proposal[]>("/proposals"),

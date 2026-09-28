@@ -77,6 +77,67 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Nothing new.");
   });
 
+  it("gives the front desk the roster and the project list, and frames an owner post as routing", () => {
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "desk",
+        project: "society",
+        trigger: TriggerSchema.parse({
+          kind: "owner_post",
+          from: "owner",
+          fromOwner: true,
+          reason: "the owner posted in general",
+        }),
+        priority: 2,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      societyView: {
+        projects: [
+          {
+            slug: "demo",
+            name: "Demo",
+            repo: null,
+            defaultBranch: "main",
+            channels: ["general", "dev"],
+            members: ["eng-1"],
+            approvers: ["owner"],
+            requiredCapabilities: [],
+            createdAt: "2026-09-28T10:00:00.000Z",
+          },
+        ],
+        members: [
+          {
+            name: "eng-1",
+            role: "engineer",
+            cli: "codex",
+            homeRunner: "local",
+            status: "active",
+            resident: false,
+            memberships: ["demo"],
+            subscriptions: ["general", "demo/general"],
+            claimsHeld: 1,
+            tasksDone: 3,
+            lastTurnAt: "2026-09-28T11:00:00.000Z",
+            lastTurnOutcome: "mention on demo: completed, shipped the endpoint",
+            createdAt: "2026-09-28T10:00:00.000Z",
+            profile: "# Profile\n\nBackend work in Python; send me API tasks.\n",
+          },
+        ],
+      },
+    });
+    expect(prompt).toContain("Trigger: owner_post from owner. the owner posted in general");
+    expect(prompt).toContain("Route it: answer in the same channel");
+    expect(prompt).toContain("## The society");
+    expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1');
+    expect(prompt).toContain(
+      "- eng-1: engineer on codex; active; projects demo; follows general, demo/general; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
+    );
+  });
+
   it("frames a turn triggered by operations signals as a decision about proposing", () => {
     const prompt = buildTurnPrompt({
       dispatch: {

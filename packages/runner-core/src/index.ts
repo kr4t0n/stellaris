@@ -1,6 +1,8 @@
 export type {
   AgentBackend,
   AgentSpec,
+  ResidentSession,
+  ResidentStart,
   SessionId,
   TurnLimits,
   TurnRequest,
@@ -16,7 +18,7 @@ export {
 export type { ClaudeMcpConfig, OnboardingContext, RenderInstructionsInput } from "./render.js";
 export { buildTurnPrompt } from "./prompt.js";
 export { parseTurnStatus } from "./status.js";
-export type { TurnPromptInput } from "./prompt.js";
+export type { SocietyView, TurnPromptInput } from "./prompt.js";
 export { ExecaGit } from "./git.js";
 export type { GitOps, MergeOutcome } from "./git.js";
 export { LocalRunner } from "./local-runner.js";

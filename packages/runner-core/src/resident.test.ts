@@ -1,0 +1,142 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Board } from "@stellaris/board-core";
+import type { AgentEvent } from "@stellaris/shared";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { LocalRunner } from "./local-runner.js";
+import { ZERO_USAGE, type AgentBackend, type ResidentSession, type TurnResult } from "./types.js";
+
+const OWNER = { name: "owner", role: "owner" } as const;
+
+function completed(summary: string, memoryUpdated = false): TurnResult {
+  return {
+    events: [],
+    finalText: summary,
+    usage: ZERO_USAGE,
+    costUsd: 0.01,
+    status: { summary, claimsHeld: [], blockedOn: [], needsOwnerDecision: false, memoryUpdated },
+    exitReason: "completed",
+  };
+}
+
+/** A backend that hosts resident sessions and counts what the runner does with them. */
+class ResidentBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  readonly starts: string[] = [];
+  readonly closes: string[] = [];
+  readonly prompts: string[] = [];
+  readonly coldTurns: string[] = [];
+  memoryUpdatedNext = false;
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  runTurn(): Promise<TurnResult> {
+    this.coldTurns.push("cold");
+    return Promise.resolve(completed("cold turn"));
+  }
+
+  startResident(spec: { agent: string }, start: { session: string }): Promise<ResidentSession> {
+    this.starts.push(`${spec.agent}:${start.session}`);
+    const session: ResidentSession = {
+      session: start.session,
+      runTurn: (prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> => {
+        this.prompts.push(prompt);
+        onEvent?.({ type: "text", delta: "hi" });
+        const result = completed(`warm turn ${this.prompts.length}`, this.memoryUpdatedNext);
+        this.memoryUpdatedNext = false;
+        return Promise.resolve({ ...result, events: [{ type: "text", delta: "hi" }] });
+      },
+      close: (): Promise<void> => {
+        this.closes.push(`${spec.agent}:${start.session}`);
+        return Promise.resolve();
+      },
+    };
+    return Promise.resolve(session);
+  }
+}
+
+describe("LocalRunner resident sessions and the society scope", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-resident-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {
+    const { board } = await Board.init(dir, { name: "resident" });
+    await board.addProject(OWNER, { slug: "demo" });
+    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(OWNER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new ResidentBackend();
+    const runner = new LocalRunner({
+      board,
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+      residentIdleMs: 80,
+    });
+    const dispatch = {
+      agent: "desk",
+      project: "society",
+      trigger: { kind: "owner_post" as const, fromOwner: true, reason: "posted" },
+      priority: 2,
+      onboarding: false,
+    };
+
+    // Two turns, one session: the society scope needs no repository, and the roster rides in the prompt.
+    const first = await runner.runTurn(dispatch);
+    expect(first.exitReason).toBe("completed");
+    expect(first.project).toBe("society");
+    expect(backend.starts).toEqual(["desk:session-1"]);
+    expect(backend.prompts[0]).toContain("## The society");
+    expect(backend.prompts[0]).toContain("- eng-1: engineer on claude");
+    expect(runner.residentPairs).toEqual(["desk/society"]);
+    await runner.runTurn(dispatch);
+    expect(backend.starts).toHaveLength(1);
+    expect(backend.prompts).toHaveLength(2);
+    expect(backend.coldTurns).toEqual([]);
+    expect((await board.readLastTurn("desk", "society"))?.status?.summary).toBe("warm turn 2");
+
+    // A turn that updated memory makes the next one start fresh, since the instructions carry it.
+    backend.memoryUpdatedNext = true;
+    await runner.runTurn(dispatch);
+    expect(backend.closes).toEqual(["desk:session-1"]);
+    expect(runner.residentPairs).toEqual([]);
+    await runner.runTurn(dispatch);
+    expect(backend.starts).toHaveLength(2);
+
+    // Idle sessions go cold on their own; shutdown closes whatever is left.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(runner.residentPairs).toEqual([]);
+    expect(backend.closes).toHaveLength(2);
+    await runner.runTurn(dispatch);
+    expect(runner.residentPairs).toEqual(["desk/society"]);
+    await runner.close();
+    expect(runner.residentPairs).toEqual([]);
+    expect(backend.closes).toHaveLength(3);
+
+    // Non-resident roles still take cold turns, and an engineer cannot use the society scope.
+    await runner.runTurn({
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual" as const, fromOwner: true, reason: "dev" },
+      priority: 2,
+      onboarding: false,
+    });
+    expect(backend.coldTurns).toEqual(["cold"]);
+    const refused = await runner.runTurn({ ...dispatch, agent: "eng-1" });
+    expect(refused.exitReason).toBe("error");
+    expect(refused.error).toContain("society-scope");
+  });
+});

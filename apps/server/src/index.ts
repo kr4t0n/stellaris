@@ -38,6 +38,8 @@ const runner = new LocalRunner({
     }),
   },
   log,
+  // Resident roles keep a warm session this long after their last turn.
+  residentIdleMs: Number(process.env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
   onEvent: (agent, project, event) => {
     turns.push(agent, project, event);
     log.debug({ agent, project, event }, "agent event");
@@ -56,7 +58,19 @@ const staticDir = await access(path.join(uiDist, "index.html"))
   .then(() => uiDist)
   .catch(() => undefined);
 
-const app = createApp({ board, version: VERSION, turns, scheduler, staticDir });
+// What the API shows: the scheduler's queues and the runner's warm sessions, read live.
+const view = {
+  get pendingPairs() {
+    return scheduler.pendingPairs;
+  },
+  get runningPairs() {
+    return scheduler.runningPairs;
+  },
+  get residentPairs() {
+    return runner.residentPairs;
+  },
+};
+const app = createApp({ board, version: VERSION, turns, scheduler: view, staticDir });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
     { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl, ui: staticDir ?? null },
@@ -76,6 +90,7 @@ log.info({ concurrency, timings }, "scheduler started");
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns");
   await scheduler.stop();
+  await runner.close();
   await board.markRunner("local", { status: "disconnected" }).catch((error: unknown) => {
     log.warn({ error: String(error) }, "could not record runner shutdown");
   });

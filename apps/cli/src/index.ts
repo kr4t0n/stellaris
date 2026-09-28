@@ -326,6 +326,15 @@ program
   });
 
 program
+  .command("ask <text>")
+  .description("Post to the society's general channel as the owner; the front desk routes it")
+  .action(async (text: string) => {
+    const board = await open();
+    const message = await board.postMessage(board.ownerActor(), { channel: "general", body: text });
+    print(message, () => `Posted ${message.id} to general; the concierge wakes on it`);
+  });
+
+program
   .command("inbox")
   .description("Read unread messages for an agent and advance its cursor")
   .option("--as <agent>", "act as this agent instead of the owner")

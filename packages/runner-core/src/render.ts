@@ -23,6 +23,7 @@ const TURN_CONTRACT = [
   "- Act through the board tools (the `board` MCP server). Claims are leases; every turn that touches a task renews it.",
   "- Work only inside your worktree and commit on your own branch. Never merge, rebase onto, or fast-forward main yourself: when a reviewer moves a task to done, the board lands the claimer's branch on main and posts the result.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
+  "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
   "- Route every lesson: about you, your craft, or the owner, write it to memory/core.md in your home directory; something everyone should know, post it to the project channel.",
   "- End every turn with the status object: summary, claims held, what is blocked, whether the owner must decide.",
 ].join("\n");
@@ -36,6 +37,7 @@ const GOVERNANCE = [
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
+  "- Projects and membership: `create_project` opens a project with its default channels (front desk and owner). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the owner; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals arrive in the ops channel as posts by the board: unclaimed tasks, backlog per member, role gaps, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
 ].join("\n");
@@ -49,6 +51,7 @@ export function renderOnboardingPreamble(context: OnboardingContext): string {
     "",
     `You are working on project "${context.project}" in the worktree at ${context.worktree}.`,
     "Your memory is empty. Write durable lessons about yourself, your craft, or the owner to memory/core.md in your home directory.",
+    "Write profile.md in your home directory: one paragraph on what you do well and what to send your way. The roster the front desk routes with is built from it.",
     "Read the project's instructions file, if it has one, before doing anything else.",
     "Silence is allowed, and every turn ends with the status object.",
   ].join("\n");

@@ -22,6 +22,16 @@ function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/** The first line of a citizen's profile that is not a heading. */
+function profileLine(profile: string): string {
+  return (
+    profile
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith("#")) ?? "no profile yet"
+  );
+}
+
 const SIGNAL_TONES: Record<string, string> = {
   backlog: "border-amber-800 text-amber-300",
   role_gap: "border-rose-800 text-rose-300",
@@ -224,6 +234,7 @@ function RetireForm({ members }: { members: readonly PublicAgent[] }) {
 export function SocietyPage() {
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents });
+  const roster = useQuery({ queryKey: ["members"], queryFn: api.members });
   const roles = useQuery({ queryKey: ["roles"], queryFn: api.roles });
   const runners = useQuery({ queryKey: ["runners"], queryFn: api.runners });
   const proposals = useQuery({ queryKey: ["proposals"], queryFn: api.proposals });
@@ -282,6 +293,11 @@ export function SocietyPage() {
           {(scheduler.data?.pending ?? []).map((pair) => (
             <Pill key={pair} className="border-board-border text-board-muted">
               {pair} queued
+            </Pill>
+          ))}
+          {(scheduler.data?.resident ?? []).map((pair) => (
+            <Pill key={`resident-${pair}`} className="border-sky-800 text-sky-300">
+              {pair} resident
             </Pill>
           ))}
         </div>
@@ -343,6 +359,9 @@ export function SocietyPage() {
                 <td className="py-1.5 pr-2 text-board-muted">{agent.cli}</td>
                 <td className="py-1.5 pr-2 text-board-muted">
                   {agent.memberships.join(", ") || "no projects"}
+                </td>
+                <td className="max-w-xs truncate py-1.5 pr-2 text-xs text-board-muted">
+                  {profileLine(roster.data?.find((m) => m.name === agent.name)?.profile ?? "")}
                 </td>
                 <td className="py-1.5 text-board-muted">
                   {agent.status === "retired" ? (

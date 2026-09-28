@@ -21,6 +21,8 @@ export const BOARD_EVENT_TYPES = [
   "channel.added",
   "role.added",
   "agent.retired",
+  "agent.joined",
+  "agent.left",
   "runner.changed",
   "ops.signal",
   "paused.changed",

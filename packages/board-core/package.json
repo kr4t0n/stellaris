@@ -1,0 +1,22 @@
+{
+  "name": "@stellaris/board-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The board's single writer: file storage, invariants, leases, cursors, event log, projection",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@stellaris/shared": "workspace:*",
+    "gray-matter": "4.0.3",
+    "ulid": "3.0.2",
+    "zod": "4.6.5"
+  }
+}

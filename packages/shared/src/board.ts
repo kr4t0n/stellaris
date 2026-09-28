@@ -1,0 +1,184 @@
+import { z } from "zod";
+import { ChannelRefSchema, IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
+import { RoleCharterSchema } from "./roles.js";
+
+export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as const;
+export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
+
+export const CliKindSchema = z.enum(["claude", "codex"]);
+export type CliKind = z.infer<typeof CliKindSchema>;
+
+export const SocietySchema = z.object({
+  name: z.string().min(1),
+  version: z.literal(1),
+  createdAt: IsoDateTimeSchema,
+  channels: z.array(NameSchema),
+});
+export type Society = z.infer<typeof SocietySchema>;
+
+export const ProjectSchema = z.object({
+  slug: NameSchema,
+  name: z.string().min(1),
+  repo: z.string().nullable(),
+  defaultBranch: z.string().min(1),
+  channels: z.array(NameSchema),
+  members: z.array(NameSchema),
+  approvers: z.array(NameSchema),
+  requiredCapabilities: z.array(z.string()),
+  createdAt: IsoDateTimeSchema,
+});
+export type Project = z.infer<typeof ProjectSchema>;
+
+/** Message frontmatter. The author is stamped by the board, never supplied by the caller. */
+export const MessageFrontmatterSchema = z.object({
+  id: UlidSchema,
+  author: NameSchema,
+  channel: ChannelRefSchema,
+  thread: UlidSchema.optional(),
+  task: UlidSchema.optional(),
+  ts: IsoDateTimeSchema,
+  mentions: z.array(NameSchema),
+});
+export type MessageFrontmatter = z.infer<typeof MessageFrontmatterSchema>;
+export interface Message extends MessageFrontmatter {
+  readonly body: string;
+}
+
+export const TaskStatusSchema = z.enum([
+  "open",
+  "claimed",
+  "in_review",
+  "done",
+  "blocked",
+  "abandoned",
+]);
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+
+export const ThreadStateSchema = z.enum(["none", "open", "closed"]);
+export type ThreadState = z.infer<typeof ThreadStateSchema>;
+
+export const TaskFrontmatterSchema = z.object({
+  id: UlidSchema,
+  project: NameSchema,
+  title: z.string().min(1),
+  status: TaskStatusSchema,
+  thread: ThreadStateSchema,
+  createdBy: NameSchema,
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+  claimedBy: NameSchema.optional(),
+  leaseExpiresAt: IsoDateTimeSchema.optional(),
+  parentId: UlidSchema.optional(),
+  blockedBy: z.array(UlidSchema),
+  requiredCapabilities: z.array(z.string()),
+});
+export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;
+export interface Task extends TaskFrontmatter {
+  readonly body: string;
+}
+
+/** Legal status transitions. Who may perform each one is enforced by the board. */
+export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
+  open: ["claimed", "abandoned"],
+  claimed: ["open", "in_review", "blocked", "abandoned"],
+  in_review: ["claimed", "done"],
+  blocked: ["claimed"],
+  done: [],
+  abandoned: [],
+};
+
+export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
+  return TASK_TRANSITIONS[from].includes(to);
+}
+
+export const AgentStatusSchema = z.enum(["active", "retired"]);
+export type AgentStatus = z.infer<typeof AgentStatusSchema>;
+
+export const AgentSchema = z.object({
+  name: NameSchema,
+  role: NameSchema,
+  cli: CliKindSchema.nullable(),
+  model: z.string().optional(),
+  homeRunner: NameSchema,
+  memberships: z.array(NameSchema),
+  subscriptions: z.array(ChannelRefSchema),
+  status: AgentStatusSchema,
+  createdAt: IsoDateTimeSchema,
+  tokenHash: z.string().min(1),
+});
+export type Agent = z.infer<typeof AgentSchema>;
+
+export const RunnerOsSchema = z.enum(["linux", "windows", "darwin"]);
+export const RunnerSchema = z.object({
+  name: NameSchema,
+  os: RunnerOsSchema,
+  clis: z.array(CliKindSchema),
+  capabilities: z.array(z.string()),
+  status: z.enum(["connected", "disconnected"]),
+  lastSeen: IsoDateTimeSchema.optional(),
+});
+export type Runner = z.infer<typeof RunnerSchema>;
+
+export const ProposalKindSchema = z.enum(["role", "member", "channel", "reallocation"]);
+export type ProposalKind = z.infer<typeof ProposalKindSchema>;
+
+export const ProposalStatusSchema = z.enum([
+  "proposed",
+  "approved",
+  "rejected",
+  "provisioned",
+  "retired",
+]);
+export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
+
+export const MemberProposalSchema = z.object({
+  name: NameSchema,
+  role: NameSchema,
+  cli: CliKindSchema,
+  homeRunner: NameSchema.default("local"),
+  memberships: z.array(NameSchema).default([]),
+  subscriptions: z.array(ChannelRefSchema).default([]),
+  seedInstructions: z.string().optional(),
+});
+export const ChannelProposalSchema = z.object({
+  project: NameSchema.nullable().default(null),
+  name: NameSchema,
+  purpose: z.string().min(1),
+});
+export const ReallocationProposalSchema = z.object({
+  description: z.string().min(1),
+});
+
+/** Charter schema per proposal kind. */
+export const ProposalCharterSchemas = {
+  role: RoleCharterSchema,
+  member: MemberProposalSchema,
+  channel: ChannelProposalSchema,
+  reallocation: ReallocationProposalSchema,
+} as const;
+
+export const ProposalFrontmatterSchema = z.object({
+  id: UlidSchema,
+  kind: ProposalKindSchema,
+  proposedBy: NameSchema,
+  status: ProposalStatusSchema,
+  createdAt: IsoDateTimeSchema,
+  decidedBy: NameSchema.optional(),
+  decidedAt: IsoDateTimeSchema.optional(),
+  reason: z.string().optional(),
+  charter: z.record(z.string(), z.unknown()),
+});
+export type ProposalFrontmatter = z.infer<typeof ProposalFrontmatterSchema>;
+export interface Proposal extends ProposalFrontmatter {
+  readonly body: string;
+}
+
+export const DecisionSchema = z.object({
+  id: UlidSchema,
+  proposalId: UlidSchema,
+  decidedBy: NameSchema,
+  outcome: z.enum(["approved", "rejected"]),
+  reason: z.string().optional(),
+  ts: IsoDateTimeSchema,
+});
+export type Decision = z.infer<typeof DecisionSchema>;

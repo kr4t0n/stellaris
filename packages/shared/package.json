@@ -1,0 +1,19 @@
+{
+  "name": "@stellaris/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Schemas and types shared by every Stellaris package: board objects, verb inputs, events, turn status",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

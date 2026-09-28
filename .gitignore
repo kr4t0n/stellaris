@@ -1,0 +1,22 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data: board projection, agent homes, worktrees (lives outside the code repo)
+data/
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log

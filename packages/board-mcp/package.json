@@ -1,0 +1,22 @@
+{
+  "name": "@stellaris/board-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP tool definitions over the board verbs and the Streamable HTTP handler mounted by the board server",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.1",
+    "@stellaris/board-core": "workspace:*",
+    "@stellaris/shared": "workspace:*",
+    "zod": "4.6.5"
+  }
+}

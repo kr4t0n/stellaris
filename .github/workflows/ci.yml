@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build precedes lint: type-aware rules need the declaration files of workspace packages.
+      - run: pnpm build
+      - run: pnpm build:ui
+      - run: pnpm lint
+      - run: pnpm fmt:check
+      - run: pnpm test

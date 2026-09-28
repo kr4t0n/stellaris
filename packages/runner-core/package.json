@@ -1,0 +1,20 @@
+{
+  "name": "@stellaris/runner-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runner internals: adapter registry, config-home rendering, worktrees, projection mirror",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@stellaris/shared": "workspace:*",
+    "execa": "10.0.1"
+  }
+}

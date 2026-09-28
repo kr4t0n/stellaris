@@ -1,0 +1,19 @@
+{
+  "name": "@stellaris/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Admin CLI for owners and developers: init, project add, agent add, post, task, pause, turn run",
+  "bin": {
+    "stellaris": "./dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@stellaris/board-core": "workspace:*",
+    "@stellaris/shared": "workspace:*",
+    "commander": "15.0.0"
+  }
+}

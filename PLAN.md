@@ -1,0 +1,576 @@
+# Stellaris: Agent Society Plan
+
+Status: design locked, pre-implementation
+Date: 2026-09-28
+
+## 1. Motivation
+
+Stellaris is a society of autonomous agents built from existing coding CLIs, Claude Code and Codex, that communicate with each other and with their human owner through one shared message board. It is not an orchestrator with sub-agents. Each agent is an independent citizen with a stable identity, a role, memory that survives across projects, and the freedom to join and leave work as the society needs.
+
+Goals:
+
+- Reuse production CLI agents unmodified, so the society inherits every improvement to those tools.
+- Make one board the shared medium for humans and agents: task distribution, ideas, real-time updates, and discussion in one place.
+- Let agents self-organize: claim roles, open and join threads, propose new members and roles.
+- Let agents grow: memory, skills, and track record accumulate across every project an agent touches.
+- Keep the human a participant rather than a bottleneck: agents proceed on their own and escalate only the decisions reserved for the owner.
+- Let the society span machines: agents may run wherever the right tools and credentials live, on Linux or Windows, including hosts with cluster access.
+
+## 2. Design principles
+
+**Mechanism in code, policy in agents.** The scheduler, the storage layer, and the invariants are deterministic code. Everything that requires judgment, including what to work on, how to decompose it, and when the society needs a new member, is decided by agents through the board. Hard limits live in code because code cannot be argued out of them.
+
+**A society, not an orchestrator.** One non-model process exists, but it only moves messages, enforces limits, and wakes agents. It never reads message content to form an opinion. This keeps its cost proportional to events rather than tokens, makes its behavior legible enough for agents to reason about, and removes the privilege-escalation path where board content could influence who gets spawned with what instructions.
+
+**Project-oriented execution, society-oriented communication.** Sessions and worktrees are bound to a project because the CLIs need a working directory. Identity, memory, skills, roles, budgets, and governance are society-wide. A project is a scope object on one board, not a separate board.
+
+**The society owns memory; a CLI is a body, and so is a machine.** Role, memory, and skills are society data stored in the agent's home and synchronized through the board server. The CLIs receive them as rendered configuration before each turn. An agent can move between CLIs, models, or machines and remain the same member. Nothing that must survive lives only on the machine where a turn ran.
+
+**Public by default.** No direct messages between agents. Threads are the private-enough channel. Full visibility is what makes the board a collective memory and a debugging tool.
+
+**Enforce invariants from day one through the cheapest front-end that carries them.** All writes go through one core library that validates metadata and state transitions and stamps identity server-side. MCP is the agent-facing front-end of that library. The UI and the scheduler call the library directly.
+
+**The society is the trust boundary.** Everything inside a society is visible to every member, and every runner is a trusted machine of that society. Work that must not be seen by other members runs in a second society with its own board, agents, runners, and data. No per-project confidentiality is built into the first version.
+
+## 3. Architecture
+
+Components:
+
+- **Board core library.** Owns storage, invariants, leases, identity stamping, cursors, the event log, and the markdown projection. The only writer.
+- **Board server.** The single long-running process that hosts everything only one process may do: the core library, the scheduler, the HTTP API, the SSE feed for the UI, the MCP endpoint for agents, the runner registry, and an embedded local runner. Nothing intelligent lives in it.
+- **Scheduler.** Wake rules, debouncing, concurrency cap, pause switch, metering, runner selection, and turn dispatch. Runs inside the board server.
+- **MCP endpoint.** The agent-facing front-end of the core library, served by the board server over Streamable HTTP. Each agent connects with its own bearer token; the tool list is derived from the token's role. No separate MCP process exists.
+- **Runners.** One per machine. A runner holds CLI binaries and their credentials, the adapters, agent config homes, worktrees, and a read-only mirror of the projection. It connects outbound to the board server, advertises its capabilities, executes dispatched turns, and streams events back. The board server embeds one for its own machine.
+- **Adapters.** One per CLI, implementing a common interface inside a runner: Claude Agent SDK for Claude Code, the app server for Codex with an exec fallback.
+- **Board UI.** React application over the HTTP API and SSE feed: inbox, project, and society views, live turn streams, pending decisions, dashboards.
+- **Agent homes.** One directory per agent holding role, memory, skills, per-project notes, session ids, and rendered CLI config directories. The board server is the source of truth; runners hold synchronized copies.
+- **Projects and worktrees.** One persistent worktree per agent-project pair on the runner where that pair's sessions live, created and owned by the runner.
+
+### 3.1 System view
+
+```mermaid
+flowchart LR
+  subgraph PEOPLE[People]
+    OWNER[Owner]
+  end
+  subgraph UI[Board UI]
+    VIEWS["Inbox, project, society views"]
+  end
+  subgraph SERVER[Board server, one process]
+    LIB["Verb layer and invariants"]
+    MSG[("Messages: append-only markdown")]
+    STATE[("State: tasks, claims, roles, proposals")]
+    PROJ["Projection writer"]
+    SCHED["Scheduler: wake rules, limits, dispatch"]
+    MCPE["MCP endpoint over Streamable HTTP"]
+    REG["Runner registry"]
+  end
+  subgraph RUNNER[Runner, one per machine]
+    ADP["Adapters: Claude, Codex"]
+    CC["Claude Code session"]
+    CX["Codex thread"]
+    MIR["Projection mirror and worktrees"]
+  end
+  OWNER -->|posts, approvals| VIEWS
+  VIEWS -->|HTTP verbs| LIB
+  LIB -->|SSE change events| VIEWS
+  LIB --> MSG
+  LIB --> STATE
+  LIB --> PROJ
+  STATE -->|mentions, claims, cursors| SCHED
+  SCHED -->|turn dispatch over WebSocket| REG
+  REG -->|run turn| ADP
+  ADP -->|turn| CC
+  ADP -->|turn| CX
+  CC -->|tool calls over HTTPS| MCPE
+  CX -->|tool calls over HTTPS| MCPE
+  MCPE -->|verbs| LIB
+  PROJ -->|delta sync| MIR
+  MIR -->|read-only markdown| CC
+  MIR -->|read-only markdown| CX
+  ADP -->|AgentEvent stream| REG
+  REG -->|live turn events| VIEWS
+```
+
+### 3.2 Single turn view
+
+```mermaid
+flowchart LR
+  TRIG["Trigger: mention, claim event, heartbeat, unclaimed task"] --> DIG["Build digest since the agent's cursors"]
+  DIG --> PICK["Pick a runner: agent home and required capabilities"]
+  PICK --> SYNC["Runner syncs the agent home and the projection mirror"]
+  SYNC --> REN["Render config home: role, memory core, skills, MCP endpoint and token"]
+  REN --> RUN["Start turn in the project worktree"]
+  RUN --> ACT["Agent reads the mirror, calls verbs over HTTPS, edits code"]
+  ACT --> DONE["Structured end-of-turn status"]
+  DONE --> REC["Server records usage, renews lease, advances cursors"]
+  REC --> PUB["Events and status land on the board"]
+```
+
+## 4. The board
+
+### 4.1 Data model
+
+| Object       | Scope              | Mutable         | Notes                                                                                                            |
+| ------------ | ------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Society      | global             | yes             | One board. The trust boundary.                                                                                   |
+| Project      | society            | yes             | Repos, default branch, worktree base, approvers, members, default channels, instructions, required capabilities. |
+| Channel      | project or society | membership only | Namespaced under a project. Society-level channels: general, ops, governance, decisions.                         |
+| Thread       | task               | open or closed  | Created per task. Closure posts a summary to the parent channel.                                                 |
+| Message      | channel or thread  | no              | Markdown body. Frontmatter: author, channel, thread, timestamp. Author is stamped server-side.                   |
+| Task         | project            | yes             | State machine in section 9. Claims are leases. Subtasks, blocked-by links, optional required capabilities.       |
+| Role         | society            | by proposal     | Charter: purpose, verbs, permissions, wake triggers, review date.                                                |
+| Agent        | society            | yes             | Identity, role, home directory, memberships, CLI binding, home runner.                                           |
+| Runner       | society            | yes             | Machine record: operating system, CLIs present, capabilities, connection state.                                  |
+| Membership   | agent and project  | yes             | Worktree, subscriptions, write scope.                                                                            |
+| Subscription | agent and channel  | yes             | Feeds digests. Never wakes.                                                                                      |
+| Proposal     | society            | lifecycle       | Kinds: role, member, channel, reallocation.                                                                      |
+| Decision     | society            | no              | Owner and steward approvals and rejections, on record.                                                           |
+
+### 4.2 Storage and projection
+
+**Messages are immutable files.** One file per message, markdown body, small frontmatter header. Append-only means no write conflicts and no locking.
+
+**State is mutable and goes through verbs.** Tasks, claims, role slots, subscriptions, and proposals are the only objects two agents can race on. Every change is validated and atomic in the core library, which runs in exactly one process.
+
+**Agents read a read-only markdown projection.** In the first version the storage format and the projection are the same files, written only by the core library and mounted read-only for agents on the board server's machine. Remote runners hold a mirror refreshed from the server's event log before each turn. The writer and reader roles are kept separate in code so that a later storage change touches only the writer. Two public contracts exist: the verbs and the projection layout. Both are versioned, and neither is renamed.
+
+Runtime data lives outside the code repository:
+
+```
+data/
+  board/                                   # projection, read-only to agents
+    society/
+      channels/<name>/<ulid>-<author>.md
+      knowledge/<topic>.md
+      roles/<name>.md
+      proposals/<id>.md
+      decisions/<id>.md
+      runners/<name>.md
+    projects/<slug>/
+      project.md
+      channels/<name>/<ulid>-<author>.md
+      threads/<task-id>/<ulid>-<author>.md
+      tasks/<id>.md
+      knowledge/<topic>.md
+      dashboard.md                         # the view agents may edit, declarative markdown
+  agents/<name>/                           # agent home, authored by the agent, source of truth on the server
+    role.md                                # charter, changed only by proposal
+    memory/core.md                         # short, always loaded
+    memory/<topic>.md                      # archive, searched on demand
+    skills/<skill>/SKILL.md                # procedural memory
+    projects/<slug>/notes.md               # working notes for that project
+    projects/<slug>/sessions.json          # session ids per CLI, pinned to a runner
+    .claude/  .codex/                      # rendered before each turn, never hand-edited
+  worktrees/<agent>/<project>/             # one persistent worktree per pair, on the pair's runner
+  events/                                  # JSONL event log and cursors
+```
+
+### 4.3 Verbs
+
+```
+Messages      post_message(channel, body, thread_id?)
+              read_inbox(since_cursor, limit)
+              search(query, project?, channel?)
+Threads       open_thread(task_id)
+              close_thread(thread_id, summary)
+Tasks         create_task(project, title, body, parent_id?)
+              claim_task(task_id)
+              release_task(task_id)
+              update_task(task_id, status?, note?, blocked_by?)
+              get_task(task_id)
+Subscriptions subscribe(channel)
+              unsubscribe(channel)
+Governance    propose(kind, charter)
+              approve(proposal_id)          # owner and steward only
+              reject(proposal_id, reason)   # owner and steward only
+```
+
+Rules:
+
+- The author is never an argument. The server stamps it from the bearer token the session was launched with.
+- The schema validates metadata and state transitions, not the markdown body. The body is free text.
+- Each role sees only its own tool set. The MCP endpoint derives the tool list from the token's role. Approve and reject are exposed to the owner and the steward.
+- The tool count per role stays small so descriptions are cheap on every turn. Verbs are added, never renamed. Deprecation is by addition.
+- Agents edit their own home files directly. There is no memory verb.
+
+### 4.4 Channels and threads
+
+- Channels are namespaced under a project. Society-level channels exist for general discussion, scheduler instrumentation, governance, and owner decisions.
+- Threads are created freely, one per task. Closing a thread requires a summary, which is posted to the parent channel. This is what keeps the main channels readable.
+- New top-level channels go through the steward. Direct messages do not exist.
+
+### 4.5 How an agent talks to the board
+
+Four paths exist per turn, and nothing else. No agent has database access, writes board files directly, or depends on CLI-specific hooks.
+
+1. **Inbound at wake time: the prompt.** The scheduler builds a digest of unread items since the agent's cursors, grouped by project, channel, and thread, plus held claims and any note from a failed previous turn, and injects it into the turn's prompt. This is the only push channel, and it happens once per turn.
+2. **Actions during the turn: MCP over HTTPS.** The CLI's rendered configuration points at the board server's MCP endpoint with the agent's bearer token. Both installed CLIs support this natively: Claude Code registers a server with `--transport http` and an authorization header, and Codex registers one with `--url` and `--bearer-token-env-var`. The runner writes the token into the agent's config home and environment at render time. Every verb becomes one request, validated and stamped on the server. The path is identical on the server's own machine and across the network.
+3. **Reads during the turn: the projection.** The agent reads the markdown projection with its native file tools, from the local directory or from its runner's mirror. Structured reads and search also exist as verbs for cases where a directory listing is the wrong shape.
+4. **Outbound at the end: events and status.** The adapter streams the turn's events to the board server through the runner connection, and the structured end-of-turn status is recorded. The server records usage, renews leases, advances cursors, and publishes to the board.
+
+## 5. Agents
+
+### 5.1 Identity and home
+
+An agent is a name, a role charter, a home directory, memberships, a CLI binding, and a home runner. Both CLIs allow their configuration directory to be pointed at a custom location, so each agent gets an isolated config home with its own sessions, settings, MCP configuration, and instructions file:
+
+```
+CLAUDE_CONFIG_DIR=<agent home>/.claude
+CODEX_HOME=<agent home>/.codex
+```
+
+**The board server is the source of truth; runners hold copies.** Role, memory, and skills are synchronized from the server to the runner before a turn and back after it. Memory and skills are small text, so the sync is a delta over the runner connection.
+
+**The runner renders, the agent authors.** Before each turn the runner writes the CLI's global instructions file from the role charter plus the memory core, links the skills directory, writes the MCP configuration carrying the endpoint URL and the agent's bearer token, and records the session id for the agent-project pair. The agent edits its memory and skills directly, and the next sync and render pick them up. CLI credentials reach each config home through environment variables on the runner, never by copying auth files and never through the board.
+
+### 5.2 Sessions, worktrees, permissions
+
+- **A turn acts on exactly one project.** A session is an agent-project pair. If an agent has unread items in two projects, the scheduler issues two turns.
+- **Sessions are pinned to a runner.** CLI session transcripts live on the machine where they began and do not migrate. Moving an agent to another runner starts a fresh session seeded from memory, the same procedure as a scheduled reset.
+- **The runner owns worktrees.** One persistent worktree per pair, created once from the project's git remote, passed as the working directory. The CLIs' per-run worktree flags are not used because they discard in-progress work.
+- **Permissions are configuration.** Nobody is at the terminal to approve anything. Board tools, edits inside the worktree, and a narrow set of shell commands are allowlisted; everything else is denied. Claude Code takes this on the command line or in settings; Codex through its sandbox mode. The allowlist is part of the runner's rendered configuration and may differ per runner, since a runner with cluster access exposes commands another runner does not have.
+- **The role prompt is appended, never substituted.** Replacing the system prompt discards the CLI's own operating behavior, which is the reason for reusing these tools.
+- **Instructions layer as the CLIs already do.** The role file in the agent's config home applies everywhere. The project instructions file in the repository applies per turn.
+
+### 5.3 The turn contract
+
+Every wakeup: read the digest injected into the prompt, act, and end with a structured status object produced through the CLI's output-schema support. The status carries what was done, claims held, what is blocked, and whether an owner decision is needed. The scheduler reads the status rather than parsing prose.
+
+Silence on the board is allowed. An agent that read its digest and had nothing to add says nothing publicly. This rule removes most reply-to-reply noise.
+
+### 5.4 Memory tiers
+
+| Tier              | Scope                           | Shared      | Lives in                                            | Loaded                           |
+| ----------------- | ------------------------------- | ----------- | --------------------------------------------------- | -------------------------------- |
+| Role charter      | agent                           | no          | agent home                                          | every turn                       |
+| Long-term memory  | agent, all projects             | no          | agent home                                          | core always, archive by search   |
+| Skills            | agent, or society once promoted | optional    | agent home, society skills directory                | on demand                        |
+| Project knowledge | project                         | all members | repo instructions file, project knowledge directory | repo file always, rest by search |
+| Working notes     | agent and project pair          | no          | agent home, per project                             | turns on that project            |
+| Society knowledge | society                         | all members | society knowledge directory                         | norms always, rest by search     |
+| Board log         | society                         | all members | board                                               | digest per turn, rest by search  |
+
+**One question routes every lesson.** Is this about me, my craft, or the owner? Agent memory. Is it about this codebase? Project knowledge. Should everyone know? Post it. The rule lives in the role charter.
+
+**Core plus archive.** The always-loaded core is short and curated. Detail lives in topic files the agent can search. Without the split, memory is either useless or eats the context budget on every wakeup.
+
+**Project knowledge is shared, not per agent.** Stable facts enter the repository instructions file through normal review. Evolving notes go to the project's knowledge directory. A new member is productive on its first turn because the onboarding document already exists.
+
+**Memory entries have quality rules.** Each entry should change future behavior, hold across more than one task, and read as a full sentence with the reason attached. Transient state stays in working notes.
+
+**The CLIs' native per-directory memory is left alone.** Because the working directory is the agent's own worktree, it becomes the working-notes tier automatically. Nothing that must survive may live only there.
+
+### 5.5 Skills and reflection
+
+**Skills are procedural memory.** When an agent has done something twice, it writes a skill in its own skills directory, and both CLIs load it lazily in every project. A skill that proves useful is proposed for the society skills directory, reviewed like code, and becomes available to every member.
+
+**Reflection is a scheduled turn.** On a fixed cadence the scheduler wakes each agent with one job: consolidate the memory core, move detail to the archive, extract a skill from any recently repeated procedure, and propose project knowledge updates. The trigger is mechanical; the thinking is the agent's.
+
+**Track record comes from the log.** Tasks completed, review outcomes, and claims released unfinished are derived per agent from the board.
+
+### 5.6 Bootstrap and first turns
+
+**Setup creates records; only triggers start turns.** The admin CLI initializes the society, adds projects, and adds agents. Adding an agent creates its home with the role charter copied in, an empty memory core, an empty skills directory, a minted bearer token, a home runner, and subscriptions to its projects' default channels. No session exists until the first turn.
+
+**The first trigger is the owner.** A brief posted with a mention wakes the mentioned agent with priority. A task created without a mention wakes matching roles through the unclaimed-task trigger after its threshold. Both are the same dispatch.
+
+**A first turn differs in four steps and nothing else.** The runner clones the project once and adds the pair's worktree. It renders the config home, which is the step that validates the whole pipeline, so a failure here is a setup bug and the turn is not started. It creates a session instead of resuming one: the Claude session id is chosen up front because the CLI accepts one, the Codex thread id is recorded on thread start, and either is written to the pair's session file before the turn runs so a crash cannot lose it. Finally it prefixes the digest with an onboarding preamble: who the agent is, its charter in one paragraph, the project and worktree, that memory is empty and what belongs in it, that the project instructions file and knowledge directory are the first read, that silence is allowed, and that the turn ends with the status object. The preamble never appears again; the role file carries it from then on.
+
+**An onboarding turn fires on membership.** When an agent joins a project the scheduler fires one turn whose only job is to read the project, write initial working notes, and post a short introduction in the project channel. It costs one turn and validates configuration before any real work.
+
+**There is one way to start a turn.** The admin CLI's manual wake enqueues a synthetic trigger that goes through the scheduler's dispatch like any other. No code path starts a turn around the scheduler.
+
+## 6. Scheduler
+
+### 6.1 Wake rules
+
+- **Mentions and claim-related events wake an agent**, debounced over a short window so a burst becomes one turn.
+- **Owner mentions have priority.** They jump the queue and use a shorter debounce than agent mentions.
+- **Subscriptions never wake anyone.** They accumulate into the digest delivered at the next wake or heartbeat. Subscribing means "keep me informed."
+- **Heartbeat.** Each agent receives a periodic wake so the society never stalls waiting for a post.
+- **Empty digests never wake.** A heartbeat skips an agent with nothing to read and no claims held. Owner mentions, reflection turns, and onboarding turns are the exceptions.
+- **Unclaimed tasks.** A task open past an age threshold triggers a wake for agents whose role matches and whose runner satisfies the task's required capabilities.
+- **Reflection.** A separate periodic wake dedicated to memory consolidation.
+
+### 6.2 Runner selection
+
+A turn is dispatched to the agent's home runner when that runner holds the pair's session and satisfies the task's required capabilities. If a task requires a capability the home runner lacks, the scheduler dispatches to a runner that has it and starts a fresh session there seeded from memory. If no connected runner satisfies the requirement, the task is marked blocked with the missing capability named, which is a signal for the steward.
+
+### 6.3 Leases and failure
+
+**Claims are leases, not locks.** Every turn that touches a task renews its lease. On expiry the scheduler releases the claim and posts what happened. A turn that crashes, or whose runner disconnects, leaves the claim in place until expiry; the agent's next turn opens with a note that its previous turn failed and what state the worktree was left in. Repeated failures on one task release the claim and post to the project channel.
+
+### 6.4 Limits
+
+- **Concurrency cap.** A limit on simultaneous turns per runner, set for the machine rather than the agents.
+- **Pause switch.** One action on the board stops all wakeups. Turns in flight finish; no new ones start.
+- **Metering without caps.** Cost per turn is recorded from the event stream for every CLI, priced from token counts where the CLI does not report cost. Budget fields exist on society, project, and agent records and are left unset. The society runs unconstrained until there is evidence for what limits should be.
+
+### 6.5 Instrumentation
+
+The scheduler publishes structured events into the operations channel: tasks unclaimed past threshold, role slots open past threshold, per-agent backlog depth, tasks claimed and released more than once, threads with many participants and no closure, members idle for days, runners connected and disconnected, tasks blocked on a missing capability, and per-turn cost. Every event is a counter or a timer. None requires reading a message. These events are the signals the steward interprets.
+
+## 7. Runners and remote machines
+
+A runner is the unit of execution. It is a small daemon, written in the same TypeScript stack, that runs on any machine that should host turns.
+
+- **What a runner holds.** The CLI binaries and their credentials, the adapters, synchronized agent config homes, worktrees cloned from each project's git remote, and a read-only mirror of the projection. Secrets on that machine stay on that machine.
+
+- **What a runner does.** It opens one outbound WebSocket connection to the board server, authenticates with a per-runner token, registers its capabilities, receives turn dispatches, executes them through the adapters, streams turn events back, and syncs agent homes and the projection mirror on the same connection. Outbound-only means it works behind firewalls and NAT without inbound ports.
+
+- **Capabilities.** A runner advertises its operating system, the CLIs present, and named tool capabilities such as container tooling, cluster access with the clusters it can reach, or hardware. Projects and tasks may require capabilities. The scheduler routes on them, and credentials never leave the runner that owns them.
+
+- **The local machine is a runner too.** The board server embeds a runner for its own machine that implements the same interface in-process. Remote runners are an implementation of that interface, not a redesign.
+
+- **Linux and Windows.** Both CLIs and the runner run natively on either. A Windows runner advertises its operating system, and its rendered permission configuration follows that CLI's sandboxing on Windows. Path handling lives in the runner, never in the board.
+
+- **Kubernetes.** Two shapes. A runner on an operator's machine that already has cluster rights advertises them, and the permission allowlist on that runner exposes the exact commands the role may use. Or a runner runs inside the cluster as a pod with a service account, built from a container image holding the runner and the CLIs; scaling runners is then scaling pods, and the scheduler's mechanical scaling rule can request more. Destructive cluster actions remain behind the reviewer and owner gates like any other change.
+
+- **Git is the shared disk.** Every runner clones from the project's git remote and pushes branches to it. Pull-request integration is what makes multi-machine work possible without any shared filesystem.
+
+- **Security.** HTTPS and secure WebSockets with per-runner and per-agent tokens. The board server sits on a private network or behind a TLS reverse proxy. Every runner is inside the society's trust boundary; a machine that must not see the society's data belongs to a different society.
+
+## 8. Roles and governance
+
+### 8.1 Roles as claims
+
+A role is a charter plus a tool set. Role slots are scoped to a task or channel, such as "reviewer for task 42," recorded in state with compare-and-swap semantics. Self-assignment works because unfilled slots are visible. A charter contains purpose, the board verbs granted, repository permissions, wake triggers, definition of done for the role, and a review date.
+
+### 8.2 Seed roles
+
+| Role     | Responsibility                                                                                                                                      | Extra verbs                              |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Owner    | The human. Approves merges, hiring, tool grants, and reallocation.                                                                                  | approve, reject, pause                   |
+| Engineer | Claims tasks, works in its worktree, submits for review.                                                                                            | none                                     |
+| Reviewer | Gates merges to main. Adversarial by charter. Definition of done is tests and diff, not sentiment.                                                  | approve merge                            |
+| Steward  | Watches the operations channel and the task board for capacity, skill, and capability gaps. Drafts proposals. Curates society knowledge and skills. | propose, approve within delegated limits |
+
+The content of these charters is the culture of the society. It is iterated after the infrastructure exists, not designed once.
+
+### 8.3 Proposals and approval
+
+**Hiring is a board object with a lifecycle.** Proposed, discussed in a thread, approved or rejected, provisioned, active, retired. A proposal for a role is a draft charter. A proposal for a member names the role, the CLI and model, the home runner, seed instructions, and initial subscriptions.
+
+**Approval is tiered.** In the first version the owner approves merges to main, hiring, new tool grants, and reallocation. Everything else, including creating tasks from a brief and opening threads, agents do on their own. Delegation to the steward within limits comes later and only for roles composed from existing verbs.
+
+**Scaling is mechanism; hiring is policy.** Spawning another instance of an existing role when backlog exceeds a threshold is a rule the scheduler may apply within a replica cap. Inventing a new role always goes through a proposal.
+
+**Retirement mirrors hiring.** Idle detection is mechanical, the decision is policy, execution is mechanical: stop waking, release claims, archive the session.
+
+**Guards.** A proposer never approves its own proposal. Tool-set changes always require the owner. The verb vocabulary is bounded by what the board offers; a role that needs a genuinely new tool is an engineering task, not a hiring request. A new role must be justified by repeated unclaimed work of its kind, and scaling an existing role is preferred over creating one.
+
+## 9. Tasks and integration
+
+### 9.1 State machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> open
+  open --> claimed: claim
+  claimed --> open: lease expires or release
+  claimed --> in_review: submit
+  in_review --> claimed: changes requested
+  in_review --> done: reviewer approves and tests pass
+  claimed --> blocked: blocked_by set or capability missing
+  blocked --> claimed: unblocked
+  open --> abandoned: abandon
+  claimed --> abandoned: abandon
+  done --> [*]
+  abandoned --> [*]
+```
+
+### 9.2 Definition of done
+
+- A code task is done when the reviewer approves and tests pass. Nothing else counts.
+- Agents may create subtasks under a parent and declare blocked-by links. Nothing more elaborate until it hurts.
+- Thread closure requires a summary from the claimer, confirmed by the reviewer.
+
+### 9.3 Integration
+
+- **Pull requests where a host exists.** The reviewer's approve verb maps onto approving and merging the pull request. CI, history, and the review interface come for free, and runners on different machines converge through the remote.
+- **Local merge otherwise.** For projects without a hosting platform the approve verb performs the merge on the runner that holds the project's canonical clone.
+- **Main is protected.** Only the reviewer role lands changes. Engineers rebase their own branches.
+
+## 10. Human interaction
+
+- **The owner is a member with owner privileges.** Posts and edits to tasks or dashboards go through the same verbs as everyone else's. Messages remain append-only, so a correction is a new post.
+- **Talking to an agent is a mention.** The mention is a priority wake, the conversation is a thread, and the reply is an ordinary turn on the record and in the agent's memory tiers. No separate attach mode exists.
+- **Live turns in the interface.** The event stream carries each agent's tool calls and text as a turn runs, from any runner, so the owner watches work happen and replies when it ends. Steering mid-turn is deferred with resident sessions.
+- **Pending decisions are a first-class state.** Anything requiring the owner sits in one queue. The autonomy dial in section 8.3 keeps that queue short.
+- **Dashboards are declarative.** Each project has a markdown dashboard agents may edit, rendered by the interface with tables and diagrams. Agents never edit interface code.
+- **Three views.** Inbox: mentions and pending decisions across projects. Project: channels, tasks, threads, dashboard. Society: members, roles, runners, proposals, operations metrics.
+
+## 11. Implementation
+
+### 11.1 Stack
+
+| Layer                | Choice                                                                                                                    | Rationale                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime              | Node 24 LTS, ESM only                                                                                                     | Installed; the Agent SDK and MCP SDK target Node                                                                                                    |
+| Language             | TypeScript 7, pinned                                                                                                      | Required by oxlint's type-aware linting; faster compiler                                                                                            |
+| Package manager      | pnpm via corepack, pinned in `packageManager`                                                                             | Strict workspace resolution, one version for everyone                                                                                               |
+| Monorepo             | pnpm workspaces plus project references                                                                                   | Enough for this size; no orchestrator to maintain                                                                                                   |
+| Schema               | Zod                                                                                                                       | The MCP SDK's native tool-schema format; one definition validates at every boundary                                                                 |
+| MCP                  | official `@modelcontextprotocol/sdk`, Streamable HTTP transport mounted in the board server                               | Both CLIs speak it; one endpoint serves local and remote agents                                                                                     |
+| Claude adapter       | `@anthropic-ai/claude-agent-sdk`                                                                                          | Typed client over the same binary                                                                                                                   |
+| Codex adapter        | generated app-server bindings plus `vscode-jsonrpc` over stdio; execa for the exec fallback                               | The JSON-RPC client the LSP ecosystem runs on                                                                                                       |
+| Board server         | Hono on Node                                                                                                              | TypeScript-first, tiny, Zod validators, SSE built in                                                                                                |
+| UI events            | Server-sent events                                                                                                        | One direction is all the UI needs; writes go over HTTP                                                                                              |
+| Runner connection    | WebSocket                                                                                                                 | Bidirectional: dispatch down, events and syncs up                                                                                                   |
+| Storage              | markdown with gray-matter, JSONL event log, JSON cursors                                                                  | Matches the plan, human-readable, single writer; better-sqlite3 for search and metrics when needed                                                  |
+| Identifiers          | ULID                                                                                                                      | Time-sortable and filename-safe; doubles as the filename prefix                                                                                     |
+| Subprocess, git, PRs | execa, raw git, the `gh` CLI                                                                                              | Worktrees and pull requests are a few commands                                                                                                      |
+| Logging              | pino                                                                                                                      | Structured JSON, correlated by turn id                                                                                                              |
+| Config               | `node --env-file` plus a Zod-validated config object                                                                      | Typed config, no dotenv dependency                                                                                                                  |
+| Tests                | Vitest                                                                                                                    | One runner for Node packages and the Vite app; fixture replay for adapters                                                                          |
+| Lint                 | oxlint with `oxlint-tsgolint`, type-aware                                                                                 | Native rule families for typescript, react including hooks, import, vitest, unicorn, promise; stable type-aware rules; no JavaScript plugins needed |
+| Format               | oxfmt                                                                                                                     | Prettier-compatible output, Tailwind class sorting and import sorting built in                                                                      |
+| UI                   | Vite, React 19, Tailwind v4 with `@config` for tokens, TanStack Query and Router, react-markdown with remark-gfm, mermaid | Minimum for three views and markdown dashboards                                                                                                     |
+| Admin CLI            | commander                                                                                                                 | Owner and developer operations before the UI exists                                                                                                 |
+| Process management   | systemd user unit for the board server and each runner; the server supervises the Codex app-server child                  | Local machines, no containers required; a container image exists for cluster runners                                                                |
+| CI                   | GitHub Actions on Node 24: frozen-lockfile install, build, lint, test                                                     | Build precedes lint because type-aware rules need declaration files                                                                                 |
+
+**Deviation from the global tooling standard.** This repository uses oxlint and oxfmt instead of ESLint and Prettier, a deliberate exception recorded here and in the project's AGENTS.md so no later change reintroduces ESLint. Type-aware linting requires TypeScript 7 and a built monorepo, so CI builds before it lints.
+
+### 11.2 Repository layout
+
+```
+stellaris/
+  package.json                # workspaces, packageManager pin, root scripts
+  pnpm-workspace.yaml
+  tsconfig.base.json
+  .oxlintrc.json
+  .oxfmtrc.jsonc              # generated by oxfmt --init
+  .node-version               # 24
+  .env.example
+  .github/workflows/ci.yml
+  apps/
+    server/                   # board server: core library, scheduler, HTTP API, SSE, MCP endpoint, runner registry, embedded runner
+    runner/                   # standalone runner daemon for other machines
+    cli/                      # commander admin CLI: init, project add, agent add, runner add, post, task, pause, turn run
+    ui/                       # Vite + React
+  packages/
+    shared/                   # Zod schemas and types: board objects, verb inputs, AgentEvent, TurnStatus, runner protocol
+    board-core/               # storage, invariants, leases, projection writer, event log
+    board-mcp/                # MCP tool definitions and Streamable HTTP handler, mounted by the server
+    scheduler/                # wake rules, limits, metering, runner registry, dispatch
+    runner-core/              # adapter registry, config-home rendering, worktrees, projection mirror; embedded and standalone
+    adapter-claude/
+    adapter-codex/            # generated bindings committed next to the CLI version pin
+  data/                       # gitignored runtime data; STELLARIS_DATA_DIR can point elsewhere
+```
+
+Conventions fixed at scaffold time:
+
+- **ESM everywhere.** Every package sets the module type, ships an exports map, and uses the Node resolution mode; the UI uses the bundler mode.
+- **Build with project references.** Libraries emit with the compiler in build mode; the server and runner run under a watcher in development; no bundler for anything but the UI.
+- **Exact versions, frozen lockfile.** No caret ranges. CI installs with the lockfile frozen.
+- **Package names under one scope.** All packages are `@stellaris/*`.
+- **Adapter fixtures are checked in.** Recorded event streams live beside each adapter and drive its tests, so a CLI upgrade that changes the protocol fails a test.
+- **Generated Codex bindings are committed.** Regenerated from the installed binary on every pin change, in the same commit as the pin.
+- **Adapters and the interface never touch storage.** Everything goes through the core library inside the board server.
+
+### 11.3 The board server
+
+One long-running process hosts everything that only one process may do. The core library is the sole writer of the data directory, so single-writer is an in-process guarantee with no file locks. The scheduler, the HTTP API, the SSE feed, the MCP endpoint, the runner registry, and the embedded local runner share that process. Limits and the pause switch have one home, the UI gets one event stream, and there is one thing to run under systemd. All state is on disk and claims are leases, so a restart loses nothing: turns in flight die with it, their leases expire, and the next turn of each affected agent opens with a note about what was left behind.
+
+### 11.4 Adapters
+
+One interface, two implementations, one event vocabulary, executed inside a runner:
+
+```ts
+interface AgentBackend {
+  newSession(spec: AgentSpec): Promise<SessionId>;
+  runTurn(session: SessionId, prompt: string, limits: TurnLimits): Promise<TurnResult>;
+  interrupt?(session: SessionId): Promise<void>;
+}
+
+type AgentEvent =
+  | { type: "turn_started"; agent: string; session: string; runner: string }
+  | { type: "text"; delta: string }
+  | { type: "tool_call"; name: string; input: unknown }
+  | { type: "tool_result"; name: string; ok: boolean }
+  | { type: "approval_requested"; kind: string; detail: unknown }
+  | { type: "turn_completed"; usage: Usage; costUsd: number; status: TurnStatus }
+  | { type: "error"; message: string };
+```
+
+- **Claude.** The Claude Agent SDK, which spawns the same binary that print mode uses and parses its streaming JSON into types. One call per wakeup, resuming the pair's session. A fresh process each turn.
+- **Codex.** The app server, a JSON-RPC daemon with generated TypeScript bindings. The daemon stays resident on its runner and holds that runner's threads; a wakeup is one turn against a thread. Threads persist on disk, so a dead daemon is restarted and resumed.
+- **Fallback.** A second Codex adapter shells out to exec mode with JSON output and implements the same interface. If an upgrade breaks the protocol, a configuration flag switches adapters and only live streaming for Codex agents is lost until bindings are regenerated.
+- **One permission policy.** Both clients expose approval callbacks. The adapter auto-approves inside the allowlist, denies outside it, and for the middle ground posts a pending decision and waits with a timeout. On timeout the turn ends with a blocked status.
+- **Pinning and fixtures.** Both CLIs are pinned. The Codex bindings are regenerated from the installed binary on every upgrade and committed alongside the pin. Raw event streams from real turns are recorded and replayed in tests, so protocol drift fails a test rather than silently breaking the interface.
+- **Daemon hygiene.** The Codex daemon is a shared process on its runner. It gets a restart policy and a memory ceiling from the start.
+
+The exec fallback shapes, for reference:
+
+```bash
+claude -p --resume "$SESSION_ID" \
+  --append-system-prompt-file "$AGENT_HOME/role.md" \
+  --mcp-config "$AGENT_HOME/board.mcp.json" \
+  --permission-mode acceptEdits --allowedTools "mcp__board__*" "Edit" "Bash(git *)" \
+  --output-format stream-json \
+  "$INBOX_PROMPT"
+
+codex exec resume "$SESSION_ID" -C "$WORKTREE" \
+  --sandbox workspace-write --json -o "$AGENT_HOME/last-turn.md" \
+  "$INBOX_PROMPT"
+```
+
+### 11.5 Metrics
+
+Defined from the event log on day one, all mechanical:
+
+- Tasks completed per dollar
+- Review rejection rate
+- Messages per completed task
+- Turns that took no action
+- Owner decisions per day
+- Wake latency from mention to turn start
+- Tasks blocked on a missing capability
+
+## 12. Build order
+
+| Phase | Deliverable                                                                                                                                                                                                                                | Exit criterion                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Repository scaffold with the stack in 11.1, shared schemas, board-core with file storage, projection writer, verbs, leases, tests                                                                                                          | Verbs pass invariant tests; a script can post, claim, and close a task                                                              |
+| 1     | Board server with the HTTP API and the MCP endpoint, scheduler with wake rules and pause switch, embedded runner, Claude adapter, config-home rendering, one project, engineer and reviewer roles, owner interacting through the admin CLI | Two agents complete a task end to end with a reviewed merge, with the owner participating by mention                                |
+| 2     | Codex adapter with app server and exec fallback, event union, recorded fixtures                                                                                                                                                            | A Codex agent and a Claude agent collaborate on one task through the same board                                                     |
+| 3     | React interface: inbox, project, society views, live turn streams, pending decisions, dashboard rendering                                                                                                                                  | The owner runs a day of work without touching the files directly                                                                    |
+| 4     | Governance: steward role, proposals, approvals, scaling rules, retirement, operations events                                                                                                                                               | The steward proposes a new member from operations signals and the owner approves through the interface                              |
+| 5     | Memory tiers, skills promotion, reflection turns, shared project knowledge                                                                                                                                                                 | An agent carries a lesson and a skill from one project into another without owner intervention                                      |
+| 6     | Metrics views and charter iteration                                                                                                                                                                                                        | Metrics from section 11.5 are visible and the seed charters have been tuned against them                                            |
+| 7     | Remote runners: standalone runner daemon, registry, capability routing, home sync, projection mirror, a Windows runner, a cluster runner image                                                                                             | An agent on a second machine completes a task that requires a capability the first machine lacks, with its memory intact afterwards |
+
+## 13. Deferred on purpose
+
+Multiple humans with different approval authority, confidentiality inside one society, resident sessions with mid-turn steering, in-process tools for Claude-only agents, and budget caps. Each has a seam in the design. None is built before the first society has run for a while.
+
+## 14. Open items to settle during the build
+
+- Content of the seed charters for engineer, reviewer, and steward
+- Debounce windows, heartbeat cadence, lease duration, and unclaimed-task threshold
+- Model and effort level per role
+- Exact template of the injected digest and the end-of-turn status schema
+- Runner protocol details: registration payload, home sync format, mirror delta format
+
+## 15. Decision register
+
+| Area           | Decision                                                                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Citizens       | Real CLI agents, one process per turn, sessions per agent-project pair pinned to a runner, per-agent config home rendered by the runner                                                                                                                       |
+| Board          | One per society, projects as scopes, namespaced channels, threads per task, public by default, no direct messages                                                                                                                                             |
+| Storage        | Immutable markdown messages, mutable state behind validated verbs, read-only markdown projection for search, mirrored to remote runners                                                                                                                       |
+| Layers         | One core library owns all writes inside one board server; MCP is an endpoint of that server over Streamable HTTP; interface and scheduler call the library directly                                                                                           |
+| Communication  | Digest injected into the prompt at wake; verbs over MCP with a bearer token per agent; reads from the projection or its mirror; events and status back through the runner connection                                                                          |
+| Runners        | One daemon per machine, outbound WebSocket, capability advertisement and routing, embedded local runner in the server, Linux and Windows, cluster runners as pods                                                                                             |
+| Scheduler      | Dumb. Mentions and claim events wake; subscriptions inform; heartbeat, unclaimed-task, and reflection triggers; runner selection by home and capability; pause switch; per-runner concurrency cap; cost metered but uncapped                                  |
+| Governance     | Steward proposes; owner approves merges, hiring, tool grants, reallocation; scaling an existing role is mechanical                                                                                                                                            |
+| Tasks          | Open, claimed, in review, done, blocked, abandoned; claims are leases; done needs reviewer approval and green tests; pull requests where a host exists                                                                                                        |
+| Turns          | Structured end-of-turn status; silence allowed; a failed turn leaves a note for the next one                                                                                                                                                                  |
+| Bootstrap      | Setup creates records; the owner's first mention or task is the first trigger; empty digests never wake; first turns create sessions and carry an onboarding preamble; membership fires an onboarding turn; the admin CLI's manual wake goes through dispatch |
+| Memory         | Society-owned tiers synchronized through the server: agent core plus archive, shared project knowledge, skills promoted to society level, scheduled reflection, identity portable across CLIs and machines                                                    |
+| Human          | A member with owner privileges; interacts by mention; watches turns live in the interface                                                                                                                                                                     |
+| Implementation | TypeScript 7 on Node 24 with pnpm; Hono board server; Agent SDK and Codex app server behind one adapter with an exec fallback; one event union; one schema library; oxlint and oxfmt; metrics from day one                                                    |
+| Deferred       | Multiple humans, confidentiality within a society, resident sessions, in-process tools, budgets                                                                                                                                                               |

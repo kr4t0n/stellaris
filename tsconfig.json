@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/board-core" },
+    { "path": "packages/board-mcp" },
+    { "path": "packages/scheduler" },
+    { "path": "packages/runner-core" },
+    { "path": "packages/adapter-claude" },
+    { "path": "packages/adapter-codex" },
+    { "path": "apps/server" },
+    { "path": "apps/runner" },
+    { "path": "apps/cli" },
+    { "path": "apps/ui" }
+  ]
+}

@@ -1,5 +1,7 @@
 import { SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
 import {
+  currentStage,
+  mayHoldStage,
   OpsSignalSchema,
   USER_NAME,
   USER_ROLE,
@@ -26,7 +28,8 @@ import { decideWake } from "./wake.js";
 /** What the scheduler needs from a runner. */
 export interface TurnRunner {
   runTurn(dispatch: TurnDispatch): Promise<TurnRecord>;
-  mergeTask(project: Name, taskId: Ulid): Promise<void>;
+  /** Runs a completing task's completion effect and records the outcome on the board. */
+  completeTask(project: Name, taskId: Ulid): Promise<void>;
 }
 
 export interface SchedulerLog {
@@ -154,7 +157,7 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
 ]);
 
 const UNCLAIMED_TRIGGER = "unclaimed_task";
-const CLAIM_TRIGGER = "claim_event";
+const HEARTBEAT_TRIGGER = "heartbeat";
 const OPS_TRIGGER = "ops_event";
 const USER_POST_TRIGGER = "user_post";
 
@@ -166,6 +169,11 @@ function stringArray(value: unknown): string[] {
 
 function stringOf(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/** A task still being worked: its current stage counts toward load, gaps, and waiting. */
+function inPlay(task: Task): boolean {
+  return (task.status === "open" || task.status === "claimed") && !task.completing;
 }
 
 function iso(ms: number): string {
@@ -194,7 +202,9 @@ export class Scheduler {
   private readonly log: SchedulerLog;
   private readonly pending = new Map<string, PendingTurn>();
   private readonly running = new Map<string, Promise<void>>();
-  private readonly merging = new Set<Promise<void>>();
+  /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
+  private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
+  private readonly completing = new Set<Promise<void>>();
   private state: State = StateSchema.parse({
     cursor: null,
     lastHeartbeat: {},
@@ -251,7 +261,7 @@ export class Scheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
-    await Promise.allSettled([...this.running.values(), ...this.merging]);
+    await Promise.allSettled([...this.running.values(), ...this.completing]);
   }
 
   /** One pass: consume events, check heartbeats and unclaimed tasks, run operations, sweep leases, dispatch. */
@@ -271,7 +281,7 @@ export class Scheduler {
       }
       if (!paused) {
         await this.checkHeartbeats(now);
-        await this.checkUnclaimedTasks(now);
+        await this.checkWaitingStages(now);
         await this.checkReflections(now);
         if (
           this.state.lastOps === null ||
@@ -285,6 +295,7 @@ export class Scheduler {
         await this.board.expireLeases();
         this.lastSweep = now;
       }
+      this.runCompletions();
       if (!paused) {
         this.dispatchReady(now);
       }
@@ -294,9 +305,9 @@ export class Scheduler {
     }
   }
 
-  /** Waits for every running turn and in-flight merge to settle. Used by tests and by stop(). */
+  /** Waits for every running turn and in-flight completion to settle. Used by tests and by stop(). */
   async drain(): Promise<void> {
-    await Promise.allSettled([...this.running.values(), ...this.merging]);
+    await Promise.allSettled([...this.running.values(), ...this.completing]);
   }
 
   private async load(): Promise<void> {
@@ -306,6 +317,14 @@ export class Scheduler {
     this.state = await this.board.readState("scheduler", StateSchema, this.state);
     for (const [key, item] of Object.entries(this.state.pending)) {
       this.pending.set(key, item);
+    }
+    // A completion interrupted by a restart left its task completing, and its event is consumed.
+    for (const project of await this.board.listProjects()) {
+      for (const task of await this.board.listTasks(project.slug)) {
+        if (task.completing) {
+          this.completions.set(task.id, { project: project.slug, actor: USER_NAME });
+        }
+      }
     }
     this.loaded = true;
   }
@@ -353,42 +372,45 @@ export class Scheduler {
         }
         return;
       }
-      case "task.updated": {
+      case "task.created":
+      case "task.advanced":
+      case "task.moved":
+      case "task.planned":
+      case "task.reopened": {
+        const taskId = stringOf(payload["taskId"]);
+        const settled =
+          (event.type === "task.planned" && payload["currentChanged"] !== true) ||
+          (event.type === "task.advanced" && payload["to"] === null);
+        if (taskId !== null && !settled) {
+          await this.wakeStage(taskId, event.actor, now);
+        }
+        return;
+      }
+      case "task.completing": {
         const taskId = stringOf(payload["taskId"]);
         const project = stringOf(payload["project"]);
-        const from = stringOf(payload["from"]);
-        const to = stringOf(payload["to"]);
+        if (taskId !== null && project !== null) {
+          this.completions.set(taskId, { project, actor: event.actor });
+        }
+        return;
+      }
+      case "task.completed": {
+        const taskId = stringOf(payload["taskId"]);
+        const project = stringOf(payload["project"]);
+        const creator = stringOf(payload["createdBy"]);
         if (taskId === null || project === null) {
           return;
         }
-        if (to === "done" || to === "abandoned") {
+        delete this.state.releaseCounts[taskId];
+        if (creator !== null && creator !== event.actor) {
+          await this.wakeCreator(taskId, project, creator, event.actor, now);
+        }
+        return;
+      }
+      case "task.updated": {
+        const taskId = stringOf(payload["taskId"]);
+        if (taskId !== null && payload["to"] === "abandoned") {
           delete this.state.releaseCounts[taskId];
-        }
-        if (to === "in_review") {
-          for (const reviewer of await this.board.membersWithRole(project, "reviewer")) {
-            if (reviewer.name !== event.actor && reviewer.cli !== null) {
-              this.enqueue(
-                reviewer.name,
-                project,
-                {
-                  kind: "claim_event",
-                  from: event.actor,
-                  reason: "task submitted for review",
-                  taskId,
-                },
-                now,
-              );
-            }
-          }
-          return;
-        }
-        if (to === "done") {
-          this.merge(project, taskId);
-          await this.wakeClaimer(taskId, project, event.actor, "task approved", now);
-          return;
-        }
-        if (to === "claimed" && from === "in_review") {
-          await this.wakeClaimer(taskId, project, event.actor, "changes requested", now);
         }
         return;
       }
@@ -549,24 +571,76 @@ export class Scheduler {
     }
   }
 
-  private async wakeClaimer(
+  /**
+   * Entering a stage wakes its named citizen, else its last holder when work returns to it, else
+   * the project's members of its role. An unassigned stage waits for the waiting-stage timer.
+   */
+  private async wakeStage(taskId: Ulid, from: Name, now: number): Promise<void> {
+    let task: Task;
+    try {
+      task = (await this.board.findTask(taskId)).task;
+    } catch {
+      return;
+    }
+    const stage = currentStage(task);
+    if (stage === undefined || task.status !== "open" || task.completing) {
+      return;
+    }
+    const lastHolder = stage.holders.at(-1);
+    const targets =
+      stage.agent !== undefined
+        ? [stage.agent]
+        : lastHolder !== undefined
+          ? [lastHolder]
+          : stage.role !== undefined
+            ? (await this.board.membersWithRole(task.project, stage.role)).map((a) => a.name)
+            : [];
+    for (const name of targets) {
+      const agent = await this.tryReadAgent(name);
+      if (agent === null || !mayHoldStage(agent, task)) {
+        continue;
+      }
+      const charter = await this.board.readRole(agent.role);
+      const scope = this.scopeForProject(agent, charter, task.project);
+      if (scope === null) {
+        continue;
+      }
+      this.enqueue(
+        agent.name,
+        scope,
+        {
+          kind: "stage",
+          from,
+          reason: `stage "${stage.name}" of task ${task.id} "${task.title}" is waiting for you`,
+          taskId: task.id,
+        },
+        now,
+      );
+    }
+  }
+
+  private async wakeCreator(
     taskId: Ulid,
     project: Name,
+    creator: Name,
     from: Name,
-    reason: string,
     now: number,
   ): Promise<void> {
-    try {
-      const { task } = await this.board.findTask(taskId);
-      if (task.claimedBy !== undefined && task.claimedBy !== from) {
-        const agent = await this.tryReadAgent(task.claimedBy);
-        if (agent !== null) {
-          this.enqueue(agent.name, project, { kind: "claim_event", from, reason, taskId }, now);
-        }
-      }
-    } catch (error) {
-      this.log.warn({ taskId, error: String(error) }, "could not resolve task claimer");
+    const agent = await this.tryReadAgent(creator);
+    if (agent === null) {
+      return;
     }
+    const charter = await this.board.readRole(agent.role);
+    const scope = this.scopeForProject(agent, charter, project);
+    if (scope === null) {
+      return;
+    }
+    this.enqueue(
+      agent.name,
+      scope,
+      { kind: "task_done", from, reason: `task ${taskId} you created is done`, taskId },
+      now,
+    );
   }
 
   private async tryReadAgent(name: Name): Promise<Agent | null> {
@@ -630,12 +704,13 @@ export class Scheduler {
     });
   }
 
-  /** Debounce coalesces chatter: mentions, claim events, and bursts of signals. Everything else runs at once. */
+  /** Debounce coalesces chatter: mentions, stage handoffs, and bursts of signals. Everything else runs at once. */
   private debounceFor(trigger: Trigger): number {
     switch (trigger.kind) {
       case "mention":
         return trigger.fromUser ? this.timings.userDebounceMs : this.timings.debounceMs;
-      case "claim_event":
+      case "stage":
+      case "task_done":
       case "ops_event":
         return this.timings.debounceMs;
       case "user_post":
@@ -651,6 +726,9 @@ export class Scheduler {
         continue;
       }
       const charter = await this.board.readRole(agent.role);
+      if (!charter.wakeTriggers.includes(HEARTBEAT_TRIGGER)) {
+        continue;
+      }
       const scopes =
         agent.memberships.length > 0
           ? agent.memberships
@@ -765,22 +843,30 @@ export class Scheduler {
     return latest;
   }
 
-  private async checkUnclaimedTasks(now: number): Promise<void> {
-    const stillOpen = new Set<string>();
+  /**
+   * A current stage without a holder past the threshold wakes the project members who may hold it
+   * and whose charter takes waiting work, once per stage, and is posted as a signal.
+   */
+  private async checkWaitingStages(now: number): Promise<void> {
+    const stillWaiting = new Set<string>();
     for (const project of await this.board.listProjects()) {
-      const open = await this.board.openTasks(project.slug);
-      for (const task of open) {
-        stillOpen.add(task.id);
-        if (this.state.unclaimedSeen[task.id] !== undefined) {
+      for (const task of await this.board.openTasks(project.slug)) {
+        const stage = currentStage(task);
+        if (stage === undefined) {
           continue;
         }
-        const age = now - new Date(task.createdAt).getTime();
+        const key = `${task.id}:${stage.id}`;
+        stillWaiting.add(key);
+        if (this.state.unclaimedSeen[key] !== undefined) {
+          continue;
+        }
+        const age = now - Date.parse(task.stageSince);
         if (age < this.timings.unclaimedTaskMs) {
           continue;
         }
-        this.state.unclaimedSeen[task.id] = iso(now);
+        this.state.unclaimedSeen[key] = iso(now);
         for (const member of await this.board.projectMembers(project.slug)) {
-          if (member.cli === null) {
+          if (member.cli === null || !mayHoldStage(member, task)) {
             continue;
           }
           const charter = await this.board.readRole(member.role);
@@ -792,7 +878,7 @@ export class Scheduler {
             project.slug,
             {
               kind: "unclaimed_task",
-              reason: `task ${task.id} has been open too long`,
+              reason: `stage "${stage.name}" of task ${task.id} has waited too long for a holder`,
               taskId: task.id,
             },
             now,
@@ -800,8 +886,8 @@ export class Scheduler {
         }
         await this.board.publishSignal({
           kind: "unclaimed_task",
-          key: `unclaimed_task:${task.id}`,
-          summary: `task ${task.id} "${task.title}" in ${project.slug} has been open for ${describeDuration(age)}`,
+          key: `unclaimed_task:${key}`,
+          summary: `stage "${stage.name}" of task ${task.id} "${task.title}" in ${project.slug} has waited ${describeDuration(age)} for a holder`,
           value: age,
           threshold: this.timings.unclaimedTaskMs,
           project: project.slug,
@@ -809,9 +895,9 @@ export class Scheduler {
         });
       }
     }
-    for (const id of Object.keys(this.state.unclaimedSeen)) {
-      if (!stillOpen.has(id)) {
-        delete this.state.unclaimedSeen[id];
+    for (const key of Object.keys(this.state.unclaimedSeen)) {
+      if (!stillWaiting.has(key)) {
+        delete this.state.unclaimedSeen[key];
       }
     }
   }
@@ -844,11 +930,6 @@ export class Scheduler {
   private async collectSignals(now: number): Promise<OpsSignal[]> {
     const signals: OpsSignal[] = [];
     const roles = (await this.board.listRoles()).filter((role) => role.name !== USER_ROLE);
-    const takers = roles.filter((role) => role.wakeTriggers.includes(UNCLAIMED_TRIGGER));
-    const reviewers = roles.filter(
-      (role) =>
-        !role.wakeTriggers.includes(UNCLAIMED_TRIGGER) && role.wakeTriggers.includes(CLAIM_TRIGGER),
-    );
     const offered = new Set(
       (await this.board.listRunners())
         .filter((runner) => runner.status === "connected")
@@ -861,46 +942,39 @@ export class Scheduler {
       const members = (await this.board.projectMembers(slug)).filter(
         (member) => member.cli !== null,
       );
-      const open = tasks.filter((task) => task.status === "open").length;
-      const claimed = tasks.filter((task) => task.status === "claimed").length;
-      const inReview = tasks.filter((task) => task.status === "in_review").length;
 
-      for (const role of takers) {
+      const gaps = new Map<Name, number>();
+      for (const task of tasks) {
+        const role = inPlay(task) ? currentStage(task)?.role : undefined;
+        if (role !== undefined && !members.some((member) => member.role === role)) {
+          gaps.set(role, (gaps.get(role) ?? 0) + 1);
+        }
+      }
+      for (const [role, count] of gaps) {
+        signals.push({
+          kind: "role_gap",
+          key: `role_gap:${slug}:${role}`,
+          summary: `${slug} has ${count} stage(s) waiting on the ${role} role and no active ${role}`,
+          value: count,
+          project: slug,
+          role,
+        });
+      }
+
+      for (const role of roles) {
         const count = members.filter((member) => member.role === role.name).length;
-        if (count === 0) {
-          if (open > 0) {
-            signals.push({
-              kind: "role_gap",
-              key: `role_gap:${slug}:${role.name}`,
-              summary: `${slug} has ${open} open task(s) and no active ${role.name}`,
-              value: open,
-              project: slug,
-              role: role.name,
-            });
-          }
+        const load = this.loadFor(role, tasks);
+        if (count === 0 || load === 0) {
           continue;
         }
-        const depth = (open + claimed) / count;
+        const depth = load / count;
         if (depth >= role.backlogThreshold) {
           signals.push({
             kind: "backlog",
             key: `backlog:${slug}:${role.name}`,
-            summary: `${slug}: ${open + claimed} open or claimed task(s) for ${count} ${role.name}(s), depth ${depth.toFixed(1)} at threshold ${role.backlogThreshold}`,
+            summary: `${slug}: ${load} current stage(s) for ${count} ${role.name}(s), depth ${depth.toFixed(1)} at threshold ${role.backlogThreshold}`,
             value: depth,
             threshold: role.backlogThreshold,
-            project: slug,
-            role: role.name,
-          });
-        }
-      }
-      for (const role of reviewers) {
-        const count = members.filter((member) => member.role === role.name).length;
-        if (count === 0 && inReview > 0) {
-          signals.push({
-            kind: "role_gap",
-            key: `role_gap:${slug}:${role.name}`,
-            summary: `${slug} has ${inReview} task(s) in review and no active ${role.name}`,
-            value: inReview,
             project: slug,
             role: role.name,
           });
@@ -992,15 +1066,18 @@ export class Scheduler {
     return signals;
   }
 
-  /** The load a role answers for: open and claimed tasks for task-taking roles, tasks in review for reviewing roles. */
+  /** Current stages a role answers for: those assigned to it, and unassigned ones when it takes waiting work. */
   private loadFor(role: RoleCharter, tasks: readonly Task[]): number {
-    if (role.wakeTriggers.includes(UNCLAIMED_TRIGGER)) {
-      return tasks.filter((task) => task.status === "open" || task.status === "claimed").length;
-    }
-    if (role.wakeTriggers.includes(CLAIM_TRIGGER)) {
-      return tasks.filter((task) => task.status === "in_review").length;
-    }
-    return 0;
+    return tasks.filter((task) => {
+      const stage = inPlay(task) ? currentStage(task) : undefined;
+      if (stage === undefined || stage.agent !== undefined) {
+        return false;
+      }
+      return (
+        stage.role === role.name ||
+        (stage.role === undefined && role.wakeTriggers.includes(UNCLAIMED_TRIGGER))
+      );
+    }).length;
   }
 
   /**
@@ -1126,15 +1203,25 @@ export class Scheduler {
     }
   }
 
-  private merge(project: Name, taskId: Ulid): void {
-    const promise: Promise<void> = this.runner
-      .mergeTask(project, taskId)
-      .catch((error: unknown) => {
-        this.log.error({ project, taskId, error: String(error) }, "merge failed");
-      })
-      .finally(() => {
-        this.merging.delete(promise);
-      });
-    this.merging.add(promise);
+  /** Starts each queued completion once the turn that finished the task's last stage has ended. */
+  private runCompletions(): void {
+    for (const [taskId, item] of this.completions) {
+      if (this.running.has(`${item.actor}/${item.project}`)) {
+        continue;
+      }
+      this.completions.delete(taskId);
+      const promise: Promise<void> = this.runner
+        .completeTask(item.project, taskId)
+        .catch((error: unknown) => {
+          this.log.error(
+            { project: item.project, taskId, error: String(error) },
+            "completion failed",
+          );
+        })
+        .finally(() => {
+          this.completing.delete(promise);
+        });
+      this.completing.add(promise);
+    }
   }
 }

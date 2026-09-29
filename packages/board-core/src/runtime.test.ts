@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { MEMBER_VERBS } from "@stellaris/shared";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, type Actor } from "./index.js";
@@ -25,6 +26,14 @@ describe("Board runtime support", () => {
   async function society() {
     const { board } = await Board.init(dir, { name: "rt" }, { now });
     await board.addProject(USER, { slug: "demo" });
+    for (const role of ["engineer", "reviewer"]) {
+      await board.setRoleCharter(USER, {
+        name: role,
+        purpose: `The ${role} of the test society.`,
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+      });
+    }
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",

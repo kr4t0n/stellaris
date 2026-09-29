@@ -9,11 +9,33 @@ import {
   type TurnRequest,
   type TurnResult,
 } from "@stellaris/runner-core";
+import type { Board } from "@stellaris/board-core";
+import { MEMBER_VERBS } from "@stellaris/shared";
 import { execa } from "execa";
 import type { Hono } from "hono";
 import { z } from "zod";
 
 export const USER = { name: "user", role: "user" } as const;
+
+/**
+ * Roles for the work itself are not seeded; tests that need them write them the way a society
+ * would, by charter.
+ */
+export async function addWorkRoles(board: Board): Promise<void> {
+  await board.setRoleCharter(USER, {
+    name: "engineer",
+    purpose: "Builds what a stage asks for and commits it on the task's branch.",
+    verbs: [...MEMBER_VERBS],
+    wakeTriggers: ["unclaimed_task", "heartbeat"],
+  });
+  await board.setRoleCharter(USER, {
+    name: "reviewer",
+    purpose: "Checks work at gated stages and sends it back when it is unfinished.",
+    verbs: [...MEMBER_VERBS],
+    wakeTriggers: ["heartbeat"],
+  });
+}
+
 export const ULID = /[0-9A-HJKMNP-TV-Z]{26}/;
 
 export function done(summary: string): TurnResult {
@@ -105,24 +127,27 @@ export class ScriptedBackend implements AgentBackend {
       return body;
     };
 
-    // The front desk routes the user's posts: a task for an existing project, or a new project.
+    // The front desk routes the user's posts: a planned task for an existing project, or a new
+    // project; a task it created coming back done is news for the user.
     if (request.spec.agent === "desk") {
+      if (request.prompt.includes("Trigger: task_done")) {
+        await verb("post_message", {
+          channel: "general",
+          body: "The health endpoint is in: its task is done.",
+        });
+        return done("told the user the task is done");
+      }
       if (!request.prompt.includes("Trigger: user_post")) {
         return done("nothing to do");
       }
       if (request.prompt.includes("health endpoint")) {
-        const task = z.object({ id: z.string() }).parse(
-          await verb("create_task", {
-            project: "demo",
-            title: "Add a health endpoint",
-            body: "Requested by the user at the front desk.",
-          }),
-        );
-        await verb("post_message", {
-          channel: "demo/general",
-          body: `@eng-1 please take task ${task.id}: add a health endpoint.`,
+        await verb("create_task", {
+          project: "demo",
+          title: "Add a health endpoint",
+          body: "Requested by the user at the front desk.",
+          stages: [{ name: "build", role: "engineer" }],
         });
-        return done("routed the request to eng-1 as a task on demo");
+        return done("planned the request as a task on demo for its engineers");
       }
       if (request.prompt.includes("new project called api")) {
         await verb("create_project", { slug: "api", name: "Public API" });
@@ -242,47 +267,61 @@ export class ScriptedBackend implements AgentBackend {
       return done("nothing to do");
     }
 
-    // A claim event names the task; a mention carries it in the message body.
+    // A stage wake names the task; a mention carries it in the message body.
     const taskId =
       /Task in question: ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1] ??
       /take task ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1];
     if (taskId === undefined || !ULID.test(taskId)) {
       return done("nothing to do");
     }
+    const git = (...args: string[]) =>
+      execa("git", args, { cwd: request.spec.cwd, env: { ...process.env, ...request.env } });
+    const branch = `task/${taskId}`;
 
+    // The engineer builds on the task's branch; a second pass adds what the review asked for.
     if (request.spec.agent === "eng-1") {
-      if (request.prompt.includes("task approved")) {
-        await verb("close_thread", { thread_id: taskId, summary: "Shipped hello.txt." });
-        return done("closed the thread");
-      }
       await verb("claim_task", { task_id: taskId });
-      await writeFile(path.join(request.spec.cwd, "hello.txt"), "hello from eng-1\n", "utf8");
-      const git = (...args: string[]) =>
-        execa("git", args, { cwd: request.spec.cwd, env: { ...process.env, ...request.env } });
-      await git("add", "hello.txt");
-      await git("commit", "-m", "feat: add hello.txt");
-      await verb("open_thread", { task_id: taskId });
-      await verb("post_message", {
-        channel: "demo/general",
-        body: "Committed hello.txt on my branch.",
-        thread_id: taskId,
-      });
-      await verb("update_task", { task_id: taskId, status: "in_review", note: "ready for review" });
-      return done("submitted hello.txt for review");
+      await git("switch", branch);
+      const file = path.join(request.spec.cwd, "hello.txt");
+      const again = await readFile(file, "utf8").then(
+        () => true,
+        () => false,
+      );
+      if (again) {
+        await writeFile(file, "hello from eng-1\nand a second line\n", "utf8");
+        await git("commit", "-am", "feat: add the second line the review asked for");
+      } else {
+        await writeFile(file, "hello from eng-1\n", "utf8");
+        await git("add", "hello.txt");
+        await git("commit", "-m", "feat: add hello.txt");
+        await verb("open_thread", { task_id: taskId }).catch(() => undefined);
+        await verb("post_message", {
+          channel: "demo/general",
+          body: `Committed hello.txt on ${branch}.`,
+          thread_id: taskId,
+        });
+      }
+      await verb("advance_task", { task_id: taskId, note: again ? "second line added" : "built" });
+      return done(again ? "reworked hello.txt" : "built hello.txt");
     }
 
+    // The reviewer holds the gated stage: it sends the work back once, then approves.
     if (request.spec.agent === "rev-1") {
-      const log = await execa("git", ["log", "--oneline", "agent/eng-1"], {
-        cwd: request.spec.cwd,
-      });
-      if (!log.stdout.includes("feat: add hello.txt")) {
-        throw new Error("reviewer cannot see the engineer's commit");
+      await verb("claim_task", { task_id: taskId });
+      const content = await git("show", `${branch}:hello.txt`);
+      if (content.stdout.split("\n").length < 2) {
+        const task = z
+          .object({ stages: z.array(z.object({ id: z.string() })) })
+          .parse(await verb("get_task", { task_id: taskId }));
+        await verb("update_task", {
+          task_id: taskId,
+          stage: task.stages[0]?.id,
+          note: "add a second line",
+        });
+        return done("sent the task back for a second line");
       }
-      await verb("update_task", {
-        task_id: taskId,
-        status: "done",
-        note: "reviewed the diff, tests not required for a text file",
-      });
+      await verb("advance_task", { task_id: taskId, note: "reviewed the diff" });
+      await verb("close_thread", { thread_id: taskId, summary: "Shipped hello.txt." });
       return done("approved");
     }
     return done("no script");

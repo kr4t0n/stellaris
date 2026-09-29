@@ -3,10 +3,14 @@ import { CliKindSchema } from "./board.js";
 import { TurnExitReasonSchema, TurnStatusSchema, UsageSchema } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 
-/** What caused a wake to be considered. Mentions and claim events wake; subscriptions never do. */
+/**
+ * What caused a wake. `stage`: a stage became current and is the member's to take. `task_done`: a
+ * task the member created is done.
+ */
 export const TriggerKindSchema = z.enum([
   "mention",
-  "claim_event",
+  "stage",
+  "task_done",
   "heartbeat",
   "unclaimed_task",
   "reflection",

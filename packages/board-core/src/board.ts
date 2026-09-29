@@ -4,11 +4,12 @@ import { monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
   AgentSchema,
-  canTransition,
+  currentStage,
   channelRef,
   ChannelProposalSchema,
   DecisionSchema,
   KnowledgeSchema,
+  mayHoldStage,
   MemberProposalSchema,
   MemberSchema,
   MessageFrontmatterSchema,
@@ -28,6 +29,7 @@ import {
   SEED_ROLES,
   SERVER_RUNNER,
   SkillProposalSchema,
+  stageIndex,
   SOCIETY_CHANNELS,
   SOCIETY_SCOPE,
   SocietySchema,
@@ -36,6 +38,7 @@ import {
   type Agent,
   type BoardEvent,
   type ChannelRef,
+  type CompletionEffect,
   type CliKind,
   type Decision,
   type Knowledge,
@@ -45,6 +48,8 @@ import {
   type MessageFrontmatter,
   type Name,
   type OpsSignal,
+  type PlanEditStage,
+  type PlanStage,
   type Project,
   type Proposal,
   type ProposalKind,
@@ -54,10 +59,11 @@ import {
   type Runner,
   type Skill,
   type SkillProposal,
+  type Stage,
+  type StageId,
   type Society,
   type Task,
   type TaskFrontmatter,
-  type TaskStatus,
   type Ulid,
   type VerbInput,
   type VerbName,
@@ -112,6 +118,8 @@ export interface AddProjectInput {
   readonly defaultBranch?: string | undefined;
   readonly channels?: readonly Name[] | undefined;
   readonly requiredCapabilities?: readonly string[] | undefined;
+  readonly defaultPlan?: readonly PlanStage[] | undefined;
+  readonly onDone?: CompletionEffect | undefined;
 }
 
 export interface AddAgentInput {
@@ -220,6 +228,9 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
+/** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
+const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
+
 /** Roles that may add a citizen to a project or remove one, beyond the citizen itself. */
 const REALLOCATING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 
@@ -248,8 +259,8 @@ function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): 
     case "role": {
       const parsed = RoleCharterSchema.safeParse(charter);
       if (!parsed.success) break;
-      const { name, verbs, repoPermission, maxReplicas } = parsed.data;
-      return `role ${name} (${verbs.length} verbs, repo ${repoPermission}, up to ${maxReplicas} per project)`;
+      const { name, verbs, maxReplicas } = parsed.data;
+      return `role ${name} (${verbs.length} verbs, up to ${maxReplicas} per project)`;
     }
     case "channel": {
       const parsed = ChannelProposalSchema.safeParse(charter);
@@ -307,6 +318,85 @@ function memberToAgentInput(member: MemberProposal): AddAgentInput {
     subscriptions: member.subscriptions,
     ...(member.seedInstructions === undefined ? {} : { seedInstructions: member.seedInstructions }),
   };
+}
+
+/** A stored stage from a planned one, built without undefined keys, which the YAML writer rejects. */
+function stageFrom(planned: PlanStage, id: StageId): Stage {
+  return {
+    id,
+    name: planned.name,
+    ...(planned.role === undefined ? {} : { role: planned.role }),
+    ...(planned.agent === undefined ? {} : { agent: planned.agent }),
+    gate: planned.gate,
+    holders: [],
+  };
+}
+
+/** An existing stage as a plan edit restates it; its holders and any completion are kept. */
+function restage(existing: Stage, edit: PlanEditStage): Stage {
+  const { role: _role, agent: _agent, ...kept } = existing;
+  return {
+    ...kept,
+    name: edit.name,
+    gate: edit.gate,
+    ...(edit.role === undefined ? {} : { role: edit.role }),
+    ...(edit.agent === undefined ? {} : { agent: edit.agent }),
+  };
+}
+
+/** A stage opened for another pass: its completion is cleared, its holders are kept. */
+function reopenStage(stage: Stage): Stage {
+  const { completedBy: _by, completedAt: _at, ...open } = stage;
+  return open;
+}
+
+/**
+ * What a plan edit does to gates, as phrases for the refusal: a gate added, removed, cleared,
+ * reassigned, or moved. A gated stage moves when the set of kept stages before it changes.
+ */
+function gateChanges(before: readonly Stage[], after: readonly Stage[]): string[] {
+  const changes: string[] = [];
+  const beforeIds = new Set(before.map((stage) => stage.id));
+  const afterById = new Map(after.map((stage) => [stage.id, stage]));
+  for (const stage of after) {
+    if (stage.gate && !beforeIds.has(stage.id)) {
+      changes.push(`add the gated stage "${stage.name}"`);
+    }
+  }
+  const keptBefore = before.filter((stage) => afterById.has(stage.id)).map((stage) => stage.id);
+  const keptAfter = after.filter((stage) => beforeIds.has(stage.id)).map((stage) => stage.id);
+  for (const stage of before) {
+    const now = afterById.get(stage.id);
+    if (!stage.gate) {
+      if (now?.gate === true) {
+        changes.push(`gate stage ${stage.id}`);
+      }
+      continue;
+    }
+    if (now === undefined) {
+      changes.push(`remove the gated stage ${stage.id}`);
+      continue;
+    }
+    if (!now.gate) {
+      changes.push(`ungate stage ${stage.id}`);
+    }
+    if (now.role !== stage.role || now.agent !== stage.agent) {
+      changes.push(`reassign the gated stage ${stage.id}`);
+    }
+    const priorBefore = keptBefore.slice(0, keptBefore.indexOf(stage.id));
+    const priorAfter = new Set(keptAfter.slice(0, keptAfter.indexOf(stage.id)));
+    if (priorBefore.length !== priorAfter.size || priorBefore.some((id) => !priorAfter.has(id))) {
+      changes.push(`move the gated stage ${stage.id}`);
+    }
+  }
+  return changes;
+}
+
+/** Appends a timestamped note under the task body's Notes heading. */
+function appendNote(body: string, ts: string, author: Name, note: string): string {
+  const heading = body.includes("\n## Notes") || body.startsWith("## Notes") ? "" : "\n## Notes\n";
+  const base = body.length === 0 ? "" : body.endsWith("\n") ? body : `${body}\n`;
+  return `${base}${heading}- ${ts} @${author}: ${note}\n`;
 }
 
 function extractMentions(body: string): Name[] {
@@ -746,6 +836,7 @@ export class Board {
     if (await exists(file)) {
       throw new BoardError("ALREADY_EXISTS", `project ${input.slug} already exists`);
     }
+    await this.validateAssignees(input.defaultPlan ?? []);
     const project: Project = ProjectSchema.parse({
       slug: input.slug,
       name: input.name ?? input.slug,
@@ -756,6 +847,8 @@ export class Board {
       approvers: [USER_NAME],
       requiredCapabilities: [...(input.requiredCapabilities ?? [])],
       createdAt: this.now().toISOString(),
+      defaultPlan: [...(input.defaultPlan ?? [])],
+      onDone: input.onDone ?? "none",
     });
     await writeMarkdown(file, project, `# ${project.name}\n`);
     for (const channel of project.channels) {
@@ -966,12 +1059,17 @@ export class Board {
               status: "open",
               claimedBy: undefined,
               leaseExpiresAt: undefined,
+              stageSince: now.toISOString(),
               updatedAt: now.toISOString(),
             });
             await this.events.append("lease.expired", task.claimedBy ?? USER_NAME, {
               taskId: task.id,
               project,
+              stage: task.stage,
             });
+            if (task.claimedBy !== undefined) {
+              await this.refreshMember(task.claimedBy);
+            }
             expired.push(released);
           }
         }
@@ -1218,13 +1316,14 @@ export class Board {
       if (location.task.thread !== "open") {
         throw new BoardError("INVALID_STATE", `thread for task ${args.thread_id} is not open`);
       }
-      const mayClose =
+      const participant =
+        location.task.createdBy === actor.name ||
         location.task.claimedBy === actor.name ||
-        ["reviewer", "steward", USER_ROLE].includes(actor.role);
-      if (!mayClose) {
+        location.task.stages.some((stage) => stage.holders.includes(actor.name));
+      if (!participant && !PLANNING_ROLES.includes(actor.role)) {
         throw new BoardError(
           "FORBIDDEN",
-          "only the claimer, a reviewer, the steward, or the user may close a thread",
+          "only the task's participants, the user, the steward, or the concierge may close its thread",
         );
       }
       const channel = channelRef(location.project, "general");
@@ -1265,12 +1364,24 @@ export class Board {
     const args = VerbInputs.create_task.parse(input);
     await this.authorize(actor, "create_task");
     return this.mutex.run(async () => {
-      await this.readProject(args.project);
+      const project = await this.readProject(args.project);
       if (args.parent_id !== undefined) {
         const parent = await this.findTask(args.parent_id);
         if (parent.project !== args.project) {
           throw new BoardError("VALIDATION", "a subtask must belong to its parent's project");
         }
+      }
+      if (args.stages?.some((stage) => stage.gate) === true) {
+        this.assertMayGate(actor, "set a gate");
+      }
+      const planned: readonly PlanStage[] =
+        args.stages ??
+        (project.defaultPlan.length > 0 ? project.defaultPlan : [{ name: "work", gate: false }]);
+      await this.validateAssignees(planned);
+      const stages = planned.map((stage, index) => stageFrom(stage, `s${index + 1}`));
+      const first = stages[0];
+      if (first === undefined) {
+        throw new BoardError("VALIDATION", "a plan needs at least one stage");
       }
       const ts = this.now().toISOString();
       const frontmatter: TaskFrontmatter = TaskFrontmatterSchema.parse({
@@ -1285,6 +1396,12 @@ export class Board {
         ...(args.parent_id === undefined ? {} : { parentId: args.parent_id }),
         blockedBy: [],
         requiredCapabilities: args.required_capabilities,
+        stages,
+        stage: first.id,
+        stageSince: ts,
+        stageSeq: stages.length,
+        onDone: project.onDone,
+        completing: false,
       });
       const task = await this.writeTask(args.project, { ...frontmatter, body: args.body });
       await this.events.append("task.created", actor.name, {
@@ -1292,11 +1409,13 @@ export class Board {
         project: task.project,
         title: task.title,
         parentId: task.parentId ?? null,
+        stage: task.stage,
       });
       return task;
     });
   }
 
+  /** Holds the task's current stage, or renews the lease on a stage the actor already holds. */
   async claimTask(actor: Actor, input: VerbInput<"claim_task">): Promise<Task> {
     const args = VerbInputs.claim_task.parse(input);
     await this.authorize(actor, "claim_task");
@@ -1304,44 +1423,49 @@ export class Board {
       const location = await this.findTask(args.task_id);
       const current = location.task;
       const now = this.now();
-      if (
-        current.status === "claimed" &&
-        current.claimedBy === actor.name &&
-        !this.leaseExpired(current, now)
-      ) {
+      this.assertInPlay(current);
+      if (current.status === "claimed" && !this.leaseExpired(current, now)) {
+        if (current.claimedBy !== actor.name) {
+          throw new BoardError(
+            "CLAIM_CONFLICT",
+            `task ${current.id} is held by ${current.claimedBy ?? "someone"}`,
+          );
+        }
         return this.writeTask(location.project, {
           ...current,
           leaseExpiresAt: this.leaseEnd(now),
           updatedAt: now.toISOString(),
         });
       }
-      if (current.status === "claimed" && this.leaseExpired(current, now)) {
-        await this.events.append("lease.expired", current.claimedBy ?? USER_NAME, {
+      const lapsed = current.status === "claimed" ? current.claimedBy : undefined;
+      if (lapsed !== undefined) {
+        await this.events.append("lease.expired", lapsed, {
           taskId: current.id,
           project: location.project,
+          stage: current.stage,
         });
-      } else if (current.status === "claimed") {
-        throw new BoardError(
-          "CLAIM_CONFLICT",
-          `task ${current.id} is held by ${current.claimedBy ?? "someone"}`,
-        );
-      } else if (current.status !== "open") {
-        throw new BoardError(
-          "INVALID_TRANSITION",
-          `task ${current.id} is ${current.status}, not open`,
-        );
       }
+      await this.assertMayHold(actor, current);
       const task = await this.writeTask(location.project, {
         ...current,
         status: "claimed",
         claimedBy: actor.name,
         leaseExpiresAt: this.leaseEnd(now),
         updatedAt: now.toISOString(),
+        stages: current.stages.map((stage) =>
+          stage.id === current.stage && !stage.holders.includes(actor.name)
+            ? { ...stage, holders: [...stage.holders, actor.name] }
+            : stage,
+        ),
       });
       await this.refreshMember(actor.name);
+      if (lapsed !== undefined && lapsed !== actor.name) {
+        await this.refreshMember(lapsed);
+      }
       await this.events.append("task.claimed", actor.name, {
         taskId: task.id,
         project: location.project,
+        stage: task.stage,
       });
       return task;
     });
@@ -1353,33 +1477,218 @@ export class Board {
     return this.mutex.run(async () => {
       const location = await this.findTask(args.task_id);
       const current = location.task;
-      if (current.status !== "claimed") {
+      if (current.status !== "claimed" || current.claimedBy === undefined) {
         throw new BoardError(
           "INVALID_TRANSITION",
-          `task ${current.id} is ${current.status}, not claimed`,
+          `task ${current.id} is ${current.status}; nobody holds its stage`,
         );
       }
-      if (current.claimedBy !== actor.name && !["steward", USER_ROLE].includes(actor.role)) {
+      if (current.claimedBy !== actor.name && !PLANNING_ROLES.includes(actor.role)) {
         throw new BoardError(
           "FORBIDDEN",
-          "only the claimer, the steward, or the user may release a task",
+          "only the holder, the user, the steward, or the concierge may release a stage",
         );
       }
+      const ts = this.now().toISOString();
       const task = await this.writeTask(location.project, {
         ...current,
         status: "open",
         claimedBy: undefined,
         leaseExpiresAt: undefined,
-        updatedAt: this.now().toISOString(),
+        stageSince: ts,
+        updatedAt: ts,
       });
+      await this.refreshMember(current.claimedBy);
       await this.events.append("task.released", actor.name, {
         taskId: task.id,
         project: location.project,
+        stage: task.stage,
       });
       return task;
     });
   }
 
+  /**
+   * Completes the current stage. The next stage becomes current and waits for its holder; past the
+   * last stage the task is done, or completing while the project's completion effect runs.
+   */
+  async advanceTask(actor: Actor, input: VerbInput<"advance_task">): Promise<Task> {
+    const args = VerbInputs.advance_task.parse(input);
+    await this.authorize(actor, "advance_task");
+    return this.mutex.run(async () => {
+      const location = await this.findTask(args.task_id);
+      const current = location.task;
+      this.assertInPlay(current);
+      const index = stageIndex(current, current.stage);
+      const stage = current.stages[index];
+      if (stage === undefined) {
+        throw new BoardError("INVALID_STATE", `task ${current.id} has no stage ${current.stage}`);
+      }
+      const holds = current.status === "claimed" && current.claimedBy === actor.name;
+      if (!holds && actor.role !== USER_ROLE) {
+        throw new BoardError(
+          "FORBIDDEN",
+          `only the holder of stage ${stage.id} "${stage.name}" may advance it; claim it first`,
+        );
+      }
+      const ts = this.now().toISOString();
+      const completed: Stage = {
+        ...stage,
+        holders: stage.holders.includes(actor.name)
+          ? stage.holders
+          : [...stage.holders, actor.name],
+        completedBy: actor.name,
+        completedAt: ts,
+      };
+      const base: Task = {
+        ...current,
+        stages: current.stages.map((s, i) => (i === index ? completed : s)),
+        body:
+          args.note === undefined
+            ? current.body
+            : appendNote(current.body, ts, actor.name, `${stage.name}: ${args.note}`),
+        claimedBy: undefined,
+        leaseExpiresAt: undefined,
+        updatedAt: ts,
+      };
+      const next = current.stages[index + 1];
+      let task: Task;
+      if (next !== undefined) {
+        task = await this.writeTask(location.project, {
+          ...base,
+          status: "open",
+          stage: next.id,
+          stageSince: ts,
+        });
+      } else if (current.onDone === "none") {
+        task = await this.writeTask(location.project, { ...base, status: "done" });
+      } else {
+        task = await this.writeTask(location.project, {
+          ...base,
+          status: "open",
+          completing: true,
+        });
+      }
+      await this.events.append("task.advanced", actor.name, {
+        taskId: task.id,
+        project: location.project,
+        from: stage.id,
+        to: next?.id ?? null,
+        note: args.note ?? null,
+      });
+      if (task.status === "done") {
+        await this.events.append("task.completed", actor.name, {
+          taskId: task.id,
+          project: location.project,
+          createdBy: task.createdBy,
+          effect: task.onDone,
+        });
+        for (const name of new Set(task.stages.flatMap((s) => s.completedBy ?? []))) {
+          await this.refreshMember(name);
+        }
+      } else if (task.completing) {
+        await this.events.append("task.completing", actor.name, {
+          taskId: task.id,
+          project: location.project,
+          effect: task.onDone,
+        });
+      }
+      await this.refreshMember(actor.name);
+      return task;
+    });
+  }
+
+  /**
+   * Reshapes a task's plan from the current stage onward while nobody holds it, and after it
+   * otherwise. Any member of the project may plan; changes that touch a gate, and the completion
+   * effect, are the user's, the steward's, and the concierge's.
+   */
+  async planTask(actor: Actor, input: VerbInput<"plan_task">): Promise<Task> {
+    const args = VerbInputs.plan_task.parse(input);
+    await this.authorize(actor, "plan_task");
+    return this.mutex.run(async () => {
+      const location = await this.findTask(args.task_id);
+      const current = location.task;
+      this.assertInPlay(current);
+      const planner = PLANNING_ROLES.includes(actor.role);
+      if (!planner) {
+        const agent = await this.readAgent(actor.name);
+        if (!agent.memberships.includes(current.project)) {
+          throw new BoardError(
+            "FORBIDDEN",
+            `${actor.name} is not a member of ${current.project}; join it first`,
+          );
+        }
+      }
+      const index = stageIndex(current, current.stage);
+      const from = current.status === "open" ? index : index + 1;
+      const ahead = current.stages.slice(from);
+      const aheadById = new Map(ahead.map((stage) => [stage.id, stage]));
+      const seen = new Set<StageId>();
+      let seq = current.stageSeq;
+      const replanned: Stage[] = [];
+      for (const edit of args.stages) {
+        if (edit.id === undefined) {
+          seq += 1;
+          replanned.push(stageFrom(edit, `s${seq}`));
+          continue;
+        }
+        const existing = aheadById.get(edit.id);
+        if (existing === undefined) {
+          throw new BoardError(
+            "VALIDATION",
+            `stage ${edit.id} is not ahead of the current stage, so plan_task cannot keep it`,
+          );
+        }
+        if (seen.has(edit.id)) {
+          throw new BoardError("VALIDATION", `stage ${edit.id} appears twice`);
+        }
+        seen.add(edit.id);
+        replanned.push(restage(existing, edit));
+      }
+      if (from === index && replanned.length === 0) {
+        throw new BoardError(
+          "VALIDATION",
+          "the current stage is waiting: keep it or give its replacement, or abandon the task",
+        );
+      }
+      const onDone = args.on_done ?? current.onDone;
+      const guarded = gateChanges(ahead, replanned);
+      if (onDone !== current.onDone) {
+        guarded.push("change the completion effect");
+      }
+      if (guarded.length > 0) {
+        this.assertMayGate(actor, guarded.join(", "));
+      }
+      await this.validateAssignees(replanned);
+      const stages = [...current.stages.slice(0, from), ...replanned];
+      const now = stages[index];
+      if (now === undefined) {
+        throw new BoardError("VALIDATION", "a plan needs at least one stage");
+      }
+      const ts = this.now().toISOString();
+      const currentChanged = now.id !== current.stage;
+      const task = await this.writeTask(location.project, {
+        ...current,
+        stages,
+        stage: now.id,
+        stageSeq: seq,
+        onDone,
+        updatedAt: ts,
+        ...(currentChanged ? { stageSince: ts } : {}),
+      });
+      await this.events.append("task.planned", actor.name, {
+        taskId: task.id,
+        project: location.project,
+        stage: task.stage,
+        currentChanged,
+        stages: task.stages.map((stage) => stage.id),
+      });
+      return task;
+    });
+  }
+
+  /** Moves a task back to an earlier stage, abandons it, adds a note, or sets its blockers. */
   async updateTask(actor: Actor, input: VerbInput<"update_task">): Promise<Task> {
     const args = VerbInputs.update_task.parse(input);
     await this.authorize(actor, "update_task");
@@ -1387,17 +1696,55 @@ export class Board {
       const location = await this.findTask(args.task_id);
       const current = location.task;
       const now = this.now();
-      let next: Task = { ...current, updatedAt: now.toISOString() };
+      const ts = now.toISOString();
+      let next: Task = { ...current, updatedAt: ts };
+      let moved: { from: StageId; to: StageId } | null = null;
 
-      if (args.status !== undefined && args.status !== current.status) {
-        this.assertTransition(actor, current, args.status);
-        next = { ...next, status: args.status };
-        if (args.status === "done" || args.status === "abandoned" || args.status === "open") {
-          next = { ...next, leaseExpiresAt: undefined };
-          if (args.status === "open") {
-            next = { ...next, claimedBy: undefined };
-          }
+      if (args.status !== undefined || args.stage !== undefined) {
+        this.assertInPlay(current);
+      }
+      if (args.status === "abandoned") {
+        const mayAbandon =
+          current.claimedBy === actor.name ||
+          current.createdBy === actor.name ||
+          PLANNING_ROLES.includes(actor.role);
+        if (!mayAbandon) {
+          throw new BoardError(
+            "FORBIDDEN",
+            "only the holder, the creator, the user, the steward, or the concierge may abandon a task",
+          );
         }
+        next = { ...next, status: "abandoned", claimedBy: undefined, leaseExpiresAt: undefined };
+      } else if (args.stage !== undefined) {
+        const at = stageIndex(current, current.stage);
+        const to = stageIndex(current, args.stage);
+        if (to < 0) {
+          throw new BoardError("NOT_FOUND", `task ${current.id} has no stage ${args.stage}`);
+        }
+        if (to >= at) {
+          throw new BoardError(
+            "VALIDATION",
+            "update_task moves a task back to an earlier stage; advance_task moves it forward",
+          );
+        }
+        if (current.claimedBy !== actor.name && !PLANNING_ROLES.includes(actor.role)) {
+          throw new BoardError(
+            "FORBIDDEN",
+            "only the holder of the current stage, the user, the steward, or the concierge may send a task back",
+          );
+        }
+        next = {
+          ...next,
+          status: "open",
+          claimedBy: undefined,
+          leaseExpiresAt: undefined,
+          stage: args.stage,
+          stageSince: ts,
+          stages: current.stages.map((stage, i) =>
+            i >= to && i <= at ? reopenStage(stage) : stage,
+          ),
+        };
+        moved = { from: current.stage, to: args.stage };
       }
       if (args.blocked_by !== undefined) {
         for (const id of args.blocked_by) {
@@ -1406,32 +1753,33 @@ export class Board {
         next = { ...next, blockedBy: [...args.blocked_by] };
       }
       if (args.note !== undefined) {
-        const heading =
-          next.body.includes("\n## Notes") || next.body.startsWith("## Notes")
-            ? ""
-            : "\n## Notes\n";
-        const base =
-          next.body.length === 0 ? "" : next.body.endsWith("\n") ? next.body : `${next.body}\n`;
-        next = {
-          ...next,
-          body: `${base}${heading}- ${now.toISOString()} @${actor.name}: ${args.note}\n`,
-        };
+        next = { ...next, body: appendNote(next.body, ts, actor.name, args.note) };
       }
       if (next.status === "claimed" && next.claimedBy === actor.name) {
         next = { ...next, leaseExpiresAt: this.leaseEnd(now) };
       }
 
       const task = await this.writeTask(location.project, next);
-      if (task.status !== current.status && task.claimedBy !== undefined) {
-        await this.refreshMember(task.claimedBy);
+      if (current.claimedBy !== undefined && task.claimedBy !== current.claimedBy) {
+        await this.refreshMember(current.claimedBy);
       }
-      await this.events.append("task.updated", actor.name, {
-        taskId: task.id,
-        project: location.project,
-        from: current.status,
-        to: task.status,
-        note: args.note ?? null,
-      });
+      if (moved !== null) {
+        await this.events.append("task.moved", actor.name, {
+          taskId: task.id,
+          project: location.project,
+          from: moved.from,
+          to: moved.to,
+          note: args.note ?? null,
+        });
+      } else {
+        await this.events.append("task.updated", actor.name, {
+          taskId: task.id,
+          project: location.project,
+          from: current.status,
+          to: task.status,
+          note: args.note ?? null,
+        });
+      }
       return task;
     });
   }
@@ -1538,8 +1886,33 @@ export class Board {
         ...(args.name === undefined ? {} : { name: args.name }),
         repo: args.repo,
         defaultBranch: args.default_branch,
+        ...(args.default_plan === undefined ? {} : { defaultPlan: args.default_plan }),
+        ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
       }),
     );
+  }
+
+  /** Sets a project's default plan and completion effect. */
+  async configureProject(actor: Actor, input: VerbInput<"configure_project">): Promise<Project> {
+    const args = VerbInputs.configure_project.parse(input);
+    await this.authorize(actor, "configure_project");
+    return this.mutex.run(async () => {
+      await this.readProject(args.project);
+      if (args.default_plan !== undefined) {
+        await this.validateAssignees(args.default_plan);
+      }
+      const project = await this.updateProject(args.project, (current) => ({
+        ...current,
+        ...(args.default_plan === undefined ? {} : { defaultPlan: args.default_plan }),
+        ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
+      }));
+      await this.events.append("project.configured", actor.name, {
+        slug: project.slug,
+        onDone: project.onDone,
+        defaultPlan: project.defaultPlan.map((stage) => stage.name),
+      });
+      return project;
+    });
   }
 
   /**
@@ -1601,6 +1974,7 @@ export class Board {
           status: "open",
           claimedBy: undefined,
           leaseExpiresAt: undefined,
+          stageSince: this.now().toISOString(),
           updatedAt: this.now().toISOString(),
         });
         await this.events.append("task.released", actor.name, {
@@ -1677,6 +2051,12 @@ export class Board {
         return this.leaveProject(actor, VerbInputs.leave_project.parse(input));
       case "write_knowledge":
         return this.writeKnowledge(actor, VerbInputs.write_knowledge.parse(input));
+      case "plan_task":
+        return this.planTask(actor, VerbInputs.plan_task.parse(input));
+      case "advance_task":
+        return this.advanceTask(actor, VerbInputs.advance_task.parse(input));
+      case "configure_project":
+        return this.configureProject(actor, VerbInputs.configure_project.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -1733,7 +2113,9 @@ export class Board {
   }
 
   async openTasks(project: Name): Promise<Task[]> {
-    return (await this.listTasks(project)).filter((task) => task.status === "open");
+    return (await this.listTasks(project)).filter(
+      (task) => task.status === "open" && !task.completing,
+    );
   }
 
   async readAgentRoleBody(agent: Name): Promise<string> {
@@ -1821,6 +2203,60 @@ export class Board {
         branch: input.branch,
         detail: input.detail,
       });
+    });
+  }
+
+  /**
+   * Records the outcome of a completing task's effect: done, or waiting again at its last stage so
+   * its participants can reshape the plan.
+   */
+  async finishCompletion(
+    actor: Actor,
+    input: { taskId: Ulid; ok: boolean; detail: string },
+  ): Promise<Task> {
+    return this.mutex.run(async () => {
+      const location = await this.findTask(input.taskId);
+      const current = location.task;
+      if (!current.completing) {
+        throw new BoardError("INVALID_STATE", `task ${current.id} is not completing`);
+      }
+      const ts = this.now().toISOString();
+      if (input.ok) {
+        const task = await this.writeTask(location.project, {
+          ...current,
+          status: "done",
+          completing: false,
+          updatedAt: ts,
+        });
+        await this.events.append("task.completed", actor.name, {
+          taskId: task.id,
+          project: location.project,
+          createdBy: task.createdBy,
+          effect: task.onDone,
+          detail: input.detail,
+        });
+        for (const name of new Set(task.stages.flatMap((stage) => stage.completedBy ?? []))) {
+          await this.refreshMember(name);
+        }
+        return task;
+      }
+      const task = await this.writeTask(location.project, {
+        ...current,
+        status: "open",
+        completing: false,
+        stageSince: ts,
+        updatedAt: ts,
+        stages: current.stages.map((stage) =>
+          stage.id === current.stage ? reopenStage(stage) : stage,
+        ),
+      });
+      await this.events.append("task.reopened", actor.name, {
+        taskId: task.id,
+        project: location.project,
+        stage: task.stage,
+        detail: input.detail,
+      });
+      return task;
     });
   }
 
@@ -2033,12 +2469,12 @@ export class Board {
     let tasksDone = 0;
     for (const project of await listDirs(this.paths.projects())) {
       for (const task of await this.listTasks(project)) {
-        if (task.claimedBy !== name) {
-          continue;
-        }
-        if (task.status === "claimed") {
+        if (task.status === "claimed" && task.claimedBy === name) {
           claimsHeld += 1;
-        } else if (task.status === "done") {
+        } else if (
+          task.status === "done" &&
+          task.stages.some((stage) => stage.completedBy === name)
+        ) {
           tasksDone += 1;
         }
       }
@@ -2407,6 +2843,7 @@ export class Board {
         status: "open",
         claimedBy: undefined,
         leaseExpiresAt: undefined,
+        stageSince: ts,
         updatedAt: ts,
       });
       await this.events.append("task.released", by, {
@@ -2518,43 +2955,60 @@ export class Board {
     }
   }
 
-  private assertTransition(actor: Actor, task: Task, to: TaskStatus): void {
-    if (!canTransition(task.status, to)) {
-      throw new BoardError(
-        "INVALID_TRANSITION",
-        `cannot move task ${task.id} from ${task.status} to ${to}`,
-      );
+  private assertInPlay(task: Task): void {
+    if (task.status === "done" || task.status === "abandoned") {
+      throw new BoardError("INVALID_TRANSITION", `task ${task.id} is ${task.status}`);
     }
-    const isClaimer = task.claimedBy === actor.name;
-    const isUser = actor.role === USER_ROLE;
-    const isReviewer = actor.role === "reviewer" || isUser;
-    const isSteward = actor.role === "steward" || isUser;
-    const allowed = (() => {
-      switch (`${task.status}->${to}`) {
-        case "open->claimed":
-          throw new BoardError("INVALID_TRANSITION", "use claim_task to claim an open task");
-        case "claimed->in_review":
-        case "claimed->blocked":
-        case "blocked->claimed":
-          return isClaimer;
-        case "claimed->open":
-          return isClaimer || isSteward;
-        case "in_review->done":
-          return isReviewer && !isClaimer;
-        case "in_review->claimed":
-          return isReviewer || isClaimer;
-        case "open->abandoned":
-        case "claimed->abandoned":
-          return isClaimer || isSteward;
-        default:
-          return false;
-      }
-    })();
-    if (!allowed) {
+    if (task.completing) {
+      throw new BoardError("INVALID_STATE", `task ${task.id} is completing`);
+    }
+  }
+
+  private assertMayGate(actor: Actor, what: string): void {
+    if (!PLANNING_ROLES.includes(actor.role)) {
       throw new BoardError(
         "FORBIDDEN",
-        `${actor.name} (${actor.role}) may not move task ${task.id} from ${task.status} to ${to}`,
+        `only the user, the steward, and the concierge may ${what}; ask one of them in the task's thread`,
       );
+    }
+  }
+
+  /** The user holds anything; everyone else must be a project member the current stage admits. */
+  private async assertMayHold(actor: Actor, task: Task): Promise<void> {
+    if (actor.role === USER_ROLE) {
+      return;
+    }
+    const agent = await this.readAgent(actor.name);
+    if (!agent.memberships.includes(task.project)) {
+      throw new BoardError(
+        "FORBIDDEN",
+        `${actor.name} is not a member of ${task.project}; join it first`,
+      );
+    }
+    if (mayHoldStage(actor, task)) {
+      return;
+    }
+    const stage = currentStage(task);
+    const which = stage === undefined ? task.stage : `stage ${stage.id} "${stage.name}"`;
+    const why =
+      stage?.agent !== undefined && stage.agent !== actor.name
+        ? `is assigned to ${stage.agent}`
+        : stage?.role !== undefined && stage.role !== actor.role
+          ? `is for the ${stage.role} role`
+          : "is gated: nobody who held an earlier stage may hold it";
+    throw new BoardError("FORBIDDEN", `${which} ${why}`);
+  }
+
+  /** A stage may name any role, so a missing one surfaces as a role gap; a named citizen must exist. */
+  private async validateAssignees(stages: readonly { agent?: Name | undefined }[]): Promise<void> {
+    for (const stage of stages) {
+      if (stage.agent === undefined) {
+        continue;
+      }
+      const agent = await this.readAgent(stage.agent);
+      if (agent.status !== "active") {
+        throw new BoardError("INVALID_STATE", `${stage.agent} is retired`);
+      }
     }
   }
 
@@ -2680,7 +3134,12 @@ export class Board {
     } catch {
       return false;
     }
-    if (location.task.claimedBy === actor.name || location.task.createdBy === actor.name) {
+    const task = location.task;
+    const involved =
+      task.claimedBy === actor.name ||
+      task.createdBy === actor.name ||
+      task.stages.some((stage) => stage.agent === actor.name || stage.holders.includes(actor.name));
+    if (involved) {
       return true;
     }
     const files = await listFiles(this.paths.thread(location.project, taskId));

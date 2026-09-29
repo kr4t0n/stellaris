@@ -1,11 +1,13 @@
-import type {
-  Knowledge,
-  Member,
-  Message,
-  Project,
-  Task,
-  TurnDispatch,
-  TurnRecord,
+import {
+  stageIndex,
+  type Knowledge,
+  type Member,
+  type Message,
+  type Project,
+  type Stage,
+  type Task,
+  type TurnDispatch,
+  type TurnRecord,
 } from "@stellaris/shared";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 
@@ -26,6 +28,10 @@ export interface TurnPromptInput {
   readonly dispatch: TurnDispatch;
   readonly messages: readonly Message[];
   readonly heldClaims: readonly Task[];
+  /** Tasks in the turn's project whose current stage waits for a holder the agent could be. */
+  readonly waitingStages?: readonly Task[] | undefined;
+  /** The turn's project, or null in the society scope. */
+  readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
   readonly onboarding: OnboardingContext | null;
   /** Present for roles that route on behalf of the user; absent for everyone else. */
@@ -51,6 +57,25 @@ function clip(text: string): string {
   return trimmed.length <= MAX_BODY_CHARS
     ? trimmed
     : `${trimmed.slice(0, MAX_BODY_CHARS)}\n[... truncated]`;
+}
+
+function assignee(stage: Stage): string {
+  return stage.agent ?? stage.role ?? "anyone";
+}
+
+/** One task as a plan line: its current stage, where that stage sits, and what follows it. */
+function planLine(task: Task, whose: string): string {
+  const index = stageIndex(task, task.stage);
+  const stage = task.stages[index];
+  const rest = task.stages
+    .slice(index + 1)
+    .map((next) => `${next.name} (${next.gate ? "gate, " : ""}${assignee(next)})`);
+  const then =
+    rest.length === 0
+      ? `then ${task.onDone === "merge" ? "the board merges it" : "done"}`
+      : `next: ${rest.join(", ")}`;
+  const gated = stage?.gate === true ? ", gated" : "";
+  return `- ${task.id} "${task.title}": ${stage?.name ?? task.stage} (${whose}, ${index + 1} of ${task.stages.length}${gated}); ${then}`;
 }
 
 /** The first line of a profile that is not a heading, clipped. */
@@ -99,9 +124,17 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "Operations signals arrived; the ops posts below carry them. Decide whether a proposal is warranted, and stay silent if not.",
     );
   }
+  if (dispatch.trigger.kind === "stage") {
+    lines.push(
+      "A stage is waiting for you: claim it with claim_task, switch your worktree to the task's branch, do the work and commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
+    );
+  }
+  if (dispatch.trigger.kind === "task_done") {
+    lines.push("A task you created is done. Tell whoever asked for it, if anyone did.");
+  }
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
-      "The user posted. Route it: answer in the same channel, or create the task, thread, or project it needs and mention the citizens who will do it, adding them to the project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
+      "The user posted. Route it: answer in the same channel, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
     );
   }
 
@@ -131,10 +164,16 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       lines.push("None yet.");
     }
     for (const project of society.projects) {
+      const plan = project.defaultPlan
+        .map(
+          (stage) =>
+            `${stage.name} (${stage.gate ? "gate, " : ""}${stage.agent ?? stage.role ?? "anyone"})`,
+        )
+        .join(", ");
       lines.push(
         `- ${project.slug} "${project.name}": channels ${project.channels.join(", ")}; members ${
           project.members.length === 0 ? "none" : project.members.join(", ")
-        }`,
+        }; on done ${project.onDone}; default plan ${plan.length === 0 ? "none" : plan}`,
       );
     }
     lines.push("", "### Citizens", "");
@@ -161,14 +200,35 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
-  lines.push("", "## Claims you hold", "");
+  const project = input.project;
+  if (project !== undefined && project !== null && project.onDone === "merge") {
+    lines.push(
+      "",
+      `## Project ${project.slug}`,
+      "",
+      `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself.`,
+    );
+  }
+
+  lines.push("", "## Stages you hold", "");
   if (input.heldClaims.length === 0) {
     lines.push("None.");
   } else {
     for (const task of input.heldClaims) {
-      lines.push(
-        `- ${task.id} "${task.title}" (${task.status}, lease until ${task.leaseExpiresAt ?? "unknown"})`,
-      );
+      lines.push(`${planLine(task, "yours")}; lease until ${task.leaseExpiresAt ?? "unknown"}`);
+    }
+  }
+
+  const waiting = input.waitingStages ?? [];
+  if (waiting.length > 0) {
+    lines.push("", "## Stages waiting for you", "");
+    for (const task of waiting.slice(0, 20)) {
+      const stage = task.stages[stageIndex(task, task.stage)];
+      const whose =
+        stage?.agent === dispatch.agent
+          ? "yours to take"
+          : `open to ${stage === undefined ? "anyone" : assignee(stage)}`;
+      lines.push(planLine(task, whose));
     }
   }
 
@@ -193,7 +253,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   lines.push(
     "## What to do",
     "",
-    "Act on the inbox and your claims through the board tools. Post replies with post_message, claim work with claim_task, submit with update_task, and ask for what the society lacks with propose. Silence is allowed when nothing needs a reply. End with the status object.",
+    "Act on the inbox and your stages through the board tools: claim_task to hold a stage, advance_task when your part is done, plan_task to reshape what comes next, post_message to talk, and propose for what the society lacks. Silence is allowed when nothing needs a reply. End with the status object.",
   );
   return `${lines.join("\n")}\n`;
 }

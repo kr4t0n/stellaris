@@ -4,11 +4,18 @@ import path from "node:path";
 import { Command } from "commander";
 import { Board, BoardError, type Actor } from "@stellaris/board-core";
 import {
+  CharterTriggerSchema,
   CliKindSchema,
+  CompletionEffectSchema,
+  MEMBER_VERBS,
   parseChannelRef,
+  PlanEditSchema,
+  PlanSchema,
   ProposalKindSchema,
   SERVER_RUNNER,
-  TaskStatusSchema,
+  stageIndex,
+  VerbNameSchema,
+  type Task,
 } from "@stellaris/shared";
 
 const program = new Command();
@@ -53,6 +60,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parsePlan(json: string) {
+  return PlanSchema.parse(JSON.parse(json));
+}
+
+/** A task's plan, one stage per line, the current one marked. */
+function describePlan(task: Task): string {
+  return task.stages
+    .map((stage) => {
+      const mark = stage.id === task.stage ? "->" : "  ";
+      const who = stage.agent ?? stage.role ?? "anyone";
+      const done = stage.completedBy === undefined ? "" : `, done by ${stage.completedBy}`;
+      return `${mark} ${stage.id} ${stage.name} (${stage.gate ? "gate, " : ""}${who}${done})`;
+    })
+    .join("\n");
+}
+
 function parseCharter(json: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(json);
   if (!isRecord(parsed)) {
@@ -82,14 +105,45 @@ project
   .description("Add a project with its default channels")
   .option("--name <name>", "display name")
   .option("--repo <url>", "git remote")
-  .action(async (slug: string, opts: { name?: string; repo?: string }) => {
+  .option("--on-done <effect>", "what finishing a task does: none, or merge its branch")
+  .option("--plan <json>", 'default plan, for example \'[{"name":"draft","role":"writer"}]\'')
+  .action(
+    async (
+      slug: string,
+      opts: { name?: string; repo?: string; onDone?: string; plan?: string },
+    ) => {
+      const board = await open();
+      const added = await board.addProject(board.userActor(), {
+        slug,
+        name: opts.name,
+        repo: opts.repo ?? null,
+        ...(opts.onDone === undefined ? {} : { onDone: CompletionEffectSchema.parse(opts.onDone) }),
+        ...(opts.plan === undefined ? {} : { defaultPlan: parsePlan(opts.plan) }),
+      });
+      print(added, () => `Project ${added.slug} added with channels ${added.channels.join(", ")}`);
+    },
+  );
+
+project
+  .command("configure <slug>")
+  .description("Set a project's default plan and completion effect")
+  .option("--on-done <effect>", "none, or merge")
+  .option("--plan <json>", "default plan as a JSON list of stages")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (slug: string, opts: { onDone?: string; plan?: string; as?: string }) => {
     const board = await open();
-    const added = await board.addProject(board.userActor(), {
-      slug,
-      name: opts.name,
-      repo: opts.repo ?? null,
+    const configured = await board.configureProject(await actorFor(board, opts.as), {
+      project: slug,
+      ...(opts.onDone === undefined ? {} : { on_done: CompletionEffectSchema.parse(opts.onDone) }),
+      ...(opts.plan === undefined ? {} : { default_plan: parsePlan(opts.plan) }),
     });
-    print(added, () => `Project ${added.slug} added with channels ${added.channels.join(", ")}`);
+    print(
+      configured,
+      () =>
+        `Project ${configured.slug}: on done ${configured.onDone}, default plan ${
+          configured.defaultPlan.map((stage) => stage.name).join(" -> ") || "none"
+        }`,
+    );
   });
 
 project
@@ -110,7 +164,7 @@ const agent = program.command("agent").description("Manage agents");
 agent
   .command("add <name>")
   .description("Add an agent and print its board token once")
-  .requiredOption("--role <role>", "role charter name, for example engineer or reviewer")
+  .requiredOption("--role <role>", "role charter name")
   .option("--cli <cli>", "claude or codex")
   .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
   .option("--runner <name>", "home runner", SERVER_RUNNER)
@@ -258,10 +312,34 @@ role
       roles
         .map(
           (r) =>
-            `${r.name}\trepo ${r.repoPermission}\treplicas up to ${r.maxReplicas}\tbacklog threshold ${r.backlogThreshold}\twakes on ${r.wakeTriggers.join(", ") || "nothing"}`,
+            `${r.name}\treplicas up to ${r.maxReplicas}\tbacklog threshold ${r.backlogThreshold}\twakes on ${r.wakeTriggers.join(", ") || "direct wakes only"}`,
         )
         .join("\n"),
     );
+  });
+
+role
+  .command("add <name>")
+  .description("Write a new role charter directly as the user")
+  .requiredOption("--purpose <text>", "what the role is for; its members read this every turn")
+  .option("--verbs <verbs...>", "board verbs granted; the member verbs by default")
+  .option(
+    "--triggers <triggers...>",
+    "wakes it opts into: user_post, ops_event, unclaimed_task, heartbeat",
+    ["unclaimed_task", "heartbeat"],
+  )
+  .action(async (name: string, opts: { purpose: string; verbs?: string[]; triggers: string[] }) => {
+    const board = await open();
+    const added = await board.setRoleCharter(board.userActor(), {
+      name,
+      purpose: opts.purpose,
+      verbs:
+        opts.verbs === undefined
+          ? [...MEMBER_VERBS]
+          : opts.verbs.map((verb) => VerbNameSchema.parse(verb)),
+      wakeTriggers: opts.triggers.map((trigger) => CharterTriggerSchema.parse(trigger)),
+    });
+    print(added, () => `Role ${added.name} written with ${added.verbs.length} verbs`);
   });
 
 role
@@ -380,15 +458,16 @@ const task = program.command("task").description("Manage tasks");
 
 task
   .command("create <project> <title>")
-  .description("Create a task")
+  .description("Create a task with a plan, or with the project's default plan")
   .option("--body <text>", "task body", "")
   .option("--parent <id>", "parent task id")
+  .option("--plan <json>", 'stages, for example \'[{"name":"analysis","role":"analyst"}]\'')
   .option("--as <agent>", "act as this agent instead of the user")
   .action(
     async (
       projectSlug: string,
       title: string,
-      opts: { body: string; parent?: string; as?: string },
+      opts: { body: string; parent?: string; plan?: string; as?: string },
     ) => {
       const board = await open();
       const who = await actorFor(board, opts.as);
@@ -397,14 +476,20 @@ task
         title,
         body: opts.body,
         ...(opts.parent === undefined ? {} : { parent_id: opts.parent }),
+        ...(opts.plan === undefined ? {} : { stages: parsePlan(opts.plan) }),
       });
-      print(created, () => `Task ${created.id} created in ${created.project}: ${created.title}`);
+      print(created, () =>
+        [
+          `Task ${created.id} created in ${created.project}: ${created.title}`,
+          describePlan(created),
+        ].join("\n"),
+      );
     },
   );
 
 task
   .command("claim <id>")
-  .description("Claim an open task")
+  .description("Hold the task's current stage")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { as?: string }) => {
     const board = await open();
@@ -412,53 +497,93 @@ task
     print(
       claimed,
       () =>
-        `Task ${claimed.id} claimed by ${claimed.claimedBy ?? "?"} until ${claimed.leaseExpiresAt ?? "?"}`,
+        `Stage ${claimed.stage} of task ${claimed.id} held by ${claimed.claimedBy ?? "?"} until ${claimed.leaseExpiresAt ?? "?"}`,
     );
   });
 
 task
   .command("release <id>")
-  .description("Release a claimed task")
+  .description("Let go of the stage held on a task")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { as?: string }) => {
     const board = await open();
     const released = await board.releaseTask(await actorFor(board, opts.as), { task_id: id });
-    print(released, () => `Task ${released.id} released`);
+    print(released, () => `Stage ${released.stage} of task ${released.id} released`);
+  });
+
+task
+  .command("advance <id>")
+  .description("Finish the current stage; past the last one the task is done")
+  .option("--note <text>", "what was done")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (id: string, opts: { note?: string; as?: string }) => {
+    const board = await open();
+    const advanced = await board.advanceTask(await actorFor(board, opts.as), {
+      task_id: id,
+      ...(opts.note === undefined ? {} : { note: opts.note }),
+    });
+    print(advanced, () =>
+      advanced.status === "done"
+        ? `Task ${advanced.id} is done`
+        : advanced.completing
+          ? `Task ${advanced.id} is completing: ${advanced.onDone}`
+          : `Task ${advanced.id} is at ${advanced.stage}\n${describePlan(advanced)}`,
+    );
+  });
+
+task
+  .command("plan <id> <stages>")
+  .description(
+    "Reshape the stages ahead: pass existing stages with their id to keep them, new ones without",
+  )
+  .option("--on-done <effect>", "override the completion effect for this task")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (id: string, stages: string, opts: { onDone?: string; as?: string }) => {
+    const board = await open();
+    const planned = await board.planTask(await actorFor(board, opts.as), {
+      task_id: id,
+      stages: PlanEditSchema.parse(JSON.parse(stages)),
+      ...(opts.onDone === undefined ? {} : { on_done: CompletionEffectSchema.parse(opts.onDone) }),
+    });
+    print(planned, () => describePlan(planned));
   });
 
 task
   .command("update <id>")
-  .description("Change status, add a note, or set blockers")
-  .option("--status <status>", "open, claimed, in_review, done, blocked, abandoned")
+  .description("Send a task back to an earlier stage, abandon it, add a note, or set blockers")
+  .option("--stage <stageId>", "move back to this earlier stage")
+  .option("--abandon", "abandon the task", false)
   .option("--note <text>", "append a note")
   .option("--blocked-by <ids...>", "task ids this task waits on")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(
     async (
       id: string,
-      opts: { status?: string; note?: string; blockedBy?: string[]; as?: string },
+      opts: { stage?: string; abandon: boolean; note?: string; blockedBy?: string[]; as?: string },
     ) => {
       const board = await open();
       const updated = await board.updateTask(await actorFor(board, opts.as), {
         task_id: id,
-        ...(opts.status === undefined ? {} : { status: TaskStatusSchema.parse(opts.status) }),
+        ...(opts.stage === undefined ? {} : { stage: opts.stage }),
+        ...(opts.abandon ? { status: "abandoned" as const } : {}),
         ...(opts.note === undefined ? {} : { note: opts.note }),
         ...(opts.blockedBy === undefined ? {} : { blocked_by: opts.blockedBy }),
       });
-      print(updated, () => `Task ${updated.id} is now ${updated.status}`);
+      print(updated, () => `Task ${updated.id} is ${updated.status} at ${updated.stage}`);
     },
   );
 
 task
   .command("show <id>")
-  .description("Show a task")
+  .description("Show a task with its plan")
   .action(async (id: string) => {
     const board = await open();
     const found = await board.getTask(board.userActor(), { task_id: id });
     print(found, () =>
       [
-        `${found.id}  ${found.status}  ${found.title}`,
-        `project: ${found.project}  claimed by: ${found.claimedBy ?? "nobody"}  thread: ${found.thread}`,
+        `${found.id}  ${found.status}${found.completing ? " (completing)" : ""}  ${found.title}`,
+        `project: ${found.project}  held by: ${found.claimedBy ?? "nobody"}  on done: ${found.onDone}  thread: ${found.thread}`,
+        describePlan(found),
         "",
         found.body.trim(),
       ].join("\n"),
@@ -467,14 +592,19 @@ task
 
 task
   .command("list <project>")
-  .description("List a project's tasks")
+  .description("List a project's tasks with their current stage")
   .action(async (projectSlug: string) => {
     const board = await open();
     const tasks = await board.listTasks(projectSlug);
     print(tasks, () =>
       tasks.length === 0
         ? "No tasks."
-        : tasks.map((t) => `${t.id}\t${t.status}\t${t.claimedBy ?? "-"}\t${t.title}`).join("\n"),
+        : tasks
+            .map((t) => {
+              const stage = t.stages[stageIndex(t, t.stage)];
+              return `${t.id}\t${t.status}\t${stage?.name ?? t.stage}\t${t.claimedBy ?? "-"}\t${t.title}`;
+            })
+            .join("\n"),
     );
   });
 

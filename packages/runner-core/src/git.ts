@@ -22,6 +22,27 @@ export interface GitOps {
   /** Lands a branch on the default branch in the canonical clone. Aborts cleanly on conflict. */
   merge(repoDir: string, into: string, branch: string): Promise<MergeOutcome>;
   branchExists(repoDir: string, branch: string): Promise<boolean>;
+  /** Creates `branch` from `base` in the clone unless it exists. */
+  ensureBranch(repoDir: string, branch: string, base: string): Promise<void>;
+  /**
+   * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
+   * then switches back to `home`. Returns the task branch, or null when there was nothing to hand back.
+   */
+  handBack(
+    worktree: string,
+    home: string,
+    author: GitAuthor,
+  ): Promise<{ branch: string; committed: boolean } | null>;
+}
+
+export interface GitAuthor {
+  readonly name: string;
+  readonly email: string;
+}
+
+/** The branch a task's work lives on, shared by whoever holds its stages. */
+export function taskBranch(taskId: string): string {
+  return `task/${taskId}`;
 }
 
 const BOARD_IDENTITY = [
@@ -104,6 +125,44 @@ export class ExecaGit implements GitOps {
   async branchExists(repoDir: string, branch: string): Promise<boolean> {
     const result = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], repoDir);
     return result.exitCode === 0;
+  }
+
+  async ensureBranch(repoDir: string, branch: string, base: string): Promise<void> {
+    if (!(await this.branchExists(repoDir, branch))) {
+      await must(["branch", branch, base], repoDir);
+    }
+  }
+
+  async handBack(
+    worktree: string,
+    home: string,
+    author: GitAuthor,
+  ): Promise<{ branch: string; committed: boolean } | null> {
+    const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], worktree);
+    const branch = head.stdout.trim();
+    if (head.exitCode !== 0 || !branch.startsWith("task/")) {
+      return null;
+    }
+    const dirty = (await must(["status", "--porcelain"], worktree)).trim().length > 0;
+    if (dirty) {
+      await must(["add", "-A"], worktree);
+      // Later -c options win over the board identity every git call starts with.
+      await must(
+        [
+          "-c",
+          `user.name=${author.name}`,
+          "-c",
+          `user.email=${author.email}`,
+          "commit",
+          "--quiet",
+          "-m",
+          `wip: left uncommitted by ${author.name} at the end of a turn`,
+        ],
+        worktree,
+      );
+    }
+    await must(["switch", "--quiet", home], worktree);
+    return { branch, committed: dirty };
   }
 
   async merge(repoDir: string, into: string, branch: string): Promise<MergeOutcome> {

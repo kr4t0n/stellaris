@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ExecaGit } from "./git.js";
+import { ExecaGit, taskBranch } from "./git.js";
 
 const project = {
   slug: "demo",
@@ -15,6 +15,8 @@ const project = {
   approvers: [],
   requiredCapabilities: [],
   createdAt: "2026-09-28T10:00:00.000Z",
+  defaultPlan: [],
+  onDone: "none" as const,
 };
 
 describe("ExecaGit", () => {
@@ -80,6 +82,43 @@ describe("ExecaGit", () => {
     expect(list.stdout).toContain(`worktree ${path.join(dir, "wt", "rel", "demo")}`);
     expect(list.stdout).not.toContain(path.join(repoDir, "tmp"));
     expect(await git.ensureWorktree(repoDir, relative, "agent/rel", "main")).toBe(worktree);
+  });
+
+  it("hands a task branch back: commits what a turn left and returns to the agent's own branch", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    const worktree = await git.ensureWorktree(
+      repoDir,
+      path.join(dir, "wt", "eng-1", "demo"),
+      "agent/eng-1",
+      "main",
+    );
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(repoDir, branch, "main");
+    await git.ensureBranch(repoDir, branch, "main");
+    const author = { name: "eng-1", email: "eng-1@stellaris.local" };
+    expect(await git.handBack(worktree, "agent/eng-1", author)).toBeNull();
+
+    await execa("git", ["switch", branch], { cwd: worktree });
+    await writeFile(path.join(worktree, "notes.md"), "half done\n", "utf8");
+    expect(await git.handBack(worktree, "agent/eng-1", author)).toEqual({
+      branch,
+      committed: true,
+    });
+    const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktree });
+    expect(head.stdout).toBe("agent/eng-1");
+    const log = await execa("git", ["log", "-1", "--format=%an %s", branch], { cwd: repoDir });
+    expect(log.stdout).toBe("eng-1 wip: left uncommitted by eng-1 at the end of a turn");
+
+    // The next holder, in another worktree, can check the branch out and finds the work.
+    const other = await git.ensureWorktree(
+      repoDir,
+      path.join(dir, "wt", "eng-2", "demo"),
+      "agent/eng-2",
+      "main",
+    );
+    await execa("git", ["switch", branch], { cwd: other });
+    expect(await readFile(path.join(other, "notes.md"), "utf8")).toBe("half done\n");
+    expect((await git.merge(repoDir, "main", branch)).ok).toBe(true);
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

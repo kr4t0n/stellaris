@@ -1,8 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Board, type Actor } from "@stellaris/board-core";
-import type { Name, TurnDispatch, TurnRecord, Ulid } from "@stellaris/shared";
+import { Board, SYSTEM_ACTOR, type Actor } from "@stellaris/board-core";
+import {
+  MEMBER_VERBS,
+  type Name,
+  type TurnDispatch,
+  type TurnRecord,
+  type Ulid,
+} from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Scheduler, type TurnRunner } from "./scheduler.js";
@@ -13,7 +19,7 @@ const REV: Actor = { name: "rev-1", role: "reviewer" };
 
 class FakeRunner implements TurnRunner {
   readonly dispatches: TurnDispatch[] = [];
-  readonly merges: Array<{ project: Name; taskId: Ulid }> = [];
+  readonly completions: Array<{ project: Name; taskId: Ulid }> = [];
   private release: (() => void) | null = null;
   hold = false;
 
@@ -59,9 +65,25 @@ class FakeRunner implements TurnRunner {
     this.release = null;
   }
 
-  async mergeTask(project: Name, taskId: Ulid): Promise<void> {
-    this.merges.push({ project, taskId });
+  async completeTask(project: Name, taskId: Ulid): Promise<void> {
+    this.completions.push({ project, taskId });
   }
+}
+
+/** Roles for the work itself are not seeded; the tests write them as a society would. */
+async function addWorkRoles(board: Board): Promise<void> {
+  await board.setRoleCharter(USER, {
+    name: "engineer",
+    purpose: "Builds.",
+    verbs: [...MEMBER_VERBS],
+    wakeTriggers: ["unclaimed_task", "heartbeat"],
+  });
+  await board.setRoleCharter(USER, {
+    name: "reviewer",
+    purpose: "Checks.",
+    verbs: [...MEMBER_VERBS],
+    wakeTriggers: ["heartbeat"],
+  });
 }
 
 describe("Scheduler", () => {
@@ -86,6 +108,7 @@ describe("Scheduler", () => {
   ) {
     const { board } = await Board.init(dir, { name: "sched" }, { now, leaseMs: 60_000 });
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
@@ -129,6 +152,7 @@ describe("Scheduler", () => {
   it("fires onboarding turns when agents join a project", async () => {
     const { board } = await Board.init(dir, { name: "sched" }, { now });
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
@@ -200,29 +224,60 @@ describe("Scheduler", () => {
     expect(scheduler.pendingCount).toBe(0);
   });
 
-  it("wakes reviewers on submission, merges and wakes the claimer on approval", async () => {
+  it("wakes each stage's assignee, completes after the finishing turn ends, and wakes the creator", async () => {
     const { board, runner, scheduler } = await setup();
-    const task = await board.createTask(USER, { project: "demo", title: "t" });
-    await board.claimTask(ENG, { task_id: task.id });
-    await board.updateTask(ENG, { task_id: task.id, status: "in_review" });
-    await scheduler.tick();
-    advance(1_000);
-    await scheduler.tick();
-    await scheduler.drain();
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await board.configureProject(USER, {
+      project: "demo",
+      on_done: "merge",
+      default_plan: [
+        { name: "build", role: "engineer" },
+        { name: "review", role: "reviewer", gate: true },
+      ],
+    });
+    const task = await board.createTask(ENG, { project: "demo", title: "t" });
+    await settle();
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.trigger.taskId])).toEqual([
-      ["rev-1", "claim_event", task.id],
+      ["eng-1", "stage", task.id],
     ]);
-    await board.updateTask(REV, { task_id: task.id, status: "done" });
+    expect(runner.dispatches[0]?.trigger.reason).toContain('stage "build"');
+
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    await settle();
+    expect(runner.dispatches.at(-1)).toMatchObject({ agent: "rev-1", trigger: { kind: "stage" } });
+
+    // The reviewer finishes the last stage during its own turn; the merge waits for that turn.
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@rev-1 over to you" });
     await scheduler.tick();
-    advance(1_000);
+    expect(scheduler.runningPairs).toEqual(["rev-1/demo"]);
+    await board.claimTask(REV, { task_id: task.id });
+    await board.advanceTask(REV, { task_id: task.id });
+    await scheduler.tick();
+    expect(runner.completions).toEqual([]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.merges).toEqual([{ project: "demo", taskId: task.id }]);
-    expect(runner.dispatches.at(-1)?.agent).toBe("eng-1");
-    expect(runner.dispatches.at(-1)?.trigger.reason).toBe("task approved");
+    expect(runner.completions).toEqual([{ project: "demo", taskId: task.id }]);
+
+    // A finished task wakes its creator.
+    await board.finishCompletion(SYSTEM_ACTOR, { taskId: task.id, ok: true, detail: "merged" });
+    await settle();
+    expect(runner.dispatches.at(-1)).toMatchObject({
+      agent: "eng-1",
+      trigger: { kind: "task_done", taskId: task.id },
+    });
   });
 
-  it("wakes engineers once for a task left unclaimed past the threshold", async () => {
+  it("wakes the members who may hold a stage left waiting past the threshold, once", async () => {
     const { board, runner, scheduler } = await setup();
     await board.createTask(USER, { project: "demo", title: "nobody took me" });
     await scheduler.tick();
@@ -355,7 +410,9 @@ describe("Scheduler", () => {
     ]);
     expect(signals[0]?.signal.value).toBe(3);
     expect(scheduler.activeSignals).toEqual(["backlog:demo:engineer"]);
-    expect((await board.listChannel("ops")).at(-1)?.body).toContain("**backlog** demo: 3 open");
+    expect((await board.listChannel("ops")).at(-1)?.body).toContain(
+      "**backlog** demo: 3 current stage(s)",
+    );
     // The signal event wakes the steward after the debounce; the engineer is not charted for it.
     await scheduler.tick();
     expect(scheduler.pendingPairs).toEqual(["stew-1/demo"]);
@@ -391,13 +448,18 @@ describe("Scheduler", () => {
       project: "demo",
       title: "needs gpu",
       required_capabilities: ["gpu"],
+      stages: [
+        { name: "build", role: "engineer" },
+        { name: "review", role: "reviewer", gate: true },
+      ],
     });
     await board.claimTask(ENG, { task_id: task.id });
     await board.releaseTask(ENG, { task_id: task.id });
     await board.claimTask(ENG, { task_id: task.id });
     await board.releaseTask(ENG, { task_id: task.id });
     await board.claimTask(ENG, { task_id: task.id });
-    await board.updateTask(ENG, { task_id: task.id, status: "in_review" });
+    // The review stage is now current, and its role has no active member.
+    await board.advanceTask(ENG, { task_id: task.id });
     const closed = await board.createTask(USER, { project: "demo", title: "done but open" });
     await board.openThread(ENG, { task_id: closed.id });
     await board.claimTask(ENG, { task_id: closed.id });

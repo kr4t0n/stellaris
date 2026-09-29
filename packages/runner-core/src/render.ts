@@ -24,8 +24,8 @@ export interface RenderInstructionsInput {
 
 const TURN_CONTRACT = [
   "- The digest in your prompt is your inbox. Read it before anything else.",
-  "- Act through the board tools (the `board` MCP server). Claims are leases; every turn that touches a task renews it.",
-  "- Work only inside your worktree and commit on your own branch. Never merge, rebase onto, or fast-forward main yourself: when a reviewer moves a task to done, the board lands the claimer's branch on main and posts the result.",
+  "- Act through the board tools (the `board` MCP server). Holding a stage is a lease; every turn that touches the task renews it.",
+  "- Work only inside your worktree. A task's work goes on its branch `task/<id>`: run `git switch task/<id>` before working on the task and commit there. After each turn the runner commits what you left on a task branch and switches your worktree back to your own branch, `agent/<name>`, for work tied to no task.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
   "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
@@ -34,19 +34,29 @@ const TURN_CONTRACT = [
   "- End every turn with the status object: summary, claims held, what is blocked, whether the user must decide.",
 ].join("\n");
 
+/** How work is planned: stages between open and done, written and reshaped by the participants. */
+const PLANNING = [
+  "- A task is a plan of stages between open and done. Hold the current stage with claim_task and finish it with advance_task; the next stage becomes current, and past the last one the task is done.",
+  "- Name stages by what gets done. Plan the next few steps rather than everything, and reshape with plan_task as the work teaches you.",
+  "- Assign a stage to a role when anyone in it could do it, to a citizen only when it must be them, and to nobody when anyone in the project could.",
+  "- Reshape rather than force: another round is an inserted stage, and a wait on something outside the society is a stage named for what it waits on. When a check finds work unfinished, send the task back to an earlier stage with update_task.",
+  "- A gated stage is an independent check: nobody who held an earlier stage of the task may hold it, and only the user, the steward, and the concierge may add, remove, move, reassign, or ungate it. Ask them in the task's thread when a gate should change.",
+  "- Commit your work on the task's branch before you advance, and say what you did in the advance note.",
+].join("\n");
+
 /** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
 const GOVERNANCE = [
   "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The user decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
   '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
-  '  - role: {"name", "purpose", "verbs": [board verbs], "repoPermission": "none", "read", "write", or "merge", "wakeTriggers": [trigger kinds], "maxReplicas"?, "backlogThreshold"?}',
+  '  - role: {"name", "purpose", "verbs": [board verbs], "wakeTriggers": any of "user_post", "ops_event", "unclaimed_task", "heartbeat", "maxReplicas"?, "backlogThreshold"?}. Mentions, stages that become yours, and finished tasks you created wake every role.',
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
-  "- Projects and membership: `create_project` opens a project with its default channels (front desk and user). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
+  "- Projects and membership: `create_project` opens a project with its default channels (front desk and user), and `configure_project` sets its default plan and completion effect (user, steward, concierge). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
-  "- Operations signals arrive in the ops channel as posts by the board: unclaimed tasks, backlog per member, role gaps, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
+  "- Operations signals arrive in the ops channel as posts by the board: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
 ].join("\n");
 
 /** The onboarding preamble. It appears on an agent's first turn and never again. */
@@ -111,6 +121,10 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     "## Turn contract",
     "",
     TURN_CONTRACT,
+    "",
+    "## Planning",
+    "",
+    PLANNING,
     "",
     "## Governance",
     "",

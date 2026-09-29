@@ -9,6 +9,7 @@ import { Board } from "@stellaris/board-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { addWorkRoles } from "./testing/scripted-backend.js";
 
 const USER = { name: "user", role: "user" } as const;
 
@@ -24,6 +25,7 @@ describe("board server", () => {
     board = init.board;
     userToken = init.userToken;
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     engToken = (
       await board.addAgent(USER, {
         name: "eng-1",
@@ -75,7 +77,20 @@ describe("board server", () => {
       headers,
       body: JSON.stringify({ task_id: task.id, status: "done" }),
     });
-    expect(invalid.status).toBe(409);
+    expect(invalid.status).toBe(400);
+
+    const claimed = await app.request("/api/verbs/claim_task", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task_id: task.id }),
+    });
+    expect(claimed.status).toBe(200);
+    const conflict = await app.request("/api/verbs/claim_task", {
+      method: "POST",
+      headers: { authorization: `Bearer ${userToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ task_id: task.id }),
+    });
+    expect(conflict.status).toBe(409);
 
     const tasks = await app.request("/api/projects/demo/tasks", {
       headers: { authorization: `Bearer ${userToken}` },

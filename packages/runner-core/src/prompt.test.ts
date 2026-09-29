@@ -1,4 +1,4 @@
-import { TriggerSchema } from "@stellaris/shared";
+import { TaskFrontmatterSchema, TriggerSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
@@ -51,7 +51,8 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Your previous turn did not finish");
     expect(prompt).toContain("Inbox (1 unread)");
     expect(prompt).toContain("please start on the scaffold");
-    expect(prompt).toContain("Claims you hold");
+    expect(prompt).toContain("## Stages you hold\n\nNone.");
+    expect(prompt).not.toContain("Stages waiting for you");
     expect(prompt).not.toContain("First turn");
   });
 
@@ -108,6 +109,11 @@ describe("buildTurnPrompt", () => {
             approvers: ["user"],
             requiredCapabilities: [],
             createdAt: "2026-09-28T10:00:00.000Z",
+            defaultPlan: [
+              { name: "build", role: "engineer", gate: false },
+              { name: "review", role: "reviewer", gate: true },
+            ],
+            onDone: "merge",
           },
         ],
         members: [
@@ -135,9 +141,81 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Trigger: user_post from user. the user posted in general");
     expect(prompt).toContain("Route it: answer in the same channel");
     expect(prompt).toContain("## The society");
-    expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1');
+    expect(prompt).toContain(
+      '- demo "Demo": channels general, dev; members eng-1; on done merge; default plan build (engineer), review (gate, reviewer)',
+    );
     expect(prompt).toContain(
       "- eng-1: engineer on codex (gpt-5-codex); active; projects demo; follows general, demo/general; skills uv-setup; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
+    );
+  });
+
+  it("shows the stages an agent holds and the ones waiting for it, each with the rest of its plan", () => {
+    const ts = "2026-09-29T10:00:00.000Z";
+    const task = (id: string, title: string, stage: string, claimedBy?: string) => ({
+      ...TaskFrontmatterSchema.parse({
+        id,
+        project: "lab",
+        title,
+        status: claimedBy === undefined ? "open" : "claimed",
+        thread: "none",
+        createdBy: "desk",
+        createdAt: ts,
+        updatedAt: ts,
+        ...(claimedBy === undefined ? {} : { claimedBy, leaseExpiresAt: ts }),
+        blockedBy: [],
+        requiredCapabilities: [],
+        stages: [
+          { id: "s1", name: "experiment", role: "researcher" },
+          { id: "s2", name: "write-up", role: "researcher" },
+          { id: "s3", name: "referee review", role: "editor", gate: true },
+        ],
+        stage,
+        stageSince: ts,
+        stageSeq: 3,
+        onDone: "merge",
+      }),
+      body: "",
+    });
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "res-1",
+        project: "lab",
+        trigger: TriggerSchema.parse({
+          kind: "stage",
+          from: "desk",
+          reason:
+            'stage "experiment" of task 01ARZ3NDEKTSV4RRFFQ69G5FAV "Churn model" is waiting for you',
+          taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        }),
+        priority: 1,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [task("01ARZ3NDEKTSV4RRFFQ69G5FAW", "Pricing", "s2", "res-1")],
+      waitingStages: [task("01ARZ3NDEKTSV4RRFFQ69G5FAV", "Churn model", "s1")],
+      project: {
+        slug: "lab",
+        name: "Lab",
+        repo: null,
+        defaultBranch: "main",
+        channels: ["general"],
+        members: ["res-1"],
+        approvers: ["user"],
+        requiredCapabilities: [],
+        createdAt: ts,
+        defaultPlan: [],
+        onDone: "merge",
+      },
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(prompt).toContain("A stage is waiting for you: claim it with claim_task");
+    expect(prompt).toContain("Never merge or fast-forward main yourself.");
+    expect(prompt).toContain(
+      '- 01ARZ3NDEKTSV4RRFFQ69G5FAW "Pricing": write-up (yours, 2 of 3); next: referee review (gate, editor); lease until 2026-09-29T10:00:00.000Z',
+    );
+    expect(prompt).toContain(
+      '## Stages waiting for you\n\n- 01ARZ3NDEKTSV4RRFFQ69G5FAV "Churn model": experiment (open to researcher, 1 of 3); next: write-up (researcher), referee review (gate, editor)',
     );
   });
 

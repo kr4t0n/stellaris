@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { ProposalKindSchema, TaskStatusSchema } from "./board.js";
+import {
+  CompletionEffectSchema,
+  PlanEditStageSchema,
+  PlanStageSchema,
+  ProposalKindSchema,
+  StageIdSchema,
+} from "./board.js";
 import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 
@@ -32,12 +38,16 @@ export const VerbInputs = {
     body: z.string().default(""),
     parent_id: UlidSchema.optional(),
     required_capabilities: z.array(z.string()).default([]),
+    /** The plan; without it the task gets the project's default plan, else one stage called work. */
+    stages: z.array(PlanStageSchema).min(1).optional(),
   }),
   claim_task: z.object({ task_id: UlidSchema }),
   release_task: z.object({ task_id: UlidSchema }),
   update_task: z.object({
     task_id: UlidSchema,
-    status: TaskStatusSchema.optional(),
+    /** Move the task back to this earlier stage. */
+    stage: StageIdSchema.optional(),
+    status: z.enum(["abandoned"]).optional(),
     note: z.string().min(1).optional(),
     blocked_by: z.array(UlidSchema).optional(),
   }),
@@ -56,6 +66,8 @@ export const VerbInputs = {
     name: z.string().min(1).optional(),
     repo: z.string().min(1).nullable().default(null),
     default_branch: z.string().min(1).default("main"),
+    default_plan: z.array(PlanStageSchema).optional(),
+    on_done: CompletionEffectSchema.optional(),
   }),
   join_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
   leave_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
@@ -64,6 +76,17 @@ export const VerbInputs = {
     project: NameSchema.nullable().default(null),
     topic: NameSchema,
     body: z.string().min(1),
+  }),
+  plan_task: z.object({
+    task_id: UlidSchema,
+    stages: z.array(PlanEditStageSchema),
+    on_done: CompletionEffectSchema.optional(),
+  }),
+  advance_task: z.object({ task_id: UlidSchema, note: z.string().min(1).optional() }),
+  configure_project: z.object({
+    project: NameSchema,
+    default_plan: z.array(PlanStageSchema).optional(),
+    on_done: CompletionEffectSchema.optional(),
   }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
@@ -79,11 +102,14 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   search: "Search messages, tasks, and knowledge by text, optionally within a project or channel.",
   open_thread: "Open the discussion thread for a task.",
   close_thread: "Close a task's thread with a summary that is posted to the project channel.",
-  create_task: "Create a task in a project, optionally under a parent task.",
-  claim_task: "Claim an open task. Claims are leases renewed by every turn that touches the task.",
-  release_task: "Release a task you hold so others can claim it.",
-  update_task: "Change a task's status, add a note, or set what it is blocked by.",
-  get_task: "Read a task with its body and notes.",
+  create_task:
+    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan.",
+  claim_task:
+    "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
+  release_task: "Let go of the stage you hold so someone else can take it.",
+  update_task:
+    "Move a task back to an earlier stage, abandon it, add a note, or set what it is blocked by.",
+  get_task: "Read a task with its plan, body, and notes.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
   propose:
@@ -92,10 +118,16 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Approve a proposal; the board then provisions it. User and steward only, never on your own proposal.",
   reject: "Reject a proposal with a reason. User and steward only, never on your own proposal.",
   create_project:
-    "Create a project with its default channels. Give it a slug, a display name, and a git remote when one exists.",
+    "Create a project with its default channels: a slug, a display name, a git remote when one exists, and optionally a default plan and a completion effect (none or merge).",
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
   write_knowledge:
     "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those.",
+  plan_task:
+    "Reshape a task's plan from the current stage onward, or after it while someone holds it: keep a stage by passing its id, drop it by leaving it out, add one without an id. Gated stages and on_done: user, steward, concierge.",
+  advance_task:
+    "Finish the stage you hold. The next stage becomes current; past the last one the task is done.",
+  configure_project:
+    "Set a project's default plan and its completion effect: none, or merge to land each finished task's branch on the default branch.",
 };

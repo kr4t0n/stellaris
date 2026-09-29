@@ -3,6 +3,7 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { SYSTEM_ACTOR, type Actor, type Board } from "@stellaris/board-core";
 import {
+  mayHoldStage,
   USER_NAME,
   SOCIETY_SCOPE,
   turnStatusJsonSchema,
@@ -13,7 +14,7 @@ import {
   type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
-import { ExecaGit, type GitOps } from "./git.js";
+import { ExecaGit, taskBranch, type GitOps } from "./git.js";
 import { buildTurnPrompt, type KnowledgeView, type SocietyView } from "./prompt.js";
 import {
   renderClaudeMcpConfig,
@@ -180,9 +181,18 @@ export class LocalRunner {
 
     // The society scope has no repository: the agent's home is its working directory.
     const home = this.board.paths.agent(agent.name);
-    const { worktree, repoDir } = societyScope
-      ? { worktree: home, repoDir: home }
-      : await this.prepare(agent.name, dispatch.project);
+    const workspace = societyScope ? null : await this.prepare(agent.name, dispatch.project);
+    const worktree = workspace?.worktree ?? home;
+    const repoDir = workspace?.repoDir ?? home;
+    const project = societyScope ? null : await this.board.readProject(dispatch.project);
+    if (project !== null) {
+      // Every task in play gets its branch before the turn, so a holder only has to switch to it.
+      for (const task of await this.board.listTasks(project.slug)) {
+        if (task.status === "open" || task.status === "claimed") {
+          await this.git.ensureBranch(repoDir, taskBranch(task.id), project.defaultBranch);
+        }
+      }
+    }
     const sessions = await this.board.readSessions(agent.name, dispatch.project);
     const spec: AgentSpec = {
       agent: agent.name,
@@ -241,10 +251,15 @@ export class LocalRunner {
           dir: this.board.paths.projectKnowledge(dispatch.project),
           topics: await this.board.listKnowledge(dispatch.project),
         };
+    const waiting = (project === null ? [] : await this.board.openTasks(project.slug)).filter(
+      (task) => task.claimedBy === undefined && mayHoldStage(actor, task),
+    );
     const prompt = buildTurnPrompt({
       dispatch,
       messages: inbox.messages,
       heldClaims: held,
+      waitingStages: waiting,
+      project,
       lastTurn,
       onboarding,
       societyView,
@@ -318,6 +333,10 @@ export class LocalRunner {
         exitReason: "error",
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+
+    if (workspace !== null) {
+      await this.handBack(agent.name, workspace.worktree, workspace.branch);
     }
 
     // CLIs that assign their own session ids report the real one after the first turn.
@@ -445,24 +464,30 @@ export class LocalRunner {
     await Promise.all([...this.residents.keys()].map((key) => this.closeResident(key, "shutdown")));
   }
 
-  /** Lands the claimer's branch on the default branch after a reviewer marks a task done. */
-  async mergeTask(project: Name, taskId: Ulid): Promise<void> {
-    const location = await this.board.findTask(taskId);
-    const record = await this.board.readProject(project);
-    const claimer = location.task.claimedBy;
-    if (claimer === undefined) {
-      await this.board.recordMerge(SYSTEM_ACTOR, {
-        project,
+  /**
+   * Runs a completing task's effect. For `merge` it lands `task/<id>` on the default branch in the
+   * project's clone, whoever did the work; the board then marks the task done, or sends it back to
+   * wait at its last stage.
+   */
+  async completeTask(project: Name, taskId: Ulid): Promise<void> {
+    const { task } = await this.board.findTask(taskId);
+    if (!task.completing) {
+      return;
+    }
+    if (task.onDone !== "merge") {
+      await this.board.finishCompletion(SYSTEM_ACTOR, {
         taskId,
-        branch: "",
-        ok: false,
-        detail: "task has no claimer",
+        ok: true,
+        detail: "no completion effect",
       });
       return;
     }
+    const record = await this.board.readProject(project);
     const repoDir = await this.git.ensureRepo(record, this.board.paths.repo(project));
-    const branch = `agent/${claimer}`;
-    const outcome = await this.git.merge(repoDir, record.defaultBranch, branch);
+    const branch = taskBranch(taskId);
+    const outcome = (await this.git.branchExists(repoDir, branch))
+      ? await this.git.merge(repoDir, record.defaultBranch, branch)
+      : { ok: true, detail: `${branch} has no work to land` };
     await this.board.recordMerge(SYSTEM_ACTOR, {
       project,
       taskId,
@@ -470,17 +495,31 @@ export class LocalRunner {
       ok: outcome.ok,
       detail: outcome.detail,
     });
-    const channel = `${project}/general`;
-    if (outcome.ok) {
-      await this.board.postMessage(SYSTEM_ACTOR, {
-        channel,
-        body: `Merged ${branch} for task ${taskId}: ${outcome.detail}`,
+    await this.board.finishCompletion(SYSTEM_ACTOR, {
+      taskId,
+      ok: outcome.ok,
+      detail: outcome.detail,
+    });
+    await this.board.postMessage(SYSTEM_ACTOR, {
+      channel: `${project}/general`,
+      body: outcome.ok
+        ? `Task ${taskId} "${task.title}" is done: ${outcome.detail}.`
+        : `Landing ${branch} for task ${taskId} "${task.title}" failed: ${outcome.detail}. The task waits at its last stage for its participants to reshape the plan.`,
+    });
+  }
+
+  /** Commits what the turn left on a task branch and returns the worktree to the agent's own branch. */
+  private async handBack(agent: Name, worktree: string, home: string): Promise<void> {
+    try {
+      const handed = await this.git.handBack(worktree, home, {
+        name: agent,
+        email: `${agent}@stellaris.local`,
       });
-    } else {
-      await this.board.postMessage(SYSTEM_ACTOR, {
-        channel,
-        body: `@${claimer} the merge of ${branch} for task ${taskId} failed: ${outcome.detail}. Rebase on ${record.defaultBranch} and resubmit.`,
-      });
+      if (handed?.committed === true) {
+        this.log.info({ agent, branch: handed.branch }, "committed work left at the end of a turn");
+      }
+    } catch (error) {
+      this.log.warn({ agent, error: String(error) }, "could not hand the worktree back");
     }
   }
 

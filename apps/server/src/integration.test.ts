@@ -8,7 +8,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
-import { USER, ScriptedBackend } from "./testing/scripted-backend.js";
+import { USER, ScriptedBackend, addWorkRoles } from "./testing/scripted-backend.js";
 
 describe("Phase 1 exit criterion", () => {
   let dir: string;
@@ -21,9 +21,17 @@ describe("Phase 1 exit criterion", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("two agents complete a task end to end with a reviewed merge, with the user participating by mention", async () => {
+  it("two agents carry a planned task through a gated review and a send-back to a merge, with the user participating by mention", async () => {
     const { board } = await Board.init(dir, { name: "e2e" });
-    await board.addProject(USER, { slug: "demo" });
+    await board.addProject(USER, {
+      slug: "demo",
+      onDone: "merge",
+      defaultPlan: [
+        { name: "build", role: "engineer", gate: false },
+        { name: "review", role: "reviewer", gate: true },
+      ],
+    });
+    await addWorkRoles(board);
     // One agent per CLI: the board must not care which body a citizen runs on.
     await board.addAgent(USER, {
       name: "eng-1",
@@ -65,6 +73,7 @@ describe("Phase 1 exit criterion", () => {
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(2);
 
+    // The task takes the project's default plan; its first stage and the user's mention both wake eng-1.
     const task = await board.createTask(USER, {
       project: "demo",
       title: "Add hello.txt",
@@ -75,46 +84,68 @@ describe("Phase 1 exit criterion", () => {
       body: `@eng-1 please take task ${task.id}: add hello.txt with a greeting.`,
     });
 
-    await settle(); // eng-1: claim, commit, submit for review
-    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("in_review");
-    await settle(); // rev-1: review and approve
-    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("done");
-    await settle(); // merge lands and eng-1 closes the thread
-    await settle();
+    await settle(); // eng-1 builds on task/<id> and advances to the review
+    expect(await board.getTask(USER, { task_id: task.id })).toMatchObject({
+      status: "open",
+      stage: "s2",
+    });
+    await settle(); // rev-1 holds the gate and sends the work back
+    expect(await board.getTask(USER, { task_id: task.id })).toMatchObject({
+      status: "open",
+      stage: "s1",
+    });
+    await settle(); // the build stage's last holder is woken, reworks, and advances again
+    await settle(); // rev-1 approves and closes the thread; the merge waits for its turn to end
+    await settle(); // the completion effect lands task/<id> and the task is done
 
     const final = await board.getTask(USER, { task_id: task.id });
+    expect(final.status).toBe("done");
     expect(final.thread).toBe("closed");
+    expect(final.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 
     const mainLog = await execa("git", ["log", "--oneline", "main"], {
       cwd: board.paths.repo("demo"),
     });
     expect(mainLog.stdout).toContain("feat: add hello.txt");
-    expect(mainLog.stdout).toContain("merge: land agent/eng-1 on main");
+    expect(mainLog.stdout).toContain("feat: add the second line the review asked for");
+    expect(mainLog.stdout).toContain(`merge: land task/${task.id} on main`);
     expect(await readFile(path.join(board.paths.repo("demo"), "hello.txt"), "utf8")).toBe(
-      "hello from eng-1\n",
+      "hello from eng-1\nand a second line\n",
     );
+    // Each worktree is back on its agent's own branch, so the task branch was free to hand over.
+    const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: board.paths.worktree("eng-1", "demo"),
+    });
+    expect(head.stdout).toBe("agent/eng-1");
 
     const general = await board.listChannel("demo/general");
-    expect(general.some((m) => m.author === "board" && m.body.includes("Merged agent/eng-1"))).toBe(
-      true,
-    );
-    expect(general.some((m) => m.author === "eng-1" && m.body.includes("Thread closed"))).toBe(
+    expect(
+      general.some(
+        (m) => m.author === "board" && m.body.includes(`Task ${task.id} "Add hello.txt" is done`),
+      ),
+    ).toBe(true);
+    expect(general.some((m) => m.author === "rev-1" && m.body.includes("Thread closed"))).toBe(
       true,
     );
 
     const types = (await board.readEvents(null)).map((e) => e.type);
-    expect(types.filter((t) => t === "turn.completed").length).toBeGreaterThanOrEqual(5);
-    expect(types).toContain("merge.completed");
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "task.advanced",
+        "task.moved",
+        "task.completing",
+        "merge.completed",
+        "task.completed",
+      ]),
+    );
     expect(types).not.toContain("turn.failed");
 
-    const last = await board.readLastTurn("eng-1", "demo");
-    expect(last?.exitReason).toBe("completed");
-    expect(last?.status?.summary).toBe("closed the thread");
     const rendered = await readFile(
       path.join(board.paths.agent("eng-1"), ".claude", "CLAUDE.md"),
       "utf8",
     );
     expect(rendered).toContain("## Role");
+    expect(rendered).toContain("## Planning");
     expect(rendered).toContain(board.paths.board);
     // The user's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readInbox({ name: "eng-1", role: "engineer" }, { advance: false });
@@ -136,6 +167,7 @@ describe("Phase 5 exit criterion", () => {
   it("the user posts naming no project and no citizen, and a resident concierge routes it", async () => {
     const { board, userToken } = await Board.init(dir, { name: "desk" });
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
@@ -184,12 +216,14 @@ describe("Phase 5 exit criterion", () => {
     expect(deskPrompt).toContain("## The society");
     expect(deskPrompt).toContain("- eng-1: engineer on codex");
     const tasks = await board.listTasks("demo");
-    expect(tasks.map((t) => t.title)).toEqual(["Add a health endpoint"]);
-    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain(
-      "@eng-1 please take task",
-    );
-    await settle(); // the mention wakes eng-1, which claims and submits
-    expect((await board.getTask(USER, { task_id: tasks[0]?.id ?? "" })).status).toBe("in_review");
+    expect(tasks.map((t) => [t.title, t.stages.map((s) => s.role)])).toEqual([
+      ["Add a health endpoint", ["engineer"]],
+    ]);
+    await settle(); // the stage wakes eng-1, which builds and finishes the only stage
+    expect((await board.getTask(USER, { task_id: tasks[0]?.id ?? "" })).status).toBe("done");
+    await settle(); // the finished task wakes its creator, the desk, which tells the user
+    expect(backend.prompts.at(-1)).toContain("Trigger: task_done");
+    expect((await board.listChannel("general")).at(-1)?.body).toContain("its task is done");
 
     // A request that needs a project the society does not have: the same warm session takes it.
     await board.postMessage(USER, {
@@ -241,6 +275,7 @@ describe("Phase 4 exit criterion", () => {
   it("the steward proposes a member from operations signals and the user approves over the API", async () => {
     const { board, userToken } = await Board.init(dir, { name: "gov" });
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     for (const [name, role, cli] of [
       ["eng-1", "engineer", "codex"],
       ["rev-1", "reviewer", "claude"],
@@ -279,7 +314,7 @@ describe("Phase 4 exit criterion", () => {
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(3);
 
-    // Three open tasks for one engineer: depth three, the seed threshold.
+    // Three unassigned stages the engineer takes as waiting work: depth three, the threshold.
     for (const title of ["Add hello.txt", "Add README", "Add a test"]) {
       await board.createTask(USER, { project: "demo", title, body: "Small." });
     }
@@ -365,6 +400,7 @@ describe("Phase 6 exit criterion", () => {
   it("an agent carries a lesson and a skill from one project into another, and a promoted skill reaches everyone", async () => {
     const { board, userToken } = await Board.init(dir, { name: "memory" });
     await board.addProject(USER, { slug: "alpha" });
+    await addWorkRoles(board);
     await board.addProject(USER, { slug: "beta" });
     await board.addAgent(USER, {
       name: "mem-1",

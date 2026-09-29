@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  canTransition,
   channelRef,
   IsoDateTimeSchema,
   loadServerConfig,
+  mayHoldStage,
   parseChannelRef,
+  PlanStageSchema,
   SEED_ROLES,
+  TaskFrontmatterSchema,
   turnStatusJsonSchema,
   VerbInputs,
 } from "./index.js";
@@ -28,20 +30,54 @@ describe("channel references", () => {
   });
 });
 
-describe("task transitions", () => {
-  it("allows the documented edges and nothing else", () => {
-    expect(canTransition("open", "claimed")).toBe(true);
-    expect(canTransition("claimed", "in_review")).toBe(true);
-    expect(canTransition("in_review", "done")).toBe(true);
-    expect(canTransition("open", "done")).toBe(false);
-    expect(canTransition("done", "open")).toBe(false);
+describe("plans", () => {
+  const ts = "2026-09-29T10:00:00.000Z";
+  const task = TaskFrontmatterSchema.parse({
+    id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    project: "lab",
+    title: "t",
+    status: "open",
+    thread: "none",
+    createdBy: "user",
+    createdAt: ts,
+    updatedAt: ts,
+    blockedBy: [],
+    requiredCapabilities: [],
+    stages: [
+      { id: "s1", name: "draft", role: "writer", holders: ["ann"], completedBy: "ann" },
+      { id: "s2", name: "referee review", role: "editor", gate: true },
+    ],
+    stage: "s2",
+    stageSince: ts,
+    stageSeq: 2,
+  });
+
+  it("admit the assignee's role, and keep a gated stage independent of earlier holders", () => {
+    expect(mayHoldStage({ name: "bob", role: "editor" }, task)).toBe(true);
+    expect(mayHoldStage({ name: "ann", role: "editor" }, task)).toBe(false);
+    expect(mayHoldStage({ name: "cy", role: "writer" }, task)).toBe(false);
+  });
+
+  it("name a role or an agent for a stage, not both", () => {
+    expect(PlanStageSchema.safeParse({ name: "x", role: "a", agent: "b" }).success).toBe(false);
+    expect(PlanStageSchema.parse({ name: "x" })).toEqual({ name: "x", gate: false });
   });
 });
 
 describe("seed roles", () => {
-  it("give governance verbs to the user and steward only", () => {
+  it("are the user, the steward, and the concierge, with no roles for the work itself", () => {
+    expect(SEED_ROLES.map((role) => role.name).toSorted()).toEqual([
+      "concierge",
+      "steward",
+      "user",
+    ]);
+  });
+
+  it("give governance verbs to the user and steward only, and planning settings to the concierge too", () => {
     const withApprove = SEED_ROLES.filter((r) => r.verbs.includes("approve")).map((r) => r.name);
     expect(withApprove.toSorted()).toEqual(["steward", "user"]);
+    const configurers = SEED_ROLES.filter((r) => r.verbs.includes("configure_project"));
+    expect(configurers.map((r) => r.name).toSorted()).toEqual(["concierge", "steward", "user"]);
   });
 });
 

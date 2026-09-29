@@ -19,7 +19,7 @@ export type { ClaudeMcpConfig, OnboardingContext, RenderInstructionsInput } from
 export { buildTurnPrompt } from "./prompt.js";
 export { parseTurnStatus } from "./status.js";
 export type { SocietyView, TurnPromptInput } from "./prompt.js";
-export { ExecaGit } from "./git.js";
-export type { GitOps, MergeOutcome } from "./git.js";
+export { ExecaGit, taskBranch } from "./git.js";
+export type { GitAuthor, GitOps, MergeOutcome } from "./git.js";
 export { LocalRunner } from "./local-runner.js";
 export type { LocalRunnerOptions, RunnerLog } from "./local-runner.js";

@@ -5,6 +5,7 @@ import { Board } from "@stellaris/board-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { addWorkRoles } from "./testing/scripted-backend.js";
 import { TurnHub } from "./turn-hub.js";
 
 const USER = { name: "user", role: "user" } as const;
@@ -47,6 +48,7 @@ describe("board server routes", () => {
     userToken = init.userToken;
     headers = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
     await board.addProject(USER, { slug: "demo" });
+    await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",

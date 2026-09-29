@@ -36,8 +36,10 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "onboarding turn", priority: 1 };
     case "reflection":
       return { wake: true, reason: "scheduled reflection", priority: 0 };
-    case "claim_event":
-      return { wake: true, reason: "claim event", priority: 1 };
+    case "stage":
+      return { wake: true, reason: "stage waiting", priority: 1 };
+    case "task_done":
+      return { wake: true, reason: "task done", priority: 1 };
     case "unclaimed_task":
       return { wake: true, reason: "unclaimed task", priority: 0 };
     case "ops_event":

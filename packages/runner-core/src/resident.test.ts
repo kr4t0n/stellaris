@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import type { AgentEvent } from "@stellaris/shared";
+import { MEMBER_VERBS, type AgentEvent } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalRunner } from "./local-runner.js";
 import { ZERO_USAGE, type AgentBackend, type ResidentSession, type TurnResult } from "./types.js";
@@ -73,6 +73,12 @@ describe("LocalRunner resident sessions and the society scope", () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addProject(USER, { slug: "demo" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",

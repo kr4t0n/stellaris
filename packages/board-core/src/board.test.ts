@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { MEMBER_VERBS } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Board, type Actor } from "./index.js";
+import { Board, SYSTEM_ACTOR, type Actor } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -29,6 +30,14 @@ describe("Board", () => {
       { now, leaseMs: 60_000 },
     );
     await board.addProject(USER, { slug: "demo" });
+    for (const role of ["engineer", "reviewer"]) {
+      await board.setRoleCharter(USER, {
+        name: role,
+        purpose: `The ${role} of the test society.`,
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+      });
+    }
     const eng = await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
@@ -70,13 +79,25 @@ describe("Board", () => {
       project: "demo",
       title: "Build the thing",
       body: "Details.",
+      stages: [
+        { name: "build", role: "engineer" },
+        { name: "review", role: "reviewer", gate: true },
+      ],
     });
+    expect(task.stages.map((stage) => [stage.id, stage.name])).toEqual([
+      ["s1", "build"],
+      ["s2", "review"],
+    ]);
+    expect(task).toMatchObject({ status: "open", stage: "s1", onDone: "none" });
 
     const inbox = await board.readInbox(ENG);
     expect(inbox.messages.map((m) => m.id)).toEqual([brief.id]);
     expect(inbox.cursor).toBe(brief.id);
     expect((await board.readInbox(ENG)).messages).toEqual([]);
 
+    await expect(board.claimTask(REV, { task_id: task.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
     const claimed = await board.claimTask(ENG, { task_id: task.id });
     expect(claimed.status).toBe("claimed");
     expect(claimed.claimedBy).toBe("eng-1");
@@ -95,14 +116,18 @@ describe("Board", () => {
     const reviewerInbox = await board.readInbox(REV);
     expect(reviewerInbox.messages.map((m) => m.id)).toEqual([brief.id]);
 
-    await board.updateTask(ENG, { task_id: task.id, status: "in_review", note: "PR ready" });
-    await expect(board.updateTask(ENG, { task_id: task.id, status: "done" })).rejects.toMatchObject(
-      { code: "FORBIDDEN" },
-    );
-    const done = await board.updateTask(REV, { task_id: task.id, status: "done" });
+    const reviewing = await board.advanceTask(ENG, { task_id: task.id, note: "PR ready" });
+    expect(reviewing).toMatchObject({ status: "open", stage: "s2" });
+    expect(reviewing.claimedBy).toBeUndefined();
+    await expect(board.claimTask(ENG, { task_id: task.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await board.claimTask(REV, { task_id: task.id });
+    const done = await board.advanceTask(REV, { task_id: task.id });
     expect(done.status).toBe("done");
     expect(done.leaseExpiresAt).toBeUndefined();
-    expect(done.body).toContain("@eng-1: PR ready");
+    expect(done.body).toContain("@eng-1: build: PR ready");
+    expect(done.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 
     const summary = await board.closeThread(REV, { thread_id: task.id, summary: "Shipped." });
     expect(summary.task).toBe(task.id);
@@ -123,7 +148,8 @@ describe("Board", () => {
         "task.created",
         "task.claimed",
         "thread.opened",
-        "task.updated",
+        "task.advanced",
+        "task.completed",
         "thread.closed",
       ]),
     );
@@ -147,18 +173,26 @@ describe("Board", () => {
     );
   });
 
-  it("enforces role charters and legal transitions", async () => {
+  it("enforces role charters and the lifecycle's ends", async () => {
     const { board } = await society();
     await expect(
       board.approve(ENG, { proposal_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    const task = await board.createTask(ENG, { project: "demo", title: "t" });
-    await expect(board.updateTask(ENG, { task_id: task.id, status: "done" })).rejects.toMatchObject(
-      { code: "INVALID_TRANSITION" },
-    );
     await expect(
-      board.updateTask(ENG, { task_id: task.id, status: "claimed" }),
-    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+      board.createTask(ENG, {
+        project: "demo",
+        title: "gated",
+        stages: [{ name: "check", gate: true }],
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const task = await board.createTask(ENG, { project: "demo", title: "t" });
+    expect(task.stages.map((stage) => stage.name)).toEqual(["work"]);
+    await expect(board.advanceTask(ENG, { task_id: task.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.updateTask(ENG, { task_id: task.id, stage: "s1" })).rejects.toMatchObject({
+      code: "VALIDATION",
+    });
     await expect(board.postMessage(ENG, { channel: "demo/nope", body: "x" })).rejects.toMatchObject(
       { code: "NOT_FOUND" },
     );
@@ -167,6 +201,207 @@ describe("Board", () => {
       code: "FORBIDDEN",
     });
     expect((await board.releaseTask(ENG, { task_id: task.id })).status).toBe("open");
+    await board.claimTask(ENG, { task_id: task.id });
+    expect((await board.advanceTask(ENG, { task_id: task.id })).status).toBe("done");
+    await expect(board.claimTask(REV, { task_id: task.id })).rejects.toMatchObject({
+      code: "INVALID_TRANSITION",
+    });
+    const other = await board.createTask(ENG, { project: "demo", title: "u" });
+    await expect(
+      board.updateTask(REV, { task_id: other.id, status: "abandoned" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await board.updateTask(ENG, { task_id: other.id, status: "abandoned" })).status).toBe(
+      "abandoned",
+    );
+  });
+
+  it("runs a plan: stages advance and return, members reshape what is ahead, and gates stay guarded", async () => {
+    const { board } = await society();
+    for (const role of ["researcher", "editor"]) {
+      await board.setRoleCharter(USER, {
+        name: role,
+        purpose: `A ${role}.`,
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: [],
+      });
+    }
+    const lab = await board.addProject(USER, {
+      slug: "lab",
+      defaultPlan: [
+        { name: "experiment", role: "researcher", gate: false },
+        { name: "write-up", role: "researcher", gate: false },
+        { name: "referee review", role: "editor", gate: true },
+      ],
+    });
+    expect(lab.onDone).toBe("none");
+    for (const [name, role] of [
+      ["res-1", "researcher"],
+      ["ed-1", "editor"],
+      ["ed-2", "editor"],
+    ] as const) {
+      await board.addAgent(USER, { name, role, cli: "claude", memberships: ["lab"] });
+    }
+    const RES: Actor = { name: "res-1", role: "researcher" };
+    const ED1: Actor = { name: "ed-1", role: "editor" };
+    const ED2: Actor = { name: "ed-2", role: "editor" };
+
+    // The project's default plan applies when the creator gives none.
+    const task = await board.createTask(USER, { project: "lab", title: "Churn model" });
+    expect(task.stages.map((s) => `${s.id}:${s.name}:${s.gate}`)).toEqual([
+      "s1:experiment:false",
+      "s2:write-up:false",
+      "s3:referee review:true",
+    ]);
+    await board.claimTask(RES, { task_id: task.id });
+    await board.advanceTask(RES, { task_id: task.id, note: "baseline done" });
+
+    // Another round is one more stage, inserted mid-flight by the researcher itself.
+    const replanned = await board.planTask(RES, {
+      task_id: task.id,
+      stages: [
+        { name: "second experiment", role: "researcher" },
+        { id: "s2", name: "write-up", role: "researcher" },
+        { id: "s3", name: "referee review", role: "editor", gate: true },
+      ],
+    });
+    expect(replanned.stage).toBe("s4");
+    expect(replanned.stages.map((s) => s.id)).toEqual(["s1", "s4", "s2", "s3"]);
+
+    // The member a gate checks cannot drop, clear, add, move, or reassign one.
+    const refused = [
+      [
+        { id: "s4", name: "second experiment" },
+        { id: "s2", name: "write-up" },
+      ],
+      [
+        { id: "s4", name: "second experiment" },
+        { id: "s2", name: "write-up" },
+        { id: "s3", name: "referee review", role: "editor" },
+      ],
+      [
+        { id: "s4", name: "second experiment" },
+        { id: "s2", name: "write-up" },
+        { id: "s3", name: "referee review", role: "editor", gate: true },
+        { name: "second opinion", gate: true },
+      ],
+      [
+        { id: "s4", name: "second experiment" },
+        { id: "s3", name: "referee review", role: "editor", gate: true },
+        { id: "s2", name: "write-up" },
+      ],
+      [
+        { id: "s4", name: "second experiment" },
+        { id: "s2", name: "write-up" },
+        { id: "s3", name: "referee review", role: "researcher", gate: true },
+      ],
+    ];
+    for (const stages of refused) {
+      await expect(board.planTask(RES, { task_id: task.id, stages })).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+    }
+    await expect(
+      board.planTask(RES, { task_id: task.id, stages: [{ id: "s1", name: "again" }] }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+
+    // The user inserts an unassigned audit; anyone in the project may hold it.
+    const audited = await board.planTask(USER, {
+      task_id: task.id,
+      stages: [
+        { id: "s4", name: "second experiment", role: "researcher" },
+        { name: "data audit" },
+        { id: "s2", name: "write-up", role: "researcher" },
+        { id: "s3", name: "referee review", role: "editor", gate: true },
+      ],
+    });
+    expect(audited.stages.map((s) => s.id)).toEqual(["s1", "s4", "s5", "s2", "s3"]);
+    await board.claimTask(RES, { task_id: task.id });
+    await board.advanceTask(RES, { task_id: task.id });
+    await board.claimTask(ED1, { task_id: task.id });
+    await board.advanceTask(ED1, { task_id: task.id });
+    await board.claimTask(RES, { task_id: task.id });
+    await board.advanceTask(RES, { task_id: task.id });
+
+    // The gate is an independent check: ed-1 held the audit, so ed-2 referees.
+    await expect(board.claimTask(RES, { task_id: task.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.claimTask(ED1, { task_id: task.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await board.claimTask(ED2, { task_id: task.id });
+    const sentBack = await board.updateTask(ED2, {
+      task_id: task.id,
+      stage: "s2",
+      note: "the write-up skips the ablation",
+    });
+    expect(sentBack).toMatchObject({ status: "open", stage: "s2" });
+    expect(sentBack.stages.find((s) => s.id === "s2")?.completedBy).toBeUndefined();
+    await board.claimTask(RES, { task_id: task.id });
+    await board.advanceTask(RES, { task_id: task.id, note: "ablation added" });
+    await board.claimTask(ED2, { task_id: task.id });
+    const done = await board.advanceTask(ED2, { task_id: task.id });
+    expect(done.status).toBe("done");
+
+    const members = await board.listMembers();
+    for (const name of ["res-1", "ed-1", "ed-2"]) {
+      expect(members.find((m) => m.name === name)?.tasksDone).toBe(1);
+    }
+    const types = (await board.readEvents(null)).map((event) => event.type);
+    expect(types).toEqual(
+      expect.arrayContaining(["task.planned", "task.moved", "task.advanced", "task.completed"]),
+    );
+  });
+
+  it("runs completion effects: a merge project completes through the board, and a failure reopens the last stage", async () => {
+    const { board } = await society();
+    await expect(
+      board.configureProject(ENG, { project: "demo", on_done: "merge" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const configured = await board.configureProject(USER, {
+      project: "demo",
+      on_done: "merge",
+      default_plan: [{ name: "build", role: "engineer" }],
+    });
+    expect(configured).toMatchObject({ onDone: "merge" });
+
+    const task = await board.createTask(USER, { project: "demo", title: "Add hello.txt" });
+    expect(task.onDone).toBe("merge");
+    await expect(
+      board.planTask(ENG, {
+        task_id: task.id,
+        stages: [{ id: "s1", name: "build" }],
+        on_done: "none",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await board.claimTask(ENG, { task_id: task.id });
+    const completing = await board.advanceTask(ENG, { task_id: task.id });
+    expect(completing).toMatchObject({ status: "open", completing: true });
+    await expect(board.claimTask(REV, { task_id: task.id })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+
+    const reopened = await board.finishCompletion(SYSTEM_ACTOR, {
+      taskId: task.id,
+      ok: false,
+      detail: "conflict in hello.txt",
+    });
+    expect(reopened).toMatchObject({ status: "open", completing: false, stage: "s1" });
+    expect(reopened.stages[0]?.completedBy).toBeUndefined();
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    const done = await board.finishCompletion(SYSTEM_ACTOR, {
+      taskId: task.id,
+      ok: true,
+      detail: "merged",
+    });
+    expect(done.status).toBe("done");
+    const events = await board.readEvents(null);
+    expect(events.filter((e) => e.type === "task.completing")).toHaveLength(2);
+    expect(events.find((e) => e.type === "task.reopened")?.payload["detail"]).toBe(
+      "conflict in hello.txt",
+    );
+    expect(events.find((e) => e.type === "task.completed")?.payload["createdBy"]).toBe("user");
   });
 
   it("validates proposals by kind, forbids self-decisions, and reserves hiring for the user", async () => {
@@ -255,8 +490,7 @@ describe("Board", () => {
         name: "designer",
         purpose: "Owns the visual language.",
         verbs: ["post_message", "read_inbox", "search"],
-        repoPermission: "read",
-        wakeTriggers: ["mention"],
+        wakeTriggers: ["heartbeat"],
       },
     });
     await board.approve(USER, { proposal_id: role.id });
@@ -365,8 +599,7 @@ describe("Board", () => {
       name: "designer",
       purpose: "Owns the visual language.",
       verbs: ["post_message"],
-      repoPermission: "read",
-      wakeTriggers: ["mention"],
+      wakeTriggers: [],
     });
     await expect(
       board.addReplica(USER, { project: "demo", role: "designer" }),
@@ -423,10 +656,10 @@ describe("Board", () => {
     await rm(board.paths.role("concierge"));
     await rm(board.paths.members(), { recursive: true, force: true });
     // A charter written before a verb existed: the user's other edits must survive the grant.
-    const engineer = await board.readRole("engineer");
+    const steward = await board.readRole("steward");
     await board.setRoleCharter(USER, {
-      ...engineer,
-      verbs: engineer.verbs.filter((verb) => verb !== "write_knowledge"),
+      ...steward,
+      verbs: steward.verbs.filter((verb) => verb !== "write_knowledge"),
       maxReplicas: 4,
     });
     // A charter written before a field existed: the seed's value applies, not the schema's default.
@@ -447,10 +680,10 @@ describe("Board", () => {
     expect(reopened.resolveToken(eng.token)).toEqual(ENG);
     expect((await reopened.readRole("concierge")).resident).toBe(true);
     expect((await reopened.listRoles()).map((role) => role.name)).toContain("concierge");
-    const granted = await reopened.readRole("engineer");
+    const granted = await reopened.readRole("steward");
     expect(granted.verbs).toContain("write_knowledge");
     expect(granted.maxReplicas).toBe(4);
-    expect((await reopened.readRole("steward")).societyScope).toBe(true);
+    expect(granted.societyScope).toBe(true);
     expect((await reopened.readRole("user")).reflects).toBe(false);
     const seeded = (await reopened.readEvents(null)).filter(
       (event) => event.type === "role.added" && event.payload["seeded"] === true,
@@ -463,8 +696,7 @@ describe("Board", () => {
       ]),
     ).toEqual([
       ["user", [], ["reflects"]],
-      ["engineer", ["write_knowledge"], []],
-      ["steward", [], ["societyScope"]],
+      ["steward", ["write_knowledge"], ["societyScope"]],
       ["concierge", undefined, undefined],
     ]);
     // The members' own role files follow, seed instructions included.
@@ -477,7 +709,7 @@ describe("Board", () => {
       (await reopened.readEvents(null)).filter(
         (event) => event.type === "role.added" && event.payload["seeded"] === true,
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(3);
     await expect(Board.open(path.join(dir, "nowhere"))).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
@@ -530,8 +762,7 @@ describe("Board", () => {
     const demoTask = await board.createTask(USER, { project: "demo", title: "d" });
     await board.claimTask(ENG, { task_id: demoTask.id });
     expect((await board.listMembers()).find((m) => m.name === "eng-1")?.claimsHeld).toBe(1);
-    await board.updateTask(ENG, { task_id: demoTask.id, status: "in_review" });
-    await board.updateTask(REV, { task_id: demoTask.id, status: "done" });
+    await board.advanceTask(ENG, { task_id: demoTask.id });
     const after = (await board.listMembers()).find((m) => m.name === "eng-1");
     expect(after).toMatchObject({ claimsHeld: 0, tasksDone: 1 });
 
@@ -702,6 +933,11 @@ describe("Board", () => {
     expect(path.isAbsolute(relative)).toBe(false);
     const { board } = await Board.init(relative, { name: "relative" });
     expect(board.paths.dataDir).toBe(dir);
+    expect((await board.listRoles()).map((role) => role.name).toSorted()).toEqual([
+      "concierge",
+      "steward",
+      "user",
+    ]);
     expect(path.isAbsolute(board.paths.worktree("eng-1", "demo"))).toBe(true);
     expect(board.paths.repo("demo")).toBe(path.join(dir, "repos", "demo"));
     expect((await Board.open(relative)).paths.agent("eng-1")).toBe(

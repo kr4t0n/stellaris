@@ -26,6 +26,40 @@ export const SocietySchema = z.object({
 });
 export type Society = z.infer<typeof SocietySchema>;
 
+/** What the board does when a task's last stage completes: nothing, or land the task's branch. */
+export const CompletionEffectSchema = z.enum(["none", "merge"]);
+export type CompletionEffect = z.infer<typeof CompletionEffectSchema>;
+
+export const StageIdSchema = z.string().regex(/^s[1-9][0-9]*$/, "expected a stage id such as s1");
+export type StageId = z.infer<typeof StageIdSchema>;
+
+const stageFields = {
+  name: z.string().trim().min(1).max(120),
+  role: NameSchema.optional(),
+  agent: NameSchema.optional(),
+  gate: z.boolean().default(false),
+};
+
+function oneAssignee(stage: { role?: string | undefined; agent?: string | undefined }): boolean {
+  return stage.role === undefined || stage.agent === undefined;
+}
+
+const ONE_ASSIGNEE = { message: "a stage names a role or an agent, not both" };
+
+/** A stage as a plan is written: a name, at most one assignee, and an optional gate. */
+export const PlanStageSchema = z.object(stageFields).refine(oneAssignee, ONE_ASSIGNEE);
+export type PlanStageInput = z.input<typeof PlanStageSchema>;
+export type PlanStage = z.output<typeof PlanStageSchema>;
+
+/** A stage passed to `plan_task`: with the id of a stage to keep, or without one for a new stage. */
+export const PlanEditStageSchema = z
+  .object({ id: StageIdSchema.optional(), ...stageFields })
+  .refine(oneAssignee, ONE_ASSIGNEE);
+export type PlanEditStage = z.output<typeof PlanEditStageSchema>;
+
+export const PlanSchema = z.array(PlanStageSchema);
+export const PlanEditSchema = z.array(PlanEditStageSchema);
+
 export const ProjectSchema = z.object({
   slug: NameSchema,
   name: z.string().min(1),
@@ -36,6 +70,9 @@ export const ProjectSchema = z.object({
   approvers: z.array(NameSchema),
   requiredCapabilities: z.array(z.string()),
   createdAt: IsoDateTimeSchema,
+  /** The plan a task gets when its creator gives none. */
+  defaultPlan: z.array(PlanStageSchema).default([]),
+  onDone: CompletionEffectSchema.default("none"),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
@@ -54,18 +91,28 @@ export interface Message extends MessageFrontmatter {
   readonly body: string;
 }
 
-export const TaskStatusSchema = z.enum([
-  "open",
-  "claimed",
-  "in_review",
-  "done",
-  "blocked",
-  "abandoned",
-]);
+/**
+ * `open`: the current stage waits for a holder. `claimed`: a member holds it. The stages between
+ * open and done are the task's plan; which one is current is recorded beside the status.
+ */
+export const TaskStatusSchema = z.enum(["open", "claimed", "done", "abandoned"]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 export const ThreadStateSchema = z.enum(["none", "open", "closed"]);
 export type ThreadState = z.infer<typeof ThreadStateSchema>;
+
+export const StageSchema = z.object({
+  id: StageIdSchema,
+  name: z.string().min(1),
+  role: NameSchema.optional(),
+  agent: NameSchema.optional(),
+  gate: z.boolean().default(false),
+  /** Everyone who has held the stage, oldest first. */
+  holders: z.array(NameSchema).default([]),
+  completedBy: NameSchema.optional(),
+  completedAt: IsoDateTimeSchema.optional(),
+});
+export type Stage = z.infer<typeof StageSchema>;
 
 export const TaskFrontmatterSchema = z.object({
   id: UlidSchema,
@@ -76,29 +123,56 @@ export const TaskFrontmatterSchema = z.object({
   createdBy: NameSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
+  /** The holder of the current stage. */
   claimedBy: NameSchema.optional(),
   leaseExpiresAt: IsoDateTimeSchema.optional(),
   parentId: UlidSchema.optional(),
   blockedBy: z.array(UlidSchema),
   requiredCapabilities: z.array(z.string()),
+  stages: z.array(StageSchema).min(1),
+  stage: StageIdSchema,
+  /** When the current stage last became current or lost its holder: the waiting clock. */
+  stageSince: IsoDateTimeSchema,
+  /** The highest stage number issued, so a removed stage's id is never reused. */
+  stageSeq: z.number().int().positive(),
+  onDone: CompletionEffectSchema.default("none"),
+  /** The last stage is complete and the completion effect is running. */
+  completing: z.boolean().default(false),
 });
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;
 export interface Task extends TaskFrontmatter {
   readonly body: string;
 }
 
-/** Legal status transitions. Who may perform each one is enforced by the board. */
-export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
-  open: ["claimed", "abandoned"],
-  claimed: ["open", "in_review", "blocked", "abandoned"],
-  in_review: ["claimed", "done"],
-  blocked: ["claimed"],
-  done: [],
-  abandoned: [],
-};
+export function stageIndex(task: TaskFrontmatter, id: StageId): number {
+  return task.stages.findIndex((stage) => stage.id === id);
+}
 
-export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
-  return TASK_TRANSITIONS[from].includes(to);
+export function currentStage(task: TaskFrontmatter): Stage | undefined {
+  return task.stages.find((stage) => stage.id === task.stage);
+}
+
+/**
+ * Whether a member may hold the task's current stage: the named citizen, a member of the named
+ * role, or anyone when neither is named; a gated stage excludes whoever held an earlier stage.
+ * Project membership and the user's exemption are the board's to check.
+ */
+export function mayHoldStage(
+  member: { name: string; role: string },
+  task: TaskFrontmatter,
+): boolean {
+  const index = stageIndex(task, task.stage);
+  const stage = task.stages[index];
+  if (stage === undefined) {
+    return false;
+  }
+  if (stage.agent !== undefined && stage.agent !== member.name) {
+    return false;
+  }
+  if (stage.role !== undefined && stage.role !== member.role) {
+    return false;
+  }
+  return !(stage.gate && task.stages.slice(0, index).some((s) => s.holders.includes(member.name)));
 }
 
 export const AgentStatusSchema = z.enum(["active", "retired"]);

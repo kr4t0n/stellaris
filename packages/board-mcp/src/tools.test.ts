@@ -4,21 +4,21 @@ import { BOARD_TOOLS, toolsForRole } from "./index.js";
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
-    expect(BOARD_TOOLS).toHaveLength(19);
+    expect(BOARD_TOOLS).toHaveLength(22);
     for (const tool of BOARD_TOOLS) {
       expect(tool.description.length).toBeGreaterThan(10);
     }
   });
 
-  it("hides governance tools from engineers and shows them to the user", () => {
-    const engineer = SEED_ROLES.find((role) => role.name === "engineer");
+  it("hides governance tools from the concierge and shows them to the user", () => {
+    const concierge = SEED_ROLES.find((role) => role.name === "concierge");
     const user = SEED_ROLES.find((role) => role.name === "user");
-    if (engineer === undefined || user === undefined) {
+    if (concierge === undefined || user === undefined) {
       throw new Error("seed roles missing");
     }
-    const engineerTools = toolsForRole(engineer).map((tool) => tool.name);
-    expect(engineerTools).not.toContain("approve");
-    expect(engineerTools).toContain("claim_task");
+    const conciergeTools = toolsForRole(concierge).map((tool) => tool.name);
+    expect(conciergeTools).not.toContain("approve");
+    expect(conciergeTools).toEqual(expect.arrayContaining(["plan_task", "configure_project"]));
     expect(toolsForRole(user).map((tool) => tool.name)).toContain("approve");
   });
 });

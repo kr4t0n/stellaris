@@ -47,6 +47,8 @@ export interface TurnRequest {
   readonly statusSchema: Record<string, unknown>;
   /** Extra environment for the CLI process, for example git identity. */
   readonly env: Readonly<Record<string, string>>;
+  /** The running total the session reported after its last turn, which a resumed session starts from. */
+  readonly costSoFarUsd?: number | undefined;
 }
 
 export interface TurnResult {
@@ -64,6 +66,8 @@ export interface TurnResult {
   readonly session?: SessionId | undefined;
   /** The model the CLI reported running for this turn, when it reports one. */
   readonly model?: string | undefined;
+  /** The session's running total after this turn, for CLIs that report one; `costUsd` is this turn's share. */
+  readonly sessionCostUsd?: number | undefined;
 }
 
 /** What a resident session needs at start: everything a turn needs except the prompt. */
@@ -75,6 +79,8 @@ export interface ResidentStart {
   readonly limits: TurnLimits;
   readonly statusSchema: Record<string, unknown>;
   readonly env: Readonly<Record<string, string>>;
+  /** The running total the session reported after its last turn, which a resumed session starts from. */
+  readonly costSoFarUsd?: number | undefined;
 }
 
 /** A warm session: the CLI process stays alive between turns and each prompt becomes one turn. */

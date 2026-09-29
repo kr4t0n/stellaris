@@ -58,6 +58,28 @@ class ResidentBackend implements AgentBackend {
   }
 }
 
+/** A cold backend whose session reports a running total, as the Claude SDK does on resume. */
+class TotalingBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  readonly startedFrom: number[] = [];
+  private total = 0;
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  runTurn(request: { costSoFarUsd?: number | undefined }): Promise<TurnResult> {
+    this.startedFrom.push(request.costSoFarUsd ?? 0);
+    this.total += 0.25;
+    const sessionCostUsd = this.total;
+    return Promise.resolve({
+      ...completed("cold turn"),
+      costUsd: sessionCostUsd - (request.costSoFarUsd ?? 0),
+      sessionCostUsd,
+    });
+  }
+}
+
 describe("LocalRunner resident sessions and the society scope", () => {
   let dir: string;
 
@@ -67,6 +89,34 @@ describe("LocalRunner resident sessions and the society scope", () => {
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it("hands a resumed session the running total its last turn reported", async () => {
+    const { board } = await Board.init(dir, { name: "totals" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const backend = new TotalingBackend();
+    const runner = new LocalRunner({
+      board,
+      runnerName: "server",
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    const dispatch = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+      onboarding: false,
+    };
+    await runner.runTurn(dispatch);
+    const second = await runner.runTurn(dispatch);
+    expect(backend.startedFrom).toEqual([0, 0.25]);
+    expect(second).toMatchObject({ costUsd: 0.25, sessionCostUsd: 0.5 });
+    // A record from before the running total was kept held it as the turn's cost.
+    const { sessionCostUsd: _total, ...legacy } = second;
+    await board.finishTurn({ ...legacy, costUsd: 0.5 });
+    await runner.runTurn(dispatch);
+    expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
   });
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {

@@ -269,6 +269,7 @@ function finishTurn(
     exitReason: state.exitReason,
     ...(state.error === undefined ? {} : { error: state.error }),
     ...(state.model === undefined ? {} : { model: state.model }),
+    ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
   };
 }
 
@@ -329,7 +330,8 @@ const INTERRUPT_GRACE_MS = 15_000;
 /**
  * A warm Claude Code session: one SDK query over streaming input that stays open between turns.
  * Each pushed user message is a turn that ends with its own result message; costs are reported
- * cumulatively by the SDK, so the session keeps the running total and hands back the delta.
+ * cumulatively by the SDK, from the total a resumed transcript saved, so the session keeps the
+ * running total and hands back the delta.
  */
 class ClaudeResident implements ResidentSession {
   session: SessionId;
@@ -339,18 +341,20 @@ class ClaudeResident implements ResidentSession {
   private active: ActiveTurn | null = null;
   private ended = false;
   private endedWith: string | undefined;
-  private lastTotalCostUsd = 0;
+  private lastTotalCostUsd: number;
   private model: string | undefined;
 
   constructor(
     private readonly context: HandlerContext,
     private readonly limits: { timeoutMs: number },
     session: SessionId,
+    costSoFarUsd: number,
     queryFn: QueryFn,
     options: Options,
     private readonly record: ((lines: readonly string[]) => Promise<void>) | null,
   ) {
     this.session = session;
+    this.lastTotalCostUsd = costSoFarUsd;
     this.stream = queryFn({ prompt: this.source, options });
     this.pumping = this.pump();
   }
@@ -533,7 +537,10 @@ export class ClaudeAgentBackend implements AgentBackend {
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the session ended without a result message";
     }
-    return finishTurn(state, state.totalCostUsd, events, emit);
+    // A resumed session's total starts from what its transcript saved: the earlier turns' cost.
+    const costSoFarUsd = resumable ? (request.costSoFarUsd ?? 0) : 0;
+    const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
+    return finishTurn(state, costUsd, events, emit);
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */
@@ -563,6 +570,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       context,
       { timeoutMs: start.limits.timeoutMs },
       start.session,
+      resumable ? (start.costSoFarUsd ?? 0) : 0,
       this.queryFn,
       this.buildOptions(request, new AbortController(), resumable),
       record,

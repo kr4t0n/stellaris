@@ -56,7 +56,7 @@ function frames(turn: number, text: string, totalCost: number, stall = false): S
  * A scripted SDK: reads user messages from the streamed prompt and answers each with the frames
  * for that turn, the way a real query does in streaming-input mode. Records interrupts and closes.
  */
-function scripted(stallOn: number | null = null) {
+function scripted(stallOn: number | null = null, savedCost = 0) {
   const prompts: string[] = [];
   const calls = { interrupts: 0, closes: 0 };
   let userMessages: AsyncIterable<SDKUserMessage> | null = null;
@@ -80,7 +80,12 @@ function scripted(stallOn: number | null = null) {
         prompts.push(
           typeof message.message.content === "string" ? message.message.content : "<blocks>",
         );
-        for (const frame of frames(turn, `reply ${turn}`, 0.1 * turn, stallOn === turn)) {
+        for (const frame of frames(
+          turn,
+          `reply ${turn}`,
+          savedCost + 0.1 * turn,
+          stallOn === turn,
+        )) {
           yield frame;
         }
       }
@@ -99,6 +104,23 @@ function scripted(stallOn: number | null = null) {
 }
 
 describe("Claude resident sessions", () => {
+  it("measures a resumed session's first turn from the total its transcript saved", async () => {
+    const script = scripted(null, 4.2);
+    const backend = new ClaudeAgentBackend({
+      queryFn: script.queryFn,
+      sessionExists: () => Promise.resolve(true),
+    });
+    const session = await backend.startResident(spec, {
+      ...start,
+      newSession: false,
+      costSoFarUsd: 4.2,
+    });
+    const first = await session.runTurn("hello");
+    expect(first.costUsd).toBeCloseTo(0.1);
+    expect(first.sessionCostUsd).toBeCloseTo(4.3);
+    await session.close();
+  });
+
   it("runs several turns on one streamed query and reports each turn's own cost", async () => {
     const script = scripted();
     const backend = new ClaudeAgentBackend({ queryFn: script.queryFn });

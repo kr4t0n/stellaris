@@ -118,6 +118,24 @@ describe("ClaudeAgentBackend replay", () => {
     expect(options?.allowedTools).toBeUndefined();
   });
 
+  it("reports a resumed turn's own cost, not the session's running total", async () => {
+    const messages = await recorded("sdk-synthetic.jsonl");
+    const resumed = new ClaudeAgentBackend({
+      queryFn: replaying(messages).queryFn,
+      sessionExists: () => Promise.resolve(true),
+    });
+    const result = await resumed.runTurn({ ...request, costSoFarUsd: 0.1 });
+    expect(result.costUsd).toBeCloseTo(0.0922);
+    expect(result.sessionCostUsd).toBeCloseTo(0.1922);
+
+    // A session that does not exist yet starts from nothing, whatever the runner last recorded.
+    const created = new ClaudeAgentBackend({
+      queryFn: replaying(messages).queryFn,
+      sessionExists: () => Promise.resolve(false),
+    });
+    expect((await created.runTurn({ ...request, costSoFarUsd: 0.1 })).costUsd).toBeCloseTo(0.1922);
+  });
+
   it("creates the session under the recorded id when it does not exist yet", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const { queryFn, calls } = replaying(messages);

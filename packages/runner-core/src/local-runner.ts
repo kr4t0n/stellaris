@@ -215,6 +215,12 @@ export class LocalRunner {
     }
 
     const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project);
+    // A resumed session reports a running total that includes its earlier turns. Records from
+    // before `sessionCostUsd` held that total as the turn's cost.
+    const costSoFarUsd =
+      !newSession && lastTurn?.session === session
+        ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
+        : 0;
     const digest = await this.board.readDigest(actor, { advance: false, limit: 50 });
     const held = await this.board.heldClaims(agent.name);
     const roleCharter = await this.board.readAgentRoleBody(agent.name);
@@ -283,7 +289,7 @@ export class LocalRunner {
     const limits = { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns };
     const statusSchema = turnStatusJsonSchema();
 
-    const record: TurnRecord = { ...base, session };
+    const record: TurnRecord = { ...base, session, sessionCostUsd: costSoFarUsd };
     await this.board.beginTurn(record);
     const resident = charter.resident && backend.startResident !== undefined;
     this.log.info(
@@ -309,6 +315,7 @@ export class LocalRunner {
           limits,
           statusSchema,
           env,
+          costSoFarUsd,
           onEvent,
         });
       } else {
@@ -328,6 +335,7 @@ export class LocalRunner {
             limits,
             statusSchema,
             env,
+            costSoFarUsd,
           },
           onEvent,
         );
@@ -363,6 +371,7 @@ export class LocalRunner {
       error: result.error ?? null,
       usage: result.usage,
       costUsd: result.costUsd,
+      sessionCostUsd: result.sessionCostUsd ?? costSoFarUsd,
       toolCalls: result.events.filter((event) => event.type === "tool_call").length,
       model: result.model ?? agent.model ?? null,
     };
@@ -406,6 +415,7 @@ export class LocalRunner {
       limits: { timeoutMs: number; maxTurns: number };
       statusSchema: Record<string, unknown>;
       env: Readonly<Record<string, string>>;
+      costSoFarUsd: number;
       onEvent: (event: AgentEvent) => void;
     },
   ): Promise<TurnResult> {
@@ -424,6 +434,7 @@ export class LocalRunner {
         limits: input.limits,
         statusSchema: input.statusSchema,
         env: input.env,
+        costSoFarUsd: input.costSoFarUsd,
       });
       resident = { session, token, timer: null };
       this.residents.set(input.key, resident);

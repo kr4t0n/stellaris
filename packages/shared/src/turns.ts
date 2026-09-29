@@ -56,6 +56,11 @@ export const TurnRecordSchema = z.object({
   error: z.string().nullable(),
   usage: UsageSchema.nullable(),
   costUsd: z.number().nonnegative().default(0),
+  /**
+   * The running total the CLI reported for the session after this turn, when it reports one. A
+   * resumed session starts from it, so the next turn's own cost is measured from here.
+   */
+  sessionCostUsd: z.number().nonnegative().optional(),
   toolCalls: z.number().int().nonnegative().default(0),
   /** The model the CLI reported for this turn, else the model configured for the agent, else null. */
   model: z.string().nullable().default(null),

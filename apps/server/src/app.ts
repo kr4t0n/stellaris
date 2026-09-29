@@ -61,7 +61,7 @@ function bearer(c: Context<Env>): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-/** The board server's HTTP surface: health, an authenticated API for the owner and tools, and the MCP endpoint. */
+/** The board server's HTTP surface: health, an authenticated API for the user and tools, and the MCP endpoint. */
 export function createApp(deps: AppDependencies): Hono<Env> {
   const { board, version, turns, scheduler } = deps;
   const app = new Hono<Env>();
@@ -120,7 +120,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
 
-  // Governance the owner does directly: retirement, charters, channels.
+  // Governance the user does directly: retirement, charters, channels.
   api.post("/agents/:name/retire", async (c) => {
     const body = RetireBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.retireAgent(c.get("actor"), {

@@ -23,9 +23,9 @@ export const BOARD_TOOLS: readonly BoardToolDefinition[] = VERB_NAMES.map((name)
   inputSchema: VerbInputs[name],
 }));
 
-/** The tools a role may see. The owner sees everything; everyone else sees exactly their charter's verbs. */
+/** The tools a role may see. The user sees everything; everyone else sees exactly their charter's verbs. */
 export function toolsForRole(charter: RoleCharter): readonly BoardToolDefinition[] {
-  if (charter.name === "owner") {
+  if (charter.name === "user") {
     return BOARD_TOOLS;
   }
   const granted = new Set<VerbName>(charter.verbs);

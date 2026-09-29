@@ -13,7 +13,7 @@ import { execa } from "execa";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-export const OWNER = { name: "owner", role: "owner" } as const;
+export const USER = { name: "user", role: "user" } as const;
 export const ULID = /[0-9A-HJKMNP-TV-Z]{26}/;
 
 export function done(summary: string): TurnResult {
@@ -26,7 +26,7 @@ export function done(summary: string): TurnResult {
       summary,
       claimsHeld: [],
       blockedOn: [],
-      needsOwnerDecision: false,
+      needsUserDecision: false,
       memoryUpdated: false,
     },
     exitReason: "completed",
@@ -105,9 +105,9 @@ export class ScriptedBackend implements AgentBackend {
       return body;
     };
 
-    // The front desk routes the owner's posts: a task for an existing project, or a new project.
+    // The front desk routes the user's posts: a task for an existing project, or a new project.
     if (request.spec.agent === "desk") {
-      if (!request.prompt.includes("Trigger: owner_post")) {
+      if (!request.prompt.includes("Trigger: user_post")) {
         return done("nothing to do");
       }
       if (request.prompt.includes("health endpoint")) {
@@ -115,7 +115,7 @@ export class ScriptedBackend implements AgentBackend {
           await verb("create_task", {
             project: "demo",
             title: "Add a health endpoint",
-            body: "Requested by the owner at the front desk.",
+            body: "Requested by the user at the front desk.",
           }),
         );
         await verb("post_message", {
@@ -129,7 +129,7 @@ export class ScriptedBackend implements AgentBackend {
         await verb("propose", {
           kind: "member",
           charter: { name: "eng-2", role: "engineer", cli: "codex", memberships: ["api"] },
-          rationale: "The owner opened a project with no engineer on it.",
+          rationale: "The user opened a project with no engineer on it.",
         });
         return done("created the api project and proposed its first engineer");
       }
@@ -223,7 +223,7 @@ export class ScriptedBackend implements AgentBackend {
         await mkdir(path.join(home, "memory"), { recursive: true });
         await writeFile(
           path.join(home, "memory", "core.md"),
-          "- The owner prefers uv for Python; run uv sync --locked before the tests.\n",
+          "- The user prefers uv for Python; run uv sync --locked before the tests.\n",
           "utf8",
         );
         await mkdir(path.join(home, "skills", "uv-setup"), { recursive: true });

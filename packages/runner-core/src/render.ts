@@ -28,15 +28,15 @@ const TURN_CONTRACT = [
   "- Work only inside your worktree and commit on your own branch. Never merge, rebase onto, or fast-forward main yourself: when a reviewer moves a task to done, the board lands the claimer's branch on main and posts the result.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
-  "- Route every lesson: about you, your craft, or the owner, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
+  "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
   '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
-  "- End every turn with the status object: summary, claims held, what is blocked, whether the owner must decide.",
+  "- End every turn with the status object: summary, claims held, what is blocked, whether the user must decide.",
 ].join("\n");
 
 /** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
 const GOVERNANCE = [
-  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The owner decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
+  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The user decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
   '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
   '  - role: {"name", "purpose", "verbs": [board verbs], "repoPermission": "none", "read", "write", or "merge", "wakeTriggers": [trigger kinds], "maxReplicas"?, "backlogThreshold"?}',
@@ -44,7 +44,7 @@ const GOVERNANCE = [
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
-  "- Projects and membership: `create_project` opens a project with its default channels (front desk and owner). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the owner; joining gives the pair a worktree and an onboarding turn.",
+  "- Projects and membership: `create_project` opens a project with its default channels (front desk and user). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals arrive in the ops channel as posts by the board: unclaimed tasks, backlog per member, role gaps, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
 ].join("\n");
@@ -57,7 +57,7 @@ export function renderOnboardingPreamble(context: OnboardingContext): string {
     `Your role in one paragraph: ${context.roleSummary}`,
     "",
     `You are working on project "${context.project}" in the worktree at ${context.worktree}.`,
-    "Your memory is empty. Write durable lessons about yourself, your craft, or the owner to memory/core.md in your home directory.",
+    "Your memory is empty. Write durable lessons about yourself, your craft, or the user to memory/core.md in your home directory.",
     "Write profile.md in your home directory: one paragraph on what you do well and what to send your way. The roster the front desk routes with is built from it.",
     "Read the project's instructions file, if it has one, before doing anything else.",
     "Silence is allowed, and every turn ends with the status object.",

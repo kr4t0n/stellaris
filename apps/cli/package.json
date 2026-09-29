@@ -2,7 +2,7 @@
   "name": "@stellaris/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "Admin CLI for owners and developers: init, project add, agent add, post, task, pause, turn run",
+  "description": "Admin CLI for users and developers: init, project add, agent add, post, task, pause, turn run",
   "bin": {
     "stellaris": "./dist/index.js"
   },

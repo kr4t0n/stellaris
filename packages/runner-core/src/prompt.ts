@@ -28,7 +28,7 @@ export interface TurnPromptInput {
   readonly heldClaims: readonly Task[];
   readonly lastTurn: TurnRecord | null;
   readonly onboarding: OnboardingContext | null;
-  /** Present for roles that route on behalf of the owner; absent for everyone else. */
+  /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
   readonly knowledge?: KnowledgeView | null | undefined;
 }
@@ -99,9 +99,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "Operations signals arrived; the ops posts below carry them. Decide whether a proposal is warranted, and stay silent if not.",
     );
   }
-  if (dispatch.trigger.kind === "owner_post") {
+  if (dispatch.trigger.kind === "user_post") {
     lines.push(
-      "The owner posted. Route it: answer in the same channel, or create the task, thread, or project it needs and mention the citizens who will do it, adding them to the project first when they are not members. Stay silent when the owner already addressed a citizen and nothing else is needed.",
+      "The user posted. Route it: answer in the same channel, or create the task, thread, or project it needs and mention the citizens who will do it, adding them to the project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
     );
   }
 

@@ -18,7 +18,7 @@ export interface WakeDecision {
 
 /**
  * Nothing wakes while paused. Every trigger wakes otherwise, except a heartbeat with an empty
- * digest and no held claims; owner mentions, owner posts, and manual wakes jump the queue.
+ * digest and no held claims; user mentions, user posts, and manual wakes jump the queue.
  */
 export function decideWake(input: WakeInput): WakeDecision {
   if (input.paused) {
@@ -29,8 +29,8 @@ export function decideWake(input: WakeInput): WakeDecision {
     case "manual":
       return { wake: true, reason: "manual wake", priority: 2 };
     case "mention":
-      return trigger.fromOwner
-        ? { wake: true, reason: "owner mention", priority: 2 }
+      return trigger.fromUser
+        ? { wake: true, reason: "user mention", priority: 2 }
         : { wake: true, reason: "mention", priority: 1 };
     case "onboarding":
       return { wake: true, reason: "onboarding turn", priority: 1 };
@@ -42,8 +42,8 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "unclaimed task", priority: 0 };
     case "ops_event":
       return { wake: true, reason: "operations signal", priority: 0 };
-    case "owner_post":
-      return { wake: true, reason: "owner post", priority: 2 };
+    case "user_post":
+      return { wake: true, reason: "user post", priority: 2 };
     case "heartbeat":
       break;
   }

@@ -13,14 +13,14 @@ export const TriggerKindSchema = z.enum([
   "onboarding",
   "manual",
   "ops_event",
-  "owner_post",
+  "user_post",
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 
 export const TriggerSchema = z.object({
   kind: TriggerKindSchema,
   from: NameSchema.optional(),
-  fromOwner: z.boolean().default(false),
+  fromUser: z.boolean().default(false),
   reason: z.string().default(""),
   taskId: UlidSchema.optional(),
   messageId: UlidSchema.optional(),

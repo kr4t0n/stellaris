@@ -3,7 +3,7 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { SYSTEM_ACTOR, type Actor, type Board } from "@stellaris/board-core";
 import {
-  OWNER_NAME,
+  USER_NAME,
   SOCIETY_SCOPE,
   turnStatusJsonSchema,
   type AgentEvent,
@@ -55,7 +55,7 @@ const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_MAX_TURNS = 60;
 const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
-const OWNER_POST_TRIGGER = "owner_post";
+const USER_POST_TRIGGER = "user_post";
 
 interface Resident {
   readonly session: ResidentSession;
@@ -230,8 +230,8 @@ export class LocalRunner {
       ...(onboarding === null ? {} : { onboarding }),
     });
     await this.renderConfigHome(agent.name, instructions);
-    // Roles that route for the owner get the roster and the project list in every digest.
-    const societyView: SocietyView | null = charter.wakeTriggers.includes(OWNER_POST_TRIGGER)
+    // Roles that route for the user get the roster and the project list in every digest.
+    const societyView: SocietyView | null = charter.wakeTriggers.includes(USER_POST_TRIGGER)
       ? { projects: await this.board.listProjects(), members: await this.board.listMembers() }
       : null;
     const knowledge: KnowledgeView = societyScope
@@ -345,10 +345,10 @@ export class LocalRunner {
         actor,
         held.map((task) => task.id),
       );
-      if (result.status?.needsOwnerDecision === true) {
+      if (result.status?.needsUserDecision === true) {
         await this.board.postMessage(actor, {
           channel: "decisions",
-          body: `@${OWNER_NAME} decision needed on ${dispatch.project}: ${result.status.summary}`,
+          body: `@${USER_NAME} decision needed on ${dispatch.project}: ${result.status.summary}`,
         });
       }
     }

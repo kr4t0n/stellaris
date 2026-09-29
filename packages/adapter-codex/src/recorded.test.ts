@@ -59,7 +59,7 @@ describe("recorded Codex stream", () => {
     expect(result.exitReason).toBe("completed");
     expect(result.session).toBe("01a0e808-3c55-7203-9fd9-1bcb2d3c7804");
     expect(result.status?.summary).toContain("merged agent/eng-1");
-    expect(result.status?.needsOwnerDecision).toBe(false);
+    expect(result.status?.needsUserDecision).toBe(false);
     expect(result.usage.inputTokens).toBeGreaterThan(0);
   });
 });

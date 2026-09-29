@@ -5,7 +5,7 @@ import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, type Actor } from "./index.js";
 
-const OWNER: Actor = { name: "owner", role: "owner" };
+const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 
 describe("Board runtime support", () => {
@@ -24,20 +24,20 @@ describe("Board runtime support", () => {
 
   async function society() {
     const { board } = await Board.init(dir, { name: "rt" }, { now });
-    await board.addProject(OWNER, { slug: "demo" });
-    await board.addAgent(OWNER, {
+    await board.addProject(USER, { slug: "demo" });
+    await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
     });
-    await board.addAgent(OWNER, {
+    await board.addAgent(USER, {
       name: "rev-1",
       role: "reviewer",
       cli: "codex",
       memberships: ["demo"],
     });
-    await board.addAgent(OWNER, { name: "eng-2", role: "engineer", cli: "claude" });
+    await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "claude" });
     return board;
   }
 
@@ -53,10 +53,10 @@ describe("Board runtime support", () => {
     const board = await society();
     const created = await board.invoke(ENG, "create_task", { project: "demo", title: "t" });
     expect(z.object({ id: z.string() }).parse(created).id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    const wake = await board.requestWake(OWNER, { agent: "eng-1", project: "demo" });
+    const wake = await board.requestWake(USER, { agent: "eng-1", project: "demo" });
     expect(wake.type).toBe("wake.requested");
     await expect(
-      board.requestWake(OWNER, { agent: "eng-2", project: "demo" }),
+      board.requestWake(USER, { agent: "eng-2", project: "demo" }),
     ).rejects.toMatchObject({ code: "VALIDATION" });
     await expect(board.requestWake(ENG, { agent: "eng-1", project: "demo" })).rejects.toMatchObject(
       { code: "FORBIDDEN" },
@@ -67,11 +67,11 @@ describe("Board runtime support", () => {
     const board = await society();
     expect((await board.projectMembers("demo")).map((a) => a.name).toSorted()).toEqual([
       "eng-1",
-      "owner",
       "rev-1",
+      "user",
     ]);
     expect((await board.membersWithRole("demo", "engineer")).map((a) => a.name)).toEqual(["eng-1"]);
-    const task = await board.createTask(OWNER, { project: "demo", title: "t" });
+    const task = await board.createTask(USER, { project: "demo", title: "t" });
     expect(await board.heldClaims("eng-1")).toEqual([]);
     await board.claimTask(ENG, { task_id: task.id });
     expect((await board.heldClaims("eng-1")).map((t) => t.id)).toEqual([task.id]);
@@ -93,7 +93,7 @@ describe("Board runtime support", () => {
       runner: "local",
       cli: "claude" as const,
       session: "11111111-1111-4111-8111-111111111111",
-      trigger: { kind: "manual" as const, fromOwner: true, reason: "test" },
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
       startedAt: clock.toISOString(),
       endedAt: null,
       exitReason: null,

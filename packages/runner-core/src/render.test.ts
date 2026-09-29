@@ -22,7 +22,7 @@ describe("config-home rendering", () => {
     const first = renderInstructions({
       agentName: "eng-1",
       roleCharter: "# engineer",
-      memoryCore: "- The owner prefers small pull requests.",
+      memoryCore: "- The user prefers small pull requests.",
       ...places,
       onboarding: {
         agentName: "eng-1",

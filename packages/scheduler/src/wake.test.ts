@@ -8,7 +8,7 @@ const trigger = (kind: string, extra: Record<string, unknown> = {}) =>
 describe("decideWake", () => {
   it("never wakes while paused", () => {
     const decision = decideWake({
-      trigger: trigger("mention", { fromOwner: true }),
+      trigger: trigger("mention", { fromUser: true }),
       digestSize: 5,
       claimsHeld: 1,
       paused: true,
@@ -16,14 +16,14 @@ describe("decideWake", () => {
     expect(decision.wake).toBe(false);
   });
 
-  it("gives owner mentions top priority", () => {
+  it("gives user mentions top priority", () => {
     const decision = decideWake({
-      trigger: trigger("mention", { fromOwner: true }),
+      trigger: trigger("mention", { fromUser: true }),
       digestSize: 0,
       claimsHeld: 0,
       paused: false,
     });
-    expect(decision).toEqual({ wake: true, reason: "owner mention", priority: 2 });
+    expect(decision).toEqual({ wake: true, reason: "user mention", priority: 2 });
   });
 
   it("skips heartbeats with an empty digest and no claims", () => {

@@ -39,9 +39,9 @@ describe("task transitions", () => {
 });
 
 describe("seed roles", () => {
-  it("give governance verbs to the owner and steward only", () => {
+  it("give governance verbs to the user and steward only", () => {
     const withApprove = SEED_ROLES.filter((r) => r.verbs.includes("approve")).map((r) => r.name);
-    expect(withApprove.toSorted()).toEqual(["owner", "steward"]);
+    expect(withApprove.toSorted()).toEqual(["steward", "user"]);
   });
 });
 

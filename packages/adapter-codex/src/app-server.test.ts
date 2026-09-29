@@ -116,7 +116,7 @@ function fakeAppServer(): {
               item: {
                 type: "agentMessage",
                 id: "a1",
-                text: `{"summary":"answered turn ${turns}","claimsHeld":[],"blockedOn":[],"needsOwnerDecision":false,"memoryUpdated":false}`,
+                text: `{"summary":"answered turn ${turns}","claimsHeld":[],"blockedOn":[],"needsUserDecision":false,"memoryUpdated":false}`,
               },
             },
           });

@@ -8,7 +8,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
-import { OWNER, ScriptedBackend } from "./testing/scripted-backend.js";
+import { USER, ScriptedBackend } from "./testing/scripted-backend.js";
 
 describe("Phase 1 exit criterion", () => {
   let dir: string;
@@ -21,17 +21,17 @@ describe("Phase 1 exit criterion", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("two agents complete a task end to end with a reviewed merge, with the owner participating by mention", async () => {
+  it("two agents complete a task end to end with a reviewed merge, with the user participating by mention", async () => {
     const { board } = await Board.init(dir, { name: "e2e" });
-    await board.addProject(OWNER, { slug: "demo" });
+    await board.addProject(USER, { slug: "demo" });
     // One agent per CLI: the board must not care which body a citizen runs on.
-    await board.addAgent(OWNER, {
+    await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "codex",
       memberships: ["demo"],
     });
-    await board.addAgent(OWNER, {
+    await board.addAgent(USER, {
       name: "rev-1",
       role: "reviewer",
       cli: "claude",
@@ -50,7 +50,7 @@ describe("Phase 1 exit criterion", () => {
       runner,
       timings: {
         debounceMs: 0,
-        ownerDebounceMs: 0,
+        userDebounceMs: 0,
         heartbeatMs: 3_600_000,
         unclaimedTaskMs: 3_600_000,
       },
@@ -64,24 +64,24 @@ describe("Phase 1 exit criterion", () => {
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(2);
 
-    const task = await board.createTask(OWNER, {
+    const task = await board.createTask(USER, {
       project: "demo",
       title: "Add hello.txt",
       body: "One file, one line.",
     });
-    const mention = await board.postMessage(OWNER, {
+    const mention = await board.postMessage(USER, {
       channel: "demo/general",
       body: `@eng-1 please take task ${task.id}: add hello.txt with a greeting.`,
     });
 
     await settle(); // eng-1: claim, commit, submit for review
-    expect((await board.getTask(OWNER, { task_id: task.id })).status).toBe("in_review");
+    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("in_review");
     await settle(); // rev-1: review and approve
-    expect((await board.getTask(OWNER, { task_id: task.id })).status).toBe("done");
+    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("done");
     await settle(); // merge lands and eng-1 closes the thread
     await settle();
 
-    const final = await board.getTask(OWNER, { task_id: task.id });
+    const final = await board.getTask(USER, { task_id: task.id });
     expect(final.thread).toBe("closed");
 
     const mainLog = await execa("git", ["log", "--oneline", "main"], {
@@ -115,7 +115,7 @@ describe("Phase 1 exit criterion", () => {
     );
     expect(rendered).toContain("## Role");
     expect(rendered).toContain(board.paths.board);
-    // The owner's mention was delivered in a completed turn, so the cursor has moved past it.
+    // The user's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readInbox({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
   });
@@ -132,16 +132,16 @@ describe("Phase 5 exit criterion", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("the owner posts naming no project and no citizen, and a resident concierge routes it", async () => {
-    const { board, ownerToken } = await Board.init(dir, { name: "desk" });
-    await board.addProject(OWNER, { slug: "demo" });
-    await board.addAgent(OWNER, {
+  it("the user posts naming no project and no citizen, and a resident concierge routes it", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "desk" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "codex",
       memberships: ["demo"],
     });
-    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     const app = createApp({ board, version: "test" });
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
@@ -155,7 +155,7 @@ describe("Phase 5 exit criterion", () => {
       runner,
       timings: {
         debounceMs: 0,
-        ownerDebounceMs: 0,
+        userDebounceMs: 0,
         heartbeatMs: 3_600_000,
         unclaimedTaskMs: 3_600_000,
       },
@@ -164,21 +164,21 @@ describe("Phase 5 exit criterion", () => {
       await scheduler.tick();
       await scheduler.drain();
     };
-    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+    const user = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
 
-    // Only the engineer onboards; the desk belongs to no project and waits for the owner.
+    // Only the engineer onboards; the desk belongs to no project and waits for the user.
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(1);
 
     // A request that names nobody: the desk wakes at once, in the society scope, on a warm session.
-    await board.postMessage(OWNER, {
+    await board.postMessage(USER, {
       channel: "general",
       body: "Can someone add a health endpoint? The demo service has none.",
     });
     await settle();
     expect(backend.residentStarts).toEqual(["desk/society"]);
     const deskPrompt = backend.prompts.at(-1) ?? "";
-    expect(deskPrompt).toContain("Trigger: owner_post from owner");
+    expect(deskPrompt).toContain("Trigger: user_post from user");
     expect(deskPrompt).toContain("## The society");
     expect(deskPrompt).toContain("- eng-1: engineer on codex");
     const tasks = await board.listTasks("demo");
@@ -187,10 +187,10 @@ describe("Phase 5 exit criterion", () => {
       "@eng-1 please take task",
     );
     await settle(); // the mention wakes eng-1, which claims and submits
-    expect((await board.getTask(OWNER, { task_id: tasks[0]?.id ?? "" })).status).toBe("in_review");
+    expect((await board.getTask(USER, { task_id: tasks[0]?.id ?? "" })).status).toBe("in_review");
 
     // A request that needs a project the society does not have: the same warm session takes it.
-    await board.postMessage(OWNER, {
+    await board.postMessage(USER, {
       channel: "general",
       body: "Let's start a new project called api for the public API.",
     });
@@ -203,12 +203,12 @@ describe("Phase 5 exit criterion", () => {
       expect.objectContaining({ kind: "member", proposedBy: "desk", status: "proposed" }),
     ]);
     const desk = (await board.listMembers()).find((m) => m.name === "desk");
-    expect(desk?.lastTurnOutcome).toContain("owner_post on society: completed");
+    expect(desk?.lastTurnOutcome).toContain("user_post on society: completed");
 
-    // The owner approves over the API, and the new engineer onboards on api.
+    // The user approves over the API, and the new engineer onboards on api.
     const approved = await app.request("/api/verbs/approve", {
       method: "POST",
-      headers: owner,
+      headers: user,
       body: JSON.stringify({ proposal_id: proposals[0]?.id }),
     });
     expect(approved.status).toBe(200);
@@ -217,7 +217,7 @@ describe("Phase 5 exit criterion", () => {
       backend.prompts.filter((p) => p.includes("This is your first turn as eng-2")).length,
     ).toBe(1);
     expect((await board.readAgent("eng-2")).memberships).toEqual(["api"]);
-    expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("owner_post");
+    expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("user_post");
     const types = (await board.readEvents(null)).map((e) => e.type);
     expect(types).not.toContain("turn.failed");
     await runner.close();
@@ -236,15 +236,15 @@ describe("Phase 4 exit criterion", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("the steward proposes a member from operations signals and the owner approves over the API", async () => {
-    const { board, ownerToken } = await Board.init(dir, { name: "gov" });
-    await board.addProject(OWNER, { slug: "demo" });
+  it("the steward proposes a member from operations signals and the user approves over the API", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "gov" });
+    await board.addProject(USER, { slug: "demo" });
     for (const [name, role, cli] of [
       ["eng-1", "engineer", "codex"],
       ["rev-1", "reviewer", "claude"],
       ["stew-1", "steward", "claude"],
     ] as const) {
-      await board.addAgent(OWNER, { name, role, cli, memberships: ["demo"] });
+      await board.addAgent(USER, { name, role, cli, memberships: ["demo"] });
     }
     const app = createApp({ board, version: "test" });
     const backend = new ScriptedBackend(app);
@@ -259,7 +259,7 @@ describe("Phase 4 exit criterion", () => {
       concurrency: 3,
       timings: {
         debounceMs: 0,
-        ownerDebounceMs: 0,
+        userDebounceMs: 0,
         heartbeatMs: 3_600_000,
         unclaimedTaskMs: 3_600_000,
         opsIntervalMs: 1,
@@ -269,16 +269,16 @@ describe("Phase 4 exit criterion", () => {
       await scheduler.tick();
       await scheduler.drain();
     };
-    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+    const user = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
     const get = async (route: string): Promise<unknown> =>
-      (await app.request(route, { headers: owner })).json();
+      (await app.request(route, { headers: user })).json();
 
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(3);
 
     // Three open tasks for one engineer: depth three, the seed threshold.
     for (const title of ["Add hello.txt", "Add README", "Add a test"]) {
-      await board.createTask(OWNER, { project: "demo", title, body: "Small." });
+      await board.createTask(USER, { project: "demo", title, body: "Small." });
     }
     await settle(); // the operations pass publishes the backlog signal
     await settle(); // the signal wakes the steward, which proposes
@@ -297,10 +297,10 @@ describe("Phase 4 exit criterion", () => {
     const stewardTurn = await board.readLastTurn("stew-1", "demo");
     expect(stewardTurn?.trigger.kind).toBe("ops_event");
 
-    // The owner approves over the API.
+    // The user approves over the API.
     const approved = await app.request("/api/verbs/approve", {
       method: "POST",
-      headers: owner,
+      headers: user,
       body: JSON.stringify({ proposal_id: proposalId }),
     });
     expect(approved.status).toBe(200);
@@ -320,14 +320,14 @@ describe("Phase 4 exit criterion", () => {
       "Approved member proposal",
     );
 
-    // The new member onboards through the usual dispatch, then the owner retires it over the API.
+    // The new member onboards through the usual dispatch, then the user retires it over the API.
     await settle();
     expect(
       backend.prompts.filter((p) => p.includes("This is your first turn as eng-2")).length,
     ).toBe(1);
     const retired = await app.request("/api/agents/eng-2/retire", {
       method: "POST",
-      headers: owner,
+      headers: user,
       body: JSON.stringify({ reason: "demo over" }),
     });
     expect(retired.status).toBe(200);
@@ -360,16 +360,16 @@ describe("Phase 6 exit criterion", () => {
   });
 
   it("an agent carries a lesson and a skill from one project into another, and a promoted skill reaches everyone", async () => {
-    const { board, ownerToken } = await Board.init(dir, { name: "memory" });
-    await board.addProject(OWNER, { slug: "alpha" });
-    await board.addProject(OWNER, { slug: "beta" });
-    await board.addAgent(OWNER, {
+    const { board, userToken } = await Board.init(dir, { name: "memory" });
+    await board.addProject(USER, { slug: "alpha" });
+    await board.addProject(USER, { slug: "beta" });
+    await board.addAgent(USER, {
       name: "mem-1",
       role: "engineer",
       cli: "claude",
       memberships: ["alpha"],
     });
-    await board.addAgent(OWNER, { name: "stew-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "stew-1", role: "steward", cli: "claude" });
     const app = createApp({ board, version: "test" });
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
@@ -385,7 +385,7 @@ describe("Phase 6 exit criterion", () => {
       now: () => new Date(clock),
       timings: {
         debounceMs: 0,
-        ownerDebounceMs: 0,
+        userDebounceMs: 0,
         heartbeatMs: 3_600_000,
         unclaimedTaskMs: 3_600_000,
         reflectionMs: 60_000,
@@ -395,11 +395,11 @@ describe("Phase 6 exit criterion", () => {
       await scheduler.tick();
       await scheduler.drain();
     };
-    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+    const user = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
 
     // Onboarding on alpha; then a working turn leaves a lesson in the core, a skill, and a project fact.
     await settle();
-    await board.requestWake(OWNER, { agent: "mem-1", project: "alpha", reason: "work" });
+    await board.requestWake(USER, { agent: "mem-1", project: "alpha", reason: "work" });
     await settle();
     expect((await board.listKnowledge("alpha")).map((k) => k.topic)).toEqual(["testing"]);
     expect((await board.listMembers()).find((m) => m.name === "mem-1")?.skills).toEqual([
@@ -437,11 +437,11 @@ describe("Phase 6 exit criterion", () => {
       "Skill uv-setup promoted to the society",
     );
 
-    // The owner assigns the agent to beta over the API. Its first turn there loads the lesson,
+    // The user assigns the agent to beta over the API. Its first turn there loads the lesson,
     // finds the archive by search, sees both skills, and seeds beta's knowledge from what it learned.
     const joined = await app.request("/api/verbs/join_project", {
       method: "POST",
-      headers: owner,
+      headers: user,
       body: JSON.stringify({ project: "beta", agent: "mem-1" }),
     });
     expect(joined.status).toBe(200);

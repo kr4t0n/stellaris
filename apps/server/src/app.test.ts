@@ -10,22 +10,22 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
 
-const OWNER = { name: "owner", role: "owner" } as const;
+const USER = { name: "user", role: "user" } as const;
 
 describe("board server", () => {
   let dir: string;
   let board: Board;
-  let ownerToken: string;
+  let userToken: string;
   let engToken: string;
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-srv-"));
     const init = await Board.init(dir, { name: "srv" });
     board = init.board;
-    ownerToken = init.ownerToken;
-    await board.addProject(OWNER, { slug: "demo" });
+    userToken = init.userToken;
+    await board.addProject(USER, { slug: "demo" });
     engToken = (
-      await board.addAgent(OWNER, {
+      await board.addAgent(USER, {
         name: "eng-1",
         role: "engineer",
         cli: "claude",
@@ -78,7 +78,7 @@ describe("board server", () => {
     expect(invalid.status).toBe(409);
 
     const tasks = await app.request("/api/projects/demo/tasks", {
-      headers: { authorization: `Bearer ${ownerToken}` },
+      headers: { authorization: `Bearer ${userToken}` },
     });
     expect(await tasks.json()).toHaveLength(1);
   });

@@ -6,5 +6,5 @@
 {"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"hello.txt","kind":"add"}],"status":"completed"}}
 {"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"git commit -m feat","exit_code":1,"status":"failed"}}
 {"type":"item.completed","item":{"id":"item_4","type":"reasoning","text":"thinking"}}
-{"type":"item.completed","item":{"id":"item_5","type":"agent_message","text":"{\"summary\":\"claimed and committed\",\"claimsHeld\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAV\"],\"blockedOn\":[],\"needsOwnerDecision\":false,\"memoryUpdated\":false}"}}
+{"type":"item.completed","item":{"id":"item_5","type":"agent_message","text":"{\"summary\":\"claimed and committed\",\"claimsHeld\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAV\"],\"blockedOn\":[],\"needsUserDecision\":false,\"memoryUpdated\":false}"}}
 {"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"cache_write_input_tokens":100,"output_tokens":90,"reasoning_output_tokens":10}}

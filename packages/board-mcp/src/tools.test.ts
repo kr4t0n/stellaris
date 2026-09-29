@@ -10,15 +10,15 @@ describe("board tools", () => {
     }
   });
 
-  it("hides governance tools from engineers and shows them to the owner", () => {
+  it("hides governance tools from engineers and shows them to the user", () => {
     const engineer = SEED_ROLES.find((role) => role.name === "engineer");
-    const owner = SEED_ROLES.find((role) => role.name === "owner");
-    if (engineer === undefined || owner === undefined) {
+    const user = SEED_ROLES.find((role) => role.name === "user");
+    if (engineer === undefined || user === undefined) {
       throw new Error("seed roles missing");
     }
     const engineerTools = toolsForRole(engineer).map((tool) => tool.name);
     expect(engineerTools).not.toContain("approve");
     expect(engineerTools).toContain("claim_task");
-    expect(toolsForRole(owner).map((tool) => tool.name)).toContain("approve");
+    expect(toolsForRole(user).map((tool) => tool.name)).toContain("approve");
   });
 });

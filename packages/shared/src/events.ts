@@ -60,7 +60,7 @@ export const TurnStatusSchema = z.object({
   summary: z.string().min(1),
   claimsHeld: z.array(UlidSchema).default([]),
   blockedOn: z.array(z.string()).default([]),
-  needsOwnerDecision: z.boolean().default(false),
+  needsUserDecision: z.boolean().default(false),
   memoryUpdated: z.boolean().default(false),
 });
 export type TurnStatus = z.infer<typeof TurnStatusSchema>;

@@ -1,8 +1,8 @@
 import { SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
 import {
   OpsSignalSchema,
-  OWNER_NAME,
-  OWNER_ROLE,
+  USER_NAME,
+  USER_ROLE,
   parseChannelRef,
   SOCIETY_SCOPE,
   TriggerSchema,
@@ -38,7 +38,7 @@ export interface SchedulerLog {
 export interface SchedulerTimings {
   readonly pollMs: number;
   readonly debounceMs: number;
-  readonly ownerDebounceMs: number;
+  readonly userDebounceMs: number;
   readonly heartbeatMs: number;
   readonly unclaimedTaskMs: number;
   readonly leaseSweepMs: number;
@@ -61,7 +61,7 @@ export interface SchedulerTimings {
 export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   pollMs: 1_000,
   debounceMs: 30_000,
-  ownerDebounceMs: 5_000,
+  userDebounceMs: 5_000,
   heartbeatMs: 15 * 60_000,
   unclaimedTaskMs: 10 * 60_000,
   leaseSweepMs: 60_000,
@@ -79,7 +79,7 @@ export const SchedulerTimingsSchema = z
   .object({
     pollMs: z.number().positive(),
     debounceMs: z.number().nonnegative(),
-    ownerDebounceMs: z.number().nonnegative(),
+    userDebounceMs: z.number().nonnegative(),
     heartbeatMs: z.number().positive(),
     unclaimedTaskMs: z.number().positive(),
     leaseSweepMs: z.number().positive(),
@@ -156,7 +156,7 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
 const UNCLAIMED_TRIGGER = "unclaimed_task";
 const CLAIM_TRIGGER = "claim_event";
 const OPS_TRIGGER = "ops_event";
-const OWNER_POST_TRIGGER = "owner_post";
+const USER_POST_TRIGGER = "user_post";
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -323,7 +323,7 @@ export class Scheduler {
         const channel = stringOf(payload["channel"]);
         const messageId = stringOf(payload["id"]) ?? undefined;
         for (const name of mentions) {
-          if (name === event.actor || name === OWNER_NAME) {
+          if (name === event.actor || name === USER_NAME) {
             continue;
           }
           const agent = await this.tryReadAgent(name);
@@ -341,14 +341,14 @@ export class Scheduler {
             {
               kind: "mention",
               from: event.actor,
-              fromOwner: event.actor === OWNER_NAME,
+              fromUser: event.actor === USER_NAME,
               reason: `mentioned by ${event.actor}`,
               ...(messageId === undefined ? {} : { messageId }),
             },
             now,
           );
         }
-        if (event.actor === OWNER_NAME) {
+        if (event.actor === USER_NAME) {
           await this.wakeFrontDesk(channel, messageId, now);
         }
         return;
@@ -419,7 +419,7 @@ export class Scheduler {
           this.enqueue(
             agent,
             project,
-            { kind: "reflection", from: event.actor, fromOwner: true, reason },
+            { kind: "reflection", from: event.actor, fromUser: true, reason },
             now,
           );
           return;
@@ -427,7 +427,7 @@ export class Scheduler {
         this.enqueue(
           agent,
           project,
-          { kind: "manual", from: event.actor, fromOwner: true, reason },
+          { kind: "manual", from: event.actor, fromUser: true, reason },
           now,
         );
         return;
@@ -516,7 +516,7 @@ export class Scheduler {
     }
   }
 
-  /** Roles charted for `owner_post` wake on every post by the owner, mentioned or not. */
+  /** Roles charted for `user_post` wake on every post by the user, mentioned or not. */
   private async wakeFrontDesk(
     channel: string | null,
     messageId: string | undefined,
@@ -527,7 +527,7 @@ export class Scheduler {
         continue;
       }
       const charter = await this.board.readRole(agent.role);
-      if (!charter.wakeTriggers.includes(OWNER_POST_TRIGGER)) {
+      if (!charter.wakeTriggers.includes(USER_POST_TRIGGER)) {
         continue;
       }
       const scope = this.scopeFor(agent, charter, channel);
@@ -538,10 +538,10 @@ export class Scheduler {
         agent.name,
         scope,
         {
-          kind: "owner_post",
-          from: OWNER_NAME,
-          fromOwner: true,
-          reason: `the owner posted in ${channel ?? "a channel"}`,
+          kind: "user_post",
+          from: USER_NAME,
+          fromUser: true,
+          reason: `the user posted in ${channel ?? "a channel"}`,
           ...(messageId === undefined ? {} : { messageId }),
         },
         now,
@@ -634,11 +634,11 @@ export class Scheduler {
   private debounceFor(trigger: Trigger): number {
     switch (trigger.kind) {
       case "mention":
-        return trigger.fromOwner ? this.timings.ownerDebounceMs : this.timings.debounceMs;
+        return trigger.fromUser ? this.timings.userDebounceMs : this.timings.debounceMs;
       case "claim_event":
       case "ops_event":
         return this.timings.debounceMs;
-      case "owner_post":
+      case "user_post":
         return 0;
       default:
         return 0;
@@ -843,7 +843,7 @@ export class Scheduler {
   /** Every operations condition that holds right now, from counters and timers only. */
   private async collectSignals(now: number): Promise<OpsSignal[]> {
     const signals: OpsSignal[] = [];
-    const roles = (await this.board.listRoles()).filter((role) => role.name !== OWNER_ROLE);
+    const roles = (await this.board.listRoles()).filter((role) => role.name !== USER_ROLE);
     const takers = roles.filter((role) => role.wakeTriggers.includes(UNCLAIMED_TRIGGER));
     const reviewers = roles.filter(
       (role) =>
@@ -1009,7 +1009,7 @@ export class Scheduler {
    */
   private async scaleRoles(now: number): Promise<void> {
     const roles = (await this.board.listRoles()).filter(
-      (role) => role.name !== OWNER_ROLE && role.maxReplicas > 1,
+      (role) => role.name !== USER_ROLE && role.maxReplicas > 1,
     );
     if (roles.length === 0) {
       return;

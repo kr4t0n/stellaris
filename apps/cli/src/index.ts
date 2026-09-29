@@ -37,7 +37,7 @@ async function open(): Promise<Board> {
 }
 
 async function actorFor(board: Board, as: string | undefined): Promise<Actor> {
-  return as === undefined ? board.ownerActor() : board.actorFor(as);
+  return as === undefined ? board.userActor() : board.actorFor(as);
 }
 
 async function readStdin(): Promise<string> {
@@ -62,14 +62,14 @@ function parseCharter(json: string): Record<string, unknown> {
 
 program
   .command("init")
-  .description("Create a society in the data directory and print the owner token once")
+  .description("Create a society in the data directory and print the user token once")
   .option("-n, --name <name>", "society name", "stellaris")
   .action(async (opts: { name: string }) => {
-    const { ownerToken } = await Board.init(globals().data, { name: opts.name });
-    print({ dataDir: globals().data, ownerToken }, () =>
+    const { userToken } = await Board.init(globals().data, { name: opts.name });
+    print({ dataDir: globals().data, userToken }, () =>
       [
         `Society "${opts.name}" initialized in ${globals().data}`,
-        `Owner token (shown once): ${ownerToken}`,
+        `User token (shown once): ${userToken}`,
       ].join("\n"),
     );
   });
@@ -83,7 +83,7 @@ project
   .option("--repo <url>", "git remote")
   .action(async (slug: string, opts: { name?: string; repo?: string }) => {
     const board = await open();
-    const added = await board.addProject(board.ownerActor(), {
+    const added = await board.addProject(board.userActor(), {
       slug,
       name: opts.name,
       repo: opts.repo ?? null,
@@ -121,7 +121,7 @@ agent
     ) => {
       const board = await open();
       const cli = opts.cli === undefined ? null : CliKindSchema.parse(opts.cli);
-      const { agent: added, token } = await board.addAgent(board.ownerActor(), {
+      const { agent: added, token } = await board.addAgent(board.userActor(), {
         name,
         role: opts.role,
         cli,
@@ -159,7 +159,7 @@ agent
   .requiredOption("--reason <text>", "why")
   .action(async (name: string, opts: { reason: string }) => {
     const board = await open();
-    const retired = await board.retireAgent(board.ownerActor(), { name, reason: opts.reason });
+    const retired = await board.retireAgent(board.userActor(), { name, reason: opts.reason });
     print(retired, () => `Agent ${retired.name} retired: ${opts.reason}`);
   });
 
@@ -202,7 +202,7 @@ proposal
   .requiredOption("--kind <kind>", "member, role, channel, reallocation, or retirement")
   .requiredOption("--charter <json>", "the charter as a JSON object")
   .option("--rationale <text>", "why", "")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (opts: { kind: string; charter: string; rationale: string; as?: string }) => {
     const board = await open();
     const created = await board.propose(await actorFor(board, opts.as), {
@@ -217,7 +217,7 @@ proposal
   .command("approve <id>")
   .description("Approve a proposal; the board provisions it")
   .option("--reason <text>", "a note for the record")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { reason?: string; as?: string }) => {
     const board = await open();
     const decision = await board.approve(await actorFor(board, opts.as), {
@@ -235,7 +235,7 @@ proposal
   .command("reject <id>")
   .description("Reject a proposal with a reason")
   .requiredOption("--reason <text>", "why")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { reason: string; as?: string }) => {
     const board = await open();
     const decision = await board.reject(await actorFor(board, opts.as), {
@@ -265,7 +265,7 @@ role
 
 role
   .command("set <name>")
-  .description("Change a charter directly as the owner: scaling cap, threshold, or purpose")
+  .description("Change a charter directly as the user: scaling cap, threshold, or purpose")
   .option("--max-replicas <n>", "active members of the role per project the scheduler may reach")
   .option("--backlog-threshold <n>", "load per member that adds a replica")
   .option("--purpose <text>", "the charter's purpose")
@@ -276,7 +276,7 @@ role
     ) => {
       const board = await open();
       const current = await board.readRole(name);
-      const updated = await board.setRoleCharter(board.ownerActor(), {
+      const updated = await board.setRoleCharter(board.userActor(), {
         ...current,
         ...(opts.maxReplicas === undefined ? {} : { maxReplicas: Number(opts.maxReplicas) }),
         ...(opts.backlogThreshold === undefined
@@ -298,7 +298,7 @@ channelCommand
   .command("add <ref>")
   .description("Open a channel: <name> for the society or <project>/<name>")
   .requiredOption("--purpose <text>", "what the channel is for")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (ref: string, opts: { purpose: string; as?: string }) => {
     const board = await open();
     const parsed = parseChannelRef(ref);
@@ -327,7 +327,7 @@ program
 program
   .command("post <channel> <body>")
   .description("Post a message to a channel, or into a task's thread")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .option("--thread <taskId>", "post into the task's thread")
   .action(async (channel: string, body: string, opts: { as?: string; thread?: string }) => {
     const board = await open();
@@ -346,17 +346,17 @@ program
 
 program
   .command("ask <text>")
-  .description("Post to the society's general channel as the owner; the front desk routes it")
+  .description("Post to the society's general channel as the user; the front desk routes it")
   .action(async (text: string) => {
     const board = await open();
-    const message = await board.postMessage(board.ownerActor(), { channel: "general", body: text });
+    const message = await board.postMessage(board.userActor(), { channel: "general", body: text });
     print(message, () => `Posted ${message.id} to general; the concierge wakes on it`);
   });
 
 program
   .command("inbox")
   .description("Read unread messages for an agent and advance its cursor")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .option("--peek", "do not advance the cursor", false)
   .option("--limit <n>", "maximum messages", "50")
   .action(async (opts: { as?: string; peek: boolean; limit: string }) => {
@@ -382,7 +382,7 @@ task
   .description("Create a task")
   .option("--body <text>", "task body", "")
   .option("--parent <id>", "parent task id")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(
     async (
       projectSlug: string,
@@ -404,7 +404,7 @@ task
 task
   .command("claim <id>")
   .description("Claim an open task")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { as?: string }) => {
     const board = await open();
     const claimed = await board.claimTask(await actorFor(board, opts.as), { task_id: id });
@@ -418,7 +418,7 @@ task
 task
   .command("release <id>")
   .description("Release a claimed task")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { as?: string }) => {
     const board = await open();
     const released = await board.releaseTask(await actorFor(board, opts.as), { task_id: id });
@@ -431,7 +431,7 @@ task
   .option("--status <status>", "open, claimed, in_review, done, blocked, abandoned")
   .option("--note <text>", "append a note")
   .option("--blocked-by <ids...>", "task ids this task waits on")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(
     async (
       id: string,
@@ -453,7 +453,7 @@ task
   .description("Show a task")
   .action(async (id: string) => {
     const board = await open();
-    const found = await board.getTask(board.ownerActor(), { task_id: id });
+    const found = await board.getTask(board.userActor(), { task_id: id });
     print(found, () =>
       [
         `${found.id}  ${found.status}  ${found.title}`,
@@ -482,7 +482,7 @@ const thread = program.command("thread").description("Manage task threads");
 thread
   .command("open <taskId>")
   .description("Open a task's thread")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (taskId: string, opts: { as?: string }) => {
     const board = await open();
     const opened = await board.openThread(await actorFor(board, opts.as), { task_id: taskId });
@@ -493,7 +493,7 @@ thread
   .command("close <taskId>")
   .description("Close a task's thread with a summary posted to the project channel")
   .requiredOption("--summary <text>", "closure summary")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (taskId: string, opts: { summary: string; as?: string }) => {
     const board = await open();
     const summary = await board.closeThread(await actorFor(board, opts.as), {
@@ -508,7 +508,7 @@ program
   .description("Stop all wakeups; turns in flight finish")
   .action(async () => {
     const board = await open();
-    await board.setPaused(board.ownerActor(), true);
+    await board.setPaused(board.userActor(), true);
     print({ paused: true }, () => "Society paused");
   });
 
@@ -517,7 +517,7 @@ program
   .description("Allow wakeups again")
   .action(async () => {
     const board = await open();
-    await board.setPaused(board.ownerActor(), false);
+    await board.setPaused(board.userActor(), false);
     print({ paused: false }, () => "Society resumed");
   });
 
@@ -553,10 +553,10 @@ knowledge
 
 knowledge
   .command("write <topic>")
-  .description("Write a knowledge topic as the owner, from a file or standard input")
+  .description("Write a knowledge topic as the user, from a file or standard input")
   .option("--project <slug>", "the project's topic instead of the society's")
   .option("--file <path>", "read the body from this file instead of standard input")
-  .option("--as <agent>", "act as this agent instead of the owner")
+  .option("--as <agent>", "act as this agent instead of the user")
   .action(async (topic: string, opts: { project?: string; file?: string; as?: string }) => {
     const board = await open();
     const body =
@@ -608,7 +608,7 @@ program
   .action(
     async (agentName: string, opts: { project: string; reason: string; reflect: boolean }) => {
       const board = await open();
-      const event = await board.requestWake(board.ownerActor(), {
+      const event = await board.requestWake(board.userActor(), {
         agent: agentName,
         project: opts.project,
         reason: opts.reason,

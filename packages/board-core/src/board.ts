@@ -14,8 +14,8 @@ import {
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
-  OWNER_NAME,
-  OWNER_ROLE,
+  USER_NAME,
+  USER_ROLE,
   parseChannelRef,
   PROJECT_DEFAULT_CHANNELS,
   ProjectSchema,
@@ -91,7 +91,7 @@ export interface Actor {
 }
 
 /** The board itself, for posts and events produced by infrastructure rather than a member. */
-export const SYSTEM_ACTOR: Actor = { name: "board", role: OWNER_ROLE };
+export const SYSTEM_ACTOR: Actor = { name: "board", role: USER_ROLE };
 
 export interface BoardOptions {
   /** Lease duration for claims. Renewed by every turn that touches the task. */
@@ -203,16 +203,16 @@ const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 const LOCAL_RUNNER: Name = "local";
 
 const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
-  role: [OWNER_ROLE],
-  member: [OWNER_ROLE],
-  retirement: [OWNER_ROLE],
-  channel: [OWNER_ROLE, "steward"],
-  reallocation: [OWNER_ROLE, "steward"],
-  skill: [OWNER_ROLE, "steward"],
+  role: [USER_ROLE],
+  member: [USER_ROLE],
+  retirement: [USER_ROLE],
+  channel: [USER_ROLE, "steward"],
+  reallocation: [USER_ROLE, "steward"],
+  skill: [USER_ROLE, "steward"],
 };
 
 /** Roles that may write society knowledge. */
-const CURATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward"];
+const CURATING_ROLES: readonly Name[] = [USER_ROLE, "steward"];
 
 /** The heading under which a member's own seed instructions live in its role file. */
 const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
@@ -221,7 +221,7 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 const OPS_WAKE_TRIGGER = "ops_event";
 
 /** Roles that may add a citizen to a project or remove one, beyond the citizen itself. */
-const REALLOCATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward", "concierge"];
+const REALLOCATING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 
 const PROFILE_TEMPLATE =
   "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n";
@@ -355,18 +355,18 @@ export class Board {
     this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
   }
 
-  /** Creates a society: channels, seed roles, the local runner, and the owner. Returns the owner token once. */
+  /** Creates a society: channels, seed roles, the local runner, and the user. Returns the user token once. */
   static async init(
     dataDir: string,
     input: InitInput,
     options: BoardOptions = {},
-  ): Promise<{ board: Board; ownerToken: string }> {
+  ): Promise<{ board: Board; userToken: string }> {
     const board = new Board(dataDir, options);
     if (await exists(board.paths.societyFile())) {
       throw new BoardError("ALREADY_EXISTS", `a society already exists in ${dataDir}`);
     }
-    const ownerToken = await board.mutex.run(() => board.initialize(input));
-    return { board, ownerToken };
+    const userToken = await board.mutex.run(() => board.initialize(input));
+    return { board, userToken };
   }
 
   static async open(dataDir: string, options: BoardOptions = {}): Promise<Board> {
@@ -396,7 +396,7 @@ export class Board {
         `# ${charter.name}\n\n${charter.purpose}\n`,
       );
       this.roleCache.set(charter.name, charter);
-      await this.events.append("role.added", OWNER_NAME, {
+      await this.events.append("role.added", USER_NAME, {
         name: charter.name,
         replaced: false,
         verbs: charter.verbs,
@@ -409,7 +409,7 @@ export class Board {
 
   /**
    * Verbs the seed grants and the copy lacks are added, and fields absent from the copy's file take
-   * the seed's value rather than the schema default; fields the file sets stand. The owner charter
+   * the seed's value rather than the schema default; fields the file sets stand. The user charter
    * is replaced by the seed in full.
    */
   private async alignSeedRole(seed: RoleCharter): Promise<void> {
@@ -421,7 +421,7 @@ export class Board {
     const fieldsAligned = RoleCharterSchema.keyof().options.filter((key) =>
       key === "verbs" || seed[key] === undefined
         ? false
-        : seed.name === OWNER_ROLE
+        : seed.name === USER_ROLE
           ? JSON.stringify(seed[key]) !== JSON.stringify(current[key])
           : !(key in raw.data),
     );
@@ -435,7 +435,7 @@ export class Board {
     });
     await writeMarkdown(file, charter, `# ${charter.name}\n\n${charter.purpose}\n`);
     this.roleCache.set(charter.name, charter);
-    await this.events.append("role.added", OWNER_NAME, {
+    await this.events.append("role.added", USER_NAME, {
       name: charter.name,
       replaced: true,
       verbs: charter.verbs,
@@ -497,8 +497,8 @@ export class Board {
     this.turnTokens.delete(hashToken(token));
   }
 
-  ownerActor(): Actor {
-    return { name: OWNER_NAME, role: OWNER_ROLE };
+  userActor(): Actor {
+    return { name: USER_NAME, role: USER_ROLE };
   }
 
   async actorFor(name: Name): Promise<Actor> {
@@ -507,7 +507,7 @@ export class Board {
   }
 
   private async authorize(actor: Actor, verb: VerbName): Promise<void> {
-    if (actor.role === OWNER_ROLE) {
+    if (actor.role === USER_ROLE) {
       return;
     }
     const charter = await this.readRole(actor.role);
@@ -730,7 +730,7 @@ export class Board {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Administration (owner and steward)
+  // Administration (user and steward)
   // ---------------------------------------------------------------------------------------------
 
   async addProject(actor: Actor, input: AddProjectInput): Promise<Project> {
@@ -753,7 +753,7 @@ export class Board {
       defaultBranch: input.defaultBranch ?? "main",
       channels: [...(input.channels ?? PROJECT_DEFAULT_CHANNELS)],
       members: [],
-      approvers: [OWNER_NAME],
+      approvers: [USER_NAME],
       requiredCapabilities: [...(input.requiredCapabilities ?? [])],
       createdAt: this.now().toISOString(),
     });
@@ -769,13 +769,13 @@ export class Board {
       { project: project.slug, updatedAt: this.now().toISOString() },
       `# ${project.name} dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n`,
     );
-    // The owner follows every project's general channel by default.
-    await this.updateAgent(OWNER_NAME, (owner) => ({
-      ...owner,
-      memberships: [...new Set([...owner.memberships, project.slug])],
-      subscriptions: [...new Set([...owner.subscriptions, channelRef(project.slug, "general")])],
+    // The user follows every project's general channel by default.
+    await this.updateAgent(USER_NAME, (user) => ({
+      ...user,
+      memberships: [...new Set([...user.memberships, project.slug])],
+      subscriptions: [...new Set([...user.subscriptions, channelRef(project.slug, "general")])],
     }));
-    await this.refreshMember(OWNER_NAME);
+    await this.refreshMember(USER_NAME);
     await this.events.append("project.added", by, {
       slug: project.slug,
       name: project.name,
@@ -794,16 +794,16 @@ export class Board {
 
   /** Retires a member: no more wakes, claims released, token revoked, sessions archived. */
   async retireAgent(actor: Actor, input: RetireAgentInput): Promise<Agent> {
-    this.assertOwner(actor, "only the owner may retire a member");
+    this.assertUser(actor, "only the user may retire a member");
     return this.mutex.run(async () => {
       await this.validateRetire(input.name);
       return (await this.retireUnlocked(actor.name, input.name, input.reason, {})).agent;
     });
   }
 
-  /** Writes a role charter directly, bypassing a role proposal. Owner only. */
+  /** Writes a role charter directly, bypassing a role proposal. User only. */
   async setRoleCharter(actor: Actor, charter: RoleCharterInput): Promise<RoleCharter> {
-    this.assertOwner(actor, "only the owner may write a role charter directly");
+    this.assertUser(actor, "only the user may write a role charter directly");
     const parsed = RoleCharterSchema.parse(charter);
     return this.mutex.run(async () => {
       this.validateRole(parsed);
@@ -944,8 +944,8 @@ export class Board {
   }
 
   async setPaused(actor: Actor, paused: boolean): Promise<void> {
-    if (actor.role !== OWNER_ROLE) {
-      throw new BoardError("FORBIDDEN", "only the owner may pause or resume the society");
+    if (actor.role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user may pause or resume the society");
     }
     await this.mutex.run(async () => {
       await writeJson(this.paths.pausedFile(), { paused });
@@ -968,7 +968,7 @@ export class Board {
               leaseExpiresAt: undefined,
               updatedAt: now.toISOString(),
             });
-            await this.events.append("lease.expired", task.claimedBy ?? OWNER_NAME, {
+            await this.events.append("lease.expired", task.claimedBy ?? USER_NAME, {
               taskId: task.id,
               project,
             });
@@ -1147,7 +1147,7 @@ export class Board {
         if (!CURATING_ROLES.includes(actor.role)) {
           throw new BoardError(
             "FORBIDDEN",
-            "society knowledge is curated by the steward and the owner",
+            "society knowledge is curated by the steward and the user",
           );
         }
       } else {
@@ -1220,11 +1220,11 @@ export class Board {
       }
       const mayClose =
         location.task.claimedBy === actor.name ||
-        ["reviewer", "steward", OWNER_ROLE].includes(actor.role);
+        ["reviewer", "steward", USER_ROLE].includes(actor.role);
       if (!mayClose) {
         throw new BoardError(
           "FORBIDDEN",
-          "only the claimer, a reviewer, the steward, or the owner may close a thread",
+          "only the claimer, a reviewer, the steward, or the user may close a thread",
         );
       }
       const channel = channelRef(location.project, "general");
@@ -1316,7 +1316,7 @@ export class Board {
         });
       }
       if (current.status === "claimed" && this.leaseExpired(current, now)) {
-        await this.events.append("lease.expired", current.claimedBy ?? OWNER_NAME, {
+        await this.events.append("lease.expired", current.claimedBy ?? USER_NAME, {
           taskId: current.id,
           project: location.project,
         });
@@ -1359,10 +1359,10 @@ export class Board {
           `task ${current.id} is ${current.status}, not claimed`,
         );
       }
-      if (current.claimedBy !== actor.name && !["steward", OWNER_ROLE].includes(actor.role)) {
+      if (current.claimedBy !== actor.name && !["steward", USER_ROLE].includes(actor.role)) {
         throw new BoardError(
           "FORBIDDEN",
-          "only the claimer, the steward, or the owner may release a task",
+          "only the claimer, the steward, or the user may release a task",
         );
       }
       const task = await this.writeTask(location.project, {
@@ -1804,7 +1804,7 @@ export class Board {
         toolCalls: parsed.toolCalls,
         model: parsed.model,
         summary: parsed.status?.summary ?? null,
-        needsOwnerDecision: parsed.status?.needsOwnerDecision ?? false,
+        needsUserDecision: parsed.status?.needsUserDecision ?? false,
         error: parsed.error,
       });
     });
@@ -1925,22 +1925,22 @@ export class Board {
     );
     await writeJson(this.paths.pausedFile(), { paused: false });
 
-    const ownerToken = mintToken();
-    const ownerCharter = await this.readRole(OWNER_ROLE);
-    const owner: Agent = AgentSchema.parse({
-      name: OWNER_NAME,
-      role: OWNER_ROLE,
+    const userToken = mintToken();
+    const userCharter = await this.readRole(USER_ROLE);
+    const user: Agent = AgentSchema.parse({
+      name: USER_NAME,
+      role: USER_ROLE,
       cli: null,
       homeRunner: LOCAL_RUNNER,
       memberships: [],
       subscriptions: [...society.channels],
       status: "active",
       createdAt,
-      tokenHash: hashToken(ownerToken),
+      tokenHash: hashToken(userToken),
     });
-    await this.writeAgentHome(owner, ownerCharter);
-    await this.events.append("society.initialized", OWNER_NAME, { name: society.name });
-    return ownerToken;
+    await this.writeAgentHome(user, userCharter);
+    await this.events.append("society.initialized", USER_NAME, { name: society.name });
+    return userToken;
   }
 
   /** The charter as the citizen reads it: its purpose, the routing rule for lessons, and its own seed instructions. */
@@ -1949,7 +1949,7 @@ export class Board {
       this.paths.agentRole(agent),
       { role: charter.name, agent },
       `# ${agent}, ${charter.name}\n\n${charter.purpose}\n\n` +
-        `Route every lesson with one question: about me, my craft, or the owner, it goes in memory/core.md; ` +
+        `Route every lesson with one question: about me, my craft, or the user, it goes in memory/core.md; ` +
         `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n` +
         (seed.length === 0 ? "" : `\n${SEED_INSTRUCTIONS_HEADING}\n\n${seed}\n`),
     );
@@ -2083,7 +2083,7 @@ export class Board {
     if (target !== actor.name && !REALLOCATING_ROLES.includes(actor.role)) {
       throw new BoardError(
         "FORBIDDEN",
-        "only the owner, the steward, or the concierge may move another citizen",
+        "only the user, the steward, or the concierge may move another citizen",
       );
     }
   }
@@ -2112,13 +2112,13 @@ export class Board {
   }
 
   private assertAdmin(actor: Actor): void {
-    if (actor.role !== OWNER_ROLE && actor.role !== "steward") {
-      throw new BoardError("FORBIDDEN", "only the owner or the steward may administer the society");
+    if (actor.role !== USER_ROLE && actor.role !== "steward") {
+      throw new BoardError("FORBIDDEN", "only the user or the steward may administer the society");
     }
   }
 
-  private assertOwner(actor: Actor, message: string): void {
-    if (actor.role !== OWNER_ROLE) {
+  private assertUser(actor: Actor, message: string): void {
+    if (actor.role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", message);
     }
   }
@@ -2331,10 +2331,10 @@ export class Board {
         doc.body,
       );
       await ensureDir(this.paths.societyChannel(input.name));
-      // The owner follows every society channel.
-      await this.updateAgent(OWNER_NAME, (owner) => ({
-        ...owner,
-        subscriptions: [...new Set([...owner.subscriptions, ref])],
+      // The user follows every society channel.
+      await this.updateAgent(USER_NAME, (user) => ({
+        ...user,
+        subscriptions: [...new Set([...user.subscriptions, ref])],
       }));
     } else {
       const project = input.project;
@@ -2354,8 +2354,8 @@ export class Board {
   }
 
   private validateRole(charter: RoleCharter): void {
-    if (charter.name === OWNER_ROLE) {
-      throw new BoardError("FORBIDDEN", "the owner charter is not subject to proposals");
+    if (charter.name === USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "the user charter is not subject to proposals");
     }
   }
 
@@ -2384,8 +2384,8 @@ export class Board {
 
   private async validateRetire(name: Name): Promise<void> {
     const agent = await this.readAgent(name);
-    if (agent.role === OWNER_ROLE) {
-      throw new BoardError("FORBIDDEN", "the owner cannot be retired");
+    if (agent.role === USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "the user cannot be retired");
     }
     if (agent.status === "retired") {
       throw new BoardError("INVALID_STATE", `${name} is already retired`);
@@ -2526,9 +2526,9 @@ export class Board {
       );
     }
     const isClaimer = task.claimedBy === actor.name;
-    const isOwner = actor.role === OWNER_ROLE;
-    const isReviewer = actor.role === "reviewer" || isOwner;
-    const isSteward = actor.role === "steward" || isOwner;
+    const isUser = actor.role === USER_ROLE;
+    const isReviewer = actor.role === "reviewer" || isUser;
+    const isSteward = actor.role === "steward" || isUser;
     const allowed = (() => {
       switch (`${task.status}->${to}`) {
         case "open->claimed":

@@ -60,7 +60,7 @@ export const VerbInputs = {
   join_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
   leave_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
   write_knowledge: z.object({
-    /** A project you belong to, or null for society knowledge, which the steward and the owner curate. */
+    /** A project you belong to, or null for society knowledge, which the steward and the user curate. */
     project: NameSchema.nullable().default(null),
     topic: NameSchema,
     body: z.string().min(1),
@@ -89,13 +89,13 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   propose:
     "Propose a member, role, channel, reallocation, or retirement. The charter shape per kind is in your instructions; approval provisions it.",
   approve:
-    "Approve a proposal; the board then provisions it. Owner and steward only, never on your own proposal.",
-  reject: "Reject a proposal with a reason. Owner and steward only, never on your own proposal.",
+    "Approve a proposal; the board then provisions it. User and steward only, never on your own proposal.",
+  reject: "Reject a proposal with a reason. User and steward only, never on your own proposal.",
   create_project:
     "Create a project with its default channels. Give it a slug, a display name, and a git remote when one exists.",
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
   write_knowledge:
-    "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and owner). Not a message; use post_message for those.",
+    "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those.",
 };

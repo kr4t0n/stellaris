@@ -10,9 +10,9 @@ describe("buildTurnPrompt", () => {
         project: "demo",
         trigger: TriggerSchema.parse({
           kind: "mention",
-          from: "owner",
-          fromOwner: true,
-          reason: "mentioned by owner",
+          from: "user",
+          fromUser: true,
+          reason: "mentioned by user",
         }),
         priority: 2,
         onboarding: false,
@@ -20,7 +20,7 @@ describe("buildTurnPrompt", () => {
       messages: [
         {
           id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-          author: "owner",
+          author: "user",
           channel: "demo/general",
           ts: "2026-09-28T10:00:00.000Z",
           mentions: ["eng-1"],
@@ -47,7 +47,7 @@ describe("buildTurnPrompt", () => {
       },
       onboarding: null,
     });
-    expect(prompt).toContain("Trigger: mention from owner. mentioned by owner");
+    expect(prompt).toContain("Trigger: mention from user. mentioned by user");
     expect(prompt).toContain("Your previous turn did not finish");
     expect(prompt).toContain("Inbox (1 unread)");
     expect(prompt).toContain("please start on the scaffold");
@@ -78,16 +78,16 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Nothing new.");
   });
 
-  it("gives the front desk the roster and the project list, and frames an owner post as routing", () => {
+  it("gives the front desk the roster and the project list, and frames a user post as routing", () => {
     const prompt = buildTurnPrompt({
       dispatch: {
         agent: "desk",
         project: "society",
         trigger: TriggerSchema.parse({
-          kind: "owner_post",
-          from: "owner",
-          fromOwner: true,
-          reason: "the owner posted in general",
+          kind: "user_post",
+          from: "user",
+          fromUser: true,
+          reason: "the user posted in general",
         }),
         priority: 2,
         onboarding: false,
@@ -105,7 +105,7 @@ describe("buildTurnPrompt", () => {
             defaultBranch: "main",
             channels: ["general", "dev"],
             members: ["eng-1"],
-            approvers: ["owner"],
+            approvers: ["user"],
             requiredCapabilities: [],
             createdAt: "2026-09-28T10:00:00.000Z",
           },
@@ -132,7 +132,7 @@ describe("buildTurnPrompt", () => {
         ],
       },
     });
-    expect(prompt).toContain("Trigger: owner_post from owner. the owner posted in general");
+    expect(prompt).toContain("Trigger: user_post from user. the user posted in general");
     expect(prompt).toContain("Route it: answer in the same channel");
     expect(prompt).toContain("## The society");
     expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1');

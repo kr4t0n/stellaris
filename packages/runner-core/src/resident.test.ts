@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalRunner } from "./local-runner.js";
 import { ZERO_USAGE, type AgentBackend, type ResidentSession, type TurnResult } from "./types.js";
 
-const OWNER = { name: "owner", role: "owner" } as const;
+const USER = { name: "user", role: "user" } as const;
 
 function completed(summary: string, memoryUpdated = false): TurnResult {
   return {
@@ -15,7 +15,7 @@ function completed(summary: string, memoryUpdated = false): TurnResult {
     finalText: summary,
     usage: ZERO_USAGE,
     costUsd: 0.01,
-    status: { summary, claimsHeld: [], blockedOn: [], needsOwnerDecision: false, memoryUpdated },
+    status: { summary, claimsHeld: [], blockedOn: [], needsUserDecision: false, memoryUpdated },
     exitReason: "completed",
   };
 }
@@ -71,9 +71,9 @@ describe("LocalRunner resident sessions and the society scope", () => {
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
-    await board.addProject(OWNER, { slug: "demo" });
-    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
-    await board.addAgent(OWNER, {
+    await board.addProject(USER, { slug: "demo" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "claude",
@@ -89,7 +89,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     const dispatch = {
       agent: "desk",
       project: "society",
-      trigger: { kind: "owner_post" as const, fromOwner: true, reason: "posted" },
+      trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
       priority: 2,
       onboarding: false,
     };
@@ -130,7 +130,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     await runner.runTurn({
       agent: "eng-1",
       project: "demo",
-      trigger: { kind: "manual" as const, fromOwner: true, reason: "dev" },
+      trigger: { kind: "manual" as const, fromUser: true, reason: "dev" },
       priority: 2,
       onboarding: false,
     });

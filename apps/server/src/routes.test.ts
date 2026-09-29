@@ -7,7 +7,7 @@ import { z } from "zod";
 import { createApp } from "./app.js";
 import { TurnHub } from "./turn-hub.js";
 
-const OWNER = { name: "owner", role: "owner" } as const;
+const USER = { name: "user", role: "user" } as const;
 
 async function readSse(response: Response, wanted: number): Promise<string[]> {
   const reader = response.body?.getReader();
@@ -37,17 +37,17 @@ async function readSse(response: Response, wanted: number): Promise<string[]> {
 describe("board server routes", () => {
   let dir: string;
   let board: Board;
-  let ownerToken: string;
+  let userToken: string;
   let headers: Record<string, string>;
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-routes-"));
     const init = await Board.init(dir, { name: "routes" });
     board = init.board;
-    ownerToken = init.ownerToken;
-    headers = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
-    await board.addProject(OWNER, { slug: "demo" });
-    await board.addAgent(OWNER, {
+    userToken = init.userToken;
+    headers = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
+    await board.addProject(USER, { slug: "demo" });
+    await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "claude",
@@ -90,7 +90,7 @@ describe("board server routes", () => {
     expect(z.object({ type: z.string() }).parse(await wake.json()).type).toBe("wake.requested");
 
     const engToken = (
-      await board.addAgent(OWNER, { name: "eng-2", role: "engineer", cli: "claude" })
+      await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "claude" })
     ).token;
     const forbidden = await app.request("/api/pause", {
       method: "POST",
@@ -127,9 +127,9 @@ describe("board server routes", () => {
 
     await board.postMessage(
       { name: "eng-1", role: "engineer" },
-      { channel: "demo/general", body: "@owner please decide" },
+      { channel: "demo/general", body: "@user please decide" },
     );
-    // The owner follows every society channel, so the proposal's governance post is unread too.
+    // The user follows every society channel, so the proposal's governance post is unread too.
     const inbox = z.object({ messages: z.array(z.object({ body: z.string() })) });
     expect(
       inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
@@ -163,7 +163,7 @@ describe("board server routes", () => {
     expect((await board.readProject("demo")).channels).toContain("design");
 
     const engToken = (
-      await board.addAgent(OWNER, { name: "eng-2", role: "engineer", cli: "claude" })
+      await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "claude" })
     ).token;
     const forbidden = await app.request("/api/agents/eng-1/retire", {
       method: "POST",
@@ -196,12 +196,12 @@ describe("board server routes", () => {
 
   it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {
     const app = createApp({ board, version: "t" });
-    await board.writeKnowledge(OWNER, {
+    await board.writeKnowledge(USER, {
       project: "demo",
       topic: "testing",
       body: "Run the tests with uv.",
     });
-    await board.writeKnowledge(OWNER, { project: null, topic: "norms", body: "Be brief." });
+    await board.writeKnowledge(USER, { project: null, topic: "norms", body: "Be brief." });
     const topics = z.array(
       z.object({ topic: z.string(), project: z.string().nullable(), body: z.string() }),
     );
@@ -218,14 +218,13 @@ describe("board server routes", () => {
       topics.parse(await (await app.request("/api/society/knowledge", { headers })).json()),
     ).toMatchObject([{ topic: "norms", project: null }]);
 
-    const proposal = await board.propose(OWNER, {
+    const proposal = await board.propose(USER, {
       kind: "skill",
       charter: { name: "release", summary: "Cut a release", body: "Tag, build, publish." },
       rationale: "Every project releases the same way.",
     });
-    const stewToken = (
-      await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" })
-    ).token;
+    const stewToken = (await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" }))
+      .token;
     await board.approve({ name: "stew", role: "steward" }, { proposal_id: proposal.id });
     const skills = z
       .array(z.object({ name: z.string(), summary: z.string(), scope: z.string() }))
@@ -252,7 +251,7 @@ describe("board server routes", () => {
       runner: "local",
       cli: "claude" as const,
       session: "s",
-      trigger: { kind: "mention" as const, from: "owner", fromOwner: true, reason: "asked" },
+      trigger: { kind: "mention" as const, from: "user", fromUser: true, reason: "asked" },
       startedAt: "2026-09-28T10:00:00.000Z",
       endedAt: "2026-09-28T10:01:00.000Z",
       exitReason: "completed" as const,
@@ -260,7 +259,7 @@ describe("board server routes", () => {
         summary: "shipped it",
         claimsHeld: [],
         blockedOn: [],
-        needsOwnerDecision: false,
+        needsUserDecision: false,
         memoryUpdated: false,
       },
       error: null,
@@ -323,7 +322,7 @@ describe("board server routes", () => {
     const members = z
       .array(z.object({ name: z.string(), role: z.string(), profile: z.string() }))
       .parse(await (await app.request("/api/members", { headers })).json());
-    expect(members.map((m) => m.name).toSorted()).toEqual(["eng-1", "owner"]);
+    expect(members.map((m) => m.name).toSorted()).toEqual(["eng-1", "user"]);
     expect(members.find((m) => m.name === "eng-1")?.profile).toContain("# Profile");
     expect(JSON.stringify(members)).not.toContain("tokenHash");
     const state = z

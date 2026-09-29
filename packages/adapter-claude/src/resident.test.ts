@@ -39,7 +39,7 @@ function frames(turn: number, text: string, totalCost: number, stall = false): S
       summary: `turn ${turn}`,
       claimsHeld: [],
       blockedOn: [],
-      needsOwnerDecision: false,
+      needsUserDecision: false,
       memoryUpdated: false,
     },
     total_cost_usd: totalCost,

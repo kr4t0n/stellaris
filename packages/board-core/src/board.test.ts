@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, type Actor } from "./index.js";
 
-const OWNER: Actor = { name: "owner", role: "owner" };
+const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
 
@@ -23,33 +23,33 @@ describe("Board", () => {
   });
 
   async function society() {
-    const { board, ownerToken } = await Board.init(
+    const { board, userToken } = await Board.init(
       dir,
       { name: "test society" },
       { now, leaseMs: 60_000 },
     );
-    await board.addProject(OWNER, { slug: "demo" });
-    const eng = await board.addAgent(OWNER, {
+    await board.addProject(USER, { slug: "demo" });
+    const eng = await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
     });
-    const rev = await board.addAgent(OWNER, {
+    const rev = await board.addAgent(USER, {
       name: "rev-1",
       role: "reviewer",
       cli: "codex",
       memberships: ["demo"],
     });
-    return { board, ownerToken, eng, rev };
+    return { board, userToken, eng, rev };
   }
 
-  it("initializes a society with seed roles, channels, a local runner, and an owner", async () => {
-    const { board, ownerToken } = await society();
+  it("initializes a society with seed roles, channels, a local runner, and a user", async () => {
+    const { board, userToken } = await society();
     expect((await board.society()).channels).toEqual(["general", "ops", "governance", "decisions"]);
     const roles = (await board.listRoles()).map((role) => role.name).toSorted();
-    expect(roles).toEqual(["concierge", "engineer", "owner", "reviewer", "steward"]);
-    expect(board.resolveToken(ownerToken)).toEqual(OWNER);
+    expect(roles).toEqual(["concierge", "engineer", "reviewer", "steward", "user"]);
+    expect(board.resolveToken(userToken)).toEqual(USER);
     expect(board.resolveToken("stl_not-a-token")).toBeNull();
     expect((await board.readProject("demo")).members.toSorted()).toEqual(["eng-1", "rev-1"]);
     await expect(Board.init(dir, { name: "again" })).rejects.toMatchObject({
@@ -61,12 +61,12 @@ describe("Board", () => {
     const { board, eng } = await society();
     expect(board.resolveToken(eng.token)).toEqual(ENG);
 
-    const brief = await board.postMessage(OWNER, {
+    const brief = await board.postMessage(USER, {
       channel: "demo/general",
       body: "Brief: build the thing. @eng-1 please start.",
     });
     expect(brief.mentions).toEqual(["eng-1"]);
-    const task = await board.createTask(OWNER, {
+    const task = await board.createTask(USER, {
       project: "demo",
       title: "Build the thing",
       body: "Details.",
@@ -131,7 +131,7 @@ describe("Board", () => {
 
   it("treats claims as leases: expired ones can be taken over and are released by the sweep", async () => {
     const { board } = await society();
-    const task = await board.createTask(OWNER, { project: "demo", title: "t" });
+    const task = await board.createTask(USER, { project: "demo", title: "t" });
     await board.claimTask(ENG, { task_id: task.id });
     clock = new Date(clock.getTime() + 61_000);
     const taken = await board.claimTask(REV, { task_id: task.id });
@@ -139,7 +139,7 @@ describe("Board", () => {
     clock = new Date(clock.getTime() + 61_000);
     const expired = await board.expireLeases();
     expect(expired.map((t) => t.id)).toEqual([task.id]);
-    const reopened = await board.getTask(OWNER, { task_id: task.id });
+    const reopened = await board.getTask(USER, { task_id: task.id });
     expect(reopened.status).toBe("open");
     expect(reopened.claimedBy).toBeUndefined();
     expect((await board.readEvents(null)).filter((e) => e.type === "lease.expired")).toHaveLength(
@@ -169,9 +169,9 @@ describe("Board", () => {
     expect((await board.releaseTask(ENG, { task_id: task.id })).status).toBe("open");
   });
 
-  it("validates proposals by kind, forbids self-decisions, and reserves hiring for the owner", async () => {
+  it("validates proposals by kind, forbids self-decisions, and reserves hiring for the user", async () => {
     const { board } = await society();
-    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
 
     await expect(
@@ -186,10 +186,10 @@ describe("Board", () => {
     await expect(board.approve(STEW, { proposal_id: hire.id })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
-    expect((await board.approve(OWNER, { proposal_id: hire.id })).outcome).toBe("approved");
+    expect((await board.approve(USER, { proposal_id: hire.id })).outcome).toBe("approved");
     expect((await board.readProposal(hire.id)).status).toBe("provisioned");
     await expect(
-      board.reject(OWNER, { proposal_id: hire.id, reason: "late" }),
+      board.reject(USER, { proposal_id: hire.id, reason: "late" }),
     ).rejects.toMatchObject({ code: "INVALID_STATE" });
 
     const channel = await board.propose(ENG, {
@@ -201,7 +201,7 @@ describe("Board", () => {
 
   it("provisions what an approval asked for: members, channels, roles, retirements", async () => {
     const { board, eng } = await society();
-    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
     expect((await board.readAgent("stew")).subscriptions).toEqual(
       expect.arrayContaining(["ops", "governance"]),
@@ -222,7 +222,7 @@ describe("Board", () => {
     expect((await board.listChannel("governance")).at(-1)?.body).toContain(
       `Proposal ${hire.id}: member eng-2 as engineer on codex for demo`,
     );
-    await board.approve(OWNER, { proposal_id: hire.id });
+    await board.approve(USER, { proposal_id: hire.id });
     const provisioned = await board.readProposal(hire.id);
     expect(provisioned.status).toBe("provisioned");
     expect(provisioned.provision).toMatchObject({ agent: "eng-2", memberships: ["demo"] });
@@ -259,12 +259,12 @@ describe("Board", () => {
         wakeTriggers: ["mention"],
       },
     });
-    await board.approve(OWNER, { proposal_id: role.id });
+    await board.approve(USER, { proposal_id: role.id });
     expect((await board.readRole("designer")).maxReplicas).toBe(1);
     expect((await board.listRoles()).map((r) => r.name)).toContain("designer");
 
     // A retirement releases claims, revokes the token, and leaves the projection.
-    const task = await board.createTask(OWNER, { project: "demo", title: "t" });
+    const task = await board.createTask(USER, { project: "demo", title: "t" });
     await board.claimTask(ENG, { task_id: task.id });
     const retirement = await board.propose(STEW, {
       kind: "retirement",
@@ -273,17 +273,17 @@ describe("Board", () => {
     await expect(board.approve(STEW, { proposal_id: retirement.id })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
-    await board.approve(OWNER, { proposal_id: retirement.id });
+    await board.approve(USER, { proposal_id: retirement.id });
     const retired = await board.readAgent("eng-1");
     expect(retired.status).toBe("retired");
     expect(retired.retiredReason).toBe("idle for a week");
-    expect((await board.getTask(OWNER, { task_id: task.id })).status).toBe("open");
+    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("open");
     expect(board.resolveToken(eng.token)).toBeNull();
     expect((await board.readProject("demo")).members).not.toContain("eng-1");
     expect((await board.projectMembers("demo")).map((a) => a.name)).toEqual([
       "eng-2",
-      "owner",
       "rev-1",
+      "user",
     ]);
     expect((await board.listChannel("general")).at(-1)?.body).toContain("Retired eng-1");
     expect((await board.readProposal(retirement.id)).provision).toMatchObject({
@@ -296,13 +296,13 @@ describe("Board", () => {
       kind: "reallocation",
       charter: { description: "Move rev-1 to the api project." },
     });
-    await board.approve(OWNER, { proposal_id: reallocation.id });
+    await board.approve(USER, { proposal_id: reallocation.id });
     expect((await board.readProposal(reallocation.id)).status).toBe("approved");
   });
 
   it("refuses proposals that could not be provisioned, and guards direct administration", async () => {
     const { board } = await society();
-    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
     await expect(
       board.propose(STEW, {
@@ -317,7 +317,7 @@ describe("Board", () => {
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(
-      board.propose(STEW, { kind: "retirement", charter: { agent: "owner", reason: "no" } }),
+      board.propose(STEW, { kind: "retirement", charter: { agent: "user", reason: "no" } }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       board.propose(STEW, {
@@ -326,14 +326,14 @@ describe("Board", () => {
       }),
     ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
 
-    // Direct administration: the owner retires and edits charters; the steward may not.
+    // Direct administration: the user retires and edits charters; the steward may not.
     await expect(board.retireAgent(STEW, { name: "eng-1", reason: "x" })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
     await expect(
       board.setRoleCharter(STEW, { ...(await board.readRole("engineer")), maxReplicas: 2 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    const engineer = await board.setRoleCharter(OWNER, {
+    const engineer = await board.setRoleCharter(USER, {
       ...(await board.readRole("engineer")),
       purpose: "Builds and ships, tests first.",
       maxReplicas: 3,
@@ -345,7 +345,7 @@ describe("Board", () => {
     expect(await board.readAgentRoleBody("eng-1")).toContain("Builds and ships, tests first.");
 
     // A replica is cloned from the newest active member of the role on the project.
-    const replica = await board.addReplica(OWNER, { project: "demo", role: "engineer" });
+    const replica = await board.addReplica(USER, { project: "demo", role: "engineer" });
     expect(replica.name).toBe("eng-2");
     expect(replica.cli).toBe("claude");
     expect(replica.memberships).toEqual(["demo"]);
@@ -353,15 +353,15 @@ describe("Board", () => {
       (event) => event.type === "agent.added" && event.payload["name"] === "eng-2",
     );
     expect(scaled?.payload["scaledFrom"]).toBe("eng-1");
-    await board.retireAgent(OWNER, { name: "eng-2", reason: "demo" });
-    expect((await board.addReplica(OWNER, { project: "demo", role: "engineer" })).name).toBe(
+    await board.retireAgent(USER, { name: "eng-2", reason: "demo" });
+    expect((await board.addReplica(USER, { project: "demo", role: "engineer" })).name).toBe(
       "eng-3",
     );
     // A society-wide member of the role is the fallback template; a role with none cannot scale.
-    expect((await board.addReplica(OWNER, { project: "demo", role: "steward" })).name).toBe(
+    expect((await board.addReplica(USER, { project: "demo", role: "steward" })).name).toBe(
       "stew-2",
     );
-    await board.setRoleCharter(OWNER, {
+    await board.setRoleCharter(USER, {
       name: "designer",
       purpose: "Owns the visual language.",
       verbs: ["post_message"],
@@ -369,15 +369,15 @@ describe("Board", () => {
       wakeTriggers: ["mention"],
     });
     await expect(
-      board.addReplica(OWNER, { project: "demo", role: "designer" }),
+      board.addReplica(USER, { project: "demo", role: "designer" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
 
-    // Channels can be added directly by the owner or the steward.
+    // Channels can be added directly by the user or the steward.
     expect(
       await board.addChannel(STEW, { project: null, name: "random", purpose: "Off topic" }),
     ).toBe("random");
     expect((await board.society()).channels).toContain("random");
-    expect((await board.readAgent("owner")).subscriptions).toContain("random");
+    expect((await board.readAgent("user")).subscriptions).toContain("random");
 
     // Runner state changes are recorded and signalled; signals are readable back.
     const runner = await board.markRunner("local", { status: "connected", clis: ["claude"] });
@@ -400,21 +400,21 @@ describe("Board", () => {
     );
   });
 
-  it("searches messages and tasks, and only the owner can pause", async () => {
+  it("searches messages and tasks, and only the user can pause", async () => {
     const { board } = await society();
     await board.postMessage(ENG, { channel: "demo/dev", body: "The pagination cursor is base64." });
     await board.createTask(ENG, { project: "demo", title: "Fix pagination", body: "cursor bug" });
     const hits = await board.search(ENG, { query: "pagination" });
     expect(hits.map((hit) => hit.kind).toSorted()).toEqual(["message", "task"]);
     expect(await board.isPaused()).toBe(false);
-    await board.setPaused(OWNER, true);
+    await board.setPaused(USER, true);
     expect(await board.isPaused()).toBe(true);
     await expect(board.setPaused(ENG, false)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("reopens with the token index intact, aligning seed roles an older build wrote differently", async () => {
     const { board, eng } = await society();
-    await board.addAgent(OWNER, {
+    await board.addAgent(USER, {
       name: "stew",
       role: "steward",
       cli: "claude",
@@ -422,9 +422,9 @@ describe("Board", () => {
     });
     await rm(board.paths.role("concierge"));
     await rm(board.paths.members(), { recursive: true, force: true });
-    // A charter written before a verb existed: the owner's other edits must survive the grant.
+    // A charter written before a verb existed: the user's other edits must survive the grant.
     const engineer = await board.readRole("engineer");
-    await board.setRoleCharter(OWNER, {
+    await board.setRoleCharter(USER, {
       ...engineer,
       verbs: engineer.verbs.filter((verb) => verb !== "write_knowledge"),
       maxReplicas: 4,
@@ -436,11 +436,11 @@ describe("Board", () => {
       (await readFile(stewardFile, "utf8")).replace("societyScope: true\n", ""),
       "utf8",
     );
-    // The owner charter is nobody's to edit, so it is the seed's in full.
-    const ownerFile = board.paths.role("owner");
+    // The user charter is nobody's to edit, so it is the seed's in full.
+    const userFile = board.paths.role("user");
     await writeFile(
-      ownerFile,
-      (await readFile(ownerFile, "utf8")).replace("reflects: false\n", "reflects: true\n"),
+      userFile,
+      (await readFile(userFile, "utf8")).replace("reflects: false\n", "reflects: true\n"),
       "utf8",
     );
     const reopened = await Board.open(dir);
@@ -451,7 +451,7 @@ describe("Board", () => {
     expect(granted.verbs).toContain("write_knowledge");
     expect(granted.maxReplicas).toBe(4);
     expect((await reopened.readRole("steward")).societyScope).toBe(true);
-    expect((await reopened.readRole("owner")).reflects).toBe(false);
+    expect((await reopened.readRole("user")).reflects).toBe(false);
     const seeded = (await reopened.readEvents(null)).filter(
       (event) => event.type === "role.added" && event.payload["seeded"] === true,
     );
@@ -462,7 +462,7 @@ describe("Board", () => {
         event.payload["fieldsAligned"],
       ]),
     ).toEqual([
-      ["owner", [], ["reflects"]],
+      ["user", [], ["reflects"]],
       ["engineer", ["write_knowledge"], []],
       ["steward", [], ["societyScope"]],
       ["concierge", undefined, undefined],
@@ -485,7 +485,7 @@ describe("Board", () => {
 
   it("runs the front desk: projects and membership as verbs, and a roster that dispatch can read", async () => {
     const { board } = await society();
-    await board.addAgent(OWNER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     const DESK: Actor = { name: "desk", role: "concierge" };
 
     // Only roles chartered for it open projects; the society scope is reserved.
@@ -497,7 +497,7 @@ describe("Board", () => {
     });
     const api = await board.createProject(DESK, { slug: "api", name: "Public API" });
     expect(api.channels).toEqual(["general", "dev"]);
-    expect((await board.readAgent("owner")).memberships).toContain("api");
+    expect((await board.readAgent("user")).memberships).toContain("api");
 
     // Citizens join themselves; the front desk adds others; an engineer may not.
     expect((await board.joinProject(ENG, { project: "api" })).memberships).toEqual(["demo", "api"]);
@@ -511,23 +511,23 @@ describe("Board", () => {
     expect((await board.readEvents(null)).filter((e) => e.type === "agent.joined")).toHaveLength(2);
     // Joining twice is a no-op, leaving releases the claims held there.
     expect((await board.joinProject(ENG, { project: "api" })).memberships).toEqual(["demo", "api"]);
-    const task = await board.createTask(OWNER, { project: "api", title: "t" });
+    const task = await board.createTask(USER, { project: "api", title: "t" });
     await board.claimTask(ENG, { task_id: task.id });
     const left = await board.leaveProject(ENG, { project: "api" });
     expect(left.memberships).toEqual(["demo"]);
     expect(left.subscriptions).not.toContain("api/general");
-    expect((await board.getTask(OWNER, { task_id: task.id })).status).toBe("open");
+    expect((await board.getTask(USER, { task_id: task.id })).status).toBe("open");
     expect((await board.readProject("api")).members).toEqual(["rev-1"]);
 
     // The roster: identity, reach, availability, and the citizen's own profile.
     const members = await board.listMembers();
-    expect(members.map((m) => m.name).toSorted()).toEqual(["desk", "eng-1", "owner", "rev-1"]);
+    expect(members.map((m) => m.name).toSorted()).toEqual(["desk", "eng-1", "rev-1", "user"]);
     const desk = members.find((m) => m.name === "desk");
     expect(desk).toMatchObject({ role: "concierge", resident: true, memberships: [] });
     expect(desk?.profile).toContain("# Profile");
     const eng = members.find((m) => m.name === "eng-1");
     expect(eng).toMatchObject({ memberships: ["demo"], claimsHeld: 0, tasksDone: 0 });
-    const demoTask = await board.createTask(OWNER, { project: "demo", title: "d" });
+    const demoTask = await board.createTask(USER, { project: "demo", title: "d" });
     await board.claimTask(ENG, { task_id: demoTask.id });
     expect((await board.listMembers()).find((m) => m.name === "eng-1")?.claimsHeld).toBe(1);
     await board.updateTask(ENG, { task_id: demoTask.id, status: "in_review" });
@@ -536,7 +536,7 @@ describe("Board", () => {
     expect(after).toMatchObject({ claimsHeld: 0, tasksDone: 1 });
 
     // The roster carries the configured model and the model the last turn reported.
-    await board.addAgent(OWNER, { name: "eng-3", role: "engineer", cli: "codex", model: "gpt-5" });
+    await board.addAgent(USER, { name: "eng-3", role: "engineer", cli: "codex", model: "gpt-5" });
     expect((await board.listMembers()).find((m) => m.name === "eng-3")).toMatchObject({
       model: "gpt-5",
     });
@@ -546,7 +546,7 @@ describe("Board", () => {
       runner: "local",
       cli: "claude" as const,
       session: "s",
-      trigger: { kind: "manual" as const, fromOwner: true, reason: "dev" },
+      trigger: { kind: "manual" as const, fromUser: true, reason: "dev" },
       startedAt: "2026-09-28T10:05:00.000Z",
       endedAt: "2026-09-28T10:06:00.000Z",
       exitReason: "completed" as const,
@@ -569,10 +569,10 @@ describe("Board", () => {
 
     // Society-scope wakes are for roles that may work outside projects.
     await expect(
-      board.requestWake(OWNER, { agent: "desk", project: "society", reason: "dev" }),
+      board.requestWake(USER, { agent: "desk", project: "society", reason: "dev" }),
     ).resolves.toMatchObject({ type: "wake.requested" });
     await expect(
-      board.requestWake(OWNER, { agent: "eng-1", project: "society", reason: "dev" }),
+      board.requestWake(USER, { agent: "eng-1", project: "society", reason: "dev" }),
     ).rejects.toMatchObject({ code: "VALIDATION" });
 
     // Turn tokens can be extended for a resident session and revoked when it closes.
@@ -586,10 +586,10 @@ describe("Board", () => {
 
   it("shares knowledge and skills: write_knowledge, skill promotion, and search over the archive", async () => {
     const { board } = await society();
-    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
 
-    // Project knowledge needs membership; society knowledge needs the steward or the owner.
+    // Project knowledge needs membership; society knowledge needs the steward or the user.
     const written = await board.writeKnowledge(ENG, {
       project: "demo",
       topic: "testing",
@@ -599,7 +599,7 @@ describe("Board", () => {
     await expect(
       board.writeKnowledge(ENG, { project: null, topic: "norms", body: "x" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await board.addProject(OWNER, { slug: "other" });
+    await board.addProject(USER, { slug: "other" });
     await expect(
       board.writeKnowledge(ENG, { project: "other", topic: "t", body: "x" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -630,7 +630,7 @@ describe("Board", () => {
     );
     await writeFile(
       path.join(board.paths.agentMemory("eng-1"), "python.md"),
-      "# Python\n\nThe owner prefers ruff over black.\n",
+      "# Python\n\nThe user prefers ruff over black.\n",
       "utf8",
     );
     expect((await board.search(ENG, { query: "ruff" })).map((h) => [h.kind, h.ref])).toEqual([
@@ -649,7 +649,7 @@ describe("Board", () => {
       runner: "local",
       cli: "claude" as const,
       session: "s",
-      trigger: { kind: "reflection" as const, fromOwner: false, reason: "scheduled" },
+      trigger: { kind: "reflection" as const, fromUser: false, reason: "scheduled" },
       startedAt: "2026-09-28T10:05:00.000Z",
       endedAt: "2026-09-28T10:06:00.000Z",
       exitReason: "completed" as const,
@@ -688,7 +688,7 @@ describe("Board", () => {
     expect((await board.listChannel("general")).at(-1)?.body).toContain("Skill uv-setup promoted");
 
     // A reflection can be requested ahead of the cadence.
-    const wake = await board.requestWake(OWNER, {
+    const wake = await board.requestWake(USER, {
       agent: "eng-1",
       project: "demo",
       reason: "reflect now",

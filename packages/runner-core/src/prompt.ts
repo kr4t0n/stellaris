@@ -37,7 +37,7 @@ export interface TurnPromptInput {
 const REFLECTION = [
   "This turn is for your memory; take no new work, and answer the inbox only where a reply is needed. Read memory/core.md and your recent turn records, then:",
   "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
-  '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, a `summary:` line in the frontmatter and then the steps. Propose it with kind "skill" when other citizens would use it.',
+  '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps. Propose it with kind "skill" when other citizens would use it.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
   "- Share: a durable fact about this scope's codebase or process goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
   "- Report memoryUpdated: true in the status object when core.md or a skill changed.",

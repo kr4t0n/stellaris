@@ -409,18 +409,38 @@ describe("Board", () => {
     await expect(board.setPaused(ENG, false)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("reopens with the token index intact, seeding roles an older build did not know", async () => {
+  it("reopens with the token index intact, seeding roles and verbs an older build did not know", async () => {
     const { board, eng } = await society();
     await rm(board.paths.role("concierge"));
     await rm(board.paths.members(), { recursive: true, force: true });
+    // A charter written before a verb existed: the owner's other edits must survive the grant.
+    const engineer = await board.readRole("engineer");
+    await board.setRoleCharter(OWNER, {
+      ...engineer,
+      verbs: engineer.verbs.filter((verb) => verb !== "write_knowledge"),
+      maxReplicas: 4,
+    });
     const reopened = await Board.open(dir);
     expect(reopened.resolveToken(eng.token)).toEqual(ENG);
     expect((await reopened.readRole("concierge")).resident).toBe(true);
     expect((await reopened.listRoles()).map((role) => role.name)).toContain("concierge");
+    const granted = await reopened.readRole("engineer");
+    expect(granted.verbs).toContain("write_knowledge");
+    expect(granted.maxReplicas).toBe(4);
     const seeded = (await reopened.readEvents(null)).filter(
       (event) => event.type === "role.added" && event.payload["seeded"] === true,
     );
-    expect(seeded.map((event) => event.payload["name"])).toEqual(["concierge"]);
+    expect(seeded.map((event) => [event.payload["name"], event.payload["verbsAdded"]])).toEqual([
+      ["engineer", ["write_knowledge"]],
+      ["concierge", undefined],
+    ]);
+    // Opening again grants nothing more.
+    await Board.open(dir);
+    expect(
+      (await reopened.readEvents(null)).filter(
+        (event) => event.type === "role.added" && event.payload["seeded"] === true,
+      ),
+    ).toHaveLength(2);
     await expect(Board.open(path.join(dir, "nowhere"))).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
@@ -568,7 +588,7 @@ describe("Board", () => {
     await mkdir(board.paths.agentSkill("eng-1", "uv-setup"), { recursive: true });
     await writeFile(
       board.paths.agentSkillFile("eng-1", "uv-setup"),
-      "---\nsummary: Set up a uv project with locked dependencies\n---\n# uv setup\n\nRun uv sync --locked before the tests.\n",
+      "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n# uv setup\n\nRun uv sync --locked before the tests.\n",
       "utf8",
     );
     await writeFile(

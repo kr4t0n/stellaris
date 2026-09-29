@@ -235,7 +235,7 @@ class ScriptedBackend implements AgentBackend {
         await mkdir(path.join(home, "skills", "uv-setup"), { recursive: true });
         await writeFile(
           path.join(home, "skills", "uv-setup", "SKILL.md"),
-          "---\nsummary: Set up a uv project with locked dependencies\n---\n# uv setup\n\n1. uv sync --locked\n2. uv run pytest -q\n",
+          "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n# uv setup\n\n1. uv sync --locked\n2. uv run pytest -q\n",
           "utf8",
         );
         await verb("write_knowledge", {

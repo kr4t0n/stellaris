@@ -29,7 +29,7 @@ const TURN_CONTRACT = [
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
   "- Route every lesson: about you, your craft, or the owner, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
-  '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, a `summary:` line in the frontmatter and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
+  '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
   "- End every turn with the status object: summary, claims held, what is blocked, whether the owner must decide.",
 ].join("\n");

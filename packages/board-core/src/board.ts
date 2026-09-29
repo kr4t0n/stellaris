@@ -252,9 +252,12 @@ function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): 
   return `${kind} ${JSON.stringify(charter)}`;
 }
 
-/** A skill's one-line summary: its frontmatter's summary or description, else the first plain line. */
+/**
+ * A skill's one-line summary: the `description` of the SKILL.md format both CLIs validate, a
+ * `summary` for files written before that was the rule, else the first plain line of the body.
+ */
 function skillSummary(data: Record<string, unknown>, body: string): string {
-  const fromFrontmatter = data["summary"] ?? data["description"];
+  const fromFrontmatter = data["description"] ?? data["summary"];
   if (typeof fromFrontmatter === "string" && fromFrontmatter.trim().length > 0) {
     return fromFrontmatter.trim();
   }
@@ -360,6 +363,7 @@ export class Board {
     await ensureDir(this.paths.societyKnowledge());
     for (const charter of SEED_ROLES) {
       if (await exists(this.paths.role(charter.name))) {
+        await this.grantSeedVerbs(charter);
         continue;
       }
       await writeMarkdown(
@@ -377,6 +381,33 @@ export class Board {
         seeded: true,
       });
     }
+  }
+
+  /**
+   * Verbs are added, never renamed, so a verb the seed charter newly grants is added to an existing
+   * society's copy of that role on open. Nothing else in the charter is touched: the owner's edits
+   * and approved role proposals stand, and a verb the owner removed by hand is added back only when
+   * a later seed grants it again, which is the same event.
+   */
+  private async grantSeedVerbs(seed: RoleCharter): Promise<void> {
+    const current = await this.readRole(seed.name);
+    const missing = seed.verbs.filter((verb) => !current.verbs.includes(verb));
+    if (missing.length === 0) {
+      return;
+    }
+    const charter = RoleCharterSchema.parse({ ...current, verbs: [...current.verbs, ...missing] });
+    const body = (await readMarkdown(this.paths.role(charter.name), RoleCharterSchema)).body;
+    await writeMarkdown(this.paths.role(charter.name), charter, body);
+    this.roleCache.set(charter.name, charter);
+    await this.events.append("role.added", OWNER_NAME, {
+      name: charter.name,
+      replaced: true,
+      verbs: charter.verbs,
+      verbsAdded: missing,
+      maxReplicas: charter.maxReplicas,
+      backlogThreshold: charter.backlogThreshold,
+      seeded: true,
+    });
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -2107,14 +2138,13 @@ export class Board {
     const file = this.paths.societySkillFile(skill.name);
     const replaced = await exists(file);
     await ensureDir(this.paths.societySkill(skill.name));
+    // The SKILL.md frontmatter the CLIs' validators accept: name, description, and a metadata map.
     await writeMarkdown(
       file,
       {
         name: skill.name,
-        summary: skill.summary,
-        proposedBy,
-        promotedBy: by,
-        promotedAt: this.now().toISOString(),
+        description: skill.summary,
+        metadata: { proposedBy, promotedBy: by, promotedAt: this.now().toISOString() },
       },
       skill.body,
     );

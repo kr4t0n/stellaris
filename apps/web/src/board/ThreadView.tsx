@@ -55,7 +55,20 @@ function ThreadStream({ id }: { id: string }) {
         subtitle={`${subjectLabel(thread.subject)} thread in #${thread.channel} · opened by ${displayName(
           thread.openedBy,
         )} ${ago(thread.openedAt, now)}`}
-        trailing={<StateChip state={thread.state} />}
+        trailing={
+          <>
+            {thread.subject?.kind === "task" ? (
+              <Link
+                to="/task/$taskId"
+                params={{ taskId: thread.subject.id }}
+                className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+              >
+                Task →
+              </Link>
+            ) : null}
+            <StateChip state={thread.state} />
+          </>
+        }
       />
       <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.length === 0 ? <PaneNote>No messages in this thread yet.</PaneNote> : null}

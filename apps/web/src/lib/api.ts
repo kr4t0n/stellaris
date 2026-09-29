@@ -6,6 +6,7 @@ import {
   ProjectSchema,
   RoleCharterSchema,
   SocietySchema,
+  TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
   UlidSchema,
 } from "@stellaris/shared";
@@ -64,6 +65,7 @@ const ThreadSummarySchema = ThreadRecordSchema.extend({
 });
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
 const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });
+const TaskSchema = TaskFrontmatterSchema.extend({ body: z.string() });
 
 /** A channel ref as a path: `general`, or `lab/general` with each part encoded. */
 function channelPath(ref: string): string {
@@ -97,6 +99,9 @@ export function createApi(token: string) {
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),
     thread: (id: string) =>
       get(`/api/threads/${encodeURIComponent(id)}`, token, ThreadDetailSchema),
+    tasks: (slug: string) =>
+      get(`/api/projects/${encodeURIComponent(slug)}/tasks`, token, TaskSchema.array()),
+    task: (id: string) => get(`/api/tasks/${encodeURIComponent(id)}`, token, TaskSchema),
   };
 }
 export type Api = ReturnType<typeof createApi>;

@@ -27,6 +27,16 @@ const routeTree = rootRoute.addChildren([
     path: "/thread/$threadId",
     component: lazyRouteComponent(() => import("./board/ThreadView.js"), "ThreadView"),
   }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/p/$slug/tasks",
+    component: lazyRouteComponent(() => import("./board/TasksView.js"), "TasksView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/task/$taskId",
+    component: lazyRouteComponent(() => import("./board/TaskView.js"), "TaskView"),
+  }),
 ]);
 
 export const router = createRouter({ routeTree });

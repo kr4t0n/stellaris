@@ -16,6 +16,7 @@ import {
   useScheduler,
   useSession,
   useSociety,
+  useTask,
   useThreads,
 } from "./lib/session.js";
 import { skyModel } from "./sky/model.js";
@@ -35,15 +36,9 @@ function useWindowWidth(): number {
   return width;
 }
 
-/** The channel a board route shows or belongs to, which is also the project the sky focuses. */
-function channelOf(pathname: string, threadChannel: (id: string) => string | undefined) {
-  if (pathname.startsWith("/c/")) {
-    return decodeURIComponent(pathname.slice(3));
-  }
-  if (pathname.startsWith("/thread/")) {
-    return threadChannel(decodeURIComponent(pathname.slice(8))) ?? null;
-  }
-  return null;
+/** The part of a path after a prefix, when the path has that prefix. */
+function after(pathname: string, prefix: string): string | null {
+  return pathname.startsWith(prefix) ? decodeURIComponent(pathname.slice(prefix.length)) : null;
 }
 
 /**
@@ -83,16 +78,24 @@ export function Playground() {
         : NO_INSETS,
     [boardOpen, contentWidth],
   );
-  const activeChannel = channelOf(
-    pathname,
-    (id) => threads.data?.find((thread) => thread.id === id)?.channel,
-  );
+  // What the open route is about: a channel, directly or through a thread, or a project's tasks,
+  // directly or through a task. The navigator highlights it and the sky focuses its project.
+  const threadId = after(pathname, "/thread/");
+  const task = useTask(after(pathname, "/task/"));
+  const activeChannel =
+    after(pathname, "/c/") ??
+    (threadId === null
+      ? null
+      : (threads.data?.find((thread) => thread.id === threadId)?.channel ?? null));
+  const tasksPath = /^\/p\/([^/]+)\/tasks$/.exec(pathname)?.[1];
+  const activeTasks = tasksPath ?? task.data?.project ?? null;
   const focus =
-    activeChannel === null
+    activeTasks ??
+    (activeChannel === null
       ? null
       : activeChannel.includes("/")
         ? (activeChannel.split("/")[0] ?? null)
-        : SOCIETY_SCOPE;
+        : SOCIETY_SCOPE);
 
   useEffect(() => {
     if (!boardOpen) {
@@ -178,7 +181,7 @@ export function Playground() {
         }
         onSignOut={signOut}
       />
-      {boardOpen ? <Navigator activeChannel={activeChannel} /> : null}
+      {boardOpen ? <Navigator activeChannel={activeChannel} activeTasks={activeTasks} /> : null}
       {boardOpen ? (
         <Island
           label="Board content"

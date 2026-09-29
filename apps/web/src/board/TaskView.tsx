@@ -1,0 +1,176 @@
+import type { Member, Stage, Task } from "@stellaris/shared";
+import { Link, useParams } from "@tanstack/react-router";
+import { Markdown } from "../components/Markdown.js";
+import { ApiError } from "../lib/api.js";
+import { ago } from "../lib/format.js";
+import { useMembers, useNow, useProjects, useTask, useThreads } from "../lib/session.js";
+import { Citizen, displayName } from "./Avatar.js";
+import { PaneHeader, PaneNote } from "./Pane.js";
+import { ThreadCard } from "./ThreadCard.js";
+import { assigneeOf, PHASES, phaseOf, progressOf, type TaskPhase } from "./tasks.js";
+
+const PHASE_STYLE: Record<TaskPhase, string> = {
+  waiting: "bg-amber-500/15 text-amber-300",
+  working: "bg-emerald-500/15 text-emerald-300",
+  landing: "bg-sky-500/15 text-sky-300",
+  done: "bg-surface-2 text-fg-secondary",
+  abandoned: "bg-surface-2 text-fg-muted",
+};
+
+function StageItem({
+  stage,
+  index,
+  task,
+  members,
+  now,
+}: {
+  stage: Stage;
+  index: number;
+  task: Task;
+  members: readonly Member[] | undefined;
+  now: number;
+}) {
+  const phase = phaseOf(task);
+  const done = stage.completedBy !== undefined;
+  const current = stage.id === task.stage && (phase === "waiting" || phase === "working");
+  const last = index === task.stages.length - 1;
+  return (
+    <li className="relative flex gap-3 pb-4">
+      {last ? null : (
+        <span aria-hidden="true" className="absolute top-6 bottom-0 left-2.5 w-px bg-line" />
+      )}
+      <span
+        aria-hidden="true"
+        className={`relative z-10 grid size-5 shrink-0 place-items-center rounded-full text-[10px] ${
+          done
+            ? "bg-emerald-400/20 text-emerald-300"
+            : current
+              ? "bg-fg-primary text-surface-0"
+              : "bg-surface-2 text-fg-muted"
+        }`}
+      >
+        {done ? "✓" : index + 1}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm ${current ? "font-medium text-fg-primary" : "text-fg-secondary"}`}>
+          {stage.name}
+          {stage.gate ? (
+            <span className="ml-2 rounded-md bg-sky-400/10 px-1.5 py-px text-[11px] text-sky-300">
+              gate
+            </span>
+          ) : null}
+        </p>
+        <p className="mt-0.5 text-meta">
+          for {assigneeOf(stage)}
+          {stage.holders.length > 0 ? (
+            <>
+              {" · held by "}
+              {stage.holders.map((holder, position) => (
+                <span key={holder}>
+                  {position > 0 ? ", " : ""}
+                  <Citizen name={holder} members={members} />
+                </span>
+              ))}
+            </>
+          ) : null}
+          {stage.completedBy !== undefined && stage.completedAt !== undefined
+            ? ` · done by ${stage.completedBy} ${ago(stage.completedAt, now)}`
+            : current && phase === "waiting"
+              ? ` · waiting since ${ago(task.stageSince, now)}`
+              : ""}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/** One task: where it stands, its plan as a timeline, its body and notes, and its thread. */
+export function TaskView() {
+  const { taskId } = useParams({ from: "/task/$taskId" });
+  const task = useTask(taskId);
+  const threads = useThreads();
+  const projects = useProjects();
+  const members = useMembers();
+  const now = useNow(30_000);
+
+  if (task.data === undefined) {
+    return (
+      <PaneNote>
+        {task.error instanceof ApiError && task.error.status === 404
+          ? `There is no task ${taskId}.`
+          : "Reading the task…"}
+      </PaneNote>
+    );
+  }
+  const current = task.data;
+  const phase = phaseOf(current);
+  const project = projects.data?.find((candidate) => candidate.slug === current.project);
+  const thread = threads.data?.find((candidate) => candidate.id === current.id);
+  return (
+    <>
+      <PaneHeader
+        leading={
+          <Link
+            to="/p/$slug/tasks"
+            params={{ slug: current.project }}
+            aria-label={`Back to the tasks of ${project?.name ?? current.project}`}
+            className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+          >
+            ←
+          </Link>
+        }
+        title={current.title}
+        subtitle={`${project?.name ?? current.project} · ${progressOf(current)} · created by ${displayName(
+          current.createdBy,
+        )} ${ago(current.createdAt, now)}`}
+        trailing={
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PHASE_STYLE[phase]}`}
+          >
+            {PHASES.find((each) => each.phase === phase)?.label.toLowerCase()}
+          </span>
+        }
+      />
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <h3 className="text-caps">Plan</h3>
+        <ol className="mt-3">
+          {current.stages.map((stage, index) => (
+            <StageItem
+              key={stage.id}
+              stage={stage}
+              index={index}
+              task={current}
+              members={members.data}
+              now={now}
+            />
+          ))}
+        </ol>
+        <p className="text-meta">
+          When the last stage is done:{" "}
+          {current.onDone === "merge"
+            ? `task/${current.id} merges onto the default branch`
+            : "nothing more"}
+          {current.blockedBy.length > 0 ? ` · blocked by ${current.blockedBy.join(", ")}` : ""}
+        </p>
+        {current.body.trim() === "" ? null : (
+          <section className="mt-5 border-t border-line pt-4">
+            <h3 className="text-caps">Brief and notes</h3>
+            <div className="mt-2">
+              <Markdown text={current.body} />
+            </div>
+          </section>
+        )}
+        <section className="mt-5 border-t border-line pt-4">
+          <h3 className="text-caps">Thread</h3>
+          {thread === undefined ? (
+            <p className="mt-2 text-meta">No thread on this task.</p>
+          ) : (
+            <div className="-mx-4">
+              <ThreadCard thread={thread} now={now} />
+            </div>
+          )}
+        </section>
+      </div>
+    </>
+  );
+}

@@ -57,6 +57,25 @@ export function useThreads() {
   return useQuery({ queryKey: ["threads"], queryFn: api.threads, refetchInterval: 60_000 });
 }
 
+export function useTasks(slug: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["tasks", slug],
+    queryFn: () => api.tasks(slug),
+    refetchInterval: 60_000,
+  });
+}
+
+/** One task; `null` reads nothing, for callers that only sometimes have a task in view. */
+export function useTask(id: string | null) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["task", id],
+    queryFn: () => api.task(id ?? ""),
+    enabled: id !== null,
+  });
+}
+
 /** The current time, refreshed on an interval, for relative times that should not go stale. */
 export function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());

@@ -34,6 +34,23 @@ export function Avatar({
   );
 }
 
+/** A citizen's name with its CLI mark, inline in a sentence. */
+export function Citizen({
+  name,
+  members,
+}: {
+  name: string;
+  members: readonly Member[] | undefined;
+}) {
+  const cli = members?.find((member) => member.name === name)?.cli ?? null;
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      {cli === null ? null : <CliIcon cli={cli} size={12} />}
+      <span className="text-fg-secondary">{name}</span>
+    </span>
+  );
+}
+
 export function displayName(name: string): string {
   return name === USER_NAME ? "you" : name;
 }

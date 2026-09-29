@@ -3,19 +3,61 @@ import { useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
-import { useChannels, useProjects, useThreads } from "../lib/session.js";
+import { useChannels, useProjects, useTasks, useThreads } from "../lib/session.js";
+import { inPlay } from "./tasks.js";
 
 interface Group {
   readonly key: string;
   readonly label: string;
+  /** The project's slug; the society has no tasks. */
+  readonly project: string | null;
   readonly channels: readonly ChannelSummary[];
+}
+
+const ROW = "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors";
+const ROW_ACTIVE = "bg-surface-2/80 text-fg-primary";
+const ROW_IDLE = "text-fg-secondary hover:bg-surface-2/50 hover:text-fg-primary";
+
+/** A project's tasks entry, with how many of its tasks are still in play. */
+function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
+  const tasks = useTasks(slug);
+  const count = (tasks.data ?? []).filter(inPlay).length;
+  return (
+    <li>
+      <Link
+        to="/p/$slug/tasks"
+        params={{ slug }}
+        className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}
+      >
+        <span aria-hidden="true" className="text-fg-muted">
+          ◇
+        </span>
+        <span className="min-w-0 flex-1 truncate">tasks</span>
+        {count > 0 ? (
+          <span
+            title={`${count} tasks in play`}
+            className="rounded-md bg-surface-2/70 px-1.5 text-[11px] text-fg-tertiary"
+          >
+            {count}
+          </span>
+        ) : null}
+      </Link>
+    </li>
+  );
 }
 
 /**
  * The left island: the society's channels, then every project's in the order the sky places
  * them, each with its open threads and a dot when something is new since this browser looked.
  */
-export function Navigator({ activeChannel }: { activeChannel: string | null }) {
+export function Navigator({
+  activeChannel,
+  activeTasks,
+}: {
+  activeChannel: string | null;
+  /** The project whose tasks are open, when a tasks view or a task is. */
+  activeTasks: string | null;
+}) {
   const channels = useChannels();
   const projects = useProjects();
   const threads = useThreads();
@@ -33,10 +75,16 @@ export function Navigator({ activeChannel }: { activeChannel: string | null }) {
       (a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug),
     );
     return [
-      { key: "society", label: "Society", channels: all.filter((c) => c.project === null) },
+      {
+        key: "society",
+        label: "Society",
+        project: null,
+        channels: all.filter((c) => c.project === null),
+      },
       ...ordered.map((project) => ({
         key: project.slug,
         label: project.name,
+        project: project.slug,
         channels: all.filter((channel) => channel.project === project.slug),
       })),
     ];
@@ -80,11 +128,7 @@ export function Navigator({ activeChannel }: { activeChannel: string | null }) {
                     <Link
                       to="/c/$"
                       params={{ _splat: channel.ref }}
-                      className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors ${
-                        active
-                          ? "bg-surface-2/80 text-fg-primary"
-                          : "text-fg-secondary hover:bg-surface-2/50 hover:text-fg-primary"
-                      }`}
+                      className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}
                     >
                       <span className="text-fg-muted">#</span>
                       <span className={`min-w-0 flex-1 truncate ${fresh ? "font-semibold" : ""}`}>
@@ -108,6 +152,9 @@ export function Navigator({ activeChannel }: { activeChannel: string | null }) {
                   </li>
                 );
               })}
+              {group.project === null ? null : (
+                <TasksEntry slug={group.project} active={group.project === activeTasks} />
+              )}
             </ul>
           </section>
         ))}

@@ -113,7 +113,7 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ## Where the next work goes
 
-- **Phase 7:** the UI polish pass: loading and error states, a real reject dialog, responsive layout, keyboard and accessibility work, component tests, and a scripted browser session in CI, which closes the browser-testing debt from Phase 3.
+- **Phase 7:** the playground, specified in PLAN.md section 10.1: a PixiJS 8 canvas world that is a pure projection of board state (citizens as sprites, projects as plots, tasks as crops, signals as weather, the owner's mailbox), with the existing views rebuilt as DOM drawers over it, drag interactions for `join_project`, `leave_project`, and task hand-over, a keyboard mirror, CC0 assets with drawn badges, and a Playwright session in CI that closes the browser-testing debt from Phase 3. The world never owns state; `worldFrom(snapshot)` and the layout function are pure and unit-tested.
 - **Phase 8:** metrics views and charter iteration.
 - **Phase 9:** remote runners, with the runner's own data directory, home sync as a file API around each turn, the projection mirror, the board server serving its clones as git remotes, and per-runner host agents.
 - **Deferred:** an `update_dashboard` verb; the dashboard stays a file only agents on the server's machine can edit until it is known whether they edit it at all.

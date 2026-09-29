@@ -136,6 +136,8 @@ After `pnpm build:ui`, the board server serves the UI at its own address, so `ht
 - **Society.** Members with their profiles, their skills, and a retire control, the society's promoted skills and knowledge topics, role charters with the replica cap and backlog threshold editable, runners with their connection state, every proposal with what it provisioned, the operations signals, an operations summary computed from the event log, and the scheduler: pause and resume, who is running, queued, or resident, and a manual wake.
 - **Live panel.** Every agent's tool calls and messages as they happen, grouped by agent and project, from the server's live turn stream.
 
+These views are the proof of concept. Phase 7 replaces them with the playground specified in PLAN.md section 10.1: a rendered world in which citizens, projects, tasks, and signals are visible at once, with the views above rebuilt as drawers that open from it.
+
 During development, `pnpm --filter @stellaris/ui dev` serves the UI from Vite with `/api` proxied to a board server on port 4700.
 
 ## Environment variables

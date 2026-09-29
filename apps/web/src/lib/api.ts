@@ -1,6 +1,8 @@
 import {
+  BoardEventSchema,
   ChannelRefSchema,
   DecisionSchema,
+  KnowledgeSchema,
   MemberSchema,
   MessageFrontmatterSchema,
   NameSchema,
@@ -8,9 +10,11 @@ import {
   ProposalFrontmatterSchema,
   RoleCharterSchema,
   SkillSchema,
+  SOCIETY_SCOPE,
   SocietySchema,
   TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
+  TurnHistoryEntrySchema,
   UlidSchema,
 } from "@stellaris/shared";
 import { z } from "zod";
@@ -79,6 +83,10 @@ export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
 const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });
 const TaskSchema = TaskFrontmatterSchema.extend({ body: z.string() });
 const ProposalSchema = ProposalFrontmatterSchema.extend({ body: z.string() });
+const TopicSchema = KnowledgeSchema.extend({ body: z.string() });
+export type Topic = z.infer<typeof TopicSchema>;
+const BodySchema = z.object({ body: z.string() });
+const DashboardSchema = z.object({ data: z.record(z.string(), z.unknown()), body: z.string() });
 
 /** A channel ref as a path: `general`, or `lab/general` with each part encoded. */
 function channelPath(ref: string): string {
@@ -160,6 +168,27 @@ export function createApi(token: string) {
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),
     skills: () => get("/api/skills", token, SkillSchema.array()),
+    turns: (name: string, limit: number) =>
+      get(
+        `/api/agents/${encodeURIComponent(name)}/turns?limit=${limit}`,
+        token,
+        TurnHistoryEntrySchema.array(),
+      ),
+    memory: (name: string) =>
+      get(`/api/agents/${encodeURIComponent(name)}/memory`, token, BodySchema),
+    agentSkills: (name: string) =>
+      get(`/api/agents/${encodeURIComponent(name)}/skills`, token, SkillSchema.array()),
+    dashboard: (slug: string) =>
+      get(`/api/projects/${encodeURIComponent(slug)}/dashboard`, token, DashboardSchema),
+    /** A project's knowledge topics, or the society's for the society scope. */
+    knowledge: (scope: string) =>
+      get(
+        scope === SOCIETY_SCOPE
+          ? "/api/society/knowledge"
+          : `/api/projects/${encodeURIComponent(scope)}/knowledge`,
+        token,
+        TopicSchema.array(),
+      ),
     sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
       invoke("post_message", token, input, MessageSchema),
     openThread: (input: {
@@ -174,6 +203,13 @@ export function createApi(token: string) {
       invoke("approve", token, input, DecisionSchema),
     reject: (input: { proposal_id: string; reason: string }) =>
       invoke("reject", token, input, DecisionSchema),
+    /** A manual or reflection turn for a citizen in one of its scopes, queued by the scheduler. */
+    wake: (input: {
+      agent: string;
+      project: string;
+      reason?: string;
+      kind: "manual" | "reflection";
+    }) => post("/api/wake", token, input, BoardEventSchema),
     setPaused: (paused: boolean) =>
       post(paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
   };

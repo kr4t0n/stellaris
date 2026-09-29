@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
+import { TurnHistoryEntrySchema } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -265,18 +266,9 @@ describe("board server routes", () => {
       status: null,
       error: "boom",
     });
-    const turns = z
-      .array(
-        z.object({
-          outcome: z.string(),
-          trigger: z.string(),
-          costUsd: z.number(),
-          model: z.string().nullable(),
-          summary: z.string().nullable(),
-          error: z.string().nullable(),
-        }),
-      )
-      .parse(await (await app.request("/api/agents/eng-1/turns?limit=10", { headers })).json());
+    const turns = TurnHistoryEntrySchema.array().parse(
+      await (await app.request("/api/agents/eng-1/turns?limit=10", { headers })).json(),
+    );
     expect(turns).toEqual([
       expect.objectContaining({
         outcome: "completed",
@@ -284,9 +276,20 @@ describe("board server routes", () => {
         costUsd: 0.25,
         model: "claude-sonnet-5",
         summary: "shipped it",
+        toolCalls: 3,
       }),
       expect.objectContaining({ outcome: "failed", error: "boom" }),
     ]);
+    // Each finished turn is paired with the start the log recorded for its scope.
+    for (const entry of turns) {
+      expect(entry.startedAt !== undefined && entry.startedAt <= entry.ts).toBe(true);
+    }
+    expect(
+      z
+        .array(z.unknown())
+        .parse(await (await app.request("/api/agents/eng-1/skills", { headers })).json()),
+    ).toEqual([]);
+    expect((await app.request("/api/agents/nobody/skills", { headers })).status).toBe(404);
     expect(
       z
         .object({ body: z.string() })

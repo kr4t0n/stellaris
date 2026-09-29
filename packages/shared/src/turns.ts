@@ -91,3 +91,22 @@ export function turnStatusJsonSchema(): Record<string, unknown> {
   delete schema["$schema"];
   return schema;
 }
+
+/** One finished turn as the event log recorded it: an entry in a citizen's turn history. */
+export const TurnHistoryEntrySchema = z.object({
+  id: UlidSchema,
+  ts: IsoDateTimeSchema,
+  outcome: z.enum(["completed", "failed"]),
+  /** A project slug, or the society scope. */
+  project: NameSchema,
+  trigger: z.string(),
+  exitReason: z.string().nullable(),
+  costUsd: z.number(),
+  model: z.string().nullable(),
+  summary: z.string().nullable(),
+  error: z.string().nullable(),
+  /** When the log recorded the turn's start; absent when the start is missing from the log. */
+  startedAt: IsoDateTimeSchema.optional(),
+  toolCalls: z.number().int().nonnegative().optional(),
+});
+export type TurnHistoryEntry = z.infer<typeof TurnHistoryEntrySchema>;

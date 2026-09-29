@@ -26,6 +26,19 @@ describe("board events", () => {
       ["members"],
     ]);
     expect(staleKeys(event("turn.started", {}, id))).toEqual([["scheduler"], ["members"]]);
+    expect(staleKeys(event("turn.completed", { project: "lab" }, id))).toEqual([
+      ["scheduler"],
+      ["members"],
+      ["turns", "ada"],
+      ["memory", "ada"],
+      ["agent-skills", "ada"],
+    ]);
+    expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([
+      ["knowledge", "society"],
+    ]);
+    expect(staleKeys(event("knowledge.written", { topic: "x", project: "lab" }, id))).toEqual([
+      ["knowledge", "lab"],
+    ]);
     expect(staleKeys(event("proposal.decided", { proposalId: id }, id))).toEqual([
       ["proposals"],
       ["proposal", id],

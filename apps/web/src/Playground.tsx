@@ -109,6 +109,12 @@ export function Playground() {
         ? "proposals"
         : null;
   const attention = useNeedsYou().length;
+  const activeOverview =
+    pathname === "/society"
+      ? SOCIETY_SCOPE
+      : (/^\/p\/([^/]+)$/.exec(pathname)?.[1] ??
+        /^\/knowledge\/([^/]+)\//.exec(pathname)?.[1] ??
+        null);
 
   useEffect(() => {
     if (!boardOpen) {
@@ -156,6 +162,7 @@ export function Playground() {
   // Governance belongs to the society as a whole.
   const focus =
     (activeGovernance === null ? null : SOCIETY_SCOPE) ??
+    activeOverview ??
     activeTasks ??
     (activeChannel === null
       ? activeCitizen === null
@@ -187,9 +194,9 @@ export function Playground() {
   };
   const working = model.stars.filter((candidate) => candidate.state === "working");
   const openProject = (anchor: string): void => {
-    const first = projects.data?.find((project) => project.slug === anchor)?.channels[0];
-    const channel = anchor === SOCIETY_SCOPE ? "general" : `${anchor}/${first ?? "general"}`;
-    void navigate({ to: "/c/$", params: { _splat: channel } });
+    void navigate(
+      anchor === SOCIETY_SCOPE ? { to: "/society" } : { to: "/p/$slug", params: { slug: anchor } },
+    );
   };
 
   return (
@@ -234,6 +241,7 @@ export function Playground() {
             activeCitizen={activeCitizen}
             activeScope={activeScope}
             activeGovernance={activeGovernance}
+            activeOverview={activeOverview}
           />
         ) : null}
         {boardOpen ? (

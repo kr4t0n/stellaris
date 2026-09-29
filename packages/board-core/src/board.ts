@@ -77,6 +77,7 @@ import {
   WakeRequestSchema,
   type BoardEvent as BoardLogEvent,
   type SessionsFile,
+  type TurnHistoryEntry,
   type TurnRecord,
   type WakeRequestInput,
 } from "@stellaris/shared";
@@ -168,20 +169,6 @@ export interface SignalRecord {
   readonly signal: OpsSignal;
 }
 
-/** One finished turn as the event log recorded it: an entry in a citizen's turn history. */
-export interface TurnHistoryEntry {
-  readonly id: Ulid;
-  readonly ts: string;
-  readonly outcome: "completed" | "failed";
-  readonly project: Name;
-  readonly trigger: string;
-  readonly exitReason: string | null;
-  readonly costUsd: number;
-  readonly model: string | null;
-  readonly summary: string | null;
-  readonly error: string | null;
-}
-
 const TurnHistoryPayloadSchema = z.object({
   project: NameSchema,
   trigger: z.string().default("manual"),
@@ -190,7 +177,9 @@ const TurnHistoryPayloadSchema = z.object({
   model: z.string().nullable().default(null),
   summary: z.string().nullable().default(null),
   error: z.string().nullable().default(null),
+  toolCalls: z.number().int().nonnegative().optional(),
 });
+const TurnStartPayloadSchema = z.object({ project: NameSchema });
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -1227,20 +1216,31 @@ export class Board {
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     const entries: TurnHistoryEntry[] = [];
+    // A citizen runs at most one turn per scope at a time, so a turn's start is the latest one
+    // logged for its scope.
+    const starts = new Map<Name, string>();
     for (const event of events) {
-      if (
-        (event.type !== "turn.completed" && event.type !== "turn.failed") ||
-        event.actor !== agent
-      ) {
+      if (event.actor !== agent) {
+        continue;
+      }
+      if (event.type === "turn.started") {
+        const start = TurnStartPayloadSchema.safeParse(event.payload);
+        if (start.success) starts.set(start.data.project, event.ts);
+        continue;
+      }
+      if (event.type !== "turn.completed" && event.type !== "turn.failed") {
         continue;
       }
       const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
       if (parsed.success) {
+        const startedAt = starts.get(parsed.data.project);
+        starts.delete(parsed.data.project);
         entries.push({
           id: event.id,
           ts: event.ts,
           outcome: event.type === "turn.failed" ? "failed" : "completed",
           ...parsed.data,
+          ...(startedAt === undefined ? {} : { startedAt }),
         });
       }
     }

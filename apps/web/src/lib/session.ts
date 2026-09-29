@@ -92,6 +92,47 @@ export function useSkills() {
   return useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 60_000 });
 }
 
+/** A citizen's finished turns, oldest first, from the event log. */
+export function useTurnHistory(name: string, limit: number) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["turns", name, limit],
+    queryFn: () => api.turns(name, limit),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useMemoryCore(name: string) {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["memory", name], queryFn: () => api.memory(name) });
+}
+
+/** A citizen's own skills, from its home. */
+export function useAgentSkills(name: string) {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["agent-skills", name], queryFn: () => api.agentSkills(name) });
+}
+
+/** Agents edit the dashboard file directly and no event says so, so it polls. */
+export function useDashboard(slug: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["dashboard", slug],
+    queryFn: () => api.dashboard(slug),
+    refetchInterval: 60_000,
+  });
+}
+
+/** Knowledge topics of a project, or of the society for the society scope. */
+export function useKnowledge(scope: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["knowledge", scope],
+    queryFn: () => api.knowledge(scope),
+    refetchInterval: 120_000,
+  });
+}
+
 /** The current time, refreshed on an interval, for relative times that should not go stale. */
 export function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());

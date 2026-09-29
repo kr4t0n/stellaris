@@ -21,6 +21,13 @@ interface Group {
 }
 
 const ROW = "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors";
+
+/** A group's heading, which opens the society's or the project's overview. */
+function heading(active: boolean): string {
+  return `block truncate rounded-md px-2 text-[11px] font-semibold tracking-wider uppercase transition-colors ${
+    active ? "text-fg-primary" : "text-fg-muted hover:text-fg-primary"
+  }`;
+}
 const ROW_ACTIVE = "bg-surface-2/80 text-fg-primary";
 const ROW_IDLE = "text-fg-secondary hover:bg-surface-2/50 hover:text-fg-primary";
 
@@ -111,6 +118,7 @@ export function Navigator({
   activeCitizen,
   activeScope,
   activeGovernance,
+  activeOverview,
 }: {
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
@@ -119,6 +127,8 @@ export function Navigator({
   activeCitizen: string | null;
   activeScope: string | null;
   activeGovernance: GovernanceView | null;
+  /** The project slug, or the society scope, whose overview or knowledge is open. */
+  activeOverview: string | null;
 }) {
   const channels = useChannels();
   const projects = useProjects();
@@ -179,8 +189,20 @@ export function Navigator({
         <Governance active={activeGovernance} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
-            <h3 className="truncate px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">
-              {group.label}
+            <h3 className="pb-1">
+              {group.project === null ? (
+                <Link to="/society" className={heading(activeOverview === group.key)}>
+                  {group.label}
+                </Link>
+              ) : (
+                <Link
+                  to="/p/$slug"
+                  params={{ slug: group.project }}
+                  className={heading(activeOverview === group.key)}
+                >
+                  {group.label}
+                </Link>
+              )}
             </h3>
             <ul>
               {group.channels.map((channel) => {

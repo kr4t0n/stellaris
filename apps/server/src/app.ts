@@ -94,13 +94,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
-  // A member's finished turns from the event log, and its memory core, read only.
+  // A member's finished turns from the event log, its memory core, and its own skills, read only.
   api.get("/agents/:name/turns", async (c) =>
     c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
   );
   api.get("/agents/:name/memory", async (c) => {
     await board.readAgent(c.req.param("name"));
     return c.json({ body: await board.readMemoryCore(c.req.param("name")) });
+  });
+  api.get("/agents/:name/skills", async (c) => {
+    await board.readAgent(c.req.param("name"));
+    return c.json(await board.listAgentSkills(c.req.param("name")));
   });
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));

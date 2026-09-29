@@ -14,7 +14,6 @@ export type {
   RunnerPatch,
   SearchHit,
   SignalRecord,
-  TurnHistoryEntry,
   TaskLocation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";

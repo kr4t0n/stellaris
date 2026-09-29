@@ -1,4 +1,4 @@
-import { BoardEventSchema, type BoardEvent } from "@stellaris/shared";
+import { BoardEventSchema, SOCIETY_SCOPE, type BoardEvent } from "@stellaris/shared";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { followStream } from "./sse.js";
 
@@ -33,7 +33,7 @@ function text(value: unknown): string | undefined {
 
 /** The cached reads an event makes stale, by query-key prefix. */
 export function staleKeys(event: BoardEvent): QueryKey[] {
-  const { type, payload } = event;
+  const { type, payload, actor } = event;
   if (type === "message.posted") {
     const thread = text(payload["thread"]);
     return thread === undefined
@@ -46,8 +46,21 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type.startsWith("task.") || type.startsWith("merge.") || type === "lease.expired") {
     return [["tasks"], ["task", text(payload["taskId"])], ["members"]];
   }
+  if (type === "turn.completed" || type === "turn.failed") {
+    // A turn may have rewritten the citizen's memory and skills as well as its history.
+    return [
+      ["scheduler"],
+      ["members"],
+      ["turns", actor],
+      ["memory", actor],
+      ["agent-skills", actor],
+    ];
+  }
   if (type.startsWith("turn.") || type === "wake.requested" || type === "paused.changed") {
     return [["scheduler"], ["members"]];
+  }
+  if (type === "knowledge.written") {
+    return [["knowledge", text(payload["project"]) ?? SOCIETY_SCOPE]];
   }
   if (type.startsWith("agent.") || type === "subscription.changed") {
     return [["members"]];

@@ -5,7 +5,7 @@ export const SKILL_PROPOSAL = "01M3PY56V68VFS0EG5ER4B9AMD";
 
 const CREATED = "2026-09-29T09:00:00.000Z";
 
-function member(name: string, charter: string) {
+function member(name: string, charter: string, memberships: string[] = []) {
   return {
     name,
     role: charter,
@@ -14,7 +14,7 @@ function member(name: string, charter: string) {
     status: "active",
     resident: false,
     skills: [],
-    memberships: [],
+    memberships,
     subscriptions: [],
     claimsHeld: 0,
     tasksDone: 0,
@@ -73,7 +73,7 @@ const PROJECT = {
   repo: null,
   defaultBranch: "main",
   channels: ["general"],
-  members: [],
+  members: ["desk"],
   approvers: [],
   requiredCapabilities: [],
   createdAt: CREATED,
@@ -110,6 +110,30 @@ const TASK = {
   onDone: "none",
   completing: false,
   body: "",
+};
+
+/** desk's one finished turn, as the event log pairs its start and end. */
+const DESK_TURN = {
+  id: "01M3Q2DDDDDDDDDDDDDDDDDDD1",
+  ts: "2026-09-29T09:03:00.000Z",
+  outcome: "completed",
+  project: "lab",
+  trigger: "user_post",
+  exitReason: "completed",
+  costUsd: 0.25,
+  model: "claude-opus-5-5",
+  summary: "Routed the survey request to ada and filed the task.",
+  error: null,
+  startedAt: "2026-09-29T09:00:00.000Z",
+  toolCalls: 4,
+};
+
+const LAB_TOPIC = {
+  topic: "experiments",
+  project: "lab",
+  updatedBy: "ada",
+  updatedAt: CREATED,
+  body: "Every run fixes its seed at 42.\n\nThe harness lives in `bench/`.",
 };
 
 /** A turn that reported it needs the user, as the runner posts it. */
@@ -201,6 +225,14 @@ export async function fakeBoard(
           return decide(route, "approved", body);
         case "/api/verbs/reject":
           return decide(route, "rejected", body);
+        case "/api/wake":
+          return json(route, {
+            id: "01M3Q2EEEEEEEEEEEEEEEEEEE1",
+            ts: CREATED,
+            type: "wake.requested",
+            actor: "user",
+            payload: body,
+          });
         case "/api/pause":
         case "/api/resume":
           paused = pathname === "/api/pause";
@@ -224,7 +256,26 @@ export async function fakeBoard(
           channels: ["general", "governance", "decisions"],
         });
       case "/api/members":
-        return json(route, [member("desk", "concierge"), member("stew", "steward")]);
+        return json(route, [member("desk", "concierge", ["lab"]), member("stew", "steward")]);
+      case "/api/agents/desk/turns":
+        return json(route, [DESK_TURN]);
+      case "/api/agents/desk/memory":
+        return json(route, { body: "# Core memory\n\n- The user writes names plainly." });
+      case "/api/agents/desk/skills":
+        return json(route, [
+          {
+            name: "routing",
+            summary: "Send a post to who can act on it.",
+            scope: "own",
+            path: "/x",
+          },
+        ]);
+      case "/api/projects/lab/dashboard":
+        return json(route, { data: {}, body: "# Lab dashboard\n\nThroughput is steady." });
+      case "/api/projects/lab/knowledge":
+        return json(route, [LAB_TOPIC]);
+      case "/api/society/knowledge":
+        return json(route, []);
       case "/api/roles":
         return json(route, [role("concierge", ["user_post"]), role("steward", ["ops_event"])]);
       case "/api/projects":

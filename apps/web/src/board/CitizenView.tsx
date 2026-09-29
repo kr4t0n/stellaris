@@ -1,5 +1,7 @@
 import { currentStage, SOCIETY_SCOPE, type TurnExitReason } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { useState } from "react";
+import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
 import { pairsOf } from "../lib/api.js";
@@ -12,9 +14,13 @@ import {
   type LiveTurn,
   type Step,
 } from "../lib/live.js";
-import { useMembers, useNow, useScheduler, useTasks } from "../lib/session.js";
+import { useMembers, useNow, useRoles, useScheduler, useTasks } from "../lib/session.js";
+import { CitizenMemory } from "./CitizenMemory.js";
+import { CitizenTurns } from "./CitizenTurns.js";
+import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { useStickyScroll } from "./useStickyScroll.js";
+import { WakeForm } from "./WakeForm.js";
 
 type State = "working" | "queued" | "idle";
 
@@ -39,10 +45,6 @@ function time(iso: string): string {
     second: "2-digit",
     hour12: false,
   });
-}
-
-function scopeName(scope: string): string {
-  return scope === SOCIETY_SCOPE ? "the society" : scope;
 }
 
 /** The tasks a citizen holds a stage of in a project, as links. */
@@ -151,19 +153,33 @@ function TurnFooter({ turn, running, now }: { turn: LiveTurn; running: boolean; 
   );
 }
 
-/** A citizen and what it is doing: its live turn as it happens, or the last one it took. */
+/** A citizen: what it is doing now, the turns it took, and what it remembers. */
 export function CitizenView() {
   const { name } = useParams({ from: "/citizen/$name" });
-  const { scope } = useSearch({ from: "/citizen/$name" });
-  return <CitizenLive key={name} name={name} chosen={scope ?? null} />;
+  const { scope, tab } = useSearch({ from: "/citizen/$name" });
+  return <CitizenPage key={name} name={name} chosen={scope ?? null} tab={tab ?? "now"} />;
 }
 
-function CitizenLive({ name, chosen }: { name: string; chosen: string | null }) {
+const TABS: ReadonlyArray<{ readonly tab: CitizenTab; readonly label: string }> = [
+  { tab: "now", label: "Now" },
+  { tab: "turns", label: "Turns" },
+  { tab: "memory", label: "Memory" },
+];
+
+function CitizenPage({
+  name,
+  chosen,
+  tab,
+}: {
+  name: string;
+  chosen: string | null;
+  tab: CitizenTab;
+}) {
   const members = useMembers();
+  const roles = useRoles();
   const scheduler = useScheduler();
   const live = useLiveTurns();
-  const now = useNow(5_000);
-  const { ref, onScroll } = useStickyScroll();
+  const [waking, setWaking] = useState(false);
 
   const member = members.data?.find((candidate) => candidate.name === name);
   if (member === undefined) {
@@ -179,18 +195,11 @@ function CitizenLive({ name, chosen }: { name: string; chosen: string | null }) 
   const queued = pairsOf(scheduler.data?.pending ?? []).find((pair) => pair.agent === name);
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
-  const turns = turnsOf(live, name);
-  const isRunning = (candidate: LiveTurn): boolean =>
-    candidate.end === null && runningScopes.includes(candidate.scope);
-  // The turn shown: the one chosen, else the running one that started first, else the latest.
-  // Not the most active one, or two busy turns would take the view back and forth.
-  const turn =
-    turns.find((candidate) => candidate.scope === chosen) ??
-    turns.filter(isRunning).toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0] ??
-    turns[0];
-  const turnRunning = turn !== undefined && isRunning(turn);
-  const scope = turn?.scope ?? runningScopes[0] ?? queued?.scope ?? null;
-  const model = turn?.model ?? member.lastModel ?? member.model ?? "CLI default";
+  const latest = turnsOf(live, name)[0];
+  const model = latest?.model ?? member.lastModel ?? member.model ?? "CLI default";
+  const charter = roles.data?.find((role) => role.name === member.role);
+  const scopes = wakeScopes(member, charter);
+  const wakeable = member.status === "active" && member.cli !== null && scopes.length > 0;
 
   return (
     <>
@@ -206,27 +215,114 @@ function CitizenLive({ name, chosen }: { name: string; chosen: string | null }) 
         subtitle={
           <>
             {member.role} · <span className="font-mono">{model}</span>
+            {member.status === "retired" ? " · retired" : ""}
           </>
         }
         trailing={
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATE_STYLE[state]}`}
-          >
-            {state}
-          </span>
+          <>
+            {wakeable && !waking ? <Button onClick={() => setWaking(true)}>Wake…</Button> : null}
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATE_STYLE[state]}`}
+            >
+              {state}
+            </span>
+          </>
         }
       />
+      {waking ? (
+        <WakeForm
+          member={member}
+          scopes={scopes}
+          preferred={chosen ?? latest?.scope ?? null}
+          running={runningScopes}
+          paused={scheduler.data?.paused ?? false}
+          onDone={() => setWaking(false)}
+        />
+      ) : null}
+      <nav aria-label="Citizen views" className="flex gap-1 border-b border-line px-3 py-2">
+        {TABS.map((each) => (
+          <Link
+            key={each.tab}
+            to="/citizen/$name"
+            params={{ name }}
+            search={{
+              ...(chosen === null ? {} : { scope: chosen }),
+              ...(each.tab === "now" ? {} : { tab: each.tab }),
+            }}
+            replace
+            aria-current={each.tab === tab ? "page" : undefined}
+            className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+              each.tab === tab
+                ? "bg-surface-2 text-fg-primary"
+                : "text-fg-tertiary hover:bg-surface-2/60 hover:text-fg-primary"
+            }`}
+          >
+            {each.label}
+          </Link>
+        ))}
+      </nav>
+      {tab === "turns" ? (
+        <CitizenTurns name={name} cli={member.cli} />
+      ) : tab === "memory" ? (
+        <CitizenMemory member={member} charter={charter} />
+      ) : (
+        <NowTab
+          name={name}
+          chosen={chosen}
+          lastTurnAt={member.lastTurnAt}
+          state={state}
+          runningScopes={runningScopes}
+          queuedScope={queued?.scope ?? null}
+        />
+      )}
+    </>
+  );
+}
+
+/** What the citizen is doing: its live turn as it happens, or the last one it took. */
+function NowTab({
+  name,
+  chosen,
+  lastTurnAt,
+  state,
+  runningScopes,
+  queuedScope,
+}: {
+  name: string;
+  chosen: string | null;
+  lastTurnAt: string | undefined;
+  state: State;
+  runningScopes: readonly string[];
+  queuedScope: string | null;
+}) {
+  const live = useLiveTurns();
+  const now = useNow(5_000);
+  const { ref, onScroll } = useStickyScroll();
+  const turns = turnsOf(live, name);
+  const isRunning = (candidate: LiveTurn): boolean =>
+    candidate.end === null && runningScopes.includes(candidate.scope);
+  // The turn shown: the one chosen, else the running one that started first, else the latest.
+  // Not the most active one, or two busy turns would take the view back and forth.
+  const turn =
+    turns.find((candidate) => candidate.scope === chosen) ??
+    turns.filter(isRunning).toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0] ??
+    turns[0];
+  const turnRunning = turn !== undefined && isRunning(turn);
+  const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
+
+  return (
+    <>
       <section className="border-b border-line px-4 py-3 text-xs text-fg-tertiary">
         <p>
           {turnRunning
             ? `In a turn at ${scopeName(turn.scope)} for ${turn.fromStart ? "" : "at least "}${elapsed(turn.startedAt, now)}`
             : runningScopes.length > 0
               ? `In a turn at ${runningScopes.map(scopeName).join(" and ")}`
-              : queued !== undefined
-                ? `Queued for a turn at ${scopeName(queued.scope)}`
-                : member.lastTurnAt === undefined
+              : queuedScope !== null
+                ? `Queued for a turn at ${scopeName(queuedScope)}`
+                : lastTurnAt === undefined
                   ? "No turns yet"
-                  : `Last turn ${ago(member.lastTurnAt, now)}`}
+                  : `Last turn ${ago(lastTurnAt, now)}`}
         </p>
         {scope === null || scope === SOCIETY_SCOPE ? null : (
           <HeldTasks project={scope} name={name} />
@@ -237,7 +333,7 @@ function CitizenLive({ name, chosen }: { name: string; chosen: string | null }) 
           <PaneNote>
             {state === "working"
               ? "The turn has not reported a step yet."
-              : `No turn of ${name}'s since the board server started. The live picture is kept in the server's memory.`}
+              : `No turn of ${name}'s since the board server started. The live picture is kept in the server's memory; Turns lists every finished one.`}
           </PaneNote>
         ) : (
           <>

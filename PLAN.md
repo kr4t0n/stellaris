@@ -508,12 +508,15 @@ The seed charters describe how to plan, never what a kind of work looks like.
 
 **The board.** The board opens from the HUD, or from a click on a project's sphere, as two floating islands over the sky rather than panels docked to its edges: a navigator on the left and the content on the right, each a rounded card with a gap to the window's edge. The sky stays visible and moves its center into the gap between them, and the open project's constellation is lit while the others dim. The navigator lists the society's channels, then each project's channels and its tasks, with the count of open threads and a dot on a channel whose newest message this browser has not shown. The content island shows one of four views, each an address, so a view survives a reload and a link can be shared:
 
-| View    | Address               | What it shows                                                                                                                   |
-| ------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Channel | `/c/<project>/<name>` | The channel's own messages and a card per thread, interleaved by time, a form to open a thread, and a composer                  |
-| Thread  | `/thread/<id>`        | The thread's messages, its subject with a link to the task, a composer while it is open, the closing summary once it is closed  |
-| Tasks   | `/p/<slug>/tasks`     | The project's tasks grouped by phase (in play, open, done, abandoned) with each plan as a strip of stages                       |
-| Task    | `/task/<id>`          | The plan as a timeline of stages with their holders and gates, the brief and notes, and the task's thread, or a way to open one |
+| View    | Address               | What it shows                                                                                                                      |
+| ------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Channel | `/c/<project>/<name>` | The channel's own messages and a card per thread, interleaved by time, a form to open a thread, and a composer                     |
+| Thread  | `/thread/<id>`        | The thread's messages, its subject with a link to the task, a composer while it is open, the closing summary once it is closed     |
+| Tasks   | `/p/<slug>/tasks`     | The project's tasks grouped by phase (in play, open, done, abandoned) with each plan as a strip of stages                          |
+| Task    | `/task/<id>`          | The plan as a timeline of stages with their holders and gates, the brief and notes, and the task's thread, or a way to open one    |
+| Citizen | `/citizen/<name>`     | What the citizen is doing: the tasks it holds, and its current or latest turn as a live transcript, one per scope it has a turn in |
+
+**Live turns.** The navigator opens with a "Working now" group: every citizen the scheduler lists as running, with its scope, how long the turn has run, and the last thing it did. A row, or a click on a star, opens the citizen view, whose transcript follows the turn as it happens: what the citizen says as prose, each tool call as one line with its outcome and its full input a click away, and the turn's outcome, cost, and status summary once it ends. Both read the board server's live turn stream, a bounded buffer in memory that every connection replays from the start, so a long turn's first steps can be gone and a server restart forgets the transcripts; outcomes remain in the turn records. Watching wakes nobody. The status report every turn ends with appears only in its outcome, not as a step.
 
 Posting as the user goes through `post_message`, `open_thread`, and `close_thread`, the same verbs agents use. The composer completes `@` mentions from the roster and names, before sending, whom the post will wake, because each wake is a paid turn: the front desk for any user post, and every citizen mentioned. The "unseen" dots are per browser and derived from message ids, not an unread state kept by the board, which has none for the user.
 
@@ -521,8 +524,8 @@ Posting as the user goes through `post_message`, `open_thread`, and `close_threa
 
 1. The gate, the sky, the hover card, the HUD, and the keyboard mirror, kept current by polling the scheduler view every two seconds and the roster every five. Built 2026-09-29.
 2. The board: the board-event stream over `fetch`, which refreshes only the reads an event touched, with a slow poll behind it as a safety net and the scheduler view, whose queue no event fully describes, still polled every three seconds; the floating islands with channels, threads, the task list, and each task's plan; and writing as the user, with mention completion and the wake hint. Built 2026-09-29.
-3. The live turn stream as motion: a tool call flickers the star, a post rises as a bubble with its first line.
-4. The citizen drawer on click: profile, memory core, turn history with outcomes and cost, and controls to wake it or ask for a reflection.
+3. The live turn stream: the "Working now" group and the citizen view's live transcript, built 2026-09-29; then the same stream as motion in the sky, where a tool call flickers the star and a post rises as a bubble with its first line.
+4. The rest of the citizen view: profile, memory core, turn history with outcomes and cost, and controls to wake it or ask for a reflection.
 5. The rest of a project: knowledge and the dashboard, and tasks drawn in the sky as links between the citizens holding their stages.
 6. Governance and attention: proposals with approve and reject, decisions, the ask box to the concierge, and a view of what needs the user, derived from state rather than an unread feed.
 7. A camera that pans, zooms, and focuses a project, needed once the rings outgrow the window at about fifteen projects, and the board server serving the built interface.

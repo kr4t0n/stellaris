@@ -48,6 +48,14 @@ const SchedulerViewSchema = z.object({
 });
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
+/** The scheduler's `agent/scope` pairs, split. */
+export function pairsOf(list: readonly string[]): Array<{ agent: string; scope: string }> {
+  return list.flatMap((pair) => {
+    const [agent, scope] = pair.split("/");
+    return agent === undefined || scope === undefined ? [] : [{ agent, scope }];
+  });
+}
+
 const MessageSchema = MessageFrontmatterSchema.extend({ body: z.string() });
 const MessagesSchema = MessageSchema.array();
 const ChannelSummarySchema = z.object({

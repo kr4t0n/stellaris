@@ -5,11 +5,12 @@ import {
   RoleCharterSchema,
   VerbNameSchema,
   WakeRequestSchema,
+  type LiveTurnEvent,
 } from "@stellaris/shared";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
-import type { LiveTurnEvent, TurnHub } from "./turn-hub.js";
+import type { TurnHub } from "./turn-hub.js";
 
 /** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
 export interface SchedulerView {

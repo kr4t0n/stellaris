@@ -8,6 +8,7 @@ import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
 import { ApiError } from "./lib/api.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
+import { LiveContext, LiveStore } from "./lib/live.js";
 import {
   useMembers,
   useNow,
@@ -44,7 +45,8 @@ function after(pathname: string, prefix: string): string | null {
 /**
  * The signed-in view and the root of every route: the sky of citizens, and when a board route is
  * open, the navigator island on the left and the content island on the right, the sky fitting
- * between them. The board's event stream keeps every read current.
+ * between them. The board's event stream keeps every read current, and the turn stream keeps the
+ * live picture of what citizens are doing.
  */
 export function Playground() {
   const { token, signOut } = useSession();
@@ -57,6 +59,8 @@ export function Playground() {
       }),
     [token, client],
   );
+  const [live] = useState(() => new LiveStore());
+  useEffect(() => live.follow(token), [live, token]);
   const society = useSociety();
   const members = useMembers();
   const projects = useProjects();
@@ -89,13 +93,7 @@ export function Playground() {
       : (threads.data?.find((thread) => thread.id === threadId)?.channel ?? null));
   const tasksPath = /^\/p\/([^/]+)\/tasks$/.exec(pathname)?.[1];
   const activeTasks = tasksPath ?? task.data?.project ?? null;
-  const focus =
-    activeTasks ??
-    (activeChannel === null
-      ? null
-      : activeChannel.includes("/")
-        ? (activeChannel.split("/")[0] ?? null)
-        : SOCIETY_SCOPE);
+  const activeCitizen = after(pathname, "/citizen/");
 
   useEffect(() => {
     if (!boardOpen) {
@@ -140,6 +138,15 @@ export function Playground() {
     );
   }
 
+  const focus =
+    activeTasks ??
+    (activeChannel === null
+      ? activeCitizen === null
+        ? null
+        : (model.stars.find((candidate) => candidate.name === activeCitizen)?.anchor ?? null)
+      : activeChannel.includes("/")
+        ? (activeChannel.split("/")[0] ?? null)
+        : SOCIETY_SCOPE);
   const star = model.stars.find((candidate) => candidate.name === hovered);
   const member = members.data?.find((candidate) => candidate.name === hovered);
   const place =
@@ -147,6 +154,8 @@ export function Playground() {
       ? "the society"
       : (projects.data?.find((project) => project.slug === star.anchor)?.name ?? star.anchor);
   const purpose = roles.data?.find((role) => role.name === member?.role)?.purpose;
+  const openCitizen = (name: string): void =>
+    void navigate({ to: "/citizen/$name", params: { name } });
   const openProject = (anchor: string): void => {
     const first = projects.data?.find((project) => project.slug === anchor)?.channels[0];
     const channel = anchor === SOCIETY_SCOPE ? "general" : `${anchor}/${first ?? "general"}`;
@@ -154,63 +163,73 @@ export function Playground() {
   };
 
   return (
-    <main className="relative h-full overflow-hidden">
-      <Sky
-        model={model}
-        paused={scheduler.data?.paused ?? false}
-        hovered={hovered}
-        onHover={setHovered}
-        insets={insets}
-        focus={focus}
-        onSelectAnchor={openProject}
-        card={
-          star === undefined || member === undefined ? null : (
-            <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
-          )
-        }
-      />
-      <Hud
-        society={society.data?.name}
-        citizens={model.stars.length}
-        working={model.stars.filter((candidate) => candidate.state === "working").length}
-        queued={model.stars.filter((candidate) => candidate.state === "queued").length}
-        paused={scheduler.data?.paused ?? false}
-        boardOpen={boardOpen}
-        onToggleBoard={() =>
-          void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
-        }
-        onSignOut={signOut}
-      />
-      {boardOpen ? <Navigator activeChannel={activeChannel} activeTasks={activeTasks} /> : null}
-      {boardOpen ? (
-        <Island
-          label="Board content"
-          className="top-[72px] right-4 bottom-4"
-          style={{ width: contentWidth }}
-        >
-          <Outlet />
-        </Island>
-      ) : null}
-      {model.stars.length === 0 && !boardOpen ? (
-        <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
-          No citizens yet. Ask the concierge for one, or add one with{" "}
-          <code className="font-mono text-fg-secondary">stellaris agent add</code>.
-        </p>
-      ) : null}
-      {/* The sky for keyboards and screen readers: focusing a citizen shows the same card. */}
-      <ul className="sr-only" aria-label="Citizens">
-        {model.stars.map((candidate) => (
-          <li key={candidate.name}>
-            <button
-              type="button"
-              onFocus={() => setHovered(candidate.name)}
-              onBlur={() => setHovered(null)}
-            >
-              {candidate.name}, {candidate.state}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </main>
+    <LiveContext value={live}>
+      <main className="relative h-full overflow-hidden">
+        <Sky
+          model={model}
+          paused={scheduler.data?.paused ?? false}
+          hovered={hovered}
+          onHover={setHovered}
+          insets={insets}
+          focus={focus}
+          onSelectAnchor={openProject}
+          onSelectStar={openCitizen}
+          card={
+            star === undefined || member === undefined ? null : (
+              <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
+            )
+          }
+        />
+        <Hud
+          society={society.data?.name}
+          citizens={model.stars.length}
+          working={model.stars.filter((candidate) => candidate.state === "working").length}
+          queued={model.stars.filter((candidate) => candidate.state === "queued").length}
+          paused={scheduler.data?.paused ?? false}
+          boardOpen={boardOpen}
+          onToggleBoard={() =>
+            void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
+          }
+          onSignOut={signOut}
+        />
+        {boardOpen ? (
+          <Navigator
+            activeChannel={activeChannel}
+            activeTasks={activeTasks}
+            activeCitizen={activeCitizen}
+          />
+        ) : null}
+        {boardOpen ? (
+          <Island
+            label="Board content"
+            className="top-[72px] right-4 bottom-4"
+            style={{ width: contentWidth }}
+          >
+            <Outlet />
+          </Island>
+        ) : null}
+        {model.stars.length === 0 && !boardOpen ? (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
+            No citizens yet. Ask the concierge for one, or add one with{" "}
+            <code className="font-mono text-fg-secondary">stellaris agent add</code>.
+          </p>
+        ) : null}
+        {/* The sky for keyboards and screen readers: focusing a citizen shows its card, choosing it opens it. */}
+        <ul className="sr-only" aria-label="Citizens">
+          {model.stars.map((candidate) => (
+            <li key={candidate.name}>
+              <button
+                type="button"
+                onFocus={() => setHovered(candidate.name)}
+                onBlur={() => setHovered(null)}
+                onClick={() => openCitizen(candidate.name)}
+              >
+                {candidate.name}, {candidate.state}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </main>
+    </LiveContext>
   );
 }

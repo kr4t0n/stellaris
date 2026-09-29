@@ -5,6 +5,7 @@ import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useTasks, useThreads } from "../lib/session.js";
 import { inPlay } from "./tasks.js";
+import { WorkingNow } from "./WorkingNow.js";
 
 interface Group {
   readonly key: string;
@@ -47,16 +48,20 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
 }
 
 /**
- * The left island: the society's channels, then every project's in the order the sky places
- * them, each with its open threads and a dot when something is new since this browser looked.
+ * The left island: who is working now, then the society's channels and every project's in the
+ * order the sky places them, each with its open threads and a dot when something is new since
+ * this browser looked.
  */
 export function Navigator({
   activeChannel,
   activeTasks,
+  activeCitizen,
 }: {
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
+  /** The citizen whose view is open. */
+  activeCitizen: string | null;
 }) {
   const channels = useChannels();
   const projects = useProjects();
@@ -113,6 +118,7 @@ export function Navigator({
         </Link>
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
+        <WorkingNow activeCitizen={activeCitizen} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="truncate px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">

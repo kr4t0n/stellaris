@@ -1,13 +1,4 @@
-import type { AgentEvent, Name } from "@stellaris/shared";
-
-/** One agent event as streamed to clients: which agent and project produced it, in a global sequence. */
-export interface LiveTurnEvent {
-  readonly seq: number;
-  readonly ts: string;
-  readonly agent: Name;
-  readonly project: Name;
-  readonly event: AgentEvent;
-}
+import type { AgentEvent, LiveTurnEvent, Name } from "@stellaris/shared";
 
 /**
  * In-memory fan-out of live turn events. The runner pushes what its adapters emit; the SSE

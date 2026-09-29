@@ -105,3 +105,16 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("error"), message: z.string() }),
 ]);
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+/**
+ * One agent event as the board server streams it live: which agent produced it, in which scope
+ * (a project slug or `society`), numbered in a sequence that restarts with the server.
+ */
+export const LiveTurnEventSchema = z.object({
+  seq: z.number().int().positive(),
+  ts: IsoDateTimeSchema,
+  agent: NameSchema,
+  project: NameSchema,
+  event: AgentEventSchema,
+});
+export type LiveTurnEvent = z.infer<typeof LiveTurnEventSchema>;

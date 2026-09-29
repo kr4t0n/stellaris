@@ -17,6 +17,7 @@ interface SkyProps {
   /** The anchor whose sphere is drawn brighter, the project the board has open. */
   readonly focus: string | null;
   readonly onSelectAnchor: (anchor: string) => void;
+  readonly onSelectStar: (name: string) => void;
   /** Shown beside the hovered star and moved with it every frame. */
   readonly card: ReactNode;
 }
@@ -58,6 +59,7 @@ export function Sky({
   insets,
   focus,
   onSelectAnchor,
+  onSelectStar,
   card,
 }: SkyProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -129,11 +131,15 @@ export function Sky({
         onClick={(event) => {
           const scene = sceneRef.current;
           const { offsetX, offsetY } = event.nativeEvent;
-          if (scene !== null && scene.hitTest(offsetX, offsetY) === null) {
-            const sphere = scene.hitTestAnchor(offsetX, offsetY);
-            if (sphere !== null) {
-              onSelectAnchor(sphere);
-            }
+          if (scene === null) {
+            return;
+          }
+          const name = scene.hitTest(offsetX, offsetY);
+          const sphere = name === null ? scene.hitTestAnchor(offsetX, offsetY) : null;
+          if (name !== null) {
+            onSelectStar(name);
+          } else if (sphere !== null) {
+            onSelectAnchor(sphere);
           }
         }}
       />

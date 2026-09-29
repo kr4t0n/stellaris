@@ -165,6 +165,28 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
 ]);
 
 const HEARTBEAT_TRIGGER = "heartbeat";
+
+/**
+ * The unread messages a heartbeat in `scope` answers for: those of its own scope and, in the
+ * society scope, those of scopes the member takes no heartbeat in, so a society-scope role still
+ * hears a project thread it joined. A project member without the society scope is not woken by
+ * society channels; mentions wake it directly, and its next turn's digest carries the rest.
+ */
+export function unreadFor(
+  unread: ReadonlyMap<string, number>,
+  scope: string,
+  scopes: readonly string[],
+): number {
+  let count = unread.get(scope) ?? 0;
+  if (scope === SOCIETY_SCOPE) {
+    for (const [other, n] of unread) {
+      if (!scopes.includes(other)) {
+        count += n;
+      }
+    }
+  }
+  return count;
+}
 const OPS_TRIGGER = "ops_event";
 const USER_POST_TRIGGER = "user_post";
 
@@ -763,6 +785,10 @@ export class Scheduler {
     }
   }
 
+  /**
+   * A heartbeat per member and scope, each answering only for its own scope: unread messages in
+   * its channels and threads, stages the member holds there, and stages waiting there for it.
+   */
   private async checkHeartbeats(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
       if (agent.status !== "active" || agent.cli === null) {
@@ -778,6 +804,9 @@ export class Scheduler {
           : charter.societyScope
             ? [SOCIETY_SCOPE]
             : [];
+      const actor = { name: agent.name, role: agent.role };
+      let unread: ReadonlyMap<string, number> | undefined;
+      let held: readonly Task[] | undefined;
       for (const project of scopes) {
         const key = `${agent.name}/${project}`;
         const last = this.state.lastHeartbeat[key];
@@ -792,11 +821,8 @@ export class Scheduler {
         if (this.pending.has(key) || this.running.has(key)) {
           continue;
         }
-        const digest = await this.board.readDigest(
-          { name: agent.name, role: agent.role },
-          { advance: false, limit: 1 },
-        );
-        const held = await this.board.heldClaims(agent.name);
+        unread ??= await this.board.unreadByScope(actor);
+        held ??= await this.board.heldClaims(agent.name);
         const waiting =
           project === SOCIETY_SCOPE
             ? []
@@ -808,8 +834,8 @@ export class Scheduler {
         const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
         const decision = decideWake({
           trigger,
-          digestSize: digest.messages.length,
-          claimsHeld: held.length,
+          digestSize: unreadFor(unread, project, scopes),
+          claimsHeld: held.filter((task) => task.project === project).length,
           waitingStages: waiting.length,
           paused: false,
         });

@@ -322,7 +322,7 @@ Silence on the board is allowed. An agent that read its digest and had nothing t
 - **User posts wake the concierge.** Any post by the user, mentioned or not, wakes the roles charted for `user_post` at user priority with no debounce. It is the only trigger that fires on a post without a mention, and it exists so the user never has to know whom to address.
 - **Subscriptions never wake anyone.** They accumulate into the digest delivered at the next wake or heartbeat. Subscribing means "keep me informed."
 - **Heartbeat.** Each agent charted for it receives a periodic wake so the society never stalls waiting for a post; it fires when the agent has something unread, holds a stage, or has a stage waiting that names it or its role.
-- **Empty digests never wake.** A heartbeat skips an agent with nothing to read and no claims held. User mentions, reflection turns, and onboarding turns are the exceptions.
+- **Empty digests never wake.** A heartbeat skips an agent with nothing to read and no claims held. It runs per project and asks only about that project: its unread messages, the stages held there, and the stages waiting there, so a claim in one project never wakes the agent in another. User mentions, reflection turns, and onboarding turns are the exceptions.
 - **Waiting stages.** A current stage without a holder past an age threshold is posted to the ops channel once while it waits. It wakes nobody by itself: its assignees see it on their heartbeat, and the steward decides whether to replan or to mention someone.
 - **Reflection.** A separate periodic wake dedicated to memory consolidation.
 

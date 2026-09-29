@@ -55,7 +55,7 @@ pnpm stellaris agent add rev-1 --role reviewer --cli claude -p demo --model clau
 pnpm --filter @stellaris/server start                      # the board server; STELLARIS_PORT defaults to 4700
 ```
 
-A new society has three roles: `user`, `steward`, and `concierge`. A new role wakes on mentions, on stages that become its to take, and on its heartbeat, which fires when it has something unread, holds a stage, or has a stage waiting for it or its role. Roles for the work itself are written for the kind of work a project does, directly with `role add` as above or through a role proposal that the steward or the concierge drafts and you approve. Omit `--repo` for a fresh local repository, and `--on-done merge` for a project whose finished tasks should not land on its default branch.
+A new society has three roles: `user`, `steward`, and `concierge`. A new role wakes on mentions, on stages that become its to take, and on its heartbeat, which fires in a project when it has something unread there, holds a stage there, or has a stage waiting there for it or its role. Roles for the work itself are written for the kind of work a project does, directly with `role add` as above or through a role proposal that the steward or the concierge drafts and you approve. Omit `--repo` for a fresh local repository, and `--on-done merge` for a project whose finished tasks should not land on its default branch.
 
 The server dispatches an onboarding turn for every agent that joined a project, then waits for triggers. While it runs, act as the user through the HTTP API with the user token, so that only one process writes the data directory:
 

@@ -11,7 +11,7 @@ import {
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Scheduler, type TurnRunner } from "./scheduler.js";
+import { Scheduler, unreadFor, type TurnRunner } from "./scheduler.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -392,6 +392,62 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
       ["eng-1", "heartbeat"],
     ]);
+  });
+
+  it("wakes a heartbeat only in the scope its reasons belong to", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "onboarding"],
+    ]);
+    runner.dispatches.length = 0;
+    // Both heartbeats have been seen once, so the next due pass may fire them.
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+
+    // A stage held in lab brings eng-1 back to lab, not to demo.
+    const task = await board.createTask(USER, { project: "lab", title: "measure" });
+    await board.claimTask(ENG, { task_id: task.id });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "heartbeat"],
+    ]);
+    runner.dispatches.length = 0;
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+
+    // News in a society channel wakes no project heartbeat; news in demo wakes demo only.
+    await board.subscribe(ENG, { channel: "general" });
+    await board.postMessage(USER, { channel: "general", body: "society news" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    await board.subscribe(ENG, { channel: "demo/dev" });
+    await board.postMessage(USER, { channel: "demo/dev", body: "demo news" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "demo", "heartbeat"],
+    ]);
+  });
+
+  it("counts the unread messages of scopes without a heartbeat toward the society scope", () => {
+    const unread = new Map([
+      ["society", 1],
+      ["lab", 2],
+      ["web", 4],
+    ]);
+    expect(unreadFor(unread, "lab", ["lab"])).toBe(2);
+    expect(unreadFor(unread, "society", ["society"])).toBe(7);
+    expect(unreadFor(unread, "society", ["society", "web"])).toBe(3);
   });
 
   it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {

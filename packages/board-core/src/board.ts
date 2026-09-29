@@ -1365,46 +1365,70 @@ export class Board {
     const args = VerbInputs.read_inbox.parse(input);
     await this.authorize(actor, "read_inbox");
     return this.mutex.run(async () => {
-      const agent = await this.readAgent(actor.name);
       const cursorFile = this.paths.agentCursors(actor.name);
-      const stored = (await exists(cursorFile))
-        ? await readJson(cursorFile, CursorsSchema)
-        : { digest: null };
-      const since = args.since_cursor === undefined ? stored.digest : args.since_cursor;
-      const subscribed = new Set(agent.subscriptions);
-      const threadParticipation = new Map<Ulid, boolean>();
-      const collected: Message[] = [];
-
-      for await (const message of this.iterateMessages(since)) {
-        let include = message.mentions.includes(actor.name);
-        if (!include && message.thread === undefined) {
-          include = subscribed.has(message.channel);
-        }
-        if (!include && message.thread !== undefined) {
-          let participates = threadParticipation.get(message.thread);
-          if (participates === undefined) {
-            const found = await this.tryFindThread(message.thread);
-            participates =
-              found !== null &&
-              (await this.participatesInThread(actor, found.thread, found.threads));
-            threadParticipation.set(message.thread, participates);
-          }
-          include = participates;
-        }
-        if (include && message.author !== actor.name) {
-          collected.push(message);
-        }
-      }
-
-      collected.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      const messages = collected.slice(0, args.limit);
+      const stored = await this.readDigestCursor(actor.name);
+      const since = args.since_cursor === undefined ? stored : args.since_cursor;
+      const messages = (await this.digestSince(actor, since)).slice(0, args.limit);
       const last = messages.at(-1);
       const cursor = last === undefined ? since : last.id;
-      if (args.advance && cursor !== stored.digest) {
+      if (args.advance && cursor !== stored) {
         await writeJson(cursorFile, { digest: cursor });
       }
       return { messages, cursor };
     });
+  }
+
+  /**
+   * How many unread digest messages a member has in each scope: a project's slug for its channels
+   * and their threads, `society` for the society's channels. The heartbeat asks, so that it wakes
+   * a member where its unread messages are and not in every project it belongs to.
+   */
+  async unreadByScope(actor: Actor): Promise<Map<string, number>> {
+    return this.mutex.run(async () => {
+      const counts = new Map<string, number>();
+      for (const message of await this.digestSince(
+        actor,
+        await this.readDigestCursor(actor.name),
+      )) {
+        const scope = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
+        counts.set(scope, (counts.get(scope) ?? 0) + 1);
+      }
+      return counts;
+    });
+  }
+
+  private async readDigestCursor(agent: Name): Promise<Ulid | null> {
+    const cursorFile = this.paths.agentCursors(agent);
+    return (await exists(cursorFile)) ? (await readJson(cursorFile, CursorsSchema)).digest : null;
+  }
+
+  /** The digest after a cursor, oldest first: what mentions the member, sits in a channel it follows, or belongs to a thread it takes part in. */
+  private async digestSince(actor: Actor, since: Ulid | null): Promise<Message[]> {
+    const agent = await this.readAgent(actor.name);
+    const subscribed = new Set(agent.subscriptions);
+    const threadParticipation = new Map<Ulid, boolean>();
+    const collected: Message[] = [];
+
+    for await (const message of this.iterateMessages(since)) {
+      let include = message.mentions.includes(actor.name);
+      if (!include && message.thread === undefined) {
+        include = subscribed.has(message.channel);
+      }
+      if (!include && message.thread !== undefined) {
+        let participates = threadParticipation.get(message.thread);
+        if (participates === undefined) {
+          const found = await this.tryFindThread(message.thread);
+          participates =
+            found !== null && (await this.participatesInThread(actor, found.thread, found.threads));
+          threadParticipation.set(message.thread, participates);
+        }
+        include = participates;
+      }
+      if (include && message.author !== actor.name) {
+        collected.push(message);
+      }
+    }
+    return collected.toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   async search(actor: Actor, input: VerbInput<"search">): Promise<SearchHit[]> {

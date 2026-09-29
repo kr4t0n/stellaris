@@ -48,7 +48,8 @@ const SchedulerViewSchema = z.object({
 });
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
-const MessagesSchema = MessageFrontmatterSchema.extend({ body: z.string() }).array();
+const MessageSchema = MessageFrontmatterSchema.extend({ body: z.string() });
+const MessagesSchema = MessageSchema.array();
 const ChannelSummarySchema = z.object({
   ref: ChannelRefSchema,
   project: NameSchema.nullable(),
@@ -85,7 +86,36 @@ async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promis
   return schema.parse(await response.json());
 }
 
-/** The read side of the board's HTTP API, validated against the shared schemas. */
+const ErrorBodySchema = z.object({ message: z.string() });
+
+/** A verb, run as the signed-in actor; the board's refusal comes back as an ApiError. */
+async function invoke<T>(
+  verb: string,
+  token: string,
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/verbs/${verb}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  } catch {
+    throw new ApiError(0, "The board server is not reachable.");
+  }
+  if (!response.ok) {
+    const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
+    throw new ApiError(
+      response.status,
+      detail.success ? detail.data.message : `${verb} answered ${response.status}`,
+    );
+  }
+  return schema.parse(await response.json());
+}
+
+/** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
 export function createApi(token: string) {
   return {
     me: () => get("/api/me", token, ActorSchema),
@@ -102,6 +132,12 @@ export function createApi(token: string) {
     tasks: (slug: string) =>
       get(`/api/projects/${encodeURIComponent(slug)}/tasks`, token, TaskSchema.array()),
     task: (id: string) => get(`/api/tasks/${encodeURIComponent(id)}`, token, TaskSchema),
+    sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
+      invoke("post_message", token, input, MessageSchema),
+    openThread: (input: { task_id?: string; channel?: string; title?: string }) =>
+      invoke("open_thread", token, input, ThreadRecordSchema),
+    closeThread: (input: { thread_id: string; summary: string }) =>
+      invoke("close_thread", token, input, MessageSchema),
   };
 }
 export type Api = ReturnType<typeof createApi>;

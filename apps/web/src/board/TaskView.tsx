@@ -1,13 +1,22 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
-import { Link, useParams } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ApiError } from "../lib/api.js";
 import { ago } from "../lib/format.js";
-import { useMembers, useNow, useProjects, useTask, useThreads } from "../lib/session.js";
+import {
+  useMembers,
+  useNow,
+  useProjects,
+  useSession,
+  useTask,
+  useThreads,
+} from "../lib/session.js";
 import { Citizen, displayName } from "./Avatar.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ThreadCard } from "./ThreadCard.js";
-import { assigneeOf, PHASES, phaseOf, progressOf, type TaskPhase } from "./tasks.js";
+import { assigneeOf, inPlay, PHASES, phaseOf, progressOf, type TaskPhase } from "./tasks.js";
 
 const PHASE_STYLE: Record<TaskPhase, string> = {
   waiting: "bg-amber-500/15 text-amber-300",
@@ -81,6 +90,30 @@ function StageItem({
         </p>
       </div>
     </li>
+  );
+}
+
+/** Opens the task's thread on its project's general channel, and goes to it. */
+function OpenTaskThread({ taskId }: { taskId: string }) {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const open = useMutation({
+    mutationFn: () => api.openThread({ task_id: taskId }),
+    onSuccess: (thread) => {
+      void client.invalidateQueries({ queryKey: ["threads"] });
+      void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });
+    },
+  });
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <Button variant="primary" disabled={open.isPending} onClick={() => open.mutate()}>
+        {open.isPending ? "Opening…" : "Open a thread"}
+      </Button>
+      <p className="text-meta">
+        {open.error === null ? "It closes when the task ends." : open.error.message}
+      </p>
+    </div>
   );
 }
 
@@ -163,7 +196,11 @@ export function TaskView() {
         <section className="mt-5 border-t border-line pt-4">
           <h3 className="text-caps">Thread</h3>
           {thread === undefined ? (
-            <p className="mt-2 text-meta">No thread on this task.</p>
+            inPlay(current) ? (
+              <OpenTaskThread taskId={current.id} />
+            ) : (
+              <p className="mt-2 text-meta">No thread on this task.</p>
+            )
           ) : (
             <div className="-mx-4">
               <ThreadCard thread={thread} now={now} />

@@ -1,13 +1,16 @@
 import type { Message } from "@stellaris/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "../components/Button.js";
 import { ApiError, type ThreadSummary } from "../lib/api.js";
 import { markSeen } from "../lib/seen.js";
 import { useMembers, useNow, useProjects, useSession, useThreads } from "../lib/session.js";
+import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ThreadCard } from "./ThreadCard.js";
+import { NewThreadForm } from "./ThreadForms.js";
 import { useStickyScroll } from "./useStickyScroll.js";
 
 type Item =
@@ -30,6 +33,7 @@ function ChannelStream({ channel }: { channel: string }) {
   const members = useMembers();
   const projects = useProjects();
   const now = useNow(30_000);
+  const [starting, setStarting] = useState(false);
 
   const items = useMemo<Item[]>(() => {
     const posts: Item[] = (messages.data ?? []).map((message) => ({
@@ -65,7 +69,9 @@ function ChannelStream({ channel }: { channel: string }) {
         subtitle={`${place} · ${messages.data?.length ?? 0} messages${
           open.length > 0 ? ` · ${open.length} open threads` : ""
         }`}
+        trailing={starting ? null : <Button onClick={() => setStarting(true)}>New thread</Button>}
       />
+      {starting ? <NewThreadForm channel={channel} onDone={() => setStarting(false)} /> : null}
       <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.error instanceof ApiError && messages.error.status === 404 ? (
           <PaneNote>There is no channel {channel}.</PaneNote>
@@ -83,6 +89,9 @@ function ChannelStream({ channel }: { channel: string }) {
           )
         )}
       </div>
+      {messages.data === undefined ? null : (
+        <Composer target={{ channel }} placeholder={`Message #${name}`} />
+      )}
     </>
   );
 }

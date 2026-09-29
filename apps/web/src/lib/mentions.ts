@@ -52,6 +52,13 @@ function walk(node: MdNode): void {
   });
 }
 
+/** The names a text mentions, as the board reads them to decide whom a post wakes. */
+export function mentionsIn(text: string): string[] {
+  return [...new Set([...text.matchAll(MENTION)].map((match) => match[2] ?? ""))].filter(
+    (name) => name !== "",
+  );
+}
+
 /** A remark plugin that marks `@mentions` so they render highlighted, outside code and links. */
 export function remarkMentions() {
   return (tree: MdNode): void => walk(tree);

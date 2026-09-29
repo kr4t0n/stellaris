@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import { ApiError } from "../lib/api.js";
 import { markSeen } from "../lib/seen.js";
 import { useMembers, useNow, useSession } from "../lib/session.js";
 import { displayName } from "./Avatar.js";
+import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { StateChip, subjectLabel } from "./ThreadCard.js";
+import { CloseThreadForm } from "./ThreadForms.js";
 import { useStickyScroll } from "./useStickyScroll.js";
 
 /** One thread: what it is about, its messages, and its summary once closed. */
@@ -27,6 +30,7 @@ function ThreadStream({ id }: { id: string }) {
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);
   const { ref, onScroll } = useStickyScroll();
+  const [closing, setClosing] = useState(false);
 
   if (detail.data === undefined) {
     return (
@@ -66,10 +70,21 @@ function ThreadStream({ id }: { id: string }) {
                 Task →
               </Link>
             ) : null}
-            <StateChip state={thread.state} />
+            {thread.state === "open" && !closing ? (
+              <Button onClick={() => setClosing(true)}>Close</Button>
+            ) : (
+              <StateChip state={thread.state} />
+            )}
           </>
         }
       />
+      {closing && thread.state === "open" ? (
+        <CloseThreadForm
+          threadId={thread.id}
+          channel={thread.channel}
+          onDone={() => setClosing(false)}
+        />
+      ) : null}
       <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.length === 0 ? <PaneNote>No messages in this thread yet.</PaneNote> : null}
         {messages.map((message) => (
@@ -89,6 +104,9 @@ function ThreadStream({ id }: { id: string }) {
           </section>
         ) : null}
       </div>
+      {thread.state === "open" ? (
+        <Composer target={{ threadId: thread.id }} placeholder="Reply in the thread" />
+      ) : null}
     </>
   );
 }

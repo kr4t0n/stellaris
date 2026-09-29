@@ -109,6 +109,52 @@ describe("skyModel", () => {
     ]);
   });
 
+  it("keeps spheres apart and citizens inside them, whatever the number and size of projects", () => {
+    const crowd = [1, 4, 2, 6, 1, 3, 2, 5, 1, 2, 3, 1, 0, 7];
+    for (const count of [1, 2, 3, 7, 9, 12, 25]) {
+      const projects = Array.from({ length: count }, (_, index) =>
+        project(`p${index}`, new Date(Date.parse(ts) + index * 60_000).toISOString()),
+      );
+      const members = [member("desk", { cli: "codex" }), member("stew")];
+      projects.forEach((each, index) => {
+        for (let k = 0; k < (crowd[index % crowd.length] ?? 1); k += 1) {
+          members.push(member(`${each.slug}-${k}`, { memberships: [each.slug] }));
+        }
+      });
+      const model = skyModel(snapshot({ members, projects }));
+      const gaps = model.anchors.flatMap((anchor, index) =>
+        model.anchors
+          .slice(index + 1)
+          .map(
+            (other) =>
+              Math.hypot(anchor.x - other.x, anchor.y - other.y) - anchor.radius - other.radius,
+          ),
+      );
+      // Spheres are separated by at least the room for a name under each and a gap.
+      expect(Math.min(...gaps, Infinity)).toBeGreaterThan(60);
+      for (const star of model.stars) {
+        const anchor = model.anchors.find((candidate) => candidate.id === star.anchor);
+        expect(Math.hypot(star.x - (anchor?.x ?? 0), star.y - (anchor?.y ?? 0)) + 15).toBeLessThan(
+          anchor?.radius ?? 0,
+        );
+      }
+      for (const anchor of model.anchors) {
+        expect(Math.hypot(anchor.x, anchor.y) + anchor.radius).toBeLessThan(model.radius);
+      }
+    }
+  });
+
+  it("grows a sphere with its citizens", () => {
+    const model = skyModel(
+      snapshot({
+        members: ["a", "b", "c", "d", "e"].map((name) => member(name, { memberships: ["big"] })),
+        projects: [project("big", ts), project("empty", "2026-09-29T11:00:00.000Z")],
+      }),
+    );
+    const [, big, empty] = model.anchors;
+    expect(big?.radius).toBeGreaterThan(2 * (empty?.radius ?? 0));
+  });
+
   it("spaces the citizens of one anchor apart and draws the same board the same way", () => {
     const members = ["a", "b", "c", "d", "e", "f"].map((name) =>
       member(name, { memberships: ["lab"] }),

@@ -28,6 +28,14 @@ interface Body {
   screen: ScreenPoint;
 }
 
+/** A sphere as the scene draws it: eased toward its anchor's place and size, like the stars. */
+interface Sphere {
+  anchor: Anchor;
+  x: number;
+  y: number;
+  radius: number;
+}
+
 interface Speck {
   x: number;
   y: number;
@@ -43,7 +51,7 @@ const SURFACE_1 = "#171717";
 const FG_SECONDARY = "212, 212, 212";
 const FG_TERTIARY = "163, 163, 163";
 const FG_MUTED = "115, 115, 115";
-const LABEL_FONT = '500 11px "Instrument Sans Variable", ui-sans-serif, sans-serif';
+const LABEL_FAMILY = '"Instrument Sans Variable", ui-sans-serif, sans-serif';
 const ANCHOR_FONT = '500 12px "Onest Variable", ui-sans-serif, sans-serif';
 const SOCIETY_FONT = '600 10px "Onest Variable", ui-sans-serif, sans-serif';
 
@@ -106,8 +114,7 @@ export class SkyScene {
   private readonly glows = new Map<string, HTMLCanvasElement>();
   private readonly bodies = new Map<string, Body>();
   private readonly specks: Speck[];
-  private anchors: readonly Anchor[] = [];
-  private extents = new Map<string, number>();
+  private readonly spheres = new Map<string, Sphere>();
   private radius = 400;
   private scale = 1;
   private width = 0;
@@ -143,15 +150,20 @@ export class SkyScene {
   }
 
   setModel(model: SkyModel): void {
-    this.anchors = model.anchors;
     this.radius = model.radius;
-    const extents = new Map<string, number>();
-    for (const star of model.stars) {
-      const anchor = model.anchors.find((candidate) => candidate.id === star.anchor);
-      const reach = anchor === undefined ? 0 : Math.hypot(star.x - anchor.x, star.y - anchor.y);
-      extents.set(star.anchor, Math.max(extents.get(star.anchor) ?? 0, reach));
+    for (const anchor of model.anchors) {
+      const sphere = this.spheres.get(anchor.id);
+      if (sphere === undefined) {
+        this.spheres.set(anchor.id, { anchor, x: anchor.x, y: anchor.y, radius: anchor.radius });
+      } else {
+        sphere.anchor = anchor;
+      }
     }
-    this.extents = extents;
+    for (const id of this.spheres.keys()) {
+      if (!model.anchors.some((anchor) => anchor.id === id)) {
+        this.spheres.delete(id);
+      }
+    }
 
     const present = new Set<string>();
     for (const star of model.stars) {
@@ -243,6 +255,12 @@ export class SkyScene {
     const fit = Math.min(this.width, this.height) / (2 * this.radius);
     const target = Math.min(1.35, Math.max(0.45, fit));
     this.scale += (target - this.scale) * Math.min(1, dt * 3);
+    const ease = this.options.reducedMotion ? 1 : Math.min(1, dt * 3);
+    for (const sphere of this.spheres.values()) {
+      sphere.x += (sphere.anchor.x - sphere.x) * ease;
+      sphere.y += (sphere.anchor.y - sphere.y) * ease;
+      sphere.radius += (sphere.anchor.radius - sphere.radius) * ease;
+    }
     for (const [name, body] of this.bodies) {
       if (this.options.reducedMotion) {
         body.x = body.star.x;
@@ -323,9 +341,9 @@ export class SkyScene {
     ctx.setLineDash([2, 7]);
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
-    for (const anchor of this.anchors) {
-      if (anchor.kind === "project") {
-        const at = this.toScreen(anchor.x, anchor.y);
+    for (const sphere of this.spheres.values()) {
+      if (sphere.anchor.kind === "project") {
+        const at = this.toScreen(sphere.x, sphere.y);
         ctx.beginPath();
         ctx.moveTo(center.x, center.y);
         ctx.lineTo(at.x, at.y);
@@ -334,9 +352,9 @@ export class SkyScene {
     }
     ctx.restore();
 
-    for (const anchor of this.anchors) {
-      const at = this.toScreen(anchor.x, anchor.y);
-      const ring = Math.max(52, (this.extents.get(anchor.id) ?? 0) + 34) * this.scale;
+    for (const { anchor, x, y, radius } of this.spheres.values()) {
+      const at = this.toScreen(x, y);
+      const ring = radius * this.scale;
       if (anchor.kind === "project") {
         const nebula = ctx.createRadialGradient(at.x, at.y, 0, at.x, at.y, ring * 1.8);
         nebula.addColorStop(0, "rgba(160, 170, 255, 0.05)");
@@ -468,11 +486,12 @@ export class SkyScene {
       }
     }
 
-    ctx.font = LABEL_FONT;
+    // Names shrink with the sky, down to a floor, so they keep clear of neighbouring stars.
+    ctx.font = `500 ${Math.max(9, Math.min(11, 11 * this.scale)).toFixed(1)}px ${LABEL_FAMILY}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = `rgba(${FG_SECONDARY}, ${hovered || working ? 1 : 0.7})`;
-    ctx.fillText(star.name, at.x, at.y + radius + 12 * Math.min(1, this.scale) + 4);
+    ctx.fillText(star.name, at.x, at.y + radius + 8 * this.scale + 3);
     ctx.restore();
   }
 }

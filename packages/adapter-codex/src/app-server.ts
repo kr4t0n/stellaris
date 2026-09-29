@@ -492,13 +492,17 @@ export class CodexAppServerSession implements ResidentSession {
     });
 
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      void this.client
-        .request("turn/interrupt", { threadId: this.session, turnId: turn.turnId })
-        .catch(() => undefined);
-      setTimeout(() => turn.settle(), 15_000).unref?.();
-    }, this.start.limits.timeoutMs);
+    const limit = this.start.limits.timeoutMs;
+    const timer =
+      limit === null
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            void this.client
+              .request("turn/interrupt", { threadId: this.session, turnId: turn.turnId })
+              .catch(() => undefined);
+            setTimeout(() => turn.settle(), 15_000).unref?.();
+          }, limit);
 
     try {
       const started = await this.client.request("turn/start", {
@@ -524,7 +528,7 @@ export class CodexAppServerSession implements ResidentSession {
     let exitReason: TurnExitReason;
     if (timedOut) {
       exitReason = "timeout";
-      turn.error = `turn exceeded ${this.start.limits.timeoutMs} ms`;
+      turn.error = `turn exceeded ${limit} ms`;
     } else if (turn.status === "completed" && turn.error === undefined) {
       exitReason = "completed";
     } else if (turn.status === "interrupted") {

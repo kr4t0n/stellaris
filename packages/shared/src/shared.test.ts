@@ -105,7 +105,19 @@ describe("server config", () => {
       host: "127.0.0.1",
       port: 4700,
       logLevel: "info",
+      concurrency: 2,
+      turnTimeoutMs: 1_200_000,
     });
     expect(loadServerConfig({ STELLARIS_PORT: "5000" }).port).toBe(5000);
+  });
+
+  it("reads a limit as a number or as unlimited", () => {
+    const config = loadServerConfig({
+      STELLARIS_CONCURRENCY: "unlimited",
+      STELLARIS_TURN_TIMEOUT_MS: "Unlimited",
+    });
+    expect([config.concurrency, config.turnTimeoutMs]).toEqual([null, null]);
+    expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
+    expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
   });
 });

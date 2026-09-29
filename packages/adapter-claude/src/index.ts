@@ -346,7 +346,7 @@ class ClaudeResident implements ResidentSession {
 
   constructor(
     private readonly context: HandlerContext,
-    private readonly limits: { timeoutMs: number },
+    private readonly limits: { timeoutMs: number | null },
     session: SessionId,
     costSoFarUsd: number,
     queryFn: QueryFn,
@@ -423,16 +423,20 @@ class ClaudeResident implements ResidentSession {
     });
 
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      void this.stream.interrupt?.().catch(() => undefined);
-      // An interrupt normally yields a result; if none comes, do not wait forever.
-      setTimeout(() => {
-        if (this.active !== null) {
-          this.active.settle();
-        }
-      }, INTERRUPT_GRACE_MS).unref?.();
-    }, this.limits.timeoutMs);
+    const limit = this.limits.timeoutMs;
+    const timer =
+      limit === null
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            void this.stream.interrupt?.().catch(() => undefined);
+            // An interrupt normally yields a result; if none comes, do not wait forever.
+            setTimeout(() => {
+              if (this.active !== null) {
+                this.active.settle();
+              }
+            }, INTERRUPT_GRACE_MS).unref?.();
+          }, limit);
     this.source.push({
       type: "user",
       message: { role: "user", content: prompt },
@@ -443,7 +447,7 @@ class ClaudeResident implements ResidentSession {
 
     if (timedOut) {
       state.exitReason = "timeout";
-      state.error = `turn exceeded ${this.limits.timeoutMs} ms`;
+      state.error = `turn exceeded ${limit} ms`;
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the turn ended without a result message";
     }
@@ -493,7 +497,8 @@ export class ClaudeAgentBackend implements AgentBackend {
       onEvent?.(event);
     };
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), request.limits.timeoutMs);
+    const limit = request.limits.timeoutMs;
+    const timer = limit === null ? undefined : setTimeout(() => abort.abort(), limit);
     const toolNames = new Map<string, string>();
     const recorded: string[] = [];
     const state = freshState();
@@ -533,7 +538,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     }
     if (abort.signal.aborted) {
       state.exitReason = "timeout";
-      state.error = `turn exceeded ${request.limits.timeoutMs} ms`;
+      state.error = `turn exceeded ${limit} ms`;
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the session ended without a result message";
     }

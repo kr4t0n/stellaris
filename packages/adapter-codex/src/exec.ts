@@ -38,7 +38,7 @@ export interface SpawnedCodex {
 
 export type SpawnCodex = (
   args: readonly string[],
-  options: { cwd: string; env: Record<string, string | undefined>; timeoutMs: number },
+  options: { cwd: string; env: Record<string, string | undefined>; timeoutMs: number | null },
 ) => SpawnedCodex;
 
 export interface CodexExecOptions {
@@ -81,7 +81,8 @@ const defaultSpawn =
       env: options.env,
       stdin: "ignore",
       reject: false,
-      timeout: options.timeoutMs,
+      // execa reads a timeout of 0 as none.
+      timeout: options.timeoutMs ?? 0,
       buffer: false,
     });
     if (subprocess.stdout === null || subprocess.stderr === null) {

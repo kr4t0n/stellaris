@@ -43,7 +43,8 @@ export interface LocalRunnerOptions {
   /** Where agents reach the board's MCP endpoint, for example http://127.0.0.1:4700/mcp */
   readonly mcpUrl: string;
   readonly runnerName: Name;
-  readonly turnTimeoutMs?: number | undefined;
+  /** How long a turn may run, or null for no limit. */
+  readonly turnTimeoutMs?: number | null | undefined;
   readonly maxTurns?: number | undefined;
   /** How long a resident session stays warm after its last turn before the runner lets it go cold. */
   readonly residentIdleMs?: number | undefined;
@@ -55,6 +56,8 @@ export interface LocalRunnerOptions {
 
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
+/** A running turn renews the leases it holds this often, so one longer than a lease keeps its claims. */
+const LEASE_RENEW_MS = 10 * 60_000;
 const DEFAULT_MAX_TURNS = 60;
 const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
 const USER_POST_TRIGGER = "user_post";
@@ -76,7 +79,7 @@ export class LocalRunner {
   private readonly backends: Partial<Record<CliKind, AgentBackend>>;
   private readonly mcpUrl: string;
   private readonly runnerName: Name;
-  private readonly turnTimeoutMs: number;
+  private readonly turnTimeoutMs: number | null;
   private readonly maxTurns: number;
   private readonly residentIdleMs: number;
   private readonly git: GitOps;
@@ -91,7 +94,8 @@ export class LocalRunner {
     this.backends = options.backends;
     this.mcpUrl = options.mcpUrl;
     this.runnerName = options.runnerName;
-    this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    this.turnTimeoutMs =
+      options.turnTimeoutMs === undefined ? DEFAULT_TURN_TIMEOUT_MS : options.turnTimeoutMs;
     this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
     this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
     this.git = options.git ?? new ExecaGit();
@@ -302,6 +306,18 @@ export class LocalRunner {
       events.push(event);
       this.onEvent?.(agent.name, dispatch.project, event);
     };
+    const keepLeases = setInterval(() => {
+      void this.board
+        .heldClaims(agent.name)
+        .then((claims) =>
+          this.renewLeases(
+            actor,
+            claims.filter((task) => task.project === dispatch.project).map((task) => task.id),
+          ),
+        )
+        .catch(() => undefined);
+    }, LEASE_RENEW_MS);
+    keepLeases.unref?.();
     let result: TurnResult;
     try {
       if (resident && backend.startResident !== undefined) {
@@ -322,23 +338,27 @@ export class LocalRunner {
         const token = this.board.issueTurnToken(
           agent.name,
           agent.role,
-          this.turnTimeoutMs + 5 * 60_000,
+          this.tokenLifetime(5 * 60_000),
         );
-        result = await backend.runTurn(
-          {
-            spec,
-            session,
-            newSession,
-            prompt,
-            instructions,
-            mcp: { url: this.mcpUrl, token },
-            limits,
-            statusSchema,
-            env,
-            costSoFarUsd,
-          },
-          onEvent,
-        );
+        try {
+          result = await backend.runTurn(
+            {
+              spec,
+              session,
+              newSession,
+              prompt,
+              instructions,
+              mcp: { url: this.mcpUrl, token },
+              limits,
+              statusSchema,
+              env,
+              costSoFarUsd,
+            },
+            onEvent,
+          );
+        } finally {
+          this.board.revokeTurnToken(token);
+        }
       }
     } catch (error) {
       result = {
@@ -350,6 +370,8 @@ export class LocalRunner {
         exitReason: "error",
         error: error instanceof Error ? error.message : String(error),
       };
+    } finally {
+      clearInterval(keepLeases);
     }
 
     if (workspace !== null) {
@@ -412,7 +434,7 @@ export class LocalRunner {
       newSession: boolean;
       instructions: string;
       prompt: string;
-      limits: { timeoutMs: number; maxTurns: number };
+      limits: { timeoutMs: number | null; maxTurns: number };
       statusSchema: Record<string, unknown>;
       env: Readonly<Record<string, string>>;
       costSoFarUsd: number;
@@ -422,7 +444,7 @@ export class LocalRunner {
     if (backend.startResident === undefined) {
       throw new Error("backend cannot host resident sessions");
     }
-    const ttl = this.residentIdleMs + this.turnTimeoutMs + 60_000;
+    const ttl = this.tokenLifetime(this.residentIdleMs + 60_000);
     let resident = this.residents.get(input.key);
     if (resident === undefined) {
       const token = this.board.issueTurnToken(input.agent.name, input.agent.role, ttl);
@@ -541,6 +563,11 @@ export class LocalRunner {
     } catch (error) {
       this.log.warn({ agent, error: String(error) }, "could not hand the worktree back");
     }
+  }
+
+  /** How long a turn token must live: the turn's limit and some slack, or for good without one. */
+  private tokenLifetime(slackMs: number): number {
+    return this.turnTimeoutMs === null ? Number.POSITIVE_INFINITY : this.turnTimeoutMs + slackMs;
   }
 
   private async renewLeases(actor: Actor, taskIds: readonly Ulid[]): Promise<void> {

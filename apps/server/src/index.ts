@@ -37,6 +37,7 @@ const runner = new LocalRunner({
     }),
   },
   log,
+  turnTimeoutMs: config.turnTimeoutMs,
   // Resident roles keep a warm session this long after their last turn.
   residentIdleMs: Number(process.env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
   onEvent: (agent, project, event) => {
@@ -45,7 +46,7 @@ const runner = new LocalRunner({
   },
 });
 
-const concurrency = Number(process.env["STELLARIS_CONCURRENCY"] ?? "2");
+const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
 const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 const scheduler = new Scheduler({ board, runner, log, concurrency, timings });
@@ -84,7 +85,14 @@ await board.markRunner(SERVER_RUNNER, {
   capabilities,
 });
 await scheduler.start();
-log.info({ concurrency, timings }, "scheduler started");
+log.info(
+  {
+    concurrency: config.concurrency ?? "unlimited",
+    turnTimeoutMs: config.turnTimeoutMs ?? "unlimited",
+    timings,
+  },
+  "scheduler started",
+);
 
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns");

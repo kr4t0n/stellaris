@@ -323,11 +323,9 @@ role
   .description("Write a new role charter directly as the user")
   .requiredOption("--purpose <text>", "what the role is for; its members read this every turn")
   .option("--verbs <verbs...>", "board verbs granted; the member verbs by default")
-  .option(
-    "--triggers <triggers...>",
-    "wakes it opts into: user_post, ops_event, unclaimed_task, heartbeat",
-    ["unclaimed_task", "heartbeat"],
-  )
+  .option("--triggers <triggers...>", "wakes it opts into: user_post, ops_event, heartbeat", [
+    "heartbeat",
+  ])
   .action(async (name: string, opts: { purpose: string; verbs?: string[]; triggers: string[] }) => {
     const board = await open();
     const added = await board.setRoleCharter(board.userActor(), {

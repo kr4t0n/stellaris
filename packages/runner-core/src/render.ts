@@ -49,13 +49,13 @@ const GOVERNANCE = [
   "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The user decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
   '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
-  '  - role: {"name", "purpose", "verbs": [board verbs], "wakeTriggers": any of "user_post", "ops_event", "unclaimed_task", "heartbeat", "maxReplicas"?, "backlogThreshold"?}. Mentions, stages that become yours, and finished tasks you created wake every role.',
+  '  - role: {"name", "purpose", "verbs": [board verbs], "wakeTriggers"?: any of "user_post", "ops_event", "heartbeat" (heartbeat when omitted), "maxReplicas"?, "backlogThreshold"?}. Mentions, stages that become yours, and finished tasks you created wake every role; a heartbeat wakes you when something is unread, held, or waiting for you.',
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
   "- Projects and membership: `create_project` opens a project with its default channels (front desk and user), and `configure_project` sets its default plan and completion effect (user, steward, concierge). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
-  "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
+  "- Prefer scaling an existing role over inventing one; a new role is justified by work a project needs that no existing role covers. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals arrive in the ops channel as posts by the board: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
 ].join("\n");
 

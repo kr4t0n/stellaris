@@ -33,12 +33,7 @@ export type VerbName = z.infer<typeof VerbNameSchema>;
  * Wakes a charter opts into. Mentions, stages that become the member's, finished tasks for their
  * creator, onboarding, manual, and reflection wakes always fire and are never listed.
  */
-export const CharterTriggerSchema = z.enum([
-  "user_post",
-  "ops_event",
-  "unclaimed_task",
-  "heartbeat",
-]);
+export const CharterTriggerSchema = z.enum(["user_post", "ops_event", "heartbeat"]);
 export type CharterTrigger = z.infer<typeof CharterTriggerSchema>;
 
 /**
@@ -49,7 +44,8 @@ export const RoleCharterSchema = z.object({
   name: NameSchema,
   purpose: z.string().min(1),
   verbs: z.array(VerbNameSchema),
-  wakeTriggers: z.array(CharterTriggerSchema),
+  /** A periodic look at the digest is on unless the charter says otherwise. */
+  wakeTriggers: z.array(CharterTriggerSchema).default(["heartbeat"]),
   reviewDate: z.string().optional(),
   maxReplicas: z.number().int().min(1).default(1),
   backlogThreshold: z.number().positive().default(3),

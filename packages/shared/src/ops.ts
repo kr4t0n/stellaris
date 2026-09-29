@@ -6,7 +6,7 @@ import { NameSchema, UlidSchema } from "./ids.js";
  * metadata, never from message content, and posted to the society's ops channel.
  */
 export const OPS_SIGNAL_KINDS = [
-  "unclaimed_task",
+  "waiting_stage",
   "backlog",
   "role_gap",
   "churn",

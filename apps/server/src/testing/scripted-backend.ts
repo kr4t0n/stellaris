@@ -26,7 +26,7 @@ export async function addWorkRoles(board: Board): Promise<void> {
     name: "engineer",
     purpose: "Builds what a stage asks for and commits it on the task's branch.",
     verbs: [...MEMBER_VERBS],
-    wakeTriggers: ["unclaimed_task", "heartbeat"],
+    wakeTriggers: ["heartbeat"],
   });
   await board.setRoleCharter(USER, {
     name: "reviewer",

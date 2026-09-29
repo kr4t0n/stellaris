@@ -12,7 +12,6 @@ export const TriggerKindSchema = z.enum([
   "stage",
   "task_done",
   "heartbeat",
-  "unclaimed_task",
   "reflection",
   "onboarding",
   "manual",

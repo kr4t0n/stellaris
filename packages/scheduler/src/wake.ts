@@ -4,8 +4,10 @@ export interface WakeInput {
   readonly trigger: Trigger;
   /** Unread items the digest would carry. */
   readonly digestSize: number;
-  /** Claims the agent currently holds. */
+  /** Stages the agent holds. */
   readonly claimsHeld: number;
+  /** Current stages without a holder that name the agent or its role. */
+  readonly waitingStages: number;
   readonly paused: boolean;
 }
 
@@ -17,8 +19,9 @@ export interface WakeDecision {
 }
 
 /**
- * Nothing wakes while paused. Every trigger wakes otherwise, except a heartbeat with an empty
- * digest and no held claims; user mentions, user posts, and manual wakes jump the queue.
+ * Nothing wakes while paused. Every trigger wakes otherwise, except a heartbeat with nothing
+ * unread, no held stage, and no stage waiting for the agent or its role; user mentions, user
+ * posts, and manual wakes jump the queue.
  */
 export function decideWake(input: WakeInput): WakeDecision {
   if (input.paused) {
@@ -40,8 +43,6 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "stage waiting", priority: 1 };
     case "task_done":
       return { wake: true, reason: "task done", priority: 1 };
-    case "unclaimed_task":
-      return { wake: true, reason: "unclaimed task", priority: 0 };
     case "ops_event":
       return { wake: true, reason: "operations signal", priority: 0 };
     case "user_post":
@@ -49,8 +50,12 @@ export function decideWake(input: WakeInput): WakeDecision {
     case "heartbeat":
       break;
   }
-  if (input.digestSize === 0 && input.claimsHeld === 0) {
-    return { wake: false, reason: "empty digest", priority: 0 };
+  if (input.digestSize === 0 && input.claimsHeld === 0 && input.waitingStages === 0) {
+    return { wake: false, reason: "nothing to read, hold, or take", priority: 0 };
   }
-  return { wake: true, reason: "heartbeat with unread items or held claims", priority: 0 };
+  return {
+    wake: true,
+    reason: "heartbeat with unread items, held stages, or stages waiting",
+    priority: 0,
+  };
 }

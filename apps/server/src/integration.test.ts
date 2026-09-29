@@ -61,7 +61,7 @@ describe("Phase 1 exit criterion", () => {
         debounceMs: 0,
         userDebounceMs: 0,
         heartbeatMs: 3_600_000,
-        unclaimedTaskMs: 3_600_000,
+        waitingStageMs: 3_600_000,
       },
     });
     const settle = async (): Promise<void> => {
@@ -191,7 +191,7 @@ describe("Phase 5 exit criterion", () => {
         debounceMs: 0,
         userDebounceMs: 0,
         heartbeatMs: 3_600_000,
-        unclaimedTaskMs: 3_600_000,
+        waitingStageMs: 3_600_000,
       },
     });
     const settle = async (): Promise<void> => {
@@ -299,7 +299,7 @@ describe("Phase 4 exit criterion", () => {
         debounceMs: 0,
         userDebounceMs: 0,
         heartbeatMs: 3_600_000,
-        unclaimedTaskMs: 3_600_000,
+        waitingStageMs: 3_600_000,
         opsIntervalMs: 1,
       },
     });
@@ -314,9 +314,14 @@ describe("Phase 4 exit criterion", () => {
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(3);
 
-    // Three unassigned stages the engineer takes as waiting work: depth three, the threshold.
+    // Three stages for the engineer role and one engineer: depth three, the threshold.
     for (const title of ["Add hello.txt", "Add README", "Add a test"]) {
-      await board.createTask(USER, { project: "demo", title, body: "Small." });
+      await board.createTask(USER, {
+        project: "demo",
+        title,
+        body: "Small.",
+        stages: [{ name: "build", role: "engineer" }],
+      });
     }
     await settle(); // the operations pass publishes the backlog signal
     await settle(); // the signal wakes the steward, which proposes
@@ -427,7 +432,7 @@ describe("Phase 6 exit criterion", () => {
         debounceMs: 0,
         userDebounceMs: 0,
         heartbeatMs: 3_600_000,
-        unclaimedTaskMs: 3_600_000,
+        waitingStageMs: 3_600_000,
         reflectionMs: 60_000,
       },
     });

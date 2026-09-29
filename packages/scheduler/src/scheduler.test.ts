@@ -76,7 +76,7 @@ async function addWorkRoles(board: Board): Promise<void> {
     name: "engineer",
     purpose: "Builds.",
     verbs: [...MEMBER_VERBS],
-    wakeTriggers: ["unclaimed_task", "heartbeat"],
+    wakeTriggers: ["heartbeat"],
   });
   await board.setRoleCharter(USER, {
     name: "reviewer",
@@ -131,7 +131,7 @@ describe("Scheduler", () => {
         debounceMs: 1_000,
         userDebounceMs: 0,
         heartbeatMs: 10_000,
-        unclaimedTaskMs: 5_000,
+        waitingStageMs: 5_000,
         leaseSweepMs: 1_000,
         ...options.timings,
       },
@@ -277,23 +277,42 @@ describe("Scheduler", () => {
     });
   });
 
-  it("wakes the members who may hold a stage left waiting past the threshold, once", async () => {
+  it("signals a stage left waiting past the threshold once, and wakes nobody by it", async () => {
     const { board, runner, scheduler } = await setup();
-    await board.createTask(USER, { project: "demo", title: "nobody took me" });
+    const task = await board.createTask(USER, { project: "demo", title: "nobody took me" });
     await scheduler.tick();
     expect(scheduler.pendingCount).toBe(0);
     advance(5_000);
     await scheduler.tick();
-    advance(1_000);
-    await scheduler.tick();
-    await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
-      ["eng-1", "unclaimed_task"],
-    ]);
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.dispatches).toHaveLength(1);
+    expect(runner.dispatches).toEqual([]);
+    const waiting = (await board.listSignals()).filter((s) => s.signal.kind === "waiting_stage");
+    expect(waiting.map((s) => s.signal.key)).toEqual([`waiting_stage:${task.id}:s1`]);
+    expect(waiting[0]?.signal.summary).toContain("for anyone in the project");
+  });
+
+  it("wakes on heartbeat for a stage waiting on the member's role", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.createTask(USER, {
+      project: "demo",
+      title: "check this",
+      stages: [{ name: "review", role: "reviewer" }],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["rev-1", "stage"]]);
+    runner.dispatches.length = 0;
+    // The first wake led to no claim; the heartbeat brings the reviewer back, and nobody else.
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["rev-1", "heartbeat"],
+    ]);
   });
 
   it("wakes on heartbeat only when there is something to read or hold", async () => {
@@ -316,7 +335,7 @@ describe("Scheduler", () => {
 
   it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {
     const { board, runner, scheduler } = await setup({
-      timings: { reflectionMs: 60_000, heartbeatMs: 3_600_000, unclaimedTaskMs: 3_600_000 },
+      timings: { reflectionMs: 60_000, heartbeatMs: 3_600_000, waitingStageMs: 3_600_000 },
       record: true,
     });
     // The reflection clock starts at the scheduler's first sight; nothing happens before the cadence.
@@ -385,7 +404,7 @@ describe("Scheduler", () => {
 
   it("publishes a backlog signal and wakes the steward on it, once per condition", async () => {
     const { board, runner, scheduler } = await setup({
-      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
     await board.addAgent(USER, {
       name: "stew-1",
@@ -397,10 +416,18 @@ describe("Scheduler", () => {
     await scheduler.drain(); // stew-1 onboarding
     runner.dispatches.length = 0;
     for (const title of ["a", "b", "c"]) {
-      await board.createTask(USER, { project: "demo", title });
+      await board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", role: "engineer" }],
+      });
     }
-    // The operations pass runs on its own cadence: nothing until the interval elapses.
     await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain(); // the first stages wake eng-1
+    runner.dispatches.length = 0;
+    // The operations pass runs on its own cadence: nothing until the interval elapses.
     expect((await board.listSignals()).map((s) => s.signal.kind)).toEqual([]);
     advance(5 * 60_000);
     await scheduler.tick();
@@ -433,9 +460,13 @@ describe("Scheduler", () => {
     }
     advance(5 * 60_000);
     await scheduler.tick();
-    await board.createTask(USER, { project: "demo", title: "d" });
-    await board.createTask(USER, { project: "demo", title: "e" });
-    await board.createTask(USER, { project: "demo", title: "f" });
+    for (const title of ["d", "e", "f"]) {
+      await board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", role: "engineer" }],
+      });
+    }
     advance(5 * 60_000);
     await scheduler.tick();
     expect((await board.listSignals()).map((s) => s.signal.kind)).toEqual(["backlog", "backlog"]);
@@ -486,10 +517,11 @@ describe("Scheduler", () => {
 
   it("scales a role within its replica cap when the backlog per member reaches the threshold", async () => {
     const { board, runner, scheduler } = await setup({
-      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
+    const build = [{ name: "build", role: "engineer" }];
     for (const title of ["a", "b", "c"]) {
-      await board.createTask(USER, { project: "demo", title });
+      await board.createTask(USER, { project: "demo", title, stages: build });
     }
     advance(5 * 60_000);
     await scheduler.tick();
@@ -509,12 +541,12 @@ describe("Scheduler", () => {
     // The replica's onboarding turn goes through the usual dispatch.
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
-      ["eng-2", "onboarding"],
-    ]);
+    expect(
+      runner.dispatches.filter((d) => d.agent === "eng-2").map((d) => [d.agent, d.trigger.kind]),
+    ).toEqual([["eng-2", "onboarding"]]);
     // The cap holds: three tasks over two engineers is under the threshold, and two is the cap anyway.
     for (const title of ["d", "e", "f", "g"]) {
-      await board.createTask(USER, { project: "demo", title });
+      await board.createTask(USER, { project: "demo", title, stages: build });
     }
     advance(3_600_000 + 5 * 60_000);
     await scheduler.tick();
@@ -523,7 +555,7 @@ describe("Scheduler", () => {
 
   it("wakes the front desk on every user post, in the society scope until it joins a project", async () => {
     const { board, runner, scheduler } = await setup({
-      timings: { unclaimedTaskMs: 3_600_000, heartbeatMs: 3_600_000 },
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     await scheduler.tick();

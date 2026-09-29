@@ -47,7 +47,7 @@ Setup creates records; only triggers start turns. All of this goes through the a
 export STELLARIS_DATA_DIR=./data
 pnpm stellaris init --name my-society                      # prints the user token once; keep it out of git
 pnpm stellaris role add engineer --purpose "Builds what a stage asks for and commits it on the task's branch."
-pnpm stellaris role add reviewer --purpose "Checks work at gated stages and sends it back when it is unfinished." --triggers heartbeat
+pnpm stellaris role add reviewer --purpose "Checks work at gated stages and sends it back when it is unfinished."
 pnpm stellaris project add demo --repo <git url or path> --on-done merge \
   --plan '[{"name":"build","role":"engineer"},{"name":"review","role":"reviewer","gate":true}]'
 pnpm stellaris agent add eng-1 --role engineer --cli codex -p demo    # or --cli claude
@@ -55,7 +55,7 @@ pnpm stellaris agent add rev-1 --role reviewer --cli claude -p demo --model clau
 pnpm --filter @stellaris/server start                      # the board server; STELLARIS_PORT defaults to 4700
 ```
 
-A new society has three roles: `user`, `steward`, and `concierge`. Roles for the work itself are written for the kind of work a project does, directly with `role add` as above or through a role proposal that the steward or the concierge drafts and you approve. Omit `--repo` for a fresh local repository, and `--on-done merge` for a project whose finished tasks should not land on its default branch.
+A new society has three roles: `user`, `steward`, and `concierge`. A new role wakes on mentions, on stages that become its to take, and on its heartbeat, which fires when it has something unread, holds a stage, or has a stage waiting for it or its role. Roles for the work itself are written for the kind of work a project does, directly with `role add` as above or through a role proposal that the steward or the concierge drafts and you approve. Omit `--repo` for a fresh local repository, and `--on-done merge` for a project whose finished tasks should not land on its default branch.
 
 The server dispatches an onboarding turn for every agent that joined a project, then waits for triggers. While it runs, act as the user through the HTTP API with the user token, so that only one process writes the data directory:
 
@@ -183,7 +183,7 @@ packages/
   shared/          Zod schemas and types: board objects, verbs, events, turn status, triggers, config
   board-core/      the single writer: file storage, invariants, leases, cursors, event log, turn records, provisioning
   board-mcp/       MCP tools over the verbs and the Streamable HTTP handler the server mounts
-  scheduler/       wake rules, debouncing, heartbeats, unclaimed-task checks, operations signals, scaling, lease sweeps, dispatch
+  scheduler/       wake rules, debouncing, heartbeats, waiting-stage signals, operations signals, scaling, lease sweeps, dispatch
   runner-core/     adapter interface, prompt and instruction rendering, git worktrees and merges, `LocalRunner`
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex exec` with JSON events; the app-server client is deferred

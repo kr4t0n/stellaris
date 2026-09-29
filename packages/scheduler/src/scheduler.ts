@@ -43,7 +43,8 @@ export interface SchedulerTimings {
   readonly debounceMs: number;
   readonly userDebounceMs: number;
   readonly heartbeatMs: number;
-  readonly unclaimedTaskMs: number;
+  /** A current stage without a holder for this long is signalled as waiting. */
+  readonly waitingStageMs: number;
   readonly leaseSweepMs: number;
   /** How often operations signals are computed and the scaling rule is applied. */
   readonly opsIntervalMs: number;
@@ -66,7 +67,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   debounceMs: 30_000,
   userDebounceMs: 5_000,
   heartbeatMs: 15 * 60_000,
-  unclaimedTaskMs: 10 * 60_000,
+  waitingStageMs: 10 * 60_000,
   leaseSweepMs: 60_000,
   opsIntervalMs: 5 * 60_000,
   signalRepeatMs: 6 * 3_600_000,
@@ -84,7 +85,7 @@ export const SchedulerTimingsSchema = z
     debounceMs: z.number().nonnegative(),
     userDebounceMs: z.number().nonnegative(),
     heartbeatMs: z.number().positive(),
-    unclaimedTaskMs: z.number().positive(),
+    waitingStageMs: z.number().positive(),
     leaseSweepMs: z.number().positive(),
     opsIntervalMs: z.number().positive(),
     signalRepeatMs: z.number().positive(),
@@ -123,7 +124,8 @@ const PendingSchema = z.object({ dispatch: TurnDispatchSchema, readyAt: z.number
 const StateSchema = z.object({
   cursor: z.string().nullable(),
   lastHeartbeat: z.record(z.string(), z.string()),
-  unclaimedSeen: z.record(z.string(), z.string()),
+  /** Waiting stages already signalled, as `task:stage`, so each is posted once while it waits. */
+  waitingSeen: z.record(z.string(), z.string()).default({}),
   /** Queued dispatches survive a restart; the cursor has already moved past the events that made them. */
   pending: z.record(z.string(), PendingSchema).default({}),
   opsReported: z.record(z.string(), z.string()).default({}),
@@ -156,7 +158,6 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
   "scaled",
 ]);
 
-const UNCLAIMED_TRIGGER = "unclaimed_task";
 const HEARTBEAT_TRIGGER = "heartbeat";
 const OPS_TRIGGER = "ops_event";
 const USER_POST_TRIGGER = "user_post";
@@ -208,7 +209,6 @@ export class Scheduler {
   private state: State = StateSchema.parse({
     cursor: null,
     lastHeartbeat: {},
-    unclaimedSeen: {},
   });
   private loaded = false;
   private ticking = false;
@@ -264,7 +264,7 @@ export class Scheduler {
     await Promise.allSettled([...this.running.values(), ...this.completing]);
   }
 
-  /** One pass: consume events, check heartbeats and unclaimed tasks, run operations, sweep leases, dispatch. */
+  /** One pass: consume events, check heartbeats and waiting stages, run operations, sweep leases, dispatch. */
   async tick(): Promise<void> {
     if (this.ticking) {
       return;
@@ -670,7 +670,13 @@ export class Scheduler {
 
   private enqueue(agent: Name, project: Name, input: TriggerInput, now: number): void {
     const trigger = TriggerSchema.parse(input);
-    const decision = decideWake({ trigger, digestSize: 0, claimsHeld: 0, paused: false });
+    const decision = decideWake({
+      trigger,
+      digestSize: 0,
+      claimsHeld: 0,
+      waitingStages: 0,
+      paused: false,
+    });
     if (!decision.wake) {
       return;
     }
@@ -754,11 +760,20 @@ export class Scheduler {
           { advance: false, limit: 1 },
         );
         const held = await this.board.heldClaims(agent.name);
+        const waiting =
+          project === SOCIETY_SCOPE
+            ? []
+            : (await this.board.openTasks(project)).filter((task) => {
+                const stage = currentStage(task);
+                const named = stage?.agent === agent.name || stage?.role === agent.role;
+                return named && mayHoldStage(agent, task);
+              });
         const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
         const decision = decideWake({
           trigger,
           digestSize: inbox.messages.length,
           claimsHeld: held.length,
+          waitingStages: waiting.length,
           paused: false,
         });
         if (decision.wake) {
@@ -844,8 +859,9 @@ export class Scheduler {
   }
 
   /**
-   * A current stage without a holder past the threshold wakes the project members who may hold it
-   * and whose charter takes waiting work, once per stage, and is posted as a signal.
+   * A current stage without a holder past the threshold is posted to the ops channel once while it
+   * waits. It wakes nobody by itself: its assignees see it on their heartbeat, and the steward
+   * decides whether to replan or to mention someone.
    */
   private async checkWaitingStages(now: number): Promise<void> {
     const stillWaiting = new Set<string>();
@@ -857,47 +873,31 @@ export class Scheduler {
         }
         const key = `${task.id}:${stage.id}`;
         stillWaiting.add(key);
-        if (this.state.unclaimedSeen[key] !== undefined) {
+        if (this.state.waitingSeen[key] !== undefined) {
           continue;
         }
         const age = now - Date.parse(task.stageSince);
-        if (age < this.timings.unclaimedTaskMs) {
+        if (age < this.timings.waitingStageMs) {
           continue;
         }
-        this.state.unclaimedSeen[key] = iso(now);
-        for (const member of await this.board.projectMembers(project.slug)) {
-          if (member.cli === null || !mayHoldStage(member, task)) {
-            continue;
-          }
-          const charter = await this.board.readRole(member.role);
-          if (!charter.wakeTriggers.includes(UNCLAIMED_TRIGGER)) {
-            continue;
-          }
-          this.enqueue(
-            member.name,
-            project.slug,
-            {
-              kind: "unclaimed_task",
-              reason: `stage "${stage.name}" of task ${task.id} has waited too long for a holder`,
-              taskId: task.id,
-            },
-            now,
-          );
-        }
+        this.state.waitingSeen[key] = iso(now);
+        const assignee = stage.agent ?? stage.role ?? "anyone in the project";
         await this.board.publishSignal({
-          kind: "unclaimed_task",
-          key: `unclaimed_task:${key}`,
-          summary: `stage "${stage.name}" of task ${task.id} "${task.title}" in ${project.slug} has waited ${describeDuration(age)} for a holder`,
+          kind: "waiting_stage",
+          key: `waiting_stage:${key}`,
+          summary: `stage "${stage.name}" of task ${task.id} "${task.title}" in ${project.slug}, for ${assignee}, has waited ${describeDuration(age)} for a holder`,
           value: age,
-          threshold: this.timings.unclaimedTaskMs,
+          threshold: this.timings.waitingStageMs,
           project: project.slug,
           taskId: task.id,
+          ...(stage.role === undefined ? {} : { role: stage.role }),
+          ...(stage.agent === undefined ? {} : { agent: stage.agent }),
         });
       }
     }
-    for (const key of Object.keys(this.state.unclaimedSeen)) {
+    for (const key of Object.keys(this.state.waitingSeen)) {
       if (!stillWaiting.has(key)) {
-        delete this.state.unclaimedSeen[key];
+        delete this.state.waitingSeen[key];
       }
     }
   }
@@ -1066,18 +1066,9 @@ export class Scheduler {
     return signals;
   }
 
-  /** Current stages a role answers for: those assigned to it, and unassigned ones when it takes waiting work. */
+  /** The current stages assigned to a role: its load for backlog signals and scaling. */
   private loadFor(role: RoleCharter, tasks: readonly Task[]): number {
-    return tasks.filter((task) => {
-      const stage = inPlay(task) ? currentStage(task) : undefined;
-      if (stage === undefined || stage.agent !== undefined) {
-        return false;
-      }
-      return (
-        stage.role === role.name ||
-        (stage.role === undefined && role.wakeTriggers.includes(UNCLAIMED_TRIGGER))
-      );
-    }).length;
+    return tasks.filter((task) => inPlay(task) && currentStage(task)?.role === role.name).length;
   }
 
   /**

@@ -82,6 +82,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     const backend = new ResidentBackend();
     const runner = new LocalRunner({
       board,
+      runnerName: "server",
       backends: { claude: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
       residentIdleMs: 80,

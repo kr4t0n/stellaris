@@ -140,7 +140,7 @@ There is no interface at the moment. The one built in Phases 3 and 7 was removed
 | `STELLARIS_LOG_LEVEL`                 | `info`               | server; `debug` also logs agent tool calls and the CLI's stderr                                                                                        |
 | `STELLARIS_CONCURRENCY`               | `2`                  | server; simultaneous turns on this machine                                                                                                             |
 | `STELLARIS_TIMINGS`                   | `{}`                 | server; JSON overriding scheduler timings, for example `{"opsIntervalMs":60000,"reflectionMs":3600000}`                                                |
-| `STELLARIS_CAPABILITIES`              | none                 | server; comma-separated capabilities the local runner offers, matched against tasks                                                                    |
+| `STELLARIS_CAPABILITIES`              | none                 | server; comma-separated capabilities the `server` runner offers, matched against tasks                                                                 |
 | `STELLARIS_RESIDENT_IDLE_MS`          | `600000`             | server; how long a resident role's session stays warm after its last turn                                                                              |
 | `STELLARIS_CODEX_SANDBOX`             | `danger-full-access` | server; the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces |
 | `STELLARIS_RECORD_DIR`                | none                 | server; when set, every turn's raw CLI stream is appended there as JSONL, for fixtures                                                                 |
@@ -161,7 +161,7 @@ packages/
   board-core/      the single writer: file storage, invariants, leases, cursors, event log, turn records, provisioning
   board-mcp/       MCP tools over the verbs and the Streamable HTTP handler the server mounts
   scheduler/       wake rules, debouncing, heartbeats, unclaimed-task checks, operations signals, scaling, lease sweeps, dispatch
-  runner-core/     adapter interface, prompt and instruction rendering, git worktrees and merges, the local runner
+  runner-core/     adapter interface, prompt and instruction rendering, git worktrees and merges, `LocalRunner`
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex exec` with JSON events; the app-server client is deferred
 data/              runtime data, ignored by git

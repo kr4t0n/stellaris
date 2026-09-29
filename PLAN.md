@@ -343,7 +343,7 @@ A runner is the unit of execution. It is a small daemon, written in the same Typ
 
 - **Capabilities.** A runner advertises its operating system, the CLIs present, and named tool capabilities such as container tooling, cluster access with the clusters it can reach, or hardware. Projects and tasks may require capabilities. The scheduler routes on them, and credentials never leave the runner that owns them.
 
-- **The local machine is a runner too.** The board server embeds a runner for its own machine that implements the same interface in-process. Remote runners are an implementation of that interface, not a redesign.
+- **The local machine is a runner too.** The board server embeds a runner for its own machine that implements the same interface in-process; its record is named `server`, since `local` would mean a different machine to every runner. Remote runners are an implementation of that interface, not a redesign, and register under names of their own.
 
 - **Linux and Windows.** Both CLIs and the runner run natively on either. A Windows runner advertises its operating system, and its rendered permission configuration follows that CLI's sandboxing on Windows. Path handling lives in the runner, never in the board.
 
@@ -638,7 +638,7 @@ Multiple humans with different approval authority, confidentiality inside one so
 | Storage        | Immutable markdown messages, mutable state behind validated verbs, read-only markdown projection for search, mirrored to remote runners                                                                                                                      |
 | Layers         | One core library owns all writes inside one board server; MCP is an endpoint of that server over Streamable HTTP; interface and scheduler call the library directly                                                                                          |
 | Communication  | Digest injected into the prompt at wake; verbs over MCP with a bearer token per agent; reads from the projection or its mirror; events and status back through the runner connection                                                                         |
-| Runners        | One daemon per machine, outbound WebSocket, capability advertisement and routing, embedded local runner in the server, Linux and Windows, cluster runners as pods                                                                                            |
+| Runners        | One daemon per machine, outbound WebSocket, capability advertisement and routing, an embedded runner named `server` in the board server, Linux and Windows, cluster runners as pods                                                                          |
 | Scheduler      | Dumb. Mentions and claim events wake; subscriptions inform; heartbeat, unclaimed-task, and reflection triggers; runner selection by home and capability; pause switch; per-runner concurrency cap; cost metered but uncapped                                 |
 | Governance     | Steward proposes; user approves merges, hiring, tool grants, reallocation; scaling an existing role is mechanical                                                                                                                                            |
 | Tasks          | Open, claimed, in review, done, blocked, abandoned; claims are leases; done needs reviewer approval and green tests; pull requests where a host exists                                                                                                       |

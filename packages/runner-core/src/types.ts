@@ -13,6 +13,8 @@ export interface AgentSpec {
   readonly agent: Name;
   readonly project: Name;
   readonly cli: CliKind;
+  /** The runner executing the turn; adapters stamp it on `turn_started`. */
+  readonly runner: Name;
   /** The agent-project worktree. */
   readonly cwd: string;
   /** The project's canonical clone the worktree hangs off; git writes its metadata there. */

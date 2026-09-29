@@ -7,6 +7,7 @@ const spec: AgentSpec = {
   agent: "desk",
   project: "society",
   cli: "claude",
+  runner: "r1",
   cwd: "/tmp/home",
   repoDir: "/tmp/home",
   configHome: "/tmp/home",
@@ -100,7 +101,7 @@ function scripted(stallOn: number | null = null) {
 describe("Claude resident sessions", () => {
   it("runs several turns on one streamed query and reports each turn's own cost", async () => {
     const script = scripted();
-    const backend = new ClaudeAgentBackend({ queryFn: script.queryFn, runnerName: "r1" });
+    const backend = new ClaudeAgentBackend({ queryFn: script.queryFn });
     const session = await backend.startResident(spec, start);
 
     const first = await session.runTurn("hello");

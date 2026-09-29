@@ -44,7 +44,7 @@ describe("Board", () => {
     return { board, userToken, eng, rev };
   }
 
-  it("initializes a society with seed roles, channels, a local runner, and a user", async () => {
+  it("initializes a society with seed roles, channels, the server runner, and a user", async () => {
     const { board, userToken } = await society();
     expect((await board.society()).channels).toEqual(["general", "ops", "governance", "decisions"]);
     const roles = (await board.listRoles()).map((role) => role.name).toSorted();
@@ -380,7 +380,7 @@ describe("Board", () => {
     expect((await board.readAgent("user")).subscriptions).toContain("random");
 
     // Runner state changes are recorded and signalled; signals are readable back.
-    const runner = await board.markRunner("local", { status: "connected", clis: ["claude"] });
+    const runner = await board.markRunner("server", { status: "connected", clis: ["claude"] });
     expect(runner.status).toBe("connected");
     await board.publishSignal({
       kind: "backlog",
@@ -543,7 +543,7 @@ describe("Board", () => {
     const turn = {
       agent: "eng-1",
       project: "demo",
-      runner: "local",
+      runner: "server",
       cli: "claude" as const,
       session: "s",
       trigger: { kind: "manual" as const, fromUser: true, reason: "dev" },
@@ -646,7 +646,7 @@ describe("Board", () => {
     const turn = {
       agent: "eng-1",
       project: "demo",
-      runner: "local",
+      runner: "server",
       cli: "claude" as const,
       session: "s",
       trigger: { kind: "reflection" as const, fromUser: false, reason: "scheduled" },

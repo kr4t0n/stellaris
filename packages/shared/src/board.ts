@@ -12,6 +12,9 @@ export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
  */
 export const SOCIETY_SCOPE = "society";
 
+/** The runner embedded in the board server. Runners on other machines register under their own names. */
+export const SERVER_RUNNER = "server";
+
 export const CliKindSchema = z.enum(["claude", "codex"]);
 export type CliKind = z.infer<typeof CliKindSchema>;
 
@@ -185,7 +188,7 @@ export const MemberProposalSchema = z.object({
   role: NameSchema,
   cli: CliKindSchema,
   model: z.string().optional(),
-  homeRunner: NameSchema.default("local"),
+  homeRunner: NameSchema.default(SERVER_RUNNER),
   memberships: z.array(NameSchema).default([]),
   subscriptions: z.array(ChannelRefSchema).default([]),
   seedInstructions: z.string().optional(),

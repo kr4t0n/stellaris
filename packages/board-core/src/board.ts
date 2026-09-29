@@ -26,6 +26,7 @@ import {
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
+  SERVER_RUNNER,
   SkillProposalSchema,
   SOCIETY_CHANNELS,
   SOCIETY_SCOPE,
@@ -200,7 +201,6 @@ const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
-const LOCAL_RUNNER: Name = "local";
 
 const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
   role: [USER_ROLE],
@@ -1907,7 +1907,7 @@ export class Board {
       this.roleCache.set(charter.name, charter);
     }
     const runner: Runner = RunnerSchema.parse({
-      name: LOCAL_RUNNER,
+      name: SERVER_RUNNER,
       os:
         process.platform === "win32"
           ? "windows"
@@ -1921,7 +1921,7 @@ export class Board {
     await writeMarkdown(
       this.paths.runner(runner.name),
       runner,
-      `# ${runner.name}\n\nThe board server's own machine.\n`,
+      `# ${runner.name}\n\nThe runner embedded in the board server.\n`,
     );
     await writeJson(this.paths.pausedFile(), { paused: false });
 
@@ -1931,7 +1931,7 @@ export class Board {
       name: USER_NAME,
       role: USER_ROLE,
       cli: null,
-      homeRunner: LOCAL_RUNNER,
+      homeRunner: SERVER_RUNNER,
       memberships: [],
       subscriptions: [...society.channels],
       status: "active",
@@ -2248,7 +2248,7 @@ export class Board {
       throw new BoardError("ALREADY_EXISTS", `agent ${input.name} already exists`);
     }
     await this.readRole(input.role);
-    await this.readRunner(input.homeRunner ?? LOCAL_RUNNER);
+    await this.readRunner(input.homeRunner ?? SERVER_RUNNER);
     for (const slug of input.memberships ?? []) {
       await this.readProject(slug);
     }
@@ -2277,7 +2277,7 @@ export class Board {
       role: input.role,
       cli: input.cli,
       ...(input.model === undefined ? {} : { model: input.model }),
-      homeRunner: input.homeRunner ?? LOCAL_RUNNER,
+      homeRunner: input.homeRunner ?? SERVER_RUNNER,
       memberships,
       subscriptions,
       status: "active",

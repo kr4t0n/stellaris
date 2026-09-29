@@ -42,6 +42,7 @@ describe("Phase 1 exit criterion", () => {
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
       board,
+      runnerName: "server",
       backends: { claude: backend, codex: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
     });
@@ -146,6 +147,7 @@ describe("Phase 5 exit criterion", () => {
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
       board,
+      runnerName: "server",
       backends: { claude: backend, codex: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
       residentIdleMs: 60_000,
@@ -250,6 +252,7 @@ describe("Phase 4 exit criterion", () => {
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
       board,
+      runnerName: "server",
       backends: { claude: backend, codex: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
     });
@@ -374,6 +377,7 @@ describe("Phase 6 exit criterion", () => {
     const backend = new ScriptedBackend(app);
     const runner = new LocalRunner({
       board,
+      runnerName: "server",
       backends: { claude: backend, codex: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
     });

@@ -106,7 +106,7 @@ describe("board server routes", () => {
       .parse(await (await app.request("/api/projects/demo/dashboard", { headers })).json());
     expect(dashboard.body).toContain("dashboard");
     expect(await (await app.request("/api/runners", { headers })).json()).toMatchObject([
-      { name: "local" },
+      { name: "server" },
     ]);
     expect(
       z
@@ -248,7 +248,7 @@ describe("board server routes", () => {
     const turn = {
       agent: "eng-1",
       project: "demo",
-      runner: "local",
+      runner: "server",
       cli: "claude" as const,
       session: "s",
       trigger: { kind: "mention" as const, from: "user", fromUser: true, reason: "asked" },

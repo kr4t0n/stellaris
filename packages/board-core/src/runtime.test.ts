@@ -90,7 +90,7 @@ describe("Board runtime support", () => {
     const record = {
       agent: "eng-1",
       project: "demo",
-      runner: "local",
+      runner: "server",
       cli: "claude" as const,
       session: "11111111-1111-4111-8111-111111111111",
       trigger: { kind: "manual" as const, fromUser: true, reason: "test" },

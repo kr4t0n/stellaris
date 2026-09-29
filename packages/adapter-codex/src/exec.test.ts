@@ -57,6 +57,7 @@ describe("CodexExecBackend", () => {
         agent: "eng-1",
         project: "demo",
         cli: "codex",
+        runner: "server",
         cwd: "/tmp/wt",
         repoDir: "/tmp/repo",
         configHome: home,

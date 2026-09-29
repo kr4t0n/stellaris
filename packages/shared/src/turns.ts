@@ -42,7 +42,7 @@ export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 export const TurnRecordSchema = z.object({
   agent: NameSchema,
   project: NameSchema,
-  runner: NameSchema.default("local"),
+  runner: NameSchema,
   cli: CliKindSchema.nullable(),
   session: z.string().nullable(),
   trigger: TriggerSchema,

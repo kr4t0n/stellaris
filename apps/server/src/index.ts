@@ -4,7 +4,7 @@ import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { Board } from "@stellaris/board-core";
 import { LocalRunner } from "@stellaris/runner-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
-import { loadServerConfig } from "@stellaris/shared";
+import { loadServerConfig, SERVER_RUNNER } from "@stellaris/shared";
 import pino from "pino";
 import { createApp } from "./app.js";
 import { TurnHub } from "./turn-hub.js";
@@ -19,6 +19,7 @@ const turns = new TurnHub();
 
 const runner = new LocalRunner({
   board,
+  runnerName: SERVER_RUNNER,
   mcpUrl,
   backends: {
     claude: new ClaudeAgentBackend({
@@ -77,7 +78,11 @@ const capabilities = (process.env["STELLARIS_CAPABILITIES"] ?? "")
   .split(",")
   .map((item) => item.trim())
   .filter((item) => item.length > 0);
-await board.markRunner("local", { status: "connected", clis: ["claude", "codex"], capabilities });
+await board.markRunner(SERVER_RUNNER, {
+  status: "connected",
+  clis: ["claude", "codex"],
+  capabilities,
+});
 await scheduler.start();
 log.info({ concurrency, timings }, "scheduler started");
 
@@ -85,7 +90,7 @@ const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns");
   await scheduler.stop();
   await runner.close();
-  await board.markRunner("local", { status: "disconnected" }).catch((error: unknown) => {
+  await board.markRunner(SERVER_RUNNER, { status: "disconnected" }).catch((error: unknown) => {
     log.warn({ error: String(error) }, "could not record runner shutdown");
   });
   server.close();

@@ -7,6 +7,7 @@ import {
   CliKindSchema,
   parseChannelRef,
   ProposalKindSchema,
+  SERVER_RUNNER,
   TaskStatusSchema,
 } from "@stellaris/shared";
 
@@ -112,7 +113,7 @@ agent
   .requiredOption("--role <role>", "role charter name, for example engineer or reviewer")
   .option("--cli <cli>", "claude or codex")
   .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
-  .option("--runner <name>", "home runner", "local")
+  .option("--runner <name>", "home runner", SERVER_RUNNER)
   .option("-p, --project <slug...>", "project memberships")
   .action(
     async (

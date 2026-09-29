@@ -8,6 +8,7 @@ const spec: AgentSpec = {
   agent: "desk",
   project: "society",
   cli: "codex",
+  runner: "r1",
   cwd: "/tmp/home",
   repoDir: "/tmp/home",
   configHome: "/tmp/home",
@@ -160,7 +161,7 @@ function fakeAppServer(): {
 describe("Codex app-server resident sessions", () => {
   it("initializes, opens a thread, and runs turns whose items become board events", async () => {
     const fake = fakeAppServer();
-    const backend = new CodexExecBackend({ spawnAppServer: fake.spawn, runnerName: "r1" });
+    const backend = new CodexExecBackend({ spawnAppServer: fake.spawn });
     const session = await backend.startResident(spec, start);
     expect(session.session).toBe("thread-7");
 

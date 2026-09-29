@@ -31,7 +31,7 @@ describe("buildTurnPrompt", () => {
       lastTurn: {
         agent: "eng-1",
         project: "demo",
-        runner: "local",
+        runner: "server",
         cli: "claude",
         session: "s",
         trigger: TriggerSchema.parse({ kind: "heartbeat" }),
@@ -115,7 +115,7 @@ describe("buildTurnPrompt", () => {
             name: "eng-1",
             role: "engineer",
             cli: "codex",
-            homeRunner: "local",
+            homeRunner: "server",
             status: "active",
             resident: false,
             skills: ["uv-setup"],

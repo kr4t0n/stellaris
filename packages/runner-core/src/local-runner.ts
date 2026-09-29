@@ -40,7 +40,7 @@ export interface LocalRunnerOptions {
   readonly backends: Partial<Record<CliKind, AgentBackend>>;
   /** Where agents reach the board's MCP endpoint, for example http://127.0.0.1:4700/mcp */
   readonly mcpUrl: string;
-  readonly runnerName?: Name | undefined;
+  readonly runnerName: Name;
   readonly turnTimeoutMs?: number | undefined;
   readonly maxTurns?: number | undefined;
   /** How long a resident session stays warm after its last turn before the runner lets it go cold. */
@@ -88,7 +88,7 @@ export class LocalRunner {
     this.board = options.board;
     this.backends = options.backends;
     this.mcpUrl = options.mcpUrl;
-    this.runnerName = options.runnerName ?? "local";
+    this.runnerName = options.runnerName;
     this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
     this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
     this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
@@ -188,6 +188,7 @@ export class LocalRunner {
       agent: agent.name,
       project: dispatch.project,
       cli: agent.cli,
+      runner: this.runnerName,
       cwd: worktree,
       repoDir,
       configHome: home,

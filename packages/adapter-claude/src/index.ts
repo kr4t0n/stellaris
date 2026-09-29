@@ -52,7 +52,6 @@ export interface ClaudeBackendOptions {
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;
   readonly stderr?: ((line: string) => void) | undefined;
   readonly pathToClaudeCodeExecutable?: string | undefined;
-  readonly runnerName?: string | undefined;
   /** Directory to append raw SDK message streams to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
   readonly queryFn?: QueryFn | undefined;
@@ -84,7 +83,7 @@ interface TurnState {
 
 interface HandlerContext {
   readonly agent: string;
-  readonly runnerName: string;
+  readonly runner: string;
   /** Cold turns announce themselves on the SDK's init message; resident turns announce per prompt. */
   readonly announceOnInit: boolean;
 }
@@ -169,7 +168,7 @@ function handleMessage(
             type: "turn_started",
             agent: context.agent,
             session: message.session_id,
-            runner: context.runnerName,
+            runner: context.runner,
             model: message.model,
           });
         }
@@ -411,7 +410,7 @@ class ClaudeResident implements ResidentSession {
       type: "turn_started",
       agent: this.context.agent,
       session: this.session,
-      runner: this.context.runnerName,
+      runner: this.context.runner,
       ...(this.model === undefined ? {} : { model: this.model }),
     });
 
@@ -492,7 +491,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     const state = freshState();
     const context: HandlerContext = {
       agent: request.spec.agent,
-      runnerName: this.options.runnerName ?? "local",
+      runner: request.spec.runner,
       announceOnInit: true,
     };
 
@@ -549,7 +548,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     };
     const context: HandlerContext = {
       agent: spec.agent,
-      runnerName: this.options.runnerName ?? "local",
+      runner: spec.runner,
       announceOnInit: false,
     };
     const record =

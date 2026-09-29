@@ -33,7 +33,7 @@ class FakeRunner implements TurnRunner {
     const record: TurnRecord = {
       agent: dispatch.agent,
       project: dispatch.project,
-      runner: "local",
+      runner: "server",
       cli: "claude",
       session: "s",
       trigger: dispatch.trigger,

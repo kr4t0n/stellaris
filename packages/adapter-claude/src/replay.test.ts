@@ -46,6 +46,7 @@ const request: TurnRequest = {
     agent: "eng-1",
     project: "demo",
     cli: "claude",
+    runner: "server",
     cwd: "/tmp/wt",
     repoDir: "/tmp/repo",
     configHome: "/tmp/home",

@@ -46,7 +46,6 @@ export interface AppServerSessionOptions {
   readonly extraConfig?: readonly string[] | undefined;
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;
   readonly stderr?: ((line: string) => void) | undefined;
-  readonly runnerName?: string | undefined;
   readonly clientVersion?: string | undefined;
 }
 
@@ -485,7 +484,7 @@ export class CodexAppServerSession implements ResidentSession {
       type: "turn_started",
       agent: this.spec.agent,
       session: this.session,
-      runner: this.options.runnerName ?? "local",
+      runner: this.spec.runner,
       ...(this.model === undefined ? {} : { model: this.model }),
     });
 

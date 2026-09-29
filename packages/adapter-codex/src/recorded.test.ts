@@ -42,6 +42,7 @@ describe("recorded Codex stream", () => {
         agent: "eng-1",
         project: "demo",
         cli: "codex",
+        runner: "server",
         cwd: home,
         repoDir: home,
         configHome: home,

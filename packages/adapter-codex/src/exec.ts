@@ -52,7 +52,6 @@ export interface CodexExecOptions {
   readonly stderr?: ((line: string) => void) | undefined;
   /** Directory to append raw JSONL streams to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
-  readonly runnerName?: string | undefined;
   readonly spawn?: SpawnCodex | undefined;
   /** Spawns `codex app-server` for resident sessions; injectable for tests. */
   readonly spawnAppServer?: SpawnAppServer | undefined;
@@ -134,7 +133,6 @@ export class CodexExecBackend implements AgentBackend {
           : { extraConfig: this.options.extraConfig }),
         ...(this.options.env === undefined ? {} : { env: this.options.env }),
         ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),
-        ...(this.options.runnerName === undefined ? {} : { runnerName: this.options.runnerName }),
       },
       spec,
       start,
@@ -209,7 +207,7 @@ export class CodexExecBackend implements AgentBackend {
             type: "turn_started",
             agent: request.spec.agent,
             session: parsed.threadId,
-            runner: this.options.runnerName ?? "local",
+            runner: request.spec.runner,
           });
         }
         if (parsed.usage !== undefined) usage = parsed.usage;

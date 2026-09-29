@@ -1,0 +1,68 @@
+@import "tailwindcss";
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/onest";
+@import "@fontsource-variable/fira-code";
+
+/* The argus dark palette: near-black surfaces, hairline borders, four foreground steps. */
+@theme {
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Onest Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Fira Code Variable", ui-monospace, monospace;
+
+  --color-surface-0: hsl(0 0% 4%);
+  --color-surface-1: hsl(0 0% 9%);
+  --color-surface-2: hsl(0 0% 15%);
+  --color-line: hsl(0 0% 12%);
+  --color-line-strong: hsl(0 0% 20%);
+  --color-fg-primary: hsl(0 0% 96%);
+  --color-fg-secondary: hsl(0 0% 83%);
+  --color-fg-tertiary: hsl(0 0% 64%);
+  --color-fg-muted: hsl(0 0% 45%);
+
+  --color-claude: #fb923c;
+  --color-codex: #10b981;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface-0 font-sans text-fg-primary;
+    color-scheme: dark;
+  }
+
+  ::selection {
+    background-color: hsl(0 0% 25%);
+    color: hsl(0 0% 98%);
+  }
+}
+
+@layer components {
+  .text-display {
+    @apply font-display text-base font-semibold tracking-tight text-fg-primary;
+  }
+  .text-title {
+    @apply text-sm font-medium tracking-tight text-fg-primary;
+  }
+  .text-body {
+    @apply text-sm leading-relaxed text-fg-primary;
+  }
+  .text-meta {
+    @apply text-xs text-fg-tertiary;
+  }
+  .text-caps {
+    @apply text-[11px] font-semibold text-fg-secondary;
+  }
+
+  .card {
+    @apply rounded-lg bg-surface-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_4px_12px_-4px_rgba(0,0,0,0.5)];
+  }
+
+  .brand-dot {
+    @apply size-2 rounded-full bg-emerald-500/80 ring-1 ring-emerald-400/15;
+  }
+}

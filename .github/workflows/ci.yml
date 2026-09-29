@@ -20,6 +20,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Build precedes lint: type-aware rules need the declaration files of workspace packages.
       - run: pnpm build
+      - run: pnpm build:web
       - run: pnpm lint
       - run: pnpm fmt:check
       - run: pnpm test

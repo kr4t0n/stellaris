@@ -6,13 +6,15 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b",
+    "build:web": "pnpm --filter @stellaris/web build",
+    "web:dev": "pnpm --filter @stellaris/web dev",
     "clean": "tsc -b --clean",
     "lint": "oxlint --type-aware",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm build && pnpm lint && pnpm fmt:check && pnpm test",
+    "check": "pnpm build && pnpm build:web && pnpm lint && pnpm fmt:check && pnpm test",
     "stellaris": "node apps/cli/dist/index.js"
   },
   "devDependencies": {

@@ -77,7 +77,9 @@ function renderSkillsIndex(skills: readonly Skill[]): string[] {
     ...skills.map(
       (skill) =>
         `- ${skill.name} (${skill.scope === "own" ? "yours" : "society"}): ${
-          skill.summary.length === 0 ? "no summary" : skill.summary
+          skill.summary.trim().length === 0
+            ? "no summary"
+            : skill.summary.trim().replace(/\.+$/, "")
         }. File: ${skill.path}`,
     ),
   ];

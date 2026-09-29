@@ -56,7 +56,7 @@ describe("config-home rendering", () => {
       skills: [
         {
           name: "uv-setup",
-          summary: "Set up a uv project",
+          summary: "Set up a uv project.",
           scope: "own",
           path: "/data/agents/eng-1/skills/uv-setup/SKILL.md",
         },

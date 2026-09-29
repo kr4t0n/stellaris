@@ -192,6 +192,9 @@ const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
 /** Roles that curate society knowledge, the tier every citizen reads. */
 const CURATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward"];
 
+/** The heading under which a member's own seed instructions live in its role file. */
+const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
+
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
@@ -368,7 +371,7 @@ export class Board {
     await ensureDir(this.paths.societyKnowledge());
     for (const charter of SEED_ROLES) {
       if (await exists(this.paths.role(charter.name))) {
-        await this.grantSeedVerbs(charter);
+        await this.alignSeedRole(charter);
         continue;
       }
       await writeMarkdown(
@@ -389,30 +392,46 @@ export class Board {
   }
 
   /**
-   * Verbs are added, never renamed, so a verb the seed charter newly grants is added to an existing
-   * society's copy of that role on open. Nothing else in the charter is touched: the owner's edits
-   * and approved role proposals stand, and a verb the owner removed by hand is added back only when
-   * a later seed grants it again, which is the same event.
+   * An existing society's copy of a seed role follows the seed in two ways on open. Verbs are added,
+   * never renamed, so a verb the seed newly grants is added. A field the copy has never set, because
+   * the file predates it, takes the seed's value rather than the schema's default. Everything the
+   * owner or an approved proposal did set stands. The owner charter is the exception: nobody may
+   * edit it, so it is the seed's in full.
    */
-  private async grantSeedVerbs(seed: RoleCharter): Promise<void> {
-    const current = await this.readRole(seed.name);
-    const missing = seed.verbs.filter((verb) => !current.verbs.includes(verb));
-    if (missing.length === 0) {
+  private async alignSeedRole(seed: RoleCharter): Promise<void> {
+    const file = this.paths.role(seed.name);
+    const raw = await readMarkdown(file, z.record(z.string(), z.unknown()));
+    const current = RoleCharterSchema.parse(raw.data);
+    const verbsAdded = seed.verbs.filter((verb) => !current.verbs.includes(verb));
+    // Keys the seed leaves unset are not aligned; the YAML writer refuses undefined values anyway.
+    const fieldsAligned = RoleCharterSchema.keyof().options.filter((key) =>
+      key === "verbs" || seed[key] === undefined
+        ? false
+        : seed.name === OWNER_ROLE
+          ? JSON.stringify(seed[key]) !== JSON.stringify(current[key])
+          : !(key in raw.data),
+    );
+    if (verbsAdded.length === 0 && fieldsAligned.length === 0) {
       return;
     }
-    const charter = RoleCharterSchema.parse({ ...current, verbs: [...current.verbs, ...missing] });
-    const body = (await readMarkdown(this.paths.role(charter.name), RoleCharterSchema)).body;
-    await writeMarkdown(this.paths.role(charter.name), charter, body);
+    const charter = RoleCharterSchema.parse({
+      ...current,
+      ...Object.fromEntries(fieldsAligned.map((key) => [key, seed[key]])),
+      verbs: [...current.verbs, ...verbsAdded],
+    });
+    await writeMarkdown(file, charter, `# ${charter.name}\n\n${charter.purpose}\n`);
     this.roleCache.set(charter.name, charter);
     await this.events.append("role.added", OWNER_NAME, {
       name: charter.name,
       replaced: true,
       verbs: charter.verbs,
-      verbsAdded: missing,
+      verbsAdded,
+      fieldsAligned,
       maxReplicas: charter.maxReplicas,
       backlogThreshold: charter.backlogThreshold,
       seeded: true,
     });
+    await this.refreshAgentRoles(charter);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1891,21 +1910,44 @@ export class Board {
     return ownerToken;
   }
 
+  /** The charter as the citizen reads it: its purpose, the routing rule for lessons, and its own seed instructions. */
+  private async writeAgentRole(agent: Name, charter: RoleCharter, seed: string): Promise<void> {
+    await writeMarkdown(
+      this.paths.agentRole(agent),
+      { role: charter.name, agent },
+      `# ${agent}, ${charter.name}\n\n${charter.purpose}\n\n` +
+        `Route every lesson with one question: about me, my craft, or the owner, it goes in memory/core.md; ` +
+        `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n` +
+        (seed.length === 0 ? "" : `\n${SEED_INSTRUCTIONS_HEADING}\n\n${seed}\n`),
+    );
+  }
+
+  /**
+   * A charter change reaches every active member of the role: each one's role file is rewritten
+   * from the new charter, keeping the seed instructions that are the member's own.
+   */
+  private async refreshAgentRoles(charter: RoleCharter): Promise<void> {
+    for (const agent of await this.listAgents()) {
+      if (agent.role !== charter.name || agent.status !== "active") {
+        continue;
+      }
+      const file = this.paths.agentRole(agent.name);
+      const body = (await exists(file))
+        ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
+        : "";
+      const at = body.indexOf(`\n${SEED_INSTRUCTIONS_HEADING}\n`);
+      const seed = at < 0 ? "" : body.slice(at + SEED_INSTRUCTIONS_HEADING.length + 2).trim();
+      await this.writeAgentRole(agent.name, charter, seed);
+    }
+  }
+
   private async writeAgentHome(
     agent: Agent,
     charter: RoleCharter,
     seedInstructions?: string,
   ): Promise<void> {
     await writeJson(this.paths.agentFile(agent.name), agent);
-    const seed = seedInstructions?.trim() ?? "";
-    await writeMarkdown(
-      this.paths.agentRole(agent.name),
-      { role: charter.name, agent: agent.name },
-      `# ${agent.name}, ${charter.name}\n\n${charter.purpose}\n\n` +
-        `Route every lesson with one question: about me, my craft, or the owner, it goes in memory/core.md; ` +
-        `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n` +
-        (seed.length === 0 ? "" : `\n## Seed instructions\n\n${seed}\n`),
-    );
+    await this.writeAgentRole(agent.name, charter, seedInstructions?.trim() ?? "");
     await ensureDir(this.paths.agentMemory(agent.name));
     if (!(await exists(this.paths.agentMemoryCore(agent.name)))) {
       await writeMarkdown(
@@ -2301,6 +2343,9 @@ export class Board {
       backlogThreshold: charter.backlogThreshold,
       ...meta,
     });
+    if (replaced) {
+      await this.refreshAgentRoles(charter);
+    }
     return { charter, replaced };
   }
 

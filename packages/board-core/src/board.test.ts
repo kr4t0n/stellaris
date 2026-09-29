@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -335,11 +335,14 @@ describe("Board", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const engineer = await board.setRoleCharter(OWNER, {
       ...(await board.readRole("engineer")),
+      purpose: "Builds and ships, tests first.",
       maxReplicas: 3,
       backlogThreshold: 2,
     });
     expect(engineer.maxReplicas).toBe(3);
     expect((await board.readRole("engineer")).backlogThreshold).toBe(2);
+    // The change reaches the members' own role files, which is what their turns render.
+    expect(await board.readAgentRoleBody("eng-1")).toContain("Builds and ships, tests first.");
 
     // A replica is cloned from the newest active member of the role on the project.
     const replica = await board.addReplica(OWNER, { project: "demo", role: "engineer" });
@@ -409,8 +412,14 @@ describe("Board", () => {
     await expect(board.setPaused(ENG, false)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("reopens with the token index intact, seeding roles and verbs an older build did not know", async () => {
+  it("reopens with the token index intact, aligning seed roles an older build wrote differently", async () => {
     const { board, eng } = await society();
+    await board.addAgent(OWNER, {
+      name: "stew",
+      role: "steward",
+      cli: "claude",
+      seedInstructions: "Read the ops channel first.",
+    });
     await rm(board.paths.role("concierge"));
     await rm(board.paths.members(), { recursive: true, force: true });
     // A charter written before a verb existed: the owner's other edits must survive the grant.
@@ -420,6 +429,20 @@ describe("Board", () => {
       verbs: engineer.verbs.filter((verb) => verb !== "write_knowledge"),
       maxReplicas: 4,
     });
+    // A charter written before a field existed: the seed's value applies, not the schema's default.
+    const stewardFile = board.paths.role("steward");
+    await writeFile(
+      stewardFile,
+      (await readFile(stewardFile, "utf8")).replace("societyScope: true\n", ""),
+      "utf8",
+    );
+    // The owner charter is nobody's to edit, so it is the seed's in full.
+    const ownerFile = board.paths.role("owner");
+    await writeFile(
+      ownerFile,
+      (await readFile(ownerFile, "utf8")).replace("reflects: false\n", "reflects: true\n"),
+      "utf8",
+    );
     const reopened = await Board.open(dir);
     expect(reopened.resolveToken(eng.token)).toEqual(ENG);
     expect((await reopened.readRole("concierge")).resident).toBe(true);
@@ -427,20 +450,34 @@ describe("Board", () => {
     const granted = await reopened.readRole("engineer");
     expect(granted.verbs).toContain("write_knowledge");
     expect(granted.maxReplicas).toBe(4);
+    expect((await reopened.readRole("steward")).societyScope).toBe(true);
+    expect((await reopened.readRole("owner")).reflects).toBe(false);
     const seeded = (await reopened.readEvents(null)).filter(
       (event) => event.type === "role.added" && event.payload["seeded"] === true,
     );
-    expect(seeded.map((event) => [event.payload["name"], event.payload["verbsAdded"]])).toEqual([
-      ["engineer", ["write_knowledge"]],
-      ["concierge", undefined],
+    expect(
+      seeded.map((event) => [
+        event.payload["name"],
+        event.payload["verbsAdded"],
+        event.payload["fieldsAligned"],
+      ]),
+    ).toEqual([
+      ["owner", [], ["reflects"]],
+      ["engineer", ["write_knowledge"], []],
+      ["steward", [], ["societyScope"]],
+      ["concierge", undefined, undefined],
     ]);
-    // Opening again grants nothing more.
+    // The members' own role files follow, seed instructions included.
+    const stewRole = await reopened.readAgentRoleBody("stew");
+    expect(stewRole).toContain("# stew, steward");
+    expect(stewRole).toContain("## Seed instructions\n\nRead the ops channel first.");
+    // Opening again aligns nothing more.
     await Board.open(dir);
     expect(
       (await reopened.readEvents(null)).filter(
         (event) => event.type === "role.added" && event.payload["seeded"] === true,
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
     await expect(Board.open(path.join(dir, "nowhere"))).rejects.toMatchObject({
       code: "NOT_FOUND",
     });

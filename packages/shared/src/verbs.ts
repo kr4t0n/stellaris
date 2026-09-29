@@ -59,6 +59,12 @@ export const VerbInputs = {
   }),
   join_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
   leave_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
+  write_knowledge: z.object({
+    /** A project you belong to, or null for society knowledge, which the steward and the owner curate. */
+    project: NameSchema.nullable().default(null),
+    topic: NameSchema,
+    body: z.string().min(1),
+  }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -90,4 +96,6 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
+  write_knowledge:
+    "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and owner). Not a message; use post_message for those.",
 };

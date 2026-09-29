@@ -21,6 +21,7 @@ export const VERB_NAMES = [
   "create_project",
   "join_project",
   "leave_project",
+  "write_knowledge",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -47,6 +48,8 @@ export const RoleCharterSchema = z.object({
   resident: z.boolean().default(false),
   /** The role may take turns in the society scope, outside any project, with its home as the working directory. */
   societyScope: z.boolean().default(false),
+  /** The scheduler wakes the role for a reflection turn on the society's cadence. Off for humans. */
+  reflects: z.boolean().default(true),
 });
 export type RoleCharter = z.infer<typeof RoleCharterSchema>;
 export type RoleCharterInput = z.input<typeof RoleCharterSchema>;
@@ -70,6 +73,7 @@ const MEMBER_VERBS: readonly VerbName[] = [
   "propose",
   "join_project",
   "leave_project",
+  "write_knowledge",
 ];
 
 const GOVERNANCE_VERBS: readonly VerbName[] = ["approve", "reject"];
@@ -88,6 +92,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     backlogThreshold: 3,
     resident: false,
     societyScope: true,
+    reflects: false,
   },
   {
     name: "engineer",
@@ -100,6 +105,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     backlogThreshold: 3,
     resident: false,
     societyScope: false,
+    reflects: true,
   },
   {
     name: "reviewer",
@@ -112,6 +118,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     backlogThreshold: 3,
     resident: false,
     societyScope: false,
+    reflects: true,
   },
   {
     name: "steward",
@@ -124,6 +131,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     backlogThreshold: 3,
     resident: false,
     societyScope: true,
+    reflects: true,
   },
   {
     name: "concierge",
@@ -136,5 +144,6 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     backlogThreshold: 3,
     resident: true,
     societyScope: true,
+    reflects: true,
   },
 ];

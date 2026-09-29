@@ -23,6 +23,8 @@ export const BOARD_EVENT_TYPES = [
   "agent.retired",
   "agent.joined",
   "agent.left",
+  "knowledge.written",
+  "skill.promoted",
   "runner.changed",
   "ops.signal",
   "paused.changed",

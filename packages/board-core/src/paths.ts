@@ -33,6 +33,19 @@ export class BoardPaths {
   societyKnowledge(): string {
     return path.join(this.society, "knowledge");
   }
+  societyKnowledgeFile(topic: Name): string {
+    return path.join(this.societyKnowledge(), `${topic}.md`);
+  }
+  /** Skills promoted to the society, one directory per skill holding SKILL.md. */
+  societySkills(): string {
+    return path.join(this.society, "skills");
+  }
+  societySkill(name: Name): string {
+    return path.join(this.societySkills(), name);
+  }
+  societySkillFile(name: Name): string {
+    return path.join(this.societySkill(name), "SKILL.md");
+  }
   roles(): string {
     return path.join(this.society, "roles");
   }
@@ -94,6 +107,9 @@ export class BoardPaths {
   projectKnowledge(slug: Name): string {
     return path.join(this.project(slug), "knowledge");
   }
+  projectKnowledgeFile(slug: Name, topic: Name): string {
+    return path.join(this.projectKnowledge(slug), `${topic}.md`);
+  }
   dashboard(slug: Name): string {
     return path.join(this.project(slug), "dashboard.md");
   }
@@ -133,6 +149,12 @@ export class BoardPaths {
   }
   agentSkills(name: Name): string {
     return path.join(this.agent(name), "skills");
+  }
+  agentSkill(name: Name, skill: Name): string {
+    return path.join(this.agentSkills(name), skill);
+  }
+  agentSkillFile(name: Name, skill: Name): string {
+    return path.join(this.agentSkill(name, skill), "SKILL.md");
   }
   agentProjects(name: Name): string {
     return path.join(this.agent(name), "projects");

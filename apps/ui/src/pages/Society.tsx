@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BoardEvent, RoleCharter } from "@stellaris/shared";
+import type { BoardEvent, Member, RoleCharter } from "@stellaris/shared";
 import { useState, type FormEvent } from "react";
 import { api, type PublicAgent } from "../api/client.js";
+import { Markdown } from "../components/Markdown.js";
 import {
   Button,
   CharterRows,
@@ -114,6 +115,74 @@ function Signals() {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The society's shared memory: promoted skills, and the knowledge topics every citizen reads. */
+function SharedMemory({ members }: { members: readonly Member[] }) {
+  const skills = useQuery({ queryKey: ["skills"], queryFn: api.skills });
+  const knowledge = useQuery({
+    queryKey: ["knowledge", "society"],
+    queryFn: () => api.knowledge(null),
+  });
+  const withSkills = members.filter((member) => member.skills.length > 0);
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div>
+        <h3 className="mb-2 text-xs uppercase tracking-wide text-board-muted">Society skills</h3>
+        {(skills.data ?? []).length === 0 ? (
+          <Empty>
+            No skills promoted yet. A citizen proposes one; the steward or the owner approves it.
+          </Empty>
+        ) : (
+          <ul className="space-y-1 text-sm">
+            {(skills.data ?? []).map((skill) => (
+              <li
+                key={skill.name}
+                className="rounded border border-board-border bg-board-bg/60 px-2 py-1"
+              >
+                <span className="font-semibold">{skill.name}</span>
+                <span className="ml-2 text-board-muted">{skill.summary || "no summary"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {withSkills.length === 0 ? null : (
+          <ul className="mt-2 space-y-1 text-xs text-board-muted">
+            {withSkills.map((member) => (
+              <li key={member.name}>
+                {member.name} keeps: {member.skills.join(", ")}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div>
+        <h3 className="mb-2 text-xs uppercase tracking-wide text-board-muted">Society knowledge</h3>
+        {(knowledge.data ?? []).length === 0 ? (
+          <Empty>
+            No topics yet. The steward writes norms and other society-wide knowledge here.
+          </Empty>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {(knowledge.data ?? []).map((topic) => (
+              <li
+                key={topic.topic}
+                className="rounded border border-board-border bg-board-bg/60 px-2 py-1"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{topic.topic}</span>
+                  <span className="text-xs text-board-muted">
+                    by {topic.updatedBy} · {timeAgo(topic.updatedAt)}
+                  </span>
+                </div>
+                <Markdown>{topic.body}</Markdown>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -256,11 +325,25 @@ export function SocietyPage() {
   const activeMembers = members.filter((agent) => agent.status === "active");
   const [wakeAgent, setWakeAgent] = useState("");
   const [wakeProject, setWakeProject] = useState("");
+  const [wakeKind, setWakeKind] = useState<"manual" | "reflection">("manual");
   const wake = useMutation({
-    mutationFn: () => api.wake(wakeAgent, wakeProject, "manual wake from the board"),
+    mutationFn: () =>
+      api.wake(
+        wakeAgent,
+        wakeProject,
+        wakeKind === "reflection" ? "reflection from the board" : "manual wake from the board",
+        wakeKind,
+      ),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["scheduler"] }),
   });
   const agentForWake = activeMembers.find((agent) => agent.name === wakeAgent);
+  const wakeScopes = [
+    ...(agentForWake?.memberships ?? (projects.data ?? []).map((project) => project.slug)),
+    ...(agentForWake !== undefined &&
+    (roles.data ?? []).find((role) => role.name === agentForWake.role)?.societyScope === true
+      ? ["society"]
+      : []),
+  ];
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -332,20 +415,30 @@ export function SocietyPage() {
               className={inputClass}
             >
               <option value="">choose</option>
-              {(
-                agentForWake?.memberships ?? (projects.data ?? []).map((project) => project.slug)
-              ).map((slug) => (
+              {wakeScopes.map((slug) => (
                 <option key={slug} value={slug}>
                   {slug}
                 </option>
               ))}
             </select>
           </Field>
+          <Field label="Turn">
+            <select
+              value={wakeKind}
+              onChange={(event) =>
+                setWakeKind(event.target.value === "reflection" ? "reflection" : "manual")
+              }
+              className={inputClass}
+            >
+              <option value="manual">working turn</option>
+              <option value="reflection">reflection</option>
+            </select>
+          </Field>
           <Button
             type="submit"
             disabled={wake.isPending || wakeAgent.length === 0 || wakeProject.length === 0}
           >
-            Wake now
+            {wakeKind === "reflection" ? "Reflect now" : "Wake now"}
           </Button>
           <ErrorNote error={wake.error ?? toggle.error} />
         </form>
@@ -385,6 +478,10 @@ export function SocietyPage() {
           </tbody>
         </table>
         <RetireForm members={members} />
+      </Panel>
+
+      <Panel title="Shared memory">
+        <SharedMemory members={roster.data ?? []} />
       </Panel>
 
       <Panel title="Roles">

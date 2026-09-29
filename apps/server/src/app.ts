@@ -109,6 +109,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
   );
+  // The shared memory tiers: the society's knowledge topics and its promoted skills.
+  api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
+  api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
 
   // Governance the owner does directly: retirement, charters, channels. Proposals cover the rest.
   api.post("/agents/:name/retire", async (c) => {
@@ -137,6 +140,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/projects/:slug/tasks", async (c) => c.json(await board.listTasks(c.req.param("slug"))));
   api.get("/projects/:slug/dashboard", async (c) =>
     c.json(await board.readDashboard(c.req.param("slug"))),
+  );
+  api.get("/projects/:slug/knowledge", async (c) =>
+    c.json(await board.listKnowledge(c.req.param("slug"))),
   );
   api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
   api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));

@@ -54,6 +54,8 @@ export interface SchedulerTimings {
   readonly idleMemberMs: number;
   /** At most one replica per role and project within this window. */
   readonly scaleCooldownMs: number;
+  /** Cadence of reflection turns for roles that reflect, counted from the scheduler's first sight of the member. */
+  readonly reflectionMs: number;
 }
 
 /** Defaults the plan leaves open; tune once the first society has run. */
@@ -70,6 +72,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   staleThreadMs: 24 * 3_600_000,
   idleMemberMs: 3 * 24 * 3_600_000,
   scaleCooldownMs: 3_600_000,
+  reflectionMs: 24 * 3_600_000,
 });
 
 /** Partial timings as configuration, for example from an environment variable holding JSON. */
@@ -87,6 +90,7 @@ export const SchedulerTimingsSchema = z
     staleThreadMs: z.number().positive(),
     idleMemberMs: z.number().positive(),
     scaleCooldownMs: z.number().positive(),
+    reflectionMs: z.number().positive(),
   })
   .partial();
 
@@ -127,6 +131,8 @@ const StateSchema = z.object({
   lastCostReport: z.string().nullable().default(null),
   costSinceReport: z.number().nonnegative().default(0),
   turnsSinceReport: z.number().int().nonnegative().default(0),
+  /** When each member last reflected, or was first seen; the cadence counts from here. */
+  lastReflection: z.record(z.string(), z.string()).default({}),
 });
 type State = z.infer<typeof StateSchema>;
 
@@ -263,6 +269,7 @@ export class Scheduler {
       if (!paused) {
         await this.checkHeartbeats(now);
         await this.checkUnclaimedTasks(now);
+        await this.checkReflections(now);
         if (
           this.state.lastOps === null ||
           now - Date.parse(this.state.lastOps) >= this.timings.opsIntervalMs
@@ -400,14 +407,26 @@ export class Scheduler {
         const agent = stringOf(payload["agent"]);
         const project = stringOf(payload["project"]);
         const reason = stringOf(payload["reason"]) ?? "manual wake";
-        if (agent !== null && project !== null) {
+        if (agent === null || project === null) {
+          return;
+        }
+        if (payload["kind"] === "reflection") {
+          // A reflection asked for ahead of the cadence restarts the cadence.
+          this.state.lastReflection[agent] = iso(now);
           this.enqueue(
             agent,
             project,
-            { kind: "manual", from: event.actor, fromOwner: true, reason },
+            { kind: "reflection", from: event.actor, fromOwner: true, reason },
             now,
           );
+          return;
         }
+        this.enqueue(
+          agent,
+          project,
+          { kind: "manual", from: event.actor, fromOwner: true, reason },
+          now,
+        );
         return;
       }
       case "agent.added": {
@@ -678,6 +697,73 @@ export class Scheduler {
         }
       }
     }
+  }
+
+  /**
+   * Reflection turns, PLAN.md section 5.4: every `reflectionMs`, a member whose charter reflects
+   * takes a turn for its memory in the scope of its latest working turn. A member that has not
+   * worked since its last reflection has nothing to consolidate and is left alone.
+   */
+  private async checkReflections(now: number): Promise<void> {
+    for (const agent of await this.board.listAgents()) {
+      if (agent.status !== "active" || agent.cli === null) {
+        continue;
+      }
+      const charter = await this.board.readRole(agent.role);
+      if (!charter.reflects) {
+        continue;
+      }
+      const last = this.state.lastReflection[agent.name];
+      if (last === undefined) {
+        this.state.lastReflection[agent.name] = iso(now);
+        continue;
+      }
+      if (now - Date.parse(last) < this.timings.reflectionMs) {
+        continue;
+      }
+      const latest = await this.latestWorkingTurn(agent, charter);
+      if (latest === null) {
+        this.state.lastReflection[agent.name] = iso(now);
+        continue;
+      }
+      const key = `${agent.name}/${latest.scope}`;
+      if (this.pending.has(key) || this.running.has(key)) {
+        // Busy: try again next tick rather than merge the reflection into a working turn.
+        continue;
+      }
+      this.state.lastReflection[agent.name] = iso(now);
+      if (Date.parse(latest.endedAt) < Date.parse(last)) {
+        continue;
+      }
+      this.enqueue(
+        agent.name,
+        latest.scope,
+        { kind: "reflection", reason: "scheduled reflection" },
+        now,
+      );
+    }
+  }
+
+  /** The member's most recent turn that was not itself a reflection, with the scope it ran in. */
+  private async latestWorkingTurn(
+    agent: Agent,
+    charter: RoleCharter,
+  ): Promise<{ scope: Name; endedAt: string } | null> {
+    const scopes = charter.societyScope
+      ? [...agent.memberships, SOCIETY_SCOPE]
+      : [...agent.memberships];
+    let latest: { scope: Name; endedAt: string } | null = null;
+    for (const scope of scopes) {
+      const turn = await this.board.readLastTurn(agent.name, scope);
+      if (turn === null || turn.trigger.kind === "reflection") {
+        continue;
+      }
+      const endedAt = turn.endedAt ?? turn.startedAt;
+      if (latest === null || Date.parse(endedAt) > Date.parse(latest.endedAt)) {
+        latest = { scope, endedAt };
+      }
+    }
+    return latest;
   }
 
   private async checkUnclaimedTasks(now: number): Promise<void> {

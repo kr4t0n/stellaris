@@ -67,6 +67,8 @@ export const WakeRequestSchema = z.object({
   agent: NameSchema,
   project: NameSchema,
   reason: z.string().default("manual wake"),
+  /** A manual wake, or a reflection turn requested ahead of the cadence. */
+  kind: z.enum(["manual", "reflection"]).default("manual"),
 });
 export type WakeRequestInput = z.input<typeof WakeRequestSchema>;
 

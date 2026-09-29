@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -525,6 +525,119 @@ describe("Board", () => {
     expect(board.resolveToken(token)).toEqual(DESK);
     board.revokeTurnToken(token);
     expect(board.resolveToken(token)).toBeNull();
+  });
+
+  it("shares knowledge and skills: write_knowledge, skill promotion, and search over the archive", async () => {
+    const { board } = await society();
+    await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+
+    // Project knowledge needs membership; society knowledge needs the steward or the owner.
+    const written = await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run `uv run pytest -q`; fixtures live under tests/fixtures.",
+    });
+    expect(written).toMatchObject({ project: "demo", topic: "testing", updatedBy: "eng-1" });
+    await expect(
+      board.writeKnowledge(ENG, { project: null, topic: "norms", body: "x" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await board.addProject(OWNER, { slug: "other" });
+    await expect(
+      board.writeKnowledge(ENG, { project: "other", topic: "t", body: "x" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await board.writeKnowledge(STEW, {
+      project: null,
+      topic: "norms",
+      body: "Summaries close threads. Silence is allowed.",
+    });
+    expect(await board.readSocietyNorms()).toContain("Silence is allowed");
+    expect((await board.listKnowledge("demo")).map((k) => k.topic)).toEqual(["testing"]);
+    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain(
+      "Knowledge written: testing",
+    );
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run `uv run pytest -q` (updated).",
+    });
+    expect((await board.listKnowledge("demo"))[0]?.body).toContain("(updated)");
+    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain("Knowledge updated");
+
+    // A citizen's own skill and archive are searchable by that citizen only, and the roster lists its skills.
+    await mkdir(board.paths.agentSkill("eng-1", "uv-setup"), { recursive: true });
+    await writeFile(
+      board.paths.agentSkillFile("eng-1", "uv-setup"),
+      "---\nsummary: Set up a uv project with locked dependencies\n---\n# uv setup\n\nRun uv sync --locked before the tests.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(board.paths.agentMemory("eng-1"), "python.md"),
+      "# Python\n\nThe owner prefers ruff over black.\n",
+      "utf8",
+    );
+    expect((await board.search(ENG, { query: "ruff" })).map((h) => [h.kind, h.ref])).toEqual([
+      ["memory", "memory/python.md"],
+    ]);
+    expect(await board.search(REV, { query: "ruff" })).toEqual([]);
+    expect((await board.search(ENG, { query: "locked" })).map((h) => h.ref)).toEqual([
+      "skills/uv-setup",
+    ]);
+    expect((await board.listAgentSkills("eng-1")).map((s) => [s.name, s.summary])).toEqual([
+      ["uv-setup", "Set up a uv project with locked dependencies"],
+    ]);
+    const turn = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "local",
+      cli: "claude" as const,
+      session: "s",
+      trigger: { kind: "reflection" as const, fromOwner: false, reason: "scheduled" },
+      startedAt: "2026-09-28T10:05:00.000Z",
+      endedAt: "2026-09-28T10:06:00.000Z",
+      exitReason: "completed" as const,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+    };
+    await board.beginTurn(turn);
+    await board.finishTurn(turn);
+    expect((await board.listMembers()).find((m) => m.name === "eng-1")?.skills).toEqual([
+      "uv-setup",
+    ]);
+
+    // Promotion: a skill proposal the steward approves lands under the society's skills, for everyone.
+    const proposal = await board.propose(ENG, {
+      kind: "skill",
+      charter: {
+        name: "uv-setup",
+        summary: "Set up a uv project with locked dependencies",
+        body: "Run uv sync --locked before the tests.",
+      },
+      rationale: "Every Python project here needs it.",
+    });
+    await board.approve(STEW, { proposal_id: proposal.id });
+    expect((await board.readProposal(proposal.id)).status).toBe("provisioned");
+    expect((await board.listSocietySkills()).map((s) => [s.name, s.scope])).toEqual([
+      ["uv-setup", "society"],
+    ]);
+    // The announcement posts quote the summary, so search for a phrase only the body carries.
+    expect((await board.search(REV, { query: "uv sync" })).map((h) => h.ref)).toEqual([
+      "society/skills/uv-setup",
+    ]);
+    expect((await board.listChannel("general")).at(-1)?.body).toContain("Skill uv-setup promoted");
+
+    // A reflection can be requested ahead of the cadence.
+    const wake = await board.requestWake(OWNER, {
+      agent: "eng-1",
+      project: "demo",
+      reason: "reflect now",
+      kind: "reflection",
+    });
+    expect(wake.payload["kind"]).toBe("reflection");
   });
 
   it("resolves a relative data directory, so worktree and home paths never depend on a cwd", async () => {

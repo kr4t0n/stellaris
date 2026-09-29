@@ -118,6 +118,7 @@ describe("buildTurnPrompt", () => {
             homeRunner: "local",
             status: "active",
             resident: false,
+            skills: ["uv-setup"],
             memberships: ["demo"],
             subscriptions: ["general", "demo/general"],
             lastModel: "gpt-5-codex",
@@ -136,7 +137,7 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("## The society");
     expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1');
     expect(prompt).toContain(
-      "- eng-1: engineer on codex (gpt-5-codex); active; projects demo; follows general, demo/general; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
+      "- eng-1: engineer on codex (gpt-5-codex); active; projects demo; follows general, demo/general; skills uv-setup; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",
     );
   });
 
@@ -161,5 +162,52 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Trigger: ops_event from board. demo: 4 open");
     expect(prompt).toContain("Operations signals arrived");
     expect(prompt).toContain("propose");
+  });
+
+  it("frames a reflection turn as memory work and lists the scope's knowledge topics", () => {
+    const dispatch = {
+      agent: "eng-1",
+      project: "demo",
+      trigger: TriggerSchema.parse({ kind: "reflection", reason: "scheduled reflection" }),
+      priority: 0,
+      onboarding: false,
+    };
+    const empty = buildTurnPrompt({
+      dispatch,
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      knowledge: { dir: "/data/board/projects/demo/knowledge", topics: [] },
+    });
+    expect(empty).toContain("## Reflection");
+    expect(empty).toContain("take no new work");
+    expect(empty).toContain("skills/<name>/SKILL.md");
+    expect(empty).toContain("memoryUpdated: true");
+    expect(empty).toContain("## Knowledge of demo\n\nNone yet.");
+
+    const listed = buildTurnPrompt({
+      dispatch: { ...dispatch, trigger: TriggerSchema.parse({ kind: "heartbeat" }) },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      knowledge: {
+        dir: "/data/board/projects/demo/knowledge",
+        topics: [
+          {
+            topic: "testing",
+            project: "demo",
+            updatedBy: "eng-1",
+            updatedAt: "2026-09-28T10:00:00.000Z",
+            body: "Run the tests with uv.",
+          },
+        ],
+      },
+    });
+    expect(listed).not.toContain("## Reflection");
+    expect(listed).toContain("Topics under /data/board/projects/demo/knowledge");
+    expect(listed).toContain("- testing: updated by eng-1 at 2026-09-28T10:00:00.000Z");
+    expect(listed).not.toContain("Run the tests with uv.");
   });
 });

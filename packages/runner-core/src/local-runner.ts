@@ -14,7 +14,7 @@ import {
   type Ulid,
 } from "@stellaris/shared";
 import { ExecaGit, type GitOps } from "./git.js";
-import { buildTurnPrompt, type SocietyView } from "./prompt.js";
+import { buildTurnPrompt, type KnowledgeView, type SocietyView } from "./prompt.js";
 import {
   renderClaudeMcpConfig,
   renderCodexMcpConfig,
@@ -216,12 +216,18 @@ export class LocalRunner {
             worktree,
           }
         : null;
+    // The memory tiers of PLAN.md section 5.4, as instructions: norms and the core in full, skills as an index.
     const instructions = renderInstructions({
       agentName: agent.name,
       roleCharter,
       memoryCore,
       homeDir: spec.configHome,
       boardDir: spec.boardDir,
+      norms: await this.board.readSocietyNorms(),
+      skills: [
+        ...(await this.board.listAgentSkills(agent.name)),
+        ...(await this.board.listSocietySkills()),
+      ],
       ...(onboarding === null ? {} : { onboarding }),
     });
     await this.renderConfigHome(agent.name, instructions);
@@ -229,6 +235,12 @@ export class LocalRunner {
     const societyView: SocietyView | null = charter.wakeTriggers.includes(OWNER_POST_TRIGGER)
       ? { projects: await this.board.listProjects(), members: await this.board.listMembers() }
       : null;
+    const knowledge: KnowledgeView = societyScope
+      ? { dir: this.board.paths.societyKnowledge(), topics: await this.board.listKnowledge(null) }
+      : {
+          dir: this.board.paths.projectKnowledge(dispatch.project),
+          topics: await this.board.listKnowledge(dispatch.project),
+        };
     const prompt = buildTurnPrompt({
       dispatch,
       messages: inbox.messages,
@@ -236,6 +248,7 @@ export class LocalRunner {
       lastTurn,
       onboarding,
       societyView,
+      knowledge,
     });
     const env = {
       GIT_AUTHOR_NAME: agent.name,

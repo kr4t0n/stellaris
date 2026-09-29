@@ -194,6 +194,56 @@ describe("board server routes for the UI", () => {
     expect(signals.map((record) => record.signal.kind)).toEqual(["idle_member"]);
   });
 
+  it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {
+    const app = createApp({ board, version: "t" });
+    await board.writeKnowledge(OWNER, {
+      project: "demo",
+      topic: "testing",
+      body: "Run the tests with uv.",
+    });
+    await board.writeKnowledge(OWNER, { project: null, topic: "norms", body: "Be brief." });
+    const topics = z.array(
+      z.object({ topic: z.string(), project: z.string().nullable(), body: z.string() }),
+    );
+    expect(
+      topics.parse(await (await app.request("/api/projects/demo/knowledge", { headers })).json()),
+    ).toMatchObject([
+      {
+        topic: "testing",
+        project: "demo",
+        body: expect.stringContaining("Run the tests with uv."),
+      },
+    ]);
+    expect(
+      topics.parse(await (await app.request("/api/society/knowledge", { headers })).json()),
+    ).toMatchObject([{ topic: "norms", project: null }]);
+
+    const proposal = await board.propose(OWNER, {
+      kind: "skill",
+      charter: { name: "release", summary: "Cut a release", body: "Tag, build, publish." },
+      rationale: "Every project releases the same way.",
+    });
+    const stewToken = (
+      await board.addAgent(OWNER, { name: "stew", role: "steward", cli: "claude" })
+    ).token;
+    await board.approve({ name: "stew", role: "steward" }, { proposal_id: proposal.id });
+    const skills = z
+      .array(z.object({ name: z.string(), summary: z.string(), scope: z.string() }))
+      .parse(await (await app.request("/api/skills", { headers })).json());
+    expect(skills).toMatchObject([{ name: "release", summary: "Cut a release", scope: "society" }]);
+    expect(stewToken).toMatch(/^stl_/);
+
+    const wake = await app.request("/api/wake", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ agent: "eng-1", project: "demo", kind: "reflection" }),
+    });
+    expect(wake.status).toBe(200);
+    expect(
+      z.object({ payload: z.object({ kind: z.string() }) }).parse(await wake.json()).payload.kind,
+    ).toBe("reflection");
+  });
+
   it("serves the roster with profiles and the runner's resident pairs", async () => {
     const app = createApp({
       board,

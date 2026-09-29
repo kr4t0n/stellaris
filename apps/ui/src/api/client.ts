@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentEvent,
   BoardEvent,
+  Knowledge,
   Member,
   Message,
   OpsSignal,
@@ -9,6 +10,7 @@ import type {
   Proposal,
   RoleCharter,
   Runner,
+  Skill,
   Society,
   Task,
   VerbInput,
@@ -142,6 +144,9 @@ export const api = {
   project: (slug: string) => request<Project>(`/projects/${slug}`),
   tasks: (slug: string) => request<Task[]>(`/projects/${slug}/tasks`),
   dashboard: (slug: string) => request<Dashboard>(`/projects/${slug}/dashboard`),
+  knowledge: (slug: string | null) =>
+    request<Knowledge[]>(slug === null ? "/society/knowledge" : `/projects/${slug}/knowledge`),
+  skills: () => request<Skill[]>("/skills"),
   task: (id: string) => request<Task>(`/tasks/${id}`),
   thread: (id: string) => request<Message[]>(`/tasks/${id}/thread`),
   channel: (ref: string) => request<Message[]>(`/channels/${ref}`),
@@ -152,8 +157,12 @@ export const api = {
   scheduler: () => request<SchedulerState>("/scheduler"),
   pause: () => request<{ paused: boolean }>("/pause", "POST"),
   resume: () => request<{ paused: boolean }>("/resume", "POST"),
-  wake: (agent: string, project: string, reason: string) =>
-    request<BoardEvent>("/wake", "POST", { agent, project, reason }),
+  wake: (
+    agent: string,
+    project: string,
+    reason: string,
+    kind: "manual" | "reflection" = "manual",
+  ) => request<BoardEvent>("/wake", "POST", { agent, project, reason, kind }),
   recentTurns: (since = 0) =>
     request<{ lastSeq: number; events: LiveTurnEvent[] }>(`/turns/recent?since=${since}`),
   verb: <V extends VerbName>(name: V, input: VerbInput<V>) =>

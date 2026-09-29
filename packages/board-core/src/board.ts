@@ -1,4 +1,4 @@
-import { readFile, rename } from "node:fs/promises";
+import { readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { monotonicFactory } from "ulid";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import {
   channelRef,
   ChannelProposalSchema,
   DecisionSchema,
+  KnowledgeSchema,
   MemberProposalSchema,
   MemberSchema,
   MessageFrontmatterSchema,
@@ -25,6 +26,7 @@ import {
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
+  SkillProposalSchema,
   SOCIETY_CHANNELS,
   SOCIETY_SCOPE,
   SocietySchema,
@@ -35,6 +37,7 @@ import {
   type ChannelRef,
   type CliKind,
   type Decision,
+  type Knowledge,
   type Member,
   type MemberProposal,
   type Message,
@@ -48,6 +51,8 @@ import {
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
+  type Skill,
+  type SkillProposal,
   type Society,
   type Task,
   type TaskFrontmatter,
@@ -155,7 +160,7 @@ export interface InboxResult {
 }
 
 export interface SearchHit {
-  readonly kind: "message" | "task" | "knowledge";
+  readonly kind: "message" | "task" | "knowledge" | "skill" | "memory";
   readonly ref: string;
   readonly snippet: string;
 }
@@ -180,7 +185,12 @@ const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
   retirement: [OWNER_ROLE],
   channel: [OWNER_ROLE, "steward"],
   reallocation: [OWNER_ROLE, "steward"],
+  // A skill is reviewed like code; the steward curates the society's skills.
+  skill: [OWNER_ROLE, "steward"],
 };
+
+/** Roles that curate society knowledge, the tier every citizen reads. */
+const CURATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward"];
 
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
@@ -231,10 +241,29 @@ function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): 
       if (!parsed.success) break;
       return `reallocation: ${parsed.data.description}`;
     }
+    case "skill": {
+      const parsed = SkillProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `skill ${parsed.data.name}: ${parsed.data.summary}`;
+    }
     default:
       break;
   }
   return `${kind} ${JSON.stringify(charter)}`;
+}
+
+/** A skill's one-line summary: its frontmatter's summary or description, else the first plain line. */
+function skillSummary(data: Record<string, unknown>, body: string): string {
+  const fromFrontmatter = data["summary"] ?? data["description"];
+  if (typeof fromFrontmatter === "string" && fromFrontmatter.trim().length > 0) {
+    return fromFrontmatter.trim();
+  }
+  return (
+    body
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith("#")) ?? ""
+  );
 }
 
 function memberToAgentInput(member: MemberProposal): AddAgentInput {
@@ -327,6 +356,8 @@ export class Board {
   private async ensureSeedRoles(): Promise<void> {
     await ensureDir(this.paths.roles());
     await ensureDir(this.paths.members());
+    await ensureDir(this.paths.societySkills());
+    await ensureDir(this.paths.societyKnowledge());
     for (const charter of SEED_ROLES) {
       if (await exists(this.paths.role(charter.name))) {
         continue;
@@ -541,6 +572,72 @@ export class Board {
     return (await exists(file))
       ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
       : "";
+  }
+
+  /** The society's norms, the one knowledge topic every turn loads. Empty until the steward writes it. */
+  async readSocietyNorms(): Promise<string> {
+    const file = this.paths.societyKnowledgeFile("norms");
+    return (await exists(file))
+      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
+      : "";
+  }
+
+  /** Knowledge topics of a project, or of the society when the project is null. */
+  async listKnowledge(project: Name | null): Promise<Knowledge[]> {
+    const dir =
+      project === null ? this.paths.societyKnowledge() : this.paths.projectKnowledge(project);
+    const topics: Knowledge[] = [];
+    for (const file of await listFiles(dir)) {
+      const doc = await readMarkdown(path.join(dir, file), z.record(z.string(), z.unknown()));
+      const parsed = KnowledgeSchema.safeParse({
+        ...doc.data,
+        project,
+        topic: file.replace(/\.md$/, ""),
+      });
+      // Files written before the verb existed carry no frontmatter; they are knowledge all the same.
+      const data = parsed.success
+        ? parsed.data
+        : {
+            topic: file.replace(/\.md$/, ""),
+            project,
+            updatedBy: SYSTEM_ACTOR.name,
+            updatedAt: (await stat(path.join(dir, file))).mtime.toISOString(),
+          };
+      topics.push({ ...data, body: doc.body });
+    }
+    return topics;
+  }
+
+  /** Skills promoted to the society: every citizen may read them. */
+  async listSocietySkills(): Promise<Skill[]> {
+    return this.listSkillsIn(this.paths.societySkills(), "society");
+  }
+
+  /** A citizen's own skills, procedural memory it wrote itself. */
+  async listAgentSkills(name: Name): Promise<Skill[]> {
+    return this.listSkillsIn(this.paths.agentSkills(name), "own");
+  }
+
+  private async listSkillsIn(dir: string, scope: Skill["scope"]): Promise<Skill[]> {
+    const skills: Skill[] = [];
+    for (const entry of await listDirs(dir)) {
+      const file = path.join(dir, entry, "SKILL.md");
+      if (!(await exists(file))) {
+        continue;
+      }
+      const name = NameSchema.safeParse(entry);
+      if (!name.success) {
+        continue;
+      }
+      const doc = await readMarkdown(file, z.record(z.string(), z.unknown()));
+      skills.push({
+        name: name.data,
+        summary: skillSummary(doc.data, doc.body),
+        scope,
+        path: file,
+      });
+    }
+    return skills;
   }
 
   async isPaused(): Promise<boolean> {
@@ -907,7 +1004,97 @@ export class Board {
         }
       }
     }
+    if (projectFilter !== undefined && projectFilter !== null) {
+      return hits;
+    }
+    // Society knowledge and skills belong to everyone; the archive and skills under the caller's
+    // own home are the caller's alone, which is the only privacy rule the board has.
+    const shared: Array<{ kind: SearchHit["kind"]; ref: string; file: string }> = [];
+    for (const file of await listFiles(this.paths.societyKnowledge())) {
+      shared.push({
+        kind: "knowledge",
+        ref: `society/knowledge/${file}`,
+        file: path.join(this.paths.societyKnowledge(), file),
+      });
+    }
+    for (const skill of await this.listSocietySkills()) {
+      shared.push({ kind: "skill", ref: `society/skills/${skill.name}`, file: skill.path });
+    }
+    for (const skill of await this.listAgentSkills(actor.name)) {
+      shared.push({ kind: "skill", ref: `skills/${skill.name}`, file: skill.path });
+    }
+    for (const file of await listFiles(this.paths.agentMemory(actor.name))) {
+      shared.push({
+        kind: "memory",
+        ref: `memory/${file}`,
+        file: path.join(this.paths.agentMemory(actor.name), file),
+      });
+    }
+    for (const entry of shared) {
+      const content = await readFile(entry.file, "utf8");
+      if (content.toLowerCase().includes(needle)) {
+        hits.push({
+          kind: entry.kind,
+          ref: entry.ref,
+          snippet: snippetAround(content, args.query),
+        });
+        if (hits.length >= args.limit) {
+          return hits;
+        }
+      }
+    }
     return hits;
+  }
+
+  /**
+   * Knowledge as a verb, so it is written through the board from any machine: a project's topic
+   * by any member, the society's topics by those who curate them. Members learn of a new topic
+   * through the channel they follow, without a wake.
+   */
+  async writeKnowledge(actor: Actor, input: VerbInput<"write_knowledge">): Promise<Knowledge> {
+    const args = VerbInputs.write_knowledge.parse(input);
+    await this.authorize(actor, "write_knowledge");
+    return this.mutex.run(async () => {
+      if (args.project === null) {
+        if (!CURATING_ROLES.includes(actor.role)) {
+          throw new BoardError(
+            "FORBIDDEN",
+            "society knowledge is curated by the steward and the owner",
+          );
+        }
+      } else {
+        const project = await this.readProject(args.project);
+        if (!CURATING_ROLES.includes(actor.role) && !project.members.includes(actor.name)) {
+          throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${args.project}`);
+        }
+      }
+      const data = KnowledgeSchema.parse({
+        topic: args.topic,
+        project: args.project,
+        updatedBy: actor.name,
+        updatedAt: this.now().toISOString(),
+      });
+      const file =
+        args.project === null
+          ? this.paths.societyKnowledgeFile(args.topic)
+          : this.paths.projectKnowledgeFile(args.project, args.topic);
+      const replaced = await exists(file);
+      await writeMarkdown(file, data, args.body);
+      await this.events.append("knowledge.written", actor.name, {
+        topic: args.topic,
+        project: args.project,
+        replaced,
+      });
+      const where = args.project === null ? "general" : channelRef(args.project, "general");
+      await this.appendMessage(
+        actor.name,
+        where,
+        `Knowledge ${replaced ? "updated" : "written"}: ${args.topic}. It is under knowledge/${args.topic}.md${
+          args.project === null ? " of the society" : ""
+        }.`,
+      );
+      return { ...data, body: args.body };
+    });
   }
 
   async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Task> {
@@ -1400,6 +1587,8 @@ export class Board {
         return this.joinProject(actor, VerbInputs.join_project.parse(input));
       case "leave_project":
         return this.leaveProject(actor, VerbInputs.leave_project.parse(input));
+      case "write_knowledge":
+        return this.writeKnowledge(actor, VerbInputs.write_knowledge.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -1426,6 +1615,7 @@ export class Board {
         agent: args.agent,
         project: args.project,
         reason: args.reason,
+        kind: args.kind,
       }),
     );
   }
@@ -1607,6 +1797,7 @@ export class Board {
       this.paths.runners(),
       this.paths.members(),
       this.paths.societyKnowledge(),
+      this.paths.societySkills(),
       this.paths.projects(),
       this.paths.agents(),
       this.paths.events(),
@@ -1764,6 +1955,7 @@ export class Board {
       resident: charter.resident,
       ...(agent.model === undefined ? {} : { model: agent.model }),
       ...(lastModel === undefined ? {} : { lastModel }),
+      skills: (await this.listAgentSkills(name)).map((skill) => skill.name),
       memberships: agent.memberships,
       subscriptions: agent.subscriptions,
       claimsHeld,
@@ -1841,6 +2033,9 @@ export class Board {
       case "retirement":
         await this.validateRetire(RetirementProposalSchema.parse(charter).agent);
         return;
+      case "skill":
+        SkillProposalSchema.parse(charter);
+        return;
       case "reallocation":
         return;
       default:
@@ -1890,11 +2085,52 @@ export class Board {
         );
         return { agent: agent.name, releasedTasks };
       }
+      case "skill": {
+        const skill = SkillProposalSchema.parse(proposal.charter);
+        const replaced = await this.promoteSkillUnlocked(by, proposal.proposedBy, skill, meta);
+        return { skill: skill.name, replaced };
+      }
       case "reallocation":
         return undefined;
       default:
         return undefined;
     }
+  }
+
+  /** Writes a promoted skill under the society's skills, where every citizen's skills index lists it. */
+  private async promoteSkillUnlocked(
+    by: Name,
+    proposedBy: Name,
+    skill: SkillProposal,
+    meta: Record<string, unknown>,
+  ): Promise<boolean> {
+    const file = this.paths.societySkillFile(skill.name);
+    const replaced = await exists(file);
+    await ensureDir(this.paths.societySkill(skill.name));
+    await writeMarkdown(
+      file,
+      {
+        name: skill.name,
+        summary: skill.summary,
+        proposedBy,
+        promotedBy: by,
+        promotedAt: this.now().toISOString(),
+      },
+      skill.body,
+    );
+    await this.events.append("skill.promoted", by, {
+      name: skill.name,
+      summary: skill.summary,
+      proposedBy,
+      replaced,
+      ...meta,
+    });
+    await this.appendMessage(
+      by,
+      "general",
+      `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${skill.summary}. Every citizen's skills index now lists it.`,
+    );
+    return replaced;
   }
 
   private async validateAddAgent(input: AddAgentInput): Promise<void> {

@@ -133,6 +133,8 @@ export const MemberSchema = z.object({
   model: z.string().optional(),
   /** The model the CLI reported on the citizen's last turn. */
   lastModel: z.string().optional(),
+  /** The citizen's own skills, by name. */
+  skills: z.array(NameSchema).default([]),
   memberships: z.array(NameSchema),
   subscriptions: z.array(ChannelRefSchema),
   claimsHeld: z.number().int().nonnegative().default(0),
@@ -164,6 +166,7 @@ export const ProposalKindSchema = z.enum([
   "channel",
   "reallocation",
   "retirement",
+  "skill",
 ]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 
@@ -204,6 +207,14 @@ export const RetirementProposalSchema = z.object({
 });
 export type RetirementProposal = z.infer<typeof RetirementProposalSchema>;
 
+/** A skill proposed for the society: reviewed like code, then available to every citizen. */
+export const SkillProposalSchema = z.object({
+  name: NameSchema,
+  summary: z.string().min(1).max(200),
+  body: z.string().min(1),
+});
+export type SkillProposal = z.infer<typeof SkillProposalSchema>;
+
 /** Charter schema per proposal kind. */
 export const ProposalCharterSchemas = {
   role: RoleCharterSchema,
@@ -211,7 +222,29 @@ export const ProposalCharterSchemas = {
   channel: ChannelProposalSchema,
   reallocation: ReallocationProposalSchema,
   retirement: RetirementProposalSchema,
+  skill: SkillProposalSchema,
 } as const;
+
+/** A skill as projected: an agent's own under its home, or the society's under `society/skills/`. */
+export const SkillSchema = z.object({
+  name: NameSchema,
+  summary: z.string().default(""),
+  scope: z.enum(["own", "society"]),
+  path: z.string().min(1),
+});
+export type Skill = z.infer<typeof SkillSchema>;
+
+/** A knowledge topic: a project's, or the society's when the project is null. */
+export const KnowledgeSchema = z.object({
+  topic: NameSchema,
+  project: NameSchema.nullable(),
+  updatedBy: NameSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type KnowledgeFrontmatter = z.infer<typeof KnowledgeSchema>;
+export interface Knowledge extends KnowledgeFrontmatter {
+  readonly body: string;
+}
 
 export const ProposalFrontmatterSchema = z.object({
   id: UlidSchema,

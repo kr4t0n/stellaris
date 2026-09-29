@@ -1,10 +1,25 @@
-import type { Member, Message, Project, Task, TurnDispatch, TurnRecord } from "@stellaris/shared";
+import type {
+  Knowledge,
+  Member,
+  Message,
+  Project,
+  Task,
+  TurnDispatch,
+  TurnRecord,
+} from "@stellaris/shared";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 
 /** What the front desk reads to route: every project with its channels, every citizen with its roster line. */
 export interface SocietyView {
   readonly projects: readonly Project[];
   readonly members: readonly Member[];
+}
+
+/** The shared knowledge of the turn's scope: the project's topics, or the society's in the society scope. */
+export interface KnowledgeView {
+  /** Where the topics are on this runner, so the agent can open one with its file tools. */
+  readonly dir: string;
+  readonly topics: readonly Knowledge[];
 }
 
 export interface TurnPromptInput {
@@ -15,7 +30,18 @@ export interface TurnPromptInput {
   readonly onboarding: OnboardingContext | null;
   /** Present for roles that route on behalf of the owner; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
+  readonly knowledge?: KnowledgeView | null | undefined;
 }
+
+/** What a reflection turn is for. It replaces new work, not the inbox. */
+const REFLECTION = [
+  "This turn is for your memory; take no new work, and answer the inbox only where a reply is needed. Read memory/core.md and your recent turn records, then:",
+  "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
+  '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, a `summary:` line in the frontmatter and then the steps. Propose it with kind "skill" when other citizens would use it.',
+  "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
+  "- Share: a durable fact about this scope's codebase or process goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
+  "- Report memoryUpdated: true in the status object when core.md or a skill changed.",
+].join("\n");
 
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
@@ -47,6 +73,7 @@ function rosterLine(member: Member): string {
     member.resident ? "resident" : "",
     member.memberships.length === 0 ? "no projects" : `projects ${member.memberships.join(", ")}`,
     member.subscriptions.length === 0 ? "" : `follows ${member.subscriptions.join(", ")}`,
+    member.skills.length === 0 ? "" : `skills ${member.skills.join(", ")}`,
     `${member.claimsHeld} claim(s) held`,
     `${member.tasksDone} done`,
     member.lastTurnOutcome === undefined
@@ -76,6 +103,10 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push(
       "The owner posted. Route it: answer in the same channel, or create the task, thread, or project it needs and mention the citizens who will do it, adding them to the project first when they are not members. Stay silent when the owner already addressed a citizen and nothing else is needed.",
     );
+  }
+
+  if (dispatch.trigger.kind === "reflection") {
+    lines.push("", "## Reflection", "", REFLECTION);
   }
 
   if (input.onboarding !== null) {
@@ -109,6 +140,24 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push("", "### Citizens", "");
     for (const member of society.members) {
       lines.push(rosterLine(member));
+    }
+  }
+
+  const knowledge = input.knowledge;
+  if (knowledge !== undefined && knowledge !== null) {
+    lines.push("", `## Knowledge of ${dispatch.project}`, "");
+    if (knowledge.topics.length === 0) {
+      lines.push(
+        "None yet. A durable fact about this scope's codebase or process is worth a write_knowledge call.",
+      );
+    } else {
+      lines.push(
+        `Topics under ${knowledge.dir}; open one with your file tools when it is relevant.`,
+        "",
+      );
+      for (const topic of knowledge.topics) {
+        lines.push(`- ${topic.topic}: updated by ${topic.updatedBy} at ${topic.updatedAt}`);
+      }
     }
   }
 

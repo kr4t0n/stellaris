@@ -6,6 +6,7 @@ import { LoginPage } from "./pages/Login.js";
 import {
   ChannelPane,
   DashboardPane,
+  KnowledgePane,
   ProjectOverview,
   ProjectPage,
   TaskPane,
@@ -78,6 +79,12 @@ export const dashboardRoute = createRoute({
   component: DashboardPane,
 });
 
+export const knowledgeRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: "/knowledge",
+  component: KnowledgePane,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inboxRoute,
@@ -88,6 +95,7 @@ const routeTree = rootRoute.addChildren([
     tasksRoute,
     taskRoute,
     dashboardRoute,
+    knowledgeRoute,
   ]),
 ]);
 

@@ -1,4 +1,4 @@
-import { AGENT_TOKEN_ENV, type Name } from "@stellaris/shared";
+import { AGENT_TOKEN_ENV, type Name, type Skill } from "@stellaris/shared";
 
 export interface OnboardingContext {
   readonly agentName: Name;
@@ -15,6 +15,10 @@ export interface RenderInstructionsInput {
   readonly homeDir: string;
   /** The board's read-only markdown projection on this runner. */
   readonly boardDir: string;
+  /** The society's norms: the one knowledge topic every turn loads. Empty until the steward writes it. */
+  readonly norms?: string | undefined;
+  /** The skills index: the agent's own skills and the society's, summaries and file paths only. */
+  readonly skills?: readonly Skill[] | undefined;
   readonly onboarding?: OnboardingContext | undefined;
 }
 
@@ -24,19 +28,22 @@ const TURN_CONTRACT = [
   "- Work only inside your worktree and commit on your own branch. Never merge, rebase onto, or fast-forward main yourself: when a reviewer moves a task to done, the board lands the claimer's branch on main and posts the result.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
-  "- Route every lesson: about you, your craft, or the owner, write it to memory/core.md in your home directory; something everyone should know, post it to the project channel.",
+  "- Route every lesson: about you, your craft, or the owner, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
+  '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, a `summary:` line in the frontmatter and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
+  "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
   "- End every turn with the status object: summary, claims held, what is blocked, whether the owner must decide.",
 ].join("\n");
 
 /** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
 const GOVERNANCE = [
-  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The owner decides members, roles, and retirements; the steward may also decide channels and reallocations. Nobody decides their own proposal.",
+  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. Approval provisions it on the spot. The owner decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
   '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
   '  - role: {"name", "purpose", "verbs": [board verbs], "repoPermission": "none", "read", "write", or "merge", "wakeTriggers": [trigger kinds], "maxReplicas"?, "backlogThreshold"?}',
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
+  '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
   "- Projects and membership: `create_project` opens a project with its default channels (front desk and owner). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the owner; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by repeated unclaimed work of its kind. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals arrive in the ops channel as posts by the board: unclaimed tasks, backlog per member, role gaps, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
@@ -57,24 +64,47 @@ export function renderOnboardingPreamble(context: OnboardingContext): string {
   ].join("\n");
 }
 
-/** The CLI's global instructions: role charter plus memory core, rendered before each turn. */
+/** The skills index: one line per skill, so the file is read only when its summary fits the work. */
+function renderSkillsIndex(skills: readonly Skill[]): string[] {
+  if (skills.length === 0) {
+    return [
+      "None yet. Write the first one when you notice yourself doing something the same way twice.",
+    ];
+  }
+  return [
+    "Read a skill's file when its summary matches the work at hand; do not load them all.",
+    "",
+    ...skills.map(
+      (skill) =>
+        `- ${skill.name} (${skill.scope === "own" ? "yours" : "society"}): ${
+          skill.summary.length === 0 ? "no summary" : skill.summary
+        }. File: ${skill.path}`,
+    ),
+  ];
+}
+
+/** The CLI's global instructions: charter, norms, memory core, and the skills index, rendered before each turn. */
 export function renderInstructions(input: RenderInstructionsInput): string {
   const memory = input.memoryCore.trim();
-  const sections = [
-    `# ${input.agentName}`,
-    "",
-    "## Role",
-    "",
-    input.roleCharter.trim(),
+  const norms = input.norms?.trim() ?? "";
+  const sections = [`# ${input.agentName}`, "", "## Role", "", input.roleCharter.trim()];
+  if (norms.length > 0) {
+    sections.push("", "## Society norms", "", norms);
+  }
+  sections.push(
     "",
     "## Core memory",
     "",
     memory.length === 0 ? "(empty)" : memory,
     "",
+    "## Skills",
+    "",
+    ...renderSkillsIndex(input.skills ?? []),
+    "",
     "## Where things are",
     "",
-    `- Your home directory: ${input.homeDir} (memory/core.md, skills/, projects/<slug>/notes.md). You may read and write it.`,
-    `- The board projection: ${input.boardDir} (read-only markdown: society and project channels, tasks, threads). Search it with your file tools; act through the board tools.`,
+    `- Your home directory: ${input.homeDir}. memory/core.md is loaded every turn; memory/<topic>.md is your archive; skills/<name>/SKILL.md are your skills; projects/<slug>/notes.md are your notes. You may read and write all of it, and the board's search covers your archive and skills for you alone.`,
+    `- The board projection: ${input.boardDir} (read-only markdown: society and project channels, tasks, threads; shared knowledge under projects/<slug>/knowledge/ and society/knowledge/; the society's skills under society/skills/). Search it with your file tools; act through the board tools.`,
     "",
     "## Turn contract",
     "",
@@ -83,7 +113,7 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     "## Governance",
     "",
     GOVERNANCE,
-  ];
+  );
   if (input.onboarding !== undefined) {
     sections.push("", "## First turn", "", renderOnboardingPreamble(input.onboarding));
   }

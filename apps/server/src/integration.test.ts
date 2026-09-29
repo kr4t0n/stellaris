@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -36,6 +36,15 @@ function done(summary: string): TurnResult {
       memoryUpdated: false,
     },
     exitReason: "completed",
+  };
+}
+
+/** A turn that changed the memory core or a skill, which the runner must know to recycle a warm session. */
+function remembered(summary: string): TurnResult {
+  const result = done(summary);
+  return {
+    ...result,
+    status: result.status === null ? null : { ...result.status, memoryUpdated: true },
   };
 }
 
@@ -148,6 +157,93 @@ class ScriptedBackend implements AgentBackend {
           rationale: "The backlog per engineer on demo reached the threshold.",
         });
         return done("proposed a second engineer for demo");
+      }
+      // The steward curates the society's skills: a proposed procedure in its digest gets a decision.
+      const skillProposal = /Proposal ([0-9A-HJKMNP-TV-Z]{26}): skill /.exec(request.prompt)?.[1];
+      if (skillProposal !== undefined) {
+        await verb("approve", {
+          proposal_id: skillProposal,
+          reason: "a procedure every Python project here needs",
+        });
+        return done(`approved skill proposal ${skillProposal}`);
+      }
+      return done("nothing to do");
+    }
+
+    // A citizen that learns: a lesson in its core, a skill in its home, a fact in project knowledge.
+    if (request.spec.agent === "mem-1") {
+      const home = request.spec.configHome;
+      if (request.prompt.includes("## Reflection")) {
+        if (!request.instructions.includes("prefers uv")) {
+          throw new Error("the reflection turn did not load the core memory");
+        }
+        if (!request.instructions.includes("- uv-setup (yours): Set up a uv project")) {
+          throw new Error("the reflection turn did not list the agent's own skill");
+        }
+        await writeFile(
+          path.join(home, "memory", "python.md"),
+          "# Python\n\nLock files are committed; run uv sync --locked before anything else.\n",
+          "utf8",
+        );
+        await writeFile(
+          path.join(home, "profile.md"),
+          "# Profile\n\nPython projects with uv; send me packaging and test setup.\n",
+          "utf8",
+        );
+        await verb("propose", {
+          kind: "skill",
+          charter: {
+            name: "uv-setup",
+            summary: "Set up a uv project with locked dependencies",
+            body: await readFile(path.join(home, "skills", "uv-setup", "SKILL.md"), "utf8"),
+          },
+          rationale: "Every Python project in the society needs the same setup.",
+        });
+        return remembered("reflected: archived the uv notes and proposed uv-setup to the society");
+      }
+      if (request.prompt.includes("This is your first turn") && request.prompt.includes('"beta"')) {
+        // The second project: the lesson, the archive, and both skills came along.
+        if (!request.instructions.includes("prefers uv")) {
+          throw new Error("the lesson from alpha did not reach beta");
+        }
+        if (
+          !request.instructions.includes("- uv-setup (yours)") ||
+          !request.instructions.includes("- uv-setup (society)")
+        ) {
+          throw new Error("the skills index on beta misses a skill");
+        }
+        const hits = z
+          .array(z.object({ kind: z.string(), ref: z.string() }))
+          .parse(await verb("search", { query: "uv sync --locked" }));
+        if (!hits.some((hit) => hit.kind === "memory" && hit.ref === "memory/python.md")) {
+          throw new Error(`the archive is not searchable on beta: ${JSON.stringify(hits)}`);
+        }
+        await verb("write_knowledge", {
+          project: "beta",
+          topic: "testing",
+          body: "Run uv sync --locked, then uv run pytest -q; carried over from alpha.",
+        });
+        return done("onboarded on beta and wrote its testing knowledge from the alpha lesson");
+      }
+      if (request.prompt.includes("Trigger: manual")) {
+        await mkdir(path.join(home, "memory"), { recursive: true });
+        await writeFile(
+          path.join(home, "memory", "core.md"),
+          "- The owner prefers uv for Python; run uv sync --locked before the tests.\n",
+          "utf8",
+        );
+        await mkdir(path.join(home, "skills", "uv-setup"), { recursive: true });
+        await writeFile(
+          path.join(home, "skills", "uv-setup", "SKILL.md"),
+          "---\nsummary: Set up a uv project with locked dependencies\n---\n# uv setup\n\n1. uv sync --locked\n2. uv run pytest -q\n",
+          "utf8",
+        );
+        await verb("write_knowledge", {
+          project: "alpha",
+          topic: "testing",
+          body: "Run uv sync --locked, then uv run pytest -q.",
+        });
+        return remembered("wrote the uv lesson, the uv-setup skill, and alpha's testing knowledge");
       }
       return done("nothing to do");
     }
@@ -534,5 +630,118 @@ describe("Phase 4 exit criterion", () => {
       ]),
     );
     expect(types).not.toContain("turn.failed");
+  });
+});
+
+describe("Phase 6 exit criterion", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-memory-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("an agent carries a lesson and a skill from one project into another, and a promoted skill reaches everyone", async () => {
+    const { board, ownerToken } = await Board.init(dir, { name: "memory" });
+    await board.addProject(OWNER, { slug: "alpha" });
+    await board.addProject(OWNER, { slug: "beta" });
+    await board.addAgent(OWNER, {
+      name: "mem-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["alpha"],
+    });
+    await board.addAgent(OWNER, { name: "stew-1", role: "steward", cli: "claude" });
+    const app = createApp({ board, version: "test" });
+    const backend = new ScriptedBackend(app);
+    const runner = new LocalRunner({
+      board,
+      backends: { claude: backend, codex: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    // The scheduler runs on its own clock so the reflection cadence and the heartbeat can be reached.
+    let clock = Date.now();
+    const scheduler = new Scheduler({
+      board,
+      runner,
+      now: () => new Date(clock),
+      timings: {
+        debounceMs: 0,
+        ownerDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        unclaimedTaskMs: 3_600_000,
+        reflectionMs: 60_000,
+      },
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const owner = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+
+    // Onboarding on alpha; then a working turn leaves a lesson in the core, a skill, and a project fact.
+    await settle();
+    await board.requestWake(OWNER, { agent: "mem-1", project: "alpha", reason: "work" });
+    await settle();
+    expect((await board.listKnowledge("alpha")).map((k) => k.topic)).toEqual(["testing"]);
+    expect((await board.listMembers()).find((m) => m.name === "mem-1")?.skills).toEqual([
+      "uv-setup",
+    ]);
+    expect((await board.listChannel("alpha/general")).at(-1)?.body).toContain(
+      "Knowledge written: testing",
+    );
+
+    // The reflection cadence passes: the agent consolidates, archives, refreshes its profile, and
+    // proposes its skill to the society. The trigger is mechanical; the turn is the agent's.
+    clock += 60_000;
+    await settle();
+    const reflection = backend.prompts.findLast((p) => p.includes("## Reflection"));
+    expect(reflection).toContain("# Turn for mem-1 on alpha");
+    expect(reflection).toContain("Trigger: reflection. scheduled reflection");
+    expect(reflection).toContain("- testing: updated by mem-1");
+    const proposals = await board.listProposals();
+    expect(proposals).toEqual([
+      expect.objectContaining({ kind: "skill", proposedBy: "mem-1", status: "proposed" }),
+    ]);
+    expect((await board.listMembers()).find((m) => m.name === "mem-1")?.profile).toContain(
+      "Python projects with uv",
+    );
+
+    // The steward's next heartbeat carries the proposal in its digest; it approves, and the board
+    // promotes the skill where every citizen's skills index lists it.
+    clock += 3_600_000;
+    await settle();
+    expect((await board.readProposal(proposals[0]?.id ?? "")).status).toBe("provisioned");
+    expect((await board.listSocietySkills()).map((s) => [s.name, s.summary])).toEqual([
+      ["uv-setup", "Set up a uv project with locked dependencies"],
+    ]);
+    expect((await board.listChannel("general")).at(-1)?.body).toContain(
+      "Skill uv-setup promoted to the society",
+    );
+
+    // The owner assigns the agent to beta, as the UI would. Its first turn there loads the lesson,
+    // finds the archive by search, sees both skills, and seeds beta's knowledge from what it learned.
+    const joined = await app.request("/api/verbs/join_project", {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ project: "beta", agent: "mem-1" }),
+    });
+    expect(joined.status).toBe(200);
+    await settle();
+    const onboarding = backend.prompts.findLast((p) => p.includes('project "beta"'));
+    expect(onboarding).toContain("This is your first turn as mem-1");
+    expect(onboarding).toContain("## Knowledge of beta\n\nNone yet.");
+    expect((await board.listKnowledge("beta")).map((k) => k.body)).toEqual([
+      expect.stringContaining("carried over from alpha"),
+    ]);
+    const types = (await board.readEvents(null)).map((e) => e.type);
+    expect(types).toEqual(
+      expect.arrayContaining(["knowledge.written", "skill.promoted", "proposal.provisioned"]),
+    );
+    expect(types).not.toContain("turn.failed");
+    expect(backend.prompts.filter((p) => p.includes("## Reflection"))).toHaveLength(1);
   });
 });

@@ -35,6 +35,53 @@ describe("config-home rendering", () => {
     expect(first).toContain("small pull requests");
   });
 
+  it("loads the norms in full and the skills as an index of summaries and paths", () => {
+    const bare = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+      norms: "",
+      skills: [],
+    });
+    expect(bare).not.toContain("## Society norms");
+    expect(bare).toContain("## Skills\n\nNone yet.");
+
+    const full = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+      norms: "- Summaries close threads.",
+      skills: [
+        {
+          name: "uv-setup",
+          summary: "Set up a uv project",
+          scope: "own",
+          path: "/data/agents/eng-1/skills/uv-setup/SKILL.md",
+        },
+        {
+          name: "release",
+          summary: "",
+          scope: "society",
+          path: "/data/board/society/skills/release/SKILL.md",
+        },
+      ],
+    });
+    const norms = full.indexOf("## Society norms");
+    expect(norms).toBeGreaterThan(full.indexOf("## Role"));
+    expect(norms).toBeLessThan(full.indexOf("## Core memory"));
+    expect(full).toContain("- Summaries close threads.");
+    expect(full).toContain(
+      "- uv-setup (yours): Set up a uv project. File: /data/agents/eng-1/skills/uv-setup/SKILL.md",
+    );
+    expect(full).toContain(
+      "- release (society): no summary. File: /data/board/society/skills/release/SKILL.md",
+    );
+    expect(full).toContain('skill: {"name", "summary", "body"}');
+    expect(full).toContain("write_knowledge");
+  });
+
   it("references the token by environment variable in both CLI configs", () => {
     const claude = renderClaudeMcpConfig("http://127.0.0.1:4700/mcp");
     expect(claude.mcpServers.board.headers.Authorization).toBe("Bearer ${STELLARIS_AGENT_TOKEN}");

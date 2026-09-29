@@ -50,6 +50,9 @@ export function ProjectPage() {
         <Link to="/projects/$slug/dashboard" params={{ slug }} className={tabClass}>
           Dashboard
         </Link>
+        <Link to="/projects/$slug/knowledge" params={{ slug }} className={tabClass}>
+          Knowledge
+        </Link>
       </nav>
       <Outlet />
     </div>
@@ -343,6 +346,40 @@ export function TaskPane() {
         ) : null}
       </Panel>
     </div>
+  );
+}
+
+/** What members wrote through write_knowledge: the project's shared memory, one topic per file. */
+export function KnowledgePane() {
+  const { slug } = projectRoute.useParams();
+  const knowledge = useQuery({
+    queryKey: ["knowledge", slug],
+    queryFn: () => api.knowledge(slug),
+  });
+  return (
+    <Panel title="Knowledge">
+      <ErrorNote error={knowledge.error} />
+      {knowledge.data === undefined ? null : knowledge.data.length === 0 ? (
+        <Empty>
+          No topics yet. Members write durable facts about the codebase and process here through the
+          write_knowledge tool.
+        </Empty>
+      ) : (
+        <ul className="space-y-3">
+          {knowledge.data.map((topic) => (
+            <li key={topic.topic} className="rounded border border-board-border bg-board-bg/60 p-3">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{topic.topic}</span>
+                <span className="text-xs text-board-muted">
+                  by {topic.updatedBy} · {timeAgo(topic.updatedAt)}
+                </span>
+              </div>
+              <Markdown>{topic.body}</Markdown>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 

@@ -4,6 +4,7 @@ import path from "node:path";
 import { Board, type Actor } from "@stellaris/board-core";
 import type { Name, TurnDispatch, TurnRecord, Ulid } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { Scheduler, type TurnRunner } from "./scheduler.js";
 
 const OWNER: Actor = { name: "owner", role: "owner" };
@@ -16,6 +17,12 @@ class FakeRunner implements TurnRunner {
   private release: (() => void) | null = null;
   hold = false;
 
+  /** With a board, turns are recorded like the real runner does, on the injected clock. */
+  constructor(
+    private readonly board: Board | null = null,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
   async runTurn(dispatch: TurnDispatch): Promise<TurnRecord> {
     this.dispatches.push(dispatch);
     if (this.hold) {
@@ -23,15 +30,15 @@ class FakeRunner implements TurnRunner {
         this.release = resolve;
       });
     }
-    return {
+    const record: TurnRecord = {
       agent: dispatch.agent,
       project: dispatch.project,
       runner: "local",
       cli: "claude",
       session: "s",
       trigger: dispatch.trigger,
-      startedAt: new Date().toISOString(),
-      endedAt: new Date().toISOString(),
+      startedAt: this.now().toISOString(),
+      endedAt: this.now().toISOString(),
       exitReason: "completed",
       status: null,
       error: null,
@@ -40,6 +47,11 @@ class FakeRunner implements TurnRunner {
       toolCalls: 0,
       model: null,
     };
+    if (this.board !== null) {
+      await this.board.beginTurn(record);
+      await this.board.finishTurn(record);
+    }
+    return record;
   }
 
   releaseHeld(): void {
@@ -69,7 +81,9 @@ describe("Scheduler", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function setup(options: { concurrency?: number; timings?: Record<string, number> } = {}) {
+  async function setup(
+    options: { concurrency?: number; timings?: Record<string, number>; record?: boolean } = {},
+  ) {
     const { board } = await Board.init(dir, { name: "sched" }, { now, leaseMs: 60_000 });
     await board.addProject(OWNER, { slug: "demo" });
     await board.addAgent(OWNER, {
@@ -84,7 +98,7 @@ describe("Scheduler", () => {
       cli: "claude",
       memberships: ["demo"],
     });
-    const runner = new FakeRunner();
+    const runner = new FakeRunner(options.record === true ? board : null, now);
     const scheduler = new Scheduler({
       board,
       runner,
@@ -243,6 +257,65 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
       ["eng-1", "heartbeat"],
     ]);
+  });
+
+  it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { reflectionMs: 60_000, heartbeatMs: 3_600_000, unclaimedTaskMs: 3_600_000 },
+      record: true,
+    });
+    // The reflection clock starts at the scheduler's first sight; nothing happens before the cadence.
+    advance(30_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    // Past the cadence, only members whose charter reflects and who have worked since take a turn;
+    // the onboarding turns count as work for both.
+    advance(31_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.priority])).toEqual([
+      ["eng-1", "demo", "reflection", 0],
+      ["rev-1", "demo", "reflection", 0],
+    ]);
+    runner.dispatches.length = 0;
+    // Nobody worked since: the next cadence passes in silence.
+    advance(61_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    // A working turn for one member makes the next cadence wake that member alone.
+    await board.requestWake(OWNER, { agent: "eng-1", project: "demo", reason: "work" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).toEqual(["manual"]);
+    runner.dispatches.length = 0;
+    advance(61_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["eng-1", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
+    // A reflection requested ahead of the cadence dispatches at once, at owner priority, and restarts the clock.
+    await board.requestWake(OWNER, {
+      agent: "rev-1",
+      project: "demo",
+      reason: "reflect now",
+      kind: "reflection",
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.priority])).toEqual([
+      ["rev-1", "reflection", 0],
+    ]);
+    // A role that does not reflect never gets one: the owner's charter says so, and it has no CLI anyway.
+    const state = await board.readState(
+      "scheduler",
+      z.object({ lastReflection: z.record(z.string(), z.string()) }),
+      { lastReflection: {} },
+    );
+    expect(Object.keys(state.lastReflection).toSorted()).toEqual(["eng-1", "rev-1"]);
   });
 
   it("manual wakes go through the same dispatch", async () => {

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { Command } from "commander";
 import { Board, BoardError, type Actor } from "@stellaris/board-core";
 import {
@@ -36,6 +38,14 @@ async function open(): Promise<Board> {
 
 async function actorFor(board: Board, as: string | undefined): Promise<Actor> {
   return as === undefined ? board.ownerActor() : board.actorFor(as);
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -511,26 +521,106 @@ program
     print({ paused: false }, () => "Society resumed");
   });
 
+const knowledge = program
+  .command("knowledge")
+  .description("Shared knowledge, by project or society");
+
+knowledge
+  .command("list [project]")
+  .description("List knowledge topics of a project, or of the society when no project is given")
+  .action(async (projectSlug: string | undefined) => {
+    const board = await open();
+    const topics = await board.listKnowledge(projectSlug ?? null);
+    print(topics, () =>
+      topics.length === 0
+        ? "No knowledge yet."
+        : topics.map((t) => `${t.topic}\tupdated by ${t.updatedBy} at ${t.updatedAt}`).join("\n"),
+    );
+  });
+
+knowledge
+  .command("show <topic>")
+  .description("Print a knowledge topic")
+  .option("--project <slug>", "the project's topic instead of the society's")
+  .action(async (topic: string, opts: { project?: string }) => {
+    const board = await open();
+    const found = (await board.listKnowledge(opts.project ?? null)).find((t) => t.topic === topic);
+    if (found === undefined) {
+      throw new BoardError("NOT_FOUND", `no knowledge topic ${topic}`);
+    }
+    print(found, () => found.body);
+  });
+
+knowledge
+  .command("write <topic>")
+  .description("Write a knowledge topic as the owner, from a file or standard input")
+  .option("--project <slug>", "the project's topic instead of the society's")
+  .option("--file <path>", "read the body from this file instead of standard input")
+  .option("--as <agent>", "act as this agent instead of the owner")
+  .action(async (topic: string, opts: { project?: string; file?: string; as?: string }) => {
+    const board = await open();
+    const body =
+      opts.file === undefined ? await readStdin() : await readFile(path.resolve(opts.file), "utf8");
+    const written = await board.writeKnowledge(await actorFor(board, opts.as), {
+      project: opts.project ?? null,
+      topic,
+      body,
+    });
+    print(written, () => `Wrote ${written.topic} for ${written.project ?? "the society"}`);
+  });
+
+program
+  .command("skill")
+  .description("Skills promoted to the society")
+  .command("list")
+  .description("List the society's skills, and each member's own")
+  .action(async () => {
+    const board = await open();
+    const society = await board.listSocietySkills();
+    const own: Array<{ agent: string; skills: Awaited<ReturnType<typeof board.listAgentSkills>> }> =
+      [];
+    for (const member of await board.listAgents()) {
+      const skills = await board.listAgentSkills(member.name);
+      if (skills.length > 0) {
+        own.push({ agent: member.name, skills });
+      }
+    }
+    print(
+      { society, own },
+      () =>
+        [
+          ...society.map((s) => `society\t${s.name}\t${s.summary}`),
+          ...own.flatMap(({ agent: name, skills }) =>
+            skills.map((s) => `${name}\t${s.name}\t${s.summary}`),
+          ),
+        ].join("\n") || "No skills yet.",
+    );
+  });
+
 program
   .command("turn")
   .description("Turn operations")
   .command("run <agent>")
-  .description("Enqueue a manual wake for an agent on a project")
-  .requiredOption("--project <slug>", "project to act on")
+  .description("Enqueue a manual wake for an agent on a project, or a reflection turn")
+  .requiredOption("--project <slug>", "project to act on, or society for a society-scope turn")
   .option("--reason <text>", "why", "manual wake from the admin CLI")
-  .action(async (agentName: string, opts: { project: string; reason: string }) => {
-    const board = await open();
-    const event = await board.requestWake(board.ownerActor(), {
-      agent: agentName,
-      project: opts.project,
-      reason: opts.reason,
-    });
-    print(
-      event,
-      () =>
-        `Wake requested for ${agentName} on ${opts.project} (event ${event.id}). A running board server dispatches it.`,
-    );
-  });
+  .option("--reflect", "a reflection turn instead of a working turn", false)
+  .action(
+    async (agentName: string, opts: { project: string; reason: string; reflect: boolean }) => {
+      const board = await open();
+      const event = await board.requestWake(board.ownerActor(), {
+        agent: agentName,
+        project: opts.project,
+        reason: opts.reason,
+        kind: opts.reflect ? "reflection" : "manual",
+      });
+      print(
+        event,
+        () =>
+          `${opts.reflect ? "Reflection" : "Wake"} requested for ${agentName} on ${opts.project} (event ${event.id}). A running board server dispatches it.`,
+      );
+    },
+  );
 
 try {
   await program.parseAsync(process.argv);

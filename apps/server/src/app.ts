@@ -150,6 +150,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const id = c.req.param("id");
     return c.json({ thread: await board.readThread(id), messages: await board.listThread(id) });
   });
+  api.get("/channels", async (c) => c.json(await board.listChannels()));
   api.get("/channels/:ref{.+}", async (c) => c.json(await board.listChannel(c.req.param("ref"))));
 
   // Board events: the durable log, as a page or as a stream.
@@ -158,9 +159,13 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const limit = Number(c.req.query("limit") ?? "200");
     return c.json(await board.readEvents(since === "" ? null : since, limit));
   });
+  // `since=latest` starts at the end of the log, for a client that has just read the board's state.
   api.get("/events/stream", (c) => {
     let cursor = c.req.query("since") ?? null;
     return streamSSE(c, async (stream) => {
+      if (cursor === "latest") {
+        cursor = await board.latestEventId();
+      }
       while (!stream.aborted && !stream.closed) {
         const events = await board.readEvents(cursor === "" ? null : cursor, 100);
         for (const event of events) {

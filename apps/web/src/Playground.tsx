@@ -1,9 +1,10 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { Hud } from "./components/Hud.js";
 import { ApiError, createApi } from "./lib/api.js";
+import { followBoardEvents, refreshFor } from "./lib/events.js";
 import { skyModel } from "./sky/model.js";
 import { Sky } from "./sky/Sky.js";
 
@@ -17,21 +18,37 @@ function useNow(intervalMs: number): number {
   return now;
 }
 
-/** The signed-in view: the sky of citizens, kept current by polling the board. */
+/**
+ * The signed-in view: the sky of citizens, kept current by the board's event stream. Polling
+ * stays as a slow fallback, and for the scheduler's queue, which changes without an event.
+ */
 export function Playground({ token, onSignOut }: { token: string; onSignOut: () => void }) {
   const api = useMemo(() => createApi(token), [token]);
+  const client = useQueryClient();
+  useEffect(
+    () =>
+      followBoardEvents(token, {
+        onEvent: (event) => refreshFor(client, event),
+        onResume: () => void client.invalidateQueries(),
+      }),
+    [token, client],
+  );
   const society = useQuery({ queryKey: ["society"], queryFn: api.society, staleTime: 60_000 });
-  const members = useQuery({ queryKey: ["members"], queryFn: api.members, refetchInterval: 5_000 });
+  const members = useQuery({
+    queryKey: ["members"],
+    queryFn: api.members,
+    refetchInterval: 30_000,
+  });
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: api.projects,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
-  const roles = useQuery({ queryKey: ["roles"], queryFn: api.roles, refetchInterval: 30_000 });
+  const roles = useQuery({ queryKey: ["roles"], queryFn: api.roles, refetchInterval: 60_000 });
   const scheduler = useQuery({
     queryKey: ["scheduler"],
     queryFn: api.scheduler,
-    refetchInterval: 2_000,
+    refetchInterval: 3_000,
   });
   const [hovered, setHovered] = useState<string | null>(null);
   const now = useNow(30_000);

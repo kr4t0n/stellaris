@@ -6,6 +6,7 @@ export type {
   AddProjectInput,
   AddReplicaInput,
   BoardOptions,
+  ChannelSummary,
   DigestResult,
   InitInput,
   RetireAgentInput,

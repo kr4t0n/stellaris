@@ -9,6 +9,9 @@ import {
 } from "@stellaris/shared";
 import { ensureDir, exists } from "./fs.js";
 
+/** Every line starts with the event's id, which `append` writes first; old lines skip unparsed. */
+const LEADING_ID = /^\{"id":"([0-9A-HJKMNP-TV-Z]{26})"/;
+
 /** Append-only JSONL log of every board change. */
 export class EventLog {
   constructor(
@@ -45,6 +48,10 @@ export class EventLog {
       if (line.trim().length === 0) {
         continue;
       }
+      const leading = LEADING_ID.exec(line)?.[1];
+      if (since !== null && leading !== undefined && leading <= since) {
+        continue;
+      }
       const event = BoardEventSchema.parse(JSON.parse(line));
       if (since !== null && event.id <= since) {
         continue;
@@ -55,5 +62,15 @@ export class EventLog {
       }
     }
     return events;
+  }
+
+  /** The id of the newest event, or null for an empty log. */
+  async lastId(): Promise<Ulid | null> {
+    if (!(await exists(this.file))) {
+      return null;
+    }
+    const lines = (await readFile(this.file, "utf8")).trimEnd().split("\n");
+    const last = lines.at(-1) ?? "";
+    return last.length === 0 ? null : BoardEventSchema.parse(JSON.parse(last)).id;
   }
 }

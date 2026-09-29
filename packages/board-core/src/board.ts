@@ -1,6 +1,6 @@
 import { readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
-import { monotonicFactory } from "ulid";
+import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
   AgentSchema,
@@ -194,6 +194,16 @@ const TurnHistoryPayloadSchema = z.object({
 export interface DigestResult {
   readonly messages: Message[];
   readonly cursor: Ulid | null;
+}
+
+/** A channel as a navigator lists it: where it is and when it last spoke. */
+export interface ChannelSummary {
+  readonly ref: ChannelRef;
+  readonly project: Name | null;
+  readonly name: Name;
+  readonly messages: number;
+  readonly lastMessageId: Ulid | null;
+  readonly lastAt: string | null;
 }
 
 export interface SearchHit {
@@ -868,6 +878,10 @@ export class Board {
     return this.events.readSince(since, limit);
   }
 
+  async latestEventId(): Promise<Ulid | null> {
+    return this.events.lastId();
+  }
+
   /** The roster as projected: every citizen with identity, reach, availability, and profile. */
   async listMembers(): Promise<Member[]> {
     const members: Member[] = [];
@@ -960,6 +974,34 @@ export class Board {
   }
 
   /** Every message in a channel, oldest first. Thread messages are listed with `listThread`. */
+  /** Every channel, the society's first, with how many messages it holds and its newest one. */
+  async listChannels(): Promise<ChannelSummary[]> {
+    const summaries: ChannelSummary[] = [];
+    const scopes: Array<{ project: Name | null; names: readonly Name[] }> = [
+      { project: null, names: (await this.society()).channels },
+      ...(await this.listProjects()).map((project) => ({
+        project: project.slug,
+        names: project.channels,
+      })),
+    ];
+    for (const { project, names } of scopes) {
+      for (const name of names) {
+        const ref = channelRef(project, name);
+        const files = await listFiles(this.paths.channelDir(ref));
+        const last = files.at(-1)?.slice(0, 26) ?? null;
+        summaries.push({
+          ref,
+          project,
+          name,
+          messages: files.length,
+          lastMessageId: last,
+          lastAt: last === null ? null : new Date(decodeTime(last)).toISOString(),
+        });
+      }
+    }
+    return summaries;
+  }
+
   async listChannel(ref: ChannelRef, limit = 200): Promise<Message[]> {
     await this.assertChannelExists(ref);
     const messages = await this.readMessagesIn(this.paths.channelDir(ref), null);

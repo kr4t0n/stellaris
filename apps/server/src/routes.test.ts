@@ -319,6 +319,45 @@ describe("board server routes", () => {
     expect(state.signals).toEqual(["backlog:demo:engineer"]);
   });
 
+  it("lists channels with their newest message, and streams board events from the log's end", async () => {
+    const app = createApp({ board, version: "t" });
+    const before = await board.postMessage(USER, { channel: "demo/general", body: "earlier" });
+    const channels = z
+      .array(
+        z.object({
+          ref: z.string(),
+          project: z.string().nullable(),
+          messages: z.number(),
+          lastMessageId: z.string().nullable(),
+        }),
+      )
+      .parse(await (await app.request("/api/channels", { headers })).json());
+    expect(channels.map((channel) => channel.ref)).toEqual([
+      "general",
+      "ops",
+      "governance",
+      "decisions",
+      "demo/general",
+      "demo/dev",
+    ]);
+    expect(channels.find((channel) => channel.ref === "demo/general")).toMatchObject({
+      project: "demo",
+      messages: 1,
+      lastMessageId: before.id,
+    });
+
+    const response = await app.request("/api/events/stream?since=latest", { headers });
+    setTimeout(() => {
+      void board.postMessage(USER, { channel: "demo/dev", body: "later" });
+    }, 20);
+    const [frame] = await readSse(response, 1);
+    const event = z
+      .object({ type: z.string(), payload: z.object({ channel: z.string() }) })
+      .parse(JSON.parse(frame ?? "{}"));
+    // Nothing from before the stream opened is replayed.
+    expect(event).toMatchObject({ type: "message.posted", payload: { channel: "demo/dev" } });
+  });
+
   it("replays and streams live turn events", async () => {
     const turns = new TurnHub(10);
     const app = createApp({ board, version: "t", turns });

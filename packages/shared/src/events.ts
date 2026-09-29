@@ -93,7 +93,13 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("text"), delta: z.string() }),
   z.object({ type: z.literal("tool_call"), name: z.string(), input: z.unknown() }),
-  z.object({ type: z.literal("tool_result"), name: z.string(), ok: z.boolean() }),
+  z.object({
+    type: z.literal("tool_result"),
+    name: z.string(),
+    ok: z.boolean(),
+    /** What the tool returned, cut to `OUTPUT_LIMIT` characters by `capOutput`. */
+    output: z.string().optional(),
+  }),
   z.object({ type: z.literal("approval_requested"), kind: z.string(), detail: z.unknown() }),
   z.object({
     type: z.literal("turn_completed"),
@@ -110,6 +116,25 @@ export type AgentEvent = z.infer<typeof AgentEventSchema>;
  * One agent event as the board server streams it live: which agent produced it, in which scope
  * (a project slug or `society`), numbered in a sequence that restarts with the server.
  */
+/** The most of one tool's output a turn keeps. */
+export const OUTPUT_LIMIT = 4_000;
+
+/** A tool's output within `limit`, keeping its start and its end, where failures usually show. */
+export function capOutput(text: string, limit = OUTPUT_LIMIT): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  const half = Math.floor(limit / 2);
+  return `${text.slice(0, half)}\n… ${text.length - 2 * half} characters cut …\n${text.slice(-half)}`;
+}
+
+/** One step of a finished turn as its transcript keeps it, stamped when the runner received it. */
+export const TranscriptEntrySchema = z.object({
+  ts: IsoDateTimeSchema,
+  event: AgentEventSchema,
+});
+export type TranscriptEntry = z.infer<typeof TranscriptEntrySchema>;
+
 export const LiveTurnEventSchema = z.object({
   seq: z.number().int().positive(),
   ts: IsoDateTimeSchema,

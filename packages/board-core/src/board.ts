@@ -77,6 +77,9 @@ import {
   WakeRequestSchema,
   type BoardEvent as BoardLogEvent,
   type SessionsFile,
+  TranscriptEntrySchema,
+  UlidSchema,
+  type TranscriptEntry,
   type TurnHistoryEntry,
   type TurnRecord,
   type WakeRequestInput,
@@ -90,6 +93,7 @@ import {
   listFiles,
   readJson,
   readMarkdown,
+  writeFileAtomic,
   writeJson,
   writeMarkdown,
 } from "./fs.js";
@@ -178,6 +182,7 @@ const TurnHistoryPayloadSchema = z.object({
   summary: z.string().nullable().default(null),
   error: z.string().nullable().default(null),
   toolCalls: z.number().int().nonnegative().optional(),
+  turnId: UlidSchema.optional(),
 });
 const TurnStartPayloadSchema = z.object({ project: NameSchema });
 
@@ -2438,6 +2443,23 @@ export class Board {
       : "";
   }
 
+  /** The steps of one finished turn, as the runner handed them over when it ended. */
+  async readTranscript(agent: Name, turnId: string): Promise<TranscriptEntry[]> {
+    // The id names a file, so only a ULID may reach the path.
+    const id = UlidSchema.safeParse(turnId);
+    const file = id.success ? this.paths.agentTranscript(agent, id.data) : null;
+    if (file === null || !(await exists(file))) {
+      throw new BoardError("NOT_FOUND", `no transcript of turn ${turnId} for ${agent}`);
+    }
+    const entries: TranscriptEntry[] = [];
+    for (const line of (await readFile(file, "utf8")).split("\n")) {
+      if (line.trim() === "") continue;
+      const parsed = TranscriptEntrySchema.safeParse(JSON.parse(line));
+      if (parsed.success) entries.push(parsed.data);
+    }
+    return entries;
+  }
+
   async readMemoryCore(agent: Name): Promise<string> {
     const file = this.paths.agentMemoryCore(agent);
     return (await exists(file))
@@ -2470,27 +2492,39 @@ export class Board {
   }
 
   /** Records a turn's start so a crash leaves evidence for the next turn. */
-  async beginTurn(record: TurnRecord): Promise<void> {
-    const parsed = TurnRecordSchema.parse(record);
+  /** Records a turn's start and gives it the id its transcript will be filed under. */
+  async beginTurn(record: TurnRecord): Promise<TurnRecord> {
+    const parsed = TurnRecordSchema.parse({ ...record, id: record.id ?? this.newId() });
     await this.mutex.run(async () => {
       await this.writeTurnRecord(parsed);
       await this.events.append("turn.started", parsed.agent, {
+        turnId: parsed.id,
         project: parsed.project,
         trigger: parsed.trigger.kind,
         session: parsed.session,
         runner: parsed.runner,
       });
     });
+    return parsed;
   }
 
   /** Records a turn's end. Timeouts and errors become `turn.failed`; everything else `turn.completed`. */
-  async finishTurn(record: TurnRecord): Promise<void> {
+  /** Records a turn's end, with the steps it took when the runner kept them. */
+  async finishTurn(record: TurnRecord, transcript: readonly TranscriptEntry[] = []): Promise<void> {
     const parsed = TurnRecordSchema.parse(record);
     const failed = parsed.exitReason === "error" || parsed.exitReason === "timeout";
     await this.mutex.run(async () => {
+      if (parsed.id !== undefined && transcript.length > 0) {
+        await ensureDir(this.paths.agentTurns(parsed.agent));
+        await writeFileAtomic(
+          this.paths.agentTranscript(parsed.agent, parsed.id),
+          `${transcript.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        );
+      }
       await this.writeTurnRecord(parsed);
       await this.refreshMember(parsed.agent);
       await this.events.append(failed ? "turn.failed" : "turn.completed", parsed.agent, {
+        ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
         project: parsed.project,
         trigger: parsed.trigger.kind,
         session: parsed.session,

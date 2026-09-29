@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capOutput,
   channelRef,
   IsoDateTimeSchema,
   loadServerConfig,
@@ -125,5 +126,13 @@ describe("server config", () => {
     ]);
     expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
+  });
+});
+
+describe("tool output", () => {
+  it("keeps short output whole and long output's start and end", () => {
+    expect(capOutput("ok")).toBe("ok");
+    const long = `${"a".repeat(30)}${"b".repeat(30)}`;
+    expect(capOutput(long, 20)).toBe(`${"a".repeat(10)}\n… 40 characters cut …\n${"b".repeat(10)}`);
   });
 });

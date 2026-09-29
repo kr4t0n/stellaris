@@ -102,6 +102,17 @@ export function useTurnHistory(name: string, limit: number) {
   });
 }
 
+/** One finished turn's steps; they never change once written, so they are read once. */
+export function useTranscript(name: string, turnId: string | null) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["transcript", name, turnId],
+    queryFn: () => api.transcript(name, turnId ?? ""),
+    enabled: turnId !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 export function useMemoryCore(name: string) {
   const { api } = useSession();
   return useQuery({ queryKey: ["memory", name], queryFn: () => api.memory(name) });

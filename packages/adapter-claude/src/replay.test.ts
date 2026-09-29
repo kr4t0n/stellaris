@@ -102,9 +102,11 @@ describe("ClaudeAgentBackend replay", () => {
       "turn_completed",
     ]);
     const toolResults = result.events.filter((e) => e.type === "tool_result");
-    expect(toolResults.map((e) => (e.type === "tool_result" ? [e.name, e.ok] : null))).toEqual([
-      ["Bash", true],
-      ["mcp__board__claim_task", false],
+    expect(
+      toolResults.map((e) => (e.type === "tool_result" ? [e.name, e.ok, e.output] : null)),
+    ).toEqual([
+      ["Bash", true, "On branch agent/eng-1"],
+      ["mcp__board__claim_task", false, "CLAIM_CONFLICT: held by rev-1"],
     ]);
 
     const options = calls[0]?.options;

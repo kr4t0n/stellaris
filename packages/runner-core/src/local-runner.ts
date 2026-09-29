@@ -12,6 +12,7 @@ import {
   type Name,
   type Thread,
   type TurnDispatch,
+  type TranscriptEntry,
   type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
@@ -294,8 +295,7 @@ export class LocalRunner {
     const limits = { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns };
     const statusSchema = turnStatusJsonSchema();
 
-    const record: TurnRecord = { ...base, session, sessionCostUsd: costSoFarUsd };
-    await this.board.beginTurn(record);
+    const record = await this.board.beginTurn({ ...base, session, sessionCostUsd: costSoFarUsd });
     const resident = charter.resident && backend.startResident !== undefined;
     this.log.info(
       { agent: agent.name, project: dispatch.project, session, newSession, resident },
@@ -303,8 +303,10 @@ export class LocalRunner {
     );
 
     const events: AgentEvent[] = [];
+    const transcript: TranscriptEntry[] = [];
     const onEvent = (event: AgentEvent): void => {
       events.push(event);
+      transcript.push({ ts: this.now().toISOString(), event });
       this.onEvent?.(agent.name, dispatch.project, event);
     };
     const keepLeases = setInterval(() => {
@@ -413,7 +415,7 @@ export class LocalRunner {
         });
       }
     }
-    await this.board.finishTurn(finished);
+    await this.board.finishTurn(finished, transcript);
     this.log.info(
       { agent: agent.name, project: dispatch.project, exitReason: finished.exitReason },
       "turn finished",

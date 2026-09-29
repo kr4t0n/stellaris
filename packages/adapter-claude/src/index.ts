@@ -22,6 +22,7 @@ import {
 } from "@stellaris/runner-core";
 import {
   AGENT_TOKEN_ENV,
+  capOutput,
   type AgentEvent,
   type TurnExitReason,
   type Usage,
@@ -66,6 +67,7 @@ interface Block {
   input?: unknown;
   tool_use_id?: unknown;
   is_error?: unknown;
+  content?: unknown;
 }
 
 interface TurnState {
@@ -110,6 +112,20 @@ function isBlock(value: unknown): value is Block {
 
 function blocksOf(content: unknown): Block[] {
   return Array.isArray(content) ? content.filter(isBlock) : [];
+}
+
+/** A tool result's content as text: a string, or its text blocks, with other blocks named. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  return blocksOf(content)
+    .map((block) =>
+      block.type === "text" && typeof block.text === "string"
+        ? block.text
+        : `[${typeof block.type === "string" ? block.type : "content"}]`,
+    )
+    .join("\n");
 }
 
 function numberField(raw: unknown, key: string): number {
@@ -195,10 +211,12 @@ function handleMessage(
     case "user": {
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+          const output = resultText(block.content);
           emit({
             type: "tool_result",
             name: toolNames.get(block.tool_use_id) ?? "unknown",
             ok: block.is_error !== true,
+            ...(output === "" ? {} : { output: capOutput(output) }),
           });
         }
       }

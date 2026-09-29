@@ -6,6 +6,7 @@ import {
   elapsed,
   lastLine,
   toolLabel,
+  transcriptTurn,
   turnsOf,
   type LiveTurns,
 } from "./live.js";
@@ -23,7 +24,7 @@ function item(agent: string, project: string, event: AgentEvent): LiveTurnEvent 
 }
 
 function replay(events: readonly LiveTurnEvent[]): LiveTurns {
-  return events.reduce<LiveTurns>(applyLive, new Map());
+  return events.reduce<LiveTurns>((turns, each) => applyLive(turns, each), new Map());
 }
 
 const STARTED = {
@@ -145,5 +146,35 @@ describe("live turns", () => {
     expect(elapsed(start, at(42))).toBe("42s");
     expect(elapsed(start, at(4 * 60 + 5))).toBe("4m");
     expect(elapsed(start, at(72 * 60))).toBe("1h 12m");
+  });
+
+  it("pairs a result's output with its call", () => {
+    const turns = replay([
+      item("ada", "lab", STARTED),
+      item("ada", "lab", { type: "tool_call", name: "Bash", input: { command: "pnpm test" } }),
+      item("ada", "lab", { type: "tool_result", name: "Bash", ok: false, output: "1 failed" }),
+    ]);
+    expect(turns.get("ada/lab")?.steps[0]).toMatchObject({ ok: false, output: "1 failed" });
+  });
+
+  it("folds a stored transcript whole, however many steps it has", () => {
+    const calls = Array.from({ length: 450 }, (_, index) => [
+      {
+        ts: "2026-09-29T13:00:00.000Z",
+        event: { type: "tool_call" as const, name: "Read", input: { file_path: `f${index}` } },
+      },
+      {
+        ts: "2026-09-29T13:00:01.000Z",
+        event: { type: "tool_result" as const, name: "Read", ok: true, output: "x" },
+      },
+    ]).flat();
+    const turn = transcriptTurn(
+      [{ ts: "2026-09-29T12:59:59.000Z", event: STARTED }, ...calls],
+      "ada",
+      "lab",
+    );
+    expect(turn?.steps).toHaveLength(450);
+    expect(turn?.fromStart).toBe(true);
+    expect(turn?.steps.every((step) => step.kind === "tool" && step.output === "x")).toBe(true);
   });
 });

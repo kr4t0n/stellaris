@@ -59,7 +59,10 @@ describe("recorded Claude stream", () => {
       .map((e) => (e.type === "tool_call" ? e.name : ""));
     expect(calls).toContain("mcp__board__update_task");
     expect(calls).toContain("StructuredOutput");
-    expect(result.events.filter((e) => e.type === "tool_result")).toHaveLength(3);
+    const results = result.events.filter((e) => e.type === "tool_result");
+    expect(results).toHaveLength(3);
+    // A board verb answers with content blocks; their text is the output.
+    expect(results[1]).toMatchObject({ output: expect.stringContaining('"project": "demo"') });
     expect(result.events[0]?.type).toBe("turn_started");
   });
 });

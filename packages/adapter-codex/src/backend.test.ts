@@ -60,7 +60,12 @@ interface TurnContext {
 function ordinaryTurn(turn: TurnContext): void {
   const command = { type: "commandExecution", id: "c1", command: "ls" };
   turn.item("item/started", { ...command, status: "inProgress" });
-  turn.item("item/completed", { ...command, status: "completed", exitCode: 0 });
+  turn.item("item/completed", {
+    ...command,
+    status: "completed",
+    exitCode: 0,
+    aggregatedOutput: "README.md\nsrc\n",
+  });
   turn.item("item/completed", {
     type: "mcpToolCall",
     id: "m1",
@@ -68,6 +73,7 @@ function ordinaryTurn(turn: TurnContext): void {
     tool: "post_message",
     status: "completed",
     arguments: { channel: "general" },
+    result: { content: [{ type: "text", text: '{"id":"01M"}' }] },
   });
   turn.item("item/completed", {
     type: "agentMessage",
@@ -249,6 +255,10 @@ describe("CodexBackend cold turns", () => {
       "Bash",
       "mcp__board__post_message",
     ]);
+    expect(result.events.flatMap((e) => (e.type === "tool_result" ? [e.output] : []))).toEqual([
+      "README.md\nsrc\n",
+      '{"id":"01M"}',
+    ]);
 
     expect(paramsOf(fake.received, "thread/start")).toEqual({
       cwd: "/tmp/wt",
@@ -345,6 +355,7 @@ describe("CodexBackend cold turns", () => {
           command: "pnpm test",
           status: "failed",
           exitCode: 1,
+          aggregatedOutput: `${"x".repeat(5_000)}\n1 test failed`,
         });
         turn.item("item/completed", {
           type: "mcpToolCall",
@@ -368,6 +379,12 @@ describe("CodexBackend cold turns", () => {
       ["mcp__board__claim_task", false],
       ["Edit", true],
     ]);
+    // Long output keeps its end, where the failure is, and the board's refusal is the output.
+    const outputs = result.events.flatMap((e) => (e.type === "tool_result" ? [e.output] : []));
+    expect(outputs[0]).toMatch(/characters cut …\n[x]*\n1 test failed\n\(exit 1\)$/);
+    expect(outputs[0]?.length).toBeLessThan(4_100);
+    expect(outputs[1]).toBe("held by eng-2");
+    expect(outputs[2]).toBeUndefined();
   });
 
   it("keeps Codex's sandbox when a runner asks for one, with the clone and the board writable", async () => {

@@ -17,6 +17,32 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await expect(view).toContainText("Charter of concierge");
 });
 
+test("a finished turn opens to every tool call with what it returned", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto("/citizen/desk?tab=turns");
+  const view = page.getByRole("region", { name: "Board content" });
+
+  await view.getByText("lab", { exact: true }).click();
+  await expect(view).toContainText("Looking at the request.");
+  await expect(view).toContainText("2 tool calls");
+  await expect(view.locator("summary", { hasText: "ls lab/bench" })).toBeVisible();
+  await expect(view.getByText("Returned an error")).toBeHidden();
+
+  await view.getByRole("button", { name: "Expand all" }).click();
+  await expect(view.getByText("Returned an error")).toBeVisible();
+  await expect(view).toContainText("ls: cannot access 'lab/bench': No such file or directory");
+  await expect(view).toContainText('{"id":"01M3Q2AAAAAAAAAAAAAAAAAAA1"}');
+});
+
+test("after a restart the Now tab shows the last turn from its transcript", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("Last turn · lab");
+  await expect(view.getByText("create_task")).toBeVisible();
+  await expect(view).toContainText("The turn completed");
+});
+
 test("waking a citizen says what it does and sends the wake the scheduler takes", async ({
   page,
 }) => {

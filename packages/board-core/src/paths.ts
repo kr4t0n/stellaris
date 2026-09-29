@@ -160,6 +160,13 @@ export class BoardPaths {
   agentMemoryCore(name: Name): string {
     return path.join(this.agentMemory(name), "core.md");
   }
+  /** Transcripts of the agent's finished turns, one JSON line per step. */
+  agentTurns(name: Name): string {
+    return path.join(this.agent(name), "turns");
+  }
+  agentTranscript(name: Name, turnId: string): string {
+    return path.join(this.agentTurns(name), `${turnId}.jsonl`);
+  }
   agentSkills(name: Name): string {
     return path.join(this.agent(name), "skills");
   }

@@ -1,4 +1,9 @@
-import { LiveTurnEventSchema, type LiveTurnEvent, type TurnExitReason } from "@stellaris/shared";
+import {
+  LiveTurnEventSchema,
+  type LiveTurnEvent,
+  type TranscriptEntry,
+  type TurnExitReason,
+} from "@stellaris/shared";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { followStream } from "./sse.js";
 
@@ -20,6 +25,8 @@ export type Step =
       readonly detail: string;
       /** Whether it succeeded, or `null` until its result arrives. */
       readonly ok: boolean | null;
+      /** What it returned, as the adapter cut it, or `null` until then or when it returned nothing. */
+      readonly output: string | null;
     })
   | (StepBase & { readonly kind: "error"; readonly message: string });
 
@@ -147,9 +154,9 @@ function isStatusText(text: string, summary: string): boolean {
   }
 }
 
-function withStep(turn: LiveTurn, step: Step): LiveTurn {
+function withStep(turn: LiveTurn, step: Step, maxSteps: number): LiveTurn {
   const steps = [...turn.steps, step];
-  const overflow = steps.length - MAX_STEPS;
+  const overflow = steps.length - maxSteps;
   return {
     ...turn,
     steps: overflow > 0 ? steps.slice(overflow) : steps,
@@ -158,8 +165,15 @@ function withStep(turn: LiveTurn, step: Step): LiveTurn {
   };
 }
 
-/** The turns after one more streamed event; the input is not changed. */
-export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
+/**
+ * The turns after one more streamed event; the input is not changed. The live store keeps at most
+ * `maxSteps` steps of a turn, the newest; a stored transcript is folded whole.
+ */
+export function applyLive(
+  turns: LiveTurns,
+  item: LiveTurnEvent,
+  { maxSteps }: { maxSteps: number } = { maxSteps: MAX_STEPS },
+): LiveTurns {
   const { event } = item;
   const key = pairKey(item.agent, item.project);
   const current = turns.get(key);
@@ -193,7 +207,10 @@ export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
         };
   switch (event.type) {
     case "text":
-      next.set(key, withStep(turn, { kind: "say", seq: item.seq, at: item.ts, text: event.delta }));
+      next.set(
+        key,
+        withStep(turn, { kind: "say", seq: item.seq, at: item.ts, text: event.delta }, maxSteps),
+      );
       break;
     case "tool_call":
       if (event.name === STATUS_TOOL) {
@@ -201,14 +218,19 @@ export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
       }
       next.set(
         key,
-        withStep(turn, {
-          kind: "tool",
-          seq: item.seq,
-          at: item.ts,
-          name: event.name,
-          ...describeCall(event.input),
-          ok: null,
-        }),
+        withStep(
+          turn,
+          {
+            kind: "tool",
+            seq: item.seq,
+            at: item.ts,
+            name: event.name,
+            ...describeCall(event.input),
+            ok: null,
+            output: null,
+          },
+          maxSteps,
+        ),
       );
       break;
     case "tool_result": {
@@ -218,7 +240,11 @@ export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
       );
       const step = turn.steps[index];
       if (step?.kind === "tool") {
-        const steps = turn.steps.with(index, { ...step, ok: event.ok });
+        const steps = turn.steps.with(index, {
+          ...step,
+          ok: event.ok,
+          output: event.output ?? null,
+        });
         next.set(key, { ...turn, steps, lastAt: item.ts });
       }
       break;
@@ -226,7 +252,11 @@ export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
     case "error":
       next.set(
         key,
-        withStep(turn, { kind: "error", seq: item.seq, at: item.ts, message: event.message }),
+        withStep(
+          turn,
+          { kind: "error", seq: item.seq, at: item.ts, message: event.message },
+          maxSteps,
+        ),
       );
       break;
     case "turn_completed": {
@@ -250,6 +280,23 @@ export function applyLive(turns: LiveTurns, item: LiveTurnEvent): LiveTurns {
       break;
   }
   return next;
+}
+
+/** A finished turn from its stored transcript, folded exactly as the live stream would be. */
+export function transcriptTurn(
+  entries: readonly TranscriptEntry[],
+  agent: string,
+  scope: string,
+): LiveTurn | undefined {
+  let turns: LiveTurns = new Map();
+  for (const [index, entry] of entries.entries()) {
+    turns = applyLive(
+      turns,
+      { seq: index + 1, ts: entry.ts, agent, project: scope, event: entry.event },
+      { maxSteps: Number.POSITIVE_INFINITY },
+    );
+  }
+  return turns.get(pairKey(agent, scope));
 }
 
 /** The newest step of a turn in one line, for lists. */

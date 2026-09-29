@@ -113,8 +113,11 @@ const TASK = {
 };
 
 /** desk's one finished turn, as the event log pairs its start and end. */
+const DESK_TURN_ID = "01M3Q2DDDDDDDDDDDDDDDDDDD2";
+
 const DESK_TURN = {
   id: "01M3Q2DDDDDDDDDDDDDDDDDDD1",
+  turnId: DESK_TURN_ID,
   ts: "2026-09-29T09:03:00.000Z",
   outcome: "completed",
   project: "lab",
@@ -127,6 +130,61 @@ const DESK_TURN = {
   startedAt: "2026-09-29T09:00:00.000Z",
   toolCalls: 4,
 };
+
+/** The steps desk's turn kept: what it said, a command that failed, and a board verb. */
+const DESK_TRANSCRIPT = [
+  {
+    ts: "2026-09-29T09:00:00.000Z",
+    event: { type: "turn_started", agent: "desk", session: "s-1", runner: "server" },
+  },
+  { ts: "2026-09-29T09:00:05.000Z", event: { type: "text", delta: "Looking at the request." } },
+  {
+    ts: "2026-09-29T09:00:06.000Z",
+    event: { type: "tool_call", name: "Bash", input: { command: "ls lab/bench" } },
+  },
+  {
+    ts: "2026-09-29T09:00:07.000Z",
+    event: {
+      type: "tool_result",
+      name: "Bash",
+      ok: false,
+      output: "ls: cannot access 'lab/bench': No such file or directory",
+    },
+  },
+  {
+    ts: "2026-09-29T09:01:00.000Z",
+    event: {
+      type: "tool_call",
+      name: "mcp__board__create_task",
+      input: { project: "lab", title: "Survey" },
+    },
+  },
+  {
+    ts: "2026-09-29T09:01:01.000Z",
+    event: {
+      type: "tool_result",
+      name: "mcp__board__create_task",
+      ok: true,
+      output: '{"id":"01M3Q2AAAAAAAAAAAAAAAAAAA1"}',
+    },
+  },
+  {
+    ts: "2026-09-29T09:03:00.000Z",
+    event: {
+      type: "turn_completed",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: 0.25,
+      status: {
+        summary: "Routed the survey request to ada and filed the task.",
+        claimsHeld: [],
+        blockedOn: [],
+        needsUserDecision: false,
+        memoryUpdated: false,
+      },
+      exitReason: "completed",
+    },
+  },
+];
 
 const LAB_TOPIC = {
   topic: "experiments",
@@ -259,6 +317,8 @@ export async function fakeBoard(
         return json(route, [member("desk", "concierge", ["lab"]), member("stew", "steward")]);
       case "/api/agents/desk/turns":
         return json(route, [DESK_TURN]);
+      case `/api/agents/desk/turns/${DESK_TURN_ID}`:
+        return json(route, DESK_TRANSCRIPT);
       case "/api/agents/desk/memory":
         return json(route, { body: "# Core memory\n\n- The user writes names plainly." });
       case "/api/agents/desk/skills":

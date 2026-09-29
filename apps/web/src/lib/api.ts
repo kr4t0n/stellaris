@@ -14,6 +14,7 @@ import {
   SocietySchema,
   TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
+  TranscriptEntrySchema,
   TurnHistoryEntrySchema,
   UlidSchema,
 } from "@stellaris/shared";
@@ -173,6 +174,12 @@ export function createApi(token: string) {
         `/api/agents/${encodeURIComponent(name)}/turns?limit=${limit}`,
         token,
         TurnHistoryEntrySchema.array(),
+      ),
+    transcript: (name: string, turnId: string) =>
+      get(
+        `/api/agents/${encodeURIComponent(name)}/turns/${encodeURIComponent(turnId)}`,
+        token,
+        TranscriptEntrySchema.array(),
       ),
     memory: (name: string) =>
       get(`/api/agents/${encodeURIComponent(name)}/memory`, token, BodySchema),

@@ -43,6 +43,8 @@ export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 
 /** The record a runner writes for every turn. The last one is what the next turn opens with. */
 export const TurnRecordSchema = z.object({
+  /** Assigned by the board when the turn begins; the turn's transcript is filed under it. */
+  id: UlidSchema.optional(),
   agent: NameSchema,
   project: NameSchema,
   runner: NameSchema,
@@ -94,7 +96,10 @@ export function turnStatusJsonSchema(): Record<string, unknown> {
 
 /** One finished turn as the event log recorded it: an entry in a citizen's turn history. */
 export const TurnHistoryEntrySchema = z.object({
+  /** The id of the event that ended the turn. */
   id: UlidSchema,
+  /** The turn's own id, when it has a transcript to open; turns before transcripts have none. */
+  turnId: UlidSchema.optional(),
   ts: IsoDateTimeSchema,
   outcome: z.enum(["completed", "failed"]),
   /** A project slug, or the society scope. */

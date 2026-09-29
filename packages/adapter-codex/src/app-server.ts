@@ -14,6 +14,7 @@ import {
 } from "@stellaris/runner-core";
 import {
   AGENT_TOKEN_ENV,
+  capOutput,
   type AgentEvent,
   type TurnExitReason,
   type Usage,
@@ -291,6 +292,34 @@ function toolOk(item: Dict): boolean {
   return true;
 }
 
+/** What a finished tool item returned, as text; file changes carry their diff in the call instead. */
+function toolOutputOf(item: Dict): string {
+  switch (item["type"]) {
+    case "commandExecution": {
+      const output = str(item["aggregatedOutput"]) ?? "";
+      const code = item["exitCode"];
+      return typeof code === "number" && code !== 0 ? `${output}\n(exit ${code})`.trim() : output;
+    }
+    case "mcpToolCall": {
+      const error = item["error"];
+      if (isDict(error)) {
+        return str(error["message"]) ?? "";
+      }
+      const result = item["result"];
+      const content = isDict(result) && Array.isArray(result["content"]) ? result["content"] : [];
+      return content
+        .map((block) =>
+          isDict(block) && block["type"] === "text"
+            ? (str(block["text"]) ?? "")
+            : `[${isDict(block) ? (str(block["type"]) ?? "content") : "content"}]`,
+        )
+        .join("\n");
+    }
+    default:
+      return "";
+  }
+}
+
 function usageOfBreakdown(raw: unknown): Usage {
   const u = isDict(raw) ? raw : {};
   return {
@@ -509,7 +538,13 @@ export class CodexAppServerSession implements ResidentSession {
           turn.emit({ type: "tool_call", name, input: toolInputOf(item) });
         }
         if (method === "item/completed") {
-          turn.emit({ type: "tool_result", name, ok: toolOk(item) });
+          const output = toolOutputOf(item);
+          turn.emit({
+            type: "tool_result",
+            name,
+            ok: toolOk(item),
+            ...(output === "" ? {} : { output: capOutput(output) }),
+          });
         }
         return;
       }

@@ -1,25 +1,26 @@
-import { currentStage, SOCIETY_SCOPE, type TurnExitReason } from "@stellaris/shared";
+import { currentStage, SOCIETY_SCOPE } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
-import { Markdown } from "../components/Markdown.js";
 import { pairsOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
+import { elapsed, turnsOf, useLiveTurns, type LiveTurn } from "../lib/live.js";
 import {
-  elapsed,
-  toolLabel,
-  turnsOf,
-  useLiveTurns,
-  type LiveTurn,
-  type Step,
-} from "../lib/live.js";
-import { useMembers, useNow, useRoles, useScheduler, useTasks } from "../lib/session.js";
+  useMembers,
+  useNow,
+  useRoles,
+  useScheduler,
+  useTasks,
+  useTurnHistory,
+} from "../lib/session.js";
 import { CitizenMemory } from "./CitizenMemory.js";
 import { CitizenTurns } from "./CitizenTurns.js";
 import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { useStickyScroll } from "./useStickyScroll.js";
+import { useStoredTurn } from "./useStoredTurn.js";
 import { WakeForm } from "./WakeForm.js";
 
 type State = "working" | "queued" | "idle";
@@ -29,23 +30,6 @@ const STATE_STYLE: Record<State, string> = {
   queued: "bg-amber-500/15 text-amber-300",
   idle: "bg-surface-2 text-fg-tertiary",
 };
-
-const OUTCOME: Record<TurnExitReason, string> = {
-  completed: "completed",
-  timeout: "timed out",
-  error: "failed",
-  interrupted: "was interrupted",
-  blocked: "was blocked",
-};
-
-function time(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
 
 /** The tasks a citizen holds a stage of in a project, as links. */
 function HeldTasks({ project, name }: { project: string; name: string }) {
@@ -76,80 +60,6 @@ function HeldTasks({ project, name }: { project: string; name: string }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-function StepItem({ step }: { step: Step }) {
-  if (step.kind === "say") {
-    return (
-      <li className="py-1.5 text-sm" title={time(step.at)}>
-        <Markdown text={step.text} />
-      </li>
-    );
-  }
-  if (step.kind === "error") {
-    return (
-      <li className="py-1 font-mono text-xs break-words text-red-400" title={time(step.at)}>
-        {step.message}
-      </li>
-    );
-  }
-  const status =
-    step.ok === null ? (
-      <span aria-label="running" className="size-1.5 animate-pulse rounded-full bg-amber-300" />
-    ) : step.ok ? (
-      <span aria-label="succeeded" className="text-[11px] text-emerald-400">
-        ✓
-      </span>
-    ) : (
-      <span aria-label="failed" className="text-[11px] text-red-400">
-        ✕
-      </span>
-    );
-  return (
-    <li>
-      <details className="group rounded-md open:bg-surface-2/30">
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-surface-2/40">
-          <span className="grid w-3 shrink-0 place-items-center">{status}</span>
-          <span className="shrink-0 font-mono text-fg-tertiary">{toolLabel(step.name)}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-fg-secondary">
-            {step.summary}
-          </span>
-          <span className="shrink-0 font-mono text-[10px] text-fg-muted">{time(step.at)}</span>
-        </summary>
-        <pre className="mx-1.5 mb-1.5 max-h-64 overflow-auto rounded-md bg-surface-0/60 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg-secondary">
-          {step.detail}
-        </pre>
-      </details>
-    </li>
-  );
-}
-
-/** How the turn stands at the end of its transcript. */
-function TurnFooter({ turn, running, now }: { turn: LiveTurn; running: boolean; now: number }) {
-  if (turn.end !== null) {
-    const cost = turn.end.costUsd > 0 ? ` · $${turn.end.costUsd.toFixed(2)}` : "";
-    return (
-      <section className="mt-3 rounded-xl bg-surface-2/40 px-3.5 py-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-        <p className="text-caps">
-          The turn {OUTCOME[turn.end.exitReason]} {ago(turn.end.at, now)}
-          {cost}
-          {turn.fromStart ? ` · ${elapsed(turn.startedAt, Date.parse(turn.end.at))}` : ""}
-        </p>
-        {turn.end.summary === null ? null : (
-          <p className="mt-1 text-sm text-fg-secondary">{turn.end.summary}</p>
-        )}
-      </section>
-    );
-  }
-  if (!running) {
-    return <p className="mt-3 text-meta">The turn ended without a report.</p>;
-  }
-  return (
-    <p className="mt-3 flex items-center gap-2 text-meta" aria-live="polite">
-      <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
-      Working · last step {ago(turn.lastAt, now)}
-    </p>
   );
 }
 
@@ -299,6 +209,9 @@ function NowTab({
   const now = useNow(5_000);
   const { ref, onScroll } = useStickyScroll();
   const turns = turnsOf(live, name);
+  // After a restart the live buffer is empty; the last finished turn is still on disk.
+  const history = useTurnHistory(name, 1);
+  const stored = useStoredTurn(name, turns.length === 0 ? history.data?.at(-1) : undefined);
   const isRunning = (candidate: LiveTurn): boolean =>
     candidate.end === null && runningScopes.includes(candidate.scope);
   // The turn shown: the one chosen, else the running one that started first, else the latest.
@@ -306,7 +219,8 @@ function NowTab({
   const turn =
     turns.find((candidate) => candidate.scope === chosen) ??
     turns.filter(isRunning).toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0] ??
-    turns[0];
+    turns[0] ??
+    stored.turn;
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
 
@@ -333,7 +247,11 @@ function NowTab({
           <PaneNote>
             {state === "working"
               ? "The turn has not reported a step yet."
-              : `No turn of ${name}'s since the board server started. The live picture is kept in the server's memory; Turns lists every finished one.`}
+              : stored.loading
+                ? "Reading the last turn…"
+                : lastTurnAt === undefined
+                  ? `${name} has not taken a turn yet.`
+                  : `${name}'s last turn kept no steps; Turns lists every finished one.`}
           </PaneNote>
         ) : (
           <>
@@ -369,18 +287,11 @@ function NowTab({
             </p>
             {turn.fromStart ? null : (
               <p className="mt-1 text-meta">
-                Earlier steps of this turn are no longer in the server's live buffer.
+                Earlier steps of this turn are no longer in the server's live buffer
+                {turnRunning ? "" : "; Turns has the whole turn"}.
               </p>
             )}
-            {turn.steps.length === 0 ? (
-              <p className="mt-2 text-meta">No steps yet.</p>
-            ) : (
-              <ol className="mt-2 space-y-0.5">
-                {turn.steps.map((step) => (
-                  <StepItem key={step.seq} step={step} />
-                ))}
-              </ol>
-            )}
+            <TranscriptSteps steps={turn.steps} />
             <TurnFooter turn={turn} running={turnRunning} now={now} />
           </>
         )}

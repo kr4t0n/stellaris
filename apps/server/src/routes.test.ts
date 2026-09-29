@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import { TurnHistoryEntrySchema } from "@stellaris/shared";
+import { TranscriptEntrySchema, TurnHistoryEntrySchema } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -256,12 +256,21 @@ describe("board server routes", () => {
       toolCalls: 3,
       model: "claude-sonnet-5",
     };
-    await board.beginTurn(turn);
-    await board.finishTurn(turn);
-    await board.beginTurn({ ...turn, startedAt: "2026-09-28T11:00:00.000Z" });
+    const begun = await board.beginTurn(turn);
+    const steps = [
+      {
+        ts: "2026-09-28T10:00:05.000Z",
+        event: { type: "tool_call", name: "Bash", input: { command: "ls" } },
+      },
+      {
+        ts: "2026-09-28T10:00:06.000Z",
+        event: { type: "tool_result", name: "Bash", ok: true, output: "src" },
+      },
+    ] as const;
+    await board.finishTurn(begun, [...steps]);
+    const second = await board.beginTurn({ ...turn, startedAt: "2026-09-28T11:00:00.000Z" });
     await board.finishTurn({
-      ...turn,
-      startedAt: "2026-09-28T11:00:00.000Z",
+      ...second,
       exitReason: "error",
       status: null,
       error: "boom",
@@ -284,6 +293,20 @@ describe("board server routes", () => {
     for (const entry of turns) {
       expect(entry.startedAt !== undefined && entry.startedAt <= entry.ts).toBe(true);
     }
+    // The first turn kept its steps under the id the board gave it when it began.
+    expect(turns[0]?.turnId).toBe(begun.id);
+    expect(
+      TranscriptEntrySchema.array().parse(
+        await (await app.request(`/api/agents/eng-1/turns/${begun.id}`, { headers })).json(),
+      ),
+    ).toEqual(steps);
+    expect(turns[1]?.turnId).toBeDefined();
+    expect(
+      (await app.request(`/api/agents/eng-1/turns/${turns[1]?.turnId}`, { headers })).status,
+    ).toBe(404);
+    expect((await app.request("/api/agents/eng-1/turns/..%2F..%2Fagent", { headers })).status).toBe(
+      404,
+    );
     expect(
       z
         .array(z.unknown())

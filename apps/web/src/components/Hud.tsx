@@ -25,6 +25,9 @@ interface HudProps {
   readonly turns: number;
   readonly queued: number;
   readonly paused: boolean;
+  /** Pauses or resumes the scheduler; while the request runs the switch waits. */
+  readonly onTogglePause: () => void;
+  readonly pauseBusy: boolean;
   readonly boardOpen: boolean;
   readonly onToggleBoard: () => void;
   readonly onSignOut: () => void;
@@ -38,6 +41,8 @@ export function Hud({
   turns,
   queued,
   paused,
+  onTogglePause,
+  pauseBusy,
   boardOpen,
   onToggleBoard,
   onSignOut,
@@ -51,7 +56,24 @@ export function Hud({
           {society === undefined ? null : <span className="text-meta">{society}</span>}
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
-          {paused ? <Chip tone="warn">paused</Chip> : null}
+          <button
+            type="button"
+            aria-pressed={paused}
+            disabled={pauseBusy}
+            onClick={onTogglePause}
+            title={
+              paused
+                ? "Nobody takes a turn until you resume; wakes wait in the queue."
+                : "Stop dispatching turns. Running turns finish; new wakes wait."
+            }
+            className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50 ${
+              paused
+                ? "text-amber-300 hover:text-amber-200"
+                : "text-fg-tertiary hover:text-fg-primary"
+            }`}
+          >
+            {paused ? "Paused · resume" : "Pause"}
+          </button>
           <Chip>{citizens === 1 ? "1 citizen" : `${citizens} citizens`}</Chip>
           <Chip tone={working > 0 ? "live" : "plain"}>
             {working} working{turns > working ? ` · ${turns} turns` : ""}

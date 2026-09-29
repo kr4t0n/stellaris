@@ -1,5 +1,6 @@
 import {
   ChannelRefSchema,
+  DecisionSchema,
   MemberSchema,
   MessageFrontmatterSchema,
   NameSchema,
@@ -99,16 +100,16 @@ async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promis
 
 const ErrorBodySchema = z.object({ message: z.string() });
 
-/** A verb, run as the signed-in actor; the board's refusal comes back as an ApiError. */
-async function invoke<T>(
-  verb: string,
+/** A write as the signed-in actor; the board's refusal comes back as an ApiError with its reason. */
+async function post<T>(
+  path: string,
   token: string,
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/verbs/${verb}`, {
+    response = await fetch(path, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(input),
@@ -120,11 +121,23 @@ async function invoke<T>(
     const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
     throw new ApiError(
       response.status,
-      detail.success ? detail.data.message : `${verb} answered ${response.status}`,
+      detail.success ? detail.data.message : `${path} answered ${response.status}`,
     );
   }
   return schema.parse(await response.json());
 }
+
+/** A verb, run as the signed-in actor through the same route agents' verbs take. */
+function invoke<T>(
+  verb: string,
+  token: string,
+  input: Record<string, unknown>,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  return post(`/api/verbs/${verb}`, token, input, schema);
+}
+
+const PausedSchema = z.object({ paused: z.boolean() });
 
 /** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
 export function createApi(token: string) {
@@ -157,6 +170,12 @@ export function createApi(token: string) {
     }) => invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>
       invoke("close_thread", token, input, MessageSchema),
+    approve: (input: { proposal_id: string; reason?: string }) =>
+      invoke("approve", token, input, DecisionSchema),
+    reject: (input: { proposal_id: string; reason: string }) =>
+      invoke("reject", token, input, DecisionSchema),
+    setPaused: (paused: boolean) =>
+      post(paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
   };
 }
 export type Api = ReturnType<typeof createApi>;

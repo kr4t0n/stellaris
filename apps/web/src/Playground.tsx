@@ -1,5 +1,5 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Navigator } from "./board/Navigator.js";
@@ -49,7 +49,7 @@ function after(pathname: string, prefix: string): string | null {
  * live picture of what citizens are doing.
  */
 export function Playground() {
-  const { token, signOut } = useSession();
+  const { api, token, signOut } = useSession();
   const client = useQueryClient();
   useEffect(
     () =>
@@ -68,6 +68,10 @@ export function Playground() {
   const scheduler = useScheduler();
   const threads = useThreads();
   const navigate = useNavigate();
+  const pause = useMutation({
+    mutationFn: (paused: boolean) => api.setPaused(paused),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["scheduler"] }),
+  });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useSearch({ strict: false });
   // The id of the hovered star: a citizen in turns in two projects has a star in each.
@@ -207,6 +211,8 @@ export function Playground() {
           turns={working.length}
           queued={model.stars.filter((candidate) => candidate.state === "queued").length}
           paused={scheduler.data?.paused ?? false}
+          onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
+          pauseBusy={pause.isPending}
           boardOpen={boardOpen}
           onToggleBoard={() =>
             void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })

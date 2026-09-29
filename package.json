@@ -15,7 +15,8 @@
     "fmt:check": "oxfmt --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm build && pnpm build:web && pnpm lint && pnpm fmt:check && pnpm test",
+    "test:e2e": "pnpm --filter @stellaris/web test:e2e",
+    "check": "pnpm build && pnpm build:web && pnpm lint && pnpm fmt:check && pnpm test && pnpm test:e2e",
     "stellaris": "node apps/cli/dist/index.js"
   },
   "devDependencies": {

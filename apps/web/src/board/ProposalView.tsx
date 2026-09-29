@@ -16,7 +16,8 @@ import {
   useThreads,
 } from "../lib/session.js";
 import { displayName } from "./Avatar.js";
-import { consequenceOf, decidersOf, proposalTitle } from "./governance.js";
+import { DecisionBar } from "./DecisionBar.js";
+import { consequenceOf, decidersOf, proposalTitle, waitingOnYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ProposalCharter } from "./ProposalCharter.js";
 import { StatusChip } from "./ProposalsView.js";
@@ -137,6 +138,11 @@ export function ProposalView() {
   const proposerRole = members.data?.find((member) => member.name === current.proposedBy)?.role;
   const thread = threads.data?.find((candidate) => candidate.id === current.id);
   const verdict = current.status === "rejected" ? "Rejected" : "Approved";
+  const consequence = consequenceOf(current, {
+    members: members.data ?? [],
+    roles: roles.data ?? [],
+    skills: skills.data ?? [],
+  });
 
   return (
     <>
@@ -160,12 +166,7 @@ export function ProposalView() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {open ? (
           <p className="rounded-lg bg-sky-400/10 px-3 py-2 text-xs leading-relaxed text-sky-200">
-            If approved:{" "}
-            {consequenceOf(current, {
-              members: members.data ?? [],
-              roles: roles.data ?? [],
-              skills: skills.data ?? [],
-            })}
+            If approved: {consequence}
           </p>
         ) : (
           <div className="rounded-lg bg-surface-2/40 px-3 py-2 text-xs leading-relaxed text-fg-secondary">
@@ -210,6 +211,7 @@ export function ProposalView() {
           )}
         </section>
       </div>
+      {waitingOnYou(current) ? <DecisionBar proposal={current} consequence={consequence} /> : null}
     </>
   );
 }

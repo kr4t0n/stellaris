@@ -23,3 +23,7 @@ data/
 
 # Logs
 *.log
+
+# Playwright's output from the browser tests
+test-results/
+playwright-report/

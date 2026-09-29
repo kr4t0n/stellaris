@@ -6,10 +6,12 @@ import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
 import { listed, wakesFor } from "./compose.js";
 
-const FIELD =
+/** A text field on an island. */
+export const FIELD =
   "block w-full rounded-lg bg-surface-2/50 px-3 py-2 text-sm text-fg-primary outline-none shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] placeholder:text-fg-muted focus:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]";
 
-function Failure({ error }: { error: Error | null }) {
+/** The board's refusal of a write, in its own words. */
+export function Failure({ error }: { error: Error | null }) {
   return error === null ? null : (
     <p role="alert" className="text-xs text-red-400">
       {error instanceof ApiError ? error.message : "The board did not take it."}

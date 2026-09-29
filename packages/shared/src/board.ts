@@ -6,9 +6,9 @@ export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as
 export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
 
 /**
- * The scope of a turn that belongs to no project: the front desk answering the owner, the
- * steward reading signals. Dispatches, sessions, and turn records use it in place of a project
- * slug, and the runner uses the agent's home as the working directory. No project may take the name.
+ * The scope of a turn that belongs to no project. Dispatches, sessions, and turn records use it in
+ * place of a project slug, and the runner uses the agent's home as the working directory. No
+ * project may take the name.
  */
 export const SOCIETY_SCOPE = "society";
 
@@ -200,14 +200,13 @@ export type ChannelProposal = z.infer<typeof ChannelProposalSchema>;
 export const ReallocationProposalSchema = z.object({
   description: z.string().min(1),
 });
-/** Retirement mirrors hiring: the decision is policy, the execution is mechanical. */
 export const RetirementProposalSchema = z.object({
   agent: NameSchema,
   reason: z.string().min(1),
 });
 export type RetirementProposal = z.infer<typeof RetirementProposalSchema>;
 
-/** A skill proposed for the society: reviewed like code, then available to every citizen. */
+/** A skill proposed for the society; approval copies the body under `society/skills/`. */
 export const SkillProposalSchema = z.object({
   name: NameSchema,
   summary: z.string().min(1).max(200),

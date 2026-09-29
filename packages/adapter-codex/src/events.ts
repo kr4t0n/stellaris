@@ -38,7 +38,7 @@ export function usageOf(raw: unknown): Usage {
   };
 }
 
-/** Tool name for an item, in the same vocabulary the Claude adapter uses so the UI can treat them alike. */
+/** Tool name for an item, in the same vocabulary the Claude adapter emits. */
 function toolNameOf(item: Dict): string | null {
   switch (item["type"]) {
     case "command_execution":

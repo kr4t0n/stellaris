@@ -30,10 +30,8 @@ export const RepoPermissionSchema = z.enum(["none", "read", "write", "merge"]);
 export type RepoPermission = z.infer<typeof RepoPermissionSchema>;
 
 /**
- * A role charter: purpose, granted verbs, repository permission, wake triggers, a review date,
- * and the scaling rule the scheduler may apply mechanically: up to `maxReplicas` active members
- * of the role per project, adding one whenever the load per member reaches `backlogThreshold`.
- * A cap of one means the role never scales on its own; hiring stays a proposal.
+ * A role charter. The scheduler adds members of the role up to `maxReplicas` per project whenever
+ * the load per member reaches `backlogThreshold`; a cap of one never scales.
  */
 export const RoleCharterSchema = z.object({
   name: NameSchema,
@@ -44,7 +42,7 @@ export const RoleCharterSchema = z.object({
   reviewDate: z.string().optional(),
   maxReplicas: z.number().int().min(1).default(1),
   backlogThreshold: z.number().positive().default(3),
-  /** The runner keeps a session alive between turns so the role answers in seconds. */
+  /** The runner keeps a warm session between turns. */
   resident: z.boolean().default(false),
   /** The role may take turns in the society scope, outside any project, with its home as the working directory. */
   societyScope: z.boolean().default(false),
@@ -79,7 +77,7 @@ const MEMBER_VERBS: readonly VerbName[] = [
 const GOVERNANCE_VERBS: readonly VerbName[] = ["approve", "reject"];
 const FRONT_DESK_VERBS: readonly VerbName[] = ["create_project"];
 
-/** Seed roles written at society initialization. Their charters are iterated after the infrastructure exists. */
+/** Seed roles, written at society initialization and aligned on every open. */
 export const SEED_ROLES: readonly RoleCharter[] = [
   {
     name: OWNER_ROLE,

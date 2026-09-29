@@ -44,11 +44,7 @@ export type QueryFn = (params: {
 export interface ClaudeBackendOptions {
   readonly model?: string | undefined;
   readonly effort?: Options["effort"] | undefined;
-  /**
-   * Defaults to `bypassPermissions`: nobody is at the terminal, so nothing may ask. This is the
-   * society's decision in PLAN.md section 5.2; a runner that must restrict its agents may set
-   * another mode here, and with it an allowlist, as its own posture.
-   */
+  /** Defaults to `bypassPermissions`; another mode with `allowedTools` restricts this runner's agents. */
   readonly permissionMode?: PermissionMode | undefined;
   /** Permission rules auto-allowed without a prompt. Only meaningful with a mode that asks. */
   readonly allowedTools?: readonly string[] | undefined;
@@ -464,10 +460,9 @@ class ClaudeResident implements ResidentSession {
 }
 
 /**
- * Claude Code through the Claude Agent SDK: one SDK call per wakeup, resuming the pair's session,
- * or a resident session that stays open between turns for roles that need to answer in seconds.
- * Instructions, permissions, and the board's MCP endpoint travel as options, so no user-level
- * configuration leaks into the agent and no token is written to disk.
+ * Claude Code through the Claude Agent SDK: one query per turn resuming the pair's session, or a
+ * resident session that stays open between turns. Instructions, permissions, and the board's MCP
+ * endpoint travel as options, so no token is written to disk.
  */
 export class ClaudeAgentBackend implements AgentBackend {
   readonly kind = "claude" as const;

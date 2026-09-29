@@ -9,7 +9,7 @@ import {
 } from "@stellaris/shared";
 import { ensureDir, exists } from "./fs.js";
 
-/** Append-only JSONL log. Every board change lands here; the scheduler and the UI read from it. */
+/** Append-only JSONL log of every board change. */
 export class EventLog {
   constructor(
     private readonly file: string,

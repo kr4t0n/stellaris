@@ -203,17 +203,15 @@ const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 const LOCAL_RUNNER: Name = "local";
 
 const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
-  // Tool-set changes, hiring, and retirement always require the owner; the steward may decide the rest.
   role: [OWNER_ROLE],
   member: [OWNER_ROLE],
   retirement: [OWNER_ROLE],
   channel: [OWNER_ROLE, "steward"],
   reallocation: [OWNER_ROLE, "steward"],
-  // A skill is reviewed like code; the steward curates the society's skills.
   skill: [OWNER_ROLE, "steward"],
 };
 
-/** Roles that curate society knowledge, the tier every citizen reads. */
+/** Roles that may write society knowledge. */
 const CURATING_ROLES: readonly Name[] = [OWNER_ROLE, "steward"];
 
 /** The heading under which a member's own seed instructions live in its role file. */
@@ -284,10 +282,7 @@ function sentence(summary: string): string {
   return summary.trim().replace(/\.+$/, "");
 }
 
-/**
- * A skill's one-line summary: the `description` of the SKILL.md format both CLIs validate, a
- * `summary` for files written before that was the rule, else the first plain line of the body.
- */
+/** A skill's one-line summary: `description`, else a legacy `summary`, else the body's first plain line. */
 function skillSummary(data: Record<string, unknown>, body: string): string {
   const fromFrontmatter = data["description"] ?? data["summary"];
   if (typeof fromFrontmatter === "string" && fromFrontmatter.trim().length > 0) {
@@ -384,10 +379,7 @@ export class Board {
     return board;
   }
 
-  /**
-   * A society created by an older build lacks the seed roles added since. Opening it writes the
-   * missing charters, untouched otherwise, so a new role such as the concierge is available at once.
-   */
+  /** Writes every missing seed charter and aligns the existing ones with their seed. */
   private async ensureSeedRoles(): Promise<void> {
     await ensureDir(this.paths.roles());
     await ensureDir(this.paths.members());
@@ -416,11 +408,9 @@ export class Board {
   }
 
   /**
-   * An existing society's copy of a seed role follows the seed in two ways on open. Verbs are added,
-   * never renamed, so a verb the seed newly grants is added. A field the copy has never set, because
-   * the file predates it, takes the seed's value rather than the schema's default. Everything the
-   * owner or an approved proposal did set stands. The owner charter is the exception: nobody may
-   * edit it, so it is the seed's in full.
+   * Verbs the seed grants and the copy lacks are added, and fields absent from the copy's file take
+   * the seed's value rather than the schema default; fields the file sets stand. The owner charter
+   * is replaced by the seed in full.
    */
   private async alignSeedRole(seed: RoleCharter): Promise<void> {
     const file = this.paths.role(seed.name);
@@ -673,7 +663,7 @@ export class Board {
         project,
         topic: file.replace(/\.md$/, ""),
       });
-      // Files written before the verb existed carry no frontmatter; they are knowledge all the same.
+      // A topic file without valid frontmatter still counts; its mtime stands in for the update.
       const data = parsed.success
         ? parsed.data
         : {
@@ -802,10 +792,7 @@ export class Board {
     });
   }
 
-  /**
-   * Retires a member: no more wakes, claims released, token revoked, sessions archived.
-   * The decision is the owner's, directly here or by approving a retirement proposal.
-   */
+  /** Retires a member: no more wakes, claims released, token revoked, sessions archived. */
   async retireAgent(actor: Actor, input: RetireAgentInput): Promise<Agent> {
     this.assertOwner(actor, "only the owner may retire a member");
     return this.mutex.run(async () => {
@@ -814,7 +801,7 @@ export class Board {
     });
   }
 
-  /** Writes a role charter directly. Charters otherwise change by role proposal; the owner is the exception. */
+  /** Writes a role charter directly, bypassing a role proposal. Owner only. */
   async setRoleCharter(actor: Actor, charter: RoleCharterInput): Promise<RoleCharter> {
     this.assertOwner(actor, "only the owner may write a role charter directly");
     const parsed = RoleCharterSchema.parse(charter);
@@ -834,8 +821,8 @@ export class Board {
   }
 
   /**
-   * The scaling rule's execution: one more member of an existing role on a project, cloned from the
-   * newest active member of that role. Mechanism rather than hiring; the charter's replica cap bounds it.
+   * Adds one member of an existing role to a project, cloned from the newest active member of the
+   * role, preferring one on that project. The caller enforces the charter's replica cap.
    */
   async addReplica(actor: Actor, input: AddReplicaInput): Promise<Agent> {
     this.assertAdmin(actor);
@@ -1110,8 +1097,7 @@ export class Board {
     if (projectFilter !== undefined && projectFilter !== null) {
       return hits;
     }
-    // Society knowledge and skills belong to everyone; the archive and skills under the caller's
-    // own home are the caller's alone, which is the only privacy rule the board has.
+    // Shared tiers, then the caller's own archive and skills; another citizen's home is never read.
     const shared: Array<{ kind: SearchHit["kind"]; ref: string; file: string }> = [];
     for (const file of await listFiles(this.paths.societyKnowledge())) {
       shared.push({
@@ -1150,9 +1136,8 @@ export class Board {
   }
 
   /**
-   * Knowledge as a verb, so it is written through the board from any machine: a project's topic
-   * by any member, the society's topics by those who curate them. Members learn of a new topic
-   * through the channel they follow, without a wake.
+   * Writes a topic: a project's by its members, the society's by the curating roles. The note in
+   * the matching general channel carries no mention, so nobody is woken.
    */
   async writeKnowledge(actor: Actor, input: VerbInput<"write_knowledge">): Promise<Knowledge> {
     const args = VerbInputs.write_knowledge.parse(input);
@@ -1543,7 +1528,7 @@ export class Board {
     return this.decide(actor, args.proposal_id, "rejected", args.reason);
   }
 
-  /** The front desk's verb: a project on the spot, with its default channels. */
+  /** Creates a project with its default channels. */
   async createProject(actor: Actor, input: VerbInput<"create_project">): Promise<Project> {
     const args = VerbInputs.create_project.parse(input);
     await this.authorize(actor, "create_project");
@@ -1558,8 +1543,8 @@ export class Board {
   }
 
   /**
-   * Membership as a verb: a citizen joins a project itself, or the front desk, the steward, or
-   * the owner adds one. The pair gets its project directory and, through the event, an onboarding turn.
+   * A citizen joins a project itself, or a reallocating role adds it. The pair gets its project
+   * directory now and, through the `agent.joined` event, an onboarding turn.
    */
   async joinProject(actor: Actor, input: VerbInput<"join_project">): Promise<Agent> {
     const args = VerbInputs.join_project.parse(input);
@@ -2036,7 +2021,7 @@ export class Board {
 
   /**
    * Rewrites a citizen's roster entry from its record, its claims, its task history, its last
-   * turn, and its profile. Called wherever any of those change; cheap at this scale.
+   * turn, and its profile. Every path that changes one of those must call it.
    */
   private async refreshMember(name: Name): Promise<void> {
     if (!(await exists(this.paths.agentFile(name)))) {

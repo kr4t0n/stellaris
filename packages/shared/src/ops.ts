@@ -2,9 +2,8 @@ import { z } from "zod";
 import { NameSchema, UlidSchema } from "./ids.js";
 
 /**
- * Operations signals, from PLAN.md section 6.5. The scheduler computes each one from board state
- * and event metadata, never from message content, and publishes it into the society's ops channel.
- * Every signal is a counter or a timer; the steward is the one who interprets them.
+ * Operations signal kinds. Each is a counter or a timer computed from board state and event
+ * metadata, never from message content, and posted to the society's ops channel.
  */
 export const OPS_SIGNAL_KINDS = [
   "unclaimed_task",

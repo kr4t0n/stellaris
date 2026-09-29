@@ -44,10 +44,7 @@ export type SpawnCodex = (
 export interface CodexExecOptions {
   readonly codexPath?: string | undefined;
   readonly model?: string | undefined;
-  /**
-   * Defaults to `danger-full-access`: no sandbox and no approvals, the society's decision in
-   * PLAN.md section 5.2. The other modes keep Codex's own sandbox for a runner that wants one.
-   */
+  /** Defaults to `danger-full-access`: no sandbox and no approvals. The other modes keep Codex's sandbox. */
   readonly sandbox?: CodexSandbox | undefined;
   /** Extra `-c key=value` overrides appended to every invocation. */
   readonly extraConfig?: readonly string[] | undefined;
@@ -107,7 +104,7 @@ const defaultSpawn =
 /**
  * Codex through `codex exec --json`: one process per turn, resumed by thread id. The board's MCP
  * endpoint and token travel as config overrides and environment; instructions travel in the prompt
- * because exec mode has no system-prompt append. Same interface as every other backend.
+ * because exec mode has no system-prompt append.
  */
 export class CodexExecBackend implements AgentBackend {
   readonly kind = "codex" as const;
@@ -297,8 +294,7 @@ export class CodexExecBackend implements AgentBackend {
     const args = [
       "exec",
       "--json",
-      // Full access skips every confirmation and runs commands unsandboxed. The other modes
-      // keep Codex's sandbox, which on Linux needs user namespaces.
+      // Codex's sandbox modes need user namespaces on Linux.
       ...(sandbox === "danger-full-access"
         ? ["--dangerously-bypass-approvals-and-sandbox"]
         : ["--sandbox", sandbox]),
@@ -318,7 +314,7 @@ export class CodexExecBackend implements AgentBackend {
       "-c",
       `mcp_servers.board.bearer_token_env_var=${JSON.stringify(AGENT_TOKEN_ENV)}`,
       // Non-interactive runs use approval policy "never", which rejects MCP calls unless the
-      // server is marked approved. The board is our own server; its tools are the point.
+      // server is marked approved.
       "-c",
       'mcp_servers.board.default_tools_approval_mode="approve"',
     ];

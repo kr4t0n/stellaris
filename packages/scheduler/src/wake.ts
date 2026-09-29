@@ -17,9 +17,8 @@ export interface WakeDecision {
 }
 
 /**
- * The wake rule from PLAN.md section 6.1. Pure, so it is testable without a board:
- * the pause switch wins, owner mentions jump the queue, and an empty digest never wakes anyone
- * except for reflection, onboarding, owner mentions, and manual wakes.
+ * Nothing wakes while paused. Every trigger wakes otherwise, except a heartbeat with an empty
+ * digest and no held claims; owner mentions, owner posts, and manual wakes jump the queue.
  */
 export function decideWake(input: WakeInput): WakeDecision {
   if (input.paused) {

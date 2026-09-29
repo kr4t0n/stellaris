@@ -67,7 +67,7 @@ interface Resident {
  * The embedded runner: ensures the worktree, renders the config home, builds the prompt,
  * runs the turn through the CLI's adapter, then records the outcome on the board.
  * Resident roles keep a warm session between turns; the society scope runs a turn in the
- * agent's home, outside any project. Remote runners will do the same behind a WebSocket.
+ * agent's home, outside any project.
  */
 export class LocalRunner {
   private readonly board: Board;
@@ -216,7 +216,6 @@ export class LocalRunner {
             worktree,
           }
         : null;
-    // The memory tiers of PLAN.md section 5.4, as instructions: norms and the core in full, skills as an index.
     const instructions = renderInstructions({
       agentName: agent.name,
       roleCharter,

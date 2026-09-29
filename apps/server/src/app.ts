@@ -120,7 +120,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
 
-  // Governance the owner does directly: retirement, charters, channels. Proposals cover the rest.
+  // Governance the owner does directly: retirement, charters, channels.
   api.post("/agents/:name/retire", async (c) => {
     const body = RetireBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.retireAgent(c.get("actor"), {

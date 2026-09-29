@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 
-/** Events the board core appends to its log. The scheduler and the UI read these; nothing else does. */
+/** Events the board core appends to its log. */
 export const BOARD_EVENT_TYPES = [
   "society.initialized",
   "project.added",

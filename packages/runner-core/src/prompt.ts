@@ -83,7 +83,7 @@ function rosterLine(member: Member): string {
   return `- ${member.name}: ${parts.join("; ")}. Profile: ${profileLine(member.profile)}`;
 }
 
-/** The digest injected into every turn. This is the only push channel from the board to an agent. */
+/** The digest injected into every turn's prompt. */
 export function buildTurnPrompt(input: TurnPromptInput): string {
   const { dispatch } = input;
   const lines: string[] = [];

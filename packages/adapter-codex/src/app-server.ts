@@ -41,7 +41,7 @@ export interface AppServerSessionOptions {
   readonly spawn?: SpawnAppServer | undefined;
   readonly codexPath?: string | undefined;
   readonly model?: string | undefined;
-  /** `true` runs with full access and no approvals; a Codex sandbox mode name keeps its sandbox. */
+  /** `danger-full-access` runs with no sandbox and no approvals; the other modes keep Codex's sandbox. */
   readonly sandbox: "danger-full-access" | "read-only" | "workspace-write";
   readonly extraConfig?: readonly string[] | undefined;
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;

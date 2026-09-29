@@ -8,7 +8,7 @@ export interface MergeOutcome {
   readonly detail: string;
 }
 
-/** The git operations a runner needs. Kept behind an interface so tests and remote runners can swap it. */
+/** The git operations a runner needs. */
 export interface GitOps {
   /** The project's canonical clone on this runner, created from its remote or initialized empty. */
   ensureRepo(project: Project, dir: string): Promise<string>;
@@ -80,8 +80,7 @@ export class ExecaGit implements GitOps {
 
   /**
    * The worktree path is made absolute before git sees it: `git worktree add` runs inside the
-   * clone, so a relative path would create the worktree inside the repository, and the CLI
-   * would later be started in a directory that does not exist.
+   * clone, where a relative path would create the worktree inside the repository.
    */
   async ensureWorktree(
     repoDir: string,

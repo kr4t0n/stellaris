@@ -23,7 +23,7 @@ import {
 import { z } from "zod";
 import { decideWake } from "./wake.js";
 
-/** What the scheduler needs from a runner. The local runner and, later, remote runners implement it. */
+/** What the scheduler needs from a runner. */
 export interface TurnRunner {
   runTurn(dispatch: TurnDispatch): Promise<TurnRecord>;
   mergeTask(project: Name, taskId: Ulid): Promise<void>;
@@ -58,7 +58,6 @@ export interface SchedulerTimings {
   readonly reflectionMs: number;
 }
 
-/** Defaults the plan leaves open; tune once the first society has run. */
 export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   pollMs: 1_000,
   debounceMs: 30_000,
@@ -182,10 +181,9 @@ function describeDuration(ms: number): string {
 }
 
 /**
- * The dumb scheduler from PLAN.md section 6. It reads event metadata, never message content,
- * turns it into triggers, debounces them, respects the pause switch and the concurrency cap,
- * and hands dispatches to a runner. On a cadence it also computes the operations signals of
- * section 6.5 from board state and applies the scaling rule of section 8.3 within each charter's cap.
+ * Turns event metadata, never message content, into debounced dispatches under the pause switch
+ * and the concurrency cap. On a cadence it also publishes operations signals computed from board
+ * state and applies each charter's scaling rule.
  */
 export class Scheduler {
   private readonly board: Board;
@@ -518,10 +516,7 @@ export class Scheduler {
     }
   }
 
-  /**
-   * The front desk: roles charted for `owner_post` wake on every post by the owner, mentioned or
-   * not, at owner priority and without debounce. The only trigger that fires without a mention.
-   */
+  /** Roles charted for `owner_post` wake on every post by the owner, mentioned or not. */
   private async wakeFrontDesk(
     channel: string | null,
     messageId: string | undefined,
@@ -705,9 +700,8 @@ export class Scheduler {
   }
 
   /**
-   * Reflection turns, PLAN.md section 5.4: every `reflectionMs`, a member whose charter reflects
-   * takes a turn for its memory in the scope of its latest working turn. A member that has not
-   * worked since its last reflection has nothing to consolidate and is left alone.
+   * Every `reflectionMs`, a member whose charter reflects takes a reflection turn in the scope of
+   * its latest working turn, unless it has not worked since its last reflection.
    */
   private async checkReflections(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -846,7 +840,7 @@ export class Scheduler {
     await this.reportCost(now);
   }
 
-  /** Every condition from PLAN.md section 6.5 that holds right now. Counters and timers only. */
+  /** Every operations condition that holds right now, from counters and timers only. */
   private async collectSignals(now: number): Promise<OpsSignal[]> {
     const signals: OpsSignal[] = [];
     const roles = (await this.board.listRoles()).filter((role) => role.name !== OWNER_ROLE);
@@ -1010,8 +1004,8 @@ export class Scheduler {
   }
 
   /**
-   * Scaling is mechanism, hiring is policy: one more replica of an existing role when the load per
-   * member reaches the charter's threshold, never past its replica cap, at most once per cooldown.
+   * Adds one replica of a role when the load per member reaches the charter's threshold, never past
+   * its replica cap, at most once per cooldown per role and project.
    */
   private async scaleRoles(now: number): Promise<void> {
     const roles = (await this.board.listRoles()).filter(

@@ -37,7 +37,7 @@ export interface TurnRequest {
   /** True when the session id was just chosen and nothing exists to resume. */
   readonly newSession: boolean;
   readonly prompt: string;
-  /** The rendered role charter plus memory core, appended to the CLI's own system prompt. */
+  /** The rendered instructions: charter, society norms, memory core, and skills index. */
   readonly instructions: string;
   readonly mcp: { readonly url: string; readonly token: string };
   readonly limits: TurnLimits;
@@ -75,10 +75,7 @@ export interface ResidentStart {
   readonly env: Readonly<Record<string, string>>;
 }
 
-/**
- * A warm session: the CLI process stays alive between turns and each prompt becomes one turn,
- * which is what brings a front-desk reply down from tens of seconds to a few.
- */
+/** A warm session: the CLI process stays alive between turns and each prompt becomes one turn. */
 export interface ResidentSession {
   /** The session in use, which may differ from the requested one for CLIs that assign their own ids. */
   readonly session: SessionId;
@@ -86,7 +83,7 @@ export interface ResidentSession {
   close(): Promise<void>;
 }
 
-/** One interface for every CLI. Implemented per CLI inside a runner. */
+/** One interface for every CLI. */
 export interface AgentBackend {
   readonly kind: CliKind;
   newSession(spec: AgentSpec): Promise<SessionId>;

@@ -228,6 +228,14 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
+/** Where readers of operations signals follow signals, proposals, and their decisions. */
+const OPS_CHANNELS: readonly ChannelRef[] = ["ops", "governance", "decisions"];
+
+/** One-time changes an existing society receives on open, by name, remembered once applied. */
+const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
+const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
+const CLOSE_ENDED_THREADS = "ended-tasks-close-threads";
+
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 
@@ -465,8 +473,66 @@ export class Board {
       throw new BoardError("NOT_FOUND", `no society found in ${dataDir}; run init first`);
     }
     await board.mutex.run(() => board.ensureSeedRoles());
+    await board.mutex.run(() => board.applyAlignments());
     await board.loadTokenIndex();
     return board;
+  }
+
+  /**
+   * Applies each one-time alignment an existing society has not had yet. Once applied it is not
+   * repeated, so a member that later chooses otherwise keeps its choice.
+   */
+  private async applyAlignments(): Promise<void> {
+    const file = path.join(this.paths.state(), "alignments.json");
+    const { applied } = (await exists(file))
+      ? await readJson(file, AlignmentsSchema)
+      : { applied: [] };
+    const pending = [FOLLOW_DECISIONS, CLOSE_ENDED_THREADS].filter(
+      (name) => !applied.includes(name),
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    if (pending.includes(FOLLOW_DECISIONS)) {
+      await this.followDecisions();
+    }
+    if (pending.includes(CLOSE_ENDED_THREADS)) {
+      await this.closeEndedThreads();
+    }
+    await writeJson(file, { applied: [...applied, ...pending] });
+  }
+
+  /** Members that predate `decisions` among the ops channels read proposals without their outcome. */
+  private async followDecisions(): Promise<void> {
+    for (const agent of await this.listAgents()) {
+      if (agent.status !== "active" || agent.subscriptions.includes("decisions")) {
+        continue;
+      }
+      if (!(await this.readRole(agent.role)).wakeTriggers.includes(OPS_WAKE_TRIGGER)) {
+        continue;
+      }
+      await this.updateAgent(agent.name, (a) => ({
+        ...a,
+        subscriptions: [...a.subscriptions, "decisions"],
+      }));
+      await this.refreshMember(agent.name);
+      await this.events.append("subscription.changed", agent.name, {
+        channel: "decisions",
+        subscribed: true,
+        aligned: true,
+      });
+    }
+  }
+
+  /** Tasks that ended before threads closed with their task still have one open. */
+  private async closeEndedThreads(): Promise<void> {
+    for (const project of await this.listProjects()) {
+      for (const task of await this.listTasks(project.slug)) {
+        if (task.thread === "open" && (task.status === "done" || task.status === "abandoned")) {
+          await this.writeEndedTask(SYSTEM_ACTOR.name, project.slug, task);
+        }
+      }
+    }
   }
 
   /** Writes every missing seed charter and aligns the existing ones with their seed. */
@@ -1561,7 +1627,10 @@ export class Board {
           stageSince: ts,
         });
       } else if (current.onDone === "none") {
-        task = await this.writeTask(location.project, { ...base, status: "done" });
+        task = await this.writeEndedTask(actor.name, location.project, {
+          ...base,
+          status: "done",
+        });
       } else {
         task = await this.writeTask(location.project, {
           ...base,
@@ -1759,7 +1828,10 @@ export class Board {
         next = { ...next, leaseExpiresAt: this.leaseEnd(now) };
       }
 
-      const task = await this.writeTask(location.project, next);
+      const task =
+        next.status === "abandoned"
+          ? await this.writeEndedTask(actor.name, location.project, next)
+          : await this.writeTask(location.project, next);
       if (current.claimedBy !== undefined && task.claimedBy !== current.claimedBy) {
         await this.refreshMember(current.claimedBy);
       }
@@ -2222,7 +2294,7 @@ export class Board {
       }
       const ts = this.now().toISOString();
       if (input.ok) {
-        const task = await this.writeTask(location.project, {
+        const task = await this.writeEndedTask(actor.name, location.project, {
           ...current,
           status: "done",
           completing: false,
@@ -2703,8 +2775,7 @@ export class Board {
     const defaultSubscriptions: ChannelRef[] = [
       "general",
       ...memberships.map((slug) => channelRef(slug, "general")),
-      // Roles woken by operations signals follow the channels where signals and proposals land.
-      ...(charter.wakeTriggers.includes(OPS_WAKE_TRIGGER) ? ["ops", "governance"] : []),
+      ...(charter.wakeTriggers.includes(OPS_WAKE_TRIGGER) ? OPS_CHANNELS : []),
     ];
     const subscriptions = [...new Set([...defaultSubscriptions, ...(input.subscriptions ?? [])])];
     const token = mintToken();
@@ -3030,6 +3101,20 @@ export class Board {
     const data = TaskFrontmatterSchema.parse(clean);
     await writeMarkdown(this.paths.task(project, task.id), data, body);
     return { ...data, body };
+  }
+
+  /** Writes a task that has just ended, done or abandoned; an open thread closes with it. */
+  private async writeEndedTask(by: Name, project: Name, task: Task): Promise<Task> {
+    if (task.thread !== "open") {
+      return this.writeTask(project, task);
+    }
+    const written = await this.writeTask(project, { ...task, thread: "closed" });
+    await this.events.append("thread.closed", by, {
+      taskId: task.id,
+      project,
+      ended: task.status,
+    });
+    return written;
   }
 
   private async writeProposal(proposal: Proposal): Promise<void> {

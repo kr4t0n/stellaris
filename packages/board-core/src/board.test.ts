@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS } from "@stellaris/shared";
+import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, SYSTEM_ACTOR, type Actor } from "./index.js";
 
@@ -123,15 +123,14 @@ describe("Board", () => {
       code: "FORBIDDEN",
     });
     await board.claimTask(REV, { task_id: task.id });
+    const summary = await board.closeThread(REV, { thread_id: task.id, summary: "Shipped." });
+    expect(summary.task).toBe(task.id);
+    expect((await board.getTask(ENG, { task_id: task.id })).thread).toBe("closed");
     const done = await board.advanceTask(REV, { task_id: task.id });
     expect(done.status).toBe("done");
     expect(done.leaseExpiresAt).toBeUndefined();
     expect(done.body).toContain("@eng-1: build: PR ready");
     expect(done.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
-
-    const summary = await board.closeThread(REV, { thread_id: task.id, summary: "Shipped." });
-    expect(summary.task).toBe(task.id);
-    expect((await board.getTask(ENG, { task_id: task.id })).thread).toBe("closed");
     expect((await board.listChannel("demo/general")).map((m) => m.id)).toEqual([
       brief.id,
       summary.id,
@@ -402,6 +401,55 @@ describe("Board", () => {
       "conflict in hello.txt",
     );
     expect(events.find((e) => e.type === "task.completed")?.payload["createdBy"]).toBe("user");
+  });
+
+  it("closes a task's open thread when the task ends, however it ends", async () => {
+    const { board } = await society();
+    const withThread = async (title: string, onDone?: "merge"): Promise<Ulid> => {
+      const task = await board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", role: "engineer" }],
+      });
+      if (onDone !== undefined) {
+        await board.planTask(USER, {
+          task_id: task.id,
+          stages: [{ id: "s1", name: "build", role: "engineer" }],
+          on_done: onDone,
+        });
+      }
+      await board.openThread(ENG, { task_id: task.id });
+      await board.postMessage(ENG, { channel: "demo/general", body: "note", thread_id: task.id });
+      return task.id;
+    };
+    const finished = await withThread("finished");
+    await board.claimTask(ENG, { task_id: finished });
+    expect(await board.advanceTask(ENG, { task_id: finished })).toMatchObject({
+      status: "done",
+      thread: "closed",
+    });
+    const merged = await withThread("merged", "merge");
+    await board.claimTask(ENG, { task_id: merged });
+    // A completing task is still in play, and its thread stays open until the effect lands.
+    expect((await board.advanceTask(ENG, { task_id: merged })).thread).toBe("open");
+    expect(
+      await board.finishCompletion(SYSTEM_ACTOR, { taskId: merged, ok: true, detail: "merged" }),
+    ).toMatchObject({ status: "done", thread: "closed" });
+    const dropped = await withThread("dropped");
+    expect(await board.updateTask(USER, { task_id: dropped, status: "abandoned" })).toMatchObject({
+      status: "abandoned",
+      thread: "closed",
+    });
+
+    await expect(
+      board.postMessage(ENG, { channel: "demo/general", body: "late", thread_id: finished }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    const closed = (await board.readEvents(null)).filter((e) => e.type === "thread.closed");
+    expect(closed.map((e) => [e.actor, e.payload["taskId"], e.payload["ended"]])).toEqual([
+      ["eng-1", finished, "done"],
+      ["board", merged, "done"],
+      ["user", dropped, "abandoned"],
+    ]);
   });
 
   it("validates proposals by kind, forbids self-decisions, and reserves hiring for the user", async () => {
@@ -713,6 +761,41 @@ describe("Board", () => {
     await expect(Board.open(path.join(dir, "nowhere"))).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+  });
+
+  it("aligns an older society once: ops readers follow decisions, ended tasks close threads", async () => {
+    const { board, eng } = await society();
+    const STEW: Actor = { name: "stew", role: "steward" };
+    const { agent } = await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    expect(agent.subscriptions).toEqual(["general", "ops", "governance", "decisions"]);
+    expect(eng.agent.subscriptions).not.toContain("decisions");
+
+    // A steward from before decisions joined the ops channels, and a task that ended with its
+    // thread open, are aligned on the next open.
+    await board.unsubscribe(STEW, { channel: "decisions" });
+    const task = await board.createTask(USER, { project: "demo", title: "old" });
+    await board.openThread(ENG, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    const taskFile = board.paths.task("demo", task.id);
+    await writeFile(
+      taskFile,
+      (await readFile(taskFile, "utf8")).replace("thread: closed", "thread: open"),
+      "utf8",
+    );
+    expect((await board.getTask(USER, { task_id: task.id })).thread).toBe("open");
+    const reopened = await Board.open(dir);
+    expect((await reopened.readAgent("stew")).subscriptions).toContain("decisions");
+    expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
+    expect((await reopened.getTask(USER, { task_id: task.id })).thread).toBe("closed");
+
+    // Only once: a later choice to leave the channel stands.
+    await reopened.unsubscribe(STEW, { channel: "decisions" });
+    const again = await Board.open(dir);
+    expect((await again.readAgent("stew")).subscriptions).not.toContain("decisions");
+    const aligned = (await again.readEvents(null)).filter(
+      (e) => e.type === "subscription.changed" && e.payload["aligned"] === true,
+    );
+    expect(aligned.map((e) => e.actor)).toEqual(["stew"]);
   });
 
   it("runs the front desk: projects and membership as verbs, and a roster that dispatch can read", async () => {

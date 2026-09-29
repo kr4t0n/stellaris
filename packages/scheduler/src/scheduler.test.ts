@@ -535,7 +535,6 @@ describe("Scheduler", () => {
 
   it("signals role gaps, churn, unclosed threads, idle members, and missing capabilities", async () => {
     const { board, runner, scheduler } = await setup();
-    await board.retireAgent(USER, { name: "rev-1", reason: "test" });
     const task = await board.createTask(USER, {
       project: "demo",
       title: "needs gpu",
@@ -545,6 +544,12 @@ describe("Scheduler", () => {
         { name: "review", role: "reviewer", gate: true },
       ],
     });
+    // Three participants, then silence: the thread has gone stale.
+    await board.openThread(ENG, { task_id: task.id });
+    for (const author of [ENG, REV, USER]) {
+      await board.postMessage(author, { channel: "demo/general", body: "hm", thread_id: task.id });
+    }
+    await board.retireAgent(USER, { name: "rev-1", reason: "test" });
     await board.claimTask(ENG, { task_id: task.id });
     await board.releaseTask(ENG, { task_id: task.id });
     await board.claimTask(ENG, { task_id: task.id });
@@ -552,10 +557,6 @@ describe("Scheduler", () => {
     await board.claimTask(ENG, { task_id: task.id });
     // The review stage is now current, and its role has no active member.
     await board.advanceTask(ENG, { task_id: task.id });
-    const closed = await board.createTask(USER, { project: "demo", title: "done but open" });
-    await board.openThread(ENG, { task_id: closed.id });
-    await board.claimTask(ENG, { task_id: closed.id });
-    await board.updateTask(ENG, { task_id: closed.id, status: "abandoned" });
     advance(3 * 24 * 3_600_000 + 5 * 60_000);
     await scheduler.tick();
     await scheduler.drain();
@@ -564,7 +565,7 @@ describe("Scheduler", () => {
       expect.arrayContaining([
         ["role_gap", "role_gap:demo:reviewer"],
         ["churn", `churn:${task.id}`],
-        ["stale_thread", `stale_thread:${closed.id}`],
+        ["stale_thread", `stale_thread:${task.id}`],
         ["blocked_capability", `blocked_capability:${task.id}`],
         ["idle_member", "idle_member:eng-1"],
       ]),

@@ -1032,21 +1032,13 @@ export class Scheduler {
             taskId: task.id,
           });
         }
+        // The board closes a thread when its task ends, so only threads of tasks in play are open.
         if (task.thread === "open") {
           const messages = await this.board.listThread(task.id);
           const participants = new Set(messages.map((message) => message.author)).size;
           const last = messages.at(-1)?.ts ?? task.updatedAt;
           const quiet = now - Date.parse(last);
-          if (terminal) {
-            signals.push({
-              kind: "stale_thread",
-              key: `stale_thread:${task.id}`,
-              summary: `thread for ${task.status} task ${task.id} "${task.title}" in ${slug} was never closed`,
-              value: participants,
-              project: slug,
-              taskId: task.id,
-            });
-          } else if (participants >= 3 && quiet >= this.timings.staleThreadMs) {
+          if (participants >= 3 && quiet >= this.timings.staleThreadMs) {
             signals.push({
               kind: "stale_thread",
               key: `stale_thread:${task.id}`,

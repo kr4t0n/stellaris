@@ -244,12 +244,17 @@ function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): 
     case "skill": {
       const parsed = SkillProposalSchema.safeParse(charter);
       if (!parsed.success) break;
-      return `skill ${parsed.data.name}: ${parsed.data.summary}`;
+      return `skill ${parsed.data.name}: ${sentence(parsed.data.summary)}`;
     }
     default:
       break;
   }
   return `${kind} ${JSON.stringify(charter)}`;
+}
+
+/** A summary without its trailing period, for sentences that add their own. */
+function sentence(summary: string): string {
+  return summary.trim().replace(/\.+$/, "");
 }
 
 /**
@@ -2158,7 +2163,7 @@ export class Board {
     await this.appendMessage(
       by,
       "general",
-      `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${skill.summary}. Every citizen's skills index now lists it.`,
+      `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${sentence(skill.summary)}. Every citizen's skills index now lists it.`,
     );
     return replaced;
   }

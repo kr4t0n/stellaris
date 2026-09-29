@@ -5,8 +5,12 @@ import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
 import { waitingOnYou } from "./governance.js";
+import { useNeedsYou } from "./useNeedsYou.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
+
+/** The governance view that is open, if one is. */
+export type GovernanceView = "needs-you" | "proposals";
 
 interface Group {
   readonly key: string;
@@ -48,16 +52,37 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
   );
 }
 
-/** Where the user decides: proposals, with how many wait on the user. */
-function Governance({ active }: { active: "proposals" | null }) {
+function Count({ value, title }: { value: number; title: string }) {
+  return value === 0 ? null : (
+    <span title={title} className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300">
+      {value}
+    </span>
+  );
+}
+
+/** Where the user decides: what waits on the user, and the proposals, each with its count. */
+function Governance({ active }: { active: GovernanceView | null }) {
   const proposals = useProposals();
   const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
+  const attention = useNeedsYou().length;
   return (
     <section aria-label="Governance" className="mt-3">
       <h3 className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">
         Governance
       </h3>
       <ul>
+        <li>
+          <Link
+            to="/needs-you"
+            className={`${ROW} ${active === "needs-you" ? ROW_ACTIVE : ROW_IDLE}`}
+          >
+            <span aria-hidden="true" className="text-fg-muted">
+              ◉
+            </span>
+            <span className="min-w-0 flex-1 truncate">needs you</span>
+            <Count value={attention} title={`${attention} waiting on you`} />
+          </Link>
+        </li>
         <li>
           <Link
             to="/proposals"
@@ -67,14 +92,7 @@ function Governance({ active }: { active: "proposals" | null }) {
               ◈
             </span>
             <span className="min-w-0 flex-1 truncate">proposals</span>
-            {waiting > 0 ? (
-              <span
-                title={`${waiting} waiting on you`}
-                className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300"
-              >
-                {waiting}
-              </span>
-            ) : null}
+            <Count value={waiting} title={`${waiting} waiting on you`} />
           </Link>
         </li>
       </ul>
@@ -100,7 +118,7 @@ export function Navigator({
   /** The citizen whose view is open, and the scope of the turn it shows when one was chosen. */
   activeCitizen: string | null;
   activeScope: string | null;
-  activeGovernance: "proposals" | null;
+  activeGovernance: GovernanceView | null;
 }) {
   const channels = useChannels();
   const projects = useProjects();

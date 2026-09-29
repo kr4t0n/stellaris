@@ -24,6 +24,9 @@ interface HudProps {
   /** Turns running: more than `working` when a citizen is in turns in two projects. */
   readonly turns: number;
   readonly queued: number;
+  /** How many things wait on the user; the chip opens them. */
+  readonly attention: number;
+  readonly onOpenAttention: () => void;
   readonly paused: boolean;
   /** Pauses or resumes the scheduler; while the request runs the switch waits. */
   readonly onTogglePause: () => void;
@@ -40,6 +43,8 @@ export function Hud({
   working,
   turns,
   queued,
+  attention,
+  onOpenAttention,
   paused,
   onTogglePause,
   pauseBusy,
@@ -56,6 +61,16 @@ export function Hud({
           {society === undefined ? null : <span className="text-meta">{society}</span>}
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
+          {attention === 0 ? null : (
+            <button
+              type="button"
+              onClick={onOpenAttention}
+              className="card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-amber-300 transition-colors hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+            >
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
+              {attention} {attention === 1 ? "needs" : "need"} you
+            </button>
+          )}
           <button
             type="button"
             aria-pressed={paused}

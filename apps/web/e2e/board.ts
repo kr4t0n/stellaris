@@ -65,6 +65,63 @@ export interface Write {
   readonly body: Record<string, unknown>;
 }
 
+export const STAGE_TASK = "01M3Q2AAAAAAAAAAAAAAAAAAA1";
+
+const PROJECT = {
+  slug: "lab",
+  name: "Lab",
+  repo: null,
+  defaultBranch: "main",
+  channels: ["general"],
+  members: [],
+  approvers: [],
+  requiredCapabilities: [],
+  createdAt: CREATED,
+  defaultPlan: [],
+  onDone: "none",
+};
+
+/** A study whose gated sign-off stage names the user. */
+const TASK = {
+  id: STAGE_TASK,
+  project: "lab",
+  title: "Compare shortest-path algorithms",
+  status: "open",
+  createdBy: "desk",
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  blockedBy: [],
+  requiredCapabilities: [],
+  stages: [
+    {
+      id: "s1",
+      name: "Survey",
+      role: "researcher",
+      gate: false,
+      holders: ["ada"],
+      completedBy: "ada",
+      completedAt: CREATED,
+    },
+    { id: "s2", name: "Sign off", agent: "user", gate: true, holders: [] },
+  ],
+  stage: "s2",
+  stageSince: CREATED,
+  stageSeq: 2,
+  onDone: "none",
+  completing: false,
+  body: "",
+};
+
+/** A turn that reported it needs the user, as the runner posts it. */
+const REQUEST = {
+  id: "01M3Q2BBBBBBBBBBBBBBBBBBB1",
+  author: "stew",
+  channel: "decisions",
+  ts: CREATED,
+  mentions: ["user"],
+  body: "@user decision needed on lab: sign off the survey before it merges",
+};
+
 export interface FakeBoard {
   /** Every write the interface sent, in order. */
   readonly writes: Write[];
@@ -76,7 +133,10 @@ export interface FakeBoard {
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would.
  */
-export async function fakeBoard(page: Page): Promise<FakeBoard> {
+export async function fakeBoard(
+  page: Page,
+  options: { unreadDecisions?: boolean } = {},
+): Promise<FakeBoard> {
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
@@ -126,6 +186,10 @@ export async function fakeBoard(page: Page): Promise<FakeBoard> {
   };
 
   await page.addInitScript((token) => localStorage.setItem("stellaris.token", token), TOKEN);
+  if (options.unreadDecisions === true) {
+    // A browser that listed the board before the request arrived, so #decisions has something new.
+    await page.addInitScript(() => localStorage.setItem("stellaris.seen", '{"*":"1"}'));
+  }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -164,13 +228,25 @@ export async function fakeBoard(page: Page): Promise<FakeBoard> {
       case "/api/roles":
         return json(route, [role("concierge", ["user_post"]), role("steward", ["ops_event"])]);
       case "/api/projects":
+        return json(route, [PROJECT]);
+      case "/api/projects/lab/tasks":
+        return json(route, [TASK]);
       case "/api/threads":
       case "/api/skills":
+      case "/api/channels/general":
+      case "/api/channels/governance":
         return json(route, []);
+      case "/api/channels/decisions":
+        return json(route, [REQUEST]);
       case "/api/scheduler":
         return json(route, { paused, running: [], pending: [], resident: [], signals: [] });
       case "/api/channels":
-        return json(route, [channel("general"), channel("governance"), channel("decisions")]);
+        return json(route, [
+          channel("general"),
+          channel("governance"),
+          { ...channel("decisions"), messages: 1, lastMessageId: REQUEST.id, lastAt: REQUEST.ts },
+          { ...channel("general"), ref: "lab/general", project: "lab" },
+        ]);
       case "/api/proposals":
         return json(route, [proposal]);
       case `/api/proposals/${SKILL_PROPOSAL}`:

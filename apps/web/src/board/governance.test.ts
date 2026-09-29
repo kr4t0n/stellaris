@@ -1,9 +1,17 @@
-import { RoleCharterSchema, type Member, type Proposal } from "@stellaris/shared";
+import {
+  RoleCharterSchema,
+  TaskFrontmatterSchema,
+  type Member,
+  type Message,
+  type Proposal,
+  type Task,
+} from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
   consequenceOf,
   decidersOf,
   groupProposals,
+  needsYou,
   proposalTitle,
   roleDiff,
   skillText,
@@ -32,6 +40,46 @@ const researcher = RoleCharterSchema.parse({
   purpose: "Runs experiments.",
   verbs: ["post_message", "claim_task", "write_knowledge"],
 });
+
+function task(
+  id: string,
+  stage: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+): Task {
+  return {
+    ...TaskFrontmatterSchema.parse({
+      id,
+      project: "lab",
+      title: `task ${id}`,
+      status: "open",
+      createdBy: "desk",
+      createdAt: "2026-09-29T08:00:00.000Z",
+      updatedAt: "2026-09-29T08:00:00.000Z",
+      blockedBy: [],
+      requiredCapabilities: [],
+      stages: [
+        { id: "s1", name: "Work", role: "researcher" },
+        { id: "s2", name: "Sign off", ...stage },
+      ],
+      stage: "s2",
+      stageSince: "2026-09-29T09:00:00.000Z",
+      stageSeq: 2,
+      ...extra,
+    }),
+    body: "",
+  };
+}
+
+function message(id: string, author: string, mentions: string[]): Message {
+  return {
+    id,
+    author,
+    channel: "decisions",
+    ts: "2026-09-29T09:30:00.000Z",
+    mentions,
+    body: "decision needed",
+  };
+}
 
 describe("governance", () => {
   it("puts what the user may decide first, then what others decide, then the decided", () => {
@@ -119,5 +167,46 @@ describe("governance", () => {
       "# Refereed\n\nUse it.",
     );
     expect(skillText("# No frontmatter")).toBe("# No frontmatter");
+  });
+
+  it("gathers what waits on the user: proposals, stages named for the user, unread requests", () => {
+    const mine = task("01M3Q2AAAAAAAAAAAAAAAAAAA1", { agent: "user", gate: true });
+    const byRole = task("01M3Q2AAAAAAAAAAAAAAAAAAA2", { role: "user" });
+    const heldElsewhere = task(
+      "01M3Q2AAAAAAAAAAAAAAAAAAA3",
+      { role: "user" },
+      {
+        status: "claimed",
+        claimedBy: "stew",
+      },
+    );
+    const notMine = task("01M3Q2AAAAAAAAAAAAAAAAAAA4", { role: "referee" });
+    const landing = task("01M3Q2AAAAAAAAAAAAAAAAAAA5", { agent: "user" }, { completing: true });
+    const old = message("01M3Q2BBBBBBBBBBBBBBBBBBB1", "stew", ["user"]);
+    const fresh = message("01M3Q2BBBBBBBBBBBBBBBBBBB3", "stew", ["user"]);
+    const own = message("01M3Q2BBBBBBBBBBBBBBBBBBB4", "user", ["user"]);
+    const unaddressed = message("01M3Q2BBBBBBBBBBBBBBBBBBB5", "desk", []);
+
+    const items = needsYou({
+      proposals: [
+        skill,
+        proposal({ id: "01M3PY56V68VFS0EG5ER4B9AMH", kind: "role", proposedBy: "user" }),
+      ],
+      tasks: [mine, byRole, heldElsewhere, notMine, landing],
+      decisions: [old, fresh, own, unaddressed],
+      seenDecisions: "01M3Q2BBBBBBBBBBBBBBBBBBB2",
+    });
+    expect(
+      items.map((item) =>
+        item.kind === "proposal"
+          ? item.proposal.id
+          : item.kind === "stage"
+            ? item.task.id
+            : item.message.id,
+      ),
+    ).toEqual([skill.id, mine.id, byRole.id, fresh.id]);
+    expect(needsYou({ proposals: [], tasks: [], decisions: [fresh], seenDecisions: null })).toEqual(
+      [],
+    );
   });
 });

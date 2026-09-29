@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fakeBoard, SKILL_PROPOSAL } from "./board.js";
+import { fakeBoard, SKILL_PROPOSAL, STAGE_TASK } from "./board.js";
 
 test("approving takes a second click, says what it does, and shows what it made", async ({
   page,
@@ -65,4 +65,28 @@ test("the pause switch pauses and resumes the society", async ({ page }) => {
   await page.getByRole("button", { name: "Paused · resume" }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   expect(board.writes.map((write) => write.path)).toEqual(["/api/pause", "/api/resume"]);
+});
+
+test("needs you gathers a proposal, a stage that names the user, and an unread request", async ({
+  page,
+}) => {
+  await fakeBoard(page, { unreadDecisions: true });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "3 need you" }).click();
+  await expect(page).toHaveURL(/\/needs-you$/);
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view.getByRole("link", { name: /^Skill refereed-research/ })).toHaveAttribute(
+    "href",
+    `/proposal/${SKILL_PROPOSAL}`,
+  );
+  await expect(view.getByRole("link", { name: /Sign off \(gate\) in Lab/ })).toHaveAttribute(
+    "href",
+    `/task/${STAGE_TASK}`,
+  );
+
+  // A request is a message: reading #decisions is what clears it.
+  await view.getByRole("link", { name: /decision needed on lab/ }).click();
+  await expect(page).toHaveURL(/\/c\/decisions$/);
+  await expect(page.getByRole("button", { name: "2 need you" })).toBeVisible();
 });

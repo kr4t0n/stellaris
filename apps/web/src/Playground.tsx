@@ -2,7 +2,8 @@ import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Navigator } from "./board/Navigator.js";
+import { Navigator, type GovernanceView } from "./board/Navigator.js";
+import { useNeedsYou } from "./board/useNeedsYou.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
@@ -101,8 +102,13 @@ export function Playground() {
   const activeTasks = tasksPath ?? task.data?.project ?? null;
   const activeCitizen = after(pathname, "/citizen/");
   const activeScope = activeCitizen === null ? null : (search.scope ?? null);
-  const activeGovernance =
-    pathname === "/proposals" || pathname.startsWith("/proposal/") ? "proposals" : null;
+  const activeGovernance: GovernanceView | null =
+    pathname === "/needs-you"
+      ? "needs-you"
+      : pathname === "/proposals" || pathname.startsWith("/proposal/")
+        ? "proposals"
+        : null;
+  const attention = useNeedsYou().length;
 
   useEffect(() => {
     if (!boardOpen) {
@@ -210,6 +216,8 @@ export function Playground() {
           working={new Set(working.map((candidate) => candidate.name)).size}
           turns={working.length}
           queued={model.stars.filter((candidate) => candidate.state === "queued").length}
+          attention={attention}
+          onOpenAttention={() => void navigate({ to: "/needs-you" })}
           paused={scheduler.data?.paused ?? false}
           onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
           pauseBusy={pause.isPending}

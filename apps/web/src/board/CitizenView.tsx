@@ -124,7 +124,7 @@ function CitizenPage({
         title={name}
         subtitle={
           <>
-            {member.role} · <span className="font-mono">{model}</span>
+            {member.role} · {model}
             {member.status === "retired" ? " · retired" : ""}
           </>
         }

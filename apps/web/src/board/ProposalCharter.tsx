@@ -154,7 +154,7 @@ export function ProposalCharter({
             </Field>
             <Field label="Role">{hire.role}</Field>
             <Field label="CLI and model">
-              {hire.cli} · <span className="font-mono">{hire.model ?? "cli default"}</span>
+              {hire.cli} · {hire.model ?? "cli default"}
             </Field>
             <Field label="Projects">{listed(hire.memberships)}</Field>
             <Field label="Also follows">{listed(hire.subscriptions)}</Field>

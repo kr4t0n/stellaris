@@ -70,7 +70,7 @@ export function CitizenCard({ member, star, purpose, place, now }: CitizenCardPr
       <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
         <Row label="CLI">
           {CLI_MARKS[star.cli].label} ·{" "}
-          <span className="font-mono">{member.lastModel ?? member.model ?? "CLI default"}</span>
+          <span>{member.lastModel ?? member.model ?? "CLI default"}</span>
         </Row>
         <Row label="Now">{activity(member, star, place, now)}</Row>
         {star.resident ? <Row label="Session">warm, kept between turns</Row> : null}

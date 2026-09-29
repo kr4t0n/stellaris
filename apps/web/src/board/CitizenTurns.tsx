@@ -2,7 +2,7 @@ import type { CliKind, TurnHistoryEntry } from "@stellaris/shared";
 import { useState } from "react";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
-import { costLabel, endingOf, failed, historyTotals, scopeName, turnLength } from "./citizen.js";
+import { costLabel, endingOf, historyTotals, scopeName, turnLength } from "./citizen.js";
 import { PaneNote } from "./Pane.js";
 import { time, TranscriptSteps } from "./Transcript.js";
 import { useStoredTurn } from "./useStoredTurn.js";
@@ -22,7 +22,6 @@ function TurnRow({
 }) {
   const [open, setOpen] = useState(false);
   const length = turnLength(entry);
-  const bad = failed(entry);
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (
@@ -30,10 +29,6 @@ function TurnRow({
       <details className="group" onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary className="block cursor-pointer list-none px-4 py-2.5 transition-colors hover:bg-surface-2/30 group-open:bg-surface-2/20">
           <span className="flex items-center gap-2 text-xs">
-            <span
-              aria-hidden="true"
-              className={`size-1.5 shrink-0 rounded-full ${bad ? "bg-red-400" : "bg-emerald-400/70"}`}
-            />
             <span className="text-fg-secondary">{scopeName(entry.project)}</span>
             <span className="text-fg-muted">{entry.trigger}</span>
             <span className="min-w-0 flex-1 truncate text-fg-muted">
@@ -57,7 +52,7 @@ function TurnRow({
           </span>
           {text.trim() === "" ? null : (
             <span
-              className={`mt-1 line-clamp-2 block pl-3.5 text-xs leading-relaxed group-open:hidden ${tone}`}
+              className={`mt-1 line-clamp-2 block text-xs leading-relaxed group-open:hidden ${tone}`}
             >
               {text}
             </span>
@@ -85,9 +80,9 @@ function TurnBody({
   return (
     <div className="px-4 pt-1 pb-3">
       {text.trim() === "" ? null : (
-        <p className={`pl-3.5 text-xs leading-relaxed whitespace-pre-wrap ${tone}`}>{text}</p>
+        <p className={`text-xs leading-relaxed whitespace-pre-wrap ${tone}`}>{text}</p>
       )}
-      <div className="mt-2 pl-3.5">
+      <div className="mt-2">
         {entry.turnId === undefined ? (
           <p className="text-meta">This turn ran before turns kept their steps.</p>
         ) : stored.loading ? (

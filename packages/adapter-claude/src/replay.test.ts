@@ -63,6 +63,18 @@ const request: TurnRequest = {
 };
 
 describe("ClaudeAgentBackend replay", () => {
+  it("announces a turn once when the SDK sends a second init message", async () => {
+    const messages = await recorded("sdk-synthetic.jsonl");
+    const init = messages.find((message) => message.type === "system");
+    const again = init === undefined ? [] : [{ ...init, model: "claude-haiku-4-5" }];
+    const { queryFn } = replaying([...messages.slice(0, 2), ...again, ...messages.slice(2)]);
+    const backend = new ClaudeAgentBackend({ queryFn, sessionExists: () => Promise.resolve(true) });
+    const result = await backend.runTurn(request);
+
+    expect(result.events.filter((e) => e.type === "turn_started")).toHaveLength(1);
+    expect(result.model).toBe("claude-opus-5-5");
+  });
+
   it("maps a recorded SDK stream onto board events and the status object", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const { queryFn, calls } = replaying(messages);

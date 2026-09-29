@@ -77,8 +77,10 @@ interface TurnState {
   exitReason: TurnExitReason;
   error: string | undefined;
   sawResult: boolean;
-  /** The model the CLI announced on its init message. */
+  /** The model the CLI announced on its first init message. */
   model: string | undefined;
+  /** Whether the turn has seen its init message; the SDK can send more than one per query. */
+  initialized: boolean;
 }
 
 interface HandlerContext {
@@ -98,6 +100,7 @@ function freshState(model?: string): TurnState {
     error: undefined,
     sawResult: false,
     model,
+    initialized: false,
   };
 }
 
@@ -161,7 +164,8 @@ function handleMessage(
 ): void {
   switch (message.type) {
     case "system": {
-      if ("subtype" in message && message.subtype === "init") {
+      if ("subtype" in message && message.subtype === "init" && !state.initialized) {
+        state.initialized = true;
         state.model = message.model;
         if (context.announceOnInit) {
           emit({

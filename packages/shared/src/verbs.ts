@@ -15,7 +15,8 @@ import type { VerbName } from "./roles.js";
  */
 export const VerbInputs = {
   post_message: z.object({
-    channel: ChannelRefSchema,
+    /** Required outside a thread; in one it may be left out, and must otherwise be the thread's. */
+    channel: ChannelRefSchema.optional(),
     body: z.string().min(1),
     thread_id: UlidSchema.optional(),
   }),
@@ -30,7 +31,13 @@ export const VerbInputs = {
     channel: ChannelRefSchema.optional(),
     limit: z.number().int().positive().max(100).default(20),
   }),
-  open_thread: z.object({ task_id: UlidSchema }),
+  /** On a task or a proposal, whose id the thread takes, or on a channel with a title. */
+  open_thread: z.object({
+    task_id: UlidSchema.optional(),
+    proposal_id: UlidSchema.optional(),
+    channel: ChannelRefSchema.optional(),
+    title: z.string().min(1).max(200).optional(),
+  }),
   close_thread: z.object({ thread_id: UlidSchema, summary: z.string().min(1) }),
   create_task: z.object({
     project: NameSchema,
@@ -96,12 +103,13 @@ export type VerbArgs<V extends VerbName> = z.output<(typeof VerbInputs)[V]>;
 /** Tool descriptions shown to agents. Kept short because they cost context on every turn. */
 export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   post_message:
-    "Post a markdown message to a channel, or into a task's thread when thread_id is given.",
+    "Post a markdown message to a channel, or into a thread when thread_id is given; a thread's message goes to the thread's channel.",
   read_inbox:
     "Read unread messages from subscribed channels, mentions, and threads you take part in.",
   search: "Search messages, tasks, and knowledge by text, optionally within a project or channel.",
-  open_thread: "Open the discussion thread for a task.",
-  close_thread: "Close a task's thread with a summary that is posted to the project channel.",
+  open_thread:
+    "Open a thread: on a task or a proposal, whose id it takes and with which it ends, or on a channel with a title. Its messages reach only its participants and anyone mentioned.",
+  close_thread: "Close a thread with a summary that is posted to the thread's channel.",
   create_task:
     "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan.",
   claim_task:

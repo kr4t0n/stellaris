@@ -37,7 +37,6 @@ describe("plans", () => {
     project: "lab",
     title: "t",
     status: "open",
-    thread: "none",
     createdBy: "user",
     createdAt: ts,
     updatedAt: ts,

@@ -153,6 +153,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   );
   api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
   api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));
+  api.get("/threads", async (c) => c.json(await board.listThreads()));
+  api.get("/threads/:id", async (c) => {
+    const id = c.req.param("id");
+    return c.json({ thread: await board.readThread(id), messages: await board.listThread(id) });
+  });
   api.get("/channels/:ref{.+}", async (c) => c.json(await board.listChannel(c.req.param("ref"))));
 
   // The caller's own inbox. Reading does not advance the cursor unless asked.

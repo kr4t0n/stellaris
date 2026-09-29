@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
 describe("buildTurnPrompt", () => {
-  it("carries the trigger, held claims, the inbox, and a failed-turn note", () => {
+  it("carries the trigger, held claims, the inbox with thread titles, and a failed-turn note", () => {
     const prompt = buildTurnPrompt({
       dispatch: {
         agent: "eng-1",
@@ -26,7 +26,30 @@ describe("buildTurnPrompt", () => {
           mentions: ["eng-1"],
           body: "@eng-1 please start on the scaffold",
         },
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          author: "rev-1",
+          channel: "demo/dev",
+          thread: "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+          ts: "2026-09-28T10:01:00.000Z",
+          mentions: [],
+          body: "vitest, I think",
+        },
       ],
+      threads: new Map([
+        [
+          "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+          {
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+            channel: "demo/dev",
+            title: "Which runner?",
+            state: "open",
+            openedBy: "eng-1",
+            openedAt: "2026-09-28T09:59:00.000Z",
+            body: "",
+          },
+        ],
+      ]),
       heldClaims: [],
       lastTurn: {
         agent: "eng-1",
@@ -49,7 +72,10 @@ describe("buildTurnPrompt", () => {
     });
     expect(prompt).toContain("Trigger: mention from user. mentioned by user");
     expect(prompt).toContain("Your previous turn did not finish");
-    expect(prompt).toContain("Inbox (1 unread)");
+    expect(prompt).toContain("Inbox (2 unread)");
+    expect(prompt).toContain(
+      'demo/dev thread "Which runner?" (01ARZ3NDEKTSV4RRFFQ69G5FAT) from @rev-1',
+    );
     expect(prompt).toContain("please start on the scaffold");
     expect(prompt).toContain("## Stages you hold\n\nNone.");
     expect(prompt).not.toContain("Stages waiting for you");
@@ -157,7 +183,6 @@ describe("buildTurnPrompt", () => {
         project: "lab",
         title,
         status: claimedBy === undefined ? "open" : "claimed",
-        thread: "none",
         createdBy: "desk",
         createdAt: ts,
         updatedAt: ts,

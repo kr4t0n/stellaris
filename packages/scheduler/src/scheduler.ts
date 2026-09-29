@@ -1032,24 +1032,6 @@ export class Scheduler {
             taskId: task.id,
           });
         }
-        // The board closes a thread when its task ends, so only threads of tasks in play are open.
-        if (task.thread === "open") {
-          const messages = await this.board.listThread(task.id);
-          const participants = new Set(messages.map((message) => message.author)).size;
-          const last = messages.at(-1)?.ts ?? task.updatedAt;
-          const quiet = now - Date.parse(last);
-          if (participants >= 3 && quiet >= this.timings.staleThreadMs) {
-            signals.push({
-              kind: "stale_thread",
-              key: `stale_thread:${task.id}`,
-              summary: `thread for task ${task.id} "${task.title}" in ${slug} has ${participants} participants and no message for ${describeDuration(quiet)}`,
-              value: quiet,
-              threshold: this.timings.staleThreadMs,
-              project: slug,
-              taskId: task.id,
-            });
-          }
-        }
         if (!terminal) {
           const required = new Set([...project.requiredCapabilities, ...task.requiredCapabilities]);
           const missing = [...required].filter((capability) => !offered.has(capability));
@@ -1064,6 +1046,27 @@ export class Scheduler {
             });
           }
         }
+      }
+    }
+
+    for (const thread of await this.board.listThreads()) {
+      if (thread.state !== "open") {
+        continue;
+      }
+      const messages = await this.board.listThread(thread.id);
+      const participants = new Set(messages.map((message) => message.author)).size;
+      const quiet = now - Date.parse(messages.at(-1)?.ts ?? thread.openedAt);
+      if (participants >= 3 && quiet >= this.timings.staleThreadMs) {
+        const { project } = parseChannelRef(thread.channel);
+        signals.push({
+          kind: "stale_thread",
+          key: `stale_thread:${thread.id}`,
+          summary: `thread ${thread.id} "${thread.title}" in ${thread.channel} has ${participants} participants and no message for ${describeDuration(quiet)}`,
+          value: quiet,
+          threshold: this.timings.staleThreadMs,
+          ...(project === null ? {} : { project }),
+          ...(thread.subject?.kind === "task" ? { taskId: thread.subject.id } : {}),
+        });
       }
     }
 

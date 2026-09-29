@@ -34,6 +34,7 @@ import {
   SOCIETY_SCOPE,
   SocietySchema,
   TaskFrontmatterSchema,
+  ThreadFrontmatterSchema,
   VerbInputs,
   type Agent,
   type BoardEvent,
@@ -64,7 +65,10 @@ import {
   type Society,
   type Task,
   type TaskFrontmatter,
+  type Thread,
+  type ThreadSubject,
   type Ulid,
+  type VerbArgs,
   type VerbInput,
   type VerbName,
   SessionsFileSchema,
@@ -234,7 +238,7 @@ const OPS_CHANNELS: readonly ChannelRef[] = ["ops", "governance", "decisions"];
 /** One-time changes an existing society receives on open, by name, remembered once applied. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
 const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
-const CLOSE_ENDED_THREADS = "ended-tasks-close-threads";
+const THREAD_RECORDS = "threads-as-records";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -487,17 +491,15 @@ export class Board {
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
       : { applied: [] };
-    const pending = [FOLLOW_DECISIONS, CLOSE_ENDED_THREADS].filter(
-      (name) => !applied.includes(name),
-    );
+    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
     }
     if (pending.includes(FOLLOW_DECISIONS)) {
       await this.followDecisions();
     }
-    if (pending.includes(CLOSE_ENDED_THREADS)) {
-      await this.closeEndedThreads();
+    if (pending.includes(THREAD_RECORDS)) {
+      await this.recordTaskThreads();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -524,13 +526,71 @@ export class Board {
     }
   }
 
-  /** Tasks that ended before threads closed with their task still have one open. */
-  private async closeEndedThreads(): Promise<void> {
-    for (const project of await this.listProjects()) {
-      for (const task of await this.listTasks(project.slug)) {
-        if (task.thread === "open" && (task.status === "done" || task.status === "abandoned")) {
-          await this.writeEndedTask(SYSTEM_ACTOR.name, project.slug, task);
+  /**
+   * Threads were once a state field on their task. Each becomes a record under the task's project,
+   * on its general channel, closed if its task has ended, and the field leaves the task file.
+   */
+  private async recordTaskThreads(): Promise<void> {
+    const opened = new Map<string, BoardEvent>();
+    const closed = new Map<string, BoardEvent>();
+    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
+      const taskId = event.payload["taskId"];
+      if (typeof taskId !== "string") {
+        continue;
+      }
+      if (event.type === "thread.opened") {
+        opened.set(taskId, event);
+      } else if (event.type === "thread.closed") {
+        closed.set(taskId, event);
+      }
+    }
+    for (const slug of await listDirs(this.paths.projects())) {
+      const threads = this.paths.threads(slug);
+      const summaries = new Map<string, string>();
+      for (const message of await this.readMessagesIn(
+        this.paths.projectChannel(slug, "general"),
+        null,
+      )) {
+        if (message.task !== undefined) {
+          summaries.set(message.task, message.body.replace(/^Thread closed[^\n]*\n\n/, ""));
         }
+      }
+      for (const file of await listFiles(this.paths.tasks(slug))) {
+        const raw = await readMarkdown(
+          path.join(this.paths.tasks(slug), file),
+          z.record(z.string(), z.unknown()),
+        );
+        const legacy = raw.data["thread"];
+        if (legacy === undefined) {
+          continue;
+        }
+        const task: Task = { ...TaskFrontmatterSchema.parse(raw.data), body: raw.body };
+        if (
+          (legacy === "open" || legacy === "closed") &&
+          !(await exists(this.paths.threadFile(threads, task.id)))
+        ) {
+          const ended = task.status === "done" || task.status === "abandoned";
+          const open = legacy === "open" && !ended;
+          const openedBy = opened.get(task.id);
+          const closedBy = closed.get(task.id);
+          await this.writeThread(threads, {
+            id: task.id,
+            channel: channelRef(slug, "general"),
+            title: task.title,
+            subject: { kind: "task", id: task.id },
+            state: open ? "open" : "closed",
+            openedBy: openedBy?.actor ?? task.createdBy,
+            openedAt: openedBy?.ts ?? task.createdAt,
+            ...(open
+              ? {}
+              : {
+                  closedBy: closedBy?.actor ?? SYSTEM_ACTOR.name,
+                  closedAt: closedBy?.ts ?? this.now().toISOString(),
+                }),
+            body: summaries.get(task.id) ?? "",
+          });
+        }
+        await this.writeTask(slug, task);
       }
     }
   }
@@ -880,9 +940,26 @@ export class Board {
     return messages.slice(-limit);
   }
 
-  async listThread(taskId: Ulid): Promise<Message[]> {
-    const location = await this.findTask(taskId);
-    return this.readMessagesIn(this.paths.thread(location.project, taskId), null);
+  /** A thread's messages, oldest first. */
+  async listThread(id: Ulid): Promise<Message[]> {
+    const { threads } = await this.findThread(id);
+    return this.readMessagesIn(this.paths.threadMessages(threads, id), null);
+  }
+
+  async readThread(id: Ulid): Promise<Thread> {
+    return (await this.findThread(id)).thread;
+  }
+
+  /** Every thread record, the society's first, then each project's. */
+  async listThreads(): Promise<Thread[]> {
+    const all: Thread[] = [];
+    for (const threads of await this.threadScopes()) {
+      for (const file of await listFiles(threads)) {
+        const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+        all.push({ ...doc.data, body: doc.body });
+      }
+    }
+    return all;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1151,9 +1228,15 @@ export class Board {
   async postMessage(actor: Actor, input: VerbInput<"post_message">): Promise<Message> {
     const args = VerbInputs.post_message.parse(input);
     await this.authorize(actor, "post_message");
-    return this.mutex.run(() =>
-      this.appendMessage(actor.name, args.channel, args.body, args.thread_id),
-    );
+    return this.mutex.run(async () => {
+      if (args.thread_id !== undefined) {
+        return this.appendThreadMessage(actor.name, args.thread_id, args.body, args.channel);
+      }
+      if (args.channel === undefined) {
+        throw new BoardError("VALIDATION", "a message needs a channel, or a thread_id");
+      }
+      return this.appendMessage(actor.name, args.channel, args.body);
+    });
   }
 
   async readInbox(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<InboxResult> {
@@ -1178,7 +1261,10 @@ export class Board {
         if (!include && message.thread !== undefined) {
           let participates = threadParticipation.get(message.thread);
           if (participates === undefined) {
-            participates = await this.participatesInThread(actor, message.thread);
+            const found = await this.tryFindThread(message.thread);
+            participates =
+              found !== null &&
+              (await this.participatesInThread(actor, found.thread, found.threads));
             threadParticipation.set(message.thread, participates);
           }
           include = participates;
@@ -1349,80 +1435,127 @@ export class Board {
     });
   }
 
-  async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Task> {
+  async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Thread> {
     const args = VerbInputs.open_thread.parse(input);
     await this.authorize(actor, "open_thread");
     return this.mutex.run(async () => {
-      const location = await this.findTask(args.task_id);
-      if (location.task.thread !== "none") {
+      const { id, channel, title, subject } = await this.threadToOpen(args);
+      if ((await this.tryFindThread(id)) !== null) {
         throw new BoardError(
           "INVALID_STATE",
-          `thread for task ${args.task_id} is already ${location.task.thread}`,
+          `${subject?.kind ?? "thread"} ${id} already has a thread`,
         );
       }
-      await ensureDir(this.paths.thread(location.project, args.task_id));
-      const task = await this.writeTask(location.project, {
-        ...location.task,
-        thread: "open",
-        updatedAt: this.now().toISOString(),
+      const threads = this.paths.threadsOf(channel);
+      await ensureDir(this.paths.threadMessages(threads, id));
+      const thread = await this.writeThread(threads, {
+        id,
+        channel,
+        title,
+        ...(subject === undefined ? {} : { subject }),
+        state: "open",
+        openedBy: actor.name,
+        openedAt: this.now().toISOString(),
+        body: "",
       });
       await this.events.append("thread.opened", actor.name, {
-        taskId: task.id,
-        project: location.project,
+        threadId: id,
+        channel,
+        subject: subject ?? null,
       });
-      return task;
+      return thread;
     });
+  }
+
+  /** Where a new thread hangs, what it is called, and what it is about. */
+  private async threadToOpen(
+    args: VerbArgs<"open_thread">,
+  ): Promise<{ id: Ulid; channel: ChannelRef; title: string; subject?: ThreadSubject }> {
+    if (args.task_id !== undefined && args.proposal_id !== undefined) {
+      throw new BoardError("VALIDATION", "a thread is about one task or one proposal, not both");
+    }
+    if (args.task_id !== undefined) {
+      const { task, project } = await this.findTask(args.task_id);
+      if (task.status === "done" || task.status === "abandoned") {
+        throw new BoardError("INVALID_STATE", `task ${task.id} is ${task.status}`);
+      }
+      const channel = args.channel ?? channelRef(project, "general");
+      if (parseChannelRef(channel).project !== project) {
+        throw new BoardError(
+          "VALIDATION",
+          `a task's thread hangs off a channel of its project, ${project}`,
+        );
+      }
+      await this.assertChannelExists(channel);
+      return {
+        id: task.id,
+        channel,
+        title: args.title ?? task.title,
+        subject: { kind: "task", id: task.id },
+      };
+    }
+    if (args.proposal_id !== undefined) {
+      const proposal = await this.readProposal(args.proposal_id);
+      if (proposal.status !== "proposed") {
+        throw new BoardError(
+          "INVALID_STATE",
+          `proposal ${proposal.id} is already ${proposal.status}`,
+        );
+      }
+      const channel = args.channel ?? "governance";
+      await this.assertChannelExists(channel);
+      const described = `${proposal.kind} proposal: ${describeCharter(proposal.kind, proposal.charter)}`;
+      return {
+        id: proposal.id,
+        channel,
+        title: args.title ?? described.slice(0, 200),
+        subject: { kind: "proposal", id: proposal.id },
+      };
+    }
+    if (args.channel === undefined || args.title === undefined) {
+      throw new BoardError(
+        "VALIDATION",
+        "a thread needs a task_id, a proposal_id, or a channel and a title",
+      );
+    }
+    await this.assertChannelExists(args.channel);
+    return { id: this.newId(), channel: args.channel, title: args.title };
   }
 
   async closeThread(actor: Actor, input: VerbInput<"close_thread">): Promise<Message> {
     const args = VerbInputs.close_thread.parse(input);
     await this.authorize(actor, "close_thread");
     return this.mutex.run(async () => {
-      const location = await this.findTask(args.thread_id);
-      if (location.task.thread !== "open") {
-        throw new BoardError("INVALID_STATE", `thread for task ${args.thread_id} is not open`);
+      const { thread, threads } = await this.findThread(args.thread_id);
+      if (thread.state !== "open") {
+        throw new BoardError("INVALID_STATE", `thread ${thread.id} is not open`);
       }
-      const participant =
-        location.task.createdBy === actor.name ||
-        location.task.claimedBy === actor.name ||
-        location.task.stages.some((stage) => stage.holders.includes(actor.name));
-      if (!participant && !PLANNING_ROLES.includes(actor.role)) {
+      if (
+        !PLANNING_ROLES.includes(actor.role) &&
+        !(await this.participatesInThread(actor, thread, threads))
+      ) {
         throw new BoardError(
           "FORBIDDEN",
-          "only the task's participants, the user, the steward, or the concierge may close its thread",
+          "only the thread's participants, the user, the steward, or the concierge may close it",
         );
       }
-      const channel = channelRef(location.project, "general");
-      const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
-        id: this.newId(),
-        author: actor.name,
-        channel,
-        task: args.thread_id,
-        ts: this.now().toISOString(),
-        mentions: extractMentions(args.summary),
-      });
-      const body = `Thread closed for task ${location.task.id} "${location.task.title}".\n\n${args.summary}`;
-      await writeMarkdown(
-        this.paths.messageFile(this.paths.channelDir(channel), frontmatter.id, actor.name),
-        frontmatter,
-        body,
+      const summary = await this.writeMessage(
+        this.paths.channelDir(thread.channel),
+        { author: actor.name, channel: thread.channel, closes: thread.id },
+        `Thread closed: "${thread.title}" (${thread.id}).\n\n${args.summary}`,
       );
-      await this.writeTask(location.project, {
-        ...location.task,
-        thread: "closed",
-        updatedAt: this.now().toISOString(),
+      await this.writeThread(threads, {
+        ...thread,
+        state: "closed",
+        closedBy: actor.name,
+        closedAt: summary.ts,
+        body: args.summary,
       });
       await this.events.append("thread.closed", actor.name, {
-        taskId: location.task.id,
-        project: location.project,
+        threadId: thread.id,
+        channel: thread.channel,
       });
-      await this.events.append("message.posted", actor.name, {
-        id: frontmatter.id,
-        channel,
-        thread: null,
-        mentions: frontmatter.mentions,
-      });
-      return { ...frontmatter, body };
+      return summary;
     });
   }
 
@@ -1455,7 +1588,6 @@ export class Board {
         project: args.project,
         title: args.title,
         status: "open",
-        thread: "none",
         createdBy: actor.name,
         createdAt: ts,
         updatedAt: ts,
@@ -2964,29 +3096,47 @@ export class Board {
   }
 
   /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
-  private async appendMessage(
-    author: Name,
-    channel: ChannelRef,
-    body: string,
-    threadId?: Ulid,
-  ): Promise<Message> {
+  private async appendMessage(author: Name, channel: ChannelRef, body: string): Promise<Message> {
     await this.assertChannelExists(channel);
-    let dir = this.paths.channelDir(channel);
-    if (threadId !== undefined) {
-      const location = await this.findTask(threadId);
-      if (location.task.thread !== "open") {
-        throw new BoardError("INVALID_STATE", `thread for task ${threadId} is not open`);
-      }
-      dir = this.paths.thread(location.project, threadId);
+    return this.writeMessage(this.paths.channelDir(channel), { author, channel }, body);
+  }
+
+  /** A thread's message carries the thread's channel; a caller naming another channel is refused. */
+  private async appendThreadMessage(
+    author: Name,
+    threadId: Ulid,
+    body: string,
+    channel?: ChannelRef,
+  ): Promise<Message> {
+    const { thread, threads } = await this.findThread(threadId);
+    if (thread.state !== "open") {
+      throw new BoardError("INVALID_STATE", `thread ${threadId} is closed`);
     }
+    if (channel !== undefined && channel !== thread.channel) {
+      throw new BoardError(
+        "VALIDATION",
+        `thread ${threadId} belongs to ${thread.channel}; leave channel out or pass that one`,
+      );
+    }
+    return this.writeMessage(
+      this.paths.threadMessages(threads, threadId),
+      { author, channel: thread.channel, thread: threadId },
+      body,
+    );
+  }
+
+  private async writeMessage(
+    dir: string,
+    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid },
+    body: string,
+  ): Promise<Message> {
     const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
       id: this.newId(),
-      author,
-      channel,
-      ...(threadId === undefined ? {} : { thread: threadId }),
+      ...head,
       ts: this.now().toISOString(),
       mentions: extractMentions(body),
     });
+    const { author } = head;
     await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);
     await this.events.append("message.posted", author, {
       id: frontmatter.id,
@@ -3103,17 +3253,10 @@ export class Board {
     return { ...data, body };
   }
 
-  /** Writes a task that has just ended, done or abandoned; an open thread closes with it. */
+  /** Writes a task that has just ended, done or abandoned; its thread, if open, closes with it. */
   private async writeEndedTask(by: Name, project: Name, task: Task): Promise<Task> {
-    if (task.thread !== "open") {
-      return this.writeTask(project, task);
-    }
-    const written = await this.writeTask(project, { ...task, thread: "closed" });
-    await this.events.append("thread.closed", by, {
-      taskId: task.id,
-      project,
-      ended: task.status,
-    });
+    const written = await this.writeTask(project, task);
+    await this.endThreadOf(task.id, by, task.status);
     return written;
   }
 
@@ -3208,27 +3351,105 @@ export class Board {
         "decisions",
         `${verdict} ${proposal.kind} proposal ${proposalId} by ${proposal.proposedBy}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`,
       );
+      await this.endThreadOf(proposalId, actor.name, outcome);
       return decision;
     });
   }
 
-  private async participatesInThread(actor: Actor, taskId: Ulid): Promise<boolean> {
-    let location: TaskLocation;
+  /** The opener, the people of its subject, and anyone who posted in it; mentions reach the rest. */
+  private async participatesInThread(
+    actor: Actor,
+    thread: Thread,
+    threads: string,
+  ): Promise<boolean> {
+    if (thread.openedBy === actor.name || (await this.involvedIn(actor, thread.subject))) {
+      return true;
+    }
+    const files = await listFiles(this.paths.threadMessages(threads, thread.id));
+    return files.some((file) => file.endsWith(`-${actor.name}.md`));
+  }
+
+  /**
+   * A task's creator, holder, and everyone named on or holding a stage; a proposal's proposer,
+   * its decider, and the roles that may decide it.
+   */
+  private async involvedIn(actor: Actor, subject: ThreadSubject | undefined): Promise<boolean> {
     try {
-      location = await this.findTask(taskId);
+      if (subject?.kind === "task") {
+        const { task } = await this.findTask(subject.id);
+        return (
+          task.claimedBy === actor.name ||
+          task.createdBy === actor.name ||
+          task.stages.some(
+            (stage) => stage.agent === actor.name || stage.holders.includes(actor.name),
+          )
+        );
+      }
+      if (subject?.kind === "proposal") {
+        const proposal = await this.readProposal(subject.id);
+        return (
+          proposal.proposedBy === actor.name ||
+          proposal.decidedBy === actor.name ||
+          ROLE_KIND_APPROVERS[proposal.kind].includes(actor.role)
+        );
+      }
     } catch {
       return false;
     }
-    const task = location.task;
-    const involved =
-      task.claimedBy === actor.name ||
-      task.createdBy === actor.name ||
-      task.stages.some((stage) => stage.agent === actor.name || stage.holders.includes(actor.name));
-    if (involved) {
-      return true;
+    return false;
+  }
+
+  private async threadScopes(): Promise<string[]> {
+    const projects = await listDirs(this.paths.projects());
+    return [this.paths.societyThreads(), ...projects.map((slug) => this.paths.threads(slug))];
+  }
+
+  private async tryFindThread(id: Ulid): Promise<{ thread: Thread; threads: string } | null> {
+    for (const threads of await this.threadScopes()) {
+      const file = this.paths.threadFile(threads, id);
+      if (await exists(file)) {
+        const doc = await readMarkdown(file, ThreadFrontmatterSchema);
+        return { thread: { ...doc.data, body: doc.body }, threads };
+      }
     }
-    const files = await listFiles(this.paths.thread(location.project, taskId));
-    return files.some((file) => file.endsWith(`-${actor.name}.md`));
+    return null;
+  }
+
+  private async findThread(id: Ulid): Promise<{ thread: Thread; threads: string }> {
+    const found = await this.tryFindThread(id);
+    if (found === null) {
+      throw new BoardError("NOT_FOUND", `thread ${id} not found`);
+    }
+    return found;
+  }
+
+  private async writeThread(threads: string, thread: Thread): Promise<Thread> {
+    const { body, ...frontmatter } = thread;
+    const clean = Object.fromEntries(
+      Object.entries(frontmatter).filter(([, value]) => value !== undefined),
+    );
+    const data = ThreadFrontmatterSchema.parse(clean);
+    await writeMarkdown(this.paths.threadFile(threads, thread.id), data, body);
+    return { ...data, body };
+  }
+
+  /** A thread with a subject closes, without a summary, when its subject ends. */
+  private async endThreadOf(subjectId: Ulid, by: Name, ended: string): Promise<void> {
+    const found = await this.tryFindThread(subjectId);
+    if (found === null || found.thread.state !== "open") {
+      return;
+    }
+    await this.writeThread(found.threads, {
+      ...found.thread,
+      state: "closed",
+      closedBy: by,
+      closedAt: this.now().toISOString(),
+    });
+    await this.events.append("thread.closed", by, {
+      threadId: subjectId,
+      channel: found.thread.channel,
+      ended,
+    });
   }
 
   private async readMessagesIn(dir: string, since: Ulid | null): Promise<Message[]> {
@@ -3250,15 +3471,20 @@ export class Board {
       for (const channel of await listDirs(this.paths.societyChannels())) {
         yield* await this.readMessagesIn(this.paths.societyChannel(channel), since);
       }
+      yield* this.threadMessagesIn(this.paths.societyThreads(), since);
     }
     const projects = project === undefined ? await listDirs(this.paths.projects()) : [project];
     for (const slug of projects) {
       for (const channel of await listDirs(this.paths.projectChannels(slug))) {
         yield* await this.readMessagesIn(this.paths.projectChannel(slug, channel), since);
       }
-      for (const taskId of await listDirs(this.paths.threads(slug))) {
-        yield* await this.readMessagesIn(this.paths.thread(slug, taskId), since);
-      }
+      yield* this.threadMessagesIn(this.paths.threads(slug), since);
+    }
+  }
+
+  private async *threadMessagesIn(threads: string, since: Ulid | null): AsyncGenerator<Message> {
+    for (const id of await listDirs(threads)) {
+      yield* await this.readMessagesIn(this.paths.threadMessages(threads, id), since);
     }
   }
 }

@@ -10,6 +10,7 @@ import {
   type AgentEvent,
   type CliKind,
   type Name,
+  type Thread,
   type TurnDispatch,
   type TurnRecord,
   type Ulid,
@@ -254,9 +255,17 @@ export class LocalRunner {
     const waiting = (project === null ? [] : await this.board.openTasks(project.slug)).filter(
       (task) => task.claimedBy === undefined && mayHoldStage(actor, task),
     );
+    const threads = new Map<Ulid, Thread>();
+    for (const id of new Set(inbox.messages.flatMap((message) => message.thread ?? []))) {
+      const thread = await this.board.readThread(id).catch(() => undefined);
+      if (thread !== undefined) {
+        threads.set(id, thread);
+      }
+    }
     const prompt = buildTurnPrompt({
       dispatch,
       messages: inbox.messages,
+      threads,
       heldClaims: held,
       waitingStages: waiting,
       project,

@@ -403,9 +403,9 @@ program
 
 program
   .command("post <channel> <body>")
-  .description("Post a message to a channel, or into a task's thread")
+  .description("Post a message to a channel, or into one of its threads")
   .option("--as <agent>", "act as this agent instead of the user")
-  .option("--thread <taskId>", "post into the task's thread")
+  .option("--thread <threadId>", "post into the thread, which must hang off the channel")
   .action(async (channel: string, body: string, opts: { as?: string; thread?: string }) => {
     const board = await open();
     const who = await actorFor(board, opts.as);
@@ -577,10 +577,14 @@ task
   .action(async (id: string) => {
     const board = await open();
     const found = await board.getTask(board.userActor(), { task_id: id });
+    const threadState = await board
+      .readThread(id)
+      .then((t) => t.state)
+      .catch(() => "none");
     print(found, () =>
       [
         `${found.id}  ${found.status}${found.completing ? " (completing)" : ""}  ${found.title}`,
-        `project: ${found.project}  held by: ${found.claimedBy ?? "nobody"}  on done: ${found.onDone}  thread: ${found.thread}`,
+        `project: ${found.project}  held by: ${found.claimedBy ?? "nobody"}  on done: ${found.onDone}  thread: ${threadState}`,
         describePlan(found),
         "",
         found.body.trim(),
@@ -606,30 +610,83 @@ task
     );
   });
 
-const thread = program.command("thread").description("Manage task threads");
+const thread = program.command("thread").description("Manage threads");
 
 thread
-  .command("open <taskId>")
-  .description("Open a task's thread")
+  .command("open [taskId]")
+  .description("Open a thread on a task, on a proposal, or on a channel with a title")
+  .option("--proposal <id>", "open the proposal's thread")
+  .option("--channel <ref>", "the channel it hangs off; required for a topic")
+  .option("--title <text>", "the thread's title; required for a topic")
   .option("--as <agent>", "act as this agent instead of the user")
-  .action(async (taskId: string, opts: { as?: string }) => {
-    const board = await open();
-    const opened = await board.openThread(await actorFor(board, opts.as), { task_id: taskId });
-    print(opened, () => `Thread opened for task ${opened.id}`);
-  });
+  .action(
+    async (
+      taskId: string | undefined,
+      opts: { proposal?: string; channel?: string; title?: string; as?: string },
+    ) => {
+      const board = await open();
+      const opened = await board.openThread(await actorFor(board, opts.as), {
+        ...(taskId === undefined ? {} : { task_id: taskId }),
+        ...(opts.proposal === undefined ? {} : { proposal_id: opts.proposal }),
+        ...(opts.channel === undefined ? {} : { channel: opts.channel }),
+        ...(opts.title === undefined ? {} : { title: opts.title }),
+      });
+      print(opened, () => `Thread ${opened.id} opened on ${opened.channel}: ${opened.title}`);
+    },
+  );
 
 thread
-  .command("close <taskId>")
-  .description("Close a task's thread with a summary posted to the project channel")
+  .command("close <threadId>")
+  .description("Close a thread with a summary posted to its channel")
   .requiredOption("--summary <text>", "closure summary")
   .option("--as <agent>", "act as this agent instead of the user")
-  .action(async (taskId: string, opts: { summary: string; as?: string }) => {
+  .action(async (threadId: string, opts: { summary: string; as?: string }) => {
     const board = await open();
     const summary = await board.closeThread(await actorFor(board, opts.as), {
-      thread_id: taskId,
+      thread_id: threadId,
       summary: opts.summary,
     });
     print(summary, () => `Thread closed; summary posted as ${summary.id} to ${summary.channel}`);
+  });
+
+thread
+  .command("list")
+  .description("List threads, the society's first, then each project's")
+  .option("--open", "only open threads", false)
+  .action(async (opts: { open: boolean }) => {
+    const board = await open();
+    const threads = (await board.listThreads()).filter((t) => !opts.open || t.state === "open");
+    print(threads, () =>
+      threads.length === 0
+        ? "No threads."
+        : threads
+            .map((t) => {
+              const about = t.subject === undefined ? "topic" : t.subject.kind;
+              return `${t.id}\t${t.state}\t${t.channel}\t${about}\t${t.title}`;
+            })
+            .join("\n"),
+    );
+  });
+
+thread
+  .command("show <threadId>")
+  .description("Show a thread and its messages")
+  .action(async (threadId: string) => {
+    const board = await open();
+    const found = await board.readThread(threadId);
+    const messages = await board.listThread(threadId);
+    print({ thread: found, messages }, () =>
+      [
+        `${found.id}  ${found.state}  ${found.channel}  ${found.title}`,
+        `opened by ${found.openedBy} at ${found.openedAt}${
+          found.closedBy === undefined
+            ? ""
+            : `; closed by ${found.closedBy} at ${found.closedAt ?? "?"}`
+        }`,
+        ...messages.map((m) => `[${m.ts}] @${m.author}: ${m.body.trim()}`),
+        ...(found.body.trim().length === 0 ? [] : ["", `Summary: ${found.body.trim()}`]),
+      ].join("\n"),
+    );
   });
 
 program

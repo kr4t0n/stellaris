@@ -29,6 +29,10 @@ export class BoardPaths {
   societyChannel(name: Name): string {
     return path.join(this.societyChannels(), name);
   }
+  /** Threads whose channel is a society channel; project channels' threads live under the project. */
+  societyThreads(): string {
+    return path.join(this.society, "threads");
+  }
   societyKnowledge(): string {
     return path.join(this.society, "knowledge");
   }
@@ -94,9 +98,6 @@ export class BoardPaths {
   threads(slug: Name): string {
     return path.join(this.project(slug), "threads");
   }
-  thread(slug: Name, taskId: Ulid): string {
-    return path.join(this.threads(slug), taskId);
-  }
   tasks(slug: Name): string {
     return path.join(this.project(slug), "tasks");
   }
@@ -118,6 +119,19 @@ export class BoardPaths {
     return parsed.project === null
       ? this.societyChannel(parsed.channel)
       : this.projectChannel(parsed.project, parsed.channel);
+  }
+
+  /** The threads directory of a channel's scope: its project's, or the society's. */
+  threadsOf(ref: ChannelRef): string {
+    const { project } = parseChannelRef(ref);
+    return project === null ? this.societyThreads() : this.threads(project);
+  }
+  /** A thread's record, `<id>.md`, beside the directory of its messages, `<id>/`. */
+  threadFile(threads: string, id: Ulid): string {
+    return path.join(threads, `${id}.md`);
+  }
+  threadMessages(threads: string, id: Ulid): string {
+    return path.join(threads, id);
   }
 
   messageFile(dir: string, id: Ulid, author: Name): string {

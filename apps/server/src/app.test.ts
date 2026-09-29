@@ -96,6 +96,25 @@ describe("board server", () => {
       headers: { authorization: `Bearer ${userToken}` },
     });
     expect(await tasks.json()).toHaveLength(1);
+
+    const opened = await app.request("/api/verbs/open_thread", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ channel: "demo/dev", title: "Which runner?" }),
+    });
+    const thread = z.object({ id: z.string() }).parse(await opened.json());
+    await app.request("/api/verbs/post_message", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ thread_id: thread.id, body: "vitest?" }),
+    });
+    const listed = await app.request("/api/threads", { headers });
+    expect(await listed.json()).toMatchObject([{ id: thread.id, channel: "demo/dev" }]);
+    const shown = await app.request(`/api/threads/${thread.id}`, { headers });
+    expect(await shown.json()).toMatchObject({
+      thread: { title: "Which runner?", state: "open" },
+      messages: [{ body: "vitest?\n", channel: "demo/dev" }],
+    });
   });
 
   it("serves the board as an MCP endpoint with role-filtered tools", async () => {

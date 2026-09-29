@@ -100,7 +100,7 @@ describe("Phase 1 exit criterion", () => {
 
     const final = await board.getTask(USER, { task_id: task.id });
     expect(final.status).toBe("done");
-    expect(final.thread).toBe("closed");
+    expect(await board.readThread(task.id)).toMatchObject({ state: "closed", closedBy: "rev-1" });
     expect(final.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 
     const mainLog = await execa("git", ["log", "--oneline", "main"], {

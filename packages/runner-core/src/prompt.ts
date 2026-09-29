@@ -6,8 +6,10 @@ import {
   type Project,
   type Stage,
   type Task,
+  type Thread,
   type TurnDispatch,
   type TurnRecord,
+  type Ulid,
 } from "@stellaris/shared";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 
@@ -37,6 +39,8 @@ export interface TurnPromptInput {
   /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
   readonly knowledge?: KnowledgeView | null | undefined;
+  /** The threads the inbox's messages belong to, by id, for their titles. */
+  readonly threads?: ReadonlyMap<Ulid, Thread> | undefined;
 }
 
 /** What a reflection turn is for. It replaces new work, not the inbox. */
@@ -237,10 +241,13 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push("Nothing new.");
   } else {
     for (const message of input.messages) {
+      const thread = message.thread === undefined ? undefined : input.threads?.get(message.thread);
       const where =
         message.thread === undefined
           ? message.channel
-          : `${message.channel} thread ${message.thread}`;
+          : thread === undefined
+            ? `${message.channel} thread ${message.thread}`
+            : `${message.channel} thread "${thread.title}" (${message.thread})`;
       lines.push(
         `### [${message.ts}] ${where} from @${message.author} (message ${message.id})`,
         "",

@@ -82,7 +82,10 @@ export const MessageFrontmatterSchema = z.object({
   author: NameSchema,
   channel: ChannelRefSchema,
   thread: UlidSchema.optional(),
+  /** On a summary post, the task whose thread it closed. Written by older builds; see `closes`. */
   task: UlidSchema.optional(),
+  /** On a summary post, the thread it closed. */
+  closes: UlidSchema.optional(),
   ts: IsoDateTimeSchema,
   mentions: z.array(NameSchema),
 });
@@ -98,8 +101,35 @@ export interface Message extends MessageFrontmatter {
 export const TaskStatusSchema = z.enum(["open", "claimed", "done", "abandoned"]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
-export const ThreadStateSchema = z.enum(["none", "open", "closed"]);
+export const ThreadStateSchema = z.enum(["open", "closed"]);
 export type ThreadState = z.infer<typeof ThreadStateSchema>;
+
+/** What a thread is about. A thread with a subject takes the subject's id and ends with it. */
+export const ThreadSubjectSchema = z.object({
+  kind: z.enum(["task", "proposal"]),
+  id: UlidSchema,
+});
+export type ThreadSubject = z.infer<typeof ThreadSubjectSchema>;
+
+/**
+ * A conversation hanging off a channel. Its messages carry the channel but reach only its
+ * participants; closing it posts a summary to the channel, which the record's body keeps.
+ */
+export const ThreadFrontmatterSchema = z.object({
+  id: UlidSchema,
+  channel: ChannelRefSchema,
+  title: z.string().min(1).max(200),
+  subject: ThreadSubjectSchema.optional(),
+  state: ThreadStateSchema,
+  openedBy: NameSchema,
+  openedAt: IsoDateTimeSchema,
+  closedBy: NameSchema.optional(),
+  closedAt: IsoDateTimeSchema.optional(),
+});
+export type ThreadFrontmatter = z.infer<typeof ThreadFrontmatterSchema>;
+export interface Thread extends ThreadFrontmatter {
+  readonly body: string;
+}
 
 export const StageSchema = z.object({
   id: StageIdSchema,
@@ -119,7 +149,6 @@ export const TaskFrontmatterSchema = z.object({
   project: NameSchema,
   title: z.string().min(1),
   status: TaskStatusSchema,
-  thread: ThreadStateSchema,
   createdBy: NameSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

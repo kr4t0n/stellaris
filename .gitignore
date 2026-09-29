@@ -18,5 +18,10 @@ data/
 .idea/
 .DS_Store
 
+# Browser session output
+e2e/output/
+test-results/
+playwright-report/
+
 # Logs
 *.log

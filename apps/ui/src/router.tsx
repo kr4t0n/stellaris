@@ -1,7 +1,10 @@
 import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { getToken } from "./api/client.js";
 import { Layout } from "./components/Layout.js";
+import { CitizenPage } from "./pages/Citizen.js";
 import { InboxPage } from "./pages/Inbox.js";
+import { LibraryPage } from "./pages/Library.js";
+import { LivePage } from "./pages/Live.js";
 import { LoginPage } from "./pages/Login.js";
 import {
   ChannelPane,
@@ -20,6 +23,11 @@ function requireToken(): void {
   }
 }
 
+/** The world alone: the drawer is closed. */
+function WorldOnly() {
+  return null;
+}
+
 const rootRoute = createRootRoute({ component: Layout });
 
 export const loginRoute = createRoute({
@@ -28,9 +36,16 @@ export const loginRoute = createRoute({
   component: LoginPage,
 });
 
-export const inboxRoute = createRoute({
+export const worldRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
+  beforeLoad: requireToken,
+  component: WorldOnly,
+});
+
+export const deskRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/desk",
   beforeLoad: requireToken,
   component: InboxPage,
 });
@@ -40,6 +55,27 @@ export const societyRoute = createRoute({
   path: "/society",
   beforeLoad: requireToken,
   component: SocietyPage,
+});
+
+export const libraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/library",
+  beforeLoad: requireToken,
+  component: LibraryPage,
+});
+
+export const liveRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/live",
+  beforeLoad: requireToken,
+  component: LivePage,
+});
+
+export const citizenRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/citizens/$name",
+  beforeLoad: requireToken,
+  component: CitizenPage,
 });
 
 export const projectRoute = createRoute({
@@ -87,8 +123,12 @@ export const knowledgeRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  inboxRoute,
+  worldRoute,
+  deskRoute,
   societyRoute,
+  libraryRoute,
+  liveRoute,
+  citizenRoute,
   projectRoute.addChildren([
     projectIndexRoute,
     channelRoute,

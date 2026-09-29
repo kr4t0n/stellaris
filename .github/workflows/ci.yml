@@ -24,3 +24,12 @@ jobs:
       - run: pnpm lint
       - run: pnpm fmt:check
       - run: pnpm test
+      # The browser session drives the built UI against a scripted board server.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playground
+          path: e2e/output
+          if-no-files-found: ignore

@@ -69,6 +69,9 @@ const view = {
   get residentPairs() {
     return runner.residentPairs;
   },
+  get activeSignals() {
+    return scheduler.activeSignals;
+  },
 };
 const app = createApp({ board, version: VERSION, turns, scheduler: view, staticDir });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {

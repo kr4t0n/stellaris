@@ -18,6 +18,8 @@ export interface SchedulerView {
   readonly runningPairs: string[];
   /** Agent-scope pairs with a warm session on the embedded runner. */
   readonly residentPairs?: string[] | undefined;
+  /** Keys of the operations conditions holding right now. */
+  readonly activeSignals?: string[] | undefined;
 }
 
 export interface AppDependencies {
@@ -102,6 +104,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
+  // The citizen drawer: a member's finished turns from the event log, and its memory core, read only.
+  api.get("/agents/:name/turns", async (c) =>
+    c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
+  );
+  api.get("/agents/:name/memory", async (c) => {
+    await board.readAgent(c.req.param("name"));
+    return c.json({ body: await board.readMemoryCore(c.req.param("name")) });
+  });
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
@@ -184,6 +194,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       running: scheduler?.runningPairs ?? [],
       pending: scheduler?.pendingPairs ?? [],
       resident: scheduler?.residentPairs ?? [],
+      signals: scheduler?.activeSignals ?? [],
     }),
   );
   api.post("/pause", async (c) => {

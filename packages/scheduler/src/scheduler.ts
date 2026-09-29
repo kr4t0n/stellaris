@@ -234,6 +234,11 @@ export class Scheduler {
     return [...this.running.keys()].toSorted();
   }
 
+  /** Keys of the operations conditions that held at the last pass: what the playground shows as weather. */
+  get activeSignals(): string[] {
+    return Object.keys(this.state.opsReported).toSorted();
+  }
+
   async start(): Promise<void> {
     await this.load();
     this.timer = setInterval(() => {

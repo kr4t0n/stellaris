@@ -354,6 +354,7 @@ describe("Scheduler", () => {
       ["backlog", "backlog:demo:engineer"],
     ]);
     expect(signals[0]?.signal.value).toBe(3);
+    expect(scheduler.activeSignals).toEqual(["backlog:demo:engineer"]);
     expect((await board.listChannel("ops")).at(-1)?.body).toContain("**backlog** demo: 3 open");
     // The signal event wakes the steward after the debounce; the engineer is not charted for it.
     await scheduler.tick();

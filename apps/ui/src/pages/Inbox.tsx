@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import type { Proposal } from "@stellaris/shared";
 import { useState, type FormEvent } from "react";
 import { api } from "../api/client.js";
@@ -124,7 +123,7 @@ function NewTask({ projects }: { projects: readonly string[] }) {
   );
 }
 
-/** Inbox: what needs the owner, mentions across projects, and a place to speak. */
+/** The mailbox: what needs the owner, mentions across projects, and a place to speak. */
 export function InboxPage() {
   const queryClient = useQueryClient();
   const inbox = useQuery({ queryKey: ["inbox"], queryFn: () => api.inbox(false) });
@@ -155,8 +154,8 @@ export function InboxPage() {
   const recentDecisions = (decisions.data ?? []).slice(-10).toReversed();
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <h1 className="text-2xl font-semibold">Inbox</h1>
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Mailbox</h1>
 
       <Panel title="Ask the society">
         <p className="mb-2 text-xs text-board-muted">
@@ -229,23 +228,6 @@ export function InboxPage() {
           <NewTask projects={(projects.data ?? []).map((project) => project.slug)} />
         )}
       </Panel>
-
-      <p className="text-xs text-board-muted">
-        Open a project from the left to read channels, tasks, and threads.{" "}
-        {(projects.data ?? []).map((project) => (
-          <Link
-            key={project.slug}
-            to="/projects/$slug"
-            params={{ slug: project.slug }}
-            className="text-board-accent underline"
-          >
-            {project.name}
-          </Link>
-        ))}
-        {inbox.data?.cursor === null || inbox.data?.cursor === undefined
-          ? null
-          : ` Cursor ${shortId(inbox.data.cursor)}.`}
-      </p>
     </div>
   );
 }

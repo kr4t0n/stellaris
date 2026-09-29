@@ -1,102 +1,44 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useState } from "react";
-import { api, getToken, setToken } from "../api/client.js";
+import { getToken } from "../api/client.js";
 import { useBoardEvents } from "../hooks/useBoardEvents.js";
-import { LivePanel } from "./LivePanel.js";
-import { Pill } from "./ui.js";
+import { useWorldSnapshot } from "../hooks/useWorldSnapshot.js";
+import { Playground } from "./Playground.js";
 
-const linkClass =
-  "block rounded px-3 py-1.5 text-sm text-board-muted hover:bg-board-panel hover:text-board-text [&.active]:bg-board-panel [&.active]:text-board-text";
-
+/** The world underneath, and the routed page as a drawer over it; the root route shows the world alone. */
 function Shell() {
   useBoardEvents();
-  const society = useQuery({ queryKey: ["society"], queryFn: api.society });
-  const me = useQuery({ queryKey: ["me"], queryFn: api.me });
-  const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
-  const scheduler = useQuery({
-    queryKey: ["scheduler"],
-    queryFn: api.scheduler,
-    refetchInterval: 5_000,
-  });
-  const [live, setLive] = useState(true);
+  const snapshot = useWorldSnapshot();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const projectSlug = /^\/projects\/([^/]+)/.exec(pathname)?.[1];
-
+  const open = pathname !== "/";
   return (
-    <div className="flex min-h-screen bg-board-bg text-board-text">
-      <nav className="flex w-56 shrink-0 flex-col gap-4 border-r border-board-border p-3">
-        <div>
-          <div className="px-3 text-lg font-semibold">{society.data?.name ?? "Stellaris"}</div>
-          <div className="px-3 text-xs text-board-muted">
-            {me.data === undefined ? "" : `${me.data.name} · ${me.data.role}`}
+    <>
+      <Playground snapshot={snapshot} />
+      {open ? (
+        <aside
+          data-testid="drawer"
+          className="fixed top-12 right-0 bottom-0 z-20 flex w-[600px] max-w-full flex-col border-l border-board-border bg-board-panel/95 text-board-text shadow-2xl backdrop-blur"
+        >
+          <div className="flex items-center justify-end border-b border-board-border px-3 py-1">
+            <Link
+              to="/"
+              className="rounded px-2 py-1 text-xs text-board-muted hover:bg-board-bg hover:text-board-text"
+              aria-label="Close the drawer"
+            >
+              Close ✕
+            </Link>
           </div>
-        </div>
-        <div className="space-y-1">
-          <Link to="/" className={linkClass} activeOptions={{ exact: true }}>
-            Inbox
-          </Link>
-          <Link to="/society" className={linkClass}>
-            Society
-          </Link>
-        </div>
-        <div>
-          <div className="px-3 text-[11px] font-semibold uppercase tracking-wide text-board-muted">
-            Projects
-          </div>
-          <div className="mt-1 space-y-1">
-            {(projects.data ?? []).map((project) => (
-              <Link
-                key={project.slug}
-                to="/projects/$slug"
-                params={{ slug: project.slug }}
-                className={linkClass}
-              >
-                {project.name}
-              </Link>
-            ))}
-          </div>
-        </div>
-        <div className="mt-auto space-y-2 px-3 text-xs text-board-muted">
-          {scheduler.data?.paused ? (
-            <Pill className="border-amber-800 text-amber-300">society paused</Pill>
-          ) : (
-            <Pill className="border-emerald-800 text-emerald-300">
-              {scheduler.data?.running.length ?? 0} running
-            </Pill>
-          )}
-          <button
-            type="button"
-            onClick={() => setLive((value) => !value)}
-            className="block hover:text-board-text"
-          >
-            {live ? "Hide live panel" : "Show live panel"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setToken(null);
-              window.location.href = "/login";
-            }}
-            className="block hover:text-board-text"
-          >
-            Sign out
-          </button>
-        </div>
-      </nav>
-      <main className="min-w-0 flex-1 overflow-y-auto p-6">
+          <main className="min-h-0 flex-1 overflow-y-auto p-4">
+            <Outlet />
+          </main>
+        </aside>
+      ) : (
         <Outlet />
-      </main>
-      {live ? (
-        <div className="w-96 shrink-0 border-l border-board-border p-3">
-          <LivePanel project={projectSlug} />
-        </div>
-      ) : null}
-    </div>
+      )}
+    </>
   );
 }
 
-/** The root layout: the login page stands alone; everything else gets the navigation and live panel. */
+/** The root layout: the login page stands alone; everything else is the playground. */
 export function Layout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   if (pathname === "/login" || getToken() === null) {

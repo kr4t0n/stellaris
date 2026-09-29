@@ -27,6 +27,22 @@ export interface SchedulerState {
   readonly running: readonly string[];
   readonly pending: readonly string[];
   readonly resident?: readonly string[] | undefined;
+  /** Keys of the operations conditions holding right now; the world shows them as weather. */
+  readonly signals?: readonly string[] | undefined;
+}
+
+/** One finished turn from the event log, as the citizen drawer lists them. */
+export interface TurnHistoryEntry {
+  readonly id: string;
+  readonly ts: string;
+  readonly outcome: "completed" | "failed";
+  readonly project: string;
+  readonly trigger: string;
+  readonly exitReason: string | null;
+  readonly costUsd: number;
+  readonly model: string | null;
+  readonly summary: string | null;
+  readonly error: string | null;
 }
 
 export interface LiveTurnEvent {
@@ -129,6 +145,9 @@ export const api = {
   society: () => request<Society>("/society"),
   agents: () => request<PublicAgent[]>("/agents"),
   members: () => request<Member[]>("/members"),
+  turns: (name: string, limit = 50) =>
+    request<TurnHistoryEntry[]>(`/agents/${name}/turns?limit=${limit}`),
+  memory: (name: string) => request<{ body: string }>(`/agents/${name}/memory`),
   roles: () => request<RoleCharter[]>("/roles"),
   runners: () => request<Runner[]>("/runners"),
   proposals: () => request<Proposal[]>("/proposals"),

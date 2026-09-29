@@ -154,6 +154,30 @@ export interface SignalRecord {
   readonly signal: OpsSignal;
 }
 
+/** One finished turn as the event log recorded it: the citizen drawer's history. */
+export interface TurnHistoryEntry {
+  readonly id: Ulid;
+  readonly ts: string;
+  readonly outcome: "completed" | "failed";
+  readonly project: Name;
+  readonly trigger: string;
+  readonly exitReason: string | null;
+  readonly costUsd: number;
+  readonly model: string | null;
+  readonly summary: string | null;
+  readonly error: string | null;
+}
+
+const TurnHistoryPayloadSchema = z.object({
+  project: NameSchema,
+  trigger: z.string().default("manual"),
+  exitReason: z.string().nullable().default(null),
+  costUsd: z.number().default(0),
+  model: z.string().nullable().default(null),
+  summary: z.string().nullable().default(null),
+  error: z.string().nullable().default(null),
+});
+
 export interface InboxResult {
   readonly messages: Message[];
   readonly cursor: Ulid | null;
@@ -906,6 +930,30 @@ export class Board {
       }
     }
     return records.slice(-limit);
+  }
+
+  /** A citizen's finished turns, oldest first, from the event log. */
+  async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    const entries: TurnHistoryEntry[] = [];
+    for (const event of events) {
+      if (
+        (event.type !== "turn.completed" && event.type !== "turn.failed") ||
+        event.actor !== agent
+      ) {
+        continue;
+      }
+      const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
+      if (parsed.success) {
+        entries.push({
+          id: event.id,
+          ts: event.ts,
+          outcome: event.type === "turn.failed" ? "failed" : "completed",
+          ...parsed.data,
+        });
+      }
+    }
+    return entries.slice(-limit);
   }
 
   async setPaused(actor: Actor, paused: boolean): Promise<void> {

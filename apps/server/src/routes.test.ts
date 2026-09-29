@@ -244,11 +244,81 @@ describe("board server routes for the UI", () => {
     ).toBe("reflection");
   });
 
+  it("serves a citizen's turn history and memory core for its drawer", async () => {
+    const app = createApp({ board, version: "t" });
+    const turn = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "local",
+      cli: "claude" as const,
+      session: "s",
+      trigger: { kind: "mention" as const, from: "owner", fromOwner: true, reason: "asked" },
+      startedAt: "2026-09-28T10:00:00.000Z",
+      endedAt: "2026-09-28T10:01:00.000Z",
+      exitReason: "completed" as const,
+      status: {
+        summary: "shipped it",
+        claimsHeld: [],
+        blockedOn: [],
+        needsOwnerDecision: false,
+        memoryUpdated: false,
+      },
+      error: null,
+      usage: null,
+      costUsd: 0.25,
+      toolCalls: 3,
+      model: "claude-sonnet-5",
+    };
+    await board.beginTurn(turn);
+    await board.finishTurn(turn);
+    await board.beginTurn({ ...turn, startedAt: "2026-09-28T11:00:00.000Z" });
+    await board.finishTurn({
+      ...turn,
+      startedAt: "2026-09-28T11:00:00.000Z",
+      exitReason: "error",
+      status: null,
+      error: "boom",
+    });
+    const turns = z
+      .array(
+        z.object({
+          outcome: z.string(),
+          trigger: z.string(),
+          costUsd: z.number(),
+          model: z.string().nullable(),
+          summary: z.string().nullable(),
+          error: z.string().nullable(),
+        }),
+      )
+      .parse(await (await app.request("/api/agents/eng-1/turns?limit=10", { headers })).json());
+    expect(turns).toEqual([
+      expect.objectContaining({
+        outcome: "completed",
+        trigger: "mention",
+        costUsd: 0.25,
+        model: "claude-sonnet-5",
+        summary: "shipped it",
+      }),
+      expect.objectContaining({ outcome: "failed", error: "boom" }),
+    ]);
+    expect(
+      z
+        .object({ body: z.string() })
+        .parse(await (await app.request("/api/agents/eng-1/memory", { headers })).json()).body,
+    ).toContain("Core memory");
+    expect((await app.request("/api/agents/nobody/memory", { headers })).status).toBe(404);
+  });
+
   it("serves the roster with profiles and the runner's resident pairs", async () => {
     const app = createApp({
       board,
       version: "t",
-      scheduler: { pendingPairs: [], runningPairs: [], residentPairs: ["desk/society"] },
+      scheduler: {
+        pendingPairs: [],
+        runningPairs: [],
+        residentPairs: ["desk/society"],
+        activeSignals: ["backlog:demo:engineer"],
+      },
     });
     const members = z
       .array(z.object({ name: z.string(), role: z.string(), profile: z.string() }))
@@ -257,9 +327,10 @@ describe("board server routes for the UI", () => {
     expect(members.find((m) => m.name === "eng-1")?.profile).toContain("# Profile");
     expect(JSON.stringify(members)).not.toContain("tokenHash");
     const state = z
-      .object({ resident: z.array(z.string()) })
+      .object({ resident: z.array(z.string()), signals: z.array(z.string()) })
       .parse(await (await app.request("/api/scheduler", { headers })).json());
     expect(state.resident).toEqual(["desk/society"]);
+    expect(state.signals).toEqual(["backlog:demo:engineer"]);
   });
 
   it("replays and streams live turn events", async () => {

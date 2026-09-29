@@ -2,7 +2,7 @@
   "name": "@stellaris/adapter-codex",
   "version": "0.0.0",
   "private": true,
-  "description": "AgentBackend implementations for Codex: app-server JSON-RPC client and exec fallback",
+  "description": "AgentBackend for Codex over the app server's JSON-RPC protocol",
   "files": [
     "dist"
   ],
@@ -17,7 +17,6 @@
     "@stellaris/runner-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
     "execa": "10.0.1",
-    "vscode-jsonrpc": "9.0.3",
     "zod": "4.6.5"
   }
 }

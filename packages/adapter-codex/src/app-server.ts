@@ -1,3 +1,5 @@
+import { appendFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { execa } from "execa";
@@ -16,13 +18,13 @@ import {
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
-import { searchInput } from "./events.js";
 
 /**
- * A warm Codex thread over `codex app-server`: JSON-RPC 2.0 over stdio, one JSON object per line.
- * The process starts once per resident session; `thread/start` or `thread/resume` opens the
- * thread, and every prompt is a `turn/start` whose items stream back as notifications until
- * `turn/completed`. Approvals never occur: the thread runs with policy `never` and full access.
+ * A Codex thread over `codex app-server`: JSON-RPC 2.0 over stdio, one JSON object per line. The
+ * process starts once per session, for one cold turn or for a resident session's lifetime;
+ * `thread/start` or `thread/resume` opens the thread, and every prompt is a `turn/start` whose
+ * items stream back as notifications until `turn/completed`. Approvals never occur: the thread
+ * runs with policy `never`.
  */
 
 export interface AppServerProcess {
@@ -47,6 +49,8 @@ export interface AppServerSessionOptions {
   readonly extraConfig?: readonly string[] | undefined;
   readonly env?: Readonly<Record<string, string | undefined>> | undefined;
   readonly stderr?: ((line: string) => void) | undefined;
+  /** Directory to append the server's raw output to, one file per turn, for fixtures. */
+  readonly recordDir?: string | undefined;
   readonly clientVersion?: string | undefined;
 }
 
@@ -64,10 +68,34 @@ function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/**
+ * What a web search looked for. The item's `query` can be empty, as when the search opened a page
+ * or was run from code; its `action` then says what it did.
+ */
+function searchInput(item: Dict): Record<string, string> {
+  const query = str(item["query"]);
+  if (query !== undefined && query !== "") {
+    return { query };
+  }
+  const action = isDict(item["action"]) ? item["action"] : {};
+  const queries = Array.isArray(action["queries"])
+    ? action["queries"].filter((each): each is string => typeof each === "string")
+    : [];
+  const found = str(action["query"]) ?? (queries.length > 0 ? queries.join(" · ") : undefined);
+  const url = str(action["url"]);
+  const pattern = str(action["pattern"]);
+  return {
+    ...(found === undefined ? {} : { query: found }),
+    ...(url === undefined ? {} : { url }),
+    ...(pattern === undefined ? {} : { pattern }),
+  };
+}
+
 /** Sessions Codex has not named yet start with this prefix; a thread id replaces it on start. */
 export const PENDING_THREAD_PREFIX = "pending-";
 
 const REQUEST_TIMEOUT_MS = 60_000;
+const STDERR_TAIL = 20;
 
 export function defaultSpawnAppServer(codexPath: string): SpawnAppServer {
   return (args, options) => {
@@ -104,6 +132,14 @@ interface Pending {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
+interface ClientHandlers {
+  readonly notification: (method: string, params: unknown) => void;
+  readonly stderr: (line: string) => void;
+  /** Every line the server wrote, before it is parsed. */
+  readonly line: (line: string) => void;
+  readonly exit: () => void;
+}
+
 /** The JSON-RPC side: requests with ids, notifications without, and server requests answered with an error. */
 class JsonRpcClient {
   private nextId = 1;
@@ -112,13 +148,15 @@ class JsonRpcClient {
 
   constructor(
     private readonly process: AppServerProcess,
-    private readonly onNotification: (method: string, params: unknown) => void,
-    private readonly onStderr: ((line: string) => void) | undefined,
+    private readonly handlers: ClientHandlers,
   ) {
     const lines = createInterface({ input: process.stdout, crlfDelay: Infinity });
-    lines.on("line", (line) => this.receive(line));
+    lines.on("line", (line) => {
+      this.handlers.line(line);
+      this.receive(line);
+    });
     const errors = createInterface({ input: process.stderr, crlfDelay: Infinity });
-    errors.on("line", (line) => this.onStderr?.(line));
+    errors.on("line", (line) => this.handlers.stderr(line));
     void (async () => {
       await process.exited;
       this.closed = true;
@@ -127,6 +165,7 @@ class JsonRpcClient {
         entry.reject(new Error("codex app-server exited"));
         this.pending.delete(id);
       }
+      this.handlers.exit();
     })();
   }
 
@@ -182,7 +221,7 @@ class JsonRpcClient {
       return;
     }
     if (method !== undefined) {
-      this.onNotification(method, parsed["params"]);
+      this.handlers.notification(method, parsed["params"]);
       return;
     }
     if (typeof id !== "number") {
@@ -280,6 +319,8 @@ export class CodexAppServerSession implements ResidentSession {
   private readonly client: JsonRpcClient;
   private active: TurnCollector | null = null;
   private closed = false;
+  private readonly stderrTail: string[] = [];
+  private readonly recorded: string[] = [];
 
   private constructor(
     private readonly options: AppServerSessionOptions,
@@ -288,14 +329,21 @@ export class CodexAppServerSession implements ResidentSession {
     process: AppServerProcess,
   ) {
     this.session = start.session;
-    this.client = new JsonRpcClient(
-      process,
-      (method, params) => this.onNotification(method, params),
-      options.stderr,
-    );
+    this.client = new JsonRpcClient(process, {
+      notification: (method, params) => this.onNotification(method, params),
+      stderr: (line) => {
+        this.stderrTail.push(line);
+        if (this.stderrTail.length > STDERR_TAIL) this.stderrTail.shift();
+        options.stderr?.(line);
+      },
+      line: (line) => {
+        if (options.recordDir !== undefined) this.recorded.push(line);
+      },
+      exit: () => this.onExit(),
+    });
   }
 
-  /** Spawns the app server, initializes it, and opens or resumes the pair's thread. */
+  /** Spawns the app server, initializes it, and opens or resumes the thread. */
   static async start(
     options: AppServerSessionOptions,
     spec: AgentSpec,
@@ -362,6 +410,8 @@ export class CodexAppServerSession implements ResidentSession {
       try {
         const resumed = await this.client.request("thread/resume", {
           threadId: this.start.session,
+          // Without it the response carries the thread's whole history, which nothing here reads.
+          excludeTurns: true,
           ...this.threadParams(),
         });
         return this.threadIdOf(resumed);
@@ -383,6 +433,48 @@ export class CodexAppServerSession implements ResidentSession {
     }
     this.model = isDict(response) ? str(response["model"]) : undefined;
     return id;
+  }
+
+  private sandboxPolicy(): Dict {
+    if (this.options.sandbox === "danger-full-access") {
+      return { type: "dangerFullAccess" };
+    }
+    if (this.options.sandbox === "read-only") {
+      return { type: "readOnly", networkAccess: false };
+    }
+    return {
+      type: "workspaceWrite",
+      // A worktree keeps its index and objects in the canonical clone; commits need it writable.
+      writableRoots: [...new Set([this.spec.configHome, this.spec.boardDir, this.spec.repoDir])],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    };
+  }
+
+  /** A server that dies mid-turn never sends `turn/completed`; the turn ends with what it said last. */
+  private onExit(): void {
+    const turn = this.active;
+    if (turn === null) {
+      return;
+    }
+    const said = this.stderrTail.join("\n").trim();
+    turn.error ??= said.length > 0 ? `codex app-server exited: ${said}` : "codex app-server exited";
+    turn.settle();
+  }
+
+  private async flushRecording(): Promise<void> {
+    if (this.options.recordDir === undefined || this.recorded.length === 0) {
+      return;
+    }
+    const lines = this.recorded.splice(0);
+    await mkdir(this.options.recordDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await appendFile(
+      path.join(this.options.recordDir, `codex-${this.spec.agent}-${stamp}.jsonl`),
+      `${lines.join("\n")}\n`,
+      "utf8",
+    );
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -445,8 +537,14 @@ export class CodexAppServerSession implements ResidentSession {
         return;
       }
       case "error": {
-        const message = str(params["message"]) ?? "codex app-server error";
-        turn.emit({ type: "error", message });
+        const error = params["error"];
+        const message =
+          (isDict(error) ? str(error["message"]) : undefined) ?? "codex app-server error";
+        if (params["willRetry"] === true) {
+          // Codex retries this itself, such as a dropped stream, and the turn may still complete.
+          turn.emit({ type: "error", message: `${message} (retrying)` });
+          return;
+        }
         turn.error = message;
         return;
       }
@@ -510,20 +608,19 @@ export class CodexAppServerSession implements ResidentSession {
         input: [{ type: "text", text: prompt, text_elements: [] }],
         cwd: this.spec.cwd,
         approvalPolicy: "never",
-        ...(this.options.sandbox === "danger-full-access"
-          ? { sandboxPolicy: { type: "dangerFullAccess" } }
-          : {}),
+        sandboxPolicy: this.sandboxPolicy(),
         outputSchema: this.start.statusSchema,
       });
       const startedTurn = isDict(started) ? started["turn"] : undefined;
       turn.turnId = isDict(startedTurn) ? (str(startedTurn["id"]) ?? null) : null;
       await done;
     } catch (error) {
-      turn.error = error instanceof Error ? error.message : String(error);
+      turn.error ??= error instanceof Error ? error.message : String(error);
       turn.settle();
     } finally {
       clearTimeout(timer);
     }
+    await this.flushRecording();
 
     let exitReason: TurnExitReason;
     if (timedOut) {

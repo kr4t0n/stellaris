@@ -339,9 +339,6 @@ importers:
       execa:
         specifier: 10.0.1
         version: 10.0.1
-      vscode-jsonrpc:
-        specifier: 9.0.3
-        version: 9.0.3
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -2573,10 +2570,6 @@ packages:
       jsdom:
         optional: true
 
-  vscode-jsonrpc@9.0.3:
-    resolution: {integrity: sha512-qETYf9PCl1lVfwR+oBmMfc4vP2nqLNA35ABxorw3j06+xlKRgDVxbLgKm4Y/xPL0YWdeDjLoI4ImICIT3nB0zQ==}
-    engines: {node: '>=14.0.0'}
-
   which-command@0.1.0:
     resolution: {integrity: sha512-XZyoF5/5hZtXitIwzrU4NKK+Wtbb9aB9CezUEw2Q0wlYK8NUYQxC1rRXgNueYLtBAJwXIb+/tFVk4dozciNJMA==}
     engines: {node: '>=22'}
@@ -4626,8 +4619,6 @@ snapshots:
       '@types/node': 24.19.0
     transitivePeerDependencies:
       - msw
-
-  vscode-jsonrpc@9.0.3: {}
 
   which-command@0.1.0: {}
 

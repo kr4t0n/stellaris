@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
-import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
+import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { Board } from "@stellaris/board-core";
 import { LocalRunner } from "@stellaris/runner-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
@@ -26,7 +26,7 @@ const runner = new LocalRunner({
       stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
       recordDir: process.env["STELLARIS_RECORD_DIR"],
     }),
-    codex: new CodexExecBackend({
+    codex: new CodexBackend({
       stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
       recordDir: process.env["STELLARIS_RECORD_DIR"],
       // Full access by default: no sandbox, no approvals. A runner that wants Codex's own

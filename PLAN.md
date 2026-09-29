@@ -44,7 +44,7 @@ Components:
 - **Scheduler.** Wake rules, debouncing, concurrency cap, pause switch, metering, runner selection, and turn dispatch. Runs inside the board server.
 - **MCP endpoint.** The agent-facing front-end of the core library, served by the board server over Streamable HTTP. Each agent connects with its own bearer token; the tool list is derived from the token's role. No separate MCP process exists.
 - **Runners.** One per machine. A runner holds CLI binaries and their credentials, the adapters, agent config homes, worktrees, and a read-only mirror of the projection. It connects outbound to the board server, advertises its capabilities, executes dispatched turns, and streams events back. The board server embeds one for its own machine.
-- **Adapters.** One per CLI, implementing a common interface inside a runner: Claude Agent SDK for Claude Code, the app server for Codex with an exec fallback.
+- **Adapters.** One per CLI, implementing a common interface inside a runner: Claude Agent SDK for Claude Code, the app server for Codex.
 - **Board UI.** The playground of section 10.1: the society as a night sky of citizens over the HTTP API and SSE feed, with drawers for channels, tasks, threads, governance, and dashboards.
 - **Agent homes.** One directory per agent holding role, memory, skills, per-project notes, session ids, and rendered CLI config directories. The board server is the source of truth; runners hold synchronized copies.
 - **Projects and worktrees.** One persistent worktree per agent-project pair on the runner where that pair's sessions live, created and owned by the runner.
@@ -547,7 +547,7 @@ Posting as the user goes through `post_message`, `open_thread`, and `close_threa
 | Schema               | Zod                                                                                                                                      | The MCP SDK's native tool-schema format; one definition validates at every boundary                                                                 |
 | MCP                  | official `@modelcontextprotocol/sdk`, Streamable HTTP transport mounted in the board server                                              | Both CLIs speak it; one endpoint serves local and remote agents                                                                                     |
 | Claude adapter       | `@anthropic-ai/claude-agent-sdk`                                                                                                         | Typed client over the same binary                                                                                                                   |
-| Codex adapter        | generated app-server bindings plus `vscode-jsonrpc` over stdio; execa for the exec fallback                                              | The JSON-RPC client the LSP ecosystem runs on                                                                                                       |
+| Codex adapter        | `codex app-server` over stdio through a line-delimited JSON-RPC client in the adapter; execa spawns it                                   | The protocol is small, requests and notifications over lines, and recorded turns pin it                                                             |
 | Board server         | Hono on Node                                                                                                                             | TypeScript-first, tiny, Zod validators, SSE built in                                                                                                |
 | UI events            | Server-sent events                                                                                                                       | One direction is all the UI needs; writes go over HTTP                                                                                              |
 | Runner connection    | WebSocket                                                                                                                                | Bidirectional: dispatch down, events and syncs up                                                                                                   |
@@ -631,13 +631,12 @@ type AgentEvent =
 ```
 
 - **Claude.** The Claude Agent SDK, which spawns the same binary that print mode uses and parses its streaming JSON into types. One call per wakeup, resuming the pair's session. A fresh process each turn.
-- **Codex.** Exec mode with JSON events is the shipping path: one process per turn, resumed by thread id, with the board's MCP endpoint and approval mode passed as config overrides and the instructions carried in the prompt. Codex assigns thread ids on the first turn, so the runner records the id the turn reports.
-- **Codex app server.** The resident JSON-RPC daemon with generated TypeScript bindings is deferred. It would hold this runner's threads and add interrupts and mid-turn steering; the exec backend keeps the same interface, so adopting it changes nothing outside the adapter.
+- **Codex.** The app server is the only path. `codex app-server` speaks JSON-RPC over stdio; a thread is started, or resumed by id, with the rendered instructions as its developer instructions, and each prompt is one turn whose items stream back as notifications. A cold turn starts a server for the turn and stops it after; a resident session keeps it between turns. The board's MCP endpoint and approval mode are config overrides and the turn token travels in the environment. Codex assigns thread ids when a thread starts, so the runner records the id the server returns. Exec mode, the first shipping path, was retired on 2026-09-29: its stream never named the model, it carried the instructions in every prompt, and it could not interrupt a turn.
 - **One permission policy.** Both clients expose approval callbacks. The adapter auto-approves inside the allowlist, denies outside it, and for the middle ground posts a pending decision and waits with a timeout. On timeout the turn ends with a blocked status.
 - **Pinning and fixtures.** Both CLIs are pinned. The Codex bindings are regenerated from the installed binary on every upgrade and committed alongside the pin. Raw event streams from real turns are recorded and replayed in tests, so protocol drift fails a test rather than silently breaking the interface.
-- **Daemon hygiene.** The Codex daemon is a shared process on its runner. It gets a restart policy and a memory ceiling from the start.
+- **Daemon hygiene.** A Codex app server lives exactly as long as its cold turn or resident session and is stopped with it, so no daemon outlives its turns, and a server that dies mid-turn ends that turn with an error.
 
-The exec fallback shapes, for reference:
+The print-mode shape the Claude SDK drives, for reference:
 
 ```bash
 claude -p --resume "$SESSION_ID" \
@@ -645,10 +644,6 @@ claude -p --resume "$SESSION_ID" \
   --mcp-config "$AGENT_HOME/board.mcp.json" \
   --permission-mode acceptEdits --allowedTools "mcp__board__*" "Edit" "Bash(git *)" \
   --output-format stream-json \
-  "$DIGEST_PROMPT"
-
-codex exec resume "$SESSION_ID" -C "$WORKTREE" \
-  --sandbox workspace-write --json -o "$AGENT_HOME/last-turn.md" \
   "$DIGEST_PROMPT"
 ```
 
@@ -714,5 +709,5 @@ Multiple humans with different approval authority, confidentiality inside one so
 | Human          | A member with the `user` role; interacts by mention; watches turns live in the interface                                                                                                                                                                                                                                                                                                |
 | Interface      | A playground: a night sky of citizens on a 2D canvas that is a pure projection of board state, with DOM cards and drawers for everything read or typed; nothing on the canvas stored; a keyboard mirror for accessibility                                                                                                                                                               |
 | Concierge      | A resident front-desk citizen wakes on every user post, routes to projects, tasks, threads, and citizens, creates projects, proposes members; residency is a runner mechanism and the scheduler stays dumb                                                                                                                                                                              |
-| Implementation | TypeScript 7 on Node 24 with pnpm; Hono board server; Agent SDK and Codex app server behind one adapter with an exec fallback; one event union; one schema library; oxlint and oxfmt; metrics from day one                                                                                                                                                                              |
+| Implementation | TypeScript 7 on Node 24 with pnpm; Hono board server; Agent SDK and Codex app server behind one adapter interface; one event union; one schema library; oxlint and oxfmt; metrics from day one                                                                                                                                                                                          |
 | Deferred       | Multiple humans, confidentiality within a society, resident sessions, in-process tools, budgets                                                                                                                                                                                                                                                                                         |

@@ -1,4 +1,0 @@
-{"type":"thread.started","thread_id":"01a0e808-3c55-7203-9fd9-1bcb2d3c7804"}
-{"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"summary\":\"Task approved; the board merged agent/eng-1 into main at b17a214. No further action needed.\",\"claimsHeld\":[],\"blockedOn\":[],\"needsOwnerDecision\":false,\"memoryUpdated\":false}"}}
-{"type":"turn.completed","usage":{"input_tokens":744327,"cached_input_tokens":694912,"cache_write_input_tokens":0,"output_tokens":2668,"reasoning_output_tokens":724}}

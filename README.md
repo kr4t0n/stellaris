@@ -121,7 +121,7 @@ The concierge answers in the same channel, or creates the task, thread, or proje
 
 Two mechanisms make this fast. The concierge is **resident**: the runner keeps its CLI session alive between turns, for Claude Code over the SDK's streaming input and for Codex over `codex app-server`, so a reply takes seconds instead of a cold start. A session goes cold after `STELLARIS_RESIDENT_IDLE_MS` without a turn, or whenever a turn changed the agent's memory, since the instructions carry it. And the concierge reads the **roster** in every digest: the board projects every citizen into `society/members/` with identity, reach (memberships and subscriptions), availability (claims held, tasks done, last turn), and the profile each citizen keeps in its own `profile.md`. `GET /api/members` returns the same roster.
 
-Every citizen also shows the **model** it runs with. Without `--model` the CLI's own default applies, so the board records what the CLI reports on each turn: Claude Code announces its model when a session starts, and the Codex app server reports it when a thread opens; a cold Codex turn through `codex exec` does not report it, so the configured model or "cli default" is shown until a resident turn does. `agent list`, `GET /api/members`, the roster the concierge reads, the live turn stream, and every turn record carry it.
+Every citizen also shows the **model** it runs with. Without `--model` the CLI's own default applies, so the board records what the CLI reports on each turn: Claude Code announces its model when a session starts, and the Codex app server reports it when a thread opens. `agent list`, `GET /api/members`, the roster the concierge reads, the live turn stream, and every turn record carry it.
 
 Roles that may work outside any project, the concierge and the steward, take turns in the **society scope**: their working directory is their home, and their session and turn records live under the `society` name. Citizens join and leave projects through `join_project` and `leave_project`; the concierge, the steward, and you may move others, and joining fires an onboarding turn.
 
@@ -218,7 +218,7 @@ packages/
   scheduler/       wake rules, debouncing, heartbeats, waiting-stage signals, operations signals, scaling, lease sweeps, dispatch
   runner-core/     adapter interface, prompt and instruction rendering, git worktrees and merges, `LocalRunner`
   adapter-claude/  Claude Code through the Claude Agent SDK
-  adapter-codex/   Codex through `codex exec` with JSON events; the app-server client is deferred
+  adapter-codex/   Codex through `codex app-server`, JSON-RPC over stdio
 data/              runtime data, ignored by git
 ```
 

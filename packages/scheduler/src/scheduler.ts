@@ -119,7 +119,11 @@ export interface SchedulerOptions {
   readonly log?: SchedulerLog | undefined;
 }
 
-const PendingSchema = z.object({ dispatch: TurnDispatchSchema, readyAt: z.number() });
+const PendingSchema = z.object({
+  dispatch: TurnDispatchSchema,
+  readyAt: z.number(),
+  stageWakes: z.array(TriggerSchema).optional(),
+});
 
 const StateSchema = z.object({
   cursor: z.string().nullable(),
@@ -143,6 +147,8 @@ type State = z.infer<typeof StateSchema>;
 interface PendingTurn {
   dispatch: TurnDispatch;
   readyAt: number;
+  /** Present while every wake merged into this turn is a stage wake; they are rechecked at dispatch. */
+  stageWakes?: Trigger[] | undefined;
 }
 
 const SILENT_LOG: SchedulerLog = { info() {}, warn() {}, error() {} };
@@ -297,7 +303,7 @@ export class Scheduler {
       }
       this.runCompletions();
       if (!paused) {
-        this.dispatchReady(now);
+        await this.dispatchReady(now);
       }
       await this.save();
     } finally {
@@ -619,6 +625,33 @@ export class Scheduler {
     }
   }
 
+  /** The first of these stage wakes whose task still waits, unheld, on a stage the agent may hold. */
+  private async stillWaiting(name: Name, wakes: Trigger[]): Promise<Trigger | undefined> {
+    const agent = await this.tryReadAgent(name);
+    if (agent === null) {
+      return undefined;
+    }
+    for (const wake of wakes) {
+      if (wake.taskId === undefined) {
+        return wake;
+      }
+      try {
+        const { task } = await this.board.findTask(wake.taskId);
+        if (
+          task.status === "open" &&
+          !task.completing &&
+          currentStage(task) !== undefined &&
+          mayHoldStage(agent, task)
+        ) {
+          return wake;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return undefined;
+  }
+
   private async wakeCreator(
     taskId: Ulid,
     project: Name,
@@ -694,6 +727,7 @@ export class Scheduler {
           onboarding: trigger.kind === "onboarding",
         },
         readyAt,
+        ...(trigger.kind === "stage" ? { stageWakes: [trigger] } : {}),
       });
       return;
     }
@@ -707,6 +741,9 @@ export class Scheduler {
         onboarding: existing.dispatch.onboarding || trigger.kind === "onboarding",
       },
       readyAt: Math.min(existing.readyAt, readyAt),
+      ...(existing.stageWakes !== undefined && trigger.kind === "stage"
+        ? { stageWakes: [...existing.stageWakes, trigger] }
+        : {}),
     });
   }
 
@@ -1153,7 +1190,7 @@ export class Scheduler {
     this.state.turnsSinceReport = 0;
   }
 
-  private dispatchReady(now: number): void {
+  private async dispatchReady(now: number): Promise<void> {
     const ready = [...this.pending.entries()]
       .filter(([key, item]) => item.readyAt <= now && !this.running.has(key))
       .toSorted(
@@ -1164,7 +1201,20 @@ export class Scheduler {
         break;
       }
       this.pending.delete(key);
-      const { dispatch } = item;
+      let { dispatch } = item;
+      if (item.stageWakes !== undefined) {
+        // A stage wake queued during the agent's own turn is often stale by now: it took the stage
+        // itself, or someone else did, or the task moved on.
+        const current = await this.stillWaiting(dispatch.agent, item.stageWakes);
+        if (current === undefined) {
+          this.log.info(
+            { agent: dispatch.agent, project: dispatch.project },
+            "dropping stage wake, the stage no longer waits for this agent",
+          );
+          continue;
+        }
+        dispatch = { ...dispatch, trigger: current };
+      }
       this.log.info(
         { agent: dispatch.agent, project: dispatch.project, trigger: dispatch.trigger.kind },
         "dispatching turn",

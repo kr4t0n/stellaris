@@ -277,6 +277,67 @@ describe("Scheduler", () => {
     });
   });
 
+  it("drops a stage wake gone stale during the agent's own turn, unless another wake merged into it", async () => {
+    const { board, runner, scheduler } = await setup();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [
+        { name: "build", role: "engineer" },
+        { name: "polish", role: "engineer" },
+        { name: "review", role: "reviewer" },
+      ],
+    });
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 go" });
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual(["eng-1/demo"]);
+    // Within one turn eng-1 finishes "build", which queues a wake for "polish", then takes "polish" itself.
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    await scheduler.tick();
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["eng-1", "mention"],
+      ["rev-1", "stage"],
+    ]);
+    expect(scheduler.pendingCount).toBe(0);
+
+    // A mention merged into the stage wake still needs its turn, stale stage or not.
+    runner.dispatches.length = 0;
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 one more" });
+    await scheduler.tick();
+    const next = await board.createTask(USER, {
+      project: "demo",
+      title: "u",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    await scheduler.tick();
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 see the new task" });
+    await board.claimTask(ENG, { task_id: next.id });
+    await scheduler.tick();
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["eng-1", "mention"],
+      ["eng-1", "stage"],
+    ]);
+  });
+
   it("signals a stage left waiting past the threshold once, and wakes nobody by it", async () => {
     const { board, runner, scheduler } = await setup();
     const task = await board.createTask(USER, { project: "demo", title: "nobody took me" });

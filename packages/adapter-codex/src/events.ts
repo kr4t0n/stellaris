@@ -57,6 +57,29 @@ function toolNameOf(item: Dict): string | null {
   }
 }
 
+/**
+ * What a web search looked for. The item's `query` can be empty, as when the search opened a page
+ * or was run from code; its `action` then says what it did.
+ */
+export function searchInput(item: Record<string, unknown>): Record<string, string> {
+  const query = str(item["query"]);
+  if (query !== undefined && query !== "") {
+    return { query };
+  }
+  const action = isDict(item["action"]) ? item["action"] : {};
+  const queries = Array.isArray(action["queries"])
+    ? action["queries"].filter((each): each is string => typeof each === "string")
+    : [];
+  const found = str(action["query"]) ?? (queries.length > 0 ? queries.join(" · ") : undefined);
+  const url = str(action["url"]);
+  const pattern = str(action["pattern"]);
+  return {
+    ...(found === undefined ? {} : { query: found }),
+    ...(url === undefined ? {} : { url }),
+    ...(pattern === undefined ? {} : { pattern }),
+  };
+}
+
 function toolInputOf(item: Dict): unknown {
   switch (item["type"]) {
     case "command_execution":
@@ -64,7 +87,7 @@ function toolInputOf(item: Dict): unknown {
     case "file_change":
       return { changes: item["changes"] };
     case "web_search":
-      return { query: item["query"] };
+      return searchInput(item);
     case "mcp_tool_call":
       return item["arguments"];
     default:
@@ -150,7 +173,9 @@ export function parseExecLine(line: string, started: Set<string>): ParsedExecLin
         return { events: [] };
       }
       const events: AgentEvent[] = [];
-      if (!started.has(id)) {
+      // A web search learns what it looked for as it runs, so its call is reported on completion.
+      const early = itemType === "web_search" && type !== "item.completed";
+      if (!started.has(id) && !early) {
         started.add(id);
         events.push({ type: "tool_call", name, input: toolInputOf(item) });
       }

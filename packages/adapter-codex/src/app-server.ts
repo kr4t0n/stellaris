@@ -16,6 +16,7 @@ import {
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
+import { searchInput } from "./events.js";
 
 /**
  * A warm Codex thread over `codex app-server`: JSON-RPC 2.0 over stdio, one JSON object per line.
@@ -228,7 +229,7 @@ function toolInputOf(item: Dict): unknown {
     case "fileChange":
       return { changes: item["changes"] };
     case "webSearch":
-      return { query: item["query"] };
+      return searchInput(item);
     case "mcpToolCall":
       return item["arguments"];
     default:
@@ -409,7 +410,9 @@ export class CodexAppServerSession implements ResidentSession {
         if (name === null) {
           return;
         }
-        if (!turn.started.has(id)) {
+        // A web search learns what it looked for as it runs, so its call is reported on completion.
+        const early = item["type"] === "webSearch" && method !== "item/completed";
+        if (!turn.started.has(id) && !early) {
           turn.started.add(id);
           turn.emit({ type: "tool_call", name, input: toolInputOf(item) });
         }

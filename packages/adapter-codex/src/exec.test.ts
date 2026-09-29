@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import type { TurnRequest } from "@stellaris/runner-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseExecLine } from "./events.js";
 import { CodexExecBackend, PENDING_SESSION_PREFIX, type SpawnCodex } from "./exec.js";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
@@ -13,6 +14,11 @@ interface FakeRun {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Record<string, string | undefined>;
+}
+
+/** One web-search line of the exec stream. */
+function searchLine(type: string, item: Record<string, unknown>): string {
+  return JSON.stringify({ type, item: { id: "ws_1", type: "web_search", ...item } });
 }
 
 /** A spawn that replays a recorded stream and exits with the given code. */
@@ -126,6 +132,19 @@ describe("CodexExecBackend", () => {
       cacheReadTokens: 800,
       cacheWriteTokens: 100,
     });
+  });
+
+  it("reports a web search when it completes, with what it looked for", () => {
+    const started = new Set<string>();
+    expect(parseExecLine(searchLine("item.started", { query: "" }), started).events).toEqual([]);
+    const opened = { query: "", action: { type: "open_page", url: "https://arxiv.org/abs/1" } };
+    expect(parseExecLine(searchLine("item.completed", opened), started).events).toEqual([
+      { type: "tool_call", name: "WebSearch", input: { url: "https://arxiv.org/abs/1" } },
+      { type: "tool_result", name: "WebSearch", ok: true },
+    ]);
+    const searched = { query: "", action: { type: "search", queries: ["sssp", "apsp"] } };
+    const events = parseExecLine(searchLine("item.completed", searched), new Set()).events;
+    expect(events[0]).toMatchObject({ input: { query: "sssp · apsp" } });
   });
 
   it("resumes an existing thread with the options before the subcommand", async () => {

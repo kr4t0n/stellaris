@@ -18,5 +18,8 @@ data/
 .idea/
 .DS_Store
 
+# argus session uploads
+.argus/
+
 # Logs
 *.log

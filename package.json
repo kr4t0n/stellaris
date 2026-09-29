@@ -8,6 +8,7 @@
     "build": "tsc -b",
     "build:web": "pnpm --filter @stellaris/web build",
     "web:dev": "pnpm --filter @stellaris/web dev",
+    "web:serve": "pnpm --filter @stellaris/web preview --port 5173 --strictPort",
     "clean": "tsc -b --clean",
     "lint": "oxlint --type-aware",
     "fmt": "oxfmt",

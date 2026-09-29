@@ -45,7 +45,8 @@ export interface LocalRunnerOptions {
   readonly runnerName: Name;
   /** How long a turn may run, or null for no limit. */
   readonly turnTimeoutMs?: number | null | undefined;
-  readonly maxTurns?: number | undefined;
+  /** Rounds of tool calls a turn may take, or null for no limit. */
+  readonly maxTurns?: number | null | undefined;
   /** How long a resident session stays warm after its last turn before the runner lets it go cold. */
   readonly residentIdleMs?: number | undefined;
   readonly git?: GitOps | undefined;
@@ -80,7 +81,7 @@ export class LocalRunner {
   private readonly mcpUrl: string;
   private readonly runnerName: Name;
   private readonly turnTimeoutMs: number | null;
-  private readonly maxTurns: number;
+  private readonly maxTurns: number | null;
   private readonly residentIdleMs: number;
   private readonly git: GitOps;
   private readonly now: () => Date;
@@ -96,7 +97,7 @@ export class LocalRunner {
     this.runnerName = options.runnerName;
     this.turnTimeoutMs =
       options.turnTimeoutMs === undefined ? DEFAULT_TURN_TIMEOUT_MS : options.turnTimeoutMs;
-    this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+    this.maxTurns = options.maxTurns === undefined ? DEFAULT_MAX_TURNS : options.maxTurns;
     this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
     this.git = options.git ?? new ExecaGit();
     this.now = options.now ?? (() => new Date());
@@ -434,7 +435,7 @@ export class LocalRunner {
       newSession: boolean;
       instructions: string;
       prompt: string;
-      limits: { timeoutMs: number | null; maxTurns: number };
+      limits: { timeoutMs: number | null; maxTurns: number | null };
       statusSchema: Record<string, unknown>;
       env: Readonly<Record<string, string>>;
       costSoFarUsd: number;

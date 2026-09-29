@@ -107,6 +107,7 @@ describe("server config", () => {
       logLevel: "info",
       concurrency: 2,
       turnTimeoutMs: 1_200_000,
+      toolRounds: 60,
     });
     expect(loadServerConfig({ STELLARIS_PORT: "5000" }).port).toBe(5000);
   });
@@ -115,8 +116,13 @@ describe("server config", () => {
     const config = loadServerConfig({
       STELLARIS_CONCURRENCY: "unlimited",
       STELLARIS_TURN_TIMEOUT_MS: "Unlimited",
+      STELLARIS_TOOL_ROUNDS: "unlimited",
     });
-    expect([config.concurrency, config.turnTimeoutMs]).toEqual([null, null]);
+    expect([config.concurrency, config.turnTimeoutMs, config.toolRounds]).toEqual([
+      null,
+      null,
+      null,
+    ]);
     expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
   });

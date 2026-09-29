@@ -627,7 +627,8 @@ export class ClaudeAgentBackend implements AgentBackend {
       ...(this.options.disallowedTools === undefined
         ? {}
         : { disallowedTools: [...this.options.disallowedTools] }),
-      maxTurns: request.limits.maxTurns ?? 60,
+      // The SDK stops a query after maxTurns rounds; leaving it out sets no limit.
+      ...(request.limits.maxTurns === null ? {} : { maxTurns: request.limits.maxTurns ?? 60 }),
       ...(request.limits.maxBudgetUsd === undefined
         ? {}
         : { maxBudgetUsd: request.limits.maxBudgetUsd }),

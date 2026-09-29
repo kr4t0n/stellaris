@@ -12,6 +12,8 @@ export const ServerConfigSchema = z.object({
   concurrency: z.number().int().positive().nullable(),
   /** How long one turn may run before it is stopped, or null for no limit. */
   turnTimeoutMs: z.number().int().positive().nullable(),
+  /** Rounds of tool calls one Claude turn may take, or null for no limit. */
+  toolRounds: z.number().int().positive().nullable(),
 });
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 
@@ -35,5 +37,6 @@ export function loadServerConfig(env: Readonly<Record<string, string | undefined
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     concurrency: limit(env["STELLARIS_CONCURRENCY"], 2),
     turnTimeoutMs: limit(env["STELLARIS_TURN_TIMEOUT_MS"], 20 * 60_000),
+    toolRounds: limit(env["STELLARIS_TOOL_ROUNDS"], 60),
   });
 }

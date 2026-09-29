@@ -29,7 +29,8 @@ export interface AgentSpec {
 export interface TurnLimits {
   /** How long a turn may run before it is stopped, or null for no limit. */
   readonly timeoutMs: number | null;
-  readonly maxTurns?: number | undefined;
+  /** Rounds of tool calls a turn may take, null for no limit, or the backend's default when unset. */
+  readonly maxTurns?: number | null | undefined;
   readonly maxBudgetUsd?: number | undefined;
 }
 

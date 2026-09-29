@@ -38,6 +38,7 @@ const runner = new LocalRunner({
   },
   log,
   turnTimeoutMs: config.turnTimeoutMs,
+  maxTurns: config.toolRounds,
   // Resident roles keep a warm session this long after their last turn.
   residentIdleMs: Number(process.env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
   onEvent: (agent, project, event) => {
@@ -89,6 +90,7 @@ log.info(
   {
     concurrency: config.concurrency ?? "unlimited",
     turnTimeoutMs: config.turnTimeoutMs ?? "unlimited",
+    toolRounds: config.toolRounds ?? "unlimited",
     timings,
   },
   "scheduler started",

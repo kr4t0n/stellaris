@@ -136,6 +136,19 @@ describe("ClaudeAgentBackend replay", () => {
     expect((await created.runTurn({ ...request, costSoFarUsd: 0.1 })).costUsd).toBeCloseTo(0.1922);
   });
 
+  it("sets no round limit when the runner asks for none", async () => {
+    const messages = await recorded("sdk-synthetic.jsonl");
+    const limited = replaying(messages);
+    await new ClaudeAgentBackend({ queryFn: limited.queryFn }).runTurn(request);
+    expect(limited.calls[0]?.options?.maxTurns).toBe(10);
+    const unlimited = replaying(messages);
+    await new ClaudeAgentBackend({ queryFn: unlimited.queryFn }).runTurn({
+      ...request,
+      limits: { timeoutMs: null, maxTurns: null },
+    });
+    expect(unlimited.calls[0]?.options).not.toHaveProperty("maxTurns");
+  });
+
   it("creates the session under the recorded id when it does not exist yet", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const { queryFn, calls } = replaying(messages);

@@ -23,7 +23,7 @@ One long-running process, the board server, hosts the only writer of the data di
 | `packages/adapter-codex`  | `AgentBackend` for Codex through `codex exec --json`: argument building, JSONL event parsing, resume-or-create by thread id, stream recording. The app-server client is a stub.                                                                                                                                                                   | Leak Codex item shapes past the adapter.                    |
 | `apps/server`             | Composes the above; HTTP routes, SSE feeds for board events and live turns, the in-memory turn hub, MCP mount, startup and shutdown.                                                                                                                                                                                                              | Contain business rules; those live in the packages.         |
 | `apps/cli`                | User and developer operations against `board-core` directly.                                                                                                                                                                                                                                                                                      | Be used by agents.                                          |
-| `apps/runner`             | Standalone runner daemon (Phase 9).                                                                                                                                                                                                                                                                                                               |                                                             |
+| `apps/runner`             | Standalone runner daemon (Phase 10).                                                                                                                                                                                                                                                                                                              |                                                             |
 
 ## Conventions
 
@@ -110,8 +110,9 @@ One long-running process, the board server, hosts the only writer of the data di
 ## Where the next work goes
 
 - **The interface:** the playground of PLAN.md section 10.1, built from scratch. The first build (Phases 3 and 7) was removed because it followed the proof-of-concept views too closely; the API routes and streams it used remain.
-- **Phase 8:** metrics views and charter iteration.
-- **Phase 9:** remote runners, with the runner's own data directory, home sync as a file API around each turn, the projection mirror, the board server serving its clones as git remotes, and per-runner host agents.
+- **Phase 8, next:** freeform work, PLAN.md section 9. Tasks carry plans of stages between `open` and `done` that agents write and reshape; gated stages only the user, the steward, and the concierge may change; completion effects per project; seed roles reduced to the user, the steward, and the concierge. Until it lands, the code still has the fixed lifecycle and the engineer and reviewer seeds described above, including the review gate keyed to the role name `reviewer`.
+- **Phase 9:** metrics views and charter iteration.
+- **Phase 10:** remote runners, with the runner's own data directory, home sync as a file API around each turn, the projection mirror, the board server serving its clones as git remotes, and per-runner host agents.
 - **Deferred:** an `update_dashboard` verb; the dashboard stays a file only agents on the server's machine can edit until it is known whether they edit it at all.
 - The build order and the deferred list are in PLAN.md sections 12 and 13.
 
@@ -128,4 +129,4 @@ One long-running process, the board server, hosts the only writer of the data di
 - Proposal discussion has no thread of its own; it happens in the `governance` channel. A per-proposal thread is worth adding when proposals get contested.
 - A promoted skill is a copy taken at approval. Later edits to the citizen's own skill do not propagate; the citizen proposes it again, and approval replaces the society's copy. A revision history for society skills does not exist.
 - Reflection costs one turn per reflecting member per cadence, with no society-wide budget. The `reflectionMs` timing and the `reflects` flag are the only brakes besides the pause switch.
-- The skills index lists absolute paths on the board server. Remote runners (Phase 9) will need to rewrite them to the mirror's location.
+- The skills index lists absolute paths on the board server. Remote runners (Phase 10) will need to rewrite them to the mirror's location.

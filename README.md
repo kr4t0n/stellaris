@@ -154,7 +154,7 @@ Tokens are minted once and stored only as hashes. Agents receive short-lived tur
 ```
 apps/
   server/          board server: core library, scheduler, HTTP API, SSE, MCP endpoint, embedded runner
-  runner/          standalone runner daemon for other machines (Phase 9)
+  runner/          standalone runner daemon for other machines (Phase 10)
   cli/             admin CLI
 packages/
   shared/          Zod schemas and types: board objects, verbs, events, turn status, triggers, config

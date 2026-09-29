@@ -14,7 +14,7 @@ export type Step =
   | (StepBase & {
       readonly kind: "tool";
       readonly name: string;
-      /** One line saying what the call was about: a command, a path, a URL, a query. */
+      /** What the call was about, on one line: a command, a path, a URL, a query. */
       readonly summary: string;
       /** The call's input in full, up to `DETAIL_LIMIT` characters. */
       readonly detail: string;
@@ -63,7 +63,8 @@ export function turnsOf(turns: LiveTurns, agent: string): LiveTurn[] {
 }
 
 const MAX_STEPS = 400;
-const SUMMARY_LIMIT = 160;
+// Rows cut summaries at their own width; this only bounds what is kept.
+const SUMMARY_LIMIT = 400;
 const DETAIL_LIMIT = 4_000;
 
 /** A tool's name as a reader knows it: board verbs bare, other MCP tools as `server:tool`. */
@@ -77,6 +78,11 @@ export function toolLabel(name: string): string {
 
 function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+}
+
+/** The whole text on one line, as argus shows a tool's argument: line breaks become spaces. */
+function flatten(text: string): string {
+  return text.replaceAll(/\s+/g, " ").trim();
 }
 
 function firstLine(text: string): string {
@@ -108,7 +114,7 @@ export function describeCall(input: unknown): { summary: string; detail: string 
   const command = fields["command"];
   if (typeof command === "string") {
     const inner = unwrapShell(command);
-    return { summary: clip(firstLine(inner), SUMMARY_LIMIT), detail: clip(inner, DETAIL_LIMIT) };
+    return { summary: clip(flatten(inner), SUMMARY_LIMIT), detail: clip(inner, DETAIL_LIMIT) };
   }
   const detail = clip(JSON.stringify(input ?? null, null, 2), DETAIL_LIMIT);
   const changes = fields["changes"];
@@ -125,7 +131,7 @@ export function describeCall(input: unknown): { summary: string; detail: string 
     (value) => typeof value === "string" || typeof value === "number",
   );
   const summary = named ?? scalars.slice(0, 3).join(" · ");
-  return { summary: clip(firstLine(summary), SUMMARY_LIMIT), detail };
+  return { summary: clip(flatten(summary), SUMMARY_LIMIT), detail };
 }
 
 // The status every turn ends with reaches the footer through `turn_completed`; Claude files it

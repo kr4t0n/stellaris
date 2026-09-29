@@ -122,10 +122,10 @@ describe("live turns", () => {
     expect(turnsOf(turns, "ref")).toEqual([]);
   });
 
-  it("says what a call was about in one line", () => {
-    expect(describeCall({ command: `/bin/bash -lc "uv run pytest -q\necho done"` })).toEqual({
-      summary: "uv run pytest -q",
-      detail: "uv run pytest -q\necho done",
+  it("says what a call was about on one line, line breaks and all", () => {
+    expect(describeCall({ command: `/bin/bash -lc "uv run pytest -q\n  echo done"` })).toEqual({
+      summary: "uv run pytest -q echo done",
+      detail: "uv run pytest -q\n  echo done",
     });
     expect(describeCall({ file_path: "/w/report.md", content: "x" }).summary).toBe("/w/report.md");
     expect(

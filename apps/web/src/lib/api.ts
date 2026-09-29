@@ -4,7 +4,9 @@ import {
   MessageFrontmatterSchema,
   NameSchema,
   ProjectSchema,
+  ProposalFrontmatterSchema,
   RoleCharterSchema,
+  SkillSchema,
   SocietySchema,
   TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
@@ -75,6 +77,7 @@ const ThreadSummarySchema = ThreadRecordSchema.extend({
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
 const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });
 const TaskSchema = TaskFrontmatterSchema.extend({ body: z.string() });
+const ProposalSchema = ProposalFrontmatterSchema.extend({ body: z.string() });
 
 /** A channel ref as a path: `general`, or `lab/general` with each part encoded. */
 function channelPath(ref: string): string {
@@ -140,10 +143,18 @@ export function createApi(token: string) {
     tasks: (slug: string) =>
       get(`/api/projects/${encodeURIComponent(slug)}/tasks`, token, TaskSchema.array()),
     task: (id: string) => get(`/api/tasks/${encodeURIComponent(id)}`, token, TaskSchema),
+    proposals: () => get("/api/proposals", token, ProposalSchema.array()),
+    proposal: (id: string) =>
+      get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),
+    skills: () => get("/api/skills", token, SkillSchema.array()),
     sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
       invoke("post_message", token, input, MessageSchema),
-    openThread: (input: { task_id?: string; channel?: string; title?: string }) =>
-      invoke("open_thread", token, input, ThreadRecordSchema),
+    openThread: (input: {
+      task_id?: string;
+      proposal_id?: string;
+      channel?: string;
+      title?: string;
+    }) => invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>
       invoke("close_thread", token, input, MessageSchema),
   };

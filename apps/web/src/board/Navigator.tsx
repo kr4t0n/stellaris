@@ -3,7 +3,8 @@ import { useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
-import { useChannels, useProjects, useTasks, useThreads } from "../lib/session.js";
+import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
+import { waitingOnYou } from "./governance.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
@@ -47,8 +48,42 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
   );
 }
 
+/** Where the user decides: proposals, with how many wait on the user. */
+function Governance({ active }: { active: "proposals" | null }) {
+  const proposals = useProposals();
+  const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
+  return (
+    <section aria-label="Governance" className="mt-3">
+      <h3 className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">
+        Governance
+      </h3>
+      <ul>
+        <li>
+          <Link
+            to="/proposals"
+            className={`${ROW} ${active === "proposals" ? ROW_ACTIVE : ROW_IDLE}`}
+          >
+            <span aria-hidden="true" className="text-fg-muted">
+              ◈
+            </span>
+            <span className="min-w-0 flex-1 truncate">proposals</span>
+            {waiting > 0 ? (
+              <span
+                title={`${waiting} waiting on you`}
+                className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300"
+              >
+                {waiting}
+              </span>
+            ) : null}
+          </Link>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
 /**
- * The left island: who is working now, then the society's channels and every project's in the
+ * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and a dot when something is new since
  * this browser looked.
  */
@@ -57,6 +92,7 @@ export function Navigator({
   activeTasks,
   activeCitizen,
   activeScope,
+  activeGovernance,
 }: {
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
@@ -64,6 +100,7 @@ export function Navigator({
   /** The citizen whose view is open, and the scope of the turn it shows when one was chosen. */
   activeCitizen: string | null;
   activeScope: string | null;
+  activeGovernance: "proposals" | null;
 }) {
   const channels = useChannels();
   const projects = useProjects();
@@ -121,6 +158,7 @@ export function Navigator({
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
+        <Governance active={activeGovernance} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="truncate px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">

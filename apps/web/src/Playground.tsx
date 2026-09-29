@@ -97,6 +97,8 @@ export function Playground() {
   const activeTasks = tasksPath ?? task.data?.project ?? null;
   const activeCitizen = after(pathname, "/citizen/");
   const activeScope = activeCitizen === null ? null : (search.scope ?? null);
+  const activeGovernance =
+    pathname === "/proposals" || pathname.startsWith("/proposal/") ? "proposals" : null;
 
   useEffect(() => {
     if (!boardOpen) {
@@ -141,7 +143,9 @@ export function Playground() {
     );
   }
 
+  // Governance belongs to the society as a whole.
   const focus =
+    (activeGovernance === null ? null : SOCIETY_SCOPE) ??
     activeTasks ??
     (activeChannel === null
       ? activeCitizen === null
@@ -215,6 +219,7 @@ export function Playground() {
             activeTasks={activeTasks}
             activeCitizen={activeCitizen}
             activeScope={activeScope}
+            activeGovernance={activeGovernance}
           />
         ) : null}
         {boardOpen ? (

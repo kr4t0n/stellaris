@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { ChannelRefSchema, IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
-import { RoleCharterSchema } from "./roles.js";
+import {
+  channelRef,
+  ChannelRefSchema,
+  IsoDateTimeSchema,
+  NameSchema,
+  UlidSchema,
+  type Name,
+} from "./ids.js";
+import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
 export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
@@ -339,6 +346,61 @@ export const ProposalCharterSchemas = {
   retirement: RetirementProposalSchema,
   skill: SkillProposalSchema,
 } as const;
+
+/** The roles that may decide a proposal of each kind. A proposer never decides its own. */
+export const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
+  role: [USER_ROLE],
+  member: [USER_ROLE],
+  retirement: [USER_ROLE],
+  channel: [USER_ROLE, "steward"],
+  reallocation: [USER_ROLE, "steward"],
+  skill: [USER_ROLE, "steward"],
+};
+
+/**
+ * One line for a proposal's charter, as the governance and decisions channels, its thread, and
+ * the interface title it.
+ */
+export function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): string {
+  switch (kind) {
+    case "member": {
+      const parsed = MemberProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      const { name, role, cli, memberships } = parsed.data;
+      const where = memberships.length === 0 ? "" : ` for ${memberships.join(", ")}`;
+      return `member ${name} as ${role} on ${cli}${where}`;
+    }
+    case "role": {
+      const parsed = RoleCharterSchema.safeParse(charter);
+      if (!parsed.success) break;
+      const { name, verbs, maxReplicas } = parsed.data;
+      return `role ${name} (${verbs.length} verbs, up to ${maxReplicas} per project)`;
+    }
+    case "channel": {
+      const parsed = ChannelProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `channel ${channelRef(parsed.data.project, parsed.data.name)}: ${parsed.data.purpose}`;
+    }
+    case "retirement": {
+      const parsed = RetirementProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `retirement of ${parsed.data.agent}: ${parsed.data.reason}`;
+    }
+    case "reallocation": {
+      const parsed = ReallocationProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `reallocation: ${parsed.data.description}`;
+    }
+    case "skill": {
+      const parsed = SkillProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `skill ${parsed.data.name}: ${parsed.data.summary.trim().replace(/\.+$/, "")}`;
+    }
+    default:
+      break;
+  }
+  return `${kind} ${JSON.stringify(charter)}`;
+}
 
 /** A skill as projected: an agent's own under its home, or the society's under `society/skills/`. */
 export const SkillSchema = z.object({

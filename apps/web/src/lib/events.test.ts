@@ -26,6 +26,10 @@ describe("board events", () => {
       ["members"],
     ]);
     expect(staleKeys(event("turn.started", {}, id))).toEqual([["scheduler"], ["members"]]);
+    expect(staleKeys(event("proposal.decided", { proposalId: id }, id))).toEqual([
+      ["proposals"],
+      ["proposal", id],
+    ]);
     expect(staleKeys(event("ops.signal", {}, id))).toEqual([]);
   });
 

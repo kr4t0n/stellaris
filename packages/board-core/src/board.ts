@@ -8,6 +8,7 @@ import {
   channelRef,
   ChannelProposalSchema,
   DecisionSchema,
+  describeCharter,
   KnowledgeSchema,
   mayHoldStage,
   MemberProposalSchema,
@@ -22,8 +23,8 @@ import {
   ProjectSchema,
   ProposalCharterSchemas,
   ProposalFrontmatterSchema,
-  ReallocationProposalSchema,
   RetirementProposalSchema,
+  ROLE_KIND_APPROVERS,
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
@@ -230,15 +231,6 @@ const PausedSchema = z.object({ paused: z.boolean() });
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 
-const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>> = {
-  role: [USER_ROLE],
-  member: [USER_ROLE],
-  retirement: [USER_ROLE],
-  channel: [USER_ROLE, "steward"],
-  reallocation: [USER_ROLE, "steward"],
-  skill: [USER_ROLE, "steward"],
-};
-
 /** Roles that may write society knowledge. */
 const CURATING_ROLES: readonly Name[] = [USER_ROLE, "steward"];
 
@@ -274,48 +266,6 @@ function plain(value: unknown): string {
   if (Array.isArray(value)) return value.map(plain).join(", ");
   if (value === null || value === undefined) return "";
   return JSON.stringify(value);
-}
-
-/** One line for a proposal's charter, as posted to the governance and decisions channels. */
-function describeCharter(kind: ProposalKind, charter: Record<string, unknown>): string {
-  switch (kind) {
-    case "member": {
-      const parsed = MemberProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      const { name, role, cli, memberships } = parsed.data;
-      const where = memberships.length === 0 ? "" : ` for ${memberships.join(", ")}`;
-      return `member ${name} as ${role} on ${cli}${where}`;
-    }
-    case "role": {
-      const parsed = RoleCharterSchema.safeParse(charter);
-      if (!parsed.success) break;
-      const { name, verbs, maxReplicas } = parsed.data;
-      return `role ${name} (${verbs.length} verbs, up to ${maxReplicas} per project)`;
-    }
-    case "channel": {
-      const parsed = ChannelProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      return `channel ${channelRef(parsed.data.project, parsed.data.name)}: ${parsed.data.purpose}`;
-    }
-    case "retirement": {
-      const parsed = RetirementProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      return `retirement of ${parsed.data.agent}: ${parsed.data.reason}`;
-    }
-    case "reallocation": {
-      const parsed = ReallocationProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      return `reallocation: ${parsed.data.description}`;
-    }
-    case "skill": {
-      const parsed = SkillProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      return `skill ${parsed.data.name}: ${sentence(parsed.data.summary)}`;
-    }
-    default:
-      break;
-  }
-  return `${kind} ${JSON.stringify(charter)}`;
 }
 
 /** A summary without its trailing period, for sentences that add their own. */

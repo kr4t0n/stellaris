@@ -58,6 +58,12 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "role.added") {
     return [["roles"]];
   }
+  if (type.startsWith("proposal.")) {
+    return [["proposals"], ["proposal", text(payload["proposalId"])]];
+  }
+  if (type === "skill.promoted") {
+    return [["skills"]];
+  }
   return [];
 }
 

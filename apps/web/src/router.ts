@@ -39,6 +39,16 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({
     getParentRoute: () => rootRoute,
+    path: "/proposals",
+    component: lazyRouteComponent(() => import("./board/ProposalsView.js"), "ProposalsView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/proposal/$proposalId",
+    component: lazyRouteComponent(() => import("./board/ProposalView.js"), "ProposalView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
     path: "/citizen/$name",
     // `scope` picks which of a citizen's turns to show, when it is in more than one.
     validateSearch: (search: Record<string, unknown>): { scope?: string } =>

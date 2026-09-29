@@ -76,6 +76,22 @@ export function useTask(id: string | null) {
   });
 }
 
+export function useProposals() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["proposals"], queryFn: api.proposals, refetchInterval: 60_000 });
+}
+
+export function useProposal(id: string) {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["proposal", id], queryFn: () => api.proposal(id) });
+}
+
+/** The society's skills, which a skill proposal may replace. */
+export function useSkills() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 60_000 });
+}
+
 /** The current time, refreshed on an interval, for relative times that should not go stale. */
 export function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());

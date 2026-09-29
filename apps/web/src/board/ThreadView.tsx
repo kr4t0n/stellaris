@@ -69,6 +69,14 @@ function ThreadStream({ id }: { id: string }) {
               >
                 Task →
               </Link>
+            ) : thread.subject?.kind === "proposal" ? (
+              <Link
+                to="/proposal/$proposalId"
+                params={{ proposalId: thread.subject.id }}
+                className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+              >
+                Proposal →
+              </Link>
             ) : null}
             {thread.state === "open" && !closing ? (
               <Button onClick={() => setClosing(true)}>Close</Button>

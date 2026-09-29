@@ -10,7 +10,6 @@
     { "path": "packages/adapter-codex" },
     { "path": "apps/server" },
     { "path": "apps/runner" },
-    { "path": "apps/cli" },
-    { "path": "apps/ui" }
+    { "path": "apps/cli" }
   ]
 }

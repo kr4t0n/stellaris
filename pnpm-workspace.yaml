@@ -8,6 +8,4 @@ allowBuilds:
 
 # Exact pins younger than pnpm's default minimum release age must be excluded explicitly.
 minimumReleaseAgeExclude:
-  - "@tanstack/react-router@1.170.40"
-  - "@tanstack/router-core@1.171.33"
   - hono@4.13.10

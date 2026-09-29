@@ -205,7 +205,7 @@ describe("Phase 5 exit criterion", () => {
     const desk = (await board.listMembers()).find((m) => m.name === "desk");
     expect(desk?.lastTurnOutcome).toContain("owner_post on society: completed");
 
-    // The owner approves over the API, as the UI does, and the new engineer onboards on api.
+    // The owner approves over the API, and the new engineer onboards on api.
     const approved = await app.request("/api/verbs/approve", {
       method: "POST",
       headers: owner,
@@ -297,7 +297,7 @@ describe("Phase 4 exit criterion", () => {
     const stewardTurn = await board.readLastTurn("stew-1", "demo");
     expect(stewardTurn?.trigger.kind).toBe("ops_event");
 
-    // The owner approves through the same interface the UI uses.
+    // The owner approves over the API.
     const approved = await app.request("/api/verbs/approve", {
       method: "POST",
       headers: owner,
@@ -437,7 +437,7 @@ describe("Phase 6 exit criterion", () => {
       "Skill uv-setup promoted to the society",
     );
 
-    // The owner assigns the agent to beta, as the UI would. Its first turn there loads the lesson,
+    // The owner assigns the agent to beta over the API. Its first turn there loads the lesson,
     // finds the archive by search, sees both skills, and seeds beta's knowledge from what it learned.
     const joined = await app.request("/api/verbs/join_project", {
       method: "POST",

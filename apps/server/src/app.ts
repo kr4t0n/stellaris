@@ -9,7 +9,6 @@ import {
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
-import { spaHandler } from "./static.js";
 import type { LiveTurnEvent, TurnHub } from "./turn-hub.js";
 
 /** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
@@ -27,8 +26,6 @@ export interface AppDependencies {
   readonly version: string;
   readonly turns?: TurnHub | undefined;
   readonly scheduler?: SchedulerView | undefined;
-  /** Directory holding the built UI. When set, non-API paths serve it. */
-  readonly staticDir?: string | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -64,7 +61,7 @@ function bearer(c: Context<Env>): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-/** The board server's HTTP surface: health, an authenticated API for the UI and tools, the MCP endpoint, and the UI. */
+/** The board server's HTTP surface: health, an authenticated API for the owner and tools, and the MCP endpoint. */
 export function createApp(deps: AppDependencies): Hono<Env> {
   const { board, version, turns, scheduler } = deps;
   const app = new Hono<Env>();
@@ -104,7 +101,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
-  // The citizen drawer: a member's finished turns from the event log, and its memory core, read only.
+  // A member's finished turns from the event log, and its memory core, read only.
   api.get("/agents/:name/turns", async (c) =>
     c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
   );
@@ -273,10 +270,6 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     return handleMcpRequest(board, actor, c.req.raw, version);
   });
-
-  if (deps.staticDir !== undefined) {
-    app.get("*", spaHandler(deps.staticDir));
-  }
 
   return app;
 }

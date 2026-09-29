@@ -1,5 +1,3 @@
-import { access } from "node:fs/promises";
-import path from "node:path";
 import { serve } from "@hono/node-server";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexExecBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
@@ -51,13 +49,6 @@ const concurrency = Number(process.env["STELLARIS_CONCURRENCY"] ?? "2");
 const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 const scheduler = new Scheduler({ board, runner, log, concurrency, timings });
 
-// The built UI ships next to the server in the monorepo; serve it when it exists.
-const uiDist =
-  process.env["STELLARIS_UI_DIR"] ?? path.resolve(import.meta.dirname, "../../ui/dist");
-const staticDir = await access(path.join(uiDist, "index.html"))
-  .then(() => uiDist)
-  .catch(() => undefined);
-
 // What the API shows: the scheduler's queues and the runner's warm sessions, read live.
 const view = {
   get pendingPairs() {
@@ -73,10 +64,10 @@ const view = {
     return scheduler.activeSignals;
   },
 };
-const app = createApp({ board, version: VERSION, turns, scheduler: view, staticDir });
+const app = createApp({ board, version: VERSION, turns, scheduler: view });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
-    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl, ui: staticDir ?? null },
+    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl },
     "board server listening",
   );
 });

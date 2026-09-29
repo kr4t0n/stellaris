@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -34,7 +34,7 @@ async function readSse(response: Response, wanted: number): Promise<string[]> {
   return lines;
 }
 
-describe("board server routes for the UI", () => {
+describe("board server routes", () => {
   let dir: string;
   let board: Board;
   let ownerToken: string;
@@ -244,7 +244,7 @@ describe("board server routes for the UI", () => {
     ).toBe("reflection");
   });
 
-  it("serves a citizen's turn history and memory core for its drawer", async () => {
+  it("serves a citizen's turn history and memory core", async () => {
     const app = createApp({ board, version: "t" });
     const turn = {
       agent: "eng-1",
@@ -361,28 +361,5 @@ describe("board server routes for the UI", () => {
     expect(
       frames.map((frame) => z.object({ seq: z.number() }).parse(JSON.parse(frame)).seq),
     ).toEqual([1, 2, 3]);
-  });
-
-  it("serves the built UI with an index fallback for client routes", async () => {
-    const ui = path.join(dir, "ui");
-    await mkdir(path.join(ui, "assets"), { recursive: true });
-    await writeFile(path.join(ui, "index.html"), "<html>board</html>", "utf8");
-    await writeFile(path.join(ui, "assets", "app.js"), "console.log(1)", "utf8");
-    const app = createApp({ board, version: "t", staticDir: ui });
-
-    const asset = await app.request("/assets/app.js");
-    expect(asset.status).toBe(200);
-    expect(asset.headers.get("content-type")).toContain("javascript");
-    expect(asset.headers.get("cache-control")).toContain("immutable");
-
-    const deep = await app.request("/projects/demo/tasks/abc");
-    expect(deep.status).toBe(200);
-    expect(await deep.text()).toBe("<html>board</html>");
-
-    const escape = await app.request("/../../etc/passwd");
-    expect(await escape.text()).toBe("<html>board</html>");
-
-    expect((await app.request("/api/me")).status).toBe(401);
-    expect((await app.request("/health")).status).toBe(200);
   });
 });

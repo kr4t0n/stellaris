@@ -1,6 +1,6 @@
 import type { AgentEvent, Name } from "@stellaris/shared";
 
-/** One agent event as seen by the UI: which agent and project produced it, in a global sequence. */
+/** One agent event as streamed to clients: which agent and project produced it, in a global sequence. */
 export interface LiveTurnEvent {
   readonly seq: number;
   readonly ts: string;

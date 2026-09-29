@@ -234,7 +234,7 @@ export class Scheduler {
     return [...this.running.keys()].toSorted();
   }
 
-  /** Keys of the operations conditions that held at the last pass: what the playground shows as weather. */
+  /** Keys of the operations conditions that held at the last pass: what holds right now, not what was posted. */
   get activeSignals(): string[] {
     return Object.keys(this.state.opsReported).toSorted();
   }

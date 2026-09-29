@@ -154,7 +154,7 @@ export interface SignalRecord {
   readonly signal: OpsSignal;
 }
 
-/** One finished turn as the event log recorded it: the citizen drawer's history. */
+/** One finished turn as the event log recorded it: an entry in a citizen's turn history. */
 export interface TurnHistoryEntry {
   readonly id: Ulid;
   readonly ts: string;

@@ -6,19 +6,16 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b",
-    "build:ui": "pnpm --filter @stellaris/ui build",
     "clean": "tsc -b --clean",
     "lint": "oxlint --type-aware",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test",
-    "check": "pnpm build && pnpm build:ui && pnpm lint && pnpm fmt:check && pnpm test",
+    "check": "pnpm build && pnpm lint && pnpm fmt:check && pnpm test",
     "stellaris": "node apps/cli/dist/index.js"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",

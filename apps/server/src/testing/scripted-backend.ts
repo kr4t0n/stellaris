@@ -55,8 +55,6 @@ export class ScriptedBackend implements AgentBackend {
 
   constructor(
     private readonly app: Hono<{ Variables: { actor: { name: string; role: string } } }>,
-    /** A pause before each turn acts, so a browser can watch the citizen work. */
-    private readonly delayMs = 0,
   ) {}
 
   newSession(): Promise<string> {
@@ -91,9 +89,6 @@ export class ScriptedBackend implements AgentBackend {
 
   async runTurn(request: TurnRequest): Promise<TurnResult> {
     this.prompts.push(request.prompt);
-    if (this.delayMs > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, this.delayMs));
-    }
     const verb = async (name: string, input: unknown): Promise<unknown> => {
       const response = await this.app.request(`/api/verbs/${name}`, {
         method: "POST",

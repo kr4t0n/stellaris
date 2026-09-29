@@ -196,6 +196,12 @@ export interface DigestResult {
   readonly cursor: Ulid | null;
 }
 
+/** A thread as a list shows it: the record, how many messages it holds, and its newest one. */
+export interface ThreadSummary extends Thread {
+  readonly messages: number;
+  readonly lastMessageId: Ulid | null;
+}
+
 /** A channel as a navigator lists it: where it is and when it last spoke. */
 export interface ChannelSummary {
   readonly ref: ChannelRef;
@@ -1018,13 +1024,19 @@ export class Board {
     return (await this.findThread(id)).thread;
   }
 
-  /** Every thread record, the society's first, then each project's. */
-  async listThreads(): Promise<Thread[]> {
-    const all: Thread[] = [];
+  /** Every thread record with its message count and newest message, the society's first. */
+  async listThreads(): Promise<ThreadSummary[]> {
+    const all: ThreadSummary[] = [];
     for (const threads of await this.threadScopes()) {
       for (const file of await listFiles(threads)) {
         const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
-        all.push({ ...doc.data, body: doc.body });
+        const messages = await listFiles(this.paths.threadMessages(threads, doc.data.id));
+        all.push({
+          ...doc.data,
+          body: doc.body,
+          messages: messages.length,
+          lastMessageId: messages.at(-1)?.slice(0, 26) ?? null,
+        });
       }
     }
     return all;

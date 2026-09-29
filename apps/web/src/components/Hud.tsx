@@ -22,11 +22,22 @@ interface HudProps {
   readonly working: number;
   readonly queued: number;
   readonly paused: boolean;
+  readonly boardOpen: boolean;
+  readonly onToggleBoard: () => void;
   readonly onSignOut: () => void;
 }
 
 /** The frame around the sky: the wordmark, what the society is doing, and the way out. */
-export function Hud({ society, citizens, working, queued, paused, onSignOut }: HudProps) {
+export function Hud({
+  society,
+  citizens,
+  working,
+  queued,
+  paused,
+  boardOpen,
+  onToggleBoard,
+  onSignOut,
+}: HudProps) {
   return (
     <>
       <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
@@ -42,6 +53,16 @@ export function Hud({ society, citizens, working, queued, paused, onSignOut }: H
           {queued > 0 ? <Chip>{queued} queued</Chip> : null}
           <button
             type="button"
+            aria-pressed={boardOpen}
+            onClick={onToggleBoard}
+            className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+              boardOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
+            }`}
+          >
+            Board
+          </button>
+          <button
+            type="button"
             onClick={onSignOut}
             className="h-7 rounded-md px-2.5 text-xs text-fg-tertiary transition-colors hover:bg-surface-2/60 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
           >
@@ -49,9 +70,11 @@ export function Hud({ society, citizens, working, queued, paused, onSignOut }: H
           </button>
         </div>
       </header>
-      <p className="pointer-events-none absolute bottom-5 left-5 text-meta">
-        Hover a star to meet a citizen.
-      </p>
+      {boardOpen ? null : (
+        <p className="pointer-events-none absolute bottom-5 left-5 text-meta">
+          Hover a star to meet a citizen; click a sphere to open its project.
+        </p>
+      )}
     </>
   );
 }

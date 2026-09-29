@@ -1,9 +1,13 @@
 import {
+  ChannelRefSchema,
   MemberSchema,
+  MessageFrontmatterSchema,
   NameSchema,
   ProjectSchema,
   RoleCharterSchema,
   SocietySchema,
+  ThreadFrontmatterSchema,
+  UlidSchema,
 } from "@stellaris/shared";
 import { z } from "zod";
 
@@ -43,6 +47,29 @@ const SchedulerViewSchema = z.object({
 });
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
+const MessagesSchema = MessageFrontmatterSchema.extend({ body: z.string() }).array();
+const ChannelSummarySchema = z.object({
+  ref: ChannelRefSchema,
+  project: NameSchema.nullable(),
+  name: NameSchema,
+  messages: z.number().int(),
+  lastMessageId: UlidSchema.nullable(),
+  lastAt: z.string().nullable(),
+});
+export type ChannelSummary = z.infer<typeof ChannelSummarySchema>;
+const ThreadRecordSchema = ThreadFrontmatterSchema.extend({ body: z.string() });
+const ThreadSummarySchema = ThreadRecordSchema.extend({
+  messages: z.number().int(),
+  lastMessageId: UlidSchema.nullable(),
+});
+export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
+const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });
+
+/** A channel ref as a path: `general`, or `lab/general` with each part encoded. */
+function channelPath(ref: string): string {
+  return ref.split("/").map(encodeURIComponent).join("/");
+}
+
 async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promise<T> {
   let response: Response;
   try {
@@ -65,6 +92,11 @@ export function createApi(token: string) {
     projects: () => get("/api/projects", token, ProjectSchema.array()),
     roles: () => get("/api/roles", token, RoleCharterSchema.array()),
     scheduler: () => get("/api/scheduler", token, SchedulerViewSchema),
+    channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
+    channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
+    threads: () => get("/api/threads", token, ThreadSummarySchema.array()),
+    thread: (id: string) =>
+      get(`/api/threads/${encodeURIComponent(id)}`, token, ThreadDetailSchema),
   };
 }
 export type Api = ReturnType<typeof createApi>;

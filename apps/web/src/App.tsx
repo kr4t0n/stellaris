@@ -1,19 +1,26 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { RouterProvider } from "@tanstack/react-router";
+import { useCallback, useMemo, useState } from "react";
 import { TokenGate } from "./components/TokenGate.js";
-import { clearToken, storedToken, storeToken } from "./lib/api.js";
-import { Playground } from "./Playground.js";
+import { clearToken, createApi, storedToken, storeToken } from "./lib/api.js";
+import { SessionContext, type Session } from "./lib/session.js";
+import { router } from "./router.js";
 
 export function App() {
-  const queryClient = useQueryClient();
+  const client = useQueryClient();
   const [token, setToken] = useState<string | null>(storedToken);
   const signOut = useCallback(() => {
     clearToken();
-    queryClient.clear();
+    client.clear();
     setToken(null);
-  }, [queryClient]);
+    void router.navigate({ to: "/" });
+  }, [client]);
+  const session = useMemo<Session | null>(
+    () => (token === null ? null : { api: createApi(token), token, signOut }),
+    [token, signOut],
+  );
 
-  if (token === null) {
+  if (session === null) {
     return (
       <TokenGate
         onEnter={(value) => {
@@ -23,5 +30,9 @@ export function App() {
       />
     );
   }
-  return <Playground token={token} onSignOut={signOut} />;
+  return (
+    <SessionContext value={session}>
+      <RouterProvider router={router} />
+    </SessionContext>
+  );
 }

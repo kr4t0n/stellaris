@@ -7,6 +7,7 @@ export type {
   AddReplicaInput,
   BoardOptions,
   ChannelSummary,
+  ThreadSummary,
   DigestResult,
   InitInput,
   RetireAgentInput,

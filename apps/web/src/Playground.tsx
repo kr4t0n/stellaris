@@ -1,29 +1,58 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { Navigator } from "./board/Navigator.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { Hud } from "./components/Hud.js";
-import { ApiError, createApi } from "./lib/api.js";
+import { Island } from "./components/Island.js";
+import { ApiError } from "./lib/api.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
+import {
+  useMembers,
+  useNow,
+  useProjects,
+  useRoles,
+  useScheduler,
+  useSession,
+  useSociety,
+  useThreads,
+} from "./lib/session.js";
 import { skyModel } from "./sky/model.js";
-import { Sky } from "./sky/Sky.js";
+import { Sky, type Insets } from "./sky/Sky.js";
 
-/** The current time, refreshed on an interval, for relative times that should not go stale. */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
+const NO_INSETS: Insets = { left: 0, right: 0 };
+const ISLAND_MARGIN = 16;
+const NAVIGATOR_WIDTH = 256;
+
+function useWindowWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
+    const update = (): void => setWidth(window.innerWidth);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return width;
+}
+
+/** The channel a board route shows or belongs to, which is also the project the sky focuses. */
+function channelOf(pathname: string, threadChannel: (id: string) => string | undefined) {
+  if (pathname.startsWith("/c/")) {
+    return decodeURIComponent(pathname.slice(3));
+  }
+  if (pathname.startsWith("/thread/")) {
+    return threadChannel(decodeURIComponent(pathname.slice(8))) ?? null;
+  }
+  return null;
 }
 
 /**
- * The signed-in view: the sky of citizens, kept current by the board's event stream. Polling
- * stays as a slow fallback, and for the scheduler's queue, which changes without an event.
+ * The signed-in view and the root of every route: the sky of citizens, and when a board route is
+ * open, the navigator island on the left and the content island on the right, the sky fitting
+ * between them. The board's event stream keeps every read current.
  */
-export function Playground({ token, onSignOut }: { token: string; onSignOut: () => void }) {
-  const api = useMemo(() => createApi(token), [token]);
+export function Playground() {
+  const { token, signOut } = useSession();
   const client = useQueryClient();
   useEffect(
     () =>
@@ -33,34 +62,61 @@ export function Playground({ token, onSignOut }: { token: string; onSignOut: () 
       }),
     [token, client],
   );
-  const society = useQuery({ queryKey: ["society"], queryFn: api.society, staleTime: 60_000 });
-  const members = useQuery({
-    queryKey: ["members"],
-    queryFn: api.members,
-    refetchInterval: 30_000,
-  });
-  const projects = useQuery({
-    queryKey: ["projects"],
-    queryFn: api.projects,
-    refetchInterval: 60_000,
-  });
-  const roles = useQuery({ queryKey: ["roles"], queryFn: api.roles, refetchInterval: 60_000 });
-  const scheduler = useQuery({
-    queryKey: ["scheduler"],
-    queryFn: api.scheduler,
-    refetchInterval: 3_000,
-  });
+  const society = useSociety();
+  const members = useMembers();
+  const projects = useProjects();
+  const roles = useRoles();
+  const scheduler = useScheduler();
+  const threads = useThreads();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [hovered, setHovered] = useState<string | null>(null);
   const now = useNow(30_000);
+  const width = useWindowWidth();
+
+  const boardOpen = pathname !== "/";
+  const contentWidth = Math.round(Math.min(680, Math.max(420, width * 0.4)));
+  const insets = useMemo<Insets>(
+    () =>
+      boardOpen
+        ? { left: NAVIGATOR_WIDTH + 2 * ISLAND_MARGIN, right: contentWidth + 2 * ISLAND_MARGIN }
+        : NO_INSETS,
+    [boardOpen, contentWidth],
+  );
+  const activeChannel = channelOf(
+    pathname,
+    (id) => threads.data?.find((thread) => thread.id === id)?.channel,
+  );
+  const focus =
+    activeChannel === null
+      ? null
+      : activeChannel.includes("/")
+        ? (activeChannel.split("/")[0] ?? null)
+        : SOCIETY_SCOPE;
+
+  useEffect(() => {
+    if (!boardOpen) {
+      return undefined;
+    }
+    const close = (event: KeyboardEvent): void => {
+      const typing =
+        event.target instanceof HTMLElement && event.target.closest("input, textarea") !== null;
+      if (event.key === "Escape" && !typing) {
+        void navigate({ to: "/" });
+      }
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [boardOpen, navigate]);
 
   const rejected = [society, members, projects, roles, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
   );
   useEffect(() => {
     if (rejected) {
-      onSignOut();
+      signOut();
     }
-  }, [rejected, onSignOut]);
+  }, [rejected, signOut]);
 
   const model = useMemo(
     () =>
@@ -88,6 +144,11 @@ export function Playground({ token, onSignOut }: { token: string; onSignOut: () 
       ? "the society"
       : (projects.data?.find((project) => project.slug === star.anchor)?.name ?? star.anchor);
   const purpose = roles.data?.find((role) => role.name === member?.role)?.purpose;
+  const openProject = (anchor: string): void => {
+    const first = projects.data?.find((project) => project.slug === anchor)?.channels[0];
+    const channel = anchor === SOCIETY_SCOPE ? "general" : `${anchor}/${first ?? "general"}`;
+    void navigate({ to: "/c/$", params: { _splat: channel } });
+  };
 
   return (
     <main className="relative h-full overflow-hidden">
@@ -96,6 +157,9 @@ export function Playground({ token, onSignOut }: { token: string; onSignOut: () 
         paused={scheduler.data?.paused ?? false}
         hovered={hovered}
         onHover={setHovered}
+        insets={insets}
+        focus={focus}
+        onSelectAnchor={openProject}
         card={
           star === undefined || member === undefined ? null : (
             <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
@@ -108,9 +172,23 @@ export function Playground({ token, onSignOut }: { token: string; onSignOut: () 
         working={model.stars.filter((candidate) => candidate.state === "working").length}
         queued={model.stars.filter((candidate) => candidate.state === "queued").length}
         paused={scheduler.data?.paused ?? false}
-        onSignOut={onSignOut}
+        boardOpen={boardOpen}
+        onToggleBoard={() =>
+          void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
+        }
+        onSignOut={signOut}
       />
-      {model.stars.length === 0 ? (
+      {boardOpen ? <Navigator activeChannel={activeChannel} /> : null}
+      {boardOpen ? (
+        <Island
+          label="Board content"
+          className="top-[72px] right-4 bottom-4"
+          style={{ width: contentWidth }}
+        >
+          <Outlet />
+        </Island>
+      ) : null}
+      {model.stars.length === 0 && !boardOpen ? (
         <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
           No citizens yet. Ask the concierge for one, or add one with{" "}
           <code className="font-mono text-fg-secondary">stellaris agent add</code>.

@@ -121,7 +121,12 @@ export class SkyScene {
   private height = 0;
   private dpr = 1;
   private hovered: string | null = null;
+  private focus: string | null = null;
   private paused = false;
+  /** Screen space the islands cover at the left and right; the sky fits the gap between. */
+  private insetLeft = 0;
+  private insetRight = 0;
+  private centerX = 0;
   private frameId: number | null = null;
   private last = 0;
 
@@ -203,6 +208,31 @@ export class SkyScene {
     this.paused = paused;
   }
 
+  /** The sphere of the project the board has open, drawn brighter. */
+  setFocus(anchor: string | null): void {
+    this.focus = anchor;
+  }
+
+  setInsets(left: number, right: number): void {
+    this.insetLeft = left;
+    this.insetRight = right;
+  }
+
+  /** The sphere under a point in CSS pixels, when no star is. */
+  hitTestAnchor(x: number, y: number): string | null {
+    let best: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const sphere of this.spheres.values()) {
+      const at = this.toScreen(sphere.x, sphere.y);
+      const distance = Math.hypot(at.x - x, at.y - y);
+      if (distance <= sphere.radius * this.scale && distance < bestDistance) {
+        best = sphere.anchor.id;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
   resize(width: number, height: number, dpr: number): void {
     this.width = width;
     this.height = height;
@@ -252,10 +282,14 @@ export class SkyScene {
   };
 
   private step(dt: number): void {
-    const fit = Math.min(this.width, this.height) / (2 * this.radius);
+    const free = Math.max(240, this.width - this.insetLeft - this.insetRight);
+    const fit = Math.min(free, this.height) / (2 * this.radius);
     const target = Math.min(1.35, Math.max(0.45, fit));
-    this.scale += (target - this.scale) * Math.min(1, dt * 3);
     const ease = this.options.reducedMotion ? 1 : Math.min(1, dt * 3);
+    this.scale += (target - this.scale) * ease;
+    // The first frame places the center; after that it glides as the islands open and close.
+    const center = this.insetLeft + free / 2;
+    this.centerX = this.centerX === 0 ? center : this.centerX + (center - this.centerX) * ease;
     for (const sphere of this.spheres.values()) {
       sphere.x += (sphere.anchor.x - sphere.x) * ease;
       sphere.y += (sphere.anchor.y - sphere.y) * ease;
@@ -282,7 +316,7 @@ export class SkyScene {
   }
 
   private toScreen(x: number, y: number): ScreenPoint {
-    return { x: this.width / 2 + x * this.scale, y: this.height / 2 + y * this.scale };
+    return { x: this.centerX + x * this.scale, y: this.height / 2 + y * this.scale };
   }
 
   private glow(color: string): HTMLCanvasElement {
@@ -355,18 +389,22 @@ export class SkyScene {
     for (const { anchor, x, y, radius } of this.spheres.values()) {
       const at = this.toScreen(x, y);
       const ring = radius * this.scale;
+      const focused = anchor.id === this.focus;
       if (anchor.kind === "project") {
         const nebula = ctx.createRadialGradient(at.x, at.y, 0, at.x, at.y, ring * 1.8);
-        nebula.addColorStop(0, "rgba(160, 170, 255, 0.05)");
+        nebula.addColorStop(0, `rgba(160, 170, 255, ${focused ? 0.1 : 0.05})`);
         nebula.addColorStop(1, "rgba(160, 170, 255, 0)");
         ctx.fillStyle = nebula;
         ctx.fillRect(at.x - ring * 1.8, at.y - ring * 1.8, ring * 3.6, ring * 3.6);
       }
       ctx.beginPath();
       ctx.arc(at.x, at.y, ring, 0, Math.PI * 2);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle =
-        anchor.kind === "society" ? "rgba(255, 255, 255, 0.09)" : "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = focused ? 1.5 : 1;
+      ctx.strokeStyle = focused
+        ? "rgba(255, 255, 255, 0.28)"
+        : anchor.kind === "society"
+          ? "rgba(255, 255, 255, 0.09)"
+          : "rgba(255, 255, 255, 0.06)";
       ctx.stroke();
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -378,7 +416,7 @@ export class SkyScene {
         ctx.letterSpacing = "0px";
       } else {
         ctx.font = ANCHOR_FONT;
-        ctx.fillStyle = `rgba(${FG_TERTIARY}, 0.95)`;
+        ctx.fillStyle = focused ? "rgba(245, 245, 245, 1)" : `rgba(${FG_TERTIARY}, 0.95)`;
         ctx.fillText(anchor.label, at.x, at.y + ring + 10);
       }
     }

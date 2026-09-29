@@ -344,8 +344,10 @@ describe("Board", () => {
     });
     expect(sentBack).toMatchObject({ status: "open", stage: "s2" });
     expect(sentBack.stages.find((s) => s.id === "s2")?.completedBy).toBeUndefined();
+    expect(sentBack.returned).toEqual({ from: "s3", by: "ed-2", at: expect.any(String) });
     await board.claimTask(RES, { task_id: task.id });
-    await board.advanceTask(RES, { task_id: task.id, note: "ablation added" });
+    const resubmitted = await board.advanceTask(RES, { task_id: task.id, note: "ablation added" });
+    expect(resubmitted.returned).toBeUndefined();
     await board.claimTask(ED2, { task_id: task.id });
     const done = await board.advanceTask(ED2, { task_id: task.id });
     expect(done.status).toBe("done");
@@ -358,6 +360,26 @@ describe("Board", () => {
     expect(types).toEqual(
       expect.arrayContaining(["task.planned", "task.moved", "task.advanced", "task.completed"]),
     );
+  });
+
+  it("records a send-back on the task for as long as its rework lasts", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "report",
+      stages: [{ name: "draft" }, { name: "figures" }, { name: "check" }],
+    });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.advanceTask(USER, { task_id: task.id });
+    const back = await board.updateTask(USER, { task_id: task.id, stage: "s1", note: "redo" });
+    expect(back.returned).toEqual({ from: "s3", by: "user", at: expect.any(String) });
+    expect((await board.claimTask(ENG, { task_id: task.id })).returned?.from).toBe("s3");
+    // Still short of the stage that returned it: the rework goes on.
+    expect((await board.advanceTask(ENG, { task_id: task.id })).returned?.from).toBe("s3");
+    expect((await board.advanceTask(USER, { task_id: task.id })).returned).toBeUndefined();
+    await board.updateTask(USER, { task_id: task.id, stage: "s2" });
+    const abandoned = await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    expect(abandoned.returned).toBeUndefined();
   });
 
   it("runs completion effects: a merge project completes through the board, and a failure reopens the last stage", async () => {
@@ -878,6 +900,29 @@ describe("Board", () => {
       "utf8",
     );
     await expect(board.readThread(live)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // A send-back was once only an event: a task still in its rework records it.
+    const legacyReturn = async (resubmit: boolean): Promise<Ulid> => {
+      const task = await board.createTask(USER, {
+        project: "demo",
+        title: resubmit ? "resubmitted" : "returned",
+        stages: [{ name: "draft" }, { name: "check" }],
+      });
+      await board.advanceTask(USER, { task_id: task.id });
+      await board.updateTask(USER, { task_id: task.id, stage: "s1" });
+      if (resubmit) {
+        await board.advanceTask(USER, { task_id: task.id });
+      }
+      const file = board.paths.task("demo", task.id);
+      await writeFile(
+        file,
+        (await readFile(file, "utf8")).replace(/returned:\n(?: {2}.*\n)+/, ""),
+        "utf8",
+      );
+      return task.id;
+    };
+    const returned = await legacyReturn(false);
+    const resubmitted = await legacyReturn(true);
+    expect(await readFile(board.paths.task("demo", returned), "utf8")).not.toContain("returned:");
     // The digest was once the inbox: cursor files keyed it `inbox`, and the user followed channels.
     const Cursor = z.object({ digest: z.string().nullable() });
     const cursor = ulid();
@@ -901,6 +946,12 @@ describe("Board", () => {
     expect(await reopened.readThread(ended)).toMatchObject({ state: "closed", openedBy: "user" });
     expect((await reopened.listThread(live)).map((m) => m.body.trim())).toEqual(["old news"]);
     await expect(reopened.readThread(untouched.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await reopened.getTask(USER, { task_id: returned })).returned).toEqual({
+      from: "s2",
+      by: "user",
+      at: expect.any(String),
+    });
+    expect((await reopened.getTask(USER, { task_id: resubmitted })).returned).toBeUndefined();
     for (const id of [live, ended, untouched.id]) {
       expect(await readFile(reopened.paths.task("demo", id), "utf8")).not.toContain("thread:");
     }

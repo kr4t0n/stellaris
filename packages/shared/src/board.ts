@@ -144,6 +144,14 @@ export const StageSchema = z.object({
 });
 export type Stage = z.infer<typeof StageSchema>;
 
+/** A send-back: the stage the work came back from, who sent it, and when. */
+export const TaskReturnSchema = z.object({
+  from: StageIdSchema,
+  by: NameSchema,
+  at: IsoDateTimeSchema,
+});
+export type TaskReturn = z.infer<typeof TaskReturnSchema>;
+
 export const TaskFrontmatterSchema = z.object({
   id: UlidSchema,
   project: NameSchema,
@@ -167,6 +175,8 @@ export const TaskFrontmatterSchema = z.object({
   onDone: CompletionEffectSchema.default("none"),
   /** The last stage is complete and the completion effect is running. */
   completing: z.boolean().default(false),
+  /** The latest send-back while its rework lasts: cleared once the task reaches that stage again. */
+  returned: TaskReturnSchema.optional(),
 });
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;
 export interface Task extends TaskFrontmatter {

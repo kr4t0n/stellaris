@@ -256,6 +256,7 @@ const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
 const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
 const THREAD_RECORDS = "threads-as-records";
 const DIGEST_CURSORS = "digest-replaces-inbox";
+const TASK_RETURNS = "task-returns-recorded";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -508,7 +509,7 @@ export class Board {
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
       : { applied: [] };
-    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS, DIGEST_CURSORS].filter(
+    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS, DIGEST_CURSORS, TASK_RETURNS].filter(
       (name) => !applied.includes(name),
     );
     if (pending.length === 0) {
@@ -523,7 +524,46 @@ export class Board {
     if (pending.includes(DIGEST_CURSORS)) {
       await this.renameInboxCursors();
     }
+    if (pending.includes(TASK_RETURNS)) {
+      await this.recordTaskReturns();
+    }
     await writeJson(file, { applied: [...applied, ...pending] });
+  }
+
+  /**
+   * A task sent back before tasks recorded it kept no trace outside the event log. A task still
+   * short of the stage its latest `task.moved` came from is in that rework, and records it.
+   */
+  private async recordTaskReturns(): Promise<void> {
+    const moves = new Map<string, BoardEvent>();
+    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
+      const taskId = event.payload["taskId"];
+      if (event.type === "task.moved" && typeof taskId === "string") {
+        moves.set(taskId, event);
+      }
+    }
+    for (const slug of await listDirs(this.paths.projects())) {
+      for (const task of await this.listTasks(slug)) {
+        const move = moves.get(task.id);
+        const from = move?.payload["from"];
+        if (
+          move === undefined ||
+          typeof from !== "string" ||
+          task.returned !== undefined ||
+          task.completing ||
+          (task.status !== "open" && task.status !== "claimed")
+        ) {
+          continue;
+        }
+        const back = stageIndex(task, from);
+        if (back > stageIndex(task, task.stage)) {
+          await this.writeTask(slug, {
+            ...task,
+            returned: { from, by: move.actor, at: move.ts },
+          });
+        }
+      }
+    }
   }
 
   /** Members that predate `decisions` among the ops channels read proposals without their outcome. */
@@ -1820,8 +1860,15 @@ export class Board {
         completedBy: actor.name,
         completedAt: ts,
       };
+      const next = current.stages[index + 1];
+      // The rework after a send-back lasts until the task is back at the stage that returned it.
+      const reworkDone =
+        current.returned === undefined ||
+        next === undefined ||
+        index + 1 >= stageIndex(current, current.returned.from);
       const base: Task = {
         ...current,
+        ...(reworkDone ? { returned: undefined } : {}),
         stages: current.stages.map((s, i) => (i === index ? completed : s)),
         body:
           args.note === undefined
@@ -1831,7 +1878,6 @@ export class Board {
         leaseExpiresAt: undefined,
         updatedAt: ts,
       };
-      const next = current.stages[index + 1];
       let task: Task;
       if (next !== undefined) {
         task = await this.writeTask(location.project, {
@@ -1997,7 +2043,13 @@ export class Board {
             "only the holder, the creator, the user, the steward, or the concierge may abandon a task",
           );
         }
-        next = { ...next, status: "abandoned", claimedBy: undefined, leaseExpiresAt: undefined };
+        next = {
+          ...next,
+          status: "abandoned",
+          claimedBy: undefined,
+          leaseExpiresAt: undefined,
+          returned: undefined,
+        };
       } else if (args.stage !== undefined) {
         const at = stageIndex(current, current.stage);
         const to = stageIndex(current, args.stage);
@@ -2026,6 +2078,7 @@ export class Board {
           stages: current.stages.map((stage, i) =>
             i >= to && i <= at ? reopenStage(stage) : stage,
           ),
+          returned: { from: current.stage, by: actor.name, at: ts },
         };
         moved = { from: current.stage, to: args.stage };
       }

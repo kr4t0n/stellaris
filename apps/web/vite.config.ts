@@ -9,8 +9,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   // React 19's production client alone is about 400 kB minified.
   build: { chunkSizeWarningLimit: 800 },
+  // IPv4 loopback, as the board server binds: Vite's `localhost` can resolve to ::1 alone, which
+  // `kubectl port-forward` cannot reach because it dials 127.0.0.1.
   server: {
+    host: "127.0.0.1",
     port: 5173,
     proxy: { "/api": board, "/health": board },
   },
+  preview: { host: "127.0.0.1" },
 });

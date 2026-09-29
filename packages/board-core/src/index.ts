@@ -6,7 +6,7 @@ export type {
   AddProjectInput,
   AddReplicaInput,
   BoardOptions,
-  InboxResult,
+  DigestResult,
   InitInput,
   RetireAgentInput,
   RunnerPatch,

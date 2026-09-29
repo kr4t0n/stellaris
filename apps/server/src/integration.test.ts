@@ -148,7 +148,7 @@ describe("Phase 1 exit criterion", () => {
     expect(rendered).toContain("## Planning");
     expect(rendered).toContain(board.paths.board);
     // The user's mention was delivered in a completed turn, so the cursor has moved past it.
-    const unread = await board.readInbox({ name: "eng-1", role: "engineer" }, { advance: false });
+    const unread = await board.readDigest({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
   });
 });

@@ -23,7 +23,7 @@ export interface RenderInstructionsInput {
 }
 
 const TURN_CONTRACT = [
-  "- The digest in your prompt is your inbox. Read it before anything else.",
+  "- The digest in your prompt is what is new for you since your last turn: unread messages that mention you, sit in channels you follow, or belong to threads you take part in, and the stages you hold or could take. Read it before anything else.",
   "- Act through the board tools (the `board` MCP server). Holding a stage is a lease; every turn that touches the task renews it.",
   "- Work only inside your worktree. A task's work goes on its branch `task/<id>`: run `git switch task/<id>` before working on the task and commit there. After each turn the runner commits what you left on a task branch and switches your worktree back to your own branch, `agent/<name>`, for work tied to no task.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",

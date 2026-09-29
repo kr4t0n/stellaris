@@ -191,7 +191,7 @@ const TurnHistoryPayloadSchema = z.object({
   error: z.string().nullable().default(null),
 });
 
-export interface InboxResult {
+export interface DigestResult {
   readonly messages: Message[];
   readonly cursor: Ulid | null;
 }
@@ -208,7 +208,7 @@ export interface TaskLocation {
   readonly task: Task;
 }
 
-const CursorsSchema = z.object({ inbox: z.string().nullable() });
+const CursorsSchema = z.object({ digest: z.string().nullable() });
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
@@ -239,6 +239,7 @@ const OPS_CHANNELS: readonly ChannelRef[] = ["ops", "governance", "decisions"];
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
 const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
 const THREAD_RECORDS = "threads-as-records";
+const DIGEST_CURSORS = "digest-replaces-inbox";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -491,7 +492,9 @@ export class Board {
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
       : { applied: [] };
-    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS].filter((name) => !applied.includes(name));
+    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS, DIGEST_CURSORS].filter(
+      (name) => !applied.includes(name),
+    );
     if (pending.length === 0) {
       return;
     }
@@ -500,6 +503,9 @@ export class Board {
     }
     if (pending.includes(THREAD_RECORDS)) {
       await this.recordTaskThreads();
+    }
+    if (pending.includes(DIGEST_CURSORS)) {
+      await this.renameInboxCursors();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -593,6 +599,26 @@ export class Board {
         await this.writeTask(slug, task);
       }
     }
+  }
+
+  /**
+   * The digest was once called the inbox: each cursor file keyed its cursor `inbox`, and the user
+   * followed every society channel and project general channel to read one. The user takes no
+   * turns, so it follows nothing now.
+   */
+  private async renameInboxCursors(): Promise<void> {
+    const Legacy = z.object({ inbox: z.string().nullable() });
+    for (const agent of await this.listAgents()) {
+      const file = this.paths.agentCursors(agent.name);
+      if (await exists(file)) {
+        const legacy = Legacy.safeParse(JSON.parse(await readFile(file, "utf8")));
+        if (legacy.success) {
+          await writeJson(file, { digest: legacy.data.inbox });
+        }
+      }
+    }
+    await this.updateAgent(USER_NAME, (user) => ({ ...user, subscriptions: [] }));
+    await this.refreshMember(USER_NAME);
   }
 
   /** Writes every missing seed charter and aligns the existing ones with their seed. */
@@ -1005,11 +1031,9 @@ export class Board {
       { project: project.slug, updatedAt: this.now().toISOString() },
       `# ${project.name} dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n`,
     );
-    // The user follows every project's general channel by default.
     await this.updateAgent(USER_NAME, (user) => ({
       ...user,
       memberships: [...new Set([...user.memberships, project.slug])],
-      subscriptions: [...new Set([...user.subscriptions, channelRef(project.slug, "general")])],
     }));
     await this.refreshMember(USER_NAME);
     await this.events.append("project.added", by, {
@@ -1239,7 +1263,11 @@ export class Board {
     });
   }
 
-  async readInbox(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<InboxResult> {
+  /**
+   * The reader's digest: messages newer than its cursor that mention it, sit in a channel it
+   * follows, or belong to a thread it takes part in. Agents reach it through the `read_inbox` verb.
+   */
+  async readDigest(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<DigestResult> {
     const args = VerbInputs.read_inbox.parse(input);
     await this.authorize(actor, "read_inbox");
     return this.mutex.run(async () => {
@@ -1247,8 +1275,8 @@ export class Board {
       const cursorFile = this.paths.agentCursors(actor.name);
       const stored = (await exists(cursorFile))
         ? await readJson(cursorFile, CursorsSchema)
-        : { inbox: null };
-      const since = args.since_cursor === undefined ? stored.inbox : args.since_cursor;
+        : { digest: null };
+      const since = args.since_cursor === undefined ? stored.digest : args.since_cursor;
       const subscribed = new Set(agent.subscriptions);
       const threadParticipation = new Map<Ulid, boolean>();
       const collected: Message[] = [];
@@ -1278,8 +1306,8 @@ export class Board {
       const messages = collected.slice(0, args.limit);
       const last = messages.at(-1);
       const cursor = last === undefined ? since : last.id;
-      if (args.advance && cursor !== stored.inbox) {
-        await writeJson(cursorFile, { inbox: cursor });
+      if (args.advance && cursor !== stored.digest) {
+        await writeJson(cursorFile, { digest: cursor });
       }
       return { messages, cursor };
     });
@@ -2220,7 +2248,7 @@ export class Board {
       case "post_message":
         return this.postMessage(actor, VerbInputs.post_message.parse(input));
       case "read_inbox":
-        return this.readInbox(actor, VerbInputs.read_inbox.parse(input));
+        return this.readDigest(actor, VerbInputs.read_inbox.parse(input));
       case "search":
         return this.search(actor, VerbInputs.search.parse(input));
       case "open_thread":
@@ -2336,8 +2364,8 @@ export class Board {
       : "";
   }
 
-  async setInboxCursor(agent: Name, cursor: Ulid | null): Promise<void> {
-    await this.mutex.run(() => writeJson(this.paths.agentCursors(agent), { inbox: cursor }));
+  async setDigestCursor(agent: Name, cursor: Ulid | null): Promise<void> {
+    await this.mutex.run(() => writeJson(this.paths.agentCursors(agent), { digest: cursor }));
   }
 
   async readSessions(agent: Name, project: Name): Promise<SessionsFile> {
@@ -2573,7 +2601,7 @@ export class Board {
       cli: null,
       homeRunner: SERVER_RUNNER,
       memberships: [],
-      subscriptions: [...society.channels],
+      subscriptions: [],
       status: "active",
       createdAt,
       tokenHash: hashToken(userToken),
@@ -2970,11 +2998,6 @@ export class Board {
         doc.body,
       );
       await ensureDir(this.paths.societyChannel(input.name));
-      // The user follows every society channel.
-      await this.updateAgent(USER_NAME, (user) => ({
-        ...user,
-        subscriptions: [...new Set([...user.subscriptions, ref])],
-      }));
     } else {
       const project = input.project;
       await this.updateProject(project, (current) => ({

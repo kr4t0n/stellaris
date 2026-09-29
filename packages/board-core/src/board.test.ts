@@ -4,6 +4,7 @@ import path from "node:path";
 import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { Board, SYSTEM_ACTOR, type Actor } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
@@ -61,6 +62,8 @@ describe("Board", () => {
     expect(roles).toEqual(["concierge", "engineer", "reviewer", "steward", "user"]);
     expect(board.resolveToken(userToken)).toEqual(USER);
     expect(board.resolveToken("stl_not-a-token")).toBeNull();
+    // The user takes no turns and reads no digest, so it follows no channel.
+    expect((await board.readAgent("user")).subscriptions).toEqual([]);
     expect((await board.readProject("demo")).members.toSorted()).toEqual(["eng-1", "rev-1"]);
     await expect(Board.init(dir, { name: "again" })).rejects.toMatchObject({
       code: "ALREADY_EXISTS",
@@ -91,10 +94,10 @@ describe("Board", () => {
     ]);
     expect(task).toMatchObject({ status: "open", stage: "s1", onDone: "none" });
 
-    const inbox = await board.readInbox(ENG);
-    expect(inbox.messages.map((m) => m.id)).toEqual([brief.id]);
-    expect(inbox.cursor).toBe(brief.id);
-    expect((await board.readInbox(ENG)).messages).toEqual([]);
+    const digest = await board.readDigest(ENG);
+    expect(digest.messages.map((m) => m.id)).toEqual([brief.id]);
+    expect(digest.cursor).toBe(brief.id);
+    expect((await board.readDigest(ENG)).messages).toEqual([]);
 
     await expect(board.claimTask(REV, { task_id: task.id })).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -114,8 +117,8 @@ describe("Board", () => {
       thread_id: task.id,
     });
     expect(threadMessage.thread).toBe(task.id);
-    const reviewerInbox = await board.readInbox(REV);
-    expect(reviewerInbox.messages.map((m) => m.id)).toEqual([brief.id]);
+    const reviewerDigest = await board.readDigest(REV);
+    expect(reviewerDigest.messages.map((m) => m.id)).toEqual([brief.id]);
 
     const reviewing = await board.advanceTask(ENG, { task_id: task.id, note: "PR ready" });
     expect(reviewing).toMatchObject({ status: "open", stage: "s2" });
@@ -462,7 +465,7 @@ describe("Board", () => {
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
     const ids = async (actor: Actor): Promise<Ulid[]> =>
-      (await board.readInbox(actor)).messages.map((m) => m.id);
+      (await board.readDigest(actor)).messages.map((m) => m.id);
 
     // A topic on a channel: the thread records its channel, and every message carries it.
     await expect(board.openThread(ENG, { channel: "demo/general" })).rejects.toMatchObject({
@@ -726,7 +729,6 @@ describe("Board", () => {
       await board.addChannel(STEW, { project: null, name: "random", purpose: "Off topic" }),
     ).toBe("random");
     expect((await board.society()).channels).toContain("random");
-    expect((await board.readAgent("user")).subscriptions).toContain("random");
 
     // Runner state changes are recorded and signalled; signals are readable back.
     const runner = await board.markRunner("server", { status: "connected", clis: ["claude"] });
@@ -831,7 +833,7 @@ describe("Board", () => {
     });
   });
 
-  it("aligns an older society once: ops readers follow decisions, task threads become records", async () => {
+  it("aligns an older society once: decisions for ops readers, thread records, the digest cursor", async () => {
     const { board, eng } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
     const { agent } = await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -876,7 +878,17 @@ describe("Board", () => {
       "utf8",
     );
     await expect(board.readThread(live)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // The digest was once the inbox: cursor files keyed it `inbox`, and the user followed channels.
+    const Cursor = z.object({ digest: z.string().nullable() });
+    const cursor = ulid();
+    const cursorFile = board.paths.agentCursors("eng-1");
+    await writeFile(cursorFile, JSON.stringify({ inbox: cursor }), "utf8");
+    await board.subscribe(USER, { channel: "demo/general" });
     const reopened = await Board.open(dir);
+    expect(Cursor.strict().parse(JSON.parse(await readFile(cursorFile, "utf8")))).toEqual({
+      digest: cursor,
+    });
+    expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
     expect((await reopened.readAgent("stew")).subscriptions).toContain("decisions");
     expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
     expect(await reopened.readThread(live)).toMatchObject({

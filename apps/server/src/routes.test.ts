@@ -101,7 +101,7 @@ describe("board server routes", () => {
     expect(forbidden.status).toBe(403);
   });
 
-  it("serves dashboards, runners, roles, proposals, and the caller's inbox", async () => {
+  it("serves dashboards, runners, roles, and proposals, and no inbox", async () => {
     const app = createApp({ board, version: "t" });
     const dashboard = z
       .object({ body: z.string() })
@@ -127,23 +127,8 @@ describe("board server routes", () => {
       [{ status: "proposed", kind: "channel" }].map((p) => expect.objectContaining(p)),
     );
 
-    await board.postMessage(
-      { name: "eng-1", role: "engineer" },
-      { channel: "demo/general", body: "@user please decide" },
-    );
-    // The user follows every society channel, so the proposal's governance post is unread too.
-    const inbox = z.object({ messages: z.array(z.object({ body: z.string() })) });
-    expect(
-      inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
-    ).toHaveLength(2);
-    // A plain read does not advance the cursor; an explicit advance does.
-    expect(
-      inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
-    ).toHaveLength(2);
-    await app.request("/api/inbox?advance=true", { headers });
-    expect(
-      inbox.parse(await (await app.request("/api/inbox", { headers })).json()).messages,
-    ).toHaveLength(0);
+    // The digest is the agents' view, read by the runner; the user follows the board itself.
+    expect((await app.request("/api/inbox", { headers })).status).toBe(404);
   });
 
   it("retires members, edits charters, opens channels, and lists signals", async () => {

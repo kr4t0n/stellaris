@@ -39,13 +39,13 @@ export interface TurnPromptInput {
   /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
   readonly knowledge?: KnowledgeView | null | undefined;
-  /** The threads the inbox's messages belong to, by id, for their titles. */
+  /** The threads the unread messages belong to, by id, for their titles. */
   readonly threads?: ReadonlyMap<Ulid, Thread> | undefined;
 }
 
-/** What a reflection turn is for. It replaces new work, not the inbox. */
+/** What a reflection turn is for. It replaces new work, not the unread messages. */
 const REFLECTION = [
-  "This turn is for your memory; take no new work, and answer the inbox only where a reply is needed. Read memory/core.md and your recent turn records, then:",
+  "This turn is for your memory; take no new work, and answer unread messages only where a reply is needed. Read memory/core.md and your recent turn records, then:",
   "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
   '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps. Propose it with kind "skill" when other citizens would use it.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
@@ -236,7 +236,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
-  lines.push("", `## Inbox (${input.messages.length} unread)`, "");
+  lines.push("", `## Unread messages (${input.messages.length})`, "");
   if (input.messages.length === 0) {
     lines.push("Nothing new.");
   } else {
@@ -260,7 +260,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   lines.push(
     "## What to do",
     "",
-    "Act on the inbox and your stages through the board tools: claim_task to hold a stage, advance_task when your part is done, plan_task to reshape what comes next, post_message to talk, and propose for what the society lacks. Silence is allowed when nothing needs a reply. End with the status object.",
+    "Act on the unread messages and your stages through the board tools: claim_task to hold a stage, advance_task when your part is done, plan_task to reshape what comes next, post_message to talk, and propose for what the society lacks. Silence is allowed when nothing needs a reply. End with the status object.",
   );
   return `${lines.join("\n")}\n`;
 }

@@ -792,7 +792,7 @@ export class Scheduler {
         if (this.pending.has(key) || this.running.has(key)) {
           continue;
         }
-        const inbox = await this.board.readInbox(
+        const digest = await this.board.readDigest(
           { name: agent.name, role: agent.role },
           { advance: false, limit: 1 },
         );
@@ -808,7 +808,7 @@ export class Scheduler {
         const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
         const decision = decideWake({
           trigger,
-          digestSize: inbox.messages.length,
+          digestSize: digest.messages.length,
           claimsHeld: held.length,
           waitingStages: waiting.length,
           paused: false,

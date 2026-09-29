@@ -126,7 +126,7 @@ describe("Board runtime support", () => {
     expect(types).toContain("turn.started");
     expect(types).toContain("turn.failed");
 
-    await board.setInboxCursor("eng-1", null);
+    await board.setDigestCursor("eng-1", null);
     expect(await board.readMemoryCore("eng-1")).toContain("Core memory");
     expect(await board.readAgentRoleBody("eng-1")).toContain("engineer");
 

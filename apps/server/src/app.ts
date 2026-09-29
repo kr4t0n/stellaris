@@ -40,14 +40,6 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
   INVALID_STATE: 409,
 };
 
-const InboxQuerySchema = z.object({
-  limit: z.coerce.number().int().positive().max(200).default(50),
-  advance: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((value) => value === "true"),
-});
-
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
 const ChannelBodySchema = z.object({
   project: NameSchema.nullable().default(null),
@@ -159,15 +151,6 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     return c.json({ thread: await board.readThread(id), messages: await board.listThread(id) });
   });
   api.get("/channels/:ref{.+}", async (c) => c.json(await board.listChannel(c.req.param("ref"))));
-
-  // The caller's own inbox. Reading does not advance the cursor unless asked.
-  api.get("/inbox", async (c) => {
-    const query = InboxQuerySchema.parse({
-      limit: c.req.query("limit") ?? "50",
-      advance: c.req.query("advance") ?? "false",
-    });
-    return c.json(await board.readInbox(c.get("actor"), query));
-  });
 
   // Board events: the durable log, as a page or as a stream.
   api.get("/events", async (c) => {

@@ -430,28 +430,6 @@ program
     print(message, () => `Posted ${message.id} to general; the concierge wakes on it`);
   });
 
-program
-  .command("inbox")
-  .description("Read unread messages for an agent and advance its cursor")
-  .option("--as <agent>", "act as this agent instead of the user")
-  .option("--peek", "do not advance the cursor", false)
-  .option("--limit <n>", "maximum messages", "50")
-  .action(async (opts: { as?: string; peek: boolean; limit: string }) => {
-    const board = await open();
-    const who = await actorFor(board, opts.as);
-    const inbox = await board.readInbox(who, { advance: !opts.peek, limit: Number(opts.limit) });
-    print(inbox, () =>
-      inbox.messages.length === 0
-        ? "No unread messages."
-        : inbox.messages
-            .map(
-              (m) =>
-                `[${m.ts}] ${m.channel}${m.thread === undefined ? "" : ` (thread ${m.thread})`} @${m.author}: ${m.body.trim()}`,
-            )
-            .join("\n"),
-    );
-  });
-
 const task = program.command("task").description("Manage tasks");
 
 task
@@ -783,9 +761,31 @@ program
     );
   });
 
-program
-  .command("turn")
-  .description("Turn operations")
+const turn = program.command("turn").description("Turn operations");
+
+turn
+  .command("digest <agent>")
+  .description("Show the unread messages the agent's next turn opens with; the cursor stays put")
+  .option("--limit <n>", "maximum messages", "50")
+  .action(async (agentName: string, opts: { limit: string }) => {
+    const board = await open();
+    const digest = await board.readDigest(await board.actorFor(agentName), {
+      advance: false,
+      limit: Number(opts.limit),
+    });
+    print(digest, () =>
+      digest.messages.length === 0
+        ? "No unread messages."
+        : digest.messages
+            .map(
+              (m) =>
+                `[${m.ts}] ${m.channel}${m.thread === undefined ? "" : ` (thread ${m.thread})`} @${m.author}: ${m.body.trim()}`,
+            )
+            .join("\n"),
+    );
+  });
+
+turn
   .command("run <agent>")
   .description("Enqueue a manual wake for an agent on a project, or a reflection turn")
   .requiredOption("--project <slug>", "project to act on, or society for a society-scope turn")

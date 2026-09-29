@@ -215,7 +215,7 @@ export class LocalRunner {
     }
 
     const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project);
-    const inbox = await this.board.readInbox(actor, { advance: false, limit: 50 });
+    const digest = await this.board.readDigest(actor, { advance: false, limit: 50 });
     const held = await this.board.heldClaims(agent.name);
     const roleCharter = await this.board.readAgentRoleBody(agent.name);
     const memoryCore = await this.board.readMemoryCore(agent.name);
@@ -256,7 +256,7 @@ export class LocalRunner {
       (task) => task.claimedBy === undefined && mayHoldStage(actor, task),
     );
     const threads = new Map<Ulid, Thread>();
-    for (const id of new Set(inbox.messages.flatMap((message) => message.thread ?? []))) {
+    for (const id of new Set(digest.messages.flatMap((message) => message.thread ?? []))) {
       const thread = await this.board.readThread(id).catch(() => undefined);
       if (thread !== undefined) {
         threads.set(id, thread);
@@ -264,7 +264,7 @@ export class LocalRunner {
     }
     const prompt = buildTurnPrompt({
       dispatch,
-      messages: inbox.messages,
+      messages: digest.messages,
       threads,
       heldClaims: held,
       waitingStages: waiting,
@@ -369,7 +369,7 @@ export class LocalRunner {
 
     if (result.exitReason === "completed" || result.exitReason === "blocked") {
       // The digest was delivered; only now does the cursor move past it.
-      await this.board.setInboxCursor(agent.name, inbox.cursor);
+      await this.board.setDigestCursor(agent.name, digest.cursor);
       await this.renewLeases(
         actor,
         held.map((task) => task.id),

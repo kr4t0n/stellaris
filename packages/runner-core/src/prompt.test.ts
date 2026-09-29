@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
 describe("buildTurnPrompt", () => {
-  it("carries the trigger, held claims, the inbox with thread titles, and a failed-turn note", () => {
+  it("carries the trigger, held claims, unread messages with thread titles, and a failed-turn note", () => {
     const prompt = buildTurnPrompt({
       dispatch: {
         agent: "eng-1",
@@ -72,7 +72,7 @@ describe("buildTurnPrompt", () => {
     });
     expect(prompt).toContain("Trigger: mention from user. mentioned by user");
     expect(prompt).toContain("Your previous turn did not finish");
-    expect(prompt).toContain("Inbox (2 unread)");
+    expect(prompt).toContain("## Unread messages (2)");
     expect(prompt).toContain(
       'demo/dev thread "Which runner?" (01ARZ3NDEKTSV4RRFFQ69G5FAT) from @rev-1',
     );

@@ -112,7 +112,10 @@ export function useWorldSnapshot(): WorldSnapshot | null {
         signals: scheduler.data.signals ?? [],
       },
       proposals: proposals.data ?? [],
-      unread: inbox.data?.messages.length ?? 0,
+      // What needs the owner: mentions of it and decisions, not every post in a followed channel.
+      unread: (inbox.data?.messages ?? []).filter(
+        (message) => message.mentions.includes("owner") || message.channel === "decisions",
+      ).length,
       events: events.data ?? [],
       activity,
       library: { skills: skills.data?.length ?? 0, knowledge: knowledge.data?.length ?? 0 },

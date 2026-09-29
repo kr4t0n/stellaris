@@ -302,15 +302,19 @@ export async function createWorldScene(
     emitCamera();
   };
 
-  /** The largest zoom at which the world's width fits and its height nearly does; pixel art wants integers. */
+  /**
+   * The largest integer zoom at which the world's width fits and its height nearly does. When no
+   * zoom of two or more manages that, two is taken anyway with the top of the world anchored,
+   * because a readable world that needs a scroll beats a whole one nobody can make out.
+   */
   const fittingZoom = (widthPx: number, heightPx: number): number => {
     const view = viewport();
-    for (let candidate = 3; candidate > MIN_ZOOM; candidate -= 1) {
-      if (widthPx * candidate <= view.width && heightPx * candidate <= view.height * 1.6) {
+    for (let candidate = 3; candidate >= 2; candidate -= 1) {
+      if (widthPx * candidate <= view.width && heightPx * candidate <= view.height * 1.15) {
         return candidate;
       }
     }
-    return MIN_ZOOM;
+    return widthPx * 2 <= view.width ? 2 : MIN_ZOOM;
   };
 
   const fit = (): void => {

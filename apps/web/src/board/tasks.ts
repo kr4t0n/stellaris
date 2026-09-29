@@ -1,9 +1,10 @@
 import { stageIndex, type Stage, type Task } from "@stellaris/shared";
 
 /** Where a task stands, as the tasks view groups it. */
-export type TaskPhase = "waiting" | "working" | "landing" | "done" | "abandoned";
+export type TaskPhase = "returned" | "waiting" | "working" | "landing" | "done" | "abandoned";
 
 export const PHASES: ReadonlyArray<{ readonly phase: TaskPhase; readonly label: string }> = [
+  { phase: "returned", label: "Sent back" },
   { phase: "waiting", label: "Waiting for a holder" },
   { phase: "working", label: "Being worked" },
   { phase: "landing", label: "Landing" },
@@ -18,12 +19,28 @@ export function phaseOf(task: Task): TaskPhase {
   if (task.completing) {
     return "landing";
   }
+  if (task.returned !== undefined) {
+    return "returned";
+  }
   return task.status === "claimed" ? "working" : "waiting";
+}
+
+/** Whether a stage is the one the task is at now, held or waiting for a holder. */
+export function isCurrent(task: Task, stage: Stage): boolean {
+  const phase = phaseOf(task);
+  return (
+    stage.id === task.stage && phase !== "landing" && phase !== "done" && phase !== "abandoned"
+  );
 }
 
 export function inPlay(task: Task): boolean {
   const phase = phaseOf(task);
   return phase !== "done" && phase !== "abandoned";
+}
+
+/** A stage of the task by its name, or its id when a plan change has removed it. */
+export function stageName(task: Task, id: string): string {
+  return task.stages.find((stage) => stage.id === id)?.name ?? id;
 }
 
 /** Who may hold a stage, in words: a named citizen, any member of a role, or anyone. */

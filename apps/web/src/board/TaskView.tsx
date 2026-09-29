@@ -16,9 +16,19 @@ import {
 import { Citizen, displayName } from "./Avatar.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ThreadCard } from "./ThreadCard.js";
-import { assigneeOf, inPlay, PHASES, phaseOf, progressOf, type TaskPhase } from "./tasks.js";
+import {
+  assigneeOf,
+  inPlay,
+  isCurrent,
+  PHASES,
+  phaseOf,
+  progressOf,
+  stageName,
+  type TaskPhase,
+} from "./tasks.js";
 
 const PHASE_STYLE: Record<TaskPhase, string> = {
+  returned: "bg-orange-500/15 text-orange-300",
   waiting: "bg-amber-500/15 text-amber-300",
   working: "bg-emerald-500/15 text-emerald-300",
   landing: "bg-sky-500/15 text-sky-300",
@@ -39,10 +49,13 @@ function StageItem({
   members: readonly Member[] | undefined;
   now: number;
 }) {
-  const phase = phaseOf(task);
   const done = stage.completedBy !== undefined;
-  const current = stage.id === task.stage && (phase === "waiting" || phase === "working");
+  const current = isCurrent(task, stage);
   const last = index === task.stages.length - 1;
+  // `holders` is everyone who ever held the stage; only the current stage has a holder now.
+  const holder = current && task.status === "claimed" ? task.claimedBy : undefined;
+  const earlier = stage.holders.filter((name) => name !== holder && name !== stage.completedBy);
+  const returned = task.returned?.from === stage.id ? task.returned : undefined;
   return (
     <li className="relative flex gap-3 pb-4">
       {last ? null : (
@@ -71,22 +84,19 @@ function StageItem({
         </p>
         <p className="mt-0.5 text-meta">
           for {assigneeOf(stage)}
-          {stage.holders.length > 0 ? (
+          {holder === undefined ? null : (
             <>
               {" · held by "}
-              {stage.holders.map((holder, position) => (
-                <span key={holder}>
-                  {position > 0 ? ", " : ""}
-                  <Citizen name={holder} members={members} />
-                </span>
-              ))}
+              <Citizen name={holder} members={members} />
             </>
-          ) : null}
+          )}
           {stage.completedBy !== undefined && stage.completedAt !== undefined
             ? ` · done by ${stage.completedBy} ${ago(stage.completedAt, now)}`
-            : current && phase === "waiting"
+            : current && task.status === "open"
               ? ` · waiting since ${ago(task.stageSince, now)}`
               : ""}
+          {earlier.length > 0 ? ` · held before by ${earlier.join(", ")}` : ""}
+          {returned === undefined ? "" : ` · sent back by ${returned.by} ${ago(returned.at, now)}`}
         </p>
       </div>
     </li>
@@ -166,6 +176,13 @@ export function TaskView() {
       />
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <h3 className="text-caps">Plan</h3>
+        {current.returned === undefined ? null : (
+          <p className="mt-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-200">
+            Sent back from {stageName(current, current.returned.from)} by {current.returned.by}{" "}
+            {ago(current.returned.at, now)}. The work is redone from{" "}
+            {stageName(current, current.stage)} until it reaches that stage again.
+          </p>
+        )}
         <ol className="mt-3">
           {current.stages.map((stage, index) => (
             <StageItem

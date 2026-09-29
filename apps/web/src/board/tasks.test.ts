@@ -43,6 +43,12 @@ describe("task phases", () => {
     expect(phaseOf(task("c", { completing: true }))).toBe("landing");
     expect(phaseOf(task("d", { status: "done" }))).toBe("done");
     expect(phaseOf(task("e", { status: "abandoned" }))).toBe("abandoned");
+    const back = { from: "s2", by: "ed", at: ts };
+    expect(phaseOf(task("f", { stage: "s1", returned: back }))).toBe("returned");
+    expect(phaseOf(task("g", { status: "claimed", claimedBy: "ann", returned: back }))).toBe(
+      "returned",
+    );
+    expect(phaseOf(task("h", { completing: true, returned: back }))).toBe("landing");
   });
 
   it("groups tasks in view order, newest first, leaving out empty groups", () => {

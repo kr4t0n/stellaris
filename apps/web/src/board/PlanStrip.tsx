@@ -1,5 +1,5 @@
 import type { Task } from "@stellaris/shared";
-import { assigneeOf, phaseOf } from "./tasks.js";
+import { assigneeOf, isCurrent, phaseOf } from "./tasks.js";
 
 /**
  * A task's plan as a row of segments: done stages filled, the current one lit (amber while it
@@ -11,11 +11,11 @@ export function PlanStrip({ task }: { task: Task }) {
     <ol className="flex gap-1" aria-hidden="true">
       {task.stages.map((stage, index) => {
         const done = stage.completedBy !== undefined;
-        const current = stage.id === task.stage && (phase === "waiting" || phase === "working");
+        const current = isCurrent(task, stage);
         const fill = done
           ? "bg-emerald-400/60"
           : current
-            ? phase === "working"
+            ? task.status === "claimed"
               ? "bg-fg-primary/90"
               : "bg-amber-300/80"
             : phase === "abandoned"

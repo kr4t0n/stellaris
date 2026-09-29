@@ -6,7 +6,7 @@ import { useMembers, useNow, useProjects, useTasks } from "../lib/session.js";
 import { Citizen } from "./Avatar.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { PlanStrip } from "./PlanStrip.js";
-import { assigneeOf, groupTasks, PHASES, phaseOf, progressOf } from "./tasks.js";
+import { assigneeOf, groupTasks, PHASES, phaseOf, progressOf, stageName } from "./tasks.js";
 
 /** Groups that end a task keep only their newest few until asked for the rest. */
 const FOLDED = 5;
@@ -36,12 +36,18 @@ function TaskRow({
         <div className="mt-2">
           <PlanStrip task={task} />
         </div>
+        {task.returned === undefined ? null : (
+          <p className="mt-1.5 truncate text-xs text-orange-300/90">
+            Sent back from {stageName(task, task.returned.from)} by {task.returned.by}{" "}
+            {ago(task.returned.at, now)}
+          </p>
+        )}
         <p className="mt-1.5 truncate text-meta">
-          {phase === "working" && stage !== undefined ? (
+          {task.status === "claimed" && phase !== "landing" && stage !== undefined ? (
             <>
               {stage.name} · held by <Citizen name={task.claimedBy ?? ""} members={members} />
             </>
-          ) : phase === "waiting" && stage !== undefined ? (
+          ) : task.status === "open" && phase !== "landing" && stage !== undefined ? (
             `${stage.name} · waiting for ${assigneeOf(stage)} since ${ago(task.stageSince, now)}`
           ) : phase === "landing" ? (
             `landing task/${task.id} on the default branch`

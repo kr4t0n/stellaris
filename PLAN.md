@@ -192,7 +192,8 @@ Subscriptions subscribe(channel)
 Governance    propose(kind, charter)
               approve(proposal_id)          # user and steward only
               reject(proposal_id, reason)   # user and steward only
-Projects      create_project(slug, name, repo?)       # Phase 5, concierge and user
+Projects      create_project(slug, name, repo?, default_plan?, on_done?)   # concierge and user
+              configure_project(project, default_plan?, on_done?)          # user, steward, concierge
 Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
 ```
 
@@ -371,11 +372,11 @@ A role is a charter plus a tool set. Work reaches a role through the stages assi
 
 ### 8.2 Seed roles
 
-| Role      | Responsibility                                                                                                                                                                                       | Extra verbs     |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| User      | The human. Decides hiring, roles and tool grants, and retirement; sets gates; may act anywhere.                                                                                                      | every verb      |
-| Steward   | Watches the operations channel and the task board for capacity, skill, and capability gaps. Drafts proposals, including the roles a project needs. Sets gates. Curates society knowledge and skills. | approve, reject |
-| Concierge | The front desk. Wakes on every user post, answers, routes to projects, tasks, threads, and citizens, plans the tasks it routes, sets gates, creates projects, proposes members. Resident.            | create_project  |
+| Role      | Responsibility                                                                                                                                                                                                                                                                           | Extra verbs                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| User      | The human. Decides hiring, roles and tool grants, and retirement; sets gates; may act anywhere.                                                                                                                                                                                          | every verb                         |
+| Steward   | Watches the operations channel and the task board for capacity, skill, and capability gaps. Drafts proposals, including the roles a project needs. Shapes plans over time, sets gates, and sets each project's default plan and completion effect. Curates society knowledge and skills. | approve, reject, configure_project |
+| Concierge | The front desk. Wakes on every user post, answers, routes to projects, tasks, threads, and citizens, plans the tasks it routes, sets gates, creates projects, proposes members. Resident.                                                                                                | create_project, configure_project  |
 
 Roles for the work itself, such as an engineer, a reviewer, a researcher, or an analyst, are not seeded. The steward and the concierge propose them when a project needs them, written for that project's kind of work, and the user approves them like any role. The content of charters is the culture of the society; it is iterated after the infrastructure exists, not designed once.
 
@@ -420,7 +421,7 @@ stateDiagram-v2
 
 **Stages advance and return.** The holder of the current stage advances it when its part is finished, and the next stage becomes current and waits for its holder. The holder, the user, the steward, and the concierge may move the task back to an earlier stage, which is how a check sends work back for another pass. Claims on a stage are leases (section 6.3): an expired lease or a release returns the stage to waiting.
 
-**Plans are written and rewritten by the participants.** A task gets its plan when it is created: from the creator, else from the project's default plan, else a single unassigned stage called `work`. The steward and the concierge plan the tasks they route, and any member of the project may reshape the stages ahead: add, remove, rename, reorder, or reassign them. An experiment that needs another round is one more stage inserted before the write-up; a task waiting on something outside the society is a stage named for what it waits on. Every change is an event on the record.
+**Plans are written and rewritten by the participants.** A task gets its plan when it is created: from the creator, else from the project's default plan, else a single unassigned stage called `work`. The steward and the concierge plan the tasks they route, and any member of the project may reshape the stages ahead: add, remove, rename, reorder, or reassign them. `plan_task` replaces the stages from the current one onward while nobody holds it, and the stages after it otherwise: a stage passed with its id is kept, one without an id is new, and an id left out is removed. An experiment that needs another round is one more stage inserted before the write-up; a task waiting on something outside the society is a stage named for what it waits on. Every change is an event on the record.
 
 **Gates are the one guarded part.** A gated stage is an independent check: nobody who held an earlier stage of the task may hold it, and the work passes it only by someone completing it. Only the user, the steward, and the concierge may add, remove, move, reassign, or ungate a gated stage; everyone else plans around them. A check cannot be dropped by the member it checks, and what a check is stays open: a code review, a referee reading a report, a second analyst reproducing a result.
 
@@ -434,9 +435,36 @@ stateDiagram-v2
 
 ### 9.3 Workspaces and integration
 
-- **Every project has a git workspace.** Each agent-project pair has a persistent worktree on its own branch, whatever the work: history serves reports, notebooks, and analysis scripts as well as code.
-- **Merge projects land work through the board.** For a project whose completion effect is `merge`, the board merges when a task completes, and the rendered instructions for that project tell agents never to merge or fast-forward the default branch themselves.
+- **Every project has a git workspace, and every task a branch.** Each agent-project pair keeps one persistent worktree, since a CLI session is tied to its working directory. A task's work lives on its own branch, `task/<id>`, which the runner creates from the default branch for every task an agent holds; the agent switches its worktree to that branch while working on the task and commits there. History serves reports, notebooks, and analysis scripts as well as code.
+- **The runner hands work over between turns.** After every turn the runner commits whatever was left uncommitted on a task branch and switches the worktree back to the agent's own branch, `agent/<name>`, which stays for work tied to no task. A task branch is therefore checked out only during its holder's turn, which git requires of a branch shared by several worktrees, and the next holder always finds the previous holder's work committed.
+- **Merge projects land work through the board.** For a task whose completion effect is `merge`, the board merges `task/<id>` into the default branch when the task completes, whoever did the work, and never lands one task's unfinished neighbours. The prompt for such a project tells agents never to merge or fast-forward the default branch themselves.
 - **Pull requests where a host exists.** A `merge` effect on a project with a hosting platform will open and merge a pull request instead of merging locally, so runners on different machines converge through the remote.
+
+### 9.4 The plan format
+
+A plan is a list of stages, each a small object:
+
+```json
+[
+  { "name": "baseline experiment", "role": "researcher" },
+  { "name": "analysis", "role": "researcher" },
+  { "name": "write-up", "role": "researcher" },
+  { "name": "referee review", "role": "editor", "gate": true }
+]
+```
+
+- **Fields.** `name` is required free text. A stage names at most one assignee, `role` or `agent`; with neither, any member of the project may hold it. `gate` is optional. Assignees are separate fields rather than an `@name`, because agents and roles share one namespace and an `@` in text the board writes would wake someone.
+- **What the board adds.** Each stage gets an id (`s1`, `s2`, and so on, never reused within a task), the members who have held it, and who completed it and when. Entering a stage wakes its named citizen, else its last holder when the work returns to it, else the project's members of its role.
+- **Project settings.** A project carries `defaultPlan`, the plan a task gets when its creator gives none, and `onDone`, its completion effect. `create_project` sets them and `configure_project` changes them, a verb only the user, the steward, and the concierge hold. A task inherits `onDone`; those three may override it per task through `plan_task`, for example for an exploratory task in a code project that should not merge.
+- **What agents see.** The task file carries the plan with the current stage marked. The digest lists the stages an agent holds and the stages waiting for it or its role, each with the rest of its plan on one line, for example `"Churn model": analysis (yours, 2 of 4); next: write-up (researcher), referee review (gate, editor)`.
+
+### 9.5 Planning in charters
+
+The seed charters describe how to plan, never what a kind of work looks like.
+
+- **Every citizen** reads the planning rules in the turn contract: name stages by what gets done; plan the next few steps and reshape as the work teaches you; assign a role when anyone in it could do the stage, a citizen only when it must be them, and nobody when anyone in the project could; insert a stage for another round or for a wait rather than forcing the plan; commit on the task branch and advance only when your part is done; ask the steward or the concierge in the task's thread when a gate should change.
+- **The concierge** plans every task it routes when it creates it, and gates where a second pair of eyes is worth it: before anything lands in a shared deliverable, so always before a merge; before effects outside the society, such as a deployment, a cluster change, or anything sent out; and before results are presented as findings. A task it created wakes it when it is done, so it can tell the user.
+- **The steward** owns how work is shaped over time. It answers stages waiting too long, stages assigned to roles nobody fills, and work sent back repeatedly by replanning, adjusting gates, or proposing the role a plan needs; it sets each project's default plan and completion effect; and it turns recurring plan shapes into society skills and planning norms into the society's norms, so the society learns how to plan instead of having it coded.
 
 ## 10. Human interaction
 
@@ -644,8 +672,6 @@ Multiple humans with different approval authority, confidentiality inside one so
 - Exact template of the injected digest and the end-of-turn status schema
 - Runner protocol details: registration payload, home sync format, mirror delta format
 - A mechanical guard against agents merging a merge project's default branch themselves; the rendered instructions forbid it, since permission rules cannot distinguish merging into main from other git use
-- Which branch a merge lands: today the working agent's branch per project, which also carries that agent's unfinished work on other tasks; a branch per task is the likely fix
-- The format of a project's default plan and of the stage list agents pass to `create_task` and `plan_task`
 
 ## 15. Decision register
 

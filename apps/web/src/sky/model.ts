@@ -11,17 +11,24 @@ export interface Anchor {
   readonly kind: "society" | "project";
   readonly x: number;
   readonly y: number;
-  /** The sphere's radius: its citizens and their names fit inside. */
+  /** The sphere's radius: everyone who may gather there, and their names, fit inside. */
   readonly radius: number;
 }
 
 export interface Star {
+  /**
+   * Unique in the sky: the citizen's name for its star at the core, and `name/scope` for a turn
+   * in a project, since a citizen in turns in two projects has a star in each.
+   */
+  readonly id: string;
   readonly name: string;
   readonly cli: CliKind;
   readonly state: StarState;
   /** A warm session is held for the citizen. */
   readonly resident: boolean;
   readonly anchor: string;
+  /** Where a queued turn will run; the star waits at the core until it starts. */
+  readonly queuedFor: string | null;
   readonly x: number;
   readonly y: number;
 }
@@ -63,28 +70,40 @@ function footprint(radius: number): number {
   return radius + NAME_ROOM;
 }
 
-/** The first scope listed for each agent in `agent/scope` pairs. */
-function scopesByAgent(pairs: readonly string[]): Map<string, string> {
-  const scopes = new Map<string, string>();
+/** The scopes in `agent/scope` pairs, by agent. */
+function scopesByAgent(pairs: readonly string[]): Map<string, string[]> {
+  const scopes = new Map<string, string[]>();
   for (const pair of pairs.toSorted()) {
     const [agent, scope] = pair.split("/");
-    if (agent !== undefined && scope !== undefined && !scopes.has(agent)) {
-      scopes.set(agent, scope);
+    if (agent !== undefined && scope !== undefined) {
+      scopes.set(agent, [...(scopes.get(agent) ?? []), scope]);
     }
   }
   return scopes;
 }
 
+interface Placement {
+  readonly id: string;
+  readonly member: Member & { cli: CliKind };
+  readonly state: StarState;
+  readonly scope: string;
+  readonly queuedFor: string | null;
+}
+
 /**
- * The sky for a snapshot of the board. Projects sit on a ring in creation order and the society
- * at the center; a citizen is at the scope of its running turn, else of its queued turn, else at
- * its first project, else at the society. Pure, so the same board always draws the same sky.
+ * The sky for a snapshot of the board. Projects sit on rings in creation order around the
+ * society at the center. A star away from the core is a turn in progress: a citizen has one star
+ * in each project it is in a turn at, and rests at the core otherwise, queued or idle. Spheres
+ * are sized for everyone who may gather there and every citizen keeps its seat in each, so a turn
+ * starting moves one star and nothing else.
+ * Pure, so the same board always draws the same sky.
  */
 export function skyModel(snapshot: SkySnapshot): SkyModel {
   const projects = snapshot.projects.toSorted(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug),
   );
   const slugs = new Set(projects.map((project) => project.slug));
+  const placeOf = (scope: string): string => (slugs.has(scope) ? scope : SOCIETY_SCOPE);
 
   const running = scopesByAgent(snapshot.scheduler.running);
   const pending = scopesByAgent(snapshot.scheduler.pending);
@@ -92,24 +111,48 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
   const citizens = snapshot.members
     .filter((member): member is Member & { cli: CliKind } => member.cli !== null)
     .filter((member) => member.status === "active")
-    .toSorted((a, b) => a.name.localeCompare(b.name))
-    .map((member) => {
-      const wanted =
-        running.get(member.name) ??
-        pending.get(member.name) ??
-        member.memberships.find((slug) => slugs.has(slug)) ??
-        SOCIETY_SCOPE;
-      const state: StarState = running.has(member.name)
-        ? "working"
-        : pending.has(member.name)
-          ? "queued"
-          : "idle";
-      return { member, state, scope: slugs.has(wanted) ? wanted : SOCIETY_SCOPE };
-    });
-  const counts = new Map<string, number>();
-  for (const { scope } of citizens) {
-    counts.set(scope, (counts.get(scope) ?? 0) + 1);
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+
+  const placements = citizens.flatMap((member): Placement[] => {
+    const turns = [...new Set((running.get(member.name) ?? []).map(placeOf))];
+    if (turns.length > 0) {
+      return turns.map((scope) => ({
+        id: scope === SOCIETY_SCOPE ? member.name : `${member.name}/${scope}`,
+        member,
+        state: "working",
+        scope,
+        queuedFor: null,
+      }));
+    }
+    const queued = pending.get(member.name)?.[0];
+    return [
+      {
+        id: member.name,
+        member,
+        state: queued === undefined ? "idle" : "queued",
+        scope: SOCIETY_SCOPE,
+        queuedFor: queued === undefined ? null : placeOf(queued),
+      },
+    ];
+  });
+
+  // Every citizen has a seat at the core and each member one at its project, in name order, with
+  // visiting non-members after them; a star leaving empties its seat and moves nobody else.
+  const seats = new Map<string, Map<string, number>>([
+    [SOCIETY_SCOPE, new Map(citizens.map((member, index) => [member.name, index]))],
+  ]);
+  for (const project of projects) {
+    const members = citizens.filter((member) => member.memberships.includes(project.slug));
+    const visitors = placements
+      .filter((placement) => placement.scope === project.slug)
+      .map((placement) => placement.member)
+      .filter((member) => !member.memberships.includes(project.slug));
+    seats.set(
+      project.slug,
+      new Map([...members, ...visitors].map((member, index) => [member.name, index])),
+    );
   }
+  const room = new Map([...seats].map(([scope, taken]) => [scope, taken.size]));
 
   const society: Anchor = {
     id: SOCIETY_SCOPE,
@@ -117,25 +160,25 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
     kind: "society",
     x: 0,
     y: 0,
-    radius: sphereRadius(counts.get(SOCIETY_SCOPE) ?? 0),
+    radius: sphereRadius(room.get(SOCIETY_SCOPE) ?? 0),
   };
-  const anchors: Anchor[] = [society, ...placeProjects(projects, counts, society)];
+  const anchors: Anchor[] = [society, ...placeProjects(projects, room, society)];
   const byId = new Map(anchors.map((anchor) => [anchor.id, anchor]));
 
-  const slots = new Map<string, number>();
-  const stars = citizens.map(({ member, state, scope }): Star => {
+  const stars = placements.map(({ id, member, state, scope, queuedFor }): Star => {
     const anchor = byId.get(scope) ?? society;
-    const slot = slots.get(anchor.id) ?? 0;
-    slots.set(anchor.id, slot + 1);
-    // Sunflower packing: the first citizen at the center, the rest spiralling out without overlap.
+    const slot = seats.get(anchor.id)?.get(member.name) ?? 0;
+    // Sunflower packing: the first seat at the center, the rest spiralling out without overlap.
     const distance = STAR_SPACING * Math.sqrt(slot);
     const angle = slot * GOLDEN_ANGLE - Math.PI / 2;
     return {
+      id,
       name: member.name,
       cli: member.cli,
       state,
       resident: resident.has(member.name),
       anchor: anchor.id,
+      queuedFor,
       x: Math.round(anchor.x + distance * Math.cos(angle)),
       y: Math.round(anchor.y + distance * Math.sin(angle)),
     };
@@ -155,7 +198,7 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
  */
 function placeProjects(
   projects: readonly Project[],
-  counts: ReadonlyMap<string, number>,
+  room: ReadonlyMap<string, number>,
   society: Anchor,
 ): Anchor[] {
   const placed: Anchor[] = [];
@@ -165,7 +208,7 @@ function placeProjects(
     const members = projects.slice(start, start + capacity);
     start += capacity;
     capacity += 4;
-    const radii = members.map((project) => sphereRadius(counts.get(project.slug) ?? 0));
+    const radii = members.map((project) => sphereRadius(room.get(project.slug) ?? 0));
     const feet = radii.map(footprint);
     const widths = feet.map((foot) => 2 * foot + GAP);
     const total = widths.reduce((sum, width) => sum + width, 0);

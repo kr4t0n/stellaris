@@ -83,11 +83,11 @@ describe("skyModel", () => {
     expect(model.radius).toBeGreaterThan(Math.hypot(later?.x ?? 0, later?.y ?? 0));
   });
 
-  it("places a citizen at its running turn, else its queued turn, else its first project", () => {
+  it("puts a star in each project a citizen is in a turn at, and rests everyone else at the core", () => {
     const model = skyModel(
       snapshot({
         members: [
-          member("ada", { memberships: ["lab"] }),
+          member("ada", { memberships: ["lab", "web"] }),
           member("bo", { memberships: ["lab"] }),
           member("cy", { memberships: ["lab", "web"] }),
           member("desk", { cli: "codex" }),
@@ -95,18 +95,45 @@ describe("skyModel", () => {
         projects: [project("lab", ts), project("web", "2026-09-29T11:00:00.000Z")],
         scheduler: {
           ...idle,
-          running: ["ada/web"],
-          pending: ["bo/society"],
+          running: ["ada/web", "ada/lab", "desk/society"],
+          pending: ["bo/lab"],
           resident: ["desk/society"],
         },
       }),
     );
-    expect(model.stars.map((star) => [star.name, star.anchor, star.state, star.resident])).toEqual([
-      ["ada", "web", "working", false],
-      ["bo", "society", "queued", false],
-      ["cy", "lab", "idle", false],
-      ["desk", "society", "idle", true],
+    expect(
+      model.stars.map((star) => [star.id, star.anchor, star.state, star.queuedFor, star.resident]),
+    ).toEqual([
+      ["ada/lab", "lab", "working", null, false],
+      ["ada/web", "web", "working", null, false],
+      ["bo", "society", "queued", "lab", false],
+      ["cy", "society", "idle", null, false],
+      ["desk", "society", "working", null, true],
     ]);
+  });
+
+  it("sizes spheres for who may gather there, so a turn starting moves only its star", () => {
+    const members = [
+      member("ada", { memberships: ["lab"] }),
+      member("bo", { memberships: ["lab"] }),
+      member("stew"),
+    ];
+    const projects = [project("lab", ts), project("web", "2026-09-29T11:00:00.000Z")];
+    const resting = skyModel(snapshot({ members, projects }));
+    const busy = skyModel(
+      snapshot({ members, projects, scheduler: { ...idle, running: ["ada/lab", "stew/web"] } }),
+    );
+    // stew is not a member of web: the sphere makes room for a visitor rather than overflow.
+    const [, lab, web] = busy.anchors;
+    expect(resting.anchors.slice(0, 2)).toEqual(busy.anchors.slice(0, 2));
+    expect(lab?.radius).toBe(resting.anchors[1]?.radius);
+    expect(web?.radius).toBeGreaterThan(0);
+    expect(busy.stars.find((star) => star.id === "ada/lab")?.anchor).toBe("lab");
+    expect(busy.stars.find((star) => star.id === "stew/web")?.anchor).toBe("web");
+    // Those who stayed at the core keep their seats.
+    const seat = (model: typeof busy, id: string): unknown =>
+      model.stars.filter((star) => star.id === id).map((star) => [star.x, star.y]);
+    expect(seat(busy, "bo")).toEqual(seat(resting, "bo"));
   });
 
   it("keeps spheres apart and citizens inside them, whatever the number and size of projects", () => {

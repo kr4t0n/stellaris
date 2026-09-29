@@ -1,6 +1,6 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useQueryClient } from "@tanstack/react-query";
-import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Navigator } from "./board/Navigator.js";
 import { CitizenCard } from "./components/CitizenCard.js";
@@ -69,6 +69,8 @@ export function Playground() {
   const threads = useThreads();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const search = useSearch({ strict: false });
+  // The id of the hovered star: a citizen in turns in two projects has a star in each.
   const [hovered, setHovered] = useState<string | null>(null);
   const now = useNow(30_000);
   const width = useWindowWidth();
@@ -94,6 +96,7 @@ export function Playground() {
   const tasksPath = /^\/p\/([^/]+)\/tasks$/.exec(pathname)?.[1];
   const activeTasks = tasksPath ?? task.data?.project ?? null;
   const activeCitizen = after(pathname, "/citizen/");
+  const activeScope = activeCitizen === null ? null : (search.scope ?? null);
 
   useEffect(() => {
     if (!boardOpen) {
@@ -143,19 +146,32 @@ export function Playground() {
     (activeChannel === null
       ? activeCitizen === null
         ? null
-        : (model.stars.find((candidate) => candidate.name === activeCitizen)?.anchor ?? null)
+        : (activeScope ??
+          model.stars.find((candidate) => candidate.name === activeCitizen)?.anchor ??
+          null)
       : activeChannel.includes("/")
         ? (activeChannel.split("/")[0] ?? null)
         : SOCIETY_SCOPE);
-  const star = model.stars.find((candidate) => candidate.name === hovered);
-  const member = members.data?.find((candidate) => candidate.name === hovered);
-  const place =
-    star === undefined || star.anchor === SOCIETY_SCOPE
+  const placeName = (scope: string): string =>
+    scope === SOCIETY_SCOPE
       ? "the society"
-      : (projects.data?.find((project) => project.slug === star.anchor)?.name ?? star.anchor);
+      : (projects.data?.find((project) => project.slug === scope)?.name ?? scope);
+  const star = model.stars.find((candidate) => candidate.id === hovered);
+  const member = members.data?.find((candidate) => candidate.name === star?.name);
+  // A queued star waits at the core; its card says where the turn will run.
+  const place = star === undefined ? "the society" : placeName(star.queuedFor ?? star.anchor);
   const purpose = roles.data?.find((role) => role.name === member?.role)?.purpose;
-  const openCitizen = (name: string): void =>
-    void navigate({ to: "/citizen/$name", params: { name } });
+  const openStar = (id: string): void => {
+    const chosen = model.stars.find((candidate) => candidate.id === id);
+    if (chosen !== undefined) {
+      void navigate({
+        to: "/citizen/$name",
+        params: { name: chosen.name },
+        search: chosen.state === "working" ? { scope: chosen.anchor } : {},
+      });
+    }
+  };
+  const working = model.stars.filter((candidate) => candidate.state === "working");
   const openProject = (anchor: string): void => {
     const first = projects.data?.find((project) => project.slug === anchor)?.channels[0];
     const channel = anchor === SOCIETY_SCOPE ? "general" : `${anchor}/${first ?? "general"}`;
@@ -173,7 +189,7 @@ export function Playground() {
           insets={insets}
           focus={focus}
           onSelectAnchor={openProject}
-          onSelectStar={openCitizen}
+          onSelectStar={openStar}
           card={
             star === undefined || member === undefined ? null : (
               <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
@@ -182,8 +198,9 @@ export function Playground() {
         />
         <Hud
           society={society.data?.name}
-          citizens={model.stars.length}
-          working={model.stars.filter((candidate) => candidate.state === "working").length}
+          citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
+          working={new Set(working.map((candidate) => candidate.name)).size}
+          turns={working.length}
           queued={model.stars.filter((candidate) => candidate.state === "queued").length}
           paused={scheduler.data?.paused ?? false}
           boardOpen={boardOpen}
@@ -197,6 +214,7 @@ export function Playground() {
             activeChannel={activeChannel}
             activeTasks={activeTasks}
             activeCitizen={activeCitizen}
+            activeScope={activeScope}
           />
         ) : null}
         {boardOpen ? (
@@ -217,14 +235,15 @@ export function Playground() {
         {/* The sky for keyboards and screen readers: focusing a citizen shows its card, choosing it opens it. */}
         <ul className="sr-only" aria-label="Citizens">
           {model.stars.map((candidate) => (
-            <li key={candidate.name}>
+            <li key={candidate.id}>
               <button
                 type="button"
-                onFocus={() => setHovered(candidate.name)}
+                onFocus={() => setHovered(candidate.id)}
                 onBlur={() => setHovered(null)}
-                onClick={() => openCitizen(candidate.name)}
+                onClick={() => openStar(candidate.id)}
               >
                 {candidate.name}, {candidate.state}
+                {candidate.state === "working" ? ` at ${placeName(candidate.anchor)}` : ""}
               </button>
             </li>
           ))}

@@ -19,7 +19,10 @@ function Chip({ tone = "plain", children }: { tone?: Tone; children: ReactNode }
 interface HudProps {
   readonly society: string | undefined;
   readonly citizens: number;
+  /** Citizens in a turn. */
   readonly working: number;
+  /** Turns running: more than `working` when a citizen is in turns in two projects. */
+  readonly turns: number;
   readonly queued: number;
   readonly paused: boolean;
   readonly boardOpen: boolean;
@@ -32,6 +35,7 @@ export function Hud({
   society,
   citizens,
   working,
+  turns,
   queued,
   paused,
   boardOpen,
@@ -49,7 +53,9 @@ export function Hud({
         <div className="pointer-events-auto flex items-center gap-2">
           {paused ? <Chip tone="warn">paused</Chip> : null}
           <Chip>{citizens === 1 ? "1 citizen" : `${citizens} citizens`}</Chip>
-          <Chip tone={working > 0 ? "live" : "plain"}>{working} working</Chip>
+          <Chip tone={working > 0 ? "live" : "plain"}>
+            {working} working{turns > working ? ` · ${turns} turns` : ""}
+          </Chip>
           {queued > 0 ? <Chip>{queued} queued</Chip> : null}
           <button
             type="button"
@@ -72,7 +78,8 @@ export function Hud({
       </header>
       {boardOpen ? null : (
         <p className="pointer-events-none absolute bottom-5 left-5 text-meta">
-          Hover a star to meet a citizen; click a sphere to open its project.
+          Hover a star to meet a citizen and click it to follow its turn; click a sphere to open its
+          project.
         </p>
       )}
     </>

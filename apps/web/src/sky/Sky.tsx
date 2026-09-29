@@ -10,14 +10,15 @@ export interface Insets {
 interface SkyProps {
   readonly model: SkyModel;
   readonly paused: boolean;
+  /** The id of the hovered star. */
   readonly hovered: string | null;
-  readonly onHover: (name: string | null) => void;
+  readonly onHover: (id: string | null) => void;
   /** Screen space covered by islands at each side; the sky fits between them. */
   readonly insets: Insets;
   /** The anchor whose sphere is drawn brighter, the project the board has open. */
   readonly focus: string | null;
   readonly onSelectAnchor: (anchor: string) => void;
-  readonly onSelectStar: (name: string) => void;
+  readonly onSelectStar: (id: string) => void;
   /** Shown beside the hovered star and moved with it every frame. */
   readonly card: ReactNode;
 }
@@ -120,11 +121,11 @@ export function Sky({
         onPointerMove={(event) => {
           const scene = sceneRef.current;
           const { offsetX, offsetY } = event.nativeEvent;
-          const name = scene?.hitTest(offsetX, offsetY) ?? null;
-          const sphere = name === null ? (scene?.hitTestAnchor(offsetX, offsetY) ?? null) : null;
-          event.currentTarget.style.cursor = name !== null || sphere !== null ? "pointer" : "";
-          if (name !== hovered) {
-            onHover(name);
+          const id = scene?.hitTest(offsetX, offsetY) ?? null;
+          const sphere = id === null ? (scene?.hitTestAnchor(offsetX, offsetY) ?? null) : null;
+          event.currentTarget.style.cursor = id !== null || sphere !== null ? "pointer" : "";
+          if (id !== hovered) {
+            onHover(id);
           }
         }}
         onPointerLeave={() => onHover(null)}
@@ -134,10 +135,10 @@ export function Sky({
           if (scene === null) {
             return;
           }
-          const name = scene.hitTest(offsetX, offsetY);
-          const sphere = name === null ? scene.hitTestAnchor(offsetX, offsetY) : null;
-          if (name !== null) {
-            onSelectStar(name);
+          const id = scene.hitTest(offsetX, offsetY);
+          const sphere = id === null ? scene.hitTestAnchor(offsetX, offsetY) : null;
+          if (id !== null) {
+            onSelectStar(id);
           } else if (sphere !== null) {
             onSelectAnchor(sphere);
           }

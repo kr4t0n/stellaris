@@ -1,6 +1,5 @@
 import { currentStage, SOCIETY_SCOPE, type TurnExitReason } from "@stellaris/shared";
-import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
 import { pairsOf } from "../lib/api.js";
@@ -155,16 +154,16 @@ function TurnFooter({ turn, running, now }: { turn: LiveTurn; running: boolean; 
 /** A citizen and what it is doing: its live turn as it happens, or the last one it took. */
 export function CitizenView() {
   const { name } = useParams({ from: "/citizen/$name" });
-  return <CitizenLive key={name} name={name} />;
+  const { scope } = useSearch({ from: "/citizen/$name" });
+  return <CitizenLive key={name} name={name} chosen={scope ?? null} />;
 }
 
-function CitizenLive({ name }: { name: string }) {
+function CitizenLive({ name, chosen }: { name: string; chosen: string | null }) {
   const members = useMembers();
   const scheduler = useScheduler();
   const live = useLiveTurns();
   const now = useNow(5_000);
   const { ref, onScroll } = useStickyScroll();
-  const [picked, setPicked] = useState<string | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
   if (member === undefined) {
@@ -183,9 +182,12 @@ function CitizenLive({ name }: { name: string }) {
   const turns = turnsOf(live, name);
   const isRunning = (candidate: LiveTurn): boolean =>
     candidate.end === null && runningScopes.includes(candidate.scope);
-  // The turn shown: the one picked, else one running now, else the most recent.
+  // The turn shown: the one chosen, else the running one that started first, else the latest.
+  // Not the most active one, or two busy turns would take the view back and forth.
   const turn =
-    turns.find((candidate) => candidate.scope === picked) ?? turns.find(isRunning) ?? turns[0];
+    turns.find((candidate) => candidate.scope === chosen) ??
+    turns.filter(isRunning).toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0] ??
+    turns[0];
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queued?.scope ?? null;
   const model = turn?.model ?? member.lastModel ?? member.model ?? "CLI default";
@@ -241,24 +243,28 @@ function CitizenLive({ name }: { name: string }) {
           <>
             {turns.length > 1 ? (
               <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Turns by scope">
-                {turns.map((candidate) => (
-                  <button
-                    key={candidate.scope}
-                    type="button"
-                    aria-pressed={candidate === turn}
-                    onClick={() => setPicked(candidate.scope)}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-                      candidate === turn
-                        ? "bg-surface-2 text-fg-primary"
-                        : "text-fg-tertiary hover:bg-surface-2/60 hover:text-fg-primary"
-                    }`}
-                  >
-                    {isRunning(candidate) ? (
-                      <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
-                    ) : null}
-                    {scopeName(candidate.scope)}
-                  </button>
-                ))}
+                {turns
+                  .toSorted((a, b) => a.scope.localeCompare(b.scope))
+                  .map((candidate) => (
+                    <Link
+                      key={candidate.scope}
+                      to="/citizen/$name"
+                      params={{ name }}
+                      search={{ scope: candidate.scope }}
+                      replace
+                      aria-current={candidate === turn ? "true" : undefined}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
+                        candidate === turn
+                          ? "bg-surface-2 text-fg-primary"
+                          : "text-fg-tertiary hover:bg-surface-2/60 hover:text-fg-primary"
+                      }`}
+                    >
+                      {isRunning(candidate) ? (
+                        <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                      ) : null}
+                      {scopeName(candidate.scope)}
+                    </Link>
+                  ))}
               </div>
             ) : null}
             <p className="text-caps">

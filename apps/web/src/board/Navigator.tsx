@@ -56,12 +56,14 @@ export function Navigator({
   activeChannel,
   activeTasks,
   activeCitizen,
+  activeScope,
 }: {
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
-  /** The citizen whose view is open. */
+  /** The citizen whose view is open, and the scope of the turn it shows when one was chosen. */
   activeCitizen: string | null;
+  activeScope: string | null;
 }) {
   const channels = useChannels();
   const projects = useProjects();
@@ -118,7 +120,7 @@ export function Navigator({
         </Link>
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
-        <WorkingNow activeCitizen={activeCitizen} />
+        <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="truncate px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">

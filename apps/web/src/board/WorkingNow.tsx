@@ -9,7 +9,13 @@ import { useMembers, useNow, useScheduler } from "../lib/session.js";
  * The citizens in a turn right now, at the top of the navigator: where, for how long, and the
  * last thing each did. The scheduler says who is running; the live stream says what they do.
  */
-export function WorkingNow({ activeCitizen }: { activeCitizen: string | null }) {
+export function WorkingNow({
+  activeCitizen,
+  activeScope,
+}: {
+  activeCitizen: string | null;
+  activeScope: string | null;
+}) {
   const scheduler = useScheduler();
   const members = useMembers();
   const live = useLiveTurns();
@@ -34,12 +40,14 @@ export function WorkingNow({ activeCitizen }: { activeCitizen: string | null }) 
             const current = turn !== undefined && turn.end === null;
             const cli = members.data?.find((member) => member.name === agent)?.cli ?? null;
             const line = current ? lastLine(turn) : null;
-            const active = agent === activeCitizen;
+            const active =
+              agent === activeCitizen && (activeScope === null || activeScope === scope);
             return (
               <li key={`${agent}/${scope}`}>
                 <Link
                   to="/citizen/$name"
                   params={{ name: agent }}
+                  search={{ scope }}
                   className={`block rounded-lg px-2 py-1.5 transition-colors ${
                     active
                       ? "bg-surface-2/80 text-fg-primary"

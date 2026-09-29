@@ -13,7 +13,7 @@ export interface SceneOptions {
   readonly onHoverPosition: (point: ScreenPoint | null) => void;
 }
 
-/** A citizen as the scene animates it: eased toward its star's place, fading in and out. */
+/** A star as the scene animates it: eased toward its place, fading in and out. */
 interface Body {
   star: Star;
   x: number;
@@ -170,38 +170,55 @@ export class SkyScene {
       }
     }
 
-    const present = new Set<string>();
+    // A citizen's stars are one body of light: a star that leaves hands its body to the star
+    // that replaces it, a second turn splits off from the first, and a turn that ends while
+    // another goes on merges back into it. Only a citizen new to the sky rises from its anchor.
+    const present = new Set(model.stars.map((star) => star.id));
+    const departing = [...this.bodies.entries()].filter(([id]) => !present.has(id));
     for (const star of model.stars) {
-      present.add(star.name);
-      const body = this.bodies.get(star.name);
-      if (body === undefined) {
-        const anchor = model.anchors.find((candidate) => candidate.id === star.anchor);
-        // A new citizen rises from its anchor's center to its place.
-        this.bodies.set(star.name, {
-          star,
-          x: this.options.reducedMotion ? star.x : (anchor?.x ?? star.x),
-          y: this.options.reducedMotion ? star.y : (anchor?.y ?? star.y),
-          vx: 0,
-          vy: 0,
-          phase: phaseOf(star.name),
-          presence: this.options.reducedMotion ? 1 : 0,
-          leaving: false,
-          screen: { x: 0, y: 0 },
-        });
-      } else {
+      const body = this.bodies.get(star.id);
+      if (body !== undefined) {
         body.star = star;
         body.leaving = false;
+        continue;
       }
+      const handed = departing.findIndex(([, other]) => other.star.name === star.name);
+      const donor = departing[handed];
+      if (donor !== undefined) {
+        departing.splice(handed, 1);
+        this.bodies.delete(donor[0]);
+        this.bodies.set(star.id, { ...donor[1], star, leaving: false });
+        continue;
+      }
+      const sibling = [...this.bodies.values()].find(
+        (other) => other.star.name === star.name && present.has(other.star.id),
+      );
+      const anchor = model.anchors.find((candidate) => candidate.id === star.anchor);
+      const from = sibling ?? anchor ?? star;
+      this.bodies.set(star.id, {
+        star,
+        x: this.options.reducedMotion ? star.x : from.x,
+        y: this.options.reducedMotion ? star.y : from.y,
+        vx: 0,
+        vy: 0,
+        phase: phaseOf(star.name),
+        presence: this.options.reducedMotion ? 1 : 0,
+        leaving: false,
+        screen: { x: 0, y: 0 },
+      });
     }
-    for (const [name, body] of this.bodies) {
-      if (!present.has(name)) {
-        body.leaving = true;
+    for (const [, body] of departing) {
+      const into = model.stars.find((star) => star.name === body.star.name);
+      body.leaving = true;
+      if (into !== undefined) {
+        body.star = { ...body.star, x: into.x, y: into.y };
       }
     }
   }
 
-  setHovered(name: string | null): void {
-    this.hovered = name;
+  /** The star to light up and follow with the card, by its id. */
+  setHovered(id: string | null): void {
+    this.hovered = id;
   }
 
   setPaused(paused: boolean): void {
@@ -241,17 +258,17 @@ export class SkyScene {
     this.canvas.height = Math.round(height * dpr);
   }
 
-  /** The citizen whose star is under a point in CSS pixels, if any. */
+  /** The id of the star under a point in CSS pixels, if any. */
   hitTest(x: number, y: number): string | null {
     let best: string | null = null;
     let bestDistance = Math.max(CORE_RADIUS * this.scale + 8, 18);
-    for (const [name, body] of this.bodies) {
+    for (const [id, body] of this.bodies) {
       if (body.leaving) {
         continue;
       }
       const distance = Math.hypot(body.screen.x - x, body.screen.y - y);
       if (distance < bestDistance) {
-        best = name;
+        best = id;
         bestDistance = distance;
       }
     }
@@ -295,7 +312,7 @@ export class SkyScene {
       sphere.y += (sphere.anchor.y - sphere.y) * ease;
       sphere.radius += (sphere.anchor.radius - sphere.radius) * ease;
     }
-    for (const [name, body] of this.bodies) {
+    for (const [id, body] of this.bodies) {
       if (this.options.reducedMotion) {
         body.x = body.star.x;
         body.y = body.star.y;
@@ -310,7 +327,7 @@ export class SkyScene {
         body.presence += (toward - body.presence) * Math.min(1, dt * 2.5);
       }
       if (body.leaving && body.presence < 0.02) {
-        this.bodies.delete(name);
+        this.bodies.delete(id);
       }
     }
   }
@@ -336,7 +353,7 @@ export class SkyScene {
     this.drawSpecks(t);
     this.drawAnchors();
     const order = [...this.bodies.values()].toSorted(
-      (a, b) => Number(a.star.name === this.hovered) - Number(b.star.name === this.hovered),
+      (a, b) => Number(a.star.id === this.hovered) - Number(b.star.id === this.hovered),
     );
     for (const body of order) {
       this.drawBody(body, t);
@@ -426,7 +443,7 @@ export class SkyScene {
     const { ctx } = this;
     const { star } = body;
     const mark = CLI_MARKS[star.cli];
-    const hovered = star.name === this.hovered;
+    const hovered = star.id === this.hovered;
     const working = star.state === "working";
     const amplitude = working ? 2.5 : 5;
     const driftX =

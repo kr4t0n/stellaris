@@ -40,6 +40,9 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/citizen/$name",
+    // `scope` picks which of a citizen's turns to show, when it is in more than one.
+    validateSearch: (search: Record<string, unknown>): { scope?: string } =>
+      typeof search["scope"] === "string" ? { scope: search["scope"] } : {},
     component: lazyRouteComponent(() => import("./board/CitizenView.js"), "CitizenView"),
   }),
 ]);

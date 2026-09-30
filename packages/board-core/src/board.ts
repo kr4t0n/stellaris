@@ -1360,9 +1360,10 @@ export class Board {
   /**
    * How many unread digest messages a member has in each scope: a project's slug for its channels
    * and their threads, `society` for the society's channels. The heartbeat asks, so that it wakes
-   * a member where its unread messages are and not in every project it belongs to. A task step's
-   * post is not counted: the step wakes whoever it hands work to, and the rest read it when they
-   * wake for something else.
+   * a member where its unread messages are and not in every project it belongs to. Two kinds of
+   * post are in the digest but not counted, and are read when the member wakes for something else:
+   * a task step's, which wakes whoever it hands work to, and the board's own, operations signals
+   * and landing announcements, whose signals that call for action wake their readers directly.
    */
   async unreadByScope(actor: Actor): Promise<Map<string, number>> {
     return this.mutex.run(async () => {
@@ -1372,7 +1373,7 @@ export class Board {
         unscoped,
         await this.readCursors(actor.name),
       )) {
-        if (message.step !== undefined) {
+        if (message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
           continue;
         }
         const scope = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;

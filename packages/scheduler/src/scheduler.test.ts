@@ -379,6 +379,23 @@ describe("Scheduler", () => {
 
   it("wakes on heartbeat only when there is something to read or hold", async () => {
     const { board, runner, scheduler } = await setup();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toHaveLength(0);
+    // The board's own posts, a spend report for the steward and a landing announcement for the
+    // project's members, are read at the next wake; they wake nobody by themselves.
+    await board.publishSignal({
+      kind: "turn_cost",
+      key: "turn_cost:report",
+      summary: "spend in the last hour: $1.20 over 4 turns",
+      value: 1.2,
+    });
+    await board.postMessage(SYSTEM_ACTOR, {
+      channel: "demo/general",
+      body: "Task 01ARZ3NDEKTSV4RRFFQ69G5FAV is done: task/x merged into main at abc123.",
+    });
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();

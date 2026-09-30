@@ -1,12 +1,21 @@
+import type { Message } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
+import { ASK_CHANNEL, askTitle } from "./asks.js";
 import { completeMention, listed, mentionAt, wakesFor } from "./compose.js";
 
-export type Target = { readonly channel: string } | { readonly threadId: string };
+/**
+ * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
+ * general channel titled by the post's first line, noting the ask it follows up on, if any.
+ */
+export type Target =
+  | { readonly channel: string }
+  | { readonly threadId: string }
+  | { readonly ask: { readonly followUp?: string | undefined } };
 
 const MAX_CANDIDATES = 6;
 
@@ -14,7 +23,21 @@ const MAX_CANDIDATES = 6;
  * Posts as the user into a channel or a thread. Enter sends and Shift+Enter breaks the line; an
  * `@` offers the citizens to mention; the line under the box names whom sending will wake.
  */
-export function Composer({ target, placeholder }: { target: Target; placeholder: string }) {
+export function Composer({
+  target,
+  placeholder,
+  focusOnOpen = false,
+  onPosted,
+  onEmptyEscape,
+}: {
+  target: Target;
+  placeholder: string;
+  /** For a composer the user just opened, such as the ask box. */
+  focusOnOpen?: boolean;
+  onPosted?: (message: Message) => void;
+  /** Escape in an empty box, for a composer that closes. */
+  onEmptyEscape?: () => void;
+}) {
   const { api } = useSession();
   const client = useQueryClient();
   const members = useMembers();
@@ -29,21 +52,40 @@ export function Composer({ target, placeholder }: { target: Target; placeholder:
   const pendingCaret = useRef<number | null>(null);
 
   const send = useMutation({
-    mutationFn: (body: string) =>
-      api.sendMessage(
-        "channel" in target
-          ? { channel: target.channel, body }
-          : { thread_id: target.threadId, body },
-      ),
-    onSuccess: () => {
+    mutationFn: async (body: string) => {
+      if ("channel" in target) {
+        return api.sendMessage({ channel: target.channel, body });
+      }
+      if ("threadId" in target) {
+        return api.sendMessage({ thread_id: target.threadId, body });
+      }
+      const thread = await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) });
+      const { followUp } = target.ask;
+      return api.sendMessage({
+        thread_id: thread.id,
+        body: followUp === undefined ? body : `${body}\n\nFollows up on ${followUp}.`,
+      });
+    },
+    onSuccess: (message) => {
       setText("");
       void client.invalidateQueries({
-        queryKey: "channel" in target ? ["channel", target.channel] : ["thread", target.threadId],
+        queryKey:
+          message.thread === undefined ? ["channel", message.channel] : ["thread", message.thread],
       });
+      if ("ask" in target) {
+        void client.invalidateQueries({ queryKey: ["threads"] });
+      }
       // A post by the user answers whatever was asked of them where it was posted.
       void client.invalidateQueries({ queryKey: ["requests"] });
+      onPosted?.(message);
     },
   });
+
+  useEffect(() => {
+    if (focusOnOpen) {
+      box.current?.focus();
+    }
+  }, [focusOnOpen]);
 
   // After every render the box fits its text, up to its maximum height, past which it scrolls.
   useLayoutEffect(() => {
@@ -107,6 +149,11 @@ export function Composer({ target, placeholder }: { target: Target; placeholder:
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       submit();
+      return;
+    }
+    if (event.key === "Escape" && text === "" && onEmptyEscape !== undefined) {
+      event.preventDefault();
+      onEmptyEscape();
     }
   };
 

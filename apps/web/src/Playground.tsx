@@ -2,8 +2,10 @@ import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { asksOf, hasUnseenReply } from "./board/asks.js";
 import { Navigator, type GovernanceView } from "./board/Navigator.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
+import { AskIsland } from "./components/AskIsland.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { EntityContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
@@ -14,6 +16,7 @@ import { ApiError } from "./lib/api.js";
 import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
+import { useSeen } from "./lib/seen.js";
 import {
   useAllTasks,
   useMembers,
@@ -84,11 +87,16 @@ export function Playground() {
     onSuccess: () => void client.invalidateQueries({ queryKey: ["scheduler"] }),
   });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  // The log and the ask box float in the same place, so one opening closes the other. The ask box
+  // shows only on the route it was opened on: its links lead into the board, which it would cover.
+  const [floating, setFloating] = useState<{ kind: "logs" | "ask"; at: string } | null>(null);
+  const logsOpen = floating?.kind === "logs";
+  const askOpen = floating?.kind === "ask" && floating.at === pathname;
+  const seen = useSeen();
   const search = useSearch({ strict: false });
   // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
   // `task:<id>` for a task's mark.
   const [hovered, setHovered] = useState<string | null>(null);
-  const [logsOpen, setLogsOpen] = useState(false);
   const now = useNow(30_000);
   const width = useWindowWidth();
 
@@ -131,25 +139,30 @@ export function Playground() {
         null);
 
   useEffect(() => {
-    if (!boardOpen && !logsOpen) {
-      return undefined;
-    }
-    const close = (event: KeyboardEvent): void => {
+    const onKey = (event: KeyboardEvent): void => {
       const typing =
         event.target instanceof HTMLElement && event.target.closest("input, textarea") !== null;
-      if (event.key !== "Escape" || typing) {
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      // The log floats over the board, so it closes first.
-      if (logsOpen) {
-        setLogsOpen(false);
-      } else {
+      if (event.key === "/") {
+        event.preventDefault();
+        setFloating({ kind: "ask", at: pathname });
+        return;
+      }
+      if (event.key !== "Escape") {
+        return;
+      }
+      // What floats over the board closes first.
+      if (logsOpen || askOpen) {
+        setFloating(null);
+      } else if (boardOpen) {
         void navigate({ to: "/" });
       }
     };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [boardOpen, logsOpen, navigate]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [boardOpen, logsOpen, askOpen, pathname, navigate]);
 
   const rejected = [society, members, projects, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
@@ -258,6 +271,9 @@ export function Playground() {
             }
             attention={attention}
             onOpenAttention={() => void navigate({ to: "/needs-you" })}
+            askOpen={askOpen}
+            askAnswered={asksOf(threads.data ?? []).some((ask) => hasUnseenReply(ask, seen))}
+            onToggleAsk={() => setFloating(askOpen ? null : { kind: "ask", at: pathname })}
             paused={scheduler.data?.paused ?? false}
             onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
             pauseBusy={pause.isPending}
@@ -266,7 +282,7 @@ export function Playground() {
               void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
             }
             logsOpen={logsOpen}
-            onToggleLogs={() => setLogsOpen(!logsOpen)}
+            onToggleLogs={() => setFloating(logsOpen ? null : { kind: "logs", at: pathname })}
             onSignOut={signOut}
           />
           {boardOpen ? (
@@ -288,7 +304,8 @@ export function Playground() {
               <Outlet />
             </Island>
           ) : null}
-          {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
+          {logsOpen ? <LogsIsland onClose={() => setFloating(null)} /> : null}
+          {askOpen ? <AskIsland onClose={() => setFloating(null)} /> : null}
           {model.stars.length === 0 && !boardOpen ? (
             <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
               No citizens yet. Ask the concierge for one, or add one with{" "}

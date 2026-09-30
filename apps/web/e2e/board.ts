@@ -322,6 +322,62 @@ const PITCH = {
   body: `Proposal ${SKILL_PROPOSAL}: skill refereed-research.\n\nThe plan has run on four tasks.`,
 };
 
+export const ANSWERED_ASK = "01M3Q2HHHHHHHHHHHHHHHHHHH1";
+export const CLOSED_ASK = "01M3Q2HHHHHHHHHHHHHHHHHHH0";
+
+interface AskFixture {
+  thread: Record<string, unknown>;
+  messages: Array<Record<string, unknown>>;
+}
+
+function askMessage(id: string, thread: string, author: string, body: string) {
+  return { id, author, channel: "general", thread, ts: CREATED, mentions: [], body };
+}
+
+/** Two asks the user made: one desk answered and nobody has read yet, one desk closed. */
+function askFixtures(): Map<string, AskFixture> {
+  return new Map([
+    [
+      CLOSED_ASK,
+      {
+        thread: {
+          id: CLOSED_ASK,
+          channel: "general",
+          title: "Merge the phone projects",
+          state: "closed",
+          openedBy: "user",
+          openedAt: CREATED,
+          closedBy: "desk",
+          closedAt: CREATED,
+          body: "Filed the merge as a task in lab and proposed archiving iphone.",
+        },
+        messages: [
+          askMessage("01M3Q2JJJJJJJJJJJJJJJJJJJ0", CLOSED_ASK, "user", "Merge the phone projects."),
+          askMessage("01M3Q2JJJJJJJJJJJJJJJJJJJ1", CLOSED_ASK, "desk", "Filed it in lab."),
+        ],
+      },
+    ],
+    [
+      ANSWERED_ASK,
+      {
+        thread: {
+          id: ANSWERED_ASK,
+          channel: "general",
+          title: "Who reviews the survey?",
+          state: "open",
+          openedBy: "user",
+          openedAt: CREATED,
+          body: "",
+        },
+        messages: [
+          askMessage("01M3Q2JJJJJJJJJJJJJJJJJJJ2", ANSWERED_ASK, "user", "Who reviews the survey?"),
+          askMessage("01M3Q2JJJJJJJJJJJJJJJJJJJ3", ANSWERED_ASK, "desk", "ada reviews it."),
+        ],
+      },
+    ],
+  ]);
+}
+
 export interface FakeBoard {
   /** Every write the interface sent, in order. */
   readonly writes: Write[];
@@ -332,13 +388,16 @@ export interface FakeBoard {
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
- * an archived project sits beside lab and desk asks to archive lab too.
+ * an archived project sits beside lab and desk asks to archive lab too. With `asks`, the user has
+ * asked twice before; a new ask opens a thread in general, and desk is in a turn on it once posted.
  */
 export async function fakeBoard(
   page: Page,
-  options: { asked?: boolean; archived?: boolean } = {},
+  options: { asked?: boolean; archived?: boolean; asks?: boolean } = {},
 ): Promise<FakeBoard> {
   const archived = options.archived === true;
+  const asks = options.asks === true ? askFixtures() : new Map<string, AskFixture>();
+  let answering: string | null = null;
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
@@ -440,7 +499,35 @@ export async function fakeBoard(
             actor: "user",
             payload: body,
           });
+        case "/api/verbs/open_thread": {
+          const thread = {
+            id: `01M3Q2HHHHHHHHHHHHHHHHHHH${asks.size + 2}`,
+            channel: body["channel"],
+            title: body["title"],
+            state: "open",
+            openedBy: "user",
+            openedAt: "2026-09-29T10:00:00.000Z",
+            body: "",
+          };
+          asks.set(thread.id, { thread, messages: [] });
+          return json(route, thread);
+        }
         case "/api/verbs/post_message": {
+          const ask = asks.get(String(body["thread_id"]));
+          if (ask !== undefined) {
+            const posted = {
+              ...askMessage(
+                `01M3Q2KKKKKKKKKKKKKKKKKKK${ask.messages.length}`,
+                String(ask.thread["id"]),
+                "user",
+                String(body["body"]),
+              ),
+              ts: "2026-09-29T10:00:00.000Z",
+            };
+            ask.messages.push(posted);
+            answering = String(ask.thread["id"]);
+            return json(route, posted);
+          }
           const posted = {
             id: `01M3Q2AAAAAAAAAAAAAAAAAAB${threadMessages.length + 1}`,
             author: "user",
@@ -463,6 +550,10 @@ export async function fakeBoard(
         default:
           return json(route, { message: `no fake for ${pathname}` }, 404);
       }
+    }
+    const ask = asks.get(pathname.slice("/api/threads/".length));
+    if (pathname.startsWith("/api/threads/") && ask !== undefined) {
+      return json(route, { thread: ask.thread, messages: ask.messages });
     }
     switch (pathname) {
       // Streams stay open and quiet, as a board with nothing happening does.
@@ -547,6 +638,12 @@ export async function fakeBoard(
             messages: proposalMessages.length,
             lastMessageId: proposalMessages.at(-1)?.["id"] ?? null,
           },
+          ...[...asks.values()].map(({ thread, messages }) => ({
+            ...thread,
+            messages: messages.length,
+            lastMessageId: messages.at(-1)?.["id"] ?? null,
+            lastAuthor: messages.at(-1)?.["author"] ?? null,
+          })),
         ]);
       case `/api/threads/${SKILL_PROPOSAL}`:
         return json(route, { thread: proposalThread(), messages: proposalMessages });
@@ -561,7 +658,7 @@ export async function fakeBoard(
       case "/api/scheduler":
         return json(route, {
           paused,
-          running: [],
+          running: answering === null ? [] : [`desk/society/${answering}`],
           pending: [],
           resident: [],
           signals: ["role_gap:lab:referee"],

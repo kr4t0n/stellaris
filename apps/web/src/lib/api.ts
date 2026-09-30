@@ -87,6 +87,8 @@ const ThreadRecordSchema = ThreadFrontmatterSchema.extend({ body: z.string() });
 const ThreadSummarySchema = ThreadRecordSchema.extend({
   messages: z.number().int(),
   lastMessageId: UlidSchema.nullable(),
+  // A server from before it was listed leaves it out.
+  lastAuthor: NameSchema.nullable().default(null),
 });
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
 const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });

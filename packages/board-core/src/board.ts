@@ -67,6 +67,7 @@ import {
   type Society,
   type Task,
   type TaskFrontmatter,
+  type TaskStep,
   type Thread,
   type ThreadSubject,
   type Ulid,
@@ -220,6 +221,9 @@ export interface TaskLocation {
   readonly task: Task;
 }
 
+/** A task as `get_task` returns it: the record and what has been said in its thread. */
+export type TaskWithThread = Task & { readonly messages: readonly Message[] };
+
 const CursorsSchema = z.object({ digest: z.string().nullable() });
 const PausedSchema = z.object({ paused: z.boolean() });
 
@@ -234,6 +238,9 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
+
+/** The wake trigger that marks a role as the front desk, woken by every post of the user's. */
+const FRONT_DESK_TRIGGER = "user_post";
 
 /** Where readers of operations signals follow signals, proposals, and their decisions. */
 const OPS_CHANNELS: readonly ChannelRef[] = ["ops", "governance", "decisions"];
@@ -365,13 +372,6 @@ function gateChanges(before: readonly Stage[], after: readonly Stage[]): string[
     }
   }
   return changes;
-}
-
-/** Appends a timestamped note under the task body's Notes heading. */
-function appendNote(body: string, ts: string, author: Name, note: string): string {
-  const heading = body.includes("\n## Notes") || body.startsWith("## Notes") ? "" : "\n## Notes\n";
-  const base = body.length === 0 ? "" : body.endsWith("\n") ? body : `${body}\n`;
-  return `${base}${heading}- ${ts} @${author}: ${note}\n`;
 }
 
 function extractMentions(body: string): Name[] {
@@ -1304,7 +1304,9 @@ export class Board {
     await this.authorize(actor, "post_message");
     return this.mutex.run(async () => {
       if (args.thread_id !== undefined) {
-        return this.appendThreadMessage(actor.name, args.thread_id, args.body, args.channel);
+        return this.appendThreadMessage(actor.name, args.thread_id, args.body, {
+          channel: args.channel,
+        });
       }
       if (args.channel === undefined) {
         throw new BoardError("VALIDATION", "a message needs a channel, or a thread_id");
@@ -1337,7 +1339,9 @@ export class Board {
   /**
    * How many unread digest messages a member has in each scope: a project's slug for its channels
    * and their threads, `society` for the society's channels. The heartbeat asks, so that it wakes
-   * a member where its unread messages are and not in every project it belongs to.
+   * a member where its unread messages are and not in every project it belongs to. A task step's
+   * post is not counted: the step wakes whoever it hands work to, and the rest read it when they
+   * wake for something else.
    */
   async unreadByScope(actor: Actor): Promise<Map<string, number>> {
     return this.mutex.run(async () => {
@@ -1346,6 +1350,9 @@ export class Board {
         actor,
         await this.readDigestCursor(actor.name),
       )) {
+        if (message.step !== undefined) {
+          continue;
+        }
         const scope = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
         counts.set(scope, (counts.get(scope) ?? 0) + 1);
       }
@@ -1358,15 +1365,21 @@ export class Board {
     return (await exists(cursorFile)) ? (await readJson(cursorFile, CursorsSchema)).digest : null;
   }
 
-  /** The digest after a cursor, oldest first: what mentions the member, sits in a channel it follows, or belongs to a thread it takes part in. */
+  /**
+   * The digest after a cursor, oldest first: what mentions the member, sits in a channel it
+   * follows, or belongs to a thread it takes part in, and for the front desk, which every post by
+   * the user wakes, every post by the user wherever it is.
+   */
   private async digestSince(actor: Actor, since: Ulid | null): Promise<Message[]> {
     const agent = await this.readAgent(actor.name);
     const subscribed = new Set(agent.subscriptions);
+    const frontDesk = (await this.readRole(agent.role)).wakeTriggers.includes(FRONT_DESK_TRIGGER);
     const threadParticipation = new Map<Ulid, boolean>();
     const collected: Message[] = [];
 
     for await (const message of this.iterateMessages(since)) {
-      let include = message.mentions.includes(actor.name);
+      let include =
+        message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
       if (!include && message.thread === undefined) {
         include = subscribed.has(message.channel);
       }
@@ -1541,32 +1554,97 @@ export class Board {
     const args = VerbInputs.open_thread.parse(input);
     await this.authorize(actor, "open_thread");
     return this.mutex.run(async () => {
-      const { id, channel, title, subject } = await this.threadToOpen(args);
-      if ((await this.tryFindThread(id)) !== null) {
+      const opening = await this.threadToOpen(args);
+      if ((await this.tryFindThread(opening.id)) !== null) {
         throw new BoardError(
           "INVALID_STATE",
-          `${subject?.kind ?? "thread"} ${id} already has a thread`,
+          `${opening.subject?.kind ?? "thread"} ${opening.id} already has a thread`,
         );
       }
-      const threads = this.paths.threadsOf(channel);
-      await ensureDir(this.paths.threadMessages(threads, id));
-      const thread = await this.writeThread(threads, {
-        id,
-        channel,
-        title,
-        ...(subject === undefined ? {} : { subject }),
-        state: "open",
-        openedBy: actor.name,
-        openedAt: this.now().toISOString(),
-        body: "",
-      });
-      await this.events.append("thread.opened", actor.name, {
-        threadId: id,
-        channel,
-        subject: subject ?? null,
-      });
-      return thread;
+      return this.openThreadUnlocked(actor.name, opening);
     });
+  }
+
+  /** Writes a new open thread and its event. Callers hold the mutex and chose where it hangs. */
+  private async openThreadUnlocked(
+    by: Name,
+    opening: { id: Ulid; channel: ChannelRef; title: string; subject?: ThreadSubject },
+  ): Promise<Thread> {
+    const { id, channel, title, subject } = opening;
+    const threads = this.paths.threadsOf(channel);
+    await ensureDir(this.paths.threadMessages(threads, id));
+    const thread = await this.writeThread(threads, {
+      id,
+      channel,
+      title,
+      ...(subject === undefined ? {} : { subject }),
+      state: "open",
+      openedBy: by,
+      openedAt: this.now().toISOString(),
+      body: "",
+    });
+    await this.events.append("thread.opened", by, {
+      threadId: id,
+      channel,
+      subject: subject ?? null,
+    });
+    return thread;
+  }
+
+  /** Where a task's thread hangs, what it is called, and what it is about. */
+  private taskThreadOpening(task: Task): {
+    id: Ulid;
+    channel: ChannelRef;
+    title: string;
+    subject: ThreadSubject;
+  } {
+    return {
+      id: task.id,
+      channel: channelRef(task.project, "general"),
+      title: task.title,
+      subject: { kind: "task", id: task.id },
+    };
+  }
+
+  /**
+   * The open thread of a task in play, for a verb about to post into it. A task from before tasks
+   * opened their threads gets one now, and a thread closed early while its task is in play opens
+   * again; an ended task's thread stays closed.
+   */
+  private async taskThreadUnlocked(by: Name, task: Task): Promise<Thread> {
+    const found = await this.tryFindThread(task.id);
+    if (found?.thread.state === "open") {
+      return found.thread;
+    }
+    if (task.status === "done" || task.status === "abandoned") {
+      throw new BoardError(
+        "INVALID_STATE",
+        `task ${task.id} is ${task.status} and its thread closed with it`,
+      );
+    }
+    if (found === null) {
+      return this.openThreadUnlocked(by, this.taskThreadOpening(task));
+    }
+    const { closedBy: _by, closedAt: _at, ...kept } = found.thread;
+    const reopened = await this.writeThread(found.threads, { ...kept, state: "open" });
+    await this.events.append("thread.opened", by, {
+      threadId: task.id,
+      channel: reopened.channel,
+      subject: reopened.subject ?? null,
+      reopened: true,
+    });
+    return reopened;
+  }
+
+  /** Posts what a task verb was told to say into the task's thread, as its author, with the step it recorded. */
+  private async postTaskNote(
+    author: Name,
+    task: Task,
+    body: string,
+    step?: TaskStep,
+  ): Promise<Message> {
+    const thread = await this.taskThreadUnlocked(author, task);
+    return this.appendThreadMessage(author, thread.id, body, step === undefined ? {} : { step });
   }
 
   /** Where a new thread hangs, what it is called, and what it is about. */
@@ -1631,6 +1709,12 @@ export class Board {
       const { thread, threads } = await this.findThread(args.thread_id);
       if (thread.state !== "open") {
         throw new BoardError("INVALID_STATE", `thread ${thread.id} is not open`);
+      }
+      if (thread.subject?.kind === "task") {
+        throw new BoardError(
+          "INVALID_STATE",
+          `thread ${thread.id} is task ${thread.subject.id}'s and closes when the task ends`,
+        );
       }
       if (
         !PLANNING_ROLES.includes(actor.role) &&
@@ -1703,6 +1787,7 @@ export class Board {
         onDone: project.onDone,
         completing: false,
       });
+      await this.assertChannelExists(channelRef(args.project, "general"));
       const task = await this.writeTask(args.project, { ...frontmatter, body: args.body });
       await this.events.append("task.created", actor.name, {
         taskId: task.id,
@@ -1711,6 +1796,7 @@ export class Board {
         parentId: task.parentId ?? null,
         stage: task.stage,
       });
+      await this.openThreadUnlocked(actor.name, this.taskThreadOpening(task));
       return task;
     });
   }
@@ -1850,14 +1936,18 @@ export class Board {
         ...current,
         ...(reworkDone ? { returned: undefined } : {}),
         stages: current.stages.map((s, i) => (i === index ? completed : s)),
-        body:
-          args.note === undefined
-            ? current.body
-            : appendNote(current.body, ts, actor.name, `${stage.name}: ${args.note}`),
         claimedBy: undefined,
         leaseExpiresAt: undefined,
         updatedAt: ts,
       };
+      // Posted before the task is written, since a task that ends here closes its thread.
+      if (args.note !== undefined) {
+        await this.postTaskNote(actor.name, current, args.note, {
+          action: "advanced",
+          stage: stage.id,
+          to: next?.id ?? null,
+        });
+      }
       let task: Task;
       if (next !== undefined) {
         task = await this.writeTask(location.project, {
@@ -1997,7 +2087,7 @@ export class Board {
     });
   }
 
-  /** Moves a task back to an earlier stage, abandons it, adds a note, or sets its blockers. */
+  /** Moves a task back to an earlier stage, abandons it, posts a note to its thread, or sets its blockers. */
   async updateTask(actor: Actor, input: VerbInput<"update_task">): Promise<Task> {
     const args = VerbInputs.update_task.parse(input);
     await this.authorize(actor, "update_task");
@@ -2068,8 +2158,15 @@ export class Board {
         }
         next = { ...next, blockedBy: [...args.blocked_by] };
       }
+      // Posted before the task is written, since an abandoned task closes its thread.
       if (args.note !== undefined) {
-        next = { ...next, body: appendNote(next.body, ts, actor.name, args.note) };
+        const step: TaskStep | undefined =
+          moved !== null
+            ? { action: "returned", stage: moved.from, to: moved.to }
+            : next.status === "abandoned"
+              ? { action: "abandoned", stage: current.stage, to: null }
+              : undefined;
+        await this.postTaskNote(actor.name, current, args.note, step);
       }
       if (next.status === "claimed" && next.claimedBy === actor.name) {
         next = { ...next, leaseExpiresAt: this.leaseEnd(now) };
@@ -2103,10 +2200,16 @@ export class Board {
     });
   }
 
-  async getTask(actor: Actor, input: VerbInput<"get_task">): Promise<Task> {
+  async getTask(actor: Actor, input: VerbInput<"get_task">): Promise<TaskWithThread> {
     const args = VerbInputs.get_task.parse(input);
     await this.authorize(actor, "get_task");
-    return (await this.findTask(args.task_id)).task;
+    const { task } = await this.findTask(args.task_id);
+    const found = await this.tryFindThread(task.id);
+    const messages =
+      found === null
+        ? []
+        : await this.readMessagesIn(this.paths.threadMessages(found.threads, task.id), null);
+    return { ...task, messages };
   }
 
   async subscribe(actor: Actor, input: VerbInput<"subscribe">): Promise<Agent> {
@@ -2556,7 +2659,8 @@ export class Board {
 
   /**
    * Records the outcome of a completing task's effect: done, or waiting again at its last stage so
-   * its participants can reshape the plan.
+   * its participants can reshape the plan. A merge's outcome is posted to the task's thread, and a
+   * landed one announced in the project's general channel.
    */
   async finishCompletion(
     actor: Actor,
@@ -2569,6 +2673,19 @@ export class Board {
         throw new BoardError("INVALID_STATE", `task ${current.id} is not completing`);
       }
       const ts = this.now().toISOString();
+      const merged = current.onDone === "merge";
+      if (merged) {
+        await this.postTaskNote(
+          actor.name,
+          current,
+          input.ok
+            ? `${sentence(input.detail)}.`
+            : `Landing failed: ${sentence(input.detail)}. The task waits at its last stage for its participants to reshape the plan.`,
+          input.ok
+            ? { action: "landed", stage: current.stage, to: null }
+            : { action: "reopened", stage: current.stage, to: current.stage },
+        );
+      }
       if (input.ok) {
         const task = await this.writeEndedTask(actor.name, location.project, {
           ...current,
@@ -2585,6 +2702,13 @@ export class Board {
         });
         for (const name of new Set(task.stages.flatMap((stage) => stage.completedBy ?? []))) {
           await this.refreshMember(name);
+        }
+        if (merged) {
+          await this.appendMessage(
+            actor.name,
+            channelRef(location.project, "general"),
+            `Task ${task.id} "${task.title}" is done: ${sentence(input.detail)}.`,
+          );
         }
         return task;
       }
@@ -3271,13 +3395,13 @@ export class Board {
     author: Name,
     threadId: Ulid,
     body: string,
-    channel?: ChannelRef,
+    options: { channel?: ChannelRef | undefined; step?: TaskStep } = {},
   ): Promise<Message> {
     const { thread, threads } = await this.findThread(threadId);
     if (thread.state !== "open") {
       throw new BoardError("INVALID_STATE", `thread ${threadId} is closed`);
     }
-    if (channel !== undefined && channel !== thread.channel) {
+    if (options.channel !== undefined && options.channel !== thread.channel) {
       throw new BoardError(
         "VALIDATION",
         `thread ${threadId} belongs to ${thread.channel}; leave channel out or pass that one`,
@@ -3285,14 +3409,19 @@ export class Board {
     }
     return this.writeMessage(
       this.paths.threadMessages(threads, threadId),
-      { author, channel: thread.channel, thread: threadId },
+      {
+        author,
+        channel: thread.channel,
+        thread: threadId,
+        ...(options.step === undefined ? {} : { step: options.step }),
+      },
       body,
     );
   }
 
   private async writeMessage(
     dir: string,
-    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid },
+    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid; step?: TaskStep },
     body: string,
   ): Promise<Message> {
     const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
@@ -3308,6 +3437,7 @@ export class Board {
       channel: frontmatter.channel,
       thread: frontmatter.thread ?? null,
       mentions: frontmatter.mentions,
+      step: frontmatter.step ?? null,
     });
     return { ...frontmatter, body };
   }
@@ -3535,20 +3665,28 @@ export class Board {
   }
 
   /**
-   * A task's creator, holder, and everyone named on or holding a stage; a proposal's proposer,
-   * its decider, and the roles that may decide it.
+   * A task's creator, holder, everyone named on or holding a stage, and, while the current stage
+   * waits, the project's members who may take it, so the note that handed it over reaches them; a
+   * proposal's proposer, its decider, and the roles that may decide it.
    */
   private async involvedIn(actor: Actor, subject: ThreadSubject | undefined): Promise<boolean> {
     try {
       if (subject?.kind === "task") {
         const { task } = await this.findTask(subject.id);
-        return (
+        if (
           task.claimedBy === actor.name ||
           task.createdBy === actor.name ||
           task.stages.some(
             (stage) => stage.agent === actor.name || stage.holders.includes(actor.name),
           )
-        );
+        ) {
+          return true;
+        }
+        if (task.status !== "open" || task.completing) {
+          return false;
+        }
+        const agent = await this.readAgent(actor.name);
+        return agent.memberships.includes(task.project) && mayHoldStage(actor, task);
       }
       if (subject?.kind === "proposal") {
         const proposal = await this.readProposal(subject.id);

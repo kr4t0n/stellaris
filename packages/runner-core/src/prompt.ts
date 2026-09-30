@@ -6,6 +6,7 @@ import {
   type Project,
   type Stage,
   type Task,
+  type TaskStep,
   type Thread,
   type TurnDispatch,
   type TurnRecord,
@@ -65,6 +66,24 @@ function clip(text: string): string {
 
 function assignee(stage: Stage): string {
   return stage.agent ?? stage.role ?? "anyone";
+}
+
+/** What a step's post records, for its heading in the digest. */
+function stepPhrase(step: TaskStep): string {
+  if (step.action === "advanced") {
+    return step.to === null
+      ? `finished ${step.stage}, the last stage`
+      : `finished ${step.stage}; the task is now at ${step.to}`;
+  }
+  if (step.action === "returned") {
+    return `sent the task back from ${step.stage} to ${step.to ?? "an earlier stage"}`;
+  }
+  if (step.action === "abandoned") {
+    return `abandoned the task at ${step.stage}`;
+  }
+  return step.action === "landed"
+    ? "landed the task"
+    : `could not land the task; it waits at ${step.stage} again`;
 }
 
 /** One task as a plan line: its current stage, where that stage sits, and what follows it. */
@@ -138,7 +157,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
-      "The user posted. Route it: answer in the same channel, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
+      "The user posted. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
     );
   }
 
@@ -248,8 +267,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
           : thread === undefined
             ? `${message.channel} thread ${message.thread}`
             : `${message.channel} thread "${thread.title}" (${message.thread})`;
+      const step = message.step === undefined ? "" : `, who ${stepPhrase(message.step)}`;
       lines.push(
-        `### [${message.ts}] ${where} from @${message.author} (message ${message.id})`,
+        `### [${message.ts}] ${where} from @${message.author}${step} (message ${message.id})`,
         "",
         clip(message.body),
         "",

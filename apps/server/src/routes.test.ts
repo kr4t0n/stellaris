@@ -48,7 +48,7 @@ describe("board server routes", () => {
     board = init.board;
     userToken = init.userToken;
     headers = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
-    await board.addProject(USER, { slug: "demo" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
     await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",

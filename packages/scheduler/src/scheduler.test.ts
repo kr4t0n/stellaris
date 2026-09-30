@@ -107,7 +107,8 @@ describe("Scheduler", () => {
     options: { concurrency?: number; timings?: Record<string, number>; record?: boolean } = {},
   ) {
     const { board } = await Board.init(dir, { name: "sched" }, { now, leaseMs: 60_000 });
-    await board.addProject(USER, { slug: "demo" });
+    // A second channel, beside the default general, which members do not follow until they choose to.
+    await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
     await addWorkRoles(board);
     await board.addAgent(USER, {
       name: "eng-1",
@@ -600,10 +601,13 @@ describe("Scheduler", () => {
         { name: "review", role: "reviewer", gate: true },
       ],
     });
-    // Three participants, then silence: the thread has gone stale.
-    await board.openThread(ENG, { task_id: task.id });
-    for (const author of [ENG, REV, USER]) {
-      await board.postMessage(author, { channel: "demo/general", body: "hm", thread_id: task.id });
+    // Three participants, then silence: the topic has gone stale. The task's thread, as busy and
+    // as quiet, is measured by its stages instead.
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "gpu drivers" });
+    for (const thread of [topic.id, task.id]) {
+      for (const author of [ENG, REV, USER]) {
+        await board.postMessage(author, { body: "hm", thread_id: thread });
+      }
     }
     await board.retireAgent(USER, { name: "rev-1", reason: "test" });
     await board.claimTask(ENG, { task_id: task.id });
@@ -621,11 +625,12 @@ describe("Scheduler", () => {
       expect.arrayContaining([
         ["role_gap", "role_gap:demo:reviewer"],
         ["churn", `churn:${task.id}`],
-        ["stale_thread", `stale_thread:${task.id}`],
+        ["stale_thread", `stale_thread:${topic.id}`],
         ["blocked_capability", `blocked_capability:${task.id}`],
         ["idle_member", "idle_member:eng-1"],
       ]),
     );
+    expect(kinds).not.toContainEqual(["stale_thread", `stale_thread:${task.id}`]);
     expect(kinds.map(([kind]) => kind)).not.toContain("backlog");
     // No steward is charted for signals here, so nobody woke on them; the retired reviewer never will.
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
@@ -722,6 +727,19 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
       ["desk", "demo", "user_post"],
     ]);
+
+    // The user's note on a step is the task's business: it wakes the stage, not the front desk.
+    runner.dispatches.length = 0;
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "sign off",
+      stages: [{ name: "draft", agent: "user" }, { name: "check" }],
+    });
+    await board.claimTask(USER, { task_id: task.id });
+    await board.advanceTask(USER, { task_id: task.id, note: "Drafted; over to anyone." });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("user_post");
   });
 
   it("drops a retired member's queued turn and keeps the queue across a restart", async () => {

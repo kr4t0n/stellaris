@@ -395,7 +395,9 @@ export class Scheduler {
             now,
           );
         }
-        if (event.actor === USER_NAME) {
+        // A step's note from the user is the task's business, not a request for the front desk.
+        const step = payload["step"];
+        if (event.actor === USER_NAME && (step === undefined || step === null)) {
           await this.wakeFrontDesk(channel, messageId, now);
         }
         return;
@@ -1075,8 +1077,9 @@ export class Scheduler {
       }
     }
 
+    // A task's thread is measured by its task's stages, which have signals of their own.
     for (const thread of await this.board.listThreads()) {
-      if (thread.state !== "open") {
+      if (thread.state !== "open" || thread.subject?.kind === "task") {
         continue;
       }
       const messages = await this.board.listThread(thread.id);
@@ -1091,7 +1094,6 @@ export class Scheduler {
           value: quiet,
           threshold: this.timings.staleThreadMs,
           ...(project === null ? {} : { project }),
-          ...(thread.subject?.kind === "task" ? { taskId: thread.subject.id } : {}),
         });
       }
     }

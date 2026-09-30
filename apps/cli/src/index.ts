@@ -505,7 +505,7 @@ task
 task
   .command("advance <id>")
   .description("Finish the current stage; past the last one the task is done")
-  .option("--note <text>", "what was done")
+  .option("--note <text>", "what was done, posted to the task's thread")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(async (id: string, opts: { note?: string; as?: string }) => {
     const board = await open();
@@ -541,10 +541,12 @@ task
 
 task
   .command("update <id>")
-  .description("Send a task back to an earlier stage, abandon it, add a note, or set blockers")
+  .description(
+    "Send a task back to an earlier stage, abandon it, or set blockers, with a note for its thread",
+  )
   .option("--stage <stageId>", "move back to this earlier stage")
   .option("--abandon", "abandon the task", false)
-  .option("--note <text>", "append a note")
+  .option("--note <text>", "a note, posted to the task's thread")
   .option("--blocked-by <ids...>", "task ids this task waits on")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(
@@ -566,7 +568,7 @@ task
 
 task
   .command("show <id>")
-  .description("Show a task with its plan")
+  .description("Show a task with its plan and its thread")
   .action(async (id: string) => {
     const board = await open();
     const found = await board.getTask(board.userActor(), { task_id: id });
@@ -574,6 +576,13 @@ task
       .readThread(id)
       .then((t) => t.state)
       .catch(() => "none");
+    const said = found.messages.map((message) => {
+      const step =
+        message.step === undefined
+          ? ""
+          : ` [${message.step.action} ${message.step.stage}${message.step.to === null ? "" : ` → ${message.step.to}`}]`;
+      return `${message.ts}  ${message.author}${step}\n${message.body.trim()}\n`;
+    });
     print(found, () =>
       [
         `${found.id}  ${found.status}${found.completing ? " (completing)" : ""}  ${found.title}`,
@@ -581,6 +590,7 @@ task
         describePlan(found),
         "",
         found.body.trim(),
+        ...(said.length === 0 ? [] : ["", "Thread:", "", ...said]),
       ].join("\n"),
     );
   });

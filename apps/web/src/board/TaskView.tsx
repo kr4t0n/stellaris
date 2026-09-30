@@ -1,10 +1,12 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useParams } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, type ThreadSummary } from "../lib/api.js";
 import { ago } from "../lib/format.js";
+import { markSeen } from "../lib/seen.js";
 import {
   useMembers,
   useNow,
@@ -14,8 +16,9 @@ import {
   useThreads,
 } from "../lib/session.js";
 import { Citizen, displayName } from "./Avatar.js";
+import { Composer } from "./Composer.js";
+import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { ThreadCard } from "./ThreadCard.js";
 import {
   assigneeOf,
   inPlay,
@@ -94,31 +97,73 @@ function StageItem({
   );
 }
 
-/** Opens the task's thread on its project's general channel, and goes to it. */
+/** Opens a thread for a task from before tasks opened their own. */
 function OpenTaskThread({ taskId }: { taskId: string }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const navigate = useNavigate();
   const open = useMutation({
     mutationFn: () => api.openThread({ task_id: taskId }),
-    onSuccess: (thread) => {
+    onSuccess: () => {
       void client.invalidateQueries({ queryKey: ["threads"] });
-      void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });
     },
   });
   return (
     <div className="mt-2 flex items-center gap-3">
       <Button variant="primary" disabled={open.isPending} onClick={() => open.mutate()}>
-        {open.isPending ? "Opening…" : "Open a thread"}
+        {open.isPending ? "Opening…" : "Open its thread"}
       </Button>
       <p className="text-meta">
-        {open.error === null ? "It closes when the task ends." : open.error.message}
+        {open.error === null
+          ? "This task is older than task threads. It closes when the task ends."
+          : open.error.message}
       </p>
     </div>
   );
 }
 
-/** One task: where it stands, its plan as a timeline, its body and notes, and its thread. */
+/** What has been said about the work: talk, and the notes each step left, oldest first. */
+function TaskThread({ task, thread, now }: { task: Task; thread: ThreadSummary; now: number }) {
+  const { api } = useSession();
+  const members = useMembers();
+  const detail = useQuery({ queryKey: ["thread", task.id], queryFn: () => api.thread(task.id) });
+  const messages = detail.data?.messages ?? [];
+  const newest = messages.at(-1)?.id ?? null;
+  useEffect(() => markSeen(task.id, newest), [task.id, newest]);
+  if (detail.data === undefined) {
+    return <p className="mt-2 text-meta">Reading the thread…</p>;
+  }
+  const closed = detail.data.thread;
+  return (
+    <div className="-mx-4 mt-1">
+      {messages.length === 0 ? (
+        <p className="mx-4 mt-1 text-meta">
+          Nothing said yet. Each stage's handover lands here, and so does anything written below.
+        </p>
+      ) : (
+        messages.map((message) => (
+          <MessageItem
+            key={message.id}
+            message={message}
+            members={members.data}
+            now={now}
+            task={task}
+          />
+        ))
+      )}
+      {thread.state === "closed" ? (
+        <div className="mx-4 mt-2">
+          <p className="text-meta">
+            Closed{closed.closedAt === undefined ? "" : ` ${ago(closed.closedAt, now)}`}
+            {closed.body.trim() === "" ? " when the task ended." : ":"}
+          </p>
+          {closed.body.trim() === "" ? null : <Markdown text={closed.body} />}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One task: where it stands, its plan as a timeline, its brief, and its thread with a composer. */
 export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
   const task = useTask(taskId);
@@ -195,27 +240,28 @@ export function TaskView() {
         </p>
         {current.body.trim() === "" ? null : (
           <section className="mt-5 border-t border-line pt-4">
-            <h3 className="text-caps">Brief and notes</h3>
+            <h3 className="text-caps">Brief</h3>
             <div className="mt-2">
               <Markdown text={current.body} />
             </div>
           </section>
         )}
-        <section className="mt-5 border-t border-line pt-4">
+        <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-caps">Thread</h3>
-          {thread === undefined ? (
+          {threads.data === undefined ? null : thread === undefined ? (
             inPlay(current) ? (
               <OpenTaskThread taskId={current.id} />
             ) : (
               <p className="mt-2 text-meta">No thread on this task.</p>
             )
           ) : (
-            <div className="-mx-4">
-              <ThreadCard thread={thread} now={now} />
-            </div>
+            <TaskThread task={current} thread={thread} now={now} />
           )}
         </section>
       </div>
+      {thread?.state === "open" ? (
+        <Composer target={{ threadId: current.id }} placeholder="Write in the task's thread" />
+      ) : null}
     </>
   );
 }

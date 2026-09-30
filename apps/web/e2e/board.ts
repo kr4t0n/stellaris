@@ -116,7 +116,30 @@ const TASK = {
   stageSeq: 2,
   onDone: "none",
   completing: false,
+  body: "Survey the field and tabulate the methods.",
+};
+
+/** The task's thread, opened with it, where ada's handover of the survey stage landed. */
+const TASK_THREAD = {
+  id: STAGE_TASK,
+  channel: "lab/general",
+  title: TASK.title,
+  subject: { kind: "task", id: STAGE_TASK },
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
   body: "",
+};
+
+const HANDOVER = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAB1",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  step: { action: "advanced", stage: "s1", to: "s2" },
+  ts: CREATED,
+  mentions: [],
+  body: "Survey done: twelve methods in SURVEY.md, with sources.",
 };
 
 /** desk's one finished turn, as the event log pairs its start and end. */
@@ -230,6 +253,7 @@ export async function fakeBoard(
   let refusal: string | null = null;
   let paused = false;
   let deskModel: string | null = null;
+  const threadMessages: Array<Record<string, unknown>> = [HANDOVER];
   const proposal: Proposal = {
     id: SKILL_PROPOSAL,
     kind: "skill",
@@ -305,6 +329,19 @@ export async function fakeBoard(
             actor: "user",
             payload: body,
           });
+        case "/api/verbs/post_message": {
+          const posted = {
+            id: `01M3Q2AAAAAAAAAAAAAAAAAAB${threadMessages.length + 1}`,
+            author: "user",
+            channel: "lab/general",
+            thread: body["thread_id"],
+            ts: "2026-09-29T10:00:00.000Z",
+            mentions: [],
+            body: body["body"],
+          };
+          threadMessages.push(posted);
+          return json(route, posted);
+        }
         case "/api/pause":
         case "/api/resume":
           paused = pathname === "/api/pause";
@@ -367,7 +404,18 @@ export async function fakeBoard(
         return json(route, [PROJECT]);
       case "/api/projects/lab/tasks":
         return json(route, [TASK]);
+      case `/api/tasks/${STAGE_TASK}`:
+        return json(route, TASK);
       case "/api/threads":
+        return json(route, [
+          {
+            ...TASK_THREAD,
+            messages: threadMessages.length,
+            lastMessageId: threadMessages.at(-1)?.["id"] ?? null,
+          },
+        ]);
+      case `/api/threads/${STAGE_TASK}`:
+        return json(route, { thread: TASK_THREAD, messages: threadMessages });
       case "/api/skills":
       case "/api/channels/general":
       case "/api/channels/governance":

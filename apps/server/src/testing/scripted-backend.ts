@@ -294,9 +294,7 @@ export class ScriptedBackend implements AgentBackend {
         await writeFile(file, "hello from eng-1\n", "utf8");
         await git("add", "hello.txt");
         await git("commit", "-m", "feat: add hello.txt");
-        await verb("open_thread", { task_id: taskId }).catch(() => undefined);
         await verb("post_message", {
-          channel: "demo/general",
           body: `Committed hello.txt on ${branch}.`,
           thread_id: taskId,
         });
@@ -321,7 +319,6 @@ export class ScriptedBackend implements AgentBackend {
         return done("sent the task back for a second line");
       }
       await verb("advance_task", { task_id: taskId, note: "reviewed the diff" });
-      await verb("close_thread", { thread_id: taskId, summary: "Shipped hello.txt." });
       return done("approved");
     }
     return done("no script");

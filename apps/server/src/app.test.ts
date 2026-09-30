@@ -24,7 +24,7 @@ describe("board server", () => {
     const init = await Board.init(dir, { name: "srv" });
     board = init.board;
     userToken = init.userToken;
-    await board.addProject(USER, { slug: "demo" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
     await addWorkRoles(board);
     engToken = (
       await board.addAgent(USER, {
@@ -108,8 +108,14 @@ describe("board server", () => {
       headers,
       body: JSON.stringify({ thread_id: thread.id, body: "vitest?" }),
     });
+    // The task's thread opened with the task; the topic hangs off the channel it names.
     const listed = await app.request("/api/threads", { headers });
-    expect(await listed.json()).toMatchObject([{ id: thread.id, channel: "demo/dev" }]);
+    expect(await listed.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: task.id, channel: "demo/general", messages: 0 }),
+        expect.objectContaining({ id: thread.id, channel: "demo/dev" }),
+      ]),
+    );
     const shown = await app.request(`/api/threads/${thread.id}`, { headers });
     expect(await shown.json()).toMatchObject({
       thread: { title: "Which runner?", state: "open" },

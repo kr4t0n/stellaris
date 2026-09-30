@@ -35,6 +35,16 @@ describe("buildTurnPrompt", () => {
           mentions: [],
           body: "vitest, I think",
         },
+        {
+          id: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+          author: "rev-1",
+          channel: "demo/general",
+          thread: "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          step: { action: "returned", stage: "s2", to: "s1" },
+          ts: "2026-09-28T10:02:00.000Z",
+          mentions: [],
+          body: "Add a second line.",
+        },
       ],
       threads: new Map([
         [
@@ -72,9 +82,13 @@ describe("buildTurnPrompt", () => {
     });
     expect(prompt).toContain("Trigger: mention from user. mentioned by user");
     expect(prompt).toContain("Your previous turn did not finish");
-    expect(prompt).toContain("## Unread messages (2)");
+    expect(prompt).toContain("## Unread messages (3)");
     expect(prompt).toContain(
-      'demo/dev thread "Which runner?" (01ARZ3NDEKTSV4RRFFQ69G5FAT) from @rev-1',
+      'demo/dev thread "Which runner?" (01ARZ3NDEKTSV4RRFFQ69G5FAT) from @rev-1 (message',
+    );
+    // A task verb's note says what the step did.
+    expect(prompt).toContain(
+      "thread 01ARZ3NDEKTSV4RRFFQ69G5FAY from @rev-1, who sent the task back from s2 to s1 (message",
     );
     expect(prompt).toContain("please start on the scaffold");
     expect(prompt).toContain("## Stages you hold\n\nNone.");
@@ -165,7 +179,9 @@ describe("buildTurnPrompt", () => {
       },
     });
     expect(prompt).toContain("Trigger: user_post from user. the user posted in general");
-    expect(prompt).toContain("Route it: answer in the same channel");
+    expect(prompt).toContain(
+      "Route it: answer where it was posted, in its thread when it came in one",
+    );
     expect(prompt).toContain("## The society");
     expect(prompt).toContain(
       '- demo "Demo": channels general, dev; members eng-1; on done merge; default plan build (engineer), review (gate, reviewer)',

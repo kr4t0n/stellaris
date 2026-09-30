@@ -31,7 +31,8 @@ describe("Board", () => {
       { name: "test society" },
       { now, leaseMs: 60_000 },
     );
-    await board.addProject(USER, { slug: "demo" });
+    // A second channel, beside the default general, for topics that do not belong in it.
+    await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
     for (const role of ["engineer", "reviewer"]) {
       await board.setRoleCharter(USER, {
         name: role,
@@ -110,40 +111,66 @@ describe("Board", () => {
       code: "CLAIM_CONFLICT",
     });
 
-    await board.openThread(ENG, { task_id: task.id });
-    const threadMessage = await board.postMessage(ENG, {
+    // The task's thread opened with it, on the project's general channel, under the task's id.
+    expect(await board.readThread(task.id)).toMatchObject({
       channel: "demo/general",
+      state: "open",
+      openedBy: "user",
+      subject: { kind: "task", id: task.id },
+    });
+    await expect(board.openThread(ENG, { task_id: task.id })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    const threadMessage = await board.postMessage(ENG, {
       body: "Working on it.",
       thread_id: task.id,
     });
-    expect(threadMessage.thread).toBe(task.id);
+    expect(threadMessage).toMatchObject({ channel: "demo/general", thread: task.id });
+    // The reviewer is not in the thread while the build is held.
     const reviewerDigest = await board.readDigest(REV);
     expect(reviewerDigest.messages.map((m) => m.id)).toEqual([brief.id]);
 
     const reviewing = await board.advanceTask(ENG, { task_id: task.id, note: "PR ready" });
     expect(reviewing).toMatchObject({ status: "open", stage: "s2" });
+    expect(reviewing.body.trim()).toBe("Details.");
     expect(reviewing.claimedBy).toBeUndefined();
+    const [, handover] = await board.listThread(task.id);
+    expect(handover).toMatchObject({
+      author: "eng-1",
+      body: "PR ready\n",
+      step: { action: "advanced", stage: "s1", to: "s2" },
+    });
+    // The review waits for the reviewer, which is now in the thread and reads the handover; the
+    // step itself does not count toward a heartbeat, the talk before it does.
+    expect((await board.unreadByScope(REV)).get("demo")).toBe(1);
+    expect((await board.readDigest(REV, { advance: false })).messages.map((m) => m.id)).toEqual([
+      threadMessage.id,
+      handover?.id,
+    ]);
     await expect(board.claimTask(ENG, { task_id: task.id })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
     await board.claimTask(REV, { task_id: task.id });
-    const summary = await board.closeThread(REV, { thread_id: task.id, summary: "Shipped." });
-    expect(summary).toMatchObject({ channel: "demo/general", closes: task.id });
-    expect(await board.readThread(task.id)).toMatchObject({
-      state: "closed",
-      closedBy: "rev-1",
-      body: "Shipped.\n",
-    });
-    const done = await board.advanceTask(REV, { task_id: task.id });
+    await expect(
+      board.closeThread(REV, { thread_id: task.id, summary: "Shipped." }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await board.getTask(REV, { task_id: task.id })).messages.map((m) => m.body)).toEqual([
+      "Working on it.\n",
+      "PR ready\n",
+    ]);
+    const done = await board.advanceTask(REV, { task_id: task.id, note: "Approved." });
     expect(done.status).toBe("done");
     expect(done.leaseExpiresAt).toBeUndefined();
-    expect(done.body).toContain("@eng-1: build: PR ready");
     expect(done.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
-    expect((await board.listChannel("demo/general")).map((m) => m.id)).toEqual([
-      brief.id,
-      summary.id,
-    ]);
-    expect((await board.listThread(task.id)).map((m) => m.id)).toEqual([threadMessage.id]);
+    expect(await board.readThread(task.id)).toMatchObject({ state: "closed", closedBy: "rev-1" });
+    expect((await board.listThread(task.id)).at(-1)).toMatchObject({
+      author: "rev-1",
+      step: { action: "advanced", stage: "s2", to: null },
+    });
+    expect((await board.listChannel("demo/general")).map((m) => m.id)).toEqual([brief.id]);
+    await expect(
+      board.updateTask(ENG, { task_id: task.id, note: "One more thing." }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
 
     const types = (await board.readEvents(null)).map((event) => event.type);
     expect(types).toEqual(
@@ -472,25 +499,57 @@ describe("Board", () => {
           on_done: onDone,
         });
       }
-      await board.openThread(ENG, { task_id: task.id });
-      await board.postMessage(ENG, { channel: "demo/general", body: "note", thread_id: task.id });
+      await board.postMessage(ENG, { body: "note", thread_id: task.id });
       return task.id;
     };
     const state = async (id: Ulid): Promise<string> => (await board.readThread(id)).state;
+    const lastStep = async (id: Ulid) => (await board.listThread(id)).at(-1)?.step;
     const finished = await withThread("finished");
     await board.claimTask(ENG, { task_id: finished });
     expect((await board.advanceTask(ENG, { task_id: finished })).status).toBe("done");
     expect(await state(finished)).toBe("closed");
+
+    // A merge that fails leaves its thread open, says so there, and waits at the last stage.
+    const conflicted = await withThread("conflicted", "merge");
+    await board.claimTask(ENG, { task_id: conflicted });
+    await board.advanceTask(ENG, { task_id: conflicted });
+    const reopened = await board.finishCompletion(SYSTEM_ACTOR, {
+      taskId: conflicted,
+      ok: false,
+      detail: "conflict in README.md",
+    });
+    expect(reopened).toMatchObject({ status: "open", stage: "s1", completing: false });
+    expect(await state(conflicted)).toBe("open");
+    expect((await board.listThread(conflicted)).at(-1)).toMatchObject({
+      author: "board",
+      body: expect.stringContaining("Landing failed: conflict in README.md."),
+      step: { action: "reopened", stage: "s1", to: "s1" },
+    });
+
     const merged = await withThread("merged", "merge");
     await board.claimTask(ENG, { task_id: merged });
     // A completing task is still in play, and its thread stays open until the effect lands.
     await board.advanceTask(ENG, { task_id: merged });
     expect(await state(merged)).toBe("open");
-    await board.finishCompletion(SYSTEM_ACTOR, { taskId: merged, ok: true, detail: "merged" });
+    await board.finishCompletion(SYSTEM_ACTOR, {
+      taskId: merged,
+      ok: true,
+      detail: "task/x merged into main at abc123",
+    });
     expect(await state(merged)).toBe("closed");
+    expect(await lastStep(merged)).toEqual({ action: "landed", stage: "s1", to: null });
+    expect((await board.listChannel("demo/general")).map((m) => m.body)).toEqual([
+      `Task ${merged} "merged" is done: task/x merged into main at abc123.\n`,
+    ]);
+
     const dropped = await withThread("dropped");
-    await board.updateTask(USER, { task_id: dropped, status: "abandoned" });
+    await board.updateTask(USER, {
+      task_id: dropped,
+      status: "abandoned",
+      note: "Not needed after all.",
+    });
     expect(await state(dropped)).toBe("closed");
+    expect(await lastStep(dropped)).toEqual({ action: "abandoned", stage: "s1", to: null });
     await expect(board.openThread(ENG, { task_id: dropped })).rejects.toMatchObject({
       code: "INVALID_STATE",
     });
@@ -891,7 +950,6 @@ describe("Board", () => {
     await board.unsubscribe(STEW, { channel: "decisions" });
     const legacyThread = async (title: string, end: boolean): Promise<Ulid> => {
       const task = await board.createTask(USER, { project: "demo", title });
-      await board.openThread(ENG, { task_id: task.id });
       await board.postMessage(ENG, { body: "old news", thread_id: task.id });
       if (end) {
         await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
@@ -917,6 +975,7 @@ describe("Board", () => {
     };
     await appendFile(board.paths.eventLog(), `${JSON.stringify(legacyEvent)}\n`, "utf8");
     const untouched = await board.createTask(USER, { project: "demo", title: "no thread" });
+    await rm(board.paths.threadFile(board.paths.threads("demo"), untouched.id));
     const untouchedFile = board.paths.task("demo", untouched.id);
     await writeFile(
       untouchedFile,
@@ -1003,7 +1062,7 @@ describe("Board", () => {
       code: "VALIDATION",
     });
     const api = await board.createProject(DESK, { slug: "api", name: "Public API" });
-    expect(api.channels).toEqual(["general", "dev"]);
+    expect(api.channels).toEqual(["general"]);
     expect((await board.readAgent("user")).memberships).toContain("api");
 
     // Citizens join themselves; the front desk adds others; an engineer may not.
@@ -1072,6 +1131,23 @@ describe("Board", () => {
       (event) => event.type === "turn.completed",
     );
     expect(completedEvent?.payload["model"]).toBe("claude-opus-5-5");
+
+    // Every post by the user wakes the front desk, so every one reaches its digest, even in a
+    // thread it takes no part in; the thread's participants read it as usual, and nobody else.
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "flaky test" });
+    const aside = await board.postMessage(USER, {
+      body: "is this still failing?",
+      thread_id: topic.id,
+    });
+    expect((await board.readDigest(DESK, { advance: false })).messages.map((m) => m.id)).toContain(
+      aside.id,
+    );
+    expect((await board.readDigest(ENG, { advance: false })).messages.map((m) => m.id)).toContain(
+      aside.id,
+    );
+    expect(
+      (await board.readDigest(REV, { advance: false })).messages.map((m) => m.id),
+    ).not.toContain(aside.id);
 
     // Society-scope wakes are for roles that may work outside projects.
     await expect(

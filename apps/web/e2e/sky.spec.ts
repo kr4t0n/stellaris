@@ -20,6 +20,9 @@ test("a task in play is a mark in the sky whose card says where it stands", asyn
 });
 
 test("dragging the sky moves it without opening what the drag began on", async ({ page }) => {
+  // Without motion the camera lands at once, so the last click finds the sky where home puts it
+  // rather than wherever the ease back has got to.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await fakeBoard(page);
   await page.goto("/");
   const sky = page.locator("canvas");
@@ -27,7 +30,8 @@ test("dragging the sky moves it without opening what the drag began on", async (
   const box = await sky.boundingBox();
   if (box === null) throw new Error("the sky is not drawn");
 
-  // The core sits in the middle; a plain click there opens the society.
+  // The core sits in the middle with desk's seat, the first, at its center: a plain click there
+  // opens desk, and a drag that begins on it opens nothing.
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await page.mouse.move(center.x, center.y);
   await page.mouse.down();
@@ -40,5 +44,5 @@ test("dragging the sky moves it without opening what the drag began on", async (
   await expect(page).toHaveURL(/\/$/);
 
   await page.mouse.click(center.x, center.y);
-  await expect(page).toHaveURL(/\/society$/);
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
 });

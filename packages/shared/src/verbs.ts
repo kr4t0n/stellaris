@@ -55,6 +55,7 @@ export const VerbInputs = {
     /** Move the task back to this earlier stage. */
     stage: StageIdSchema.optional(),
     status: z.enum(["abandoned"]).optional(),
+    /** Posted to the task's thread as the caller, marked with the step when the task moved. */
     note: z.string().min(1).optional(),
     blocked_by: z.array(UlidSchema).optional(),
   }),
@@ -89,6 +90,7 @@ export const VerbInputs = {
     stages: z.array(PlanEditStageSchema),
     on_done: CompletionEffectSchema.optional(),
   }),
+  /** The note is posted to the task's thread as the caller, marked with the step. */
   advance_task: z.object({ task_id: UlidSchema, note: z.string().min(1).optional() }),
   configure_project: z.object({
     project: NameSchema,
@@ -108,16 +110,17 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Read your digest's messages again, or page past them: unread messages that mention you, sit in channels you follow, or belong to threads you take part in.",
   search: "Search messages, tasks, and knowledge by text, optionally within a project or channel.",
   open_thread:
-    "Open a thread: on a task or a proposal, whose id it takes and with which it ends, or on a channel with a title. Its messages reach only its participants and anyone mentioned.",
-  close_thread: "Close a thread with a summary that is posted to the thread's channel.",
+    "Open a thread: on a proposal, whose id it takes and with which it ends, or on a channel with a title. Tasks have theirs already. Its messages reach only its participants and anyone mentioned.",
+  close_thread:
+    "Close a thread with a summary that is posted to the thread's channel. A task's thread closes with its task.",
   create_task:
-    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan.",
+    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan. Its thread opens with it, under the task's id, for everything said about the work.",
   claim_task:
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
   update_task:
-    "Move a task back to an earlier stage, abandon it, add a note, or set what it is blocked by.",
-  get_task: "Read a task with its plan, body, and notes.",
+    "Move a task back to an earlier stage, abandon it, or set what it is blocked by. A note is posted to the task's thread.",
+  get_task: "Read a task with its plan, its brief, and the messages of its thread.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
   propose:
@@ -126,7 +129,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Approve a proposal; the board then provisions it. User and steward only, never on your own proposal.",
   reject: "Reject a proposal with a reason. User and steward only, never on your own proposal.",
   create_project:
-    "Create a project with its default channels: a slug, a display name, a git remote when one exists, and optionally a default plan and a completion effect (none or merge).",
+    "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a default plan and a completion effect (none or merge).",
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
@@ -135,7 +138,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   plan_task:
     "Reshape a task's plan from the current stage onward, or after it while someone holds it: keep a stage by passing its id, drop it by leaving it out, add one without an id. Gated stages and on_done: user, steward, concierge.",
   advance_task:
-    "Finish the stage you hold. The next stage becomes current; past the last one the task is done.",
+    "Finish the stage you hold, with a note for the task's thread on what you did. The next stage becomes current; past the last one the task is done.",
   configure_project:
     "Set a project's default plan and its completion effect: none, or merge to land each finished task's branch on the default branch.",
 };

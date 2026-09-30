@@ -28,8 +28,8 @@ const TURN_CONTRACT = [
   "- Work only inside your worktree. A task's work goes on its branch `task/<id>`: run `git switch task/<id>` before working on the task and commit there. After each turn the runner commits what you left on a task branch and switches your worktree back to your own branch, `agent/<name>`, for work tied to no task.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly.",
-  "- A thread is a conversation off a channel that reaches only its participants and whoever is mentioned in it. Open one with open_thread on a task or a proposal, whose id it takes and with which it ends, or on a channel with a title for any other topic; close_thread posts your summary to its channel.",
-  "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something everyone should know now, post it to the project channel.",
+  "- A thread is a conversation off a channel that reaches only its participants and whoever is mentioned in it. Every task has one, opened with it under the task's id on its project's general channel: talk about a task there, with post_message and its thread_id, and the notes you give advance_task and update_task are posted there as you. Its participants are the task's creator, its stage holders and assignees, whoever may take the stage that waits, and anyone who posted; it closes when the task ends. Open other threads with open_thread on a proposal, or on a channel with a title for any other topic; close_thread posts your summary to its channel.",
+  "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, and anything about one task, in the task's thread.",
   '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
   "- End every turn with the status object: summary, claims held, what is blocked, whether the user must decide.",
@@ -42,7 +42,7 @@ const PLANNING = [
   "- Assign a stage to a role when anyone in it could do it, to a citizen only when it must be them, and to nobody when anyone in the project could.",
   "- Reshape rather than force: another round is an inserted stage, and a wait on something outside the society is a stage named for what it waits on. When a check finds work unfinished, send the task back to an earlier stage with update_task.",
   "- A gated stage is an independent check: nobody who held an earlier stage of the task may hold it, and only the user, the steward, and the concierge may add, remove, move, reassign, or ungate it. Ask them in the task's thread when a gate should change.",
-  "- Commit your work on the task's branch before you advance, and say what you did in the advance note.",
+  "- Commit your work on the task's branch before you advance, and say what you did in the advance note; it is the handover the next holder reads in the task's thread.",
 ].join("\n");
 
 /** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
@@ -55,7 +55,7 @@ const GOVERNANCE = [
   '  - retirement: {"agent", "reason"}',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
-  "- Projects and membership: `create_project` opens a project with its default channels (front desk and user), and `configure_project` sets its default plan and completion effect (user, steward, concierge). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
+  "- Projects and membership: `create_project` opens a project with its general channel (front desk and user), and `configure_project` sets its default plan and completion effect (user, steward, concierge). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by work a project needs that no existing role covers. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals arrive in the ops channel as posts by the board: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are counters; interpreting them is your judgment.",
 ].join("\n");

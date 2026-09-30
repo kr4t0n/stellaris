@@ -551,12 +551,6 @@ export class LocalRunner {
       ok: outcome.ok,
       detail: outcome.detail,
     });
-    await this.board.postMessage(SYSTEM_ACTOR, {
-      channel: `${project}/general`,
-      body: outcome.ok
-        ? `Task ${taskId} "${task.title}" is done: ${outcome.detail}.`
-        : `Landing ${branch} for task ${taskId} "${task.title}" failed: ${outcome.detail}. The task waits at its last stage for its participants to reshape the plan.`,
-    });
   }
 
   /** Commits what the turn left on a task branch and returns the worktree to the agent's own branch. */

@@ -95,12 +95,24 @@ describe("Phase 1 exit criterion", () => {
       stage: "s1",
     });
     await settle(); // the build stage's last holder is woken, reworks, and advances again
-    await settle(); // rev-1 approves and closes the thread; the merge waits for its turn to end
+    await settle(); // rev-1 approves; the merge waits for its turn to end
     await settle(); // the completion effect lands task/<id> and the task is done
 
     const final = await board.getTask(USER, { task_id: task.id });
     expect(final.status).toBe("done");
-    expect(await board.readThread(task.id)).toMatchObject({ state: "closed", closedBy: "rev-1" });
+    // The task's thread holds the work's conversation, every handover and send-back, and the
+    // landing, and closed when the task ended.
+    expect(await board.readThread(task.id)).toMatchObject({ state: "closed", closedBy: "board" });
+    expect(
+      final.messages.map((m) => [m.author, m.step?.action ?? "said", m.body.trim().split("\n")[0]]),
+    ).toEqual([
+      ["eng-1", "said", `Committed hello.txt on task/${task.id}.`],
+      ["eng-1", "advanced", "built"],
+      ["rev-1", "returned", "add a second line"],
+      ["eng-1", "advanced", "second line added"],
+      ["rev-1", "advanced", "reviewed the diff"],
+      ["board", "landed", expect.stringContaining(`task/${task.id} merged into main at`)],
+    ]);
     expect(final.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 
     const mainLog = await execa("git", ["log", "--oneline", "main"], {
@@ -124,9 +136,8 @@ describe("Phase 1 exit criterion", () => {
         (m) => m.author === "board" && m.body.includes(`Task ${task.id} "Add hello.txt" is done`),
       ),
     ).toBe(true);
-    expect(general.some((m) => m.author === "rev-1" && m.body.includes("Thread closed"))).toBe(
-      true,
-    );
+    // The verdicts stayed in the task's thread; the channel has the request and the announcement.
+    expect(general.map((m) => m.author)).not.toContain("rev-1");
 
     const types = (await board.readEvents(null)).map((e) => e.type);
     expect(types).toEqual(
@@ -233,7 +244,7 @@ describe("Phase 5 exit criterion", () => {
     await settle();
     expect(backend.residentStarts).toEqual(["desk/society"]);
     expect(backend.residentCloses).toEqual([]);
-    expect((await board.readProject("api")).channels).toEqual(["general", "dev"]);
+    expect((await board.readProject("api")).channels).toEqual(["general"]);
     const proposals = await board.listProposals();
     expect(proposals).toEqual([
       expect.objectContaining({ kind: "member", proposedBy: "desk", status: "proposed" }),

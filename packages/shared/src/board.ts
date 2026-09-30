@@ -10,7 +10,7 @@ import {
 import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
 export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as const;
-export const PROJECT_DEFAULT_CHANNELS = ["general", "dev"] as const;
+export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 
 /**
  * The scope of a turn that belongs to no project. Dispatches, sessions, and turn records use it in
@@ -83,6 +83,18 @@ export const ProjectSchema = z.object({
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
+/**
+ * What a task verb did, on the post it made of its note in the task's thread: the stage it acted
+ * at, and where the task went, the next stage or the one it was sent back to, or null once it left
+ * its plan. `landed` and `reopened` are the board's, for a completion effect that ran or failed.
+ */
+export const TaskStepSchema = z.object({
+  action: z.enum(["advanced", "returned", "abandoned", "landed", "reopened"]),
+  stage: StageIdSchema,
+  to: StageIdSchema.nullable(),
+});
+export type TaskStep = z.infer<typeof TaskStepSchema>;
+
 /** Message frontmatter. The author is stamped by the board, never supplied by the caller. */
 export const MessageFrontmatterSchema = z.object({
   id: UlidSchema,
@@ -93,6 +105,8 @@ export const MessageFrontmatterSchema = z.object({
   task: UlidSchema.optional(),
   /** On a summary post, the thread it closed. */
   closes: UlidSchema.optional(),
+  /** On a post a task verb made in the task's thread: the step it recorded. */
+  step: TaskStepSchema.optional(),
   ts: IsoDateTimeSchema,
   mentions: z.array(NameSchema),
 });

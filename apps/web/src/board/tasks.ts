@@ -1,4 +1,4 @@
-import { stageIndex, type Stage, type Task } from "@stellaris/shared";
+import { stageIndex, type Stage, type Task, type TaskStep } from "@stellaris/shared";
 
 /** Where a task stands, as the tasks view groups it. */
 export type TaskPhase = "returned" | "waiting" | "working" | "landing" | "done" | "abandoned";
@@ -51,6 +51,32 @@ export function inPlay(task: Task): boolean {
 /** A stage of the task by its name, or its id when a plan change has removed it. */
 export function stageName(task: Task, id: string): string {
   return task.stages.find((stage) => stage.id === id)?.name ?? id;
+}
+
+/** A step's chip on the post that recorded it: what it says, and its colour. */
+export function stepLabel(step: TaskStep, task: Task | undefined): { text: string; tone: string } {
+  const name = (id: string): string => (task === undefined ? id : stageName(task, id));
+  if (step.action === "advanced") {
+    const text =
+      step.to === null
+        ? `finished ${name(step.stage)}`
+        : `finished ${name(step.stage)} → ${name(step.to)}`;
+    return { text, tone: PHASE_STYLE.working };
+  }
+  if (step.action === "returned") {
+    const to = step.to === null ? "an earlier stage" : name(step.to);
+    return { text: `sent back from ${name(step.stage)} to ${to}`, tone: PHASE_STYLE.returned };
+  }
+  if (step.action === "abandoned") {
+    return { text: "abandoned", tone: PHASE_STYLE.abandoned };
+  }
+  if (step.action === "landed") {
+    return { text: "landed", tone: PHASE_STYLE.landing };
+  }
+  return {
+    text: `landing failed · back at ${name(step.stage)}`,
+    tone: "bg-red-500/15 text-red-300",
+  };
 }
 
 /** Who may hold a stage, in words: a named citizen, any member of a role, or anyone. */

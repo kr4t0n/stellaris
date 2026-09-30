@@ -92,10 +92,10 @@ export function ModelForm({
           {unlisted === null ? null : <option value={unlisted}>{unlisted} · not listed</option>}
         </select>
       )}
+      {picked === undefined || picked.description === "" ? null : (
+        <p className="text-xs text-fg-secondary">{picked.description}</p>
+      )}
       <p className="text-[11px] leading-relaxed text-fg-muted">
-        {picked?.description === undefined || picked.description === ""
-          ? ""
-          : `${picked.description} `}
         From {member.name}'s next turn; its session goes on with the new model
         {warm ? ", and its warm session starts afresh" : ""}.
       </p>

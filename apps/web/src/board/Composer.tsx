@@ -26,7 +26,7 @@ const MAX_CANDIDATES = 6;
 export function Composer({
   target,
   placeholder,
-  wakeLine = true,
+  oneLine = false,
   className = "border-t border-line p-3",
   focusOnOpen = false,
   onPosted,
@@ -34,8 +34,11 @@ export function Composer({
 }: {
   target: Target;
   placeholder: string;
-  /** Whether the line under the box says whom sending wakes; the ask box, which always wakes the front desk, leaves it out. */
-  wakeLine?: boolean;
+  /**
+   * The box with Send beside it and no line under it of whom sending wakes, for the ask box, where
+   * every post wakes the front desk.
+   */
+  oneLine?: boolean;
   className?: string;
   /** For a composer the user just opened, such as the ask box. */
   focusOnOpen?: boolean;
@@ -158,6 +161,11 @@ export function Composer({
     }
   };
 
+  const sendButton = (
+    <Button variant="primary" type="submit" disabled={text.trim() === "" || send.isPending}>
+      {send.isPending ? "Sending…" : "Send"}
+    </Button>
+  );
   return (
     <form
       className={className}
@@ -166,7 +174,11 @@ export function Composer({
         submit();
       }}
     >
-      <div className="relative rounded-xl bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]">
+      <div
+        className={`relative rounded-xl bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
+          oneLine ? "flex items-end gap-2 pr-1.5" : ""
+        }`}
+      >
         {candidates.length > 0 ? (
           <ul
             aria-label="Citizens to mention"
@@ -208,20 +220,22 @@ export function Composer({
           }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}
-          className="block max-h-48 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
+          className={`block max-h-48 w-full resize-none bg-transparent px-3 text-sm text-fg-primary outline-none placeholder:text-fg-muted ${
+            oneLine ? "py-2.5" : "pt-2.5 pb-1"
+          }`}
         />
-        <div className="flex items-center gap-2 px-3 pb-2">
-          <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-            {!wakeLine
-              ? ""
-              : wakes.length > 0
+        {oneLine ? (
+          <div className="shrink-0 pb-1.5">{sendButton}</div>
+        ) : (
+          <div className="flex items-center gap-2 px-3 pb-2">
+            <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
+              {wakes.length > 0
                 ? `Sending wakes ${listed(wakes)}: a turn each.`
                 : "Enter to send · Shift+Enter for a new line"}
-          </p>
-          <Button variant="primary" type="submit" disabled={text.trim() === "" || send.isPending}>
-            {send.isPending ? "Sending…" : "Send"}
-          </Button>
-        </div>
+            </p>
+            {sendButton}
+          </div>
+        )}
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">

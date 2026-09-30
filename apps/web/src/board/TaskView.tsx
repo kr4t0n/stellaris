@@ -167,7 +167,7 @@ export function TaskView() {
         }
       />
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        <h3 className="text-caps">Plan</h3>
+        <h3 className="text-section">Plan</h3>
         {current.returned === undefined ? null : (
           <p className="mt-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-200">
             Sent back from {stageName(current, current.returned.from)} by {current.returned.by}{" "}
@@ -196,14 +196,14 @@ export function TaskView() {
         </p>
         {current.body.trim() === "" ? null : (
           <section className="mt-5 border-t border-line pt-4">
-            <h3 className="text-caps">Brief</h3>
+            <h3 className="text-section">Brief</h3>
             <div className="mt-2">
               <Markdown text={current.body} />
             </div>
           </section>
         )}
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
-          <h3 className="text-caps">Thread</h3>
+          <h3 className="text-section">Thread</h3>
           {threads.data === undefined ? null : thread === undefined ? (
             inPlay(current) ? (
               <OpenTaskThread taskId={current.id} />

@@ -7,7 +7,7 @@ import { withoutTitle } from "./citizen.js";
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-t border-line pt-4 first:border-t-0 first:pt-0">
-      <h3 className="text-caps">{title}</h3>
+      <h3 className="text-section">{title}</h3>
       <div className="mt-2">{children}</div>
     </section>
   );

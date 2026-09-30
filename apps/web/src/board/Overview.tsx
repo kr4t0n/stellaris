@@ -20,7 +20,7 @@ export function Section({
   return (
     <section className="border-t border-line pt-4 first:border-t-0 first:pt-0">
       <h3 className="flex items-baseline justify-between gap-2">
-        <span className="text-caps">{title}</span>
+        <span className="text-section">{title}</span>
         {aside}
       </h3>
       <div className="mt-2">{children}</div>

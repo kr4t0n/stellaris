@@ -168,14 +168,14 @@ export function ProposalView() {
         {/* The pitch opens the proposal's thread; a proposal older than that keeps its rationale here. */}
         {current.body.trim() === "" || thread !== undefined ? null : (
           <section className="mt-5">
-            <h3 className="text-caps">Why</h3>
+            <h3 className="text-section">Why</h3>
             <div className="mt-2">
               <Markdown text={current.body} />
             </div>
           </section>
         )}
         <section className="mt-5 border-t border-line pt-4">
-          <h3 className="text-caps">
+          <h3 className="text-section">
             {open
               ? "What it would make"
               : current.status === "provisioned"
@@ -185,7 +185,7 @@ export function ProposalView() {
           <ProposalCharter proposal={current} roles={roles.data} members={members.data} />
         </section>
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
-          <h3 className="text-caps">Thread</h3>
+          <h3 className="text-section">Thread</h3>
           {thread === undefined ? (
             <p className="mt-2 text-meta">
               {threads.data === undefined

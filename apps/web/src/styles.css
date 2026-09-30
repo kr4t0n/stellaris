@@ -45,6 +45,14 @@
   .text-display {
     @apply font-display text-base font-semibold tracking-tight text-fg-primary;
   }
+  /* A pane's title, over everything in the pane. */
+  .text-heading {
+    @apply text-base font-semibold tracking-tight text-fg-primary;
+  }
+  /* A section of a pane, never smaller than the content under it. */
+  .text-section {
+    @apply text-sm font-semibold text-fg-primary;
+  }
   .text-title {
     @apply text-sm font-medium tracking-tight text-fg-primary;
   }
@@ -69,8 +77,9 @@
   .board-markdown > * + * {
     @apply mt-2;
   }
+  /* Medium, so a pane's section headings stay above the headings of what agents write. */
   .board-markdown :is(h1, h2, h3, h4) {
-    @apply mt-3 text-sm font-semibold text-fg-primary;
+    @apply mt-3 text-sm font-medium text-fg-primary;
   }
   .board-markdown > :first-child {
     @apply mt-0;

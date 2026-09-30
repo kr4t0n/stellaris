@@ -10,9 +10,11 @@ import {
   type LiveTurnEvent,
 } from "@stellaris/shared";
 import { Hono, type Context } from "hono";
+import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import type { ModelSource } from "./models.js";
+import { spaHandler } from "./static.js";
 import type { TurnHub } from "./turn-hub.js";
 
 /** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
@@ -32,6 +34,8 @@ export interface AppDependencies {
   readonly scheduler?: SchedulerView | undefined;
   /** The models each CLI offers, for choosing a citizen's model. */
   readonly models?: ModelSource | undefined;
+  /** The built interface. When set, every path the API and MCP do not answer serves it. */
+  readonly webDir?: string | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -61,7 +65,10 @@ function bearer(c: Context<Env>): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-/** The board server's HTTP surface: health, an authenticated API for the user and tools, and the MCP endpoint. */
+/**
+ * The board server's HTTP surface: health, an authenticated API for the user and tools, the MCP
+ * endpoint, and the built interface.
+ */
 export function createApp(deps: AppDependencies): Hono<Env> {
   const { board, version, turns, scheduler, models } = deps;
   const app = new Hono<Env>();
@@ -294,6 +301,12 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     return handleMcpRequest(board, actor, c.req.raw, version);
   });
+
+  // Compressed, since the bundle is a megabyte raw and often crosses a slow forwarded link. The
+  // API and its event streams answer before this route, so compression never buffers a stream.
+  if (deps.webDir !== undefined) {
+    app.get("*", compress(), spaHandler(deps.webDir));
+  }
 
   return app;
 }

@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { serve } from "@hono/node-server";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
@@ -70,16 +72,25 @@ const view = {
     return scheduler.activeSignals;
   },
 };
+// The built interface sits beside the server in the monorepo. It is read on every request, so a
+// build made after the server started is served without a restart.
+const webDir =
+  process.env["STELLARIS_WEB_DIR"] ?? path.resolve(import.meta.dirname, "../../web/dist");
+const webBuilt = await access(path.join(webDir, "index.html")).then(
+  () => true,
+  () => false,
+);
 const app = createApp({
   board,
   version: VERSION,
   turns,
   scheduler: view,
   models: new ModelCatalog(backends),
+  webDir,
 });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
-    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl },
+    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl, webDir, webBuilt },
     "board server listening",
   );
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -459,5 +459,66 @@ describe("board server routes", () => {
     expect(
       frames.map((frame) => z.object({ seq: z.number() }).parse(JSON.parse(frame)).seq),
     ).toEqual([1, 2, 3]);
+  });
+
+  it("serves the built interface, with its own routes loading the page and nothing outside it", async () => {
+    const web = path.join(dir, "web");
+    await mkdir(path.join(web, "assets"), { recursive: true });
+    await writeFile(path.join(web, "index.html"), "<html>sky</html>", "utf8");
+    await writeFile(
+      path.join(web, "assets", "app-1a2b.js"),
+      "console.log(1);\n".repeat(200),
+      "utf8",
+    );
+    await writeFile(path.join(web, "favicon.svg"), "<svg/>", "utf8");
+    // A sibling whose name starts with the build directory's must stay out of reach.
+    await mkdir(path.join(dir, "web-secret"));
+    await writeFile(path.join(dir, "web-secret", "token"), "secret", "utf8");
+    const app = createApp({ board, version: "t", webDir: web });
+
+    const asset = await app.request("/assets/app-1a2b.js");
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toContain("javascript");
+    expect(asset.headers.get("cache-control")).toContain("immutable");
+    const zipped = await app.request("/assets/app-1a2b.js", {
+      headers: { "accept-encoding": "gzip, deflate, br" },
+    });
+    expect(zipped.headers.get("content-encoding")).toBe("gzip");
+    const unzipped = zipped.body?.pipeThrough(new DecompressionStream("gzip"));
+    expect(await new Response(unzipped).text()).toContain("console.log(1);");
+    const icon = await app.request("/favicon.svg");
+    expect(icon.headers.get("content-type")).toBe("image/svg+xml");
+    expect(icon.headers.get("cache-control")).toBe("no-cache");
+
+    for (const route of ["/", "/task/01M3Q2AAAAAAAAAAAAAAAAAAA1", "/c/lab/general"]) {
+      const page = await app.request(route);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toBe("<html>sky</html>");
+    }
+
+    for (const escape of [
+      "/../web-secret/token",
+      "/%2e%2e/web-secret/token",
+      "/..%2fweb-secret/token",
+    ]) {
+      expect(await (await app.request(escape)).text()).not.toContain("secret");
+    }
+    expect((await app.request("/%E0%A4%A")).status).toBe(200);
+
+    // A chunk a rebuild removed is missing, not the page.
+    expect((await app.request("/assets/app-old.js")).status).toBe(404);
+
+    const unknown = await app.request("/api/nothing-here", { headers });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: "NOT_FOUND" });
+    expect((await app.request("/api/me")).status).toBe(401);
+    expect((await app.request("/health")).status).toBe(200);
+  });
+
+  it("says the interface is not built when its directory has no page", async () => {
+    const app = createApp({ board, version: "t", webDir: path.join(dir, "missing") });
+    const page = await app.request("/");
+    expect(page.status).toBe(404);
+    expect(await page.text()).toContain("pnpm build:web");
   });
 });

@@ -4,13 +4,16 @@ import { mkdir } from "node:fs/promises";
 import { SYSTEM_ACTOR, type Actor, type Board } from "@stellaris/board-core";
 import {
   mayHoldStage,
+  sessionKey,
   USER_NAME,
   SOCIETY_SCOPE,
   turnStatusJsonSchema,
   wakeScope,
   type AgentEvent,
   type CliKind,
+  type Message,
   type Name,
+  type Task,
   type Thread,
   type TurnDispatch,
   type TranscriptEntry,
@@ -18,7 +21,12 @@ import {
   type Ulid,
 } from "@stellaris/shared";
 import { ExecaGit, taskBranch, type GitOps } from "./git.js";
-import { buildTurnPrompt, type KnowledgeView, type SocietyView } from "./prompt.js";
+import {
+  buildTurnPrompt,
+  type Conversation,
+  type KnowledgeView,
+  type SocietyView,
+} from "./prompt.js";
 import {
   renderClaudeMcpConfig,
   renderCodexMcpConfig,
@@ -54,7 +62,22 @@ export interface LocalRunnerOptions {
   readonly git?: GitOps | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: RunnerLog | undefined;
-  readonly onEvent?: ((agent: Name, project: Name, event: AgentEvent) => void) | undefined;
+  /** Every event a turn's adapter emits, with the turn's scope and, in a thread, its thread. */
+  readonly onEvent?: TurnEventListener | undefined;
+}
+
+export type TurnEventListener = (
+  agent: Name,
+  project: Name,
+  event: AgentEvent,
+  thread?: Ulid,
+) => void;
+
+/** Where a turn runs: the clone, the worktree, and the branch to hand the worktree back to, or null to detach. */
+interface Workspace {
+  readonly repoDir: string;
+  readonly worktree: string;
+  readonly branch: string | null;
 }
 
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
@@ -93,7 +116,7 @@ export class LocalRunner {
   private readonly git: GitOps;
   private readonly now: () => Date;
   private readonly log: RunnerLog;
-  private readonly onEvent: ((agent: Name, project: Name, event: AgentEvent) => void) | undefined;
+  private readonly onEvent: TurnEventListener | undefined;
   private readonly prepareLocks = new Map<Name, Promise<void>>();
   private readonly residents = new Map<string, Resident>();
 
@@ -112,21 +135,22 @@ export class LocalRunner {
     this.onEvent = options.onEvent;
   }
 
-  /** Agent-scope pairs with a warm session right now, as `agent/scope`. */
+  /** Home conversations with a warm session right now, as `agent/scope`. */
   get residentPairs(): string[] {
     return [...this.residents.keys()].toSorted();
   }
 
-  /** Clones the project once and adds the pair's worktree. Idempotent. */
-  async prepare(
-    agent: Name,
-    project: Name,
-  ): Promise<{ repoDir: string; worktree: string; branch: string }> {
+  /**
+   * Clones the project once and adds the worktree a turn runs in: the pair's own for its home
+   * conversation and its proposal and topic threads, or, for a task's conversation, one of its own
+   * on the task's branch. Idempotent.
+   */
+  async prepare(agent: Name, project: Name, taskId?: Ulid): Promise<Workspace> {
     // Two first turns on one project must not both initialize its repository: serialize per project.
     const previous = this.prepareLocks.get(project) ?? Promise.resolve();
     const run = previous.then(
-      () => this.prepareUnlocked(agent, project),
-      () => this.prepareUnlocked(agent, project),
+      () => this.prepareUnlocked(agent, project, taskId),
+      () => this.prepareUnlocked(agent, project, taskId),
     );
     this.prepareLocks.set(
       project,
@@ -141,9 +165,20 @@ export class LocalRunner {
   private async prepareUnlocked(
     agent: Name,
     project: Name,
-  ): Promise<{ repoDir: string; worktree: string; branch: string }> {
+    taskId: Ulid | undefined,
+  ): Promise<Workspace> {
     const record = await this.board.readProject(project);
     const repoDir = await this.git.ensureRepo(record, this.board.paths.repo(project));
+    if (taskId !== undefined) {
+      const branch = taskBranch(taskId);
+      await this.git.ensureBranch(repoDir, branch, record.defaultBranch);
+      const worktree = await this.git.ensureTaskWorktree(
+        repoDir,
+        this.board.paths.taskWorktree(agent, taskId),
+        branch,
+      );
+      return { repoDir, worktree, branch: null };
+    }
     const branch = `agent/${agent}`;
     const worktree = await this.git.ensureWorktree(
       repoDir,
@@ -158,9 +193,11 @@ export class LocalRunner {
     const agent = await this.board.readAgent(dispatch.agent);
     const actor: Actor = { name: agent.name, role: agent.role };
     const startedAt = this.now().toISOString();
+    const thread = dispatch.thread;
     const base: TurnRecord = {
       agent: agent.name,
       project: dispatch.project,
+      ...(thread === undefined ? {} : { thread: thread.id }),
       runner: this.runnerName,
       cli: agent.cli,
       session: null,
@@ -194,7 +231,10 @@ export class LocalRunner {
 
     // The society scope has no repository: the agent's home is its working directory.
     const home = this.board.paths.agent(agent.name);
-    const workspace = societyScope ? null : await this.prepare(agent.name, dispatch.project);
+    const taskId = thread?.task === true ? thread.id : undefined;
+    const workspace = societyScope
+      ? null
+      : await this.prepare(agent.name, dispatch.project, taskId);
     const worktree = workspace?.worktree ?? home;
     const repoDir = workspace?.repoDir ?? home;
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
@@ -206,7 +246,7 @@ export class LocalRunner {
         }
       }
     }
-    const sessions = await this.board.readSessions(agent.name, dispatch.project);
+    const sessions = await this.board.readSessions(agent.name, dispatch.project, thread?.id);
     const spec: AgentSpec = {
       agent: agent.name,
       project: dispatch.project,
@@ -223,29 +263,45 @@ export class LocalRunner {
     if (session === undefined) {
       session = await backend.newSession(spec);
       // Written before the turn runs so a crash cannot lose the id.
-      await this.board.writeSession(agent.name, dispatch.project, agent.cli, session);
+      await this.board.writeSession(agent.name, dispatch.project, agent.cli, session, thread?.id);
     }
 
-    const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project);
+    const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project, thread?.id);
     // A resumed session reports a running total that includes its earlier turns. Records from
     // before `sessionCostUsd` held that total as the turn's cost.
     const costSoFarUsd =
       !newSession && lastTurn?.session === session
         ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
         : 0;
-    // The digest and the stages of this turn's scope only: a citizen's turns in its other scopes
-    // may run at the same time, and each reads and acts on its own.
+    // The digest of this turn's conversation only: a citizen's turns in its other conversations
+    // may run at the same time, and each reads and acts on its own. A new thread conversation
+    // is shown the whole thread, since nothing of it is in the session yet.
     const digest = await this.board.readDigest(
-      { ...actor, scope: dispatch.project },
-      { advance: false, limit: 50 },
+      { ...actor, scope: dispatch.project, ...(thread === undefined ? {} : { thread: thread.id }) },
+      { advance: false, limit: thread === undefined ? 50 : 100 },
     );
-    const held = (await this.board.heldClaims(agent.name)).filter(
-      (task) => task.project === dispatch.project,
-    );
+    const threadSoFar =
+      thread !== undefined && newSession
+        ? (await this.board.listThread(thread.id).catch(() => [] as Message[])).slice(-100)
+        : null;
+    const messages = threadSoFar ?? digest.messages;
+    const cursorAfter = threadSoFar?.at(-1)?.id ?? digest.cursor;
+    const task: Task | null =
+      taskId === undefined
+        ? null
+        : await this.board
+            .findTask(taskId)
+            .then((found) => found.task)
+            .catch(() => null);
+    // Stages are a task conversation's business: its own task's, and nothing in other conversations.
+    const held =
+      task === null
+        ? []
+        : (await this.board.heldClaims(agent.name)).filter((each) => each.id === task.id);
     const roleCharter = await this.board.readAgentRoleBody(agent.name);
     const memoryCore = await this.board.readMemoryCore(agent.name);
     const onboarding: OnboardingContext | null =
-      dispatch.onboarding || newSession
+      dispatch.onboarding || (newSession && thread === undefined)
         ? {
             agentName: agent.name,
             roleSummary: charter.purpose,
@@ -280,30 +336,42 @@ export class LocalRunner {
           dir: this.board.paths.projectKnowledge(dispatch.project),
           topics: await this.board.listKnowledge(dispatch.project),
         };
-    // Readers of operations signals get those logged for this scope since their last turn here.
-    const signals = charter.wakeTriggers.includes(OPS_TRIGGER)
-      ? (await this.board.listSignals(500))
-          .filter(
-            (record) =>
-              wakeScope(agent, charter, record.signal.project ?? null) === dispatch.project &&
-              (lastTurn === null || record.ts > lastTurn.startedAt),
-          )
-          .slice(-MAX_SIGNALS)
-      : null;
-    const waiting = (project === null ? [] : await this.board.openTasks(project.slug)).filter(
-      (task) => task.claimedBy === undefined && mayHoldStage(actor, task),
-    );
+    // Readers of operations signals get those logged for this scope since their last home turn here.
+    const signals =
+      thread === undefined && charter.wakeTriggers.includes(OPS_TRIGGER)
+        ? (await this.board.listSignals(500))
+            .filter(
+              (record) =>
+                wakeScope(agent, charter, record.signal.project ?? null) === dispatch.project &&
+                (lastTurn === null || record.ts > lastTurn.startedAt),
+            )
+            .slice(-MAX_SIGNALS)
+        : null;
+    const waiting =
+      task !== null && task.status === "open" && !task.completing && mayHoldStage(actor, task)
+        ? [task]
+        : [];
     const threads = new Map<Ulid, Thread>();
-    for (const id of new Set(digest.messages.flatMap((message) => message.thread ?? []))) {
-      const thread = await this.board.readThread(id).catch(() => undefined);
-      if (thread !== undefined) {
-        threads.set(id, thread);
+    for (const id of new Set(messages.flatMap((message) => message.thread ?? []))) {
+      const record = await this.board.readThread(id).catch(() => undefined);
+      if (record !== undefined) {
+        threads.set(id, record);
       }
     }
+    const threadRecord =
+      thread === undefined
+        ? undefined
+        : (threads.get(thread.id) ??
+          (await this.board.readThread(thread.id).catch(() => undefined)));
+    const conversation: Conversation | null =
+      threadRecord === undefined
+        ? null
+        : { thread: threadRecord, task, fresh: threadSoFar !== null };
     const prompt = buildTurnPrompt({
       dispatch,
-      messages: digest.messages,
+      messages,
       threads,
+      conversation,
       heldClaims: held,
       waitingStages: waiting,
       project,
@@ -323,9 +391,18 @@ export class LocalRunner {
     const statusSchema = turnStatusJsonSchema();
 
     const record = await this.board.beginTurn({ ...base, session, sessionCostUsd: costSoFarUsd });
-    const resident = charter.resident && backend.startResident !== undefined;
+    // Residency keeps a role's home conversation warm; its thread conversations run cold.
+    const resident =
+      charter.resident && backend.startResident !== undefined && thread === undefined;
     this.log.info(
-      { agent: agent.name, project: dispatch.project, session, newSession, resident },
+      {
+        agent: agent.name,
+        project: dispatch.project,
+        thread: thread?.id,
+        session,
+        newSession,
+        resident,
+      },
       "turn starting",
     );
 
@@ -334,7 +411,7 @@ export class LocalRunner {
     const onEvent = (event: AgentEvent): void => {
       events.push(event);
       transcript.push({ ts: this.now().toISOString(), event });
-      this.onEvent?.(agent.name, dispatch.project, event);
+      this.onEvent?.(agent.name, dispatch.project, event, thread?.id);
     };
     const keepLeases = setInterval(() => {
       void this.board
@@ -342,7 +419,7 @@ export class LocalRunner {
         .then((claims) =>
           this.renewLeases(
             actor,
-            claims.filter((task) => task.project === dispatch.project).map((task) => task.id),
+            claims.filter((each) => each.project === dispatch.project).map((each) => each.id),
           ),
         )
         .catch(() => undefined);
@@ -352,7 +429,7 @@ export class LocalRunner {
     try {
       if (resident && backend.startResident !== undefined) {
         result = await this.runResidentTurn(backend, spec, {
-          key: `${agent.name}/${dispatch.project}`,
+          key: sessionKey(agent.name, dispatch.project),
           scope: dispatch.project,
           agent: { name: agent.name, role: agent.role },
           session,
@@ -371,6 +448,7 @@ export class LocalRunner {
           agent.role,
           this.tokenLifetime(5 * 60_000),
           dispatch.project,
+          thread?.id,
         );
         try {
           result = await backend.runTurn(
@@ -408,11 +486,20 @@ export class LocalRunner {
 
     if (workspace !== null) {
       await this.handBack(agent.name, workspace.worktree, workspace.branch);
+      if (taskId !== undefined) {
+        await this.dropEndedTaskWorktree(taskId, workspace);
+      }
     }
 
     // CLIs that assign their own session ids report the real one after the first turn.
     if (result.session !== undefined && result.session !== session) {
-      await this.board.writeSession(agent.name, dispatch.project, agent.cli, result.session);
+      await this.board.writeSession(
+        agent.name,
+        dispatch.project,
+        agent.cli,
+        result.session,
+        thread?.id,
+      );
       session = result.session;
     }
 
@@ -432,18 +519,23 @@ export class LocalRunner {
 
     if (result.exitReason === "completed" || result.exitReason === "blocked") {
       // The digest was delivered; only now does the cursor move past it.
-      await this.board.setDigestCursor(agent.name, dispatch.project, digest.cursor);
+      await this.board.setDigestCursor(agent.name, dispatch.project, cursorAfter, thread?.id);
       await this.renewLeases(
         actor,
-        held.map((task) => task.id),
+        held.map((each) => each.id),
       );
       if (result.status?.needsUserDecision === true) {
-        await this.askUser(actor, dispatch.project, startedAt, result.status.summary);
+        await this.askUser(actor, dispatch.project, thread?.id, startedAt, result.status.summary);
       }
     }
     await this.board.finishTurn(finished, transcript);
     this.log.info(
-      { agent: agent.name, project: dispatch.project, exitReason: finished.exitReason },
+      {
+        agent: agent.name,
+        project: dispatch.project,
+        thread: thread?.id,
+        exitReason: finished.exitReason,
+      },
       "turn finished",
     );
     return finished;
@@ -581,13 +673,29 @@ export class LocalRunner {
 
   /**
    * A turn that reported the user must decide asks where the question belongs, with a mention of
-   * the user, which is what puts it before them. One that mentioned the user nowhere gets a thread
-   * of its own on its scope's general channel, opened as the citizen with its summary, so the
-   * question still reaches the user and the answer reaches the citizen.
+   * the user, which is what puts it before them. One that mentioned the user nowhere asks in its
+   * own thread when it was in one that is still open, so the answer comes back to the same
+   * conversation, and otherwise in a thread of its own on its scope's general channel, opened as the
+   * citizen with its summary.
    */
-  private async askUser(actor: Actor, scope: Name, since: string, summary: string): Promise<void> {
+  private async askUser(
+    actor: Actor,
+    scope: Name,
+    threadId: Ulid | undefined,
+    since: string,
+    summary: string,
+  ): Promise<void> {
     try {
       if (await this.board.hasMentioned(actor.name, USER_NAME, since)) {
+        return;
+      }
+      const current =
+        threadId === undefined ? null : await this.board.readThread(threadId).catch(() => null);
+      if (current !== null && current.state === "open") {
+        await this.board.postMessage(actor, {
+          thread_id: current.id,
+          body: `@${USER_NAME} ${summary}`,
+        });
         return;
       }
       const thread = await this.board.openThread(actor, {
@@ -603,8 +711,11 @@ export class LocalRunner {
     }
   }
 
-  /** Commits what the turn left on a task branch and returns the worktree to the agent's own branch. */
-  private async handBack(agent: Name, worktree: string, home: string): Promise<void> {
+  /**
+   * Commits what the turn left on a task branch and returns the worktree to the agent's own
+   * branch, or for a task's own worktree detaches it, which frees the branch for the next holder.
+   */
+  private async handBack(agent: Name, worktree: string, home: string | null): Promise<void> {
     try {
       const handed = await this.git.handBack(worktree, home, {
         name: agent,
@@ -615,6 +726,18 @@ export class LocalRunner {
       }
     } catch (error) {
       this.log.warn({ agent, error: String(error) }, "could not hand the worktree back");
+    }
+  }
+
+  /** A task's own worktree goes once the task has ended; its work is on the task's branch. */
+  private async dropEndedTaskWorktree(taskId: Ulid, workspace: Workspace): Promise<void> {
+    try {
+      const { task } = await this.board.findTask(taskId);
+      if (task.status === "done" || task.status === "abandoned") {
+        await this.git.removeWorktree(workspace.repoDir, workspace.worktree);
+      }
+    } catch (error) {
+      this.log.warn({ taskId, error: String(error) }, "could not remove an ended task's worktree");
     }
   }
 

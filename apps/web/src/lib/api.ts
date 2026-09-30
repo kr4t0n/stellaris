@@ -9,6 +9,7 @@ import {
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
+  parseSessionKey,
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
@@ -61,10 +62,13 @@ const SchedulerViewSchema = z.object({
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
 /** The scheduler's `agent/scope` pairs, split. */
-export function pairsOf(list: readonly string[]): Array<{ agent: string; scope: string }> {
-  return list.flatMap((pair) => {
-    const [agent, scope] = pair.split("/");
-    return agent === undefined || scope === undefined ? [] : [{ agent, scope }];
+/** Sessions as the scheduler lists them: a citizen, a scope, and, for a thread's conversation, its thread. */
+export function pairsOf(
+  list: readonly string[],
+): Array<{ agent: string; scope: string; thread?: string }> {
+  return list.flatMap((key) => {
+    const parsed = parseSessionKey(key);
+    return parsed === null ? [] : [parsed];
   });
 }
 

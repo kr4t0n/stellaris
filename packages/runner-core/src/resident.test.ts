@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
+import { execa } from "execa";
 import { MEMBER_VERBS, type AgentEvent } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalRunner } from "./local-runner.js";
@@ -161,7 +162,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     expect((await board.getTask(USER, { task_id: task.id })).status).toBe("claimed");
   });
 
-  it("gives a citizen's turns in two projects each its own digest, stages, and scoped token", async () => {
+  it("gives a citizen's conversations each their own digest, stages, worktree, and token", async () => {
     const { board } = await Board.init(dir, { name: "scopes" });
     for (const slug of ["demo", "lab"]) {
       await board.addProject(USER, { slug });
@@ -180,19 +181,25 @@ describe("LocalRunner resident sessions and the society scope", () => {
     });
     const demoTask = await board.createTask(USER, { project: "demo", title: "demo build" });
     await board.claimTask({ name: "eng-1", role: "engineer" }, { task_id: demoTask.id });
+    await board.postMessage(USER, { thread_id: demoTask.id, body: "@eng-1 the task's spec" });
     await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 the demo handover" });
     await board.postMessage(USER, { channel: "lab/general", body: "@eng-1 the lab question" });
 
-    const seen = new Map<string, { prompt: string; scope: string | undefined }>();
+    const seen = new Map<string, { prompt: string; cwd: string; branch: string }>();
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
-      runTurn: (request) => {
-        seen.set(request.spec.project, {
-          prompt: request.prompt,
-          scope: board.resolveToken(request.mcp.token)?.scope,
+      runTurn: async (request) => {
+        const actor = board.resolveToken(request.mcp.token);
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: request.spec.cwd,
         });
-        return Promise.resolve(completed("done"));
+        seen.set(`${actor?.scope}/${actor?.thread ?? "home"}`, {
+          prompt: request.prompt,
+          cwd: request.spec.cwd,
+          branch: head.stdout.trim(),
+        });
+        return completed("done");
       },
     };
     const runner = new LocalRunner({
@@ -201,35 +208,56 @@ describe("LocalRunner resident sessions and the society scope", () => {
       backends: { claude: backend },
       mcpUrl: "http://127.0.0.1:0/mcp",
     });
-    const turn = (project: string) =>
+    const turn = (project: string, thread?: string) =>
       runner.runTurn({
         agent: "eng-1",
         project,
+        ...(thread === undefined ? {} : { thread: { id: thread, task: true } }),
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
         onboarding: false,
       });
-    // Both at once, as the scheduler runs a citizen's scopes.
-    await Promise.all([turn("demo"), turn("lab")]);
+    // All at once, as the scheduler runs a citizen's conversations.
+    await Promise.all([turn("demo"), turn("demo", demoTask.id), turn("lab")]);
 
-    const demo = seen.get("demo");
-    const lab = seen.get("lab");
-    expect(demo?.scope).toBe("demo");
+    const demo = seen.get("demo/home");
+    const task = seen.get(`demo/${demoTask.id}`);
+    const lab = seen.get("lab/home");
     expect(demo?.prompt).toContain("the demo handover");
     expect(demo?.prompt).not.toContain("the lab question");
-    expect(demo?.prompt).toContain(`${demoTask.id} "demo build"`);
-    expect(lab?.scope).toBe("lab");
+    expect(demo?.prompt).not.toContain("the task's spec");
+    expect(demo?.prompt).not.toContain("Stages you hold");
+    expect(demo?.branch).toBe("agent/eng-1");
+    // The task's conversation holds its stage, runs in a worktree of its own on the task's branch,
+    // and is shown its thread so far.
+    expect(task?.prompt).toContain(`${demoTask.id} "demo build": work (yours, 1 of 1)`);
+    expect(task?.prompt).toContain("## The thread so far (1)");
+    expect(task?.prompt).toContain("the task's spec");
+    expect(task?.prompt).not.toContain("the demo handover");
+    expect(task?.cwd).toBe(path.resolve(board.paths.taskWorktree("eng-1", demoTask.id)));
+    expect(task?.branch).toBe(`task/${demoTask.id}`);
     expect(lab?.prompt).toContain("the lab question");
     expect(lab?.prompt).not.toContain("the demo handover");
-    expect(lab?.prompt).toContain("## Stages you hold\n\nNone.");
-    // Each turn moved its own scope's cursor: both digests are read now.
-    for (const scope of ["demo", "lab"]) {
+    // After the turn the task's worktree lets its branch go for the next holder.
+    const after = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: task?.cwd ?? "",
+    });
+    expect(after.stdout.trim()).toBe("HEAD");
+    // Each turn moved its own conversation's cursor: every digest is read now.
+    for (const [scope, thread] of [
+      ["demo", undefined],
+      ["demo", demoTask.id],
+      ["lab", undefined],
+    ] as const) {
       const digest = await board.readDigest(
-        { name: "eng-1", role: "engineer", scope },
+        { name: "eng-1", role: "engineer", scope, ...(thread === undefined ? {} : { thread }) },
         { advance: false },
       );
       expect(digest.messages).toEqual([]);
     }
+    expect(await board.readSessions("eng-1", "demo", demoTask.id)).toEqual({
+      claude: "session-1",
+    });
   });
 
   it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {

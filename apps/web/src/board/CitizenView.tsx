@@ -3,9 +3,17 @@ import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
+import { useEntities } from "../components/Entities.js";
 import { pairsOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
-import { elapsed, turnsOf, useLiveTurns, type LiveTurn } from "../lib/live.js";
+import {
+  conversationOf,
+  elapsed,
+  pairKey,
+  turnsOf,
+  useLiveTurns,
+  type LiveTurn,
+} from "../lib/live.js";
 import {
   useMembers,
   useNow,
@@ -100,9 +108,9 @@ function CitizenPage({
       </PaneNote>
     );
   }
-  const runningScopes = pairsOf(scheduler.data?.running ?? [])
-    .filter((pair) => pair.agent === name)
-    .map((pair) => pair.scope);
+  const running = pairsOf(scheduler.data?.running ?? []).filter((pair) => pair.agent === name);
+  const runningScopes = [...new Set(running.map((pair) => pair.scope))];
+  const runningKeys = running.map((pair) => pairKey(pair.agent, pair.scope, pair.thread));
   const queued = pairsOf(scheduler.data?.pending ?? []).find((pair) => pair.agent === name);
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
@@ -153,7 +161,7 @@ function CitizenPage({
         <WakeForm
           member={member}
           scopes={scopes}
-          preferred={chosen ?? latest?.scope ?? null}
+          preferred={chosen?.split("/")[0] ?? latest?.scope ?? null}
           running={runningScopes}
           paused={scheduler.data?.paused ?? false}
           onDone={() => setOpen(null)}
@@ -194,11 +202,17 @@ function CitizenPage({
           lastTurnAt={member.lastTurnAt}
           state={state}
           runningScopes={runningScopes}
+          runningKeys={runningKeys}
           queuedScope={queued?.scope ?? null}
         />
       )}
     </>
   );
+}
+
+/** The turn that started first. */
+function earliest(candidates: readonly LiveTurn[]): LiveTurn | undefined {
+  return candidates.toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0];
 }
 
 /** What the citizen is doing: its live turn as it happens, or the last one it took. */
@@ -208,13 +222,17 @@ function NowTab({
   lastTurnAt,
   state,
   runningScopes,
+  runningKeys,
   queuedScope,
 }: {
   name: string;
+  /** The conversation the address picks: a scope, or `scope/thread`. */
   chosen: string | null;
   lastTurnAt: string | undefined;
   state: State;
   runningScopes: readonly string[];
+  /** The citizen's sessions with a turn in flight, as the scheduler keys them. */
+  runningKeys: readonly string[];
   queuedScope: string | null;
 }) {
   const live = useLiveTurns();
@@ -224,15 +242,30 @@ function NowTab({
   // After a restart the live buffer is empty; the last finished turn is still on disk.
   const history = useTurnHistory(name, 1);
   const stored = useStoredTurn(name, turns.length === 0 ? history.data?.at(-1) : undefined);
+  const entities = useEntities();
   const isRunning = (candidate: LiveTurn): boolean =>
-    candidate.end === null && runningScopes.includes(candidate.scope);
-  // The turn shown: the one chosen, else the running one that started first, else the latest.
-  // Not the most active one, or two busy turns would take the view back and forth.
+    candidate.end === null &&
+    runningKeys.includes(pairKey(candidate.agent, candidate.scope, candidate.thread));
+  const chosenScope = chosen?.split("/")[0] ?? null;
+  // The turn shown: the conversation chosen, else a running one in the scope chosen, else the
+  // running one that started first, else the latest. Not the most active one, or two busy turns
+  // would take the view back and forth.
   const turn =
-    turns.find((candidate) => candidate.scope === chosen) ??
-    turns.filter(isRunning).toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))[0] ??
+    (chosen?.includes("/") === true
+      ? turns.find((candidate) => conversationOf(candidate) === chosen)
+      : undefined) ??
+    earliest(
+      turns.filter((candidate) => candidate.scope === chosenScope && isRunning(candidate)),
+    ) ??
+    turns.find((candidate) => conversationOf(candidate) === chosen) ??
+    earliest(turns.filter(isRunning)) ??
     turns[0] ??
     stored.turn;
+  // Where a turn was: its scope, and the thread's title for a thread's conversation.
+  const placeOf = (candidate: LiveTurn): string =>
+    candidate.thread === undefined
+      ? scopeName(candidate.scope)
+      : `${scopeName(candidate.scope)} · ${entities.get(candidate.thread)?.title ?? "a thread"}`;
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
 
@@ -268,15 +301,15 @@ function NowTab({
         ) : (
           <>
             {turns.length > 1 ? (
-              <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Turns by scope">
+              <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Turns by conversation">
                 {turns
-                  .toSorted((a, b) => a.scope.localeCompare(b.scope))
+                  .toSorted((a, b) => conversationOf(a).localeCompare(conversationOf(b)))
                   .map((candidate) => (
                     <Link
-                      key={candidate.scope}
+                      key={conversationOf(candidate)}
                       to="/citizen/$name"
                       params={{ name }}
-                      search={{ scope: candidate.scope }}
+                      search={{ scope: conversationOf(candidate) }}
                       replace
                       aria-current={candidate === turn ? "true" : undefined}
                       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
@@ -288,13 +321,13 @@ function NowTab({
                       {isRunning(candidate) ? (
                         <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
                       ) : null}
-                      {scopeName(candidate.scope)}
+                      {placeOf(candidate)}
                     </Link>
                   ))}
               </div>
             ) : null}
             <p className="text-caps">
-              {turnRunning ? "This turn" : "Last turn"} · {scopeName(turn.scope)} · started{" "}
+              {turnRunning ? "This turn" : "Last turn"} · {placeOf(turn)} · started{" "}
               {turn.fromStart ? time(turn.startedAt) : "before the earliest step shown"}
             </p>
             {turn.fromStart ? null : (

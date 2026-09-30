@@ -4,6 +4,7 @@ import path from "node:path";
 import { Board, SYSTEM_ACTOR, type Actor } from "@stellaris/board-core";
 import {
   MEMBER_VERBS,
+  sessionKey,
   type Name,
   type TurnDispatch,
   type TurnRecord,
@@ -11,7 +12,7 @@ import {
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Scheduler, unreadFor, type TurnRunner } from "./scheduler.js";
+import { Scheduler, type TurnRunner } from "./scheduler.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -20,7 +21,7 @@ const REV: Actor = { name: "rev-1", role: "reviewer" };
 class FakeRunner implements TurnRunner {
   readonly dispatches: TurnDispatch[] = [];
   readonly completions: Array<{ project: Name; taskId: Ulid }> = [];
-  private release: (() => void) | null = null;
+  private releases: Array<() => void> = [];
   hold = false;
 
   /** With a board, turns are recorded like the real runner does, on the injected clock. */
@@ -33,7 +34,7 @@ class FakeRunner implements TurnRunner {
     this.dispatches.push(dispatch);
     if (this.hold) {
       await new Promise<void>((resolve) => {
-        this.release = resolve;
+        this.releases.push(resolve);
       });
     }
     const record: TurnRecord = {
@@ -61,8 +62,10 @@ class FakeRunner implements TurnRunner {
   }
 
   releaseHeld(): void {
-    this.release?.();
-    this.release = null;
+    for (const release of this.releases) {
+      release();
+    }
+    this.releases = [];
   }
 
   async completeTask(project: Name, taskId: Ulid): Promise<void> {
@@ -300,7 +303,10 @@ describe("Scheduler", () => {
     await board.claimTask(ENG, { task_id: task.id });
     await board.advanceTask(ENG, { task_id: task.id });
     await scheduler.tick();
-    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    expect(scheduler.pendingPairs).toEqual([
+      sessionKey("eng-1", "demo", task.id),
+      sessionKey("rev-1", "demo", task.id),
+    ]);
     runner.hold = false;
     runner.releaseHeld();
     await scheduler.drain();
@@ -313,7 +319,8 @@ describe("Scheduler", () => {
     ]);
     expect(scheduler.pendingCount).toBe(0);
 
-    // A mention merged into the stage wake still needs its turn, stale stage or not.
+    // A mention in the task's thread merges into its stage wake and still needs its turn, stale
+    // stage or not.
     runner.dispatches.length = 0;
     runner.hold = true;
     await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 one more" });
@@ -324,7 +331,7 @@ describe("Scheduler", () => {
       stages: [{ name: "build", role: "engineer" }],
     });
     await scheduler.tick();
-    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 see the new task" });
+    await board.postMessage(REV, { thread_id: next.id, body: "@eng-1 see the new task" });
     await board.claimTask(ENG, { task_id: next.id });
     await scheduler.tick();
     runner.hold = false;
@@ -508,15 +515,49 @@ describe("Scheduler", () => {
     ]);
   });
 
-  it("counts the unread messages of scopes without a heartbeat toward the society scope", () => {
-    const unread = new Map([
-      ["society", 1],
-      ["lab", 2],
-      ["web", 4],
+  it("gives each thread a session: task threads run side by side, other conversations share a lane", async () => {
+    const { board, runner, scheduler } = await setup({ concurrency: 4 });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+    };
+    const build = [{ name: "build", role: "engineer" }];
+    const first = await board.createTask(USER, { project: "demo", title: "first", stages: build });
+    const second = await board.createTask(USER, {
+      project: "demo",
+      title: "second",
+      stages: build,
+    });
+    runner.hold = true;
+    await settle();
+    // Two tasks' conversations run at once, each in its task's thread.
+    expect(scheduler.runningPairs).toEqual([
+      sessionKey("eng-1", "demo", first.id),
+      sessionKey("eng-1", "demo", second.id),
     ]);
-    expect(unreadFor(unread, "lab", ["lab"])).toBe(2);
-    expect(unreadFor(unread, "society", ["society"])).toBe(7);
-    expect(unreadFor(unread, "society", ["society", "web"])).toBe(3);
+    expect(runner.dispatches.map((d) => d.thread)).toEqual([
+      { id: first.id, task: true },
+      { id: second.id, task: true },
+    ]);
+
+    // A topic thread and the channels share the scope's worktree, so they take turns.
+    const topic = await board.openThread(REV, { channel: "demo/dev", title: "which library?" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 thoughts?" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 hello" });
+    await settle();
+    expect(scheduler.runningPairs).toContain(sessionKey("eng-1", "demo", topic.id));
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo")]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.slice(2).map((d) => [d.trigger.kind, d.thread])).toEqual([
+      ["mention", { id: topic.id, task: false }],
+      ["mention", undefined],
+    ]);
   });
 
   it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {

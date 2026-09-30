@@ -182,6 +182,10 @@ export class BoardPaths {
   agentProject(name: Name, slug: Name): string {
     return path.join(this.agentProjects(name), slug);
   }
+  /** A thread conversation's session and last turn, beside the scope's home conversation. */
+  agentThread(name: Name, slug: Name, thread: string): string {
+    return path.join(this.agentProject(name, slug), "threads", thread);
+  }
   agentCursors(name: Name): string {
     return path.join(this.agent(name), "cursors.json");
   }
@@ -199,6 +203,10 @@ export class BoardPaths {
   }
   worktree(agent: Name, slug: Name): string {
     return path.join(this.worktrees(), agent, slug);
+  }
+  /** A task conversation's own worktree. The dot keeps it apart from every project slug. */
+  taskWorktree(agent: Name, taskId: string): string {
+    return path.join(this.worktrees(), agent, ".tasks", taskId);
   }
 
   events(): string {

@@ -124,6 +124,25 @@ describe("live turns", () => {
     expect(turnsOf(turns, "ref")).toEqual([]);
   });
 
+  it("keeps a citizen's conversations in one scope apart, a thread's from its home", () => {
+    const thread = "01M3S1EF764MW5N61H5J41VGR2";
+    const inThread = (event: AgentEvent): LiveTurnEvent => ({
+      ...item("ada", "pi", event),
+      thread,
+    });
+    const turns = replay([
+      item("ada", "pi", STARTED),
+      inThread(STARTED),
+      inThread({ type: "text", delta: "On the task." }),
+    ]);
+    expect(
+      turnsOf(turns, "ada").map((turn) => [turn.scope, turn.thread, turn.steps.length]),
+    ).toEqual([
+      ["pi", thread, 1],
+      ["pi", undefined, 0],
+    ]);
+  });
+
   it("says what a call was about on one line, line breaks and all", () => {
     expect(describeCall({ command: `/bin/bash -lc "uv run pytest -q\n  echo done"` })).toEqual({
       summary: "uv run pytest -q echo done",

@@ -1,6 +1,6 @@
 import type { CliKind, TurnHistoryEntry } from "@stellaris/shared";
 import { useState } from "react";
-import { LinkedText } from "../components/Entities.js";
+import { LinkedText, useEntities } from "../components/Entities.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import { costLabel, endingOf, historyTotals, scopeName, turnLength } from "./citizen.js";
@@ -22,7 +22,10 @@ function TurnRow({
   now: number;
 }) {
   const [open, setOpen] = useState(false);
+  const entities = useEntities();
   const length = turnLength(entry);
+  const about =
+    entry.thread === undefined ? null : (entities.get(entry.thread)?.title ?? "a thread");
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (
@@ -30,7 +33,10 @@ function TurnRow({
       <details className="group" onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary className="block cursor-pointer list-none px-4 py-2.5 transition-colors hover:bg-surface-2/30 group-open:bg-surface-2/20">
           <span className="flex items-center gap-2 text-xs">
-            <span className="text-fg-secondary">{scopeName(entry.project)}</span>
+            <span className="min-w-0 truncate text-fg-secondary">
+              {scopeName(entry.project)}
+              {about === null ? "" : ` · ${about}`}
+            </span>
             <span className="text-fg-muted">{entry.trigger}</span>
             <span className="min-w-0 flex-1 truncate text-fg-muted">
               {endingOf(entry)} {ago(entry.ts, now)}

@@ -1,5 +1,6 @@
 import {
   currentStage,
+  parseSessionKey,
   SOCIETY_SCOPE,
   type CliKind,
   type Member,
@@ -107,12 +108,16 @@ function footprint(radius: number): number {
 }
 
 /** The scopes in `agent/scope` pairs, by agent. */
+/** Each citizen's scopes with a session listed: one star per scope, however many conversations run there. */
 function scopesByAgent(pairs: readonly string[]): Map<string, string[]> {
   const scopes = new Map<string, string[]>();
-  for (const pair of pairs.toSorted()) {
-    const [agent, scope] = pair.split("/");
-    if (agent !== undefined && scope !== undefined) {
-      scopes.set(agent, [...(scopes.get(agent) ?? []), scope]);
+  for (const key of pairs.toSorted()) {
+    const parsed = parseSessionKey(key);
+    if (parsed !== null) {
+      const known = scopes.get(parsed.agent) ?? [];
+      if (!known.includes(parsed.scope)) {
+        scopes.set(parsed.agent, [...known, parsed.scope]);
+      }
     }
   }
   return scopes;

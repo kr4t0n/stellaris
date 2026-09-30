@@ -3,6 +3,7 @@ import {
   currentStage,
   mayHoldStage,
   OpsSignalSchema,
+  sessionKey,
   USER_NAME,
   USER_ROLE,
   parseChannelRef,
@@ -22,6 +23,7 @@ import {
   type TriggerInput,
   type TurnDispatch,
   type TurnRecord,
+  type TurnThread,
   type Ulid,
 } from "@stellaris/shared";
 import { z } from "zod";
@@ -159,27 +161,6 @@ const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set(WAKING_SIGNAL_KINDS);
 
 const HEARTBEAT_TRIGGER = "heartbeat";
 
-/**
- * The unread messages a heartbeat in `scope` answers for: those of its own scope and, in the
- * society scope, those of scopes the member takes no heartbeat in, so a society-scope role still
- * hears a project thread it joined. A project member without the society scope is not woken by
- * society channels; mentions wake it directly, and its next turn's digest carries the rest.
- */
-export function unreadFor(
-  unread: ReadonlyMap<string, number>,
-  scope: string,
-  scopes: readonly string[],
-): number {
-  let count = unread.get(scope) ?? 0;
-  if (scope === SOCIETY_SCOPE) {
-    for (const [other, n] of unread) {
-      if (!scopes.includes(other)) {
-        count += n;
-      }
-    }
-  }
-  return count;
-}
 const OPS_TRIGGER = "ops_event";
 const USER_POST_TRIGGER = "user_post";
 
@@ -223,7 +204,8 @@ export class Scheduler {
   private readonly now: () => Date;
   private readonly log: SchedulerLog;
   private readonly pending = new Map<string, PendingTurn>();
-  private readonly running = new Map<string, Promise<void>>();
+  /** Turns in flight by session key, each with the lane it holds (see `laneOf`). */
+  private readonly running = new Map<string, { lane: string; promise: Promise<void> }>();
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
   private readonly completing = new Set<Promise<void>>();
@@ -253,12 +235,12 @@ export class Scheduler {
     return this.running.size;
   }
 
-  /** Agent-project pairs waiting for dispatch, as `agent/project`. */
+  /** Sessions waiting for dispatch, as `sessionKey` spells them. */
   get pendingPairs(): string[] {
     return [...this.pending.keys()].toSorted();
   }
 
-  /** Agent-project pairs with a turn in flight, as `agent/project`. */
+  /** Sessions with a turn in flight, as `sessionKey` spells them. */
   get runningPairs(): string[] {
     return [...this.running.keys()].toSorted();
   }
@@ -282,7 +264,10 @@ export class Scheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
-    await Promise.allSettled([...this.running.values(), ...this.completing]);
+    await Promise.allSettled([
+      ...[...this.running.values()].map((turn) => turn.promise),
+      ...this.completing,
+    ]);
   }
 
   /** One pass: consume events, check heartbeats and waiting stages, run operations, sweep leases, dispatch. */
@@ -328,7 +313,10 @@ export class Scheduler {
 
   /** Waits for every running turn and in-flight completion to settle. Used by tests and by stop(). */
   async drain(): Promise<void> {
-    await Promise.allSettled([...this.running.values(), ...this.completing]);
+    await Promise.allSettled([
+      ...[...this.running.values()].map((turn) => turn.promise),
+      ...this.completing,
+    ]);
   }
 
   private async load(): Promise<void> {
@@ -362,6 +350,7 @@ export class Scheduler {
         const mentions = stringArray(payload["mentions"]);
         const channel = stringOf(payload["channel"]);
         const messageId = stringOf(payload["id"]) ?? undefined;
+        const threadId = stringOf(payload["thread"]) ?? undefined;
         for (const name of mentions) {
           if (name === event.actor || name === USER_NAME) {
             continue;
@@ -386,12 +375,13 @@ export class Scheduler {
               ...(messageId === undefined ? {} : { messageId }),
             },
             now,
+            threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
           );
         }
         // A step's note from the user is the task's business, not a request for the front desk.
         const step = payload["step"];
         if (event.actor === USER_NAME && (step === undefined || step === null)) {
-          await this.wakeFrontDesk(channel, messageId, now);
+          await this.wakeFrontDesk(channel, messageId, threadId, now);
         }
         return;
       }
@@ -516,7 +506,12 @@ export class Scheduler {
         const name = stringOf(payload["name"]);
         const project = stringOf(payload["project"]);
         if (name !== null && project !== null) {
-          this.pending.delete(`${name}/${project}`);
+          const home = sessionKey(name, project);
+          for (const key of this.pending.keys()) {
+            if (key === home || key.startsWith(`${home}/`)) {
+              this.pending.delete(key);
+            }
+          }
         }
         return;
       }
@@ -573,6 +568,7 @@ export class Scheduler {
   private async wakeFrontDesk(
     channel: string | null,
     messageId: string | undefined,
+    threadId: Ulid | undefined,
     now: number,
   ): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -598,6 +594,7 @@ export class Scheduler {
           ...(messageId === undefined ? {} : { messageId }),
         },
         now,
+        threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
       );
     }
   }
@@ -646,6 +643,7 @@ export class Scheduler {
           taskId: task.id,
         },
         now,
+        { id: task.id, task: scope === task.project },
       );
     }
   }
@@ -731,6 +729,21 @@ export class Scheduler {
     );
   }
 
+  /**
+   * A thread's conversation for a turn in `scope`, and whether it is a task's in that scope, whose
+   * turns get a worktree of their own. Reads the thread's record, never its messages.
+   */
+  private async conversationOf(threadId: Ulid, scope: Name): Promise<TurnThread> {
+    try {
+      const thread = await this.board.readThread(threadId);
+      const task =
+        thread.subject?.kind === "task" && parseChannelRef(thread.channel).project === scope;
+      return { id: threadId, task };
+    } catch {
+      return { id: threadId, task: false };
+    }
+  }
+
   private async tryReadAgent(name: Name): Promise<Agent | null> {
     try {
       const agent = await this.board.readAgent(name);
@@ -753,7 +766,14 @@ export class Scheduler {
     return wakeScope(agent, charter, project);
   }
 
-  private enqueue(agent: Name, project: Name, input: TriggerInput, now: number): void {
+  /** Queues a wake in one conversation: a thread's, or without one, the scope's home. */
+  private enqueue(
+    agent: Name,
+    project: Name,
+    input: TriggerInput,
+    now: number,
+    thread?: TurnThread,
+  ): void {
     const trigger = TriggerSchema.parse(input);
     const decision = decideWake({
       trigger,
@@ -766,7 +786,7 @@ export class Scheduler {
       return;
     }
     const debounce = this.debounceFor(trigger);
-    const key = `${agent}/${project}`;
+    const key = sessionKey(agent, project, thread?.id);
     const readyAt = now + debounce;
     const existing = this.pending.get(key);
     if (existing === undefined) {
@@ -774,6 +794,7 @@ export class Scheduler {
         dispatch: {
           agent,
           project,
+          ...(thread === undefined ? {} : { thread }),
           trigger,
           priority: decision.priority,
           onboarding: trigger.kind === "onboarding",
@@ -817,8 +838,10 @@ export class Scheduler {
   }
 
   /**
-   * A heartbeat per member and scope, each answering only for its own scope: unread messages in
-   * its channels and threads, stages the member holds there, and stages waiting there for it.
+   * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
+   * scope: the unread messages of its home and of each thread, a stage the member holds, and a stage
+   * waiting that it may take, each in its task's thread. Each conversation with something wakes on
+   * its own, so a heartbeat never brings one task's business into another's turn.
    */
   private async checkHeartbeats(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -836,47 +859,84 @@ export class Scheduler {
             ? [SOCIETY_SCOPE]
             : [];
       const actor = { name: agent.name, role: agent.role };
-      let unread: ReadonlyMap<string, number> | undefined;
+      let unread: { scope: Name; thread: Ulid | null; count: number }[] | undefined;
       let held: readonly Task[] | undefined;
       for (const project of scopes) {
-        const key = `${agent.name}/${project}`;
-        const last = this.state.lastHeartbeat[key];
+        const cadence = sessionKey(agent.name, project);
+        const last = this.state.lastHeartbeat[cadence];
         if (last === undefined) {
-          this.state.lastHeartbeat[key] = iso(now);
+          this.state.lastHeartbeat[cadence] = iso(now);
           continue;
         }
         if (now - new Date(last).getTime() < this.timings.heartbeatMs) {
           continue;
         }
-        this.state.lastHeartbeat[key] = iso(now);
-        if (this.pending.has(key) || this.running.has(key)) {
-          continue;
-        }
-        unread ??= await this.board.unreadByScope(actor);
+        this.state.lastHeartbeat[cadence] = iso(now);
+        unread ??= await this.board.unreadByConversation(actor);
         held ??= await this.board.heldClaims(agent.name);
-        const waiting =
-          project === SOCIETY_SCOPE
-            ? []
-            : (await this.board.openTasks(project)).filter((task) => mayHoldStage(agent, task));
-        const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
-        const decision = decideWake({
-          trigger,
-          digestSize: unreadFor(unread, project, scopes),
-          claimsHeld: held.filter((task) => task.project === project).length,
-          waitingStages: waiting.length,
-          paused: false,
-        });
-        if (decision.wake) {
-          this.pending.set(key, {
-            dispatch: {
-              agent: agent.name,
-              project,
-              trigger,
-              priority: decision.priority,
-              onboarding: false,
-            },
-            readyAt: now,
+        const reasons = new Map<
+          string,
+          {
+            thread: TurnThread | undefined;
+            digestSize: number;
+            claimsHeld: number;
+            waiting: number;
+          }
+        >();
+        const reasonsIn = (thread: TurnThread | undefined) => {
+          const key = sessionKey(agent.name, project, thread?.id);
+          const existing = reasons.get(key);
+          if (existing !== undefined) {
+            return existing;
+          }
+          const fresh = { thread, digestSize: 0, claimsHeld: 0, waiting: 0 };
+          reasons.set(key, fresh);
+          return fresh;
+        };
+        for (const entry of unread) {
+          if (entry.scope === project) {
+            const thread =
+              entry.thread === null ? undefined : await this.conversationOf(entry.thread, project);
+            reasonsIn(thread).digestSize += entry.count;
+          }
+        }
+        for (const task of held) {
+          if (task.project === project) {
+            reasonsIn({ id: task.id, task: true }).claimsHeld += 1;
+          }
+        }
+        if (project !== SOCIETY_SCOPE) {
+          for (const task of await this.board.openTasks(project)) {
+            if (mayHoldStage(agent, task)) {
+              reasonsIn({ id: task.id, task: true }).waiting += 1;
+            }
+          }
+        }
+        for (const [key, reason] of reasons) {
+          if (this.pending.has(key) || this.running.has(key)) {
+            continue;
+          }
+          const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
+          const decision = decideWake({
+            trigger,
+            digestSize: reason.digestSize,
+            claimsHeld: reason.claimsHeld,
+            waitingStages: reason.waiting,
+            paused: false,
           });
+          if (decision.wake) {
+            this.pending.set(key, {
+              dispatch: {
+                agent: agent.name,
+                project,
+                ...(reason.thread === undefined ? {} : { thread: reason.thread }),
+                trigger,
+                priority: decision.priority,
+                onboarding: false,
+              },
+              readyAt: now,
+            });
+          }
         }
       }
     }
@@ -908,8 +968,8 @@ export class Scheduler {
         this.state.lastReflection[agent.name] = iso(now);
         continue;
       }
-      const key = `${agent.name}/${latest.scope}`;
-      if (this.pending.has(key) || this.running.has(key)) {
+      const key = sessionKey(agent.name, latest.scope);
+      if (this.pending.has(key) || this.laneBusy(key)) {
         // Busy: try again next tick rather than merge the reflection into a working turn.
         continue;
       }
@@ -936,7 +996,7 @@ export class Scheduler {
       : [...agent.memberships];
     let latest: { scope: Name; endedAt: string } | null = null;
     for (const scope of scopes) {
-      const turn = await this.board.readLastTurn(agent.name, scope);
+      const turn = await this.board.readLatestTurn(agent.name, scope);
       if (turn === null || turn.trigger.kind === "reflection") {
         continue;
       }
@@ -1129,7 +1189,7 @@ export class Scheduler {
       }
       let last = Date.parse(agent.createdAt);
       for (const project of [...agent.memberships, SOCIETY_SCOPE]) {
-        const turn = await this.board.readLastTurn(agent.name, project);
+        const turn = await this.board.readLatestTurn(agent.name, project);
         const ended = turn?.endedAt ?? turn?.startedAt;
         if (ended !== undefined) {
           last = Math.max(last, Date.parse(ended));
@@ -1238,6 +1298,26 @@ export class Scheduler {
     this.state.turnsSinceReport = 0;
   }
 
+  /**
+   * The lane a turn runs in: a task's conversation has its own, with a worktree of its own; a
+   * member's home conversation and its proposal and topic threads in a scope share the scope's
+   * worktree, and so one lane, one turn at a time.
+   */
+  private laneOf(dispatch: TurnDispatch): string {
+    return dispatch.thread?.task === true
+      ? sessionKey(dispatch.agent, dispatch.project, dispatch.thread.id)
+      : sessionKey(dispatch.agent, dispatch.project);
+  }
+
+  private laneBusy(lane: string): boolean {
+    for (const turn of this.running.values()) {
+      if (turn.lane === lane) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private async dispatchReady(now: number): Promise<void> {
     const ready = [...this.pending.entries()]
       .filter(([key, item]) => item.readyAt <= now && !this.running.has(key))
@@ -1247,6 +1327,10 @@ export class Scheduler {
     for (const [key, item] of ready) {
       if (this.running.size >= this.concurrency) {
         break;
+      }
+      const lane = this.laneOf(item.dispatch);
+      if (this.laneBusy(lane)) {
+        continue;
       }
       this.pending.delete(key);
       let { dispatch } = item;
@@ -1264,7 +1348,12 @@ export class Scheduler {
         dispatch = { ...dispatch, trigger: current };
       }
       this.log.info(
-        { agent: dispatch.agent, project: dispatch.project, trigger: dispatch.trigger.kind },
+        {
+          agent: dispatch.agent,
+          project: dispatch.project,
+          thread: dispatch.thread?.id,
+          trigger: dispatch.trigger.kind,
+        },
         "dispatching turn",
       );
       const promise = (async (): Promise<void> => {
@@ -1288,14 +1377,15 @@ export class Scheduler {
           this.running.delete(key);
         }
       })();
-      this.running.set(key, promise);
+      this.running.set(key, { lane, promise });
     }
   }
 
   /** Starts each queued completion once the turn that finished the task's last stage has ended. */
   private runCompletions(): void {
     for (const [taskId, item] of this.completions) {
-      if (this.running.has(`${item.actor}/${item.project}`)) {
+      const home = sessionKey(item.actor, item.project);
+      if ([...this.running.keys()].some((key) => key === home || key.startsWith(`${home}/`))) {
         continue;
       }
       this.completions.delete(taskId);

@@ -25,12 +25,20 @@ export interface GitOps {
   /** Creates `branch` from `base` in the clone unless it exists. */
   ensureBranch(repoDir: string, branch: string, base: string): Promise<void>;
   /**
+   * A task conversation's worktree, on the task's branch when no other worktree has it checked
+   * out, else detached at the branch's tip, where the turn can read the work but not commit to it.
+   */
+  ensureTaskWorktree(repoDir: string, worktreeDir: string, branch: string): Promise<string>;
+  /** Removes a worktree and its checkout, once its task has ended. */
+  removeWorktree(repoDir: string, worktreeDir: string): Promise<void>;
+  /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
-   * then switches back to `home`. Returns the task branch, or null when there was nothing to hand back.
+   * then switches back to `home`, or with `home` null detaches, which frees the branch for the
+   * next holder. Returns the task branch, or null when there was nothing to hand back.
    */
   handBack(
     worktree: string,
-    home: string,
+    home: string | null,
     author: GitAuthor,
   ): Promise<{ branch: string; committed: boolean } | null>;
 }
@@ -133,9 +141,30 @@ export class ExecaGit implements GitOps {
     }
   }
 
+  async ensureTaskWorktree(repoDir: string, requestedDir: string, branch: string): Promise<string> {
+    const worktreeDir = path.resolve(requestedDir);
+    if (!(await exists(path.join(worktreeDir, ".git")))) {
+      await mkdir(path.dirname(worktreeDir), { recursive: true });
+      await must(["worktree", "add", "--detach", worktreeDir, branch], repoDir);
+    }
+    // A branch is checked out in one worktree at a time: another holder's turn may have it.
+    const switched = await git(["switch", "--quiet", branch], worktreeDir);
+    if (switched.exitCode !== 0) {
+      await must(["switch", "--quiet", "--detach", branch], worktreeDir);
+    }
+    return worktreeDir;
+  }
+
+  async removeWorktree(repoDir: string, requestedDir: string): Promise<void> {
+    const worktreeDir = path.resolve(requestedDir);
+    if (await exists(worktreeDir)) {
+      await must(["worktree", "remove", "--force", worktreeDir], repoDir);
+    }
+  }
+
   async handBack(
     worktree: string,
-    home: string,
+    home: string | null,
     author: GitAuthor,
   ): Promise<{ branch: string; committed: boolean } | null> {
     const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], worktree);
@@ -161,7 +190,10 @@ export class ExecaGit implements GitOps {
         worktree,
       );
     }
-    await must(["switch", "--quiet", home], worktree);
+    await must(
+      home === null ? ["switch", "--quiet", "--detach"] : ["switch", "--quiet", home],
+      worktree,
+    );
     return { branch, committed: dirty };
   }
 

@@ -11,6 +11,26 @@ const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
 
+/** A turn record of eng-1 in demo, in a thread's conversation or at home. */
+const turnIn = (thread: Ulid | undefined, at: string) => ({
+  agent: "eng-1",
+  project: "demo",
+  ...(thread === undefined ? {} : { thread }),
+  runner: "server",
+  cli: "claude" as const,
+  session: thread === undefined ? "home-session" : "task-session",
+  trigger: { kind: "manual" as const, fromUser: true, reason: "" },
+  startedAt: at,
+  endedAt: null,
+  exitReason: null,
+  status: null,
+  error: null,
+  usage: null,
+  costUsd: 0,
+  toolCalls: 0,
+  model: null,
+});
+
 describe("Board", () => {
   let dir: string;
   let clock: Date;
@@ -142,7 +162,9 @@ describe("Board", () => {
     });
     // The review waits for the reviewer, which is now in the thread and reads the handover; the
     // step itself does not count toward a heartbeat, the talk before it does.
-    expect((await board.unreadByScope(REV)).get("demo")).toBe(1);
+    expect(await board.unreadByConversation(REV)).toEqual([
+      { scope: "demo", thread: task.id, count: 1 },
+    ]);
     expect((await board.readDigest(REV, { advance: false })).messages.map((m) => m.id)).toEqual([
       threadMessage.id,
       handover?.id,
@@ -232,6 +254,84 @@ describe("Board", () => {
     expect((await board.readDigest(turnActor)).messages.map((m) => m.id)).toEqual([later.id]);
     expect(await ids("lab")).toEqual([]);
     expect(await ids("demo")).toEqual([elsewhere.id]);
+  });
+
+  it("files each thread in a conversation of its own, with its own cursor, session, and last turn", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    const inChannel = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "@eng-1 a channel question",
+    });
+    const inTask = await board.postMessage(REV, { thread_id: task.id, body: "@eng-1 the spec" });
+    const inTopic = await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
+    const ids = async (thread?: Ulid): Promise<Ulid[]> =>
+      (
+        await board.readDigest(
+          { ...ENG, scope: "demo", ...(thread === undefined ? {} : { thread }) },
+          { advance: false },
+        )
+      ).messages.map((m) => m.id);
+
+    // The home conversation carries the channels; each thread is a conversation of its own.
+    expect(await ids()).toEqual([inChannel.id]);
+    expect(await ids(task.id)).toEqual([inTask.id]);
+    expect(await ids(topic.id)).toEqual([inTopic.id]);
+    expect(await board.unreadByConversation(ENG)).toEqual([
+      { scope: "demo", thread: null, count: 1 },
+      { scope: "demo", thread: task.id, count: 1 },
+      { scope: "demo", thread: topic.id, count: 1 },
+    ]);
+
+    // A turn in one thread moves that thread's cursor alone, and a thread token reads its thread.
+    await board.setDigestCursor("eng-1", "demo", inTask.id, task.id);
+    expect(await ids(task.id)).toEqual([]);
+    expect(await ids()).toEqual([inChannel.id]);
+    const token = board.issueTurnToken("eng-1", "engineer", 60_000, "demo", topic.id);
+    const turnActor = board.resolveToken(token);
+    expect(turnActor).toEqual({ ...ENG, scope: "demo", thread: topic.id });
+    if (turnActor === null) {
+      throw new Error("the turn token did not resolve");
+    }
+    expect((await board.readDigest(turnActor)).messages.map((m) => m.id)).toEqual([inTopic.id]);
+    expect(await ids(topic.id)).toEqual([]);
+
+    // Sessions and last turns are kept per conversation; the latest of a scope is any of them.
+    await board.writeSession("eng-1", "demo", "claude", "home-session");
+    await board.writeSession("eng-1", "demo", "claude", "task-session", task.id);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "home-session" });
+    expect(await board.readSessions("eng-1", "demo", task.id)).toEqual({
+      claude: "task-session",
+    });
+    // Two turns in one scope at once: each pairs its start with its own end.
+    clock = new Date("2026-09-28T10:01:00.000Z");
+    const home = await board.beginTurn(turnIn(undefined, clock.toISOString()));
+    clock = new Date("2026-09-28T10:02:00.000Z");
+    const inThread = await board.beginTurn(turnIn(task.id, clock.toISOString()));
+    await board.finishTurn({
+      ...inThread,
+      endedAt: "2026-09-28T10:04:00.000Z",
+      exitReason: "completed",
+    });
+    await board.finishTurn({
+      ...home,
+      endedAt: "2026-09-28T10:03:00.000Z",
+      exitReason: "completed",
+    });
+    expect((await board.readLastTurn("eng-1", "demo"))?.session).toBe("home-session");
+    expect((await board.readLastTurn("eng-1", "demo", task.id))?.session).toBe("task-session");
+    expect((await board.readLatestTurn("eng-1", "demo"))?.thread).toBe(task.id);
+    expect(
+      (await board.listTurns("eng-1")).map((entry) => [entry.thread, entry.startedAt]),
+    ).toEqual([
+      [task.id, "2026-09-28T10:02:00.000Z"],
+      [undefined, "2026-09-28T10:01:00.000Z"],
+    ]);
   });
 
   it("lists what citizens asked the user and the user has not answered, wherever they asked", async () => {
@@ -1193,8 +1293,14 @@ describe("Board", () => {
     await writeFile(cursorFile, JSON.stringify({ inbox: cursor }), "utf8");
     await board.subscribe(USER, { channel: "demo/general" });
     const reopened = await Board.open(dir);
-    expect(Cursor.strict().parse(JSON.parse(await readFile(cursorFile, "utf8")))).toEqual({
+    // Threads, once read in each scope's single conversation, start where that conversation was.
+    expect(Cursor.parse(JSON.parse(await readFile(cursorFile, "utf8")))).toEqual({
       digest: cursor,
+    });
+    expect(JSON.parse(await readFile(cursorFile, "utf8"))).toEqual({
+      digest: cursor,
+      scopes: {},
+      threadsFrom: { demo: cursor, society: cursor },
     });
     expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
     expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);

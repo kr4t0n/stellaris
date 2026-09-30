@@ -33,15 +33,42 @@ export const TriggerSchema = z.object({
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;
 
-/** What the scheduler hands a runner: one agent, one project, one reason. */
+/**
+ * The thread a turn's conversation is: its id, and whether it is a task's thread in the turn's own
+ * project, whose turns get a worktree of their own on the task's branch and may run beside others.
+ */
+export const TurnThreadSchema = z.object({ id: UlidSchema, task: z.boolean() });
+export type TurnThread = z.infer<typeof TurnThreadSchema>;
+
+/**
+ * What the scheduler hands a runner: one agent, one project, one conversation, one reason. Without
+ * `thread` the turn is in the agent's home conversation for the scope.
+ */
 export const TurnDispatchSchema = z.object({
   agent: NameSchema,
   project: NameSchema,
+  thread: TurnThreadSchema.optional(),
   trigger: TriggerSchema,
   priority: z.number().int().min(0).max(2),
   onboarding: z.boolean().default(false),
 });
 export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
+
+/** A session's key: `agent/scope` for the home conversation, `agent/scope/thread` for a thread's. */
+export function sessionKey(agent: string, scope: string, thread?: string): string {
+  return thread === undefined ? `${agent}/${scope}` : `${agent}/${scope}/${thread}`;
+}
+
+/** The parts of a session key, or null for anything else. */
+export function parseSessionKey(
+  key: string,
+): { agent: string; scope: string; thread?: string } | null {
+  const [agent, scope, thread, rest] = key.split("/");
+  if (agent === undefined || scope === undefined || rest !== undefined) {
+    return null;
+  }
+  return thread === undefined ? { agent, scope } : { agent, scope, thread };
+}
 
 /** The record a runner writes for every turn. The last one is what the next turn opens with. */
 export const TurnRecordSchema = z.object({
@@ -49,6 +76,8 @@ export const TurnRecordSchema = z.object({
   id: UlidSchema.optional(),
   agent: NameSchema,
   project: NameSchema,
+  /** The thread whose conversation the turn was in; absent for the home conversation. */
+  thread: UlidSchema.optional(),
   runner: NameSchema,
   cli: CliKindSchema.nullable(),
   session: z.string().nullable(),
@@ -71,7 +100,7 @@ export const TurnRecordSchema = z.object({
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 
-/** Session ids per CLI for one agent-project pair, pinned to the runner where they began. */
+/** Session ids per CLI for one conversation, pinned to the runner where they began. */
 export const SessionsFileSchema = z.record(z.string(), z.string());
 export type SessionsFile = z.infer<typeof SessionsFileSchema>;
 
@@ -106,6 +135,8 @@ export const TurnHistoryEntrySchema = z.object({
   outcome: z.enum(["completed", "failed"]),
   /** A project slug, or the society scope. */
   project: NameSchema,
+  /** The thread whose conversation the turn was in; absent for the home conversation. */
+  thread: UlidSchema.optional(),
   trigger: z.string(),
   exitReason: z.string().nullable(),
   costUsd: z.number(),

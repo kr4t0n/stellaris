@@ -113,7 +113,9 @@ export function Playground() {
   const tasksPath = /^\/p\/([^/]+)\/tasks$/.exec(pathname)?.[1];
   const activeTasks = tasksPath ?? task.data?.project ?? null;
   const activeCitizen = after(pathname, "/citizen/");
+  // The citizen view's `scope` names a conversation: a scope, or `scope/thread`.
   const activeScope = activeCitizen === null ? null : (search.scope ?? null);
+  const activePlace = activeScope?.split("/")[0] ?? null;
   const activeGovernance: GovernanceView | null =
     pathname === "/needs-you"
       ? "needs-you"
@@ -190,7 +192,7 @@ export function Playground() {
     (activeChannel === null
       ? activeCitizen === null
         ? null
-        : (activeScope ??
+        : (activePlace ??
           model.stars.find((candidate) => candidate.name === activeCitizen)?.anchor ??
           null)
       : activeChannel.includes("/")

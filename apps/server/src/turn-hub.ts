@@ -1,4 +1,4 @@
-import type { AgentEvent, LiveTurnEvent, Name } from "@stellaris/shared";
+import type { AgentEvent, LiveTurnEvent, Name, Ulid } from "@stellaris/shared";
 
 /**
  * In-memory fan-out of live turn events. The runner pushes what its adapters emit; the SSE
@@ -19,13 +19,15 @@ export class TurnHub {
     return this.seq;
   }
 
-  push(agent: Name, project: Name, event: AgentEvent): LiveTurnEvent {
+  /** Records one event of a turn, in its scope and, for a thread's conversation, its thread. */
+  push(agent: Name, project: Name, event: AgentEvent, thread?: Ulid): LiveTurnEvent {
     this.seq += 1;
     const item: LiveTurnEvent = {
       seq: this.seq,
       ts: this.now().toISOString(),
       agent,
       project,
+      ...(thread === undefined ? {} : { thread }),
       event,
     };
     this.buffer.push(item);

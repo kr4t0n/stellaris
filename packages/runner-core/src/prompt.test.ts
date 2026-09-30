@@ -91,7 +91,9 @@ describe("buildTurnPrompt", () => {
       "thread 01ARZ3NDEKTSV4RRFFQ69G5FAY from @rev-1, who sent the task back from s2 to s1 (message",
     );
     expect(prompt).toContain("please start on the scaffold");
-    expect(prompt).toContain("## Stages you hold\n\nNone.");
+    // A home turn names its conversation and carries no stages: those are their tasks' business.
+    expect(prompt).toContain("This turn is in your home conversation for demo");
+    expect(prompt).not.toContain("Stages you hold");
     expect(prompt).not.toContain("Stages waiting for you");
     expect(prompt).not.toContain("First turn");
   });
@@ -185,7 +187,7 @@ describe("buildTurnPrompt", () => {
     );
   });
 
-  it("shows the stages an agent holds and the ones waiting for it, each with the rest of its plan", () => {
+  it("gives a task's conversation its task, and the stage held or waiting with the rest of its plan", () => {
     const ts = "2026-09-29T10:00:00.000Z";
     const task = (id: string, title: string, stage: string, claimedBy?: string) => ({
       ...TaskFrontmatterSchema.parse({
@@ -211,46 +213,85 @@ describe("buildTurnPrompt", () => {
       }),
       body: "",
     });
-    const prompt = buildTurnPrompt({
+    const project = {
+      slug: "lab",
+      name: "Lab",
+      repo: null,
+      defaultBranch: "main",
+      channels: ["general"],
+      members: ["res-1"],
+      approvers: ["user"],
+      requiredCapabilities: [],
+      createdAt: ts,
+      onDone: "merge" as const,
+    };
+    const threadOf = (id: string, title: string) => ({
+      id,
+      channel: "lab/general",
+      title,
+      subject: { kind: "task" as const, id },
+      state: "open" as const,
+      openedBy: "desk",
+      openedAt: ts,
+      body: "",
+    });
+    const churn = task("01ARZ3NDEKTSV4RRFFQ69G5FAV", "Churn model", "s1");
+    const waiting = buildTurnPrompt({
       dispatch: {
         agent: "res-1",
         project: "lab",
+        thread: { id: churn.id, task: true },
         trigger: TriggerSchema.parse({
           kind: "stage",
           from: "desk",
           reason:
             'stage "experiment" of task 01ARZ3NDEKTSV4RRFFQ69G5FAV "Churn model" is waiting for you',
-          taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          taskId: churn.id,
         }),
         priority: 1,
         onboarding: false,
       },
       messages: [],
-      heldClaims: [task("01ARZ3NDEKTSV4RRFFQ69G5FAW", "Pricing", "s2", "res-1")],
-      waitingStages: [task("01ARZ3NDEKTSV4RRFFQ69G5FAV", "Churn model", "s1")],
-      project: {
-        slug: "lab",
-        name: "Lab",
-        repo: null,
-        defaultBranch: "main",
-        channels: ["general"],
-        members: ["res-1"],
-        approvers: ["user"],
-        requiredCapabilities: [],
-        createdAt: ts,
-        onDone: "merge",
-      },
+      conversation: { thread: threadOf(churn.id, churn.title), task: churn, fresh: true },
+      heldClaims: [],
+      waitingStages: [churn],
+      project,
       lastTurn: null,
       onboarding: null,
     });
-    expect(prompt).toContain("A stage is waiting for you: claim it with claim_task");
-    expect(prompt).toContain("Never merge or fast-forward main yourself.");
-    expect(prompt).toContain(
-      '- 01ARZ3NDEKTSV4RRFFQ69G5FAW "Pricing": write-up (yours, 2 of 3); next: referee review (gate, editor); lease until 2026-09-29T10:00:00.000Z',
+    expect(waiting).toContain("A stage is waiting for you: claim it with claim_task");
+    expect(waiting).toContain("Never merge or fast-forward main yourself.");
+    expect(waiting).toContain(
+      `This turn is in the thread "Churn model" on lab/general, about task ${churn.id}.`,
     );
-    expect(prompt).toContain(
+    expect(waiting).toContain(
       '## Stages waiting for you\n\n- 01ARZ3NDEKTSV4RRFFQ69G5FAV "Churn model": experiment (open to researcher, 1 of 3); next: write-up (researcher), referee review (gate, editor)',
     );
+    expect(waiting).toContain("## Stages you hold\n\nNone.");
+    // A new conversation is shown its thread so far, not only what is unread.
+    expect(waiting).toContain("## The thread so far (0)");
+
+    const pricing = task("01ARZ3NDEKTSV4RRFFQ69G5FAW", "Pricing", "s2", "res-1");
+    const held = buildTurnPrompt({
+      dispatch: {
+        agent: "res-1",
+        project: "lab",
+        thread: { id: pricing.id, task: true },
+        trigger: TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" }),
+        priority: 0,
+        onboarding: false,
+      },
+      messages: [],
+      conversation: { thread: threadOf(pricing.id, pricing.title), task: pricing, fresh: false },
+      heldClaims: [pricing],
+      project,
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(held).toContain(
+      '- 01ARZ3NDEKTSV4RRFFQ69G5FAW "Pricing": write-up (yours, 2 of 3); next: referee review (gate, editor); lease until 2026-09-29T10:00:00.000Z',
+    );
+    expect(held).toContain("## Unread messages (0)");
   });
 
   it("frames a turn triggered by operations signals as a decision about proposing", () => {

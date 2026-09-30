@@ -44,9 +44,9 @@ const runner = new LocalRunner({
   maxTurns: config.toolRounds,
   // Resident roles keep a warm session this long after their last turn.
   residentIdleMs: Number(process.env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
-  onEvent: (agent, project, event) => {
-    turns.push(agent, project, event);
-    log.debug({ agent, project, event }, "agent event");
+  onEvent: (agent, project, event, thread) => {
+    turns.push(agent, project, event, thread);
+    log.debug({ agent, project, thread, event }, "agent event");
   },
 });
 

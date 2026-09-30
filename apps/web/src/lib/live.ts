@@ -1,5 +1,6 @@
 import {
   LiveTurnEventSchema,
+  sessionKey,
   type LiveTurnEvent,
   type TranscriptEntry,
   type TurnExitReason,
@@ -42,6 +43,8 @@ export interface LiveTurn {
   readonly agent: string;
   /** A project slug or `society`. */
   readonly scope: string;
+  /** The thread whose conversation the turn is in; absent for the home conversation. */
+  readonly thread?: string | undefined;
   /** When the turn started, or its first step still held when the start is not. */
   readonly startedAt: string;
   /** False when the server's buffer or the step cap has dropped the turn's first steps. */
@@ -53,13 +56,18 @@ export interface LiveTurn {
 }
 
 /**
- * The latest turn of every citizen in every scope the stream has reported, keyed like the
- * scheduler's pairs: a citizen may be in turns in two scopes at once.
+ * The latest turn of every citizen in every conversation the stream has reported, keyed like the
+ * scheduler's sessions: a citizen may be in turns in several at once.
  */
 export type LiveTurns = ReadonlyMap<string, LiveTurn>;
 
-export function pairKey(agent: string, scope: string): string {
-  return `${agent}/${scope}`;
+export function pairKey(agent: string, scope: string, thread?: string): string {
+  return sessionKey(agent, scope, thread);
+}
+
+/** A turn's conversation as the citizen view's `scope` search names it: the scope, or `scope/thread`. */
+export function conversationOf(turn: { scope: string; thread?: string | undefined }): string {
+  return turn.thread === undefined ? turn.scope : `${turn.scope}/${turn.thread}`;
 }
 
 /** A citizen's turns, the most recently active first. */
@@ -175,13 +183,17 @@ export function applyLive(
   { maxSteps }: { maxSteps: number } = { maxSteps: MAX_STEPS },
 ): LiveTurns {
   const { event } = item;
-  const key = pairKey(item.agent, item.project);
+  const key = pairKey(item.agent, item.project, item.thread);
   const current = turns.get(key);
   const next = new Map(turns);
+  const where = {
+    agent: item.agent,
+    scope: item.project,
+    ...(item.thread === undefined ? {} : { thread: item.thread }),
+  };
   if (event.type === "turn_started") {
     next.set(key, {
-      agent: item.agent,
-      scope: item.project,
+      ...where,
       startedAt: item.ts,
       fromStart: true,
       model: event.model ?? null,
@@ -196,8 +208,7 @@ export function applyLive(
     current !== undefined && current.end === null
       ? current
       : {
-          agent: item.agent,
-          scope: item.project,
+          ...where,
           startedAt: item.ts,
           fromStart: false,
           model: null,
@@ -287,16 +298,24 @@ export function transcriptTurn(
   entries: readonly TranscriptEntry[],
   agent: string,
   scope: string,
+  thread?: string,
 ): LiveTurn | undefined {
   let turns: LiveTurns = new Map();
   for (const [index, entry] of entries.entries()) {
     turns = applyLive(
       turns,
-      { seq: index + 1, ts: entry.ts, agent, project: scope, event: entry.event },
+      {
+        seq: index + 1,
+        ts: entry.ts,
+        agent,
+        project: scope,
+        ...(thread === undefined ? {} : { thread }),
+        event: entry.event,
+      },
       { maxSteps: Number.POSITIVE_INFINITY },
     );
   }
-  return turns.get(pairKey(agent, scope));
+  return turns.get(pairKey(agent, scope, thread));
 }
 
 /** The first line a `post_message` call posts, for the bubble that rises from its star. */

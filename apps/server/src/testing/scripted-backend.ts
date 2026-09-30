@@ -267,10 +267,11 @@ export class ScriptedBackend implements AgentBackend {
       return done("nothing to do");
     }
 
-    // A stage wake names the task; a mention carries it in the message body.
+    // A task is worked only in its own conversation: a stage wake names it, and a turn in its
+    // thread says so. A mention elsewhere asking to take it is left to that conversation's turn.
     const taskId =
       /Task in question: ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1] ??
-      /take task ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1];
+      /about task ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1];
     if (taskId === undefined || !ULID.test(taskId)) {
       return done("nothing to do");
     }

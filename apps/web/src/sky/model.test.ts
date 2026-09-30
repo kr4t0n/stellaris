@@ -119,8 +119,9 @@ describe("skyModel", () => {
         projects: [project("lab", ts), project("web", "2026-09-29T11:00:00.000Z")],
         scheduler: {
           ...idle,
-          running: ["ada/web", "ada/lab", "desk/society"],
-          pending: ["bo/lab"],
+          // ada works two conversations in lab, its home and a task's thread: one star there.
+          running: ["ada/web", "ada/lab", "ada/lab/01M3S1EF764MW5N61H5J41VGR2", "desk/society"],
+          pending: ["bo/lab/01M3S1EF764MW5N61H5J41VGR2"],
           resident: ["desk/society"],
         },
       }),

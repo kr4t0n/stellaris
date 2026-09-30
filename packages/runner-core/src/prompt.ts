@@ -45,6 +45,12 @@ export interface TurnPromptInput {
   /** The threads the unread messages belong to, by id, for their titles. */
   readonly threads?: ReadonlyMap<Ulid, Thread> | undefined;
   /**
+   * The thread whose conversation the turn is in, with its task when it is a task's thread, and
+   * whether the conversation is new, in which case `messages` is the whole thread so far. Absent
+   * for a turn in the home conversation.
+   */
+  readonly conversation?: Conversation | null | undefined;
+  /**
    * For roles that read operations signals, those logged for this scope since the reader's last
    * turn here, oldest first; absent for everyone else.
    */
@@ -52,6 +58,13 @@ export interface TurnPromptInput {
     | ReadonlyArray<{ readonly ts: string; readonly signal: OpsSignal }>
     | null
     | undefined;
+}
+
+/** A thread's conversation as its turn's prompt describes it. */
+export interface Conversation {
+  readonly thread: Thread;
+  readonly task: Task | null;
+  readonly fresh: boolean;
 }
 
 /** What a reflection turn is for. It replaces new work, not the unread messages. */
@@ -172,7 +185,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "stage") {
     lines.push(
-      "A stage is waiting for you: claim it with claim_task, switch your worktree to the task's branch, do the work and commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
+      "A stage is waiting for you: claim it with claim_task, do the work in your worktree, which is on the task's branch, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
     );
   }
   if (dispatch.trigger.kind === "task_done") {
@@ -187,6 +200,27 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push(
       "The user posted. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
     );
+  }
+
+  const conversation = input.conversation ?? null;
+  lines.push("", "## This conversation", "");
+  if (conversation === null) {
+    lines.push(
+      `This turn is in your home conversation for ${dispatch.project}: its channels, and work tied to no thread. Each thread you take part in, a task's, a proposal's, or a topic's, is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn.`,
+    );
+  } else {
+    const { thread, task } = conversation;
+    const about =
+      thread.subject === undefined ? "a topic" : `${thread.subject.kind} ${thread.subject.id}`;
+    lines.push(
+      `This turn is in the thread "${thread.title}" on ${thread.channel}, about ${about}. Only this conversation is below: read anything else you need with get_task, search, or the board's files, and leave other tasks and threads to their own turns. Talk here with post_message and thread_id ${thread.id}.`,
+    );
+    if (task !== null) {
+      lines.push("", `Task ${task.id} "${task.title}", ${task.status}:`, planLine(task, "now"));
+      if (task.body.trim() !== "") {
+        lines.push("", clip(task.body));
+      }
+    }
   }
 
   if (dispatch.trigger.kind === "reflection") {
@@ -271,12 +305,15 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
-  lines.push("", "## Stages you hold", "");
-  if (input.heldClaims.length === 0) {
-    lines.push("None.");
-  } else {
-    for (const task of input.heldClaims) {
-      lines.push(`${planLine(task, "yours")}; lease until ${task.leaseExpiresAt ?? "unknown"}`);
+  // Stages are a task conversation's business; the home conversation and other threads carry none.
+  if (conversation?.task !== null && conversation?.task !== undefined) {
+    lines.push("", "## Stages you hold", "");
+    if (input.heldClaims.length === 0) {
+      lines.push("None.");
+    } else {
+      for (const task of input.heldClaims) {
+        lines.push(`${planLine(task, "yours")}; lease until ${task.leaseExpiresAt ?? "unknown"}`);
+      }
     }
   }
 
@@ -293,7 +330,13 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
-  lines.push("", `## Unread messages (${input.messages.length})`, "");
+  lines.push(
+    "",
+    conversation?.fresh === true
+      ? `## The thread so far (${input.messages.length})`
+      : `## Unread messages (${input.messages.length})`,
+    "",
+  );
   if (input.messages.length === 0) {
     lines.push("Nothing new.");
   } else {

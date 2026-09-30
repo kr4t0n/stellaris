@@ -46,6 +46,7 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
         <ol className="flex-1 overflow-y-auto">
           {records.toReversed().map(({ id, ts, signal }) => {
             const wakes = wakesReaders(signal.kind);
+            const facts = signalFacts(signal);
             return (
               <li key={id} className="border-b border-line/60 px-4 py-2.5 last:border-b-0">
                 <div className="flex items-center gap-2">
@@ -66,22 +67,23 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
                 <p className="mt-1 text-sm text-fg-secondary">
                   <LinkedText text={signal.summary} />
                 </p>
-                <p className="mt-0.5 text-meta">
-                  {signalFacts(signal)}
-                  {wakes ? " · wakes the steward" : ""}
-                  {signal.taskId === undefined ? null : (
-                    <>
-                      {" · "}
-                      <Link
-                        to="/task/$taskId"
-                        params={{ taskId: signal.taskId }}
-                        className="text-fg-tertiary underline-offset-2 hover:text-fg-primary hover:underline"
-                      >
-                        the task
-                      </Link>
-                    </>
-                  )}
-                </p>
+                {facts.length === 0 && signal.taskId === undefined ? null : (
+                  <p className="mt-0.5 text-meta">
+                    {facts.join(" · ")}
+                    {signal.taskId === undefined ? null : (
+                      <>
+                        {facts.length === 0 ? "" : " · "}
+                        <Link
+                          to="/task/$taskId"
+                          params={{ taskId: signal.taskId }}
+                          className="text-fg-tertiary underline-offset-2 hover:text-fg-primary hover:underline"
+                        >
+                          the task
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                )}
               </li>
             );
           })}

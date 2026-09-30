@@ -21,6 +21,7 @@ test("the operations log floats from the top bar, apart from the board, and Esc 
   await expect(gap).toContainText("lab · role referee · wakes the steward");
   const runner = log.getByRole("listitem").filter({ hasText: "runner server is connected" });
   await expect(runner).not.toContainText("wakes the steward");
+  await expect(runner).not.toContainText("value");
   await expect(runner).not.toContainText("holds now");
 
   // Esc closes the log first and leaves the board open.

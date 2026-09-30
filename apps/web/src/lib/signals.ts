@@ -40,16 +40,15 @@ export function holdingNow(
   return new Set(newest.values());
 }
 
-/** The numbers behind a signal, for the line under its summary. */
-export function signalFacts(signal: OpsSignal): string {
+/**
+ * What a signal concerns and whether it wakes the steward, for the line under its summary. Its
+ * value and threshold are left out: the summary already says them in words and units.
+ */
+export function signalFacts(signal: OpsSignal): string[] {
   return [
-    signal.threshold === undefined
-      ? `value ${signal.value}`
-      : `${signal.value} against ${signal.threshold}`,
     signal.project ?? "",
     signal.agent ?? "",
     signal.role === undefined ? "" : `role ${signal.role}`,
-  ]
-    .filter((fact) => fact.length > 0)
-    .join(" · ");
+    wakesReaders(signal.kind) ? "wakes the steward" : "",
+  ].filter((fact) => fact.length > 0);
 }

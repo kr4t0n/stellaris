@@ -23,7 +23,7 @@ describe("the operations log", () => {
     expect(holdingNow(records, [])).toEqual(new Set());
   });
 
-  it("says which kinds wake the steward and what numbers stand behind a signal", () => {
+  it("says which kinds wake the steward and what a signal concerns, without its numbers", () => {
     expect(wakesReaders("role_gap")).toBe(true);
     expect(wakesReaders("runner")).toBe(false);
     expect(wakesReaders("turn_cost")).toBe(false);
@@ -37,9 +37,9 @@ describe("the operations log", () => {
         project: "lab",
         role: "researcher",
       }),
-    ).toBe("4 against 3 · lab · role researcher");
-    expect(signalFacts({ kind: "runner", key: "runner:server", summary: "s", value: 1 })).toBe(
-      "value 1",
+    ).toEqual(["lab", "role researcher", "wakes the steward"]);
+    expect(signalFacts({ kind: "runner", key: "runner:server", summary: "s", value: 1 })).toEqual(
+      [],
     );
   });
 });

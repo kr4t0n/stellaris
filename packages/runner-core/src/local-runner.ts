@@ -7,6 +7,7 @@ import {
   USER_NAME,
   SOCIETY_SCOPE,
   turnStatusJsonSchema,
+  wakeScope,
   type AgentEvent,
   type CliKind,
   type Name,
@@ -63,6 +64,9 @@ const LEASE_RENEW_MS = 10 * 60_000;
 const DEFAULT_MAX_TURNS = 60;
 const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
 const USER_POST_TRIGGER = "user_post";
+const OPS_TRIGGER = "ops_event";
+/** How many signals a reader's prompt lists at most, newest kept. */
+const MAX_SIGNALS = 30;
 
 interface Resident {
   readonly session: ResidentSession;
@@ -273,6 +277,16 @@ export class LocalRunner {
           dir: this.board.paths.projectKnowledge(dispatch.project),
           topics: await this.board.listKnowledge(dispatch.project),
         };
+    // Readers of operations signals get those logged for this scope since their last turn here.
+    const signals = charter.wakeTriggers.includes(OPS_TRIGGER)
+      ? (await this.board.listSignals(500))
+          .filter(
+            (record) =>
+              wakeScope(agent, charter, record.signal.project ?? null) === dispatch.project &&
+              (lastTurn === null || record.ts > lastTurn.startedAt),
+          )
+          .slice(-MAX_SIGNALS)
+      : null;
     const waiting = (project === null ? [] : await this.board.openTasks(project.slug)).filter(
       (task) => task.claimedBy === undefined && mayHoldStage(actor, task),
     );
@@ -294,6 +308,7 @@ export class LocalRunner {
       onboarding,
       societyView,
       knowledge,
+      signals,
     });
     const env = {
       GIT_AUTHOR_NAME: agent.name,

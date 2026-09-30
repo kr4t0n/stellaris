@@ -33,6 +33,9 @@ interface HudProps {
   readonly pauseBusy: boolean;
   readonly boardOpen: boolean;
   readonly onToggleBoard: () => void;
+  /** Whether the operations log floats open; it is the server's, not the board's. */
+  readonly logsOpen: boolean;
+  readonly onToggleLogs: () => void;
   readonly onSignOut: () => void;
 }
 
@@ -50,6 +53,8 @@ export function Hud({
   pauseBusy,
   boardOpen,
   onToggleBoard,
+  logsOpen,
+  onToggleLogs,
   onSignOut,
 }: HudProps) {
   return (
@@ -103,6 +108,16 @@ export function Hud({
             }`}
           >
             Board
+          </button>
+          <button
+            type="button"
+            aria-expanded={logsOpen}
+            onClick={onToggleLogs}
+            className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+              logsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
+            }`}
+          >
+            Logs
           </button>
           <button
             type="button"

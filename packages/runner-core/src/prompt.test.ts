@@ -277,10 +277,59 @@ describe("buildTurnPrompt", () => {
       heldClaims: [],
       lastTurn: null,
       onboarding: null,
+      signals: [
+        {
+          ts: "2026-09-30T06:00:00.000Z",
+          signal: {
+            kind: "backlog",
+            key: "backlog:demo:engineer",
+            summary: "demo: 4 open or claimed task(s) for 1 engineer(s)",
+            value: 4,
+            threshold: 3,
+            project: "demo",
+          },
+        },
+      ],
     });
     expect(prompt).toContain("Trigger: ops_event from board. demo: 4 open");
-    expect(prompt).toContain("Operations signals arrived");
+    expect(prompt).toContain(
+      "Operations signals arrived; they are listed under Operations signals",
+    );
     expect(prompt).toContain("propose");
+    // The signals themselves are in the prompt, not in a channel's posts.
+    expect(prompt).toContain(
+      "- [2026-09-30T06:00:00.000Z] backlog: demo: 4 open or claimed task(s) for 1 engineer(s) (value 4, threshold 3; project demo)",
+    );
+    const none = buildTurnPrompt({
+      dispatch: {
+        agent: "stew-1",
+        project: "demo",
+        trigger: TriggerSchema.parse({ kind: "heartbeat" }),
+        priority: 0,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      signals: [],
+    });
+    expect(none).toContain("## Operations signals\n\nNone since your last turn here.");
+    // Roles that read no signals get no section at all.
+    const reader = buildTurnPrompt({
+      dispatch: {
+        agent: "eng-1",
+        project: "demo",
+        trigger: TriggerSchema.parse({ kind: "heartbeat" }),
+        priority: 0,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(reader).not.toContain("## Operations signals");
   });
 
   it("frames a reflection turn as memory work and lists the scope's knowledge topics", () => {

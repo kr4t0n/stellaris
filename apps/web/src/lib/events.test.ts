@@ -43,7 +43,7 @@ describe("board events", () => {
       ["proposals"],
       ["proposal", id],
     ]);
-    expect(staleKeys(event("ops.signal", {}, id))).toEqual([]);
+    expect(staleKeys(event("ops.signal", {}, id))).toEqual([["signals"], ["scheduler"]]);
   });
 
   it("reads frames split across chunks and resumes after the last event it saw", async () => {

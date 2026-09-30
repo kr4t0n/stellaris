@@ -3,6 +3,7 @@ import {
   type Knowledge,
   type Member,
   type Message,
+  type OpsSignal,
   type Project,
   type Stage,
   type Task,
@@ -42,6 +43,14 @@ export interface TurnPromptInput {
   readonly knowledge?: KnowledgeView | null | undefined;
   /** The threads the unread messages belong to, by id, for their titles. */
   readonly threads?: ReadonlyMap<Ulid, Thread> | undefined;
+  /**
+   * For roles that read operations signals, those logged for this scope since the reader's last
+   * turn here, oldest first; absent for everyone else.
+   */
+  readonly signals?:
+    | ReadonlyArray<{ readonly ts: string; readonly signal: OpsSignal }>
+    | null
+    | undefined;
 }
 
 /** What a reflection turn is for. It replaces new work, not the unread messages. */
@@ -101,6 +110,16 @@ function planLine(task: Task, whose: string): string {
   return `- ${task.id} "${task.title}": ${stage?.name ?? task.stage} (${whose}, ${index + 1} of ${task.stages.length}${gated}); ${then}`;
 }
 
+/** One signal as its reader sees it: when, what, and the numbers behind it. */
+function signalLine(ts: string, signal: OpsSignal): string {
+  const facts = [
+    `value ${signal.value}${signal.threshold === undefined ? "" : `, threshold ${signal.threshold}`}`,
+    signal.project === undefined ? "" : `project ${signal.project}`,
+    signal.taskId === undefined ? "" : `task ${signal.taskId}`,
+  ].filter((fact) => fact.length > 0);
+  return `- [${ts}] ${signal.kind}: ${signal.summary} (${facts.join("; ")})`;
+}
+
 /** The first line of a profile that is not a heading, clipped. */
 function profileLine(profile: string): string {
   const line = profile
@@ -144,7 +163,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "ops_event") {
     lines.push(
-      "Operations signals arrived; the ops posts below carry them. Decide whether a proposal is warranted, and stay silent if not.",
+      "Operations signals arrived; they are listed under Operations signals below. Decide whether a proposal is warranted, and stay silent if not.",
     );
   }
   if (dispatch.trigger.kind === "stage") {
@@ -231,6 +250,22 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself.`,
     );
+  }
+
+  const signals = input.signals;
+  if (signals !== undefined && signals !== null) {
+    lines.push("", "## Operations signals", "");
+    if (signals.length === 0) {
+      lines.push("None since your last turn here.");
+    } else {
+      lines.push(
+        "Counters and timers the board logged since your last turn here, oldest first. A condition that persists is logged again every few hours; one that clears is not logged.",
+        "",
+      );
+      for (const { ts, signal } of signals) {
+        lines.push(signalLine(ts, signal));
+      }
+    }
   }
 
   lines.push("", "## Stages you hold", "");

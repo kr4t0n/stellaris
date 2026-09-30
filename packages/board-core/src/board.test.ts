@@ -58,7 +58,7 @@ describe("Board", () => {
 
   it("initializes a society with seed roles, channels, the server runner, and a user", async () => {
     const { board, userToken } = await society();
-    expect((await board.society()).channels).toEqual(["general", "ops", "governance", "decisions"]);
+    expect((await board.society()).channels).toEqual(["general", "governance", "decisions"]);
     const roles = (await board.listRoles()).map((role) => role.name).toSorted();
     expect(roles).toEqual(["concierge", "engineer", "reviewer", "steward", "user"]);
     expect(board.resolveToken(userToken)).toEqual(USER);
@@ -708,7 +708,7 @@ describe("Board", () => {
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
     expect((await board.readAgent("stew")).subscriptions).toEqual(
-      expect.arrayContaining(["ops", "governance"]),
+      expect.arrayContaining(["governance", "decisions"]),
     );
 
     // A member proposal becomes an agent with a home, memberships, and seed instructions.
@@ -894,7 +894,9 @@ describe("Board", () => {
     });
     const signals = await board.listSignals();
     expect(signals.map((record) => record.signal.kind)).toEqual(["runner", "backlog"]);
-    expect((await board.listChannel("ops")).at(-1)?.body).toContain("**backlog** demo: 4 open");
+    // A signal is logged, not posted: no channel carries it.
+    expect(signals.at(-1)?.signal.summary).toBe("demo: 4 open or claimed tasks for 1 engineer");
+    expect((await board.listChannels()).map((channel) => channel.ref)).not.toContain("ops");
     const types = (await board.readEvents(null)).map((event) => event.type);
     expect(types).toEqual(
       expect.arrayContaining(["runner.changed", "ops.signal", "role.added", "channel.added"]),
@@ -919,7 +921,7 @@ describe("Board", () => {
       name: "stew",
       role: "steward",
       cli: "claude",
-      seedInstructions: "Read the ops channel first.",
+      seedInstructions: "Read the signals first.",
     });
     await rm(board.paths.role("concierge"));
     await rm(board.paths.members(), { recursive: true, force: true });
@@ -970,7 +972,7 @@ describe("Board", () => {
     // The members' own role files follow, seed instructions included.
     const stewRole = await reopened.readAgentRoleBody("stew");
     expect(stewRole).toContain("# stew, steward");
-    expect(stewRole).toContain("## Seed instructions\n\nRead the ops channel first.");
+    expect(stewRole).toContain("## Seed instructions\n\nRead the signals first.");
     // Opening again aligns nothing more.
     await Board.open(dir);
     expect(
@@ -987,12 +989,15 @@ describe("Board", () => {
     const { board, eng } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
     const { agent } = await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
-    expect(agent.subscriptions).toEqual(["general", "ops", "governance", "decisions"]);
+    expect(agent.subscriptions).toEqual(["general", "governance", "decisions"]);
     expect(eng.agent.subscriptions).not.toContain("decisions");
 
     // A steward from before decisions joined the ops channels is aligned on the next open, and
     // threads kept as a state on their task, as older builds wrote them, become records.
     await board.unsubscribe(STEW, { channel: "decisions" });
+    // Signals were once posted to an ops society channel as well, which ops readers followed.
+    await board.addChannel(USER, { project: null, name: "ops", purpose: "operations signals" });
+    await board.subscribe(STEW, { channel: "ops" });
     const legacyThread = async (title: string, end: boolean): Promise<Ulid> => {
       const task = await board.createTask(USER, { project: "demo", title });
       await board.postMessage(ENG, { body: "old news", thread_id: task.id });
@@ -1063,6 +1068,8 @@ describe("Board", () => {
     });
     expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
     expect((await reopened.readAgent("stew")).subscriptions).toContain("decisions");
+    expect((await reopened.readAgent("stew")).subscriptions).not.toContain("ops");
+    expect((await reopened.society()).channels).toEqual(["general", "governance", "decisions"]);
     expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
     expect(await reopened.readThread(live)).toMatchObject({
       channel: "demo/general",

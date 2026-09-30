@@ -258,8 +258,8 @@ const OPS_WAKE_TRIGGER = "ops_event";
 /** The wake trigger that marks a role as the front desk, woken by every post of the user's. */
 const FRONT_DESK_TRIGGER = "user_post";
 
-/** Where readers of operations signals follow signals, proposals, and their decisions. */
-const OPS_CHANNELS: readonly ChannelRef[] = ["ops", "governance", "decisions"];
+/** Where readers of operations signals follow proposals and their decisions. */
+const OPS_CHANNELS: readonly ChannelRef[] = ["governance", "decisions"];
 
 /** One-time changes an existing society receives on open, by name, remembered once applied. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
@@ -267,6 +267,7 @@ const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
 const THREAD_RECORDS = "threads-as-records";
 const DIGEST_CURSORS = "digest-replaces-inbox";
 const TASK_RETURNS = "task-returns-recorded";
+const OPS_CHANNEL_RETIRED = "ops-channel-retired";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -470,9 +471,13 @@ export class Board {
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
       : { applied: [] };
-    const pending = [FOLLOW_DECISIONS, THREAD_RECORDS, DIGEST_CURSORS, TASK_RETURNS].filter(
-      (name) => !applied.includes(name),
-    );
+    const pending = [
+      FOLLOW_DECISIONS,
+      THREAD_RECORDS,
+      DIGEST_CURSORS,
+      TASK_RETURNS,
+      OPS_CHANNEL_RETIRED,
+    ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
     }
@@ -487,6 +492,9 @@ export class Board {
     }
     if (pending.includes(TASK_RETURNS)) {
       await this.recordTaskReturns();
+    }
+    if (pending.includes(OPS_CHANNEL_RETIRED)) {
+      await this.retireOpsChannel();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -523,6 +531,31 @@ export class Board {
             returned: { from, by: move.actor, at: move.ts },
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Operations signals were once posted to an `ops` society channel as well as logged. They are
+   * only logged now, so the channel leaves the society's list and every member's subscriptions;
+   * its old posts stay on disk.
+   */
+  private async retireOpsChannel(): Promise<void> {
+    const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
+    if (doc.data.channels.includes("ops")) {
+      await writeMarkdown(
+        this.paths.societyFile(),
+        { ...doc.data, channels: doc.data.channels.filter((name) => name !== "ops") },
+        doc.body,
+      );
+    }
+    for (const agent of await this.listAgents()) {
+      if (agent.subscriptions.includes("ops")) {
+        await this.updateAgent(agent.name, (a) => ({
+          ...a,
+          subscriptions: a.subscriptions.filter((ref) => ref !== "ops"),
+        }));
+        await this.refreshMember(agent.name);
       }
     }
   }
@@ -1214,7 +1247,11 @@ export class Board {
     });
   }
 
-  /** Publishes an operations signal: a post in the ops channel plus an `ops.signal` event. */
+  /**
+   * Logs an operations signal as an `ops.signal` event. No channel carries it: the scheduler wakes
+   * its readers from the event, the runner lists it in their prompts, and the interface's log shows
+   * it to the user.
+   */
   async publishSignal(signal: OpsSignal): Promise<BoardEvent> {
     return this.mutex.run(() => this.publishSignalUnlocked(signal));
   }
@@ -3529,17 +3566,7 @@ export class Board {
   }
 
   private async publishSignalUnlocked(signal: OpsSignal): Promise<BoardEvent> {
-    const parsed = OpsSignalSchema.parse(signal);
-    const meta = Object.entries(parsed)
-      .filter(([key]) => key !== "summary")
-      .map(([key, value]) => `${key}=${plain(value)}`)
-      .join(" ");
-    await this.appendMessage(
-      SYSTEM_ACTOR.name,
-      "ops",
-      `**${parsed.kind}** ${parsed.summary}\n\n\`${meta}\``,
-    );
-    return this.events.append("ops.signal", SYSTEM_ACTOR.name, parsed);
+    return this.events.append("ops.signal", SYSTEM_ACTOR.name, OpsSignalSchema.parse(signal));
   }
 
   private async assertChannelExists(ref: ChannelRef): Promise<void> {

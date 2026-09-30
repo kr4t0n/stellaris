@@ -224,6 +224,32 @@ const LAB_TOPIC = {
   body: "Every run fixes its seed at 42.\n\nThe harness lives in `bench/`.",
 };
 
+/** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
+const SIGNALS = [
+  {
+    id: "01M3Q2FFFFFFFFFFFFFFFFFFF1",
+    ts: CREATED,
+    signal: {
+      kind: "runner",
+      key: "runner:server",
+      summary: "runner server is connected with claude, codex",
+      value: 1,
+    },
+  },
+  {
+    id: "01M3Q2FFFFFFFFFFFFFFFFFFF2",
+    ts: CREATED,
+    signal: {
+      kind: "role_gap",
+      key: "role_gap:lab:referee",
+      summary: "a stage in lab waits on the referee role, which nobody fills",
+      value: 1,
+      project: "lab",
+      role: "referee",
+    },
+  },
+];
+
 /** A turn that reported it needs the user, as the runner posts it. */
 const REQUEST = {
   id: "01M3Q2BBBBBBBBBBBBBBBBBBB1",
@@ -423,7 +449,15 @@ export async function fakeBoard(
       case "/api/channels/decisions":
         return json(route, [REQUEST]);
       case "/api/scheduler":
-        return json(route, { paused, running: [], pending: [], resident: [], signals: [] });
+        return json(route, {
+          paused,
+          running: [],
+          pending: [],
+          resident: [],
+          signals: ["role_gap:lab:referee"],
+        });
+      case "/api/signals":
+        return json(route, SIGNALS);
       case "/api/channels":
         return json(route, [
           channel("general"),

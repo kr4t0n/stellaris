@@ -9,7 +9,7 @@ import {
 } from "./ids.js";
 import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
-export const SOCIETY_CHANNELS = ["general", "ops", "governance", "decisions"] as const;
+export const SOCIETY_CHANNELS = ["general", "governance", "decisions"] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 
 /**

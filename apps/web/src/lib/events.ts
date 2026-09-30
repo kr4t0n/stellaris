@@ -77,6 +77,9 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "skill.promoted") {
     return [["skills"]];
   }
+  if (type === "ops.signal") {
+    return [["signals"], ["scheduler"]];
+  }
   return [];
 }
 

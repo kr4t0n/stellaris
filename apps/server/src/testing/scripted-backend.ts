@@ -163,7 +163,7 @@ export class ScriptedBackend implements AgentBackend {
 
     // The steward reads operations signals and proposes; it never touches tasks.
     if (request.spec.agent === "stew-1") {
-      if (request.prompt.includes("Trigger: ops_event") && request.prompt.includes("**backlog**")) {
+      if (request.prompt.includes("Trigger: ops_event") && /\] backlog: /.test(request.prompt)) {
         await verb("propose", {
           kind: "member",
           charter: {

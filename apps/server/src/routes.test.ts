@@ -409,7 +409,6 @@ describe("board server routes", () => {
       .parse(await (await app.request("/api/channels", { headers })).json());
     expect(channels.map((channel) => channel.ref)).toEqual([
       "general",
-      "ops",
       "governance",
       "decisions",
       "demo/general",

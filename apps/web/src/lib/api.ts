@@ -8,6 +8,7 @@ import {
   ModelOptionSchema,
   MessageFrontmatterSchema,
   NameSchema,
+  OpsSignalSchema,
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
@@ -151,6 +152,8 @@ function invoke<T>(
 }
 
 const PausedSchema = z.object({ paused: z.boolean() });
+const SignalRecordSchema = z.object({ id: UlidSchema, ts: z.string(), signal: OpsSignalSchema });
+export type SignalRecord = z.infer<typeof SignalRecordSchema>;
 const AgentRecordSchema = AgentSchema.omit({ tokenHash: true });
 
 /** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
@@ -162,6 +165,9 @@ export function createApi(token: string) {
     projects: () => get("/api/projects", token, ProjectSchema.array()),
     roles: () => get("/api/roles", token, RoleCharterSchema.array()),
     scheduler: () => get("/api/scheduler", token, SchedulerViewSchema),
+    /** The operations log, oldest first. */
+    signals: (limit: number) =>
+      get(`/api/signals?limit=${limit}`, token, SignalRecordSchema.array()),
     channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
     channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),

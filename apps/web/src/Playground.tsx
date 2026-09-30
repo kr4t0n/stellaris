@@ -7,6 +7,7 @@ import { useNeedsYou } from "./board/useNeedsYou.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
+import { LogsIsland } from "./components/LogsIsland.js";
 import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
@@ -81,6 +82,7 @@ export function Playground() {
   // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
   // `task:<id>` for a task's mark.
   const [hovered, setHovered] = useState<string | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
   const now = useNow(30_000);
   const width = useWindowWidth();
 
@@ -121,19 +123,25 @@ export function Playground() {
         null);
 
   useEffect(() => {
-    if (!boardOpen) {
+    if (!boardOpen && !logsOpen) {
       return undefined;
     }
     const close = (event: KeyboardEvent): void => {
       const typing =
         event.target instanceof HTMLElement && event.target.closest("input, textarea") !== null;
-      if (event.key === "Escape" && !typing) {
+      if (event.key !== "Escape" || typing) {
+        return;
+      }
+      // The log floats over the board, so it closes first.
+      if (logsOpen) {
+        setLogsOpen(false);
+      } else {
         void navigate({ to: "/" });
       }
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [boardOpen, navigate]);
+  }, [boardOpen, logsOpen, navigate]);
 
   const rejected = [society, members, projects, roles, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
@@ -249,6 +257,8 @@ export function Playground() {
           onToggleBoard={() =>
             void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
           }
+          logsOpen={logsOpen}
+          onToggleLogs={() => setLogsOpen(!logsOpen)}
           onSignOut={signOut}
         />
         {boardOpen ? (
@@ -270,6 +280,7 @@ export function Playground() {
             <Outlet />
           </Island>
         ) : null}
+        {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
         {model.stars.length === 0 && !boardOpen ? (
           <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
             No citizens yet. Ask the concierge for one, or add one with{" "}

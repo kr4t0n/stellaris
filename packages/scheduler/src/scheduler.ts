@@ -9,6 +9,7 @@ import {
   SOCIETY_SCOPE,
   TriggerSchema,
   TurnDispatchSchema,
+  WAKING_SIGNAL_KINDS,
   wakeScope,
   type Agent,
   type BoardEvent,
@@ -49,9 +50,9 @@ export interface SchedulerTimings {
   readonly leaseSweepMs: number;
   /** How often operations signals are computed and the scaling rule is applied. */
   readonly opsIntervalMs: number;
-  /** A condition that persists is posted again after this long; one that clears and returns posts at once. */
+  /** A condition that persists is logged again after this long; one that clears and returns is logged at once. */
   readonly signalRepeatMs: number;
-  /** Cadence of the spend summary in the ops channel. */
+  /** Cadence of the spend summary, a `turn_cost` signal. */
   readonly costReportMs: number;
   /** A thread with several participants and no message for this long is stale. */
   readonly staleThreadMs: number;
@@ -129,7 +130,7 @@ const PendingSchema = z.object({
 const StateSchema = z.object({
   cursor: z.string().nullable(),
   lastHeartbeat: z.record(z.string(), z.string()),
-  /** Waiting stages already signalled, as `task:stage`, so each is posted once while it waits. */
+  /** Waiting stages already signalled, as `task:stage`, so each is logged once while it waits. */
   waitingSeen: z.record(z.string(), z.string()).default({}),
   /** Queued dispatches survive a restart; the cursor has already moved past the events that made them. */
   pending: z.record(z.string(), PendingSchema).default({}),
@@ -154,16 +155,7 @@ interface PendingTurn {
 
 const SILENT_LOG: SchedulerLog = { info() {}, warn() {}, error() {} };
 
-/** Signals that wake roles charted for `ops_event`. The rest inform through the ops channel at the next wake. */
-const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set<OpsSignalKind>([
-  "backlog",
-  "role_gap",
-  "churn",
-  "stale_thread",
-  "idle_member",
-  "blocked_capability",
-  "scaled",
-]);
+const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set(WAKING_SIGNAL_KINDS);
 
 const HEARTBEAT_TRIGGER = "heartbeat";
 
@@ -922,9 +914,9 @@ export class Scheduler {
   }
 
   /**
-   * A current stage without a holder past the threshold is posted to the ops channel once while it
-   * waits. It wakes nobody by itself: its assignees see it on their heartbeat, and the steward
-   * decides whether to replan or to mention someone.
+   * A current stage without a holder past the threshold is logged as a signal once while it waits.
+   * It wakes nobody by itself: its assignees see the stage on their heartbeat, and the steward reads
+   * the signal at its next turn and decides whether to replan or to mention someone.
    */
   private async checkWaitingStages(now: number): Promise<void> {
     const stillWaiting = new Set<string>();

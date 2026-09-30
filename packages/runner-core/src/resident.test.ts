@@ -232,6 +232,43 @@ describe("LocalRunner resident sessions and the society scope", () => {
     }
   });
 
+  it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const prompts: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve(completed("read the signals"));
+      },
+    };
+    const runner = new LocalRunner({
+      board,
+      runnerName: "server",
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    const dispatch = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
+      priority: 0,
+      onboarding: false,
+    };
+    await board.publishSignal({
+      kind: "role_gap",
+      key: "role_gap:lab:referee",
+      summary: "a stage waits on the referee role, which nobody fills",
+      value: 1,
+    });
+    await runner.runTurn(dispatch);
+    await runner.runTurn(dispatch);
+    expect(prompts[0]).toContain("role_gap: a stage waits on the referee role, which nobody fills");
+    expect(prompts[1]).toContain("## Operations signals\n\nNone since your last turn here.");
+  });
+
   it("hands a resumed session the running total its last turn reported", async () => {
     const { board } = await Board.init(dir, { name: "totals" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

@@ -49,6 +49,17 @@ export function useScheduler() {
   return useQuery({ queryKey: ["scheduler"], queryFn: api.scheduler, refetchInterval: 3_000 });
 }
 
+/** The operations log; only the logs island reads it, so it loads when that opens. */
+export function useSignals(enabled: boolean) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["signals"],
+    queryFn: () => api.signals(200),
+    enabled,
+    refetchInterval: 60_000,
+  });
+}
+
 export function useChannels() {
   const { api } = useSession();
   return useQuery({ queryKey: ["channels"], queryFn: api.channels, refetchInterval: 60_000 });

@@ -23,7 +23,7 @@ export interface RenderInstructionsInput {
 }
 
 const TURN_CONTRACT = [
-  "- The digest in your prompt is what is new for you since your last turn: unread messages that mention you, sit in channels you follow, or belong to threads you take part in, and the stages you hold or could take. Read it before anything else.",
+  "- The digest in your prompt is what is new for you in this turn's scope since your last turn there: unread messages that mention you, sit in channels you follow, or belong to threads you take part in, and the stages you hold or could take there. Read it before anything else. Each project you belong to has its own turns and sessions, which may run while this one does: work only on this turn's project, and leave another project's tasks and worktree to your turn there, which reads that project's news itself.",
   "- Act through the board tools (the `board` MCP server). Holding a stage is a lease; every turn that touches the task renews it.",
   "- Work only inside your worktree. A task's work goes on its branch `task/<id>`: run `git switch task/<id>` before working on the task and commit there. After each turn the runner commits what you left on a task branch and switches your worktree back to your own branch, `agent/<name>`, for work tied to no task.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
@@ -32,7 +32,7 @@ const TURN_CONTRACT = [
   "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, and anything about one task, in the task's thread.",
   '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
-  "- End every turn with the status object: summary, claims held, what is blocked, whether the user must decide.",
+  "- End every turn with the status object: summary, claims held, what is blocked, and whether the user must decide something the board does not already put before them. Each such report is posted to the decisions channel for the user; a proposal waiting on the user is already in front of them, so it is not one.",
 ].join("\n");
 
 /** How work is planned: stages between open and done, written and reshaped by the participants. */

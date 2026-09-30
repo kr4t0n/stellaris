@@ -189,6 +189,51 @@ describe("Board", () => {
     );
   });
 
+  it("files a citizen's digest by the scope a turn reads it in, with a cursor per scope", async () => {
+    const { board } = await society();
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    const inDemo = await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 demo" });
+    const inLab = await board.postMessage(USER, { channel: "lab/general", body: "@eng-1 lab" });
+    const inSociety = await board.postMessage(USER, { channel: "general", body: "@eng-1 news" });
+    const ids = async (scope?: string): Promise<Ulid[]> =>
+      (
+        await board.readDigest(
+          { ...ENG, ...(scope === undefined ? {} : { scope }) },
+          { advance: false },
+        )
+      ).messages.map((m) => m.id);
+
+    // A society channel is filed where a mention there wakes eng-1: its first project.
+    expect(await ids("demo")).toEqual([inDemo.id, inSociety.id]);
+    expect(await ids("lab")).toEqual([inLab.id]);
+    expect(await ids()).toEqual([inDemo.id, inLab.id, inSociety.id]);
+
+    // A turn in lab moves lab's cursor alone, and a turn that read earlier but ends later cannot
+    // rewind demo's.
+    await board.setDigestCursor("eng-1", "lab", inLab.id);
+    expect(await ids("lab")).toEqual([]);
+    expect(await ids("demo")).toEqual([inDemo.id, inSociety.id]);
+    await board.setDigestCursor("eng-1", "demo", inSociety.id);
+    await board.setDigestCursor("eng-1", "demo", inDemo.id);
+    expect(await ids("demo")).toEqual([]);
+
+    // A turn token names its scope, so read_inbox in a turn reads and advances that scope only.
+    const later = await board.postMessage(USER, { channel: "lab/general", body: "@eng-1 more" });
+    const elsewhere = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "@eng-1 too",
+    });
+    const turnActor = board.resolveToken(board.issueTurnToken("eng-1", "engineer", 60_000, "lab"));
+    expect(turnActor).toEqual({ ...ENG, scope: "lab" });
+    if (turnActor === null) {
+      throw new Error("the turn token did not resolve");
+    }
+    expect((await board.readDigest(turnActor)).messages.map((m) => m.id)).toEqual([later.id]);
+    expect(await ids("lab")).toEqual([]);
+    expect(await ids("demo")).toEqual([elsewhere.id]);
+  });
+
   it("lets the user set a citizen's model and clear it back to the CLI's default", async () => {
     const { board } = await society();
     const set = await board.setAgentModel(USER, "eng-1", "sonnet");

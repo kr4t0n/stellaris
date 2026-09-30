@@ -790,14 +790,18 @@ const turn = program.command("turn").description("Turn operations");
 
 turn
   .command("digest <agent>")
-  .description("Show the unread messages the agent's next turn opens with; the cursor stays put")
+  .description(
+    "Show the unread messages the agent's next turn opens with, in one scope or all; the cursors stay put",
+  )
   .option("--limit <n>", "maximum messages", "50")
-  .action(async (agentName: string, opts: { limit: string }) => {
+  .option("--project <slug>", "the scope whose turn to show: a project, or society")
+  .action(async (agentName: string, opts: { limit: string; project?: string }) => {
     const board = await open();
-    const digest = await board.readDigest(await board.actorFor(agentName), {
-      advance: false,
-      limit: Number(opts.limit),
-    });
+    const actor = await board.actorFor(agentName);
+    const digest = await board.readDigest(
+      opts.project === undefined ? actor : { ...actor, scope: opts.project },
+      { advance: false, limit: Number(opts.limit) },
+    );
     print(digest, () =>
       digest.messages.length === 0
         ? "No unread messages."

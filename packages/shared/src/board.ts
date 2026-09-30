@@ -19,6 +19,24 @@ export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
  */
 export const SOCIETY_SCOPE = "society";
 
+/**
+ * Where a citizen takes a turn for something in `project`, or in a society channel when it is null:
+ * that project when the citizen belongs to it, else its first project, else the society scope when
+ * its charter allows work outside projects, else nowhere. The scheduler wakes by it and the board
+ * files the digest by it, so a turn reads what it was woken for and nothing another turn of the
+ * same citizen, in another scope, will read.
+ */
+export function wakeScope(
+  member: { readonly memberships: readonly string[] },
+  charter: { readonly societyScope: boolean },
+  project: string | null,
+): string | null {
+  if (project !== null && member.memberships.includes(project)) {
+    return project;
+  }
+  return member.memberships[0] ?? (charter.societyScope ? SOCIETY_SCOPE : null);
+}
+
 /** The runner embedded in the board server. Runners on other machines register under their own names. */
 export const SERVER_RUNNER = "server";
 

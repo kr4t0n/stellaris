@@ -38,6 +38,7 @@ import {
   TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
   VerbInputs,
+  wakeScope,
   type Agent,
   type BoardEvent,
   type ChannelRef,
@@ -107,6 +108,8 @@ import { hashToken, mintToken } from "./tokens.js";
 export interface Actor {
   readonly name: Name;
   readonly role: Name;
+  /** The scope of the turn a turn token was issued for; the digest it reads is that scope's. */
+  readonly scope?: Name | undefined;
 }
 
 /** The board itself, for posts and events produced by infrastructure rather than a member. */
@@ -224,7 +227,20 @@ export interface TaskLocation {
 /** A task as `get_task` returns it: the record and what has been said in its thread. */
 export type TaskWithThread = Task & { readonly messages: readonly Message[] };
 
-const CursorsSchema = z.object({ digest: z.string().nullable() });
+/**
+ * A member's digest cursors: one per scope a turn has read in, and `digest`, the single cursor
+ * from before digests were filed by scope, where every other scope starts.
+ */
+const CursorsSchema = z.object({
+  digest: z.string().nullable(),
+  scopes: z.record(z.string(), z.string()).default({}),
+});
+type Cursors = z.infer<typeof CursorsSchema>;
+
+/** Where a scope's digest resumes. */
+function cursorOf(cursors: Cursors, scope: string): Ulid | null {
+  return cursors.scopes[scope] ?? cursors.digest;
+}
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
@@ -715,12 +731,13 @@ export class Board {
 
   /**
    * A short-lived token for one turn, handed to the CLI by the runner. Only its hash is kept,
-   * in memory, until it expires, so no raw agent token ever needs to exist at rest.
+   * in memory, until it expires, so no raw agent token ever needs to exist at rest. The turn's
+   * scope rides on the actor it resolves to, so `read_inbox` reads that scope's digest.
    */
-  issueTurnToken(agent: Name, role: Name, ttlMs: number): string {
+  issueTurnToken(agent: Name, role: Name, ttlMs: number, scope?: Name): string {
     const token = mintToken();
     this.turnTokens.set(hashToken(token), {
-      actor: { name: agent, role },
+      actor: { name: agent, role, ...(scope === undefined ? {} : { scope }) },
       expiresAt: this.now().getTime() + ttlMs,
     });
     return token;
@@ -1317,22 +1334,26 @@ export class Board {
 
   /**
    * The reader's digest: messages newer than its cursor that mention it, sit in a channel it
-   * follows, or belong to a thread it takes part in. Agents reach it through the `read_inbox` verb.
+   * follows, or belong to a thread it takes part in. A turn reads its own scope's, each message
+   * filed where `wakeScope` would wake the reader for it, so two turns of one citizen in two scopes
+   * never read the same message; a reader with no scope, such as the admin CLI, reads them all.
+   * Agents reach it through the `read_inbox` verb, whose turn token names the scope.
    */
   async readDigest(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<DigestResult> {
     const args = VerbInputs.read_inbox.parse(input);
     await this.authorize(actor, "read_inbox");
     return this.mutex.run(async () => {
-      const cursorFile = this.paths.agentCursors(actor.name);
-      const stored = await this.readDigestCursor(actor.name);
-      const since = args.since_cursor === undefined ? stored : args.since_cursor;
-      const messages = (await this.digestSince(actor, since)).slice(0, args.limit);
-      const last = messages.at(-1);
-      const cursor = last === undefined ? since : last.id;
-      if (args.advance && cursor !== stored) {
-        await writeJson(cursorFile, { digest: cursor });
+      const stored = await this.readCursors(actor.name);
+      const from: Cursors =
+        args.since_cursor === undefined ? stored : { digest: args.since_cursor, scopes: {} };
+      const filed = (await this.digestSince(actor, from, actor.scope)).slice(0, args.limit);
+      if (args.advance) {
+        await this.advanceCursors(actor.name, filed);
       }
-      return { messages, cursor };
+      const last = filed.at(-1)?.message.id;
+      const cursor =
+        last ?? (actor.scope === undefined ? from.digest : cursorOf(from, actor.scope));
+      return { messages: filed.map((entry) => entry.message), cursor };
     });
   }
 
@@ -1346,9 +1367,10 @@ export class Board {
   async unreadByScope(actor: Actor): Promise<Map<string, number>> {
     return this.mutex.run(async () => {
       const counts = new Map<string, number>();
-      for (const message of await this.digestSince(
-        actor,
-        await this.readDigestCursor(actor.name),
+      const unscoped = { name: actor.name, role: actor.role };
+      for (const { message } of await this.digestSince(
+        unscoped,
+        await this.readCursors(actor.name),
       )) {
         if (message.step !== undefined) {
           continue;
@@ -1360,24 +1382,71 @@ export class Board {
     });
   }
 
-  private async readDigestCursor(agent: Name): Promise<Ulid | null> {
-    const cursorFile = this.paths.agentCursors(agent);
-    return (await exists(cursorFile)) ? (await readJson(cursorFile, CursorsSchema)).digest : null;
+  private async readCursors(agent: Name): Promise<Cursors> {
+    const file = this.paths.agentCursors(agent);
+    return (await exists(file)) ? readJson(file, CursorsSchema) : { digest: null, scopes: {} };
+  }
+
+  /** Moves each scope's cursor to the newest message delivered there; a cursor never moves back. */
+  private async advanceCursors(
+    agent: Name,
+    filed: readonly { scope: Name; message: Message }[],
+  ): Promise<void> {
+    const cursors = await this.readCursors(agent);
+    const scopes = { ...cursors.scopes };
+    let moved = false;
+    for (const { scope, message } of filed) {
+      const current = scopes[scope] ?? cursors.digest;
+      if (current === null || message.id > current) {
+        scopes[scope] = message.id;
+        moved = true;
+      }
+    }
+    if (moved) {
+      await writeJson(this.paths.agentCursors(agent), { ...cursors, scopes });
+    }
   }
 
   /**
-   * The digest after a cursor, oldest first: what mentions the member, sits in a channel it
-   * follows, or belongs to a thread it takes part in, and for the front desk, which every post by
-   * the user wakes, every post by the user wherever it is.
+   * The digest after each scope's cursor, oldest first, with the scope each message is filed in:
+   * what mentions the member, sits in a channel it follows, or belongs to a thread it takes part
+   * in, and for the front desk, which every post by the user wakes, every post by the user
+   * wherever it is. With `scope`, only what is filed there.
    */
-  private async digestSince(actor: Actor, since: Ulid | null): Promise<Message[]> {
+  private async digestSince(
+    actor: Actor,
+    cursors: Cursors,
+    scope?: Name,
+  ): Promise<{ scope: Name; message: Message }[]> {
     const agent = await this.readAgent(actor.name);
+    const charter = await this.readRole(agent.role);
     const subscribed = new Set(agent.subscriptions);
-    const frontDesk = (await this.readRole(agent.role)).wakeTriggers.includes(FRONT_DESK_TRIGGER);
+    const frontDesk = charter.wakeTriggers.includes(FRONT_DESK_TRIGGER);
     const threadParticipation = new Map<Ulid, boolean>();
-    const collected: Message[] = [];
+    const collected: { scope: Name; message: Message }[] = [];
+    // Read from the oldest cursor of the scopes a message may be filed in.
+    const scopes =
+      scope !== undefined
+        ? [scope]
+        : agent.memberships.length > 0
+          ? agent.memberships
+          : [SOCIETY_SCOPE];
+    const starts = scopes.map((each) => cursorOf(cursors, each));
+    const known = starts.filter((start): start is Ulid => start !== null);
+    const since =
+      known.length < starts.length
+        ? null
+        : (known.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0] ?? null);
 
     for await (const message of this.iterateMessages(since)) {
+      const filedIn = wakeScope(agent, charter, parseChannelRef(message.channel).project);
+      if (filedIn === null || (scope !== undefined && filedIn !== scope)) {
+        continue;
+      }
+      const cursor = cursorOf(cursors, filedIn);
+      if (cursor !== null && message.id <= cursor) {
+        continue;
+      }
       let include =
         message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
       if (!include && message.thread === undefined) {
@@ -1394,10 +1463,12 @@ export class Board {
         include = participates;
       }
       if (include && message.author !== actor.name) {
-        collected.push(message);
+        collected.push({ scope: filedIn, message });
       }
     }
-    return collected.toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return collected.toSorted((a, b) =>
+      a.message.id < b.message.id ? -1 : a.message.id > b.message.id ? 1 : 0,
+    );
   }
 
   async search(actor: Actor, input: VerbInput<"search">): Promise<SearchHit[]> {
@@ -2571,8 +2642,22 @@ export class Board {
       : "";
   }
 
-  async setDigestCursor(agent: Name, cursor: Ulid | null): Promise<void> {
-    await this.mutex.run(() => writeJson(this.paths.agentCursors(agent), { digest: cursor }));
+  /**
+   * Moves a scope's cursor forward to `cursor` once a turn there has delivered up to it. It never
+   * moves back, so a turn that ends after a later one in the same scope cannot rewind it.
+   */
+  async setDigestCursor(agent: Name, scope: Name, cursor: Ulid | null): Promise<void> {
+    await this.mutex.run(async () => {
+      const cursors = await this.readCursors(agent);
+      const current = cursorOf(cursors, scope);
+      if (cursor === null || (current !== null && cursor <= current)) {
+        return;
+      }
+      await writeJson(this.paths.agentCursors(agent), {
+        ...cursors,
+        scopes: { ...cursors.scopes, [scope]: cursor },
+      });
+    });
   }
 
   async readSessions(agent: Name, project: Name): Promise<SessionsFile> {

@@ -229,8 +229,15 @@ export class LocalRunner {
       !newSession && lastTurn?.session === session
         ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
         : 0;
-    const digest = await this.board.readDigest(actor, { advance: false, limit: 50 });
-    const held = await this.board.heldClaims(agent.name);
+    // The digest and the stages of this turn's scope only: a citizen's turns in its other scopes
+    // may run at the same time, and each reads and acts on its own.
+    const digest = await this.board.readDigest(
+      { ...actor, scope: dispatch.project },
+      { advance: false, limit: 50 },
+    );
+    const held = (await this.board.heldClaims(agent.name)).filter(
+      (task) => task.project === dispatch.project,
+    );
     const roleCharter = await this.board.readAgentRoleBody(agent.name);
     const memoryCore = await this.board.readMemoryCore(agent.name);
     const onboarding: OnboardingContext | null =
@@ -328,6 +335,7 @@ export class LocalRunner {
       if (resident && backend.startResident !== undefined) {
         result = await this.runResidentTurn(backend, spec, {
           key: `${agent.name}/${dispatch.project}`,
+          scope: dispatch.project,
           agent: { name: agent.name, role: agent.role },
           session,
           newSession,
@@ -344,6 +352,7 @@ export class LocalRunner {
           agent.name,
           agent.role,
           this.tokenLifetime(5 * 60_000),
+          dispatch.project,
         );
         try {
           result = await backend.runTurn(
@@ -405,7 +414,7 @@ export class LocalRunner {
 
     if (result.exitReason === "completed" || result.exitReason === "blocked") {
       // The digest was delivered; only now does the cursor move past it.
-      await this.board.setDigestCursor(agent.name, digest.cursor);
+      await this.board.setDigestCursor(agent.name, dispatch.project, digest.cursor);
       await this.renewLeases(
         actor,
         held.map((task) => task.id),
@@ -434,6 +443,8 @@ export class LocalRunner {
     spec: AgentSpec,
     input: {
       key: string;
+      /** The pair's scope, which its turn token carries. */
+      scope: Name;
       agent: { name: Name; role: Name };
       session: string;
       newSession: boolean;
@@ -456,7 +467,7 @@ export class LocalRunner {
     }
     let resident = this.residents.get(input.key);
     if (resident === undefined) {
-      const token = this.board.issueTurnToken(input.agent.name, input.agent.role, ttl);
+      const token = this.board.issueTurnToken(input.agent.name, input.agent.role, ttl, input.scope);
       const session = await backend.startResident(spec, {
         session: input.session,
         newSession: input.newSession,

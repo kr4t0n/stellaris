@@ -9,6 +9,7 @@ import {
   SOCIETY_SCOPE,
   TriggerSchema,
   TurnDispatchSchema,
+  wakeScope,
   type Agent,
   type BoardEvent,
   type Name,
@@ -719,10 +720,7 @@ export class Scheduler {
   }
 
   private scopeForProject(agent: Agent, charter: RoleCharter, project: Name | null): Name | null {
-    if (project !== null && agent.memberships.includes(project)) {
-      return project;
-    }
-    return agent.memberships[0] ?? (charter.societyScope ? SOCIETY_SCOPE : null);
+    return wakeScope(agent, charter, project);
   }
 
   private enqueue(agent: Name, project: Name, input: TriggerInput, now: number): void {

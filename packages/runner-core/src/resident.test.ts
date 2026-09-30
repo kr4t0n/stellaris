@@ -161,6 +161,77 @@ describe("LocalRunner resident sessions and the society scope", () => {
     expect((await board.getTask(USER, { task_id: task.id })).status).toBe("claimed");
   });
 
+  it("gives a citizen's turns in two projects each its own digest, stages, and scoped token", async () => {
+    const { board } = await Board.init(dir, { name: "scopes" });
+    for (const slug of ["demo", "lab"]) {
+      await board.addProject(USER, { slug });
+    }
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo", "lab"],
+    });
+    const demoTask = await board.createTask(USER, { project: "demo", title: "demo build" });
+    await board.claimTask({ name: "eng-1", role: "engineer" }, { task_id: demoTask.id });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 the demo handover" });
+    await board.postMessage(USER, { channel: "lab/general", body: "@eng-1 the lab question" });
+
+    const seen = new Map<string, { prompt: string; scope: string | undefined }>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        seen.set(request.spec.project, {
+          prompt: request.prompt,
+          scope: board.resolveToken(request.mcp.token)?.scope,
+        });
+        return Promise.resolve(completed("done"));
+      },
+    };
+    const runner = new LocalRunner({
+      board,
+      runnerName: "server",
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    const turn = (project: string) =>
+      runner.runTurn({
+        agent: "eng-1",
+        project,
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+        onboarding: false,
+      });
+    // Both at once, as the scheduler runs a citizen's scopes.
+    await Promise.all([turn("demo"), turn("lab")]);
+
+    const demo = seen.get("demo");
+    const lab = seen.get("lab");
+    expect(demo?.scope).toBe("demo");
+    expect(demo?.prompt).toContain("the demo handover");
+    expect(demo?.prompt).not.toContain("the lab question");
+    expect(demo?.prompt).toContain(`${demoTask.id} "demo build"`);
+    expect(lab?.scope).toBe("lab");
+    expect(lab?.prompt).toContain("the lab question");
+    expect(lab?.prompt).not.toContain("the demo handover");
+    expect(lab?.prompt).toContain("## Stages you hold\n\nNone.");
+    // Each turn moved its own scope's cursor: both digests are read now.
+    for (const scope of ["demo", "lab"]) {
+      const digest = await board.readDigest(
+        { name: "eng-1", role: "engineer", scope },
+        { advance: false },
+      );
+      expect(digest.messages).toEqual([]);
+    }
+  });
+
   it("hands a resumed session the running total its last turn reported", async () => {
     const { board } = await Board.init(dir, { name: "totals" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

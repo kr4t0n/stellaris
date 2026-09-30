@@ -107,7 +107,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   post_message:
     "Post a markdown message to a channel, or into a thread when thread_id is given; a thread's message goes to the thread's channel.",
   read_inbox:
-    "Read your digest's messages again, or page past them: unread messages that mention you, sit in channels you follow, or belong to threads you take part in.",
+    "Read your digest's messages again, or page past them: unread messages of this turn's scope that mention you, sit in channels you follow, or belong to threads you take part in.",
   search: "Search messages, tasks, and knowledge by text, optionally within a project or channel.",
   open_thread:
     "Open a thread: on a proposal, whose id it takes and with which it ends, or on a channel with a title. Tasks have theirs already. Its messages reach only its participants and anyone mentioned.",

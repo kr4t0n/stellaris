@@ -108,7 +108,7 @@ describe("Phase 1 exit criterion", () => {
       ["rev-1", "returned", "add a second line"],
       ["eng-1", "advanced", "second line added"],
       ["rev-1", "advanced", "reviewed the diff"],
-      ["board", "landed", expect.stringContaining(`task/${task.id} merged into main at`)],
+      ["board", "landed", expect.stringMatching(/^merged into main at [0-9a-f]+\.$/)],
     ]);
     expect(final.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 

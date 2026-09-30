@@ -436,7 +436,7 @@ describe("Scheduler", () => {
     });
     await board.postMessage(SYSTEM_ACTOR, {
       channel: "demo/general",
-      body: "Task 01ARZ3NDEKTSV4RRFFQ69G5FAV is done: task/x merged into main at abc123.",
+      body: "Task 01ARZ3NDEKTSV4RRFFQ69G5FAV is done: merged into main at abc123.",
     });
     advance(10_000);
     await scheduler.tick();

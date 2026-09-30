@@ -179,7 +179,8 @@ export class ExecaGit implements GitOps {
     );
     if (merge.exitCode === 0) {
       const head = (await must(["rev-parse", "--short", "HEAD"], repoDir)).trim();
-      return { ok: true, detail: `${branch} merged into ${into} at ${head}` };
+      // The outcome is posted under the task's own name, so it need not spell out the branch.
+      return { ok: true, detail: `merged into ${into} at ${head}` };
     }
     await git(["merge", "--abort"], repoDir);
     return { ok: false, detail: merge.stderr.trim() || merge.stdout.trim() || "merge failed" };

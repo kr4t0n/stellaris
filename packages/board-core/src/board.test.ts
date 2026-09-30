@@ -610,12 +610,12 @@ describe("Board", () => {
     await board.finishCompletion(SYSTEM_ACTOR, {
       taskId: merged,
       ok: true,
-      detail: "task/x merged into main at abc123",
+      detail: "merged into main at abc123",
     });
     expect(await state(merged)).toBe("closed");
     expect(await lastStep(merged)).toEqual({ action: "landed", stage: "s1", to: null });
     expect((await board.listChannel("demo/general")).map((m) => m.body)).toEqual([
-      `Task ${merged} "merged" is done: task/x merged into main at abc123.\n`,
+      `Task ${merged} "merged" is done: merged into main at abc123.\n`,
     ]);
 
     const dropped = await withThread("dropped");

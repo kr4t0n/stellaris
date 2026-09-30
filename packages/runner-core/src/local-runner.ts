@@ -564,7 +564,7 @@ export class LocalRunner {
     const branch = taskBranch(taskId);
     const outcome = (await this.git.branchExists(repoDir, branch))
       ? await this.git.merge(repoDir, record.defaultBranch, branch)
-      : { ok: true, detail: `${branch} has no work to land` };
+      : { ok: true, detail: "nothing to land, since the task left no branch" };
     await this.board.recordMerge(SYSTEM_ACTOR, {
       project,
       taskId,

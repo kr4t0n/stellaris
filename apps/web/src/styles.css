@@ -39,6 +39,34 @@
     background-color: hsl(0 0% 25%);
     color: hsl(0 0% 98%);
   }
+
+  /*
+   * Thin scrollbars in the argus manner: a transparent track and a rounded thumb in the line
+   * colour. Chromium ignores the WebKit pseudo-elements on any element that sets the standard
+   * properties, so those are set only where the pseudo-elements do not exist (Firefox).
+   */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-line-strong) transparent;
+    }
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: var(--color-line-strong);
+  }
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: var(--color-fg-muted);
+  }
 }
 
 @layer components {

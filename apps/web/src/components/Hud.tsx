@@ -7,10 +7,6 @@ interface HudProps {
   /** How many things wait on the user; the chip opens them. */
   readonly attention: number;
   readonly onOpenAttention: () => void;
-  /** Whether the ask box floats open, and whether an ask has an answer not yet shown. */
-  readonly askOpen: boolean;
-  readonly askAnswered: boolean;
-  readonly onToggleAsk: () => void;
   readonly paused: boolean;
   /** Pauses or resumes the scheduler; while the request runs the switch waits. */
   readonly onTogglePause: () => void;
@@ -31,9 +27,6 @@ export function Hud({
   onToggleCitizens,
   attention,
   onOpenAttention,
-  askOpen,
-  askAnswered,
-  onToggleAsk,
   paused,
   onTogglePause,
   pauseBusy,
@@ -60,21 +53,6 @@ export function Hud({
             {attention} {attention === 1 ? "needs" : "need"} you
           </button>
         )}
-        <button
-          type="button"
-          aria-expanded={askOpen}
-          aria-keyshortcuts="/"
-          title="Ask the front desk (/)"
-          onClick={onToggleAsk}
-          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            askOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Ask
-          {askAnswered ? (
-            <span aria-label="new answer" className="size-1.5 rounded-full bg-emerald-400" />
-          ) : null}
-        </button>
         <button
           type="button"
           aria-pressed={paused}

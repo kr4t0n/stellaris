@@ -10,12 +10,12 @@ import { completeMention, listed, mentionAt, wakesFor } from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
- * general channel titled by the post's first line, noting the ask it follows up on, if any.
+ * general channel titled by the post's first line.
  */
 export type Target =
   | { readonly channel: string }
   | { readonly threadId: string }
-  | { readonly ask: { readonly followUp?: string | undefined } };
+  | { readonly ask: true };
 
 const MAX_CANDIDATES = 6;
 
@@ -26,12 +26,17 @@ const MAX_CANDIDATES = 6;
 export function Composer({
   target,
   placeholder,
+  hint = "Enter to send · Shift+Enter for a new line",
+  className = "border-t border-line p-3",
   focusOnOpen = false,
   onPosted,
   onEmptyEscape,
 }: {
   target: Target;
   placeholder: string;
+  /** The line under the box while sending would wake nobody. */
+  hint?: string;
+  className?: string;
   /** For a composer the user just opened, such as the ask box. */
   focusOnOpen?: boolean;
   onPosted?: (message: Message) => void;
@@ -60,11 +65,7 @@ export function Composer({
         return api.sendMessage({ thread_id: target.threadId, body });
       }
       const thread = await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) });
-      const { followUp } = target.ask;
-      return api.sendMessage({
-        thread_id: thread.id,
-        body: followUp === undefined ? body : `${body}\n\nFollows up on ${followUp}.`,
-      });
+      return api.sendMessage({ thread_id: thread.id, body });
     },
     onSuccess: (message) => {
       setText("");
@@ -159,7 +160,7 @@ export function Composer({
 
   return (
     <form
-      className="border-t border-line p-3"
+      className={className}
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -211,9 +212,7 @@ export function Composer({
         />
         <div className="flex items-center gap-2 px-3 pb-2">
           <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-            {wakes.length > 0
-              ? `Sending wakes ${listed(wakes)}: a turn each.`
-              : "Enter to send · Shift+Enter for a new line"}
+            {wakes.length > 0 ? `Sending wakes ${listed(wakes)}: a turn each.` : hint}
           </p>
           <Button variant="primary" type="submit" disabled={text.trim() === "" || send.isPending}>
             {send.isPending ? "Sending…" : "Send"}

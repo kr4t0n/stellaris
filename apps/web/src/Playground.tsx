@@ -1,11 +1,11 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
 import { Navigator, type GovernanceView } from "./board/Navigator.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
-import { AskIsland } from "./components/AskIsland.js";
+import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { EntityContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
@@ -87,11 +87,14 @@ export function Playground() {
     onSuccess: () => void client.invalidateQueries({ queryKey: ["scheduler"] }),
   });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  // The log and the ask box float in the same place, so one opening closes the other. The ask box
-  // shows only on the route it was opened on: its links lead into the board, which it would cover.
-  const [floating, setFloating] = useState<{ kind: "logs" | "ask"; at: string } | null>(null);
-  const logsOpen = floating?.kind === "logs";
-  const askOpen = floating?.kind === "ask" && floating.at === pathname;
+  const [logsOpen, setLogsOpen] = useState(false);
+  // The ask box shows only on the route it was opened on: its asks lead into the board.
+  const [askAt, setAskAt] = useState<string | null>(null);
+  const askOpen = askAt === pathname;
+  const closeAsk = useCallback(() => setAskAt(null), []);
+  // Whether focus last moved by pointer rather than Tab. Chromium matches :focus-visible on a
+  // clicked button once any key is pressed, so it cannot tell a keyboard user's control apart.
+  const pointerFocus = useRef(true);
   const seen = useSeen();
   const search = useSearch({ strict: false });
   // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
@@ -139,29 +142,46 @@ export function Playground() {
         null);
 
   useEffect(() => {
+    const onPointer = (): void => {
+      pointerFocus.current = true;
+    };
     const onKey = (event: KeyboardEvent): void => {
-      const typing =
-        event.target instanceof HTMLElement && event.target.closest("input, textarea") !== null;
+      if (event.key === "Tab") {
+        pointerFocus.current = false;
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const typing = target?.closest("input, textarea, select, [contenteditable]") != null;
       if (typing || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      if (event.key === "/") {
+      if (event.key === " ") {
+        // A control reached by Tab takes Space as its own press; one merely clicked does not.
+        const control = target?.closest("button, a, summary, [role='button']") != null;
+        if (control && !pointerFocus.current) {
+          return;
+        }
         event.preventDefault();
-        setFloating({ kind: "ask", at: pathname });
+        setAskAt(pathname);
         return;
       }
       if (event.key !== "Escape") {
         return;
       }
       // What floats over the board closes first.
-      if (logsOpen || askOpen) {
-        setFloating(null);
+      if (askOpen) {
+        setAskAt(null);
+      } else if (logsOpen) {
+        setLogsOpen(false);
       } else if (boardOpen) {
         void navigate({ to: "/" });
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
   }, [boardOpen, logsOpen, askOpen, pathname, navigate]);
 
   const rejected = [society, members, projects, scheduler].some(
@@ -211,6 +231,15 @@ export function Playground() {
       : activeChannel.includes("/")
         ? (activeChannel.split("/")[0] ?? null)
         : SOCIETY_SCOPE);
+  // The ask box sits in the middle of the sky, or of the window when the islands leave too little.
+  const skyWidth = width - insets.left - insets.right;
+  const roomy = skyWidth >= 460;
+  const askWidth = Math.min(560, (roomy ? skyWidth : width) - 32);
+  const askBox = {
+    left: (roomy ? insets.left : 0) + ((roomy ? skyWidth : width) - askWidth) / 2,
+    width: askWidth,
+  };
+  const unread = asksOf(threads.data ?? []).filter((ask) => hasUnseenReply(ask, seen));
   const placeName = (scope: string): string =>
     scope === SOCIETY_SCOPE
       ? "the society"
@@ -271,9 +300,6 @@ export function Playground() {
             }
             attention={attention}
             onOpenAttention={() => void navigate({ to: "/needs-you" })}
-            askOpen={askOpen}
-            askAnswered={asksOf(threads.data ?? []).some((ask) => hasUnseenReply(ask, seen))}
-            onToggleAsk={() => setFloating(askOpen ? null : { kind: "ask", at: pathname })}
             paused={scheduler.data?.paused ?? false}
             onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
             pauseBusy={pause.isPending}
@@ -282,7 +308,7 @@ export function Playground() {
               void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
             }
             logsOpen={logsOpen}
-            onToggleLogs={() => setFloating(logsOpen ? null : { kind: "logs", at: pathname })}
+            onToggleLogs={() => setLogsOpen(!logsOpen)}
             onSignOut={signOut}
           />
           {boardOpen ? (
@@ -304,8 +330,17 @@ export function Playground() {
               <Outlet />
             </Island>
           ) : null}
-          {logsOpen ? <LogsIsland onClose={() => setFloating(null)} /> : null}
-          {askOpen ? <AskIsland onClose={() => setFloating(null)} /> : null}
+          {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
+          {askOpen ? (
+            <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
+          ) : (
+            <div
+              className="pointer-events-none absolute bottom-5 flex justify-center px-16"
+              style={{ left: insets.left, right: insets.right }}
+            >
+              <AskHint unread={unread} onOpen={() => setAskAt(pathname)} />
+            </div>
+          )}
           {model.stars.length === 0 && !boardOpen ? (
             <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
               No citizens yet. Ask the concierge for one, or add one with{" "}

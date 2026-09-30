@@ -159,12 +159,7 @@ function CitizenPage({
           onDone={() => setOpen(null)}
         />
       ) : open === "model" ? (
-        <ModelForm
-          member={member}
-          charter={charter}
-          observed={observed}
-          onDone={() => setOpen(null)}
-        />
+        <ModelForm member={member} onDone={() => setOpen(null)} />
       ) : null}
       <nav aria-label="Citizen views" className="flex gap-1 border-b border-line px-3 py-2">
         {TABS.map((each) => (

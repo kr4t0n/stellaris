@@ -53,12 +53,20 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
 
   await view.getByRole("button", { name: "Model…" }).click();
   const form = page.getByRole("form", { name: "Model of desk" });
-  await expect(form.getByLabel("Model")).toHaveValue("");
-  await expect(form.getByRole("option", { name: "CLI default · Opus 5.5" })).toBeAttached();
+  const picker = form.getByRole("button", { name: /^Model: / });
+  await expect(picker).toHaveAccessibleName("Model: CLI default · Opus 5.5");
   await expect(form.getByRole("button", { name: "Use this model" })).toBeDisabled();
-  await form.getByLabel("Model").selectOption("sonnet");
+
+  await picker.click();
   await expect(form).toContainText("Efficient for routine tasks.");
-  await expect(form).toContainText("warm session starts afresh");
+  // Escape closes the list, not the board.
+  await page.keyboard.press("Escape");
+  await expect(form).not.toContainText("Efficient for routine tasks.");
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+
+  await picker.click();
+  await form.getByRole("button", { name: /^Sonnet 5/ }).click();
+  await expect(picker).toHaveAccessibleName("Model: Sonnet 5 · sonnet");
   await form.getByRole("button", { name: "Use this model" }).click();
 
   await expect(form).toHaveCount(0);

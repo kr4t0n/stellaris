@@ -26,7 +26,7 @@ const MAX_CANDIDATES = 6;
 export function Composer({
   target,
   placeholder,
-  hint = "Enter to send · Shift+Enter for a new line",
+  wakeLine = true,
   className = "border-t border-line p-3",
   focusOnOpen = false,
   onPosted,
@@ -34,8 +34,8 @@ export function Composer({
 }: {
   target: Target;
   placeholder: string;
-  /** The line under the box while sending would wake nobody. */
-  hint?: string;
+  /** Whether the line under the box says whom sending wakes; the ask box, which always wakes the front desk, leaves it out. */
+  wakeLine?: boolean;
   className?: string;
   /** For a composer the user just opened, such as the ask box. */
   focusOnOpen?: boolean;
@@ -212,7 +212,11 @@ export function Composer({
         />
         <div className="flex items-center gap-2 px-3 pb-2">
           <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-            {wakes.length > 0 ? `Sending wakes ${listed(wakes)}: a turn each.` : hint}
+            {!wakeLine
+              ? ""
+              : wakes.length > 0
+                ? `Sending wakes ${listed(wakes)}: a turn each.`
+                : "Enter to send · Shift+Enter for a new line"}
           </p>
           <Button variant="primary" type="submit" disabled={text.trim() === "" || send.isPending}>
             {send.isPending ? "Sending…" : "Send"}

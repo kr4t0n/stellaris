@@ -80,7 +80,7 @@ export function AskBox({
         <Composer
           target={{ ask: true }}
           placeholder="Ask the front desk"
-          hint="Each ask opens a thread in #general · Enter to send"
+          wakeLine={false}
           className="p-2"
           focusOnOpen
           onEmptyEscape={onClose}

@@ -20,7 +20,7 @@ test("Space opens a composer in the sky, and an ask opens a thread in general fo
   const field = box.getByRole("textbox", { name: "Ask the front desk" });
   await expect(field).toBeFocused();
   await field.fill("Should lab fix a seed policy?");
-  await expect(box).toContainText("Sending wakes desk: a turn each.");
+  await expect(box).not.toContainText("Sending wakes");
   await field.press("Enter");
 
   await expect(field).toHaveValue("");

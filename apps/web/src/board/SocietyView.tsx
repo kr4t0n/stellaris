@@ -58,7 +58,7 @@ export function SocietyView() {
                       {role.societyScope ? " · works outside projects" : ""}
                     </span>
                   </p>
-                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-fg-secondary">
+                  <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">
                     {role.purpose}
                   </p>
                 </li>
@@ -78,7 +78,7 @@ export function SocietyView() {
             <ul className="space-y-1.5">
               {skills.data.map((skill) => (
                 <li key={skill.name} className="text-sm">
-                  <span className="font-mono text-fg-primary">{skill.name}</span>
+                  <span className="text-fg-primary">{skill.name}</span>
                   {skill.summary === "" ? null : (
                     <span className="text-fg-secondary"> · {skill.summary}</span>
                   )}

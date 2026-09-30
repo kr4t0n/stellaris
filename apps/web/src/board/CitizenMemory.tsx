@@ -53,7 +53,7 @@ export function CitizenMemory({
           <ul className="space-y-1.5">
             {skills.data.map((skill) => (
               <li key={skill.name} className="text-sm">
-                <span className="font-mono text-fg-primary">{skill.name}</span>
+                <span className="text-fg-primary">{skill.name}</span>
                 {skill.summary === "" ? null : (
                   <span className="text-fg-secondary"> · {skill.summary}</span>
                 )}

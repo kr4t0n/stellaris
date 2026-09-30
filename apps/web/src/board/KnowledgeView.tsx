@@ -40,7 +40,7 @@ export function KnowledgeView() {
     <>
       <PaneHeader
         leading={back}
-        title={<span className="font-mono">{entry.topic}</span>}
+        title={entry.topic}
         subtitle={`Knowledge of ${owner} · written by ${entry.updatedBy} ${ago(entry.updatedAt, now)}`}
       />
       <div className="flex-1 overflow-y-auto px-4 py-4">

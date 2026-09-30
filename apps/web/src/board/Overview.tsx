@@ -108,12 +108,12 @@ export function TopicList({
               className="block rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-2/50"
             >
               <span className="flex items-baseline gap-2">
-                <span className="font-mono text-sm text-fg-primary">{topic.topic}</span>
+                <span className="text-sm text-fg-primary">{topic.topic}</span>
                 <span className="text-meta">
                   by {topic.updatedBy} {ago(topic.updatedAt, now)}
                 </span>
               </span>
-              <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-fg-secondary">
+              <span className="mt-0.5 line-clamp-2 block text-sm leading-relaxed text-fg-secondary">
                 {firstParagraph(topic.body, 240)}
               </span>
             </Link>

@@ -72,6 +72,9 @@
   .board-markdown :is(h1, h2, h3, h4) {
     @apply mt-3 text-sm font-semibold text-fg-primary;
   }
+  .board-markdown > :first-child {
+    @apply mt-0;
+  }
   .board-markdown :is(ul, ol) {
     @apply space-y-0.5 pl-5;
   }

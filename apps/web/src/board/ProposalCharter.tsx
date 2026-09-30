@@ -248,9 +248,7 @@ export function ProposalCharter({
       return (
         <>
           <Fields>
-            <Field label="Skill">
-              <span className="font-mono">{parsed.data.name}</span>
-            </Field>
+            <Field label="Skill">{parsed.data.name}</Field>
             <Field label="Summary">{parsed.data.summary}</Field>
           </Fields>
           <Block>

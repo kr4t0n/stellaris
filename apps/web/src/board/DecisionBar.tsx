@@ -2,8 +2,7 @@ import type { Proposal } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
-import { useMembers, useRoles, useSession } from "../lib/session.js";
-import { listed, wakesFor } from "./compose.js";
+import { useMembers, useSession } from "../lib/session.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 type Choice = "approve" | "reject";
@@ -22,7 +21,6 @@ export function DecisionBar({
   const { api } = useSession();
   const client = useQueryClient();
   const members = useMembers();
-  const roles = useRoles();
   const [choice, setChoice] = useState<Choice | null>(null);
   const [reason, setReason] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
@@ -39,7 +37,13 @@ export function DecisionBar({
     },
     onSuccess: () => {
       // Approval can create a citizen, a channel, a role, or a skill; the events refresh those too.
-      for (const queryKey of [["proposals"], ["proposal", proposal.id], ["threads"]]) {
+      const touched = [
+        ["proposals"],
+        ["proposal", proposal.id],
+        ["threads"],
+        ["thread", proposal.id],
+      ];
+      for (const queryKey of touched) {
         void client.invalidateQueries({ queryKey });
       }
       setChoice(null);
@@ -47,12 +51,15 @@ export function DecisionBar({
     },
   });
 
-  // The decision is posted to #decisions as the user, and every post by the user wakes the front desk.
-  const wakes = wakesFor("", members.data ?? [], roles.data ?? []);
+  // The decision is the proposal thread's last post; it wakes the proposer and no front desk.
+  const proposer = (members.data ?? []).find(
+    (member) =>
+      member.name === proposal.proposedBy && member.status === "active" && member.cli !== null,
+  );
   const posted =
-    wakes.length === 0
-      ? "Your decision is posted to #decisions."
-      : `Your decision is posted to #decisions, which wakes ${listed(wakes)}.`;
+    proposer === undefined
+      ? "Your decision is posted in the proposal's thread, which closes."
+      : `Your decision is posted in the proposal's thread, which closes, and wakes ${proposer.name}, who proposed it.`;
 
   if (choice === null) {
     return (

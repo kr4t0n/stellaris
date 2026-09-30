@@ -43,6 +43,8 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "stage waiting", priority: 1 };
     case "task_done":
       return { wake: true, reason: "task done", priority: 1 };
+    case "proposal_decided":
+      return { wake: true, reason: "proposal decided", priority: 1 };
     case "ops_event":
       return { wake: true, reason: "operations signal", priority: 0 };
     case "user_post":

@@ -58,7 +58,7 @@ describe("Board", () => {
 
   it("initializes a society with seed roles, channels, the server runner, and a user", async () => {
     const { board, userToken } = await society();
-    expect((await board.society()).channels).toEqual(["general", "governance", "decisions"]);
+    expect((await board.society()).channels).toEqual(["general", "governance"]);
     const roles = (await board.listRoles()).map((role) => role.name).toSorted();
     expect(roles).toEqual(["concierge", "engineer", "reviewer", "steward", "user"]);
     expect(board.resolveToken(userToken)).toEqual(USER);
@@ -232,6 +232,37 @@ describe("Board", () => {
     expect((await board.readDigest(turnActor)).messages.map((m) => m.id)).toEqual([later.id]);
     expect(await ids("lab")).toEqual([]);
     expect(await ids("demo")).toEqual([elsewhere.id]);
+  });
+
+  it("lists what citizens asked the user and the user has not answered, wherever they asked", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, { project: "demo", title: "survey" });
+    const ask = await board.postMessage(ENG, {
+      body: "@user should the survey cover A or B?",
+      thread_id: task.id,
+    });
+    const aside = await board.postMessage(REV, { channel: "demo/general", body: "@user FYI" });
+    await board.postMessage(ENG, { channel: "demo/general", body: "no mention here" });
+    const requests = async () =>
+      (await board.listRequests()).map((r) => [r.message.id, r.thread?.id ?? null]);
+    expect(await requests()).toEqual([
+      [ask.id, task.id],
+      [aside.id, null],
+    ]);
+    // An answer in the same thread, or the same channel, settles what was asked there before it.
+    await board.postMessage(USER, { body: "B, please.", thread_id: task.id });
+    expect(await requests()).toEqual([[aside.id, null]]);
+    await board.postMessage(USER, { channel: "demo/general", body: "noted" });
+    expect(await requests()).toEqual([]);
+    // A closed thread asks nothing any more.
+    const later = await board.createTask(USER, { project: "demo", title: "later" });
+    await board.postMessage(ENG, { body: "@user a question", thread_id: later.id });
+    expect(await requests()).toHaveLength(1);
+    await board.updateTask(USER, { task_id: later.id, status: "abandoned" });
+    expect(await requests()).toEqual([]);
+
+    expect(await board.hasMentioned("eng-1", "user", ask.ts)).toBe(true);
+    expect(await board.hasMentioned("rev-1", "user", "2099-01-01T00:00:00.000Z")).toBe(false);
   });
 
   it("lets the user set a citizen's model and clear it back to the CLI's default", async () => {
@@ -648,28 +679,43 @@ describe("Board", () => {
     expect(summary.body).toContain('"Which runner?"');
     expect(await board.readThread(topic.id)).toMatchObject({ state: "closed", closedBy: "rev-1" });
 
-    // A proposal: the thread takes its id, reaches its proposer and deciders, and ends with it.
+    // A proposal opens its thread with its pitch, under its id in governance; the thread reaches
+    // its proposer, its deciders, and the readers of signals, and its decision ends it.
     const proposal = await board.propose(STEW, {
       kind: "channel",
       charter: { project: "demo", name: "ideas", purpose: "Loose ideas." },
+      rationale: "Ideas keep landing in general.",
     });
-    const talk = await board.openThread(STEW, { proposal_id: proposal.id });
-    expect(talk).toMatchObject({
-      id: proposal.id,
+    expect(await board.readThread(proposal.id)).toMatchObject({
       channel: "governance",
       subject: { kind: "proposal", id: proposal.id },
+      state: "open",
+      openedBy: "stew",
     });
+    const [pitch] = await board.listThread(proposal.id);
+    expect(pitch?.body).toContain("Ideas keep landing in general.");
+    expect(await board.listChannel("governance")).toEqual([]);
     await expect(board.openThread(ENG, { proposal_id: proposal.id })).rejects.toMatchObject({
       code: "INVALID_STATE",
     });
-    const why = await board.postMessage(STEW, { body: "Worth a channel?", thread_id: talk.id });
-    expect(await ids(USER)).toContain(why.id);
+    await expect(
+      board.closeThread(STEW, { thread_id: proposal.id, summary: "never mind" }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    const why = await board.postMessage(USER, { body: "Worth a channel?", thread_id: proposal.id });
+    expect(await ids(STEW)).toContain(why.id);
     expect(await ids(ENG)).not.toContain(why.id);
-    await board.approve(USER, { proposal_id: proposal.id });
+    await board.approve(USER, { proposal_id: proposal.id, reason: "yes" });
     expect(await board.readThread(proposal.id)).toMatchObject({
       state: "closed",
       closedBy: "user",
     });
+    expect((await board.listThread(proposal.id)).at(-1)).toMatchObject({
+      author: "user",
+      step: { action: "approved" },
+      body: expect.stringContaining("Approved: channel demo/ideas"),
+    });
+    const decided = (await board.readEvents(null)).findLast((e) => e.type === "proposal.decided");
+    expect(decided?.payload).toMatchObject({ outcome: "approved", proposedBy: "stew" });
     expect((await board.listThreads()).map((thread) => thread.id)).toEqual([proposal.id, topic.id]);
   });
 
@@ -707,9 +753,7 @@ describe("Board", () => {
     const { board, eng } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
-    expect((await board.readAgent("stew")).subscriptions).toEqual(
-      expect.arrayContaining(["governance", "decisions"]),
-    );
+    expect((await board.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
 
     // A member proposal becomes an agent with a home, memberships, and seed instructions.
     const hire = await board.propose(STEW, {
@@ -723,7 +767,7 @@ describe("Board", () => {
       },
       rationale: "Backlog depth is above threshold.",
     });
-    expect((await board.listChannel("governance")).at(-1)?.body).toContain(
+    expect((await board.listThread(hire.id)).at(0)?.body).toContain(
       `Proposal ${hire.id}: member eng-2 as engineer on codex for demo`,
     );
     await board.approve(USER, { proposal_id: hire.id });
@@ -738,8 +782,8 @@ describe("Board", () => {
       (event) => event.type === "agent.added" && event.payload["name"] === "eng-2",
     );
     expect(added?.payload["proposalId"]).toBe(hire.id);
-    expect((await board.listChannel("decisions")).at(-1)?.body).toContain(
-      "Approved member proposal",
+    expect((await board.listThread(hire.id)).at(-1)?.body).toContain(
+      "Approved: member eng-2 as engineer on codex for demo",
     );
 
     // A channel proposal opens the channel with its purpose as the first message.
@@ -989,14 +1033,16 @@ describe("Board", () => {
     const { board, eng } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
     const { agent } = await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
-    expect(agent.subscriptions).toEqual(["general", "governance", "decisions"]);
+    expect(agent.subscriptions).toEqual(["general", "governance"]);
     expect(eng.agent.subscriptions).not.toContain("decisions");
 
-    // A steward from before decisions joined the ops channels is aligned on the next open, and
-    // threads kept as a state on their task, as older builds wrote them, become records.
-    await board.unsubscribe(STEW, { channel: "decisions" });
-    // Signals were once posted to an ops society channel as well, which ops readers followed.
+    // An older society had ops and decisions channels: signals were posted to ops, which ops
+    // readers followed, and proposals were decided in decisions, which a steward from before that
+    // did not follow. Both channels are retired on the next open, after the steward was aligned
+    // to follow decisions; threads kept as a state on their task, as older builds wrote them,
+    // become records.
     await board.addChannel(USER, { project: null, name: "ops", purpose: "operations signals" });
+    await board.addChannel(USER, { project: null, name: "decisions", purpose: "decisions" });
     await board.subscribe(STEW, { channel: "ops" });
     const legacyThread = async (title: string, end: boolean): Promise<Ulid> => {
       const task = await board.createTask(USER, { project: "demo", title });
@@ -1067,9 +1113,8 @@ describe("Board", () => {
       digest: cursor,
     });
     expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
-    expect((await reopened.readAgent("stew")).subscriptions).toContain("decisions");
-    expect((await reopened.readAgent("stew")).subscriptions).not.toContain("ops");
-    expect((await reopened.society()).channels).toEqual(["general", "governance", "decisions"]);
+    expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
+    expect((await reopened.society()).channels).toEqual(["general", "governance"]);
     expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
     expect(await reopened.readThread(live)).toMatchObject({
       channel: "demo/general",

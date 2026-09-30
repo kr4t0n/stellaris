@@ -74,10 +74,10 @@ function message(id: string, author: string, mentions: string[]): Message {
   return {
     id,
     author,
-    channel: "decisions",
+    channel: "general",
     ts: "2026-09-29T09:30:00.000Z",
     mentions,
-    body: "decision needed",
+    body: "@user which one?",
   };
 }
 
@@ -169,7 +169,7 @@ describe("governance", () => {
     expect(skillText("# No frontmatter")).toBe("# No frontmatter");
   });
 
-  it("gathers what waits on the user: proposals, stages named for the user, unread requests", () => {
+  it("gathers what waits on the user: proposals, stages named for the user, questions asked", () => {
     const mine = task("01M3Q2AAAAAAAAAAAAAAAAAAA1", { agent: "user", gate: true });
     const byRole = task("01M3Q2AAAAAAAAAAAAAAAAAAA2", { role: "user" });
     const heldElsewhere = task(
@@ -182,10 +182,12 @@ describe("governance", () => {
     );
     const notMine = task("01M3Q2AAAAAAAAAAAAAAAAAAA4", { role: "referee" });
     const landing = task("01M3Q2AAAAAAAAAAAAAAAAAAA5", { agent: "user" }, { completing: true });
-    const old = message("01M3Q2BBBBBBBBBBBBBBBBBBB1", "stew", ["user"]);
-    const fresh = message("01M3Q2BBBBBBBBBBBBBBBBBBB3", "stew", ["user"]);
-    const own = message("01M3Q2BBBBBBBBBBBBBBBBBBB4", "user", ["user"]);
-    const unaddressed = message("01M3Q2BBBBBBBBBBBBBBBBBBB5", "desk", []);
+    // The board lists only unanswered questions; the view keeps them oldest first after the rest.
+    const later = {
+      ...message("01M3Q2BBBBBBBBBBBBBBBBBBB3", "stew", ["user"]),
+      ts: "2026-09-29T09:31:00.000Z",
+    };
+    const earlier = message("01M3Q2BBBBBBBBBBBBBBBBBBB1", "ada", ["user"]);
 
     const items = needsYou({
       proposals: [
@@ -193,8 +195,10 @@ describe("governance", () => {
         proposal({ id: "01M3PY56V68VFS0EG5ER4B9AMH", kind: "role", proposedBy: "user" }),
       ],
       tasks: [mine, byRole, heldElsewhere, notMine, landing],
-      decisions: [old, fresh, own, unaddressed],
-      seenDecisions: "01M3Q2BBBBBBBBBBBBBBBBBBB2",
+      requests: [
+        { message: later, thread: null },
+        { message: earlier, thread: null },
+      ],
     });
     expect(
       items.map((item) =>
@@ -204,9 +208,6 @@ describe("governance", () => {
             ? item.task.id
             : item.message.id,
       ),
-    ).toEqual([skill.id, mine.id, byRole.id, fresh.id]);
-    expect(needsYou({ proposals: [], tasks: [], decisions: [fresh], seenDecisions: null })).toEqual(
-      [],
-    );
+    ).toEqual([skill.id, mine.id, byRole.id, earlier.id, later.id]);
   });
 });

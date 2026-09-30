@@ -17,6 +17,7 @@ import {
   type Stage,
   type Task,
 } from "@stellaris/shared";
+import type { UserRequest } from "../lib/api.js";
 import { phaseOf } from "./tasks.js";
 
 /** Where a proposal stands for the user, as the proposals view groups it. */
@@ -211,7 +212,13 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
 export type Attention =
   | { readonly kind: "proposal"; readonly since: string; readonly proposal: Proposal }
   | { readonly kind: "stage"; readonly since: string; readonly task: Task; readonly stage: Stage }
-  | { readonly kind: "request"; readonly since: string; readonly message: Message };
+  | {
+      readonly kind: "request";
+      readonly since: string;
+      readonly message: Message;
+      /** The thread the question was asked in, or null for a channel post. */
+      readonly thread: UserRequest["thread"];
+    };
 
 /** The task's current stage when it waits on the user: named for the user, and nobody else holds it. */
 export function stageForYou(task: Task): Stage | null {
@@ -228,16 +235,13 @@ export function stageForYou(task: Task): Stage | null {
 
 /**
  * What waits on the user, derived from the board: proposals the user may decide, stages that name
- * the user, and requests addressed to the user in #decisions since this browser last opened it.
- * The first two are board state and leave when it changes; the requests are messages, so reading
- * #decisions clears them.
+ * the user, and questions citizens asked the user, wherever they asked, that the user has not
+ * answered in the same thread or channel. All three leave when the board changes.
  */
 export function needsYou(input: {
   readonly proposals: readonly Proposal[];
   readonly tasks: readonly Task[];
-  readonly decisions: readonly Message[];
-  /** The newest #decisions message this browser has shown, or null before it has listed any. */
-  readonly seenDecisions: string | null;
+  readonly requests: readonly UserRequest[];
 }): Attention[] {
   const oldestFirst = (a: Attention, b: Attention): number => a.since.localeCompare(b.since);
   const proposals = input.proposals
@@ -247,18 +251,12 @@ export function needsYou(input: {
     const stage = stageForYou(task);
     return stage === null ? [] : [{ kind: "stage", since: task.stageSince, task, stage }];
   });
-  const seen = input.seenDecisions;
-  const requests =
-    seen === null
-      ? []
-      : input.decisions
-          .filter(
-            (message) =>
-              message.id > seen &&
-              message.author !== USER_NAME &&
-              message.mentions.includes(USER_NAME),
-          )
-          .map((message): Attention => ({ kind: "request", since: message.ts, message }));
+  const requests = input.requests.map(({ message, thread }): Attention => ({
+    kind: "request",
+    since: message.ts,
+    message,
+    thread,
+  }));
   return [
     ...proposals.toSorted(oldestFirst),
     ...stages.toSorted(oldestFirst),

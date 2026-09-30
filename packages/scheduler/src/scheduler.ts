@@ -520,6 +520,14 @@ export class Scheduler {
         }
         return;
       }
+      case "proposal.decided": {
+        const proposalId = stringOf(payload["proposalId"]);
+        const proposer = stringOf(payload["proposedBy"]);
+        if (proposalId !== null && proposer !== null && proposer !== event.actor) {
+          await this.wakeProposer(proposalId, proposer, event, now);
+        }
+        return;
+      }
       case "ops.signal": {
         const parsed = OpsSignalSchema.safeParse(payload);
         if (!parsed.success || !WAKING_SIGNALS.has(parsed.data.kind)) {
@@ -693,6 +701,36 @@ export class Scheduler {
     );
   }
 
+  /** A decided proposal wakes the citizen that made it, to carry on with what it enables. */
+  private async wakeProposer(
+    proposalId: Ulid,
+    proposer: Name,
+    event: BoardEvent,
+    now: number,
+  ): Promise<void> {
+    const agent = await this.tryReadAgent(proposer);
+    if (agent === null) {
+      return;
+    }
+    const scope = this.scopeForProject(agent, await this.board.readRole(agent.role), null);
+    if (scope === null) {
+      return;
+    }
+    const kind = stringOf(event.payload["kind"]) ?? "";
+    const outcome = stringOf(event.payload["outcome"]) ?? "decided";
+    this.enqueue(
+      agent.name,
+      scope,
+      {
+        kind: "proposal_decided",
+        from: event.actor,
+        fromUser: event.actor === USER_NAME,
+        reason: `your ${kind} proposal ${proposalId} was ${outcome} by ${event.actor}`,
+      },
+      now,
+    );
+  }
+
   private async tryReadAgent(name: Name): Promise<Agent | null> {
     try {
       const agent = await this.board.readAgent(name);
@@ -768,6 +806,7 @@ export class Scheduler {
         return trigger.fromUser ? this.timings.userDebounceMs : this.timings.debounceMs;
       case "stage":
       case "task_done":
+      case "proposal_decided":
       case "ops_event":
         return this.timings.debounceMs;
       case "user_post":

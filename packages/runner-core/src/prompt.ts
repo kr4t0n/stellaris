@@ -7,7 +7,8 @@ import {
   type Project,
   type Stage,
   type Task,
-  type TaskStep,
+  isTaskStep,
+  type MessageStep,
   type Thread,
   type TurnDispatch,
   type TurnRecord,
@@ -78,7 +79,10 @@ function assignee(stage: Stage): string {
 }
 
 /** What a step's post records, for its heading in the digest. */
-function stepPhrase(step: TaskStep): string {
+function stepPhrase(step: MessageStep): string {
+  if (!isTaskStep(step)) {
+    return `${step.action} the proposal`;
+  }
   if (step.action === "advanced") {
     return step.to === null
       ? `finished ${step.stage}, the last stage`
@@ -173,6 +177,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "task_done") {
     lines.push("A task you created is done. Tell whoever asked for it, if anyone did.");
+  }
+  if (dispatch.trigger.kind === "proposal_decided") {
+    lines.push(
+      "A proposal you made was decided; the decision is the last post in its thread. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows.",
+    );
   }
   if (dispatch.trigger.kind === "user_post") {
     lines.push(

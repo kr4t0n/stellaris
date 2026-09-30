@@ -757,6 +757,33 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("user_post");
   });
 
+  it("wakes a proposal's proposer when it is decided, and the decision wakes no front desk", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    const proposal = await board.propose(STEW, {
+      kind: "channel",
+      charter: { project: "demo", name: "ideas", purpose: "Loose ideas." },
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    await board.approve(USER, { proposal_id: proposal.id, reason: "fine" });
+    // The wake waits out the debounce, like a finished task's, so several decisions become one turn.
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["stew/society"]);
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["stew", "society", "proposal_decided"],
+    ]);
+    expect(runner.dispatches[0]?.trigger.reason).toBe(
+      `your channel proposal ${proposal.id} was approved by user`,
+    );
+  });
+
   it("drops a retired member's queued turn and keeps the queue across a restart", async () => {
     const { board, runner, scheduler } = await setup();
     await board.setPaused(USER, true);

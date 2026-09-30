@@ -15,10 +15,11 @@ describe("board events", () => {
     const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     expect(
       staleKeys(event("message.posted", { channel: "lab/general", thread: null }, id)),
-    ).toEqual([["channels"], ["channel", "lab/general"]]);
+    ).toEqual([["channels"], ["channel", "lab/general"], ["requests"]]);
     expect(staleKeys(event("message.posted", { channel: "lab/general", thread: id }, id))).toEqual([
       ["threads"],
       ["thread", id],
+      ["requests"],
     ]);
     expect(staleKeys(event("task.advanced", { taskId: id, project: "lab" }, id))).toEqual([
       ["tasks"],

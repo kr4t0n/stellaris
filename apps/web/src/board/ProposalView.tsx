@@ -1,8 +1,6 @@
 import type { Proposal } from "@stellaris/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { z } from "zod";
-import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ApiError } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -11,7 +9,6 @@ import {
   useNow,
   useProposal,
   useRoles,
-  useSession,
   useSkills,
   useThreads,
 } from "../lib/session.js";
@@ -21,7 +18,8 @@ import { consequenceOf, decidersOf, proposalTitle, waitingOnYou } from "./govern
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ProposalCharter } from "./ProposalCharter.js";
 import { StatusChip } from "./ProposalsView.js";
-import { ThreadCard } from "./ThreadCard.js";
+import { Composer } from "./Composer.js";
+import { SubjectThread } from "./SubjectThread.js";
 
 const ProvisionSchema = z.object({
   agent: z.string().optional(),
@@ -88,33 +86,10 @@ function Provisioned({ proposal }: { proposal: Proposal }) {
   return null;
 }
 
-/** Opens the proposal's thread in governance, and goes to it. */
-function OpenProposalThread({ proposalId }: { proposalId: string }) {
-  const { api } = useSession();
-  const client = useQueryClient();
-  const navigate = useNavigate();
-  const open = useMutation({
-    mutationFn: () => api.openThread({ proposal_id: proposalId }),
-    onSuccess: (thread) => {
-      void client.invalidateQueries({ queryKey: ["threads"] });
-      void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });
-    },
-  });
-  return (
-    <div className="mt-2 flex items-center gap-3">
-      <Button variant="primary" disabled={open.isPending} onClick={() => open.mutate()}>
-        {open.isPending ? "Opening…" : "Open a thread"}
-      </Button>
-      <p className="text-meta">
-        {open.error === null
-          ? "The proposer and whoever may decide it take part; it closes with the decision."
-          : open.error.message}
-      </p>
-    </div>
-  );
-}
-
-/** One proposal: what approving it does, its charter drawn for its kind, the rationale, the thread. */
+/**
+ * One proposal: what approving it does, its charter drawn for its kind, and its thread, which opens
+ * with the pitch and closes with the decision, with a composer while it waits.
+ */
 export function ProposalView() {
   const { proposalId } = useParams({ from: "/proposal/$proposalId" });
   const proposal = useProposal(proposalId);
@@ -178,7 +153,8 @@ export function ProposalView() {
             <Provisioned proposal={current} />
           </div>
         )}
-        {current.body.trim() === "" ? null : (
+        {/* The pitch opens the proposal's thread; a proposal older than that keeps its rationale here. */}
+        {current.body.trim() === "" || thread !== undefined ? null : (
           <section className="mt-5">
             <h3 className="text-caps">Why</h3>
             <div className="mt-2">
@@ -196,21 +172,26 @@ export function ProposalView() {
           </h3>
           <ProposalCharter proposal={current} roles={roles.data} members={members.data} />
         </section>
-        <section className="mt-5 border-t border-line pt-4">
+        <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-caps">Thread</h3>
           {thread === undefined ? (
-            open ? (
-              <OpenProposalThread proposalId={current.id} />
-            ) : (
-              <p className="mt-2 text-meta">No thread on this proposal.</p>
-            )
+            <p className="mt-2 text-meta">
+              {threads.data === undefined
+                ? "Reading the thread…"
+                : "This proposal is older than proposal threads; its thread opens when it is decided."}
+            </p>
           ) : (
-            <div className="-mx-4">
-              <ThreadCard thread={thread} now={now} />
-            </div>
+            <SubjectThread
+              thread={thread}
+              now={now}
+              empty="Nothing said yet. The pitch and the decision are posted here."
+            />
           )}
         </section>
       </div>
+      {thread?.state === "open" ? (
+        <Composer target={{ threadId: current.id }} placeholder="Write in the proposal's thread" />
+      ) : null}
       {waitingOnYou(current) ? <DecisionBar proposal={current} consequence={consequence} /> : null}
     </>
   );

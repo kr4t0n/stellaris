@@ -37,11 +37,11 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "message.posted") {
     const thread = text(payload["thread"]);
     return thread === undefined
-      ? [["channels"], ["channel", text(payload["channel"])]]
-      : [["threads"], ["thread", thread]];
+      ? [["channels"], ["channel", text(payload["channel"])], ["requests"]]
+      : [["threads"], ["thread", thread], ["requests"]];
   }
   if (type.startsWith("thread.")) {
-    return [["threads"], ["thread", text(payload["threadId"])], ["channel"]];
+    return [["threads"], ["thread", text(payload["threadId"])], ["channel"], ["requests"]];
   }
   if (type.startsWith("task.") || type.startsWith("merge.") || type === "lease.expired") {
     return [["tasks"], ["task", text(payload["taskId"])], ["members"]];

@@ -7,6 +7,7 @@ import {
   CharterTriggerSchema,
   CliKindSchema,
   CompletionEffectSchema,
+  isTaskStep,
   MEMBER_VERBS,
   parseChannelRef,
   PlanEditSchema,
@@ -577,11 +578,14 @@ task
       .then((t) => t.state)
       .catch(() => "none");
     const said = found.messages.map((message) => {
-      const step =
-        message.step === undefined
+      const step = message.step;
+      const marker =
+        step === undefined
           ? ""
-          : ` [${message.step.action} ${message.step.stage}${message.step.to === null ? "" : ` → ${message.step.to}`}]`;
-      return `${message.ts}  ${message.author}${step}\n${message.body.trim()}\n`;
+          : isTaskStep(step)
+            ? ` [${step.action} ${step.stage}${step.to === null ? "" : ` → ${step.to}`}]`
+            : ` [${step.action}]`;
+      return `${message.ts}  ${message.author}${marker}\n${message.body.trim()}\n`;
     });
     print(found, () =>
       [

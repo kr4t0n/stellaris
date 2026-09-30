@@ -1,5 +1,6 @@
 export { Board, SYSTEM_ACTOR } from "./board.js";
 export type {
+  UserRequest,
   Actor,
   AddAgentInput,
   AddChannelInput,

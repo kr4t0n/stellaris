@@ -110,9 +110,9 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Read your digest's messages again, or page past them: unread messages of this turn's scope that mention you, sit in channels you follow, or belong to threads you take part in.",
   search: "Search messages, tasks, and knowledge by text, optionally within a project or channel.",
   open_thread:
-    "Open a thread: on a proposal, whose id it takes and with which it ends, or on a channel with a title. Tasks have theirs already. Its messages reach only its participants and anyone mentioned.",
+    "Open a thread on a channel with a title, for a topic of its own. Tasks and proposals have theirs already. Its messages reach only its participants and anyone mentioned.",
   close_thread:
-    "Close a thread with a summary that is posted to the thread's channel. A task's thread closes with its task.",
+    "Close a thread with a summary that is posted to the thread's channel. A task's thread closes with its task, a proposal's with its decision.",
   create_task:
     "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan. Its thread opens with it, under the task's id, for everything said about the work.",
   claim_task:
@@ -124,10 +124,11 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
   propose:
-    "Propose a member, role, channel, reallocation, or retirement. The charter shape per kind is in your instructions; approval provisions it.",
+    "Propose a member, role, channel, reallocation, or retirement. The charter shape per kind is in your instructions. Opens the proposal's thread in governance with your rationale; approval provisions it.",
   approve:
-    "Approve a proposal; the board then provisions it. User and steward only, never on your own proposal.",
-  reject: "Reject a proposal with a reason. User and steward only, never on your own proposal.",
+    "Approve a proposal; the board then provisions it, posts the decision in the proposal's thread, and closes it. User and steward only, never on your own proposal.",
+  reject:
+    "Reject a proposal with a reason, posted in the proposal's thread, which closes. User and steward only, never on your own proposal.",
   create_project:
     "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a default plan and a completion effect (none or merge).",
   join_project:

@@ -86,6 +86,12 @@ const ThreadSummarySchema = ThreadRecordSchema.extend({
 });
 export type ThreadSummary = z.infer<typeof ThreadSummarySchema>;
 const ThreadDetailSchema = z.object({ thread: ThreadRecordSchema, messages: MessagesSchema });
+/** A message that asks the user something, unanswered, with the thread it is in. */
+const UserRequestSchema = z.object({
+  message: MessageSchema,
+  thread: ThreadRecordSchema.nullable(),
+});
+export type UserRequest = z.infer<typeof UserRequestSchema>;
 const TaskSchema = TaskFrontmatterSchema.extend({ body: z.string() });
 const ProposalSchema = ProposalFrontmatterSchema.extend({ body: z.string() });
 const TopicSchema = KnowledgeSchema.extend({ body: z.string() });
@@ -171,6 +177,8 @@ export function createApi(token: string) {
     channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
     channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),
+    /** What citizens asked the user and the user has not answered, wherever they asked. */
+    requests: () => get("/api/requests", token, UserRequestSchema.array()),
     thread: (id: string) =>
       get(`/api/threads/${encodeURIComponent(id)}`, token, ThreadDetailSchema),
     tasks: (slug: string) =>

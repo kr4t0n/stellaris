@@ -264,7 +264,8 @@ describe("Phase 5 exit criterion", () => {
       backend.prompts.filter((p) => p.includes("This is your first turn as eng-2")).length,
     ).toBe(1);
     expect((await board.readAgent("eng-2")).memberships).toEqual(["api"]);
-    expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("user_post");
+    // The decision wakes desk as the proposer, not as a post by the user.
+    expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("proposal_decided");
     const types = (await board.readEvents(null)).map((e) => e.type);
     expect(types).not.toContain("turn.failed");
     await runner.close();
@@ -345,7 +346,8 @@ describe("Phase 4 exit criterion", () => {
       expect.objectContaining({ kind: "member", status: "proposed", proposedBy: "stew-1" }),
     ]);
     const proposalId = proposals[0]?.id ?? "";
-    expect((await board.listChannel("governance")).at(-1)?.body).toContain(
+    // The proposal's pitch opens its thread in governance.
+    expect((await board.listThread(proposalId)).at(0)?.body).toContain(
       "member eng-2 as engineer on codex for demo",
     );
     const stewardTurn = await board.readLastTurn("stew-1", "demo");
@@ -370,9 +372,13 @@ describe("Phase 4 exit criterion", () => {
       ]),
     );
     expect(await board.readAgentRoleBody("eng-2")).toContain("Start with the oldest open task.");
-    expect((await board.listChannel("decisions")).at(-1)?.body).toContain(
-      "Approved member proposal",
-    );
+    // The decision is the thread's last post, and it closed the thread.
+    expect((await board.listThread(proposalId)).at(-1)).toMatchObject({
+      author: "user",
+      step: { action: "approved" },
+      body: expect.stringContaining("Approved: member eng-2"),
+    });
+    expect((await board.readThread(proposalId)).state).toBe("closed");
 
     // The new member onboards through the usual dispatch, then the user retires it over the API.
     await settle();

@@ -9,7 +9,7 @@ import {
 } from "./ids.js";
 import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
-export const SOCIETY_CHANNELS = ["general", "governance", "decisions"] as const;
+export const SOCIETY_CHANNELS = ["general", "governance"] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 
 /**
@@ -113,6 +113,19 @@ export const TaskStepSchema = z.object({
 });
 export type TaskStep = z.infer<typeof TaskStepSchema>;
 
+/** The decision on a proposal, on the post the deciding verb made in the proposal's thread. */
+export const ProposalStepSchema = z.object({ action: z.enum(["approved", "rejected"]) });
+export type ProposalStep = z.infer<typeof ProposalStepSchema>;
+
+/** What a verb recorded on the post it made in its subject's thread. */
+export const MessageStepSchema = z.union([TaskStepSchema, ProposalStepSchema]);
+export type MessageStep = z.infer<typeof MessageStepSchema>;
+
+/** Whether a step is a task's, which names the stages it moved between. */
+export function isTaskStep(step: MessageStep): step is TaskStep {
+  return "stage" in step;
+}
+
 /** Message frontmatter. The author is stamped by the board, never supplied by the caller. */
 export const MessageFrontmatterSchema = z.object({
   id: UlidSchema,
@@ -123,8 +136,8 @@ export const MessageFrontmatterSchema = z.object({
   task: UlidSchema.optional(),
   /** On a summary post, the thread it closed. */
   closes: UlidSchema.optional(),
-  /** On a post a task verb made in the task's thread: the step it recorded. */
-  step: TaskStepSchema.optional(),
+  /** On a post a task verb made in the task's thread, or a decision in a proposal's: the step it recorded. */
+  step: MessageStepSchema.optional(),
   ts: IsoDateTimeSchema,
   mentions: z.array(NameSchema),
 });

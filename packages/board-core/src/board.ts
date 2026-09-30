@@ -50,6 +50,7 @@ import {
   type MemberProposal,
   type Message,
   type MessageFrontmatter,
+  type MessageStep,
   type Name,
   type OpsSignal,
   type PlanEditStage,
@@ -196,6 +197,12 @@ export interface DigestResult {
   readonly cursor: Ulid | null;
 }
 
+/** A message that asks something of the user and waits for an answer, with the thread it is in. */
+export interface UserRequest {
+  readonly message: Message;
+  readonly thread: Thread | null;
+}
+
 /** A thread as a list shows it: the record, how many messages it holds, and its newest one. */
 export interface ThreadSummary extends Thread {
   readonly messages: number;
@@ -258,8 +265,8 @@ const OPS_WAKE_TRIGGER = "ops_event";
 /** The wake trigger that marks a role as the front desk, woken by every post of the user's. */
 const FRONT_DESK_TRIGGER = "user_post";
 
-/** Where readers of operations signals follow proposals and their decisions. */
-const OPS_CHANNELS: readonly ChannelRef[] = ["governance", "decisions"];
+/** Where readers of operations signals follow governance; proposals reach them as threads. */
+const OPS_CHANNELS: readonly ChannelRef[] = ["governance"];
 
 /** One-time changes an existing society receives on open, by name, remembered once applied. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
@@ -268,6 +275,7 @@ const THREAD_RECORDS = "threads-as-records";
 const DIGEST_CURSORS = "digest-replaces-inbox";
 const TASK_RETURNS = "task-returns-recorded";
 const OPS_CHANNEL_RETIRED = "ops-channel-retired";
+const DECISIONS_CHANNEL_RETIRED = "decisions-channel-retired";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -391,6 +399,19 @@ function gateChanges(before: readonly Stage[], after: readonly Stage[]): string[
   return changes;
 }
 
+/** The messages asking the user something that no later post by the user has answered. */
+function unanswered(messages: readonly Message[]): Message[] {
+  let waiting: Message[] = [];
+  for (const message of messages) {
+    if (message.author === USER_NAME) {
+      waiting = [];
+    } else if (message.mentions.includes(USER_NAME)) {
+      waiting.push(message);
+    }
+  }
+  return waiting;
+}
+
 function extractMentions(body: string): Name[] {
   const found = new Set<Name>();
   for (const match of body.matchAll(MENTION_PATTERN)) {
@@ -477,6 +498,7 @@ export class Board {
       DIGEST_CURSORS,
       TASK_RETURNS,
       OPS_CHANNEL_RETIRED,
+      DECISIONS_CHANNEL_RETIRED,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -494,7 +516,10 @@ export class Board {
       await this.recordTaskReturns();
     }
     if (pending.includes(OPS_CHANNEL_RETIRED)) {
-      await this.retireOpsChannel();
+      await this.retireSocietyChannel("ops");
+    }
+    if (pending.includes(DECISIONS_CHANNEL_RETIRED)) {
+      await this.retireSocietyChannel("decisions");
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -536,24 +561,25 @@ export class Board {
   }
 
   /**
-   * Operations signals were once posted to an `ops` society channel as well as logged. They are
-   * only logged now, so the channel leaves the society's list and every member's subscriptions;
-   * its old posts stay on disk.
+   * A society channel the board no longer uses leaves the society's list and every member's
+   * subscriptions; its old posts stay on disk. `ops` carried operations signals, which are only
+   * logged now; `decisions` carried proposals' outcomes, which are posts in their threads now, and
+   * requests to the user, which are mentions of the user wherever the question belongs.
    */
-  private async retireOpsChannel(): Promise<void> {
+  private async retireSocietyChannel(name: Name): Promise<void> {
     const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
-    if (doc.data.channels.includes("ops")) {
+    if (doc.data.channels.includes(name)) {
       await writeMarkdown(
         this.paths.societyFile(),
-        { ...doc.data, channels: doc.data.channels.filter((name) => name !== "ops") },
+        { ...doc.data, channels: doc.data.channels.filter((channel) => channel !== name) },
         doc.body,
       );
     }
     for (const agent of await this.listAgents()) {
-      if (agent.subscriptions.includes("ops")) {
+      if (agent.subscriptions.includes(name)) {
         await this.updateAgent(agent.name, (a) => ({
           ...a,
-          subscriptions: a.subscriptions.filter((ref) => ref !== "ops"),
+          subscriptions: a.subscriptions.filter((ref) => ref !== name),
         }));
         await this.refreshMember(agent.name);
       }
@@ -562,6 +588,9 @@ export class Board {
 
   /** Members that predate `decisions` among the ops channels read proposals without their outcome. */
   private async followDecisions(): Promise<void> {
+    if (!(await this.society()).channels.includes("decisions")) {
+      return;
+    }
     for (const agent of await this.listAgents()) {
       if (agent.status !== "active" || agent.subscriptions.includes("decisions")) {
         continue;
@@ -1057,6 +1086,60 @@ export class Board {
 
   async readThread(id: Ulid): Promise<Thread> {
     return (await this.findThread(id)).thread;
+  }
+
+  /**
+   * What citizens have asked the user and the user has not answered, oldest first: every message
+   * by someone else that mentions the user, in an open thread or a channel the society or a
+   * project still has, with no later post by the user in the same thread, or the same channel for
+   * a channel post. Derived, never stored, like everything else that waits on the user.
+   */
+  async listRequests(): Promise<UserRequest[]> {
+    const requests: UserRequest[] = [];
+    const refs = [
+      ...(await this.society()).channels.map((name) => channelRef(null, name)),
+      ...(await this.listProjects()).flatMap((project) =>
+        project.channels.map((name) => channelRef(project.slug, name)),
+      ),
+    ];
+    for (const ref of refs) {
+      const messages = await this.readMessagesIn(this.paths.channelDir(ref), null);
+      for (const message of unanswered(messages)) {
+        requests.push({ message, thread: null });
+      }
+    }
+    for (const threads of await this.threadScopes()) {
+      for (const file of await listFiles(threads)) {
+        if (!file.endsWith(".md")) {
+          continue;
+        }
+        const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+        if (doc.data.state !== "open") {
+          continue;
+        }
+        const thread: Thread = { ...doc.data, body: doc.body };
+        const messages = await this.readMessagesIn(
+          this.paths.threadMessages(threads, thread.id),
+          null,
+        );
+        for (const message of unanswered(messages)) {
+          requests.push({ message, thread });
+        }
+      }
+    }
+    return requests.toSorted((a, b) =>
+      a.message.id < b.message.id ? -1 : a.message.id > b.message.id ? 1 : 0,
+    );
+  }
+
+  /** Whether `author` has mentioned `name` in any message posted at or after `since`, an ISO time. */
+  async hasMentioned(author: Name, name: Name, since: string): Promise<boolean> {
+    for await (const message of this.iterateMessages(null)) {
+      if (message.author === author && message.ts >= since && message.mentions.includes(name)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Every thread record with its message count and newest message, the society's first. */
@@ -1700,6 +1783,46 @@ export class Board {
     return thread;
   }
 
+  /** Where a proposal's thread hangs, what it is called, and what it is about. */
+  private proposalThreadOpening(proposal: Proposal): {
+    id: Ulid;
+    channel: ChannelRef;
+    title: string;
+    subject: ThreadSubject;
+  } {
+    const described = `${proposal.kind} proposal: ${describeCharter(proposal.kind, proposal.charter)}`;
+    return {
+      id: proposal.id,
+      channel: "governance",
+      title: described.slice(0, 200),
+      subject: { kind: "proposal", id: proposal.id },
+    };
+  }
+
+  /**
+   * The open thread of a proposal being decided. A proposal from before proposals opened their
+   * threads gets one now, opened as its proposer, and a thread closed before the decision opens
+   * again.
+   */
+  private async proposalThreadUnlocked(by: Name, proposal: Proposal): Promise<Thread> {
+    const found = await this.tryFindThread(proposal.id);
+    if (found?.thread.state === "open") {
+      return found.thread;
+    }
+    if (found === null) {
+      return this.openThreadUnlocked(proposal.proposedBy, this.proposalThreadOpening(proposal));
+    }
+    const { closedBy: _by, closedAt: _at, ...kept } = found.thread;
+    const reopened = await this.writeThread(found.threads, { ...kept, state: "open" });
+    await this.events.append("thread.opened", by, {
+      threadId: proposal.id,
+      channel: reopened.channel,
+      subject: reopened.subject ?? null,
+      reopened: true,
+    });
+    return reopened;
+  }
+
   /** Where a task's thread hangs, what it is called, and what it is about. */
   private taskThreadOpening(task: Task): {
     id: Ulid;
@@ -1819,10 +1942,12 @@ export class Board {
       if (thread.state !== "open") {
         throw new BoardError("INVALID_STATE", `thread ${thread.id} is not open`);
       }
-      if (thread.subject?.kind === "task") {
+      if (thread.subject !== undefined) {
         throw new BoardError(
           "INVALID_STATE",
-          `thread ${thread.id} is task ${thread.subject.id}'s and closes when the task ends`,
+          `thread ${thread.id} is ${thread.subject.kind} ${thread.subject.id}'s and closes when the ${
+            thread.subject.kind === "task" ? "task ends" : "proposal is decided"
+          }`,
         );
       }
       if (
@@ -2383,10 +2508,15 @@ export class Board {
         proposalId: proposal.id,
         kind: proposal.kind,
       });
-      const rationale = args.rationale.trim();
-      await this.appendMessage(
+      // The proposal's thread opens with its pitch, and its decision is posted there too.
+      const thread = await this.openThreadUnlocked(
         actor.name,
-        "governance",
+        this.proposalThreadOpening(proposal),
+      );
+      const rationale = args.rationale.trim();
+      await this.appendThreadMessage(
+        actor.name,
+        thread.id,
         `Proposal ${proposal.id}: ${describeCharter(proposal.kind, proposal.charter)}.${
           rationale.length === 0 ? "" : `\n\n${rationale}`
         }`,
@@ -3400,7 +3530,9 @@ export class Board {
       purpose: input.purpose,
       ...meta,
     });
-    await this.appendMessage(by, ref, `Channel ${ref} opened: ${input.purpose}`);
+    // A notice of what the board did, like a landed merge's: posted as the decider, it read as a
+    // post by the user and woke the front desk for nothing.
+    await this.appendMessage(SYSTEM_ACTOR.name, ref, `Channel ${ref} opened: ${input.purpose}`);
     return ref;
   }
 
@@ -3518,7 +3650,7 @@ export class Board {
     author: Name,
     threadId: Ulid,
     body: string,
-    options: { channel?: ChannelRef | undefined; step?: TaskStep } = {},
+    options: { channel?: ChannelRef | undefined; step?: MessageStep } = {},
   ): Promise<Message> {
     const { thread, threads } = await this.findThread(threadId);
     if (thread.state !== "open") {
@@ -3544,7 +3676,7 @@ export class Board {
 
   private async writeMessage(
     dir: string,
-    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid; step?: TaskStep },
+    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid; step?: MessageStep },
     body: string,
   ): Promise<Message> {
     const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({
@@ -3738,6 +3870,7 @@ export class Board {
         proposalId,
         outcome,
         kind: proposal.kind,
+        proposedBy: proposal.proposedBy,
       });
       if (provision !== undefined) {
         await this.events.append("proposal.provisioned", actor.name, {
@@ -3754,10 +3887,14 @@ export class Board {
           : ` Provisioned: ${Object.entries(provision)
               .map(([key, value]) => `${key} ${plain(value)}`)
               .join(", ")}.`;
-      await this.appendMessage(
+      // The decision is the proposal's last post, a step that wakes no front desk, and it ends
+      // the thread; the scheduler wakes the proposer from the event.
+      const thread = await this.proposalThreadUnlocked(actor.name, proposal);
+      await this.appendThreadMessage(
         actor.name,
-        "decisions",
-        `${verdict} ${proposal.kind} proposal ${proposalId} by ${proposal.proposedBy}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`,
+        thread.id,
+        `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`,
+        { step: { action: outcome } },
       );
       await this.endThreadOf(proposalId, actor.name, outcome);
       return decision;
@@ -3803,11 +3940,15 @@ export class Board {
       }
       if (subject?.kind === "proposal") {
         const proposal = await this.readProposal(subject.id);
-        return (
+        if (
           proposal.proposedBy === actor.name ||
           proposal.decidedBy === actor.name ||
           ROLE_KIND_APPROVERS[proposal.kind].includes(actor.role)
-        );
+        ) {
+          return true;
+        }
+        // Readers of operations signals take part in every proposal, so none proposes blind to one.
+        return (await this.readRole(actor.role)).wakeTriggers.includes(OPS_WAKE_TRIGGER);
       }
     } catch {
       return false;

@@ -410,7 +410,6 @@ describe("board server routes", () => {
     expect(channels.map((channel) => channel.ref)).toEqual([
       "general",
       "governance",
-      "decisions",
       "demo/general",
       "demo/dev",
     ]);

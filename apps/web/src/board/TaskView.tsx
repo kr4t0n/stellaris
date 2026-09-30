@@ -1,12 +1,10 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect } from "react";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError, type ThreadSummary } from "../lib/api.js";
+import { ApiError } from "../lib/api.js";
 import { ago } from "../lib/format.js";
-import { markSeen } from "../lib/seen.js";
 import {
   useMembers,
   useNow,
@@ -17,8 +15,8 @@ import {
 } from "../lib/session.js";
 import { Citizen, displayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
-import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { SubjectThread } from "./SubjectThread.js";
 import {
   assigneeOf,
   inPlay,
@@ -121,48 +119,6 @@ function OpenTaskThread({ taskId }: { taskId: string }) {
   );
 }
 
-/** What has been said about the work: talk, and the notes each step left, oldest first. */
-function TaskThread({ task, thread, now }: { task: Task; thread: ThreadSummary; now: number }) {
-  const { api } = useSession();
-  const members = useMembers();
-  const detail = useQuery({ queryKey: ["thread", task.id], queryFn: () => api.thread(task.id) });
-  const messages = detail.data?.messages ?? [];
-  const newest = messages.at(-1)?.id ?? null;
-  useEffect(() => markSeen(task.id, newest), [task.id, newest]);
-  if (detail.data === undefined) {
-    return <p className="mt-2 text-meta">Reading the thread…</p>;
-  }
-  const closed = detail.data.thread;
-  return (
-    <div className="-mx-4 mt-1">
-      {messages.length === 0 ? (
-        <p className="mx-4 mt-1 text-meta">
-          Nothing said yet. Each stage's handover lands here, and so does anything written below.
-        </p>
-      ) : (
-        messages.map((message) => (
-          <MessageItem
-            key={message.id}
-            message={message}
-            members={members.data}
-            now={now}
-            task={task}
-          />
-        ))
-      )}
-      {thread.state === "closed" ? (
-        <div className="mx-4 mt-2">
-          <p className="text-meta">
-            Closed{closed.closedAt === undefined ? "" : ` ${ago(closed.closedAt, now)}`}
-            {closed.body.trim() === "" ? " when the task ended." : ":"}
-          </p>
-          {closed.body.trim() === "" ? null : <Markdown text={closed.body} />}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /** One task: where it stands, its plan as a timeline, its brief, and its thread with a composer. */
 export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
@@ -255,7 +211,12 @@ export function TaskView() {
               <p className="mt-2 text-meta">No thread on this task.</p>
             )
           ) : (
-            <TaskThread task={current} thread={thread} now={now} />
+            <SubjectThread
+              thread={thread}
+              now={now}
+              task={current}
+              empty="Nothing said yet. Each stage's handover lands here, and so does anything written below."
+            />
           )}
         </section>
       </div>

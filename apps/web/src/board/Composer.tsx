@@ -40,6 +40,8 @@ export function Composer({ target, placeholder }: { target: Target; placeholder:
       void client.invalidateQueries({
         queryKey: "channel" in target ? ["channel", target.channel] : ["thread", target.threadId],
       });
+      // A post by the user answers whatever was asked of them where it was posted.
+      void client.invalidateQueries({ queryKey: ["requests"] });
     },
   });
 

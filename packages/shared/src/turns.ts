@@ -5,12 +5,14 @@ import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 
 /**
  * What caused a wake. `stage`: a stage became current and is the member's to take. `task_done`: a
- * task the member created is done.
+ * task the member created is done. `proposal_decided`: a proposal the member made was approved or
+ * rejected.
  */
 export const TriggerKindSchema = z.enum([
   "mention",
   "stage",
   "task_done",
+  "proposal_decided",
   "heartbeat",
   "reflection",
   "onboarding",

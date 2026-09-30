@@ -250,14 +250,26 @@ const SIGNALS = [
   },
 ];
 
-/** A turn that reported it needs the user, as the runner posts it. */
-const REQUEST = {
+/** ada asks the user in the task's thread; the board lists it until the user answers there. */
+const ASK = {
   id: "01M3Q2BBBBBBBBBBBBBBBBBBB1",
-  author: "stew",
-  channel: "decisions",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
   ts: CREATED,
   mentions: ["user"],
-  body: "@user decision needed on lab: sign off the survey before it merges",
+  body: "@user should the survey cover the 2025 results too?",
+};
+
+/** The skill proposal's pitch, which opened its thread in governance. */
+const PITCH = {
+  id: "01M3Q2CCCCCCCCCCCCCCCCCCC1",
+  author: "stew",
+  channel: "governance",
+  thread: SKILL_PROPOSAL,
+  ts: CREATED,
+  mentions: [],
+  body: `Proposal ${SKILL_PROPOSAL}: skill refereed-research.\n\nThe plan has run on four tasks.`,
 };
 
 export interface FakeBoard {
@@ -271,15 +283,15 @@ export interface FakeBoard {
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would.
  */
-export async function fakeBoard(
-  page: Page,
-  options: { unreadDecisions?: boolean } = {},
-): Promise<FakeBoard> {
+export async function fakeBoard(page: Page, options: { asked?: boolean } = {}): Promise<FakeBoard> {
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
   let deskModel: string | null = null;
-  const threadMessages: Array<Record<string, unknown>> = [HANDOVER];
+  // With `asked`, ada's question waits in the task's thread until the user writes there.
+  let waitingAsk = options.asked === true;
+  const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
+  const proposalMessages: Array<Record<string, unknown>> = [PITCH];
   const proposal: Proposal = {
     id: SKILL_PROPOSAL,
     kind: "skill",
@@ -306,6 +318,16 @@ export async function fakeBoard(
     }
     const ts = "2026-09-29T10:00:00.000Z";
     const reason = typeof body["reason"] === "string" ? body["reason"] : undefined;
+    proposalMessages.push({
+      id: "01M3Q2CCCCCCCCCCCCCCCCCCC2",
+      author: "user",
+      channel: "governance",
+      thread: SKILL_PROPOSAL,
+      step: { action: outcome },
+      ts,
+      mentions: [],
+      body: `${outcome === "approved" ? "Approved" : "Rejected"}: skill refereed-research.`,
+    });
     Object.assign(proposal, {
       status: outcome === "rejected" ? "rejected" : "provisioned",
       decidedBy: "user",
@@ -325,11 +347,19 @@ export async function fakeBoard(
     });
   };
 
+  // The proposal's thread opened with its pitch and closes with its decision.
+  const proposalThread = () => ({
+    id: SKILL_PROPOSAL,
+    channel: "governance",
+    title: "skill proposal: refereed-research",
+    subject: { kind: "proposal", id: SKILL_PROPOSAL },
+    state: proposal.status === "proposed" ? "open" : "closed",
+    openedBy: "stew",
+    openedAt: CREATED,
+    body: "",
+  });
+
   await page.addInitScript((token) => localStorage.setItem("stellaris.token", token), TOKEN);
-  if (options.unreadDecisions === true) {
-    // A browser that listed the board before the request arrived, so #decisions has something new.
-    await page.addInitScript(() => localStorage.setItem("stellaris.seen", '{"*":"1"}'));
-  }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -366,6 +396,9 @@ export async function fakeBoard(
             body: body["body"],
           };
           threadMessages.push(posted);
+          if (body["thread_id"] === STAGE_TASK) {
+            waitingAsk = false;
+          }
           return json(route, posted);
         }
         case "/api/pause":
@@ -388,7 +421,7 @@ export async function fakeBoard(
           name: "fixture",
           version: 1,
           createdAt: CREATED,
-          channels: ["general", "governance", "decisions"],
+          channels: ["general", "governance"],
         });
       case "/api/members":
         return json(route, [
@@ -439,15 +472,22 @@ export async function fakeBoard(
             messages: threadMessages.length,
             lastMessageId: threadMessages.at(-1)?.["id"] ?? null,
           },
+          {
+            ...proposalThread(),
+            messages: proposalMessages.length,
+            lastMessageId: proposalMessages.at(-1)?.["id"] ?? null,
+          },
         ]);
+      case `/api/threads/${SKILL_PROPOSAL}`:
+        return json(route, { thread: proposalThread(), messages: proposalMessages });
+      case "/api/requests":
+        return json(route, waitingAsk ? [{ message: ASK, thread: TASK_THREAD }] : []);
       case `/api/threads/${STAGE_TASK}`:
         return json(route, { thread: TASK_THREAD, messages: threadMessages });
       case "/api/skills":
       case "/api/channels/general":
       case "/api/channels/governance":
         return json(route, []);
-      case "/api/channels/decisions":
-        return json(route, [REQUEST]);
       case "/api/scheduler":
         return json(route, {
           paused,
@@ -462,7 +502,6 @@ export async function fakeBoard(
         return json(route, [
           channel("general"),
           channel("governance"),
-          { ...channel("decisions"), messages: 1, lastMessageId: REQUEST.id, lastAt: REQUEST.ts },
           { ...channel("general"), ref: "lab/general", project: "lab" },
         ]);
       case "/api/proposals":

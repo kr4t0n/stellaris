@@ -269,6 +269,60 @@ describe("LocalRunner resident sessions and the society scope", () => {
     expect(prompts[1]).toContain("## Operations signals\n\nNone since your last turn here.");
   });
 
+  it("asks the user in a thread of its own when a turn needs a decision and mentioned nobody", async () => {
+    const { board } = await Board.init(dir, { name: "asks" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    let mention = false;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async () => {
+        if (mention) {
+          await board.postMessage(
+            { name: "stew", role: "steward" },
+            { channel: "general", body: "@user which project should this go in?" },
+          );
+        }
+        const base = completed("which project should the survey go in?");
+        return {
+          ...base,
+          status: base.status === null ? null : { ...base.status, needsUserDecision: true },
+        };
+      },
+    };
+    const runner = new LocalRunner({
+      board,
+      runnerName: "server",
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+    });
+    const dispatch = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+      onboarding: false,
+    };
+    await runner.runTurn(dispatch);
+    const threads = await board.listThreads();
+    expect(threads).toEqual([
+      expect.objectContaining({
+        channel: "general",
+        openedBy: "stew",
+        title: "stew asks for a decision: which project should the survey go in?",
+      }),
+    ]);
+    expect((await board.listThread(threads[0]?.id ?? "")).at(0)?.body.trim()).toBe(
+      "@user which project should the survey go in?",
+    );
+    expect(await board.listRequests()).toHaveLength(1);
+    // A turn that asked the user itself gets no second question.
+    mention = true;
+    await runner.runTurn(dispatch);
+    expect(await board.listThreads()).toHaveLength(1);
+    expect(await board.listRequests()).toHaveLength(2);
+  });
+
   it("hands a resumed session the running total its last turn reported", async () => {
     const { board } = await Board.init(dir, { name: "totals" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

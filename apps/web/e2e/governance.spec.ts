@@ -9,14 +9,19 @@ test("approving takes a second click, says what it does, and shows what it made"
 
   await expect(page.getByText("If approved: Publishes refereed-research")).toBeVisible();
   await expect(page.getByRole("region", { name: "Governance" })).toContainText("proposals1");
+  // The pitch opened the proposal's thread, shown in its view.
+  const thread = page.getByRole("region", { name: "Thread" });
+  await expect(thread).toContainText("The plan has run on four tasks.");
 
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   const form = page.getByRole("form", { name: "Approve the proposal" });
-  await expect(form).toContainText("which wakes desk");
+  // The decision wakes the proposer, not the front desk.
+  await expect(form).toContainText("wakes stew, who proposed it");
   expect(board.writes).toEqual([]);
 
   await form.getByRole("button", { name: "Confirm approval" }).click();
   await expect(page.getByText("Approved by you")).toBeVisible();
+  await expect(thread).toContainText("Approved: skill refereed-research.");
   await expect(page.getByText("Published the society's skill refereed-research.")).toBeVisible();
   expect(board.writes).toEqual([
     { path: "/api/verbs/approve", body: { proposal_id: SKILL_PROPOSAL } },
@@ -67,10 +72,10 @@ test("the pause switch pauses and resumes the society", async ({ page }) => {
   expect(board.writes.map((write) => write.path)).toEqual(["/api/pause", "/api/resume"]);
 });
 
-test("needs you gathers a proposal, a stage that names the user, and an unread request", async ({
+test("needs you gathers a proposal, a stage that names the user, and a question asked in a thread", async ({
   page,
 }) => {
-  await fakeBoard(page, { unreadDecisions: true });
+  const board = await fakeBoard(page, { asked: true });
   await page.goto("/");
 
   await page.getByRole("button", { name: "3 need you" }).click();
@@ -85,8 +90,15 @@ test("needs you gathers a proposal, a stage that names the user, and an unread r
     `/task/${STAGE_TASK}`,
   );
 
-  // A request is a message: reading #decisions is what clears it.
-  await view.getByRole("link", { name: /decision needed on lab/ }).click();
-  await expect(page).toHaveURL(/\/c\/decisions$/);
+  // A question is answered where it was asked: the task's thread. Answering there settles it.
+  await view.getByRole("link", { name: /should the survey cover the 2025 results too/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
+  const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+  await box.fill("Yes, include 2025.");
+  await box.press("Enter");
   await expect(page.getByRole("button", { name: "2 need you" })).toBeVisible();
+  expect(board.writes.at(-1)).toEqual({
+    path: "/api/verbs/post_message",
+    body: { thread_id: STAGE_TASK, body: "Yes, include 2025." },
+  });
 });

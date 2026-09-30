@@ -10,7 +10,7 @@ import { useNeedsYou } from "./useNeedsYou.js";
 const SECTIONS: ReadonlyArray<{ readonly kind: Attention["kind"]; readonly label: string }> = [
   { kind: "proposal", label: "Proposals to decide" },
   { kind: "stage", label: "Stages that name you" },
-  { kind: "request", label: "Addressed to you in #decisions" },
+  { kind: "request", label: "Asked of you" },
 ];
 
 const ROW = "block rounded-xl px-3 py-2.5 transition-colors hover:bg-surface-2/50";
@@ -45,8 +45,8 @@ export function NeedsYouView() {
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {items.length === 0 ? (
           <PaneNote>
-            Nothing waits on you. Proposals you may decide, stages that name you, and requests
-            addressed to you in #decisions appear here.
+            Nothing waits on you. Proposals you may decide, stages that name you, and questions
+            citizens ask you with @user appear here until you answer where they asked.
           </PaneNote>
         ) : (
           SECTIONS.map(({ kind, label }) => {
@@ -95,14 +95,40 @@ export function NeedsYouView() {
                         </li>
                       );
                     }
+                    const meta = `${displayName(item.message.author)} in ${
+                      item.thread === null ? `#${item.message.channel}` : item.thread.title
+                    } ${ago(item.since, now)}`;
+                    const row = <Row title={firstParagraph(item.message.body, 160)} meta={meta} />;
+                    const subject = item.thread?.subject;
+                    // A question is answered where it was asked: the task's or the proposal's view,
+                    // which shows its thread, a topic's thread, or the channel.
                     return (
                       <li key={item.message.id}>
-                        <Link to="/c/$" params={{ _splat: "decisions" }} className={ROW}>
-                          <Row
-                            title={firstParagraph(item.message.body, 160)}
-                            meta={`${item.message.author} ${ago(item.since, now)} · opening #decisions clears it`}
-                          />
-                        </Link>
+                        {subject?.kind === "task" ? (
+                          <Link to="/task/$taskId" params={{ taskId: subject.id }} className={ROW}>
+                            {row}
+                          </Link>
+                        ) : subject?.kind === "proposal" ? (
+                          <Link
+                            to="/proposal/$proposalId"
+                            params={{ proposalId: subject.id }}
+                            className={ROW}
+                          >
+                            {row}
+                          </Link>
+                        ) : item.thread !== null ? (
+                          <Link
+                            to="/thread/$threadId"
+                            params={{ threadId: item.thread.id }}
+                            className={ROW}
+                          >
+                            {row}
+                          </Link>
+                        ) : (
+                          <Link to="/c/$" params={{ _splat: item.message.channel }} className={ROW}>
+                            {row}
+                          </Link>
+                        )}
                       </li>
                     );
                   })}

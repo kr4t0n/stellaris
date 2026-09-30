@@ -49,6 +49,12 @@ export function useScheduler() {
   return useQuery({ queryKey: ["scheduler"], queryFn: api.scheduler, refetchInterval: 3_000 });
 }
 
+/** Questions to the user that wait for an answer; every post and closed thread refreshes them. */
+export function useRequests() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["requests"], queryFn: api.requests, refetchInterval: 60_000 });
+}
+
 /** The operations log; only the logs island reads it, so it loads when that opens. */
 export function useSignals(enabled: boolean) {
   const { api } = useSession();

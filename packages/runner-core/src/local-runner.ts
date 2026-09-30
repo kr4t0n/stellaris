@@ -435,10 +435,7 @@ export class LocalRunner {
         held.map((task) => task.id),
       );
       if (result.status?.needsUserDecision === true) {
-        await this.board.postMessage(actor, {
-          channel: "decisions",
-          body: `@${USER_NAME} decision needed on ${dispatch.project}: ${result.status.summary}`,
-        });
+        await this.askUser(actor, dispatch.project, startedAt, result.status.summary);
       }
     }
     await this.board.finishTurn(finished, transcript);
@@ -577,6 +574,30 @@ export class LocalRunner {
       ok: outcome.ok,
       detail: outcome.detail,
     });
+  }
+
+  /**
+   * A turn that reported the user must decide asks where the question belongs, with a mention of
+   * the user, which is what puts it before them. One that mentioned the user nowhere gets a thread
+   * of its own on its scope's general channel, opened as the citizen with its summary, so the
+   * question still reaches the user and the answer reaches the citizen.
+   */
+  private async askUser(actor: Actor, scope: Name, since: string, summary: string): Promise<void> {
+    try {
+      if (await this.board.hasMentioned(actor.name, USER_NAME, since)) {
+        return;
+      }
+      const thread = await this.board.openThread(actor, {
+        channel: scope === SOCIETY_SCOPE ? "general" : `${scope}/general`,
+        title: `${actor.name} asks for a decision: ${summary}`.slice(0, 200),
+      });
+      await this.board.postMessage(actor, {
+        thread_id: thread.id,
+        body: `@${USER_NAME} ${summary}`,
+      });
+    } catch (error) {
+      this.log.warn({ agent: actor.name, error: String(error) }, "could not ask the user");
+    }
   }
 
   /** Commits what the turn left on a task branch and returns the worktree to the agent's own branch. */

@@ -1,4 +1,4 @@
-import { stageIndex, type Stage, type Task, type TaskStep } from "@stellaris/shared";
+import { isTaskStep, stageIndex, type MessageStep, type Stage, type Task } from "@stellaris/shared";
 
 /** Where a task stands, as the tasks view groups it. */
 export type TaskPhase = "returned" | "waiting" | "working" | "landing" | "done" | "abandoned";
@@ -54,7 +54,15 @@ export function stageName(task: Task, id: string): string {
 }
 
 /** A step's chip on the post that recorded it: what it says, and its colour. */
-export function stepLabel(step: TaskStep, task: Task | undefined): { text: string; tone: string } {
+export function stepLabel(
+  step: MessageStep,
+  task: Task | undefined,
+): { text: string; tone: string } {
+  if (!isTaskStep(step)) {
+    return step.action === "approved"
+      ? { text: "approved", tone: PHASE_STYLE.working }
+      : { text: "rejected", tone: "bg-red-500/15 text-red-300" };
+  }
   const name = (id: string): string => (task === undefined ? id : stageName(task, id));
   if (step.action === "advanced") {
     const text =

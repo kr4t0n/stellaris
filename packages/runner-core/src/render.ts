@@ -40,7 +40,7 @@ const TURN_CONTRACT = [
 const PLANNING = [
   "- A task is a plan of stages between open and done. Hold the current stage with claim_task and finish it with advance_task; the next stage becomes current, and past the last one the task is done.",
   "- Name stages by what gets done. Plan the next few steps rather than everything, and reshape with plan_task as the work teaches you.",
-  "- Assign a stage to a role when anyone in it could do it, to a citizen only when it must be them, and to nobody when anyone in the project could.",
+  "- Assign a stage to a role when anyone in it could do it, to a citizen only when it must be them, and to nobody when anyone in the project could. A stage wakes everyone it is open to when it comes up, so the narrower the assignee, the fewer turns it costs.",
   "- Reshape rather than force: another round is an inserted stage, and a wait on something outside the society is a stage named for what it waits on. When a check finds work unfinished, send the task back to an earlier stage with update_task.",
   "- A gated stage is an independent check: nobody who held an earlier stage of the task may hold it, and only the user, the steward, and the concierge may add, remove, move, reassign, or ungate it. Ask them in the task's thread when a gate should change.",
   "- Commit your work on the task's branch before you advance, and say what you did in the advance note; it is the handover the next holder reads in the task's thread.",

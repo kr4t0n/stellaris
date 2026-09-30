@@ -341,7 +341,12 @@ describe("Scheduler", () => {
 
   it("signals a stage left waiting past the threshold once, and wakes nobody by it", async () => {
     const { board, runner, scheduler } = await setup();
-    const task = await board.createTask(USER, { project: "demo", title: "nobody took me" });
+    // A stage for the user wakes no citizen, so only the timer notices it.
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "nobody took me",
+      stages: [{ name: "decide", agent: "user" }],
+    });
     await scheduler.tick();
     expect(scheduler.pendingCount).toBe(0);
     advance(5_000);
@@ -352,7 +357,44 @@ describe("Scheduler", () => {
     expect(runner.dispatches).toEqual([]);
     const waiting = (await board.listSignals()).filter((s) => s.signal.kind === "waiting_stage");
     expect(waiting.map((s) => s.signal.key)).toEqual([`waiting_stage:${task.id}:s1`]);
-    expect(waiting[0]?.signal.summary).toContain("for anyone in the project");
+    expect(waiting[0]?.signal.summary).toContain("for user");
+  });
+
+  it("wakes every member who may take a stage that names nobody, on entry and on heartbeat", async () => {
+    const { board, runner, scheduler } = await setup();
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "draft" }, { name: "check", gate: true }],
+    });
+    await settle();
+    expect(
+      runner.dispatches
+        .map((d) => `${d.agent}:${d.trigger.kind}`)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["eng-1:stage", "rev-1:stage"]);
+
+    // The gate keeps the check from whoever drafted, so it wakes the other member alone.
+    runner.dispatches.length = 0;
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    await settle();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["rev-1", "stage"]]);
+
+    // The wake led to no claim; the heartbeat brings back whoever may take it, and nobody else.
+    runner.dispatches.length = 0;
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["rev-1", "heartbeat"],
+    ]);
   });
 
   it("wakes on heartbeat for a stage waiting on the member's role", async () => {
@@ -428,8 +470,17 @@ describe("Scheduler", () => {
     await scheduler.drain();
     expect(runner.dispatches).toEqual([]);
 
-    // A stage held in lab brings eng-1 back to lab, not to demo.
+    // A stage held in lab brings eng-1 back to lab, not to demo. Its one stage names nobody, so
+    // it first wakes eng-1, lab's one working member.
     const task = await board.createTask(USER, { project: "lab", title: "measure" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "stage"],
+    ]);
+    runner.dispatches.length = 0;
     await board.claimTask(ENG, { task_id: task.id });
     advance(10_000);
     await scheduler.tick();

@@ -77,7 +77,7 @@ The admin CLI can also post, claim, and move tasks directly with `--as <agent>` 
 
 ### Tasks and plans
 
-A task starts `open` and ends `done` or `abandoned`; between them runs its plan, a list of stages that agents write for the work at hand. Each stage has a free-text name, at most one assignee (a `role` or an `agent`; with neither, anyone in the project), and an optional `gate`. The holder of the current stage advances it, and the next stage becomes current and wakes its assignee; past the last stage the task is done.
+A task starts `open` and ends `done` or `abandoned`; between them runs its plan, a list of stages that agents write for the work at hand. Each stage has a free-text name, at most one assignee (a `role` or an `agent`; with neither, anyone in the project), and an optional `gate`. The holder of the current stage advances it, and the next stage becomes current and wakes its assignee, or every member of the project who may hold it when it names none; past the last stage the task is done.
 
 - **Plans come from their writers.** A task gets its plan from its creator, else from the project's default plan, else a single stage called `work`. Any member of the project reshapes the stages ahead with `plan_task`: another experiment round, a stage for a wait, a stage for another citizen. A check that finds work unfinished sends the task back to an earlier stage with `update_task`.
 - **Gates are independent checks.** Nobody who held an earlier stage of the task may hold a gated stage, and only the user, the steward, and the concierge may add, remove, move, reassign, or ungate one.

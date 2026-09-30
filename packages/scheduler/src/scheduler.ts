@@ -604,7 +604,7 @@ export class Scheduler {
 
   /**
    * Entering a stage wakes its named citizen, else its last holder when work returns to it, else
-   * the project's members of its role. An unassigned stage waits for the waiting-stage timer.
+   * the project's members of its role, else every member of the project who may hold it.
    */
   private async wakeStage(taskId: Ulid, from: Name, now: number): Promise<void> {
     let task: Task;
@@ -625,7 +625,7 @@ export class Scheduler {
           ? [lastHolder]
           : stage.role !== undefined
             ? (await this.board.membersWithRole(task.project, stage.role)).map((a) => a.name)
-            : [];
+            : (await this.board.projectMembers(task.project)).map((a) => a.name);
     for (const name of targets) {
       const agent = await this.tryReadAgent(name);
       if (agent === null || !mayHoldStage(agent, task)) {
@@ -857,11 +857,7 @@ export class Scheduler {
         const waiting =
           project === SOCIETY_SCOPE
             ? []
-            : (await this.board.openTasks(project)).filter((task) => {
-                const stage = currentStage(task);
-                const named = stage?.agent === agent.name || stage?.role === agent.role;
-                return named && mayHoldStage(agent, task);
-              });
+            : (await this.board.openTasks(project)).filter((task) => mayHoldStage(agent, task));
         const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
         const decision = decideWake({
           trigger,

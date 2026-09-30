@@ -6,7 +6,7 @@ export interface WakeInput {
   readonly digestSize: number;
   /** Stages the agent holds. */
   readonly claimsHeld: number;
-  /** Current stages without a holder that name the agent or its role. */
+  /** Current stages without a holder that the agent may take. */
   readonly waitingStages: number;
   readonly paused: boolean;
 }

@@ -61,7 +61,6 @@ export function Hud({
     <>
       <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
         <div className="flex items-center gap-2.5">
-          <span className="brand-dot" />
           <span className="text-display">Stellaris</span>
           {society === undefined ? null : <span className="text-meta">{society}</span>}
         </div>

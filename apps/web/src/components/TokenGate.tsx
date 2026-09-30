@@ -35,10 +35,7 @@ export function TokenGate({ onEnter }: { onEnter: (token: string) => void }) {
   return (
     <main className="relative grid h-full place-items-center overflow-hidden bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.04),transparent_60%)]">
       <form onSubmit={(event) => void submit(event)} className="card w-[380px] p-6">
-        <div className="flex items-center gap-2">
-          <span className="brand-dot" />
-          <h1 className="text-display">Stellaris</h1>
-        </div>
+        <h1 className="text-display">Stellaris</h1>
         <p className="mt-1 text-meta">A society of autonomous agents on one board.</p>
         <label className="mt-6 block">
           <span className="mb-1.5 block text-caps">Board token</span>

@@ -1,32 +1,9 @@
-import type { ReactNode } from "react";
-
-type Tone = "plain" | "live" | "warn";
-
-const TONES: Record<Tone, string> = {
-  plain: "text-fg-tertiary",
-  live: "text-emerald-300",
-  warn: "text-amber-300",
-};
-
-function Chip({ tone = "plain", children }: { tone?: Tone; children: ReactNode }) {
-  return (
-    <span className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs ${TONES[tone]}`}>
-      {children}
-    </span>
-  );
-}
-
 interface HudProps {
   readonly society: string | undefined;
   readonly citizens: number;
   /** Whether the citizens view is open; the count opens and closes it. */
   readonly citizensOpen: boolean;
   readonly onToggleCitizens: () => void;
-  /** Citizens in a turn. */
-  readonly working: number;
-  /** Turns running: more than `working` when a citizen is in turns in two projects. */
-  readonly turns: number;
-  readonly queued: number;
   /** How many things wait on the user; the chip opens them. */
   readonly attention: number;
   readonly onOpenAttention: () => void;
@@ -48,9 +25,6 @@ export function Hud({
   citizens,
   citizensOpen,
   onToggleCitizens,
-  working,
-  turns,
-  queued,
   attention,
   onOpenAttention,
   paused,
@@ -107,10 +81,6 @@ export function Hud({
         >
           {citizens === 1 ? "1 citizen" : `${citizens} citizens`}
         </button>
-        <Chip tone={working > 0 ? "live" : "plain"}>
-          {working} working{turns > working ? ` · ${turns} turns` : ""}
-        </Chip>
-        {queued > 0 ? <Chip>{queued} queued</Chip> : null}
         <button
           type="button"
           aria-pressed={boardOpen}

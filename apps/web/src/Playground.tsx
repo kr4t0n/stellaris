@@ -220,7 +220,6 @@ export function Playground() {
   const openTask = (id: string): void => {
     void navigate({ to: "/task/$taskId", params: { taskId: id } });
   };
-  const working = model.stars.filter((candidate) => candidate.state === "working");
   const openProject = (anchor: string): void => {
     void navigate(
       anchor === SOCIETY_SCOPE ? { to: "/society" } : { to: "/p/$slug", params: { slug: anchor } },
@@ -257,9 +256,6 @@ export function Playground() {
             onToggleCitizens={() =>
               void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
             }
-            working={new Set(working.map((candidate) => candidate.name)).size}
-            turns={working.length}
-            queued={model.stars.filter((candidate) => candidate.state === "queued").length}
             attention={attention}
             onOpenAttention={() => void navigate({ to: "/needs-you" })}
             paused={scheduler.data?.paused ?? false}

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { LinkedText } from "../components/Entities.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import { useNow, useProjects } from "../lib/session.js";
 import { displayName } from "./Avatar.js";
@@ -98,7 +99,14 @@ export function NeedsYouView() {
                     const meta = `${displayName(item.message.author)} in ${
                       item.thread === null ? `#${item.message.channel}` : item.thread.title
                     } ${ago(item.since, now)}`;
-                    const row = <Row title={firstParagraph(item.message.body, 160)} meta={meta} />;
+                    const row = (
+                      <Row
+                        title={
+                          <LinkedText text={firstParagraph(item.message.body, 160)} links={false} />
+                        }
+                        meta={meta}
+                      />
+                    );
                     const subject = item.thread?.subject;
                     // A question is answered where it was asked: the task's or the proposal's view,
                     // which shows its thread, a topic's thread, or the channel.

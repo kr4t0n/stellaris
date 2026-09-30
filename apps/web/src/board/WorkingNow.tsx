@@ -1,6 +1,7 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { CliIcon } from "../components/CliIcon.js";
+import { LinkedText } from "../components/Entities.js";
 import { pairsOf } from "../lib/api.js";
 import { elapsed, lastLine, pairKey, useLiveTurns } from "../lib/live.js";
 import { useMembers, useNow, useScheduler } from "../lib/session.js";
@@ -71,7 +72,7 @@ export function WorkingNow({
                     ) : null}
                   </span>
                   <span className="mt-0.5 block truncate pl-5.5 text-[11px] text-fg-muted">
-                    {line ?? "Starting…"}
+                    {line === null ? "Starting…" : <LinkedText text={line} links={false} />}
                   </span>
                 </Link>
               </li>

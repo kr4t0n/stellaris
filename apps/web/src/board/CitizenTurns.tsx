@@ -1,5 +1,6 @@
 import type { CliKind, TurnHistoryEntry } from "@stellaris/shared";
 import { useState } from "react";
+import { LinkedText } from "../components/Entities.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import { costLabel, endingOf, historyTotals, scopeName, turnLength } from "./citizen.js";
@@ -54,7 +55,7 @@ function TurnRow({
             <span
               className={`mt-1 line-clamp-2 block text-xs leading-relaxed group-open:hidden ${tone}`}
             >
-              {text}
+              <LinkedText text={text} links={false} />
             </span>
           )}
         </summary>
@@ -80,7 +81,9 @@ function TurnBody({
   return (
     <div className="px-4 pt-1 pb-3">
       {text.trim() === "" ? null : (
-        <p className={`text-xs leading-relaxed whitespace-pre-wrap ${tone}`}>{text}</p>
+        <p className={`text-xs leading-relaxed whitespace-pre-wrap ${tone}`}>
+          <LinkedText text={text} />
+        </p>
       )}
       <div className="mt-2">
         {entry.turnId === undefined ? (

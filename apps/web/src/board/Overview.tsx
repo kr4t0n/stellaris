@@ -2,6 +2,7 @@ import { SOCIETY_SCOPE, type Member } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CliIcon } from "../components/CliIcon.js";
+import { LinkedText } from "../components/Entities.js";
 import type { Topic } from "../lib/api.js";
 import { pairsOf } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
@@ -114,7 +115,7 @@ export function TopicList({
                 </span>
               </span>
               <span className="mt-0.5 line-clamp-2 block text-sm leading-relaxed text-fg-secondary">
-                {firstParagraph(topic.body, 240)}
+                <LinkedText text={firstParagraph(topic.body, 240)} links={false} />
               </span>
             </Link>
           </li>

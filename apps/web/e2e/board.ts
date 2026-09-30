@@ -271,7 +271,7 @@ const LAB_TOPIC = {
   project: "lab",
   updatedBy: "ada",
   updatedAt: CREATED,
-  body: "Every run fixes its seed at 42.\n\nThe harness lives in `bench/`.",
+  body: `Every run fixes its seed at 42.\n\nThe harness lives in \`bench/\`.\n\nTask ${STAGE_TASK} settled the seed; its branch is task/${STAGE_TASK}.`,
 };
 
 /** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */

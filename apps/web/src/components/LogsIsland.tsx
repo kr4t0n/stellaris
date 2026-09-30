@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ago } from "../lib/format.js";
 import { useNow, useScheduler, useSignals } from "../lib/session.js";
 import { holdingNow, SIGNAL_LABEL, signalFacts, wakesReaders } from "../lib/signals.js";
+import { LinkedText } from "./Entities.js";
 import { Island } from "./Island.js";
 
 /**
@@ -62,7 +63,9 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
                     {ago(ts, now)}
                   </time>
                 </div>
-                <p className="mt-1 text-sm text-fg-secondary">{signal.summary}</p>
+                <p className="mt-1 text-sm text-fg-secondary">
+                  <LinkedText text={signal.summary} />
+                </p>
                 <p className="mt-0.5 text-meta">
                   {signalFacts(signal)}
                   {wakes ? " · wakes the steward" : ""}

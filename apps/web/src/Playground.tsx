@@ -5,11 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigator, type GovernanceView } from "./board/Navigator.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { CitizenCard } from "./components/CitizenCard.js";
+import { EntityContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
 import { LogsIsland } from "./components/LogsIsland.js";
 import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
+import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
 import {
@@ -17,6 +19,7 @@ import {
   useMembers,
   useNow,
   useProjects,
+  useProposals,
   useRoles,
   useScheduler,
   useSession,
@@ -72,6 +75,11 @@ export function Playground() {
   const scheduler = useScheduler();
   const threads = useThreads();
   const tasks = useAllTasks();
+  const proposals = useProposals();
+  const entities = useMemo(
+    () => entityIndex(threads.data ?? [], tasks, proposals.data ?? []),
+    [threads.data, tasks, proposals.data],
+  );
   const navigate = useNavigate();
   const pause = useMutation({
     mutationFn: (paused: boolean) => api.setPaused(paused),
@@ -222,102 +230,110 @@ export function Playground() {
 
   return (
     <LiveContext value={live}>
-      <main className="relative h-full overflow-hidden">
-        <Sky
-          model={model}
-          paused={scheduler.data?.paused ?? false}
-          hovered={hovered}
-          onHover={setHovered}
-          insets={insets}
-          focus={focus}
-          onSelectAnchor={openProject}
-          onSelectStar={openStar}
-          onSelectTask={openTask}
-          live={live}
-          card={
-            mark !== undefined ? (
-              <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
-            ) : star === undefined || member === undefined ? null : (
-              <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
-            )
-          }
-        />
-        <Hud
-          society={society.data?.name}
-          citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
-          working={new Set(working.map((candidate) => candidate.name)).size}
-          turns={working.length}
-          queued={model.stars.filter((candidate) => candidate.state === "queued").length}
-          attention={attention}
-          onOpenAttention={() => void navigate({ to: "/needs-you" })}
-          paused={scheduler.data?.paused ?? false}
-          onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
-          pauseBusy={pause.isPending}
-          boardOpen={boardOpen}
-          onToggleBoard={() =>
-            void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
-          }
-          logsOpen={logsOpen}
-          onToggleLogs={() => setLogsOpen(!logsOpen)}
-          onSignOut={signOut}
-        />
-        {boardOpen ? (
-          <Navigator
-            activeChannel={activeChannel}
-            activeTasks={activeTasks}
-            activeCitizen={activeCitizen}
-            activeScope={activeScope}
-            activeGovernance={activeGovernance}
-            activeOverview={activeOverview}
+      <EntityContext value={entities}>
+        <main className="relative h-full overflow-hidden">
+          <Sky
+            model={model}
+            paused={scheduler.data?.paused ?? false}
+            hovered={hovered}
+            onHover={setHovered}
+            insets={insets}
+            focus={focus}
+            onSelectAnchor={openProject}
+            onSelectStar={openStar}
+            onSelectTask={openTask}
+            live={live}
+            card={
+              mark !== undefined ? (
+                <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
+              ) : star === undefined || member === undefined ? null : (
+                <CitizenCard
+                  member={member}
+                  star={star}
+                  purpose={purpose}
+                  place={place}
+                  now={now}
+                />
+              )
+            }
           />
-        ) : null}
-        {boardOpen ? (
-          <Island
-            label="Board content"
-            className="top-[72px] right-4 bottom-4"
-            style={{ width: contentWidth }}
-          >
-            <Outlet />
-          </Island>
-        ) : null}
-        {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
-        {model.stars.length === 0 && !boardOpen ? (
-          <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
-            No citizens yet. Ask the concierge for one, or add one with{" "}
-            <code className="font-mono text-fg-secondary">stellaris agent add</code>.
-          </p>
-        ) : null}
-        {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}
-        <ul className="sr-only" aria-label="Tasks in play">
-          {model.tasks.map((candidate) => (
-            <li key={candidate.id}>
-              <button
-                type="button"
-                onFocus={() => setHovered(`task:${candidate.id}`)}
-                onBlur={() => setHovered(null)}
-                onClick={() => openTask(candidate.id)}
-              >
-                Task {candidate.title}, {candidate.phase} at {placeName(candidate.project)}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <ul className="sr-only" aria-label="Citizens">
-          {model.stars.map((candidate) => (
-            <li key={candidate.id}>
-              <button
-                type="button"
-                onFocus={() => setHovered(candidate.id)}
-                onBlur={() => setHovered(null)}
-                onClick={() => openStar(candidate.id)}
-              >
-                {candidate.name}, {candidate.state}
-                {candidate.state === "working" ? ` at ${placeName(candidate.anchor)}` : ""}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </main>
+          <Hud
+            society={society.data?.name}
+            citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
+            working={new Set(working.map((candidate) => candidate.name)).size}
+            turns={working.length}
+            queued={model.stars.filter((candidate) => candidate.state === "queued").length}
+            attention={attention}
+            onOpenAttention={() => void navigate({ to: "/needs-you" })}
+            paused={scheduler.data?.paused ?? false}
+            onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
+            pauseBusy={pause.isPending}
+            boardOpen={boardOpen}
+            onToggleBoard={() =>
+              void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
+            }
+            logsOpen={logsOpen}
+            onToggleLogs={() => setLogsOpen(!logsOpen)}
+            onSignOut={signOut}
+          />
+          {boardOpen ? (
+            <Navigator
+              activeChannel={activeChannel}
+              activeTasks={activeTasks}
+              activeCitizen={activeCitizen}
+              activeScope={activeScope}
+              activeGovernance={activeGovernance}
+              activeOverview={activeOverview}
+            />
+          ) : null}
+          {boardOpen ? (
+            <Island
+              label="Board content"
+              className="top-[72px] right-4 bottom-4"
+              style={{ width: contentWidth }}
+            >
+              <Outlet />
+            </Island>
+          ) : null}
+          {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
+          {model.stars.length === 0 && !boardOpen ? (
+            <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
+              No citizens yet. Ask the concierge for one, or add one with{" "}
+              <code className="font-mono text-fg-secondary">stellaris agent add</code>.
+            </p>
+          ) : null}
+          {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}
+          <ul className="sr-only" aria-label="Tasks in play">
+            {model.tasks.map((candidate) => (
+              <li key={candidate.id}>
+                <button
+                  type="button"
+                  onFocus={() => setHovered(`task:${candidate.id}`)}
+                  onBlur={() => setHovered(null)}
+                  onClick={() => openTask(candidate.id)}
+                >
+                  Task {candidate.title}, {candidate.phase} at {placeName(candidate.project)}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <ul className="sr-only" aria-label="Citizens">
+            {model.stars.map((candidate) => (
+              <li key={candidate.id}>
+                <button
+                  type="button"
+                  onFocus={() => setHovered(candidate.id)}
+                  onBlur={() => setHovered(null)}
+                  onClick={() => openStar(candidate.id)}
+                >
+                  {candidate.name}, {candidate.state}
+                  {candidate.state === "working" ? ` at ${placeName(candidate.anchor)}` : ""}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </main>
+      </EntityContext>
     </LiveContext>
   );
 }

@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEntities } from "../components/Entities.js";
+import { withTitles } from "../lib/entities.js";
 import { postedLine, type LiveStore } from "../lib/live.js";
 import { starOf, type SkyModel } from "./model.js";
 import { SkyScene, type ScreenPoint } from "./scene.js";
@@ -97,6 +99,12 @@ export function Sky({
   useLayoutEffect(() => {
     modelRef.current = model;
   }, [model]);
+  // And it reads a posted line with the ids it names as their titles.
+  const entities = useEntities();
+  const entitiesRef = useRef(entities);
+  useLayoutEffect(() => {
+    entitiesRef.current = entities;
+  }, [entities]);
   // A press on the sky, and whether it has moved far enough to be a drag rather than a click.
   const pressRef = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
   const draggedRef = useRef(false);
@@ -159,7 +167,7 @@ export function Sky({
         scene.flash(star);
         const line = postedLine(item.event.name, item.event.input);
         if (line !== null) {
-          scene.say(star, line);
+          scene.say(star, withTitles(line, entitiesRef.current));
         }
       }),
     [live],

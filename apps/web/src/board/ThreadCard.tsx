@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { LinkedText } from "../components/Entities.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import type { ThreadSummary } from "../lib/api.js";
 
@@ -41,7 +42,9 @@ export function ThreadCard({ thread, now }: { thread: ThreadSummary; now: number
         {ago(thread.openedAt, now)}
       </p>
       {summary === "" ? null : (
-        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-fg-secondary">{summary}</p>
+        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-fg-secondary">
+          <LinkedText text={summary} links={false} />
+        </p>
       )}
     </Link>
   );

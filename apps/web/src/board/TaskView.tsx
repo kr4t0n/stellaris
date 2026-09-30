@@ -2,6 +2,7 @@ import type { Member, Stage, Task } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { Button } from "../components/Button.js";
+import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
 import { ApiError } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -192,7 +193,12 @@ export function TaskView() {
           {current.onDone === "merge"
             ? `task/${current.id} merges onto the default branch`
             : "nothing more"}
-          {current.blockedBy.length > 0 ? ` · blocked by ${current.blockedBy.join(", ")}` : ""}
+          {current.blockedBy.length > 0 ? (
+            <>
+              {" · blocked by "}
+              <LinkedText text={current.blockedBy.join(", ")} />
+            </>
+          ) : null}
         </p>
         {current.body.trim() === "" ? null : (
           <section className="mt-5 border-t border-line pt-4">

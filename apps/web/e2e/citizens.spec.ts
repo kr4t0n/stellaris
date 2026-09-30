@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fakeBoard } from "./board.js";
+import { fakeBoard, STAGE_TASK } from "./board.js";
 
 test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await fakeBoard(page);
@@ -120,4 +120,11 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   await expect(page).toHaveURL(/\/knowledge\/lab\/experiments$/);
   await expect(view).toContainText("Knowledge of Lab · written by ada");
   await expect(view).toContainText("The harness lives in bench/.");
+
+  // An id in the text reads as what it names and links to it; a branch name stays as written.
+  const settled = view.getByRole("link", { name: "Compare shortest-path algorithms" });
+  await expect(settled).toHaveAttribute("title", `task ${STAGE_TASK}`);
+  await expect(view).toContainText(`its branch is task/${STAGE_TASK}.`);
+  await settled.click();
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });

@@ -1,11 +1,18 @@
 import type { CliKind } from "@stellaris/shared";
 import { CLI_MARKS } from "../lib/marks.js";
+import {
+  frameSphere,
+  homeCamera,
+  panBy,
+  viewCenter,
+  zoomAt,
+  type Camera,
+  type ScreenPoint,
+  type Viewport,
+} from "./camera.js";
 import type { Anchor, SkyModel, Star, TaskMark } from "./model.js";
 
-export interface ScreenPoint {
-  readonly x: number;
-  readonly y: number;
-}
+export type { ScreenPoint } from "./camera.js";
 
 export interface SceneOptions {
   readonly reducedMotion: boolean;
@@ -85,6 +92,11 @@ const BUBBLE_FONT = `500 11px ${LABEL_FAMILY}`;
 const BUBBLE_LIFE = 5;
 const BUBBLE_WIDTH = 240;
 
+/** Room around a focused sphere the camera keeps in view: its name and its tasks' orbit. */
+const FOCUS_ROOM = 34;
+/** How far the background drifts against a pan, for depth. */
+const PARALLAX = 0.06;
+
 const CORE_RADIUS = 15;
 const SPRING = 5;
 const DAMPING = 4.2;
@@ -106,6 +118,11 @@ function phaseOf(name: string): number {
     hash = Math.imul(hash ^ name.charCodeAt(i), 16_777_619);
   }
   return ((hash >>> 0) / 4_294_967_296) * Math.PI * 2;
+}
+
+/** A value wrapped into `[0, size)`, for the background's parallax. */
+function wrap(value: number, size: number): number {
+  return ((value % size) + size) % size;
 }
 
 function rgb(hex: string): string {
@@ -150,7 +167,18 @@ export class SkyScene {
   private readonly specks: Speck[];
   private readonly spheres = new Map<string, Sphere>();
   private radius = 400;
+  /** The camera as drawn, eased toward `target`. */
   private scale = 1;
+  private camX = 0;
+  private camY = 0;
+  private target: Camera = { x: 0, y: 0, scale: 1 };
+  /**
+   * `home` follows the whole sky as it and the islands change, `focus` holds on the sphere the
+   * board brought into view, and `manual` stays wherever the user zoomed or dragged it.
+   */
+  private mode: "home" | "focus" | "manual" = "home";
+  /** A new focus waits for the next frame, when the islands' insets for it are known too. */
+  private focusPending = false;
   private width = 0;
   private height = 0;
   private dpr = 1;
@@ -298,9 +326,57 @@ export class SkyScene {
     this.paused = paused;
   }
 
-  /** The sphere of the project the board has open, drawn brighter. */
+  /** The sphere of the project the board has open: drawn brighter, and brought into view. */
   setFocus(anchor: string | null): void {
     this.focus = anchor;
+    this.focusPending = true;
+  }
+
+  /** Zooms by `factor` around a point in CSS pixels, the middle of the free sky by default. */
+  zoomBy(factor: number, at?: ScreenPoint): void {
+    const view = this.view();
+    this.target = zoomAt(this.target, view, factor, at ?? viewCenter(view));
+    this.mode = "manual";
+  }
+
+  /** Moves the sky with a drag of `dx`, `dy` CSS pixels, at once rather than eased. */
+  panBy(dx: number, dy: number): void {
+    this.target = panBy(this.target, dx, dy);
+    this.camX -= dx / this.scale;
+    this.camY -= dy / this.scale;
+    this.mode = "manual";
+  }
+
+  /** Back to the whole sky, which then follows the society as it grows. */
+  home(): void {
+    this.mode = "home";
+  }
+
+  private view(): Viewport {
+    return { width: this.width, height: this.height, left: this.insetLeft, right: this.insetRight };
+  }
+
+  /**
+   * Brings the focused project into view when it is not, and lets a focus the camera moved for go
+   * home when the board lets go of it. A view the user chose stays unless the focus is off it.
+   */
+  private frameFocus(view: Viewport): void {
+    const sphere = this.focus === null ? undefined : this.spheres.get(this.focus);
+    if (sphere === undefined || sphere.anchor.kind === "society") {
+      if (this.mode === "focus") {
+        this.mode = "home";
+      }
+      return;
+    }
+    const framed = frameSphere(this.target, view, {
+      x: sphere.anchor.x,
+      y: sphere.anchor.y,
+      reach: sphere.anchor.radius + FOCUS_ROOM,
+    });
+    if (framed !== null) {
+      this.target = framed;
+      this.mode = "focus";
+    }
   }
 
   setInsets(left: number, right: number): void {
@@ -387,13 +463,20 @@ export class SkyScene {
   };
 
   private step(dt: number): void {
-    const free = Math.max(240, this.width - this.insetLeft - this.insetRight);
-    const fit = Math.min(free, this.height) / (2 * this.radius);
-    const target = Math.min(1.35, Math.max(0.45, fit));
+    const view = this.view();
+    if (this.mode === "home") {
+      this.target = homeCamera(view, this.radius);
+    }
+    if (this.focusPending && this.width > 0) {
+      this.focusPending = false;
+      this.frameFocus(view);
+    }
     const ease = this.options.reducedMotion ? 1 : Math.min(1, dt * 3);
-    this.scale += (target - this.scale) * ease;
+    this.scale += (this.target.scale - this.scale) * ease;
+    this.camX += (this.target.x - this.camX) * ease;
+    this.camY += (this.target.y - this.camY) * ease;
     // The first frame places the center; after that it glides as the islands open and close.
-    const center = this.insetLeft + free / 2;
+    const center = viewCenter(view).x;
     this.centerX = this.centerX === 0 ? center : this.centerX + (center - this.centerX) * ease;
     for (const sphere of this.spheres.values()) {
       sphere.x += (sphere.anchor.x - sphere.x) * ease;
@@ -437,7 +520,10 @@ export class SkyScene {
   }
 
   private toScreen(x: number, y: number): ScreenPoint {
-    return { x: this.centerX + x * this.scale, y: this.height / 2 + y * this.scale };
+    return {
+      x: this.centerX + (x - this.camX) * this.scale,
+      y: this.height / 2 + (y - this.camY) * this.scale,
+    };
   }
 
   private glow(color: string): HTMLCanvasElement {
@@ -591,10 +677,17 @@ export class SkyScene {
 
   private drawSpecks(t: number): void {
     const { ctx } = this;
+    const shiftX = -this.camX * this.scale * PARALLAX;
+    const shiftY = -this.camY * this.scale * PARALLAX;
     for (const speck of this.specks) {
       const twinkle = t === 0 ? 1 : 0.6 + 0.4 * Math.sin(t * speck.rate + speck.phase);
       ctx.fillStyle = `rgba(255, 255, 255, ${(speck.alpha * twinkle * (this.paused ? 0.6 : 1)).toFixed(3)})`;
-      ctx.fillRect(speck.x * this.width, speck.y * this.height, speck.size, speck.size);
+      ctx.fillRect(
+        wrap(speck.x * this.width + shiftX, this.width),
+        wrap(speck.y * this.height + shiftY, this.height),
+        speck.size,
+        speck.size,
+      );
     }
     // A faint core of light behind the society, so the center reads as the heart of the sky.
     const center = this.toScreen(0, 0);

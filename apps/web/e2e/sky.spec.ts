@@ -18,3 +18,27 @@ test("a task in play is a mark in the sky whose card says where it stands", asyn
   await mark.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
+
+test("dragging the sky moves it without opening what the drag began on", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto("/");
+  const sky = page.locator("canvas");
+  await expect(page.getByRole("group", { name: "Camera" })).toBeVisible();
+  const box = await sky.boundingBox();
+  if (box === null) throw new Error("the sky is not drawn");
+
+  // The core sits in the middle; a plain click there opens the society.
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 120, center.y + 60, { steps: 6 });
+  await page.mouse.up();
+  await expect(page).toHaveURL(/\/$/);
+
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Fit the whole sky" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  await page.mouse.click(center.x, center.y);
+  await expect(page).toHaveURL(/\/society$/);
+});

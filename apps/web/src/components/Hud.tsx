@@ -116,7 +116,7 @@ export function Hud({
       {boardOpen ? null : (
         <p className="pointer-events-none absolute bottom-5 left-5 text-meta">
           Hover a star to meet a citizen and click it to follow its turn; click a sphere to open its
-          project.
+          project. Drag to move around the sky and scroll to zoom.
         </p>
       )}
     </>

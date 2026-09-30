@@ -35,6 +35,15 @@ const RECENT_MS = 15_000;
 
 const CARD_GAP = 26;
 const EDGE = 12;
+/** A press that moves further than this is a drag, and does not also click. */
+const DRAG_SLOP = 4;
+/** How much one pixel of wheel travel zooms; a trackpad pinch arrives as a wheel with Ctrl held. */
+const WHEEL_ZOOM = 0.0015;
+const PINCH_ZOOM = 0.01;
+const STEP_ZOOM = 1.3;
+
+const CONTROL =
+  "grid size-7 place-items-center rounded-md text-sm text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none";
 
 /** Puts the card beside the star inside the sky's free area, flipping sides to stay in it. */
 function place(
@@ -88,6 +97,9 @@ export function Sky({
   useLayoutEffect(() => {
     modelRef.current = model;
   }, [model]);
+  // A press on the sky, and whether it has moved far enough to be a drag rather than a click.
+  const pressRef = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
+  const draggedRef = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -105,8 +117,20 @@ export function Sky({
       scene.resize(bounds.width, bounds.height, window.devicePixelRatio);
     });
     observer.observe(canvas);
+    // Not a React handler: the listener must be active to stop a pinch from zooming the page.
+    const wheel = (event: WheelEvent): void => {
+      event.preventDefault();
+      const pixels =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY;
+      scene.zoomBy(Math.exp(-pixels * (event.ctrlKey ? PINCH_ZOOM : WHEEL_ZOOM)), {
+        x: event.offsetX,
+        y: event.offsetY,
+      });
+    };
+    canvas.addEventListener("wheel", wheel, { passive: false });
     scene.start();
     return () => {
+      canvas.removeEventListener("wheel", wheel);
       observer.disconnect();
       scene.stop();
       sceneRef.current = null;
@@ -157,16 +181,47 @@ export function Sky({
     <div className="absolute inset-0">
       <canvas
         ref={canvasRef}
-        className="size-full"
+        className="size-full touch-none"
         aria-hidden="true"
+        onPointerDown={(event) => {
+          if (event.button === 0) {
+            pressRef.current = { x: event.clientX, y: event.clientY, dragging: false };
+            draggedRef.current = false;
+          }
+        }}
+        onPointerUp={(event) => {
+          if (pressRef.current?.dragging === true) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            event.currentTarget.style.cursor = "grab";
+          }
+          pressRef.current = null;
+        }}
         onPointerMove={(event) => {
           const scene = sceneRef.current;
+          const press = pressRef.current;
+          if (press !== null && scene !== null) {
+            const dx = event.clientX - press.x;
+            const dy = event.clientY - press.y;
+            if (!press.dragging && Math.hypot(dx, dy) > DRAG_SLOP) {
+              press.dragging = true;
+              draggedRef.current = true;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              onHover(null);
+            }
+            if (press.dragging) {
+              scene.panBy(dx, dy);
+              press.x = event.clientX;
+              press.y = event.clientY;
+              event.currentTarget.style.cursor = "grabbing";
+              return;
+            }
+          }
           const { offsetX, offsetY } = event.nativeEvent;
           const star = scene?.hitTest(offsetX, offsetY) ?? null;
           const mark = star === null ? (scene?.hitTestMark(offsetX, offsetY) ?? null) : null;
           const id = star ?? (mark === null ? null : `task:${mark}`);
           const sphere = id === null ? (scene?.hitTestAnchor(offsetX, offsetY) ?? null) : null;
-          event.currentTarget.style.cursor = id !== null || sphere !== null ? "pointer" : "";
+          event.currentTarget.style.cursor = id !== null || sphere !== null ? "pointer" : "grab";
           if (id !== hovered) {
             onHover(id);
           }
@@ -175,7 +230,9 @@ export function Sky({
         onClick={(event) => {
           const scene = sceneRef.current;
           const { offsetX, offsetY } = event.nativeEvent;
-          if (scene === null) {
+          // The click that ends a drag lands wherever the drag stopped; it selects nothing.
+          if (scene === null || draggedRef.current) {
+            draggedRef.current = false;
             return;
           }
           const id = scene.hitTest(offsetX, offsetY);
@@ -191,6 +248,37 @@ export function Sky({
           }
         }}
       />
+      <fieldset
+        className="card absolute bottom-4 flex flex-col gap-0.5 p-1"
+        style={{ right: insets.right + 16 }}
+      >
+        <legend className="sr-only">Camera</legend>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          className={CONTROL}
+          onClick={() => sceneRef.current?.zoomBy(STEP_ZOOM)}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom out"
+          className={CONTROL}
+          onClick={() => sceneRef.current?.zoomBy(1 / STEP_ZOOM)}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          aria-label="Fit the whole sky"
+          title="Fit the whole sky"
+          className={CONTROL}
+          onClick={() => sceneRef.current?.home()}
+        >
+          ⤢
+        </button>
+      </fieldset>
       <div
         ref={cardRef}
         className="pointer-events-none absolute top-0 left-0 will-change-transform"

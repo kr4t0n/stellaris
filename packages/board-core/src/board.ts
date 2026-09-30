@@ -206,10 +206,11 @@ export interface UserRequest {
   readonly thread: Thread | null;
 }
 
-/** A thread as a list shows it: the record, how many messages it holds, and its newest one. */
+/** A thread as a list shows it: the record, how many messages it holds, its newest, and who wrote that. */
 export interface ThreadSummary extends Thread {
   readonly messages: number;
   readonly lastMessageId: Ulid | null;
+  readonly lastAuthor: Name | null;
 }
 
 /** A channel as a navigator lists it: where it is and when it last spoke. */
@@ -1226,11 +1227,14 @@ export class Board {
       for (const file of await listFiles(threads)) {
         const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
         const messages = await listFiles(this.paths.threadMessages(threads, doc.data.id));
+        // A message's file is `<id>-<author>.md`, so the newest one's author needs no read.
+        const last = messages.at(-1);
         all.push({
           ...doc.data,
           body: doc.body,
           messages: messages.length,
-          lastMessageId: messages.at(-1)?.slice(0, 26) ?? null,
+          lastMessageId: last?.slice(0, 26) ?? null,
+          lastAuthor: last?.slice(27, -".md".length) ?? null,
         });
       }
     }

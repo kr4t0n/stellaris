@@ -816,7 +816,9 @@ describe("Board", () => {
     });
     const decided = (await board.readEvents(null)).findLast((e) => e.type === "proposal.decided");
     expect(decided?.payload).toMatchObject({ outcome: "approved", proposedBy: "stew" });
-    expect((await board.listThreads()).map((thread) => thread.id)).toEqual([proposal.id, topic.id]);
+    const listed = await board.listThreads();
+    expect(listed.map((thread) => thread.id)).toEqual([proposal.id, topic.id]);
+    expect(listed[0]).toMatchObject({ messages: 3, lastAuthor: "user" });
   });
 
   it("validates proposals by kind, forbids self-decisions, and reserves hiring for the user", async () => {

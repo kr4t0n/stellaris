@@ -128,3 +128,31 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   await settled.click();
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
+
+test("the citizen count opens every citizen by role, with its model, and each opens its view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/");
+  const count = page.getByRole("button", { name: "2 citizens" });
+  await count.click();
+  await expect(page).toHaveURL(/\/citizens$/);
+  await expect(count).toHaveAttribute("aria-pressed", "true");
+
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view.getByRole("heading", { name: "Citizens" })).toBeVisible();
+  await expect(view.getByRole("heading", { name: /concierge/ })).toBeVisible();
+  await expect(view.getByRole("heading", { name: /steward/ })).toBeVisible();
+  const desk = view.getByRole("link", { name: /^desk/ });
+  await expect(desk).toContainText("claude-opus-5-5");
+  await expect(desk).toContainText("lab");
+  await expect(desk).toContainText("resting");
+  await expect(view.getByRole("link", { name: /^stew/ })).toContainText("no projects");
+
+  await desk.click();
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+  await count.click();
+  await expect(page).toHaveURL(/\/citizens$/);
+  await count.click();
+  await expect(page).toHaveURL(/\/$/);
+});

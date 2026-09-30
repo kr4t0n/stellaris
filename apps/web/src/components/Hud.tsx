@@ -19,6 +19,9 @@ function Chip({ tone = "plain", children }: { tone?: Tone; children: ReactNode }
 interface HudProps {
   readonly society: string | undefined;
   readonly citizens: number;
+  /** Whether the citizens view is open; the count opens and closes it. */
+  readonly citizensOpen: boolean;
+  readonly onToggleCitizens: () => void;
   /** Citizens in a turn. */
   readonly working: number;
   /** Turns running: more than `working` when a citizen is in turns in two projects. */
@@ -43,6 +46,8 @@ interface HudProps {
 export function Hud({
   society,
   citizens,
+  citizensOpen,
+  onToggleCitizens,
   working,
   turns,
   queued,
@@ -92,7 +97,16 @@ export function Hud({
         >
           {paused ? "Paused · resume" : "Pause"}
         </button>
-        <Chip>{citizens === 1 ? "1 citizen" : `${citizens} citizens`}</Chip>
+        <button
+          type="button"
+          aria-pressed={citizensOpen}
+          onClick={onToggleCitizens}
+          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+            citizensOpen ? "text-fg-primary" : "text-fg-tertiary hover:text-fg-primary"
+          }`}
+        >
+          {citizens === 1 ? "1 citizen" : `${citizens} citizens`}
+        </button>
         <Chip tone={working > 0 ? "live" : "plain"}>
           {working} working{turns > working ? ` · ${turns} turns` : ""}
         </Chip>

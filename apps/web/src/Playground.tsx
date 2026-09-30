@@ -253,6 +253,10 @@ export function Playground() {
           <Hud
             society={society.data?.name}
             citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
+            citizensOpen={pathname === "/citizens"}
+            onToggleCitizens={() =>
+              void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
+            }
             working={new Set(working.map((candidate) => candidate.name)).size}
             turns={working.length}
             queued={model.stars.filter((candidate) => candidate.state === "queued").length}

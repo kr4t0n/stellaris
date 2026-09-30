@@ -146,12 +146,17 @@ export class LocalRunner {
    * on the task's branch. Idempotent.
    */
   async prepare(agent: Name, project: Name, taskId?: Ulid): Promise<Workspace> {
-    // Two first turns on one project must not both initialize its repository: serialize per project.
+    return this.withProjectLock(project, () => this.prepareUnlocked(agent, project, taskId));
+  }
+
+  /**
+   * Runs `work` alone among git work on the project's clone. Two first turns once both initialized
+   * the same repository, and two turns of one citizen, its home and a task's, once both created
+   * the task's branch, and the second failed.
+   */
+  private async withProjectLock<T>(project: Name, work: () => Promise<T>): Promise<T> {
     const previous = this.prepareLocks.get(project) ?? Promise.resolve();
-    const run = previous.then(
-      () => this.prepareUnlocked(agent, project, taskId),
-      () => this.prepareUnlocked(agent, project, taskId),
-    );
+    const run = previous.then(work, work);
     this.prepareLocks.set(
       project,
       run.then(
@@ -186,6 +191,12 @@ export class LocalRunner {
       branch,
       record.defaultBranch,
     );
+    // Every task in play gets its branch before the turn, so a holder only has to switch to it.
+    for (const task of await this.board.listTasks(project)) {
+      if (task.status === "open" || task.status === "claimed") {
+        await this.git.ensureBranch(repoDir, taskBranch(task.id), record.defaultBranch);
+      }
+    }
     return { repoDir, worktree, branch };
   }
 
@@ -238,14 +249,6 @@ export class LocalRunner {
     const worktree = workspace?.worktree ?? home;
     const repoDir = workspace?.repoDir ?? home;
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
-    if (project !== null) {
-      // Every task in play gets its branch before the turn, so a holder only has to switch to it.
-      for (const task of await this.board.listTasks(project.slug)) {
-        if (task.status === "open" || task.status === "claimed") {
-          await this.git.ensureBranch(repoDir, taskBranch(task.id), project.defaultBranch);
-        }
-      }
-    }
     const sessions = await this.board.readSessions(agent.name, dispatch.project, thread?.id);
     const spec: AgentSpec = {
       agent: agent.name,
@@ -734,7 +737,9 @@ export class LocalRunner {
     try {
       const { task } = await this.board.findTask(taskId);
       if (task.status === "done" || task.status === "abandoned") {
-        await this.git.removeWorktree(workspace.repoDir, workspace.worktree);
+        await this.withProjectLock(task.project, () =>
+          this.git.removeWorktree(workspace.repoDir, workspace.worktree),
+        );
       }
     } catch (error) {
       this.log.warn({ taskId, error: String(error) }, "could not remove an ended task's worktree");

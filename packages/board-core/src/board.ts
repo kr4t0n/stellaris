@@ -4,6 +4,7 @@ import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
   AgentSchema,
+  ArchiveProposalSchema,
   currentStage,
   channelRef,
   ChannelProposalSchema,
@@ -858,6 +859,15 @@ export class Board {
     return (await readMarkdown(file, ProjectSchema)).data;
   }
 
+  /** A project that still takes work: an archived one refuses posts, tasks, threads, members, and knowledge. */
+  private async readActiveProject(slug: Name): Promise<Project> {
+    const project = await this.readProject(slug);
+    if (project.archived !== undefined) {
+      throw new BoardError("INVALID_STATE", `project ${slug} is archived`);
+    }
+    return project;
+  }
+
   async listAgents(): Promise<Agent[]> {
     const names = await listDirs(this.paths.agents());
     const agents: Agent[] = [];
@@ -1089,17 +1099,17 @@ export class Board {
 
   /**
    * What citizens have asked the user and the user has not answered, oldest first: every message
-   * by someone else that mentions the user, in an open thread or a channel the society or a
-   * project still has, with no later post by the user in the same thread, or the same channel for
+   * by someone else that mentions the user, in an open thread or a channel the society or an
+   * unarchived project still has, with no later post by the user in the same thread, or the same channel for
    * a channel post. Derived, never stored, like everything else that waits on the user.
    */
   async listRequests(): Promise<UserRequest[]> {
     const requests: UserRequest[] = [];
     const refs = [
       ...(await this.society()).channels.map((name) => channelRef(null, name)),
-      ...(await this.listProjects()).flatMap((project) =>
-        project.channels.map((name) => channelRef(project.slug, name)),
-      ),
+      ...(await this.listProjects())
+        .filter((project) => project.archived === undefined)
+        .flatMap((project) => project.channels.map((name) => channelRef(project.slug, name))),
     ];
     for (const ref of refs) {
       const messages = await this.readMessagesIn(this.paths.channelDir(ref), null);
@@ -1705,7 +1715,7 @@ export class Board {
           );
         }
       } else {
-        const project = await this.readProject(args.project);
+        const project = await this.readActiveProject(args.project);
         if (!CURATING_ROLES.includes(actor.role) && !project.members.includes(actor.name)) {
           throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${args.project}`);
         }
@@ -1895,7 +1905,7 @@ export class Board {
           `a task's thread hangs off a channel of its project, ${project}`,
         );
       }
-      await this.assertChannelExists(channel);
+      await this.assertChannelOpen(channel);
       return {
         id: task.id,
         channel,
@@ -1912,7 +1922,7 @@ export class Board {
         );
       }
       const channel = args.channel ?? "governance";
-      await this.assertChannelExists(channel);
+      await this.assertChannelOpen(channel);
       const described = `${proposal.kind} proposal: ${describeCharter(proposal.kind, proposal.charter)}`;
       return {
         id: proposal.id,
@@ -1927,7 +1937,7 @@ export class Board {
         "a thread needs a task_id, a proposal_id, or a channel and a title",
       );
     }
-    await this.assertChannelExists(args.channel);
+    await this.assertChannelOpen(args.channel);
     return { id: this.newId(), channel: args.channel, title: args.title };
   }
 
@@ -1980,7 +1990,7 @@ export class Board {
     const args = VerbInputs.create_task.parse(input);
     await this.authorize(actor, "create_task");
     return this.mutex.run(async () => {
-      const project = await this.readProject(args.project);
+      const project = await this.readActiveProject(args.project);
       if (args.parent_id !== undefined) {
         const parent = await this.findTask(args.parent_id);
         if (parent.project !== args.project) {
@@ -2445,7 +2455,7 @@ export class Board {
     const args = VerbInputs.subscribe.parse(input);
     await this.authorize(actor, "subscribe");
     return this.mutex.run(async () => {
-      await this.assertChannelExists(args.channel);
+      await this.assertChannelOpen(args.channel);
       const agent = await this.updateAgent(actor.name, (a) => ({
         ...a,
         subscriptions: [...new Set([...a.subscriptions, args.channel])],
@@ -2552,7 +2562,7 @@ export class Board {
     const args = VerbInputs.configure_project.parse(input);
     await this.authorize(actor, "configure_project");
     return this.mutex.run(async () => {
-      await this.readProject(args.project);
+      await this.readActiveProject(args.project);
       const project = await this.updateProject(args.project, (current) => ({
         ...current,
         onDone: args.on_done,
@@ -2562,6 +2572,16 @@ export class Board {
         onDone: project.onDone,
       });
       return project;
+    });
+  }
+
+  /** Archives a project directly: the user's verb for now, and what an approved archive proposal runs. */
+  async archiveProject(actor: Actor, input: VerbInput<"archive_project">): Promise<Project> {
+    const args = VerbInputs.archive_project.parse(input);
+    await this.authorize(actor, "archive_project");
+    return this.mutex.run(async () => {
+      await this.validateArchive(args.project);
+      return (await this.archiveUnlocked(actor.name, args.project, args.reason, {})).project;
     });
   }
 
@@ -2575,7 +2595,7 @@ export class Board {
     const target = args.agent ?? actor.name;
     this.assertMayReallocate(actor, target);
     return this.mutex.run(async () => {
-      await this.readProject(args.project);
+      await this.readActiveProject(args.project);
       const current = await this.readAgent(target);
       if (current.status !== "active") {
         throw new BoardError("INVALID_STATE", `${target} is retired`);
@@ -2707,6 +2727,8 @@ export class Board {
         return this.advanceTask(actor, VerbInputs.advance_task.parse(input));
       case "configure_project":
         return this.configureProject(actor, VerbInputs.configure_project.parse(input));
+      case "archive_project":
+        return this.archiveProject(actor, VerbInputs.archive_project.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -3323,6 +3345,9 @@ export class Board {
       case "skill":
         SkillProposalSchema.parse(charter);
         return;
+      case "archive":
+        await this.validateArchive(ArchiveProposalSchema.parse(charter).project);
+        return;
       case "reallocation":
         return;
       default:
@@ -3377,6 +3402,11 @@ export class Board {
         const replaced = await this.promoteSkillUnlocked(by, proposal.proposedBy, skill, meta);
         return { skill: skill.name, replaced };
       }
+      case "archive": {
+        const input = ArchiveProposalSchema.parse(proposal.charter);
+        const { members } = await this.archiveUnlocked(by, input.project, input.reason, meta);
+        return { project: input.project, members };
+      }
       case "reallocation":
         return undefined;
       default:
@@ -3426,10 +3456,10 @@ export class Board {
     await this.readRole(input.role);
     await this.readRunner(input.homeRunner ?? SERVER_RUNNER);
     for (const slug of input.memberships ?? []) {
-      await this.readProject(slug);
+      await this.readActiveProject(slug);
     }
     for (const ref of input.subscriptions ?? []) {
-      await this.assertChannelExists(ref);
+      await this.assertChannelOpen(ref);
     }
   }
 
@@ -3483,7 +3513,7 @@ export class Board {
       }
       return;
     }
-    const project = await this.readProject(input.project);
+    const project = await this.readActiveProject(input.project);
     if (project.channels.includes(input.name)) {
       throw new BoardError(
         "ALREADY_EXISTS",
@@ -3552,6 +3582,93 @@ export class Board {
       await this.refreshAgentRoles(charter);
     }
     return { charter, replaced };
+  }
+
+  /** A project may be archived while it is active and no task there is in play. */
+  private async validateArchive(slug: Name): Promise<void> {
+    await this.readActiveProject(slug);
+    const inPlay = (await this.listTasks(slug)).filter(
+      (task) => task.status === "open" || task.status === "claimed",
+    );
+    if (inPlay.length > 0) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `project ${slug} has ${inPlay.length} task(s) in play (${inPlay.map((task) => task.id).join(", ")}); finish or abandon them, or file them again in another project, before archiving it`,
+      );
+    }
+  }
+
+  /**
+   * Every member leaves, every open thread on its channels closes, and the project is marked; its
+   * files, repository, and history stay. The notice is the board's, since the reason is free text
+   * a proposer wrote and a board-authored mention would wake whoever it names.
+   */
+  private async archiveUnlocked(
+    by: Name,
+    slug: Name,
+    reason: string,
+    meta: Record<string, unknown>,
+  ): Promise<{ project: Project; members: Name[] }> {
+    const current = await this.readProject(slug);
+    const ts = this.now().toISOString();
+    // The project's list and the members' own records both say who belongs; the user joins every
+    // project it creates on its record alone.
+    const members = [
+      ...new Set([
+        ...current.members,
+        ...(await this.listAgents())
+          .filter((agent) => agent.memberships.includes(slug))
+          .map((agent) => agent.name),
+      ]),
+    ].toSorted((a, b) => a.localeCompare(b));
+    for (const name of members) {
+      await this.updateAgent(name, (agent) => ({
+        ...agent,
+        memberships: agent.memberships.filter((each) => each !== slug),
+        subscriptions: agent.subscriptions.filter((ref) => parseChannelRef(ref).project !== slug),
+      }));
+      await this.refreshMember(name);
+      await this.events.append("agent.left", by, { name, project: slug, releasedTasks: [] });
+    }
+    const threads = this.paths.threads(slug);
+    const threadsClosed: Ulid[] = [];
+    for (const file of await listFiles(threads)) {
+      const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+      if (doc.data.state !== "open") {
+        continue;
+      }
+      await this.writeThread(threads, {
+        ...doc.data,
+        body: doc.body,
+        state: "closed",
+        closedBy: by,
+        closedAt: ts,
+      });
+      await this.events.append("thread.closed", by, {
+        threadId: doc.data.id,
+        channel: doc.data.channel,
+        ended: "archived",
+      });
+      threadsClosed.push(doc.data.id);
+    }
+    const project = await this.updateProject(slug, (p) => ({
+      ...p,
+      members: [],
+      archived: { at: ts, by, reason },
+    }));
+    await this.events.append("project.archived", by, {
+      slug,
+      reason,
+      members,
+      threadsClosed,
+      ...meta,
+    });
+    await this.appendMessage(
+      SYSTEM_ACTOR.name,
+      "general",
+      `Project ${slug} is archived by ${by}. Its files and history stay; nothing more is posted, filed, or joined there.`,
+    );
+    return { project, members };
   }
 
   private async validateRetire(name: Name): Promise<void> {
@@ -3630,7 +3747,7 @@ export class Board {
 
   /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
   private async appendMessage(author: Name, channel: ChannelRef, body: string): Promise<Message> {
-    await this.assertChannelExists(channel);
+    await this.assertChannelOpen(channel);
     return this.writeMessage(this.paths.channelDir(channel), { author, channel }, body);
   }
 
@@ -3702,6 +3819,15 @@ export class Board {
     const project = await this.readProject(parsed.project);
     if (!project.channels.includes(parsed.channel)) {
       throw new BoardError("NOT_FOUND", `channel ${ref} not found`);
+    }
+  }
+
+  /** A channel that takes new posts, threads, and followers: it exists, and its project is not archived. */
+  private async assertChannelOpen(ref: ChannelRef): Promise<void> {
+    await this.assertChannelExists(ref);
+    const { project } = parseChannelRef(ref);
+    if (project !== null) {
+      await this.readActiveProject(project);
     }
   }
 

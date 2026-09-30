@@ -267,9 +267,12 @@ export class LocalRunner {
       ...(onboarding === null ? {} : { onboarding }),
     });
     await this.renderConfigHome(agent.name, instructions);
-    // Roles that route for the user get the roster and the project list in every digest.
+    // Roles that route for the user get the roster and the projects still taking work in every digest.
     const societyView: SocietyView | null = charter.wakeTriggers.includes(USER_POST_TRIGGER)
-      ? { projects: await this.board.listProjects(), members: await this.board.listMembers() }
+      ? {
+          projects: (await this.board.listProjects()).filter((each) => each.archived === undefined),
+          members: await this.board.listMembers(),
+        }
       : null;
     const knowledge: KnowledgeView = societyScope
       ? { dir: this.board.paths.societyKnowledge(), topics: await this.board.listKnowledge(null) }

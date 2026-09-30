@@ -1,4 +1,5 @@
 import {
+  ArchiveProposalSchema,
   ChannelProposalSchema,
   channelRef,
   MemberProposalSchema,
@@ -9,11 +10,14 @@ import {
   type Proposal,
   type RoleCharter,
 } from "@stellaris/shared";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
+import { useProjects, useTasks } from "../lib/session.js";
 import { Citizen } from "./Avatar.js";
 import { proposedRole, roleDiff, skillText } from "./governance.js";
+import { inPlay } from "./tasks.js";
 
 function Fields({ children }: { children: ReactNode }) {
   return <dl className="mt-2 space-y-1.5">{children}</dl>;
@@ -125,6 +129,62 @@ function RoleCharterView({
   );
 }
 
+/**
+ * A project's archive: who would leave it and whether any task still holds it open, or, once
+ * decided, who left.
+ */
+function ArchiveCharterView({
+  proposal,
+  slug,
+  reason,
+  members,
+}: {
+  proposal: Proposal;
+  slug: string;
+  reason: string;
+  members: readonly Member[] | undefined;
+}) {
+  const projects = useProjects();
+  const tasks = useTasks(slug);
+  const project = projects.data?.find((candidate) => candidate.slug === slug);
+  const pending = proposal.status === "proposed";
+  const leaving = pending
+    ? (members ?? [])
+        .filter((member) => member.status === "active" && member.memberships.includes(slug))
+        .map((member) => member.name)
+    : (proposal.provision?.["members"] ?? []);
+  const open = (tasks.data ?? []).filter(inPlay).length;
+  return (
+    <Fields>
+      <Field label="Project">
+        <Link to="/p/$slug" params={{ slug }} className="hover:text-fg-primary">
+          {project?.name ?? slug}
+        </Link>
+        {project?.name === undefined || project.name === slug ? null : ` · ${slug}`}
+      </Field>
+      <Field label={pending ? "Members who leave" : "Members who left"}>
+        {Array.isArray(leaving)
+          ? listed(leaving.filter((name): name is string => typeof name === "string"))
+          : "none"}
+      </Field>
+      {pending ? (
+        <Field label="Tasks in play">
+          {tasks.data === undefined
+            ? "reading…"
+            : open === 0
+              ? "none"
+              : `${open}: approval is refused until they are done, abandoned, or filed elsewhere`}
+        </Field>
+      ) : null}
+      <Field label="Reason">{reason}</Field>
+      <Field label="After">
+        Its open threads close and nothing more is posted, filed, or joined there; its channels,
+        tasks, repository, and history stay readable.
+      </Field>
+    </Fields>
+  );
+}
+
 /** What approval would create or change, drawn for the proposal's kind. */
 export function ProposalCharter({
   proposal,
@@ -228,6 +288,18 @@ export function ProposalCharter({
           </Field>
           <Field label="Reason">{parsed.data.reason}</Field>
         </Fields>
+      );
+    }
+    case "archive": {
+      const parsed = ArchiveProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return (
+        <ArchiveCharterView
+          proposal={proposal}
+          slug={parsed.data.project}
+          reason={parsed.data.reason}
+          members={members}
+        />
       );
     }
     case "reallocation": {

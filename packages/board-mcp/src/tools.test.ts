@@ -4,7 +4,7 @@ import { BOARD_TOOLS, toolsForRole } from "./index.js";
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
-    expect(BOARD_TOOLS).toHaveLength(22);
+    expect(BOARD_TOOLS).toHaveLength(23);
     for (const tool of BOARD_TOOLS) {
       expect(tool.description.length).toBeGreaterThan(10);
     }
@@ -18,7 +18,11 @@ describe("board tools", () => {
     }
     const conciergeTools = toolsForRole(concierge).map((tool) => tool.name);
     expect(conciergeTools).not.toContain("approve");
+    // Archiving is the user's alone for now; the concierge proposes it instead.
+    expect(conciergeTools).not.toContain("archive_project");
     expect(conciergeTools).toEqual(expect.arrayContaining(["plan_task", "configure_project"]));
-    expect(toolsForRole(user).map((tool) => tool.name)).toContain("approve");
+    expect(toolsForRole(user).map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["approve", "archive_project"]),
+    );
   });
 });

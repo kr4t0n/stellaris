@@ -135,9 +135,10 @@ interface Placement {
  * Pure, so the same board always draws the same sky.
  */
 export function skyModel(snapshot: SkySnapshot): SkyModel {
-  const projects = snapshot.projects.toSorted(
-    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug),
-  );
+  // An archived project has no members and takes no work, so it has no sphere.
+  const projects = snapshot.projects
+    .filter((project) => project.archived === undefined)
+    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug));
   const slugs = new Set(projects.map((project) => project.slug));
   const placeOf = (scope: string): string => (slugs.has(scope) ? scope : SOCIETY_SCOPE);
 

@@ -1,6 +1,8 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { Markdown } from "../components/Markdown.js";
+import { ago } from "../lib/format.js";
 import {
+  useChannels,
   useDashboard,
   useKnowledge,
   useMembers,
@@ -12,10 +14,15 @@ import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { groupTasks, PHASES } from "./tasks.js";
 
-/** A project at a glance: who works in it, where its tasks stand, how they end, its dashboard, and what it knows. */
+/**
+ * A project at a glance: who works in it, where its tasks stand, how they end, its dashboard, and
+ * what it knows; an archived one also says when and why, and lists its channels, which the
+ * navigator no longer does.
+ */
 export function ProjectView() {
   const { slug } = useParams({ from: "/p/$slug" });
   const projects = useProjects();
+  const channels = useChannels();
   const members = useMembers();
   const tasks = useTasks(slug);
   const dashboard = useDashboard(slug);
@@ -52,6 +59,33 @@ export function ProjectView() {
         }
       />
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        {project.archived === undefined ? null : (
+          <p className="rounded-lg bg-surface-2/40 px-3 py-2 text-sm text-fg-secondary">
+            Archived {ago(project.archived.at, now)} by {project.archived.by}:{" "}
+            {project.archived.reason}. Its channels, tasks, and history stay readable here; nothing
+            more is posted, filed, or joined.
+          </p>
+        )}
+        {project.archived === undefined ? null : (
+          <Section title="Channels">
+            <ul className="space-y-1">
+              {(channels.data ?? [])
+                .filter((channel) => channel.project === slug)
+                .map((channel) => (
+                  <li key={channel.ref}>
+                    <Link
+                      to="/c/$"
+                      params={{ _splat: channel.ref }}
+                      className="text-sm text-fg-secondary hover:text-fg-primary"
+                    >
+                      # {channel.name}
+                    </Link>
+                    <span className="text-meta"> · {channel.messages} messages</span>
+                  </li>
+                ))}
+            </ul>
+          </Section>
+        )}
         <Section title="Members">
           <CrewList members={crew} scope={slug} />
         </Section>

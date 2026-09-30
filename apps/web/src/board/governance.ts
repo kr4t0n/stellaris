@@ -1,4 +1,5 @@
 import {
+  ArchiveProposalSchema,
   ChannelProposalSchema,
   channelRef,
   describeCharter,
@@ -199,6 +200,11 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
       return board.skills.some((skill) => skill.name === parsed.data.name)
         ? `Replaces the society's ${parsed.data.name} skill with this text.`
         : `Publishes ${parsed.data.name} to the society's skills, which every citizen's instructions list.`;
+    }
+    case "archive": {
+      const parsed = ArchiveProposalSchema.safeParse(proposal.charter);
+      if (!parsed.success) break;
+      return `Archives ${parsed.data.project}: its members leave, its open threads close, and it takes no more work; its channels, tasks, and history stay readable.`;
     }
     case "reallocation":
       return "Records the decision; the board carries out nothing for a reallocation.";

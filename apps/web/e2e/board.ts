@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 
 export const TOKEN = "stl_e2e_fixture";
 export const SKILL_PROPOSAL = "01M3PY56V68VFS0EG5ER4B9AMD";
+export const ARCHIVE_PROPOSAL = "01M3PY56V68VFS0EG5ER4B9AME";
 
 const CREATED = "2026-09-29T09:00:00.000Z";
 
@@ -85,6 +86,56 @@ const PROJECT = {
   requiredCapabilities: [],
   createdAt: CREATED,
   onDone: "none",
+};
+
+/** A project archived after its work moved to lab, with the one post it kept. */
+const ARCHIVED_PROJECT = {
+  ...PROJECT,
+  slug: "iphone",
+  name: "iPhone study",
+  members: [],
+  archived: { at: CREATED, by: "user", reason: "merged into lab" },
+};
+
+const ARCHIVED_POST = {
+  id: "01M3Q2GGGGGGGGGGGGGGGGGGG1",
+  author: "ada",
+  channel: "iphone/general",
+  ts: CREATED,
+  mentions: [],
+  body: "The findings are on task/01M3Q2AAAAAAAAAAAAAAAAAAA9.",
+};
+
+/** desk asks to archive lab, whose sign-off stage is still in play. */
+const ARCHIVE = {
+  id: ARCHIVE_PROPOSAL,
+  kind: "archive",
+  proposedBy: "desk",
+  status: "proposed",
+  createdAt: CREATED,
+  charter: { project: "lab", reason: "its work moves to a phones project" },
+  body: "Its work moves to a phones project.",
+};
+
+const ARCHIVE_PITCH = {
+  id: "01M3Q2GGGGGGGGGGGGGGGGGGG2",
+  author: "desk",
+  channel: "governance",
+  thread: ARCHIVE_PROPOSAL,
+  ts: CREATED,
+  mentions: [],
+  body: `Proposal ${ARCHIVE_PROPOSAL}: archive of project lab: its work moves to a phones project.`,
+};
+
+const ARCHIVE_THREAD = {
+  id: ARCHIVE_PROPOSAL,
+  channel: "governance",
+  title: "archive proposal: archive of project lab",
+  subject: { kind: "proposal", id: ARCHIVE_PROPOSAL },
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
+  body: "",
 };
 
 /** A study whose gated sign-off stage names the user. */
@@ -280,9 +331,14 @@ export interface FakeBoard {
 
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
- * Decisions and the pause switch change the fake's state the way the board would.
+ * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
+ * an archived project sits beside lab and desk asks to archive lab too.
  */
-export async function fakeBoard(page: Page, options: { asked?: boolean } = {}): Promise<FakeBoard> {
+export async function fakeBoard(
+  page: Page,
+  options: { asked?: boolean; archived?: boolean } = {},
+): Promise<FakeBoard> {
+  const archived = options.archived === true;
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
@@ -459,13 +515,28 @@ export async function fakeBoard(page: Page, options: { asked?: boolean } = {}): 
           role("steward", ["ops_event"]),
         ]);
       case "/api/projects":
-        return json(route, [PROJECT]);
+        return json(route, archived ? [PROJECT, ARCHIVED_PROJECT] : [PROJECT]);
       case "/api/projects/lab/tasks":
         return json(route, [TASK]);
       case `/api/tasks/${STAGE_TASK}`:
         return json(route, TASK);
+      case "/api/projects/iphone/tasks":
+      case "/api/projects/iphone/knowledge":
+      case "/api/channels/lab/general":
+        return json(route, []);
+      case "/api/projects/iphone/dashboard":
+        return json(route, { data: {}, body: "" });
+      case "/api/channels/iphone/general":
+        return json(route, [ARCHIVED_POST]);
+      case `/api/proposals/${ARCHIVE_PROPOSAL}`:
+        return json(route, ARCHIVE);
+      case `/api/threads/${ARCHIVE_PROPOSAL}`:
+        return json(route, { thread: ARCHIVE_THREAD, messages: [ARCHIVE_PITCH] });
       case "/api/threads":
         return json(route, [
+          ...(archived
+            ? [{ ...ARCHIVE_THREAD, messages: 1, lastMessageId: ARCHIVE_PITCH.id }]
+            : []),
           {
             ...TASK_THREAD,
             messages: threadMessages.length,
@@ -502,9 +573,12 @@ export async function fakeBoard(page: Page, options: { asked?: boolean } = {}): 
           channel("general"),
           channel("governance"),
           { ...channel("general"), ref: "lab/general", project: "lab" },
+          ...(archived
+            ? [{ ...channel("general"), ref: "iphone/general", project: "iphone", messages: 1 }]
+            : []),
         ]);
       case "/api/proposals":
-        return json(route, [proposal]);
+        return json(route, archived ? [proposal, ARCHIVE] : [proposal]);
       case `/api/proposals/${SKILL_PROPOSAL}`:
         return json(route, proposal);
       default:

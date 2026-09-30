@@ -847,6 +847,90 @@ describe("Board", () => {
     expect((await board.readProposal(reallocation.id)).status).toBe("approved");
   });
 
+  it("archives a project by the user alone, once no task there is in play, and keeps what it holds", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const STEW: Actor = { name: "stew", role: "steward" };
+    const task = await board.createTask(USER, { project: "demo", title: "last study" });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "sources" });
+    await board.postMessage(ENG, { thread_id: topic.id, body: "@user which source wins?" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@user the findings are in." });
+    const charter = { project: "demo", reason: "merged into phones" };
+
+    // Only the user holds the verb; the others propose, and a task in play keeps the project open.
+    await expect(
+      board.archiveProject(DESK, { project: "demo", reason: "merged into phones" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.propose(DESK, { kind: "archive", charter })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    const proposal = await board.propose(DESK, { kind: "archive", charter });
+    expect((await board.listThread(proposal.id)).at(0)?.body).toContain(
+      "archive of project demo: merged into phones",
+    );
+    await expect(board.approve(STEW, { proposal_id: proposal.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect((await board.listRequests()).map((request) => request.message.author)).toEqual([
+      "eng-1",
+      "rev-1",
+    ]);
+    await board.approve(USER, { proposal_id: proposal.id });
+
+    const archived = await board.readProject("demo");
+    expect(archived.archived).toMatchObject({ by: "user", reason: "merged into phones" });
+    expect(archived.members).toEqual([]);
+    expect((await board.readProposal(proposal.id)).provision).toEqual({
+      project: "demo",
+      members: ["eng-1", "rev-1", "user"],
+    });
+    for (const name of ["eng-1", "rev-1", "user"]) {
+      const agent = await board.readAgent(name);
+      expect(agent.memberships).not.toContain("demo");
+      expect(agent.subscriptions.filter((ref) => ref.startsWith("demo/"))).toEqual([]);
+    }
+    expect((await board.readThread(topic.id)).state).toBe("closed");
+    // Nothing is asked of the user where nobody can answer any more, and the history stays readable.
+    expect(await board.listRequests()).toEqual([]);
+    expect((await board.listChannel("demo/general")).at(-1)?.body.trim()).toBe(
+      "@user the findings are in.",
+    );
+    // The notice is the board's and names nobody, so it wakes nobody.
+    const notice = (await board.listChannel("general")).at(-1);
+    expect(notice).toMatchObject({ author: "board", mentions: [] });
+    expect(notice?.body.trim()).toBe(
+      "Project demo is archived by user. Its files and history stay; nothing more is posted, filed, or joined there.",
+    );
+    expect(
+      (await board.readEvents(null)).find((event) => event.type === "project.archived")?.payload,
+    ).toMatchObject({
+      slug: "demo",
+      members: ["eng-1", "rev-1", "user"],
+      threadsClosed: [topic.id],
+    });
+
+    // An archived project takes no more work of any kind.
+    for (const attempt of [
+      () => board.postMessage(USER, { channel: "demo/general", body: "anyone?" }),
+      () => board.createTask(USER, { project: "demo", title: "more" }),
+      () => board.openThread(USER, { channel: "demo/general", title: "more" }),
+      () => board.joinProject(USER, { project: "demo", agent: "eng-1" }),
+      () => board.writeKnowledge(USER, { project: "demo", topic: "notes", body: "x" }),
+      () => board.subscribe(ENG, { channel: "demo/dev" }),
+      () => board.archiveProject(USER, { project: "demo", reason: "again" }),
+    ]) {
+      await expect(attempt()).rejects.toMatchObject({ code: "INVALID_STATE" });
+    }
+
+    // The user may archive directly, without a proposal.
+    await board.addProject(USER, { slug: "lab" });
+    const lab = await board.archiveProject(USER, { project: "lab", reason: "never used" });
+    expect(lab.archived).toMatchObject({ by: "user", reason: "never used" });
+  });
+
   it("refuses proposals that could not be provisioned, and guards direct administration", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

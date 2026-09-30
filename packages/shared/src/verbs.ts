@@ -95,6 +95,7 @@ export const VerbInputs = {
     project: NameSchema,
     on_done: CompletionEffectSchema,
   }),
+  archive_project: z.object({ project: NameSchema, reason: z.string().min(1) }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -122,7 +123,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
   propose:
-    "Propose a member, role, channel, reallocation, or retirement. The charter shape per kind is in your instructions. Opens the proposal's thread in governance with your rationale; approval provisions it.",
+    "Propose a member, role, channel, reallocation, retirement, skill, or a project's archive. The charter shape per kind is in your instructions. Opens the proposal's thread in governance with your rationale; approval provisions it.",
   approve:
     "Approve a proposal; the board then provisions it, posts the decision in the proposal's thread, and closes it. User and steward only, never on your own proposal.",
   reject:
@@ -140,4 +141,6 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Finish the stage you hold, with a note for the task's thread on what you did. The next stage becomes current; past the last one the task is done.",
   configure_project:
     "Set a project's completion effect: none, or merge to land each finished task's branch on the default branch.",
+  archive_project:
+    "Archive a project whose work is finished or has moved: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay. Refused while a task there is in play.",
 };

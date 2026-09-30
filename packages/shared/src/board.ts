@@ -96,6 +96,10 @@ export const ProjectSchema = z.object({
   requiredCapabilities: z.array(z.string()),
   createdAt: IsoDateTimeSchema,
   onDone: CompletionEffectSchema.default("none"),
+  /** Set once the project is archived: nobody belongs to it, and nothing more is posted, filed, or joined there. */
+  archived: z
+    .object({ at: IsoDateTimeSchema, by: NameSchema, reason: z.string().min(1) })
+    .optional(),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
@@ -350,6 +354,7 @@ export const ProposalKindSchema = z.enum([
   "reallocation",
   "retirement",
   "skill",
+  "archive",
 ]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 
@@ -388,6 +393,12 @@ export const RetirementProposalSchema = z.object({
   reason: z.string().min(1),
 });
 export type RetirementProposal = z.infer<typeof RetirementProposalSchema>;
+/** A project to archive once its work is finished or has moved to another project. */
+export const ArchiveProposalSchema = z.object({
+  project: NameSchema,
+  reason: z.string().min(1),
+});
+export type ArchiveProposal = z.infer<typeof ArchiveProposalSchema>;
 
 /** A skill proposed for the society; approval copies the body under `society/skills/`. */
 export const SkillProposalSchema = z.object({
@@ -405,6 +416,7 @@ export const ProposalCharterSchemas = {
   reallocation: ReallocationProposalSchema,
   retirement: RetirementProposalSchema,
   skill: SkillProposalSchema,
+  archive: ArchiveProposalSchema,
 } as const;
 
 /** The roles that may decide a proposal of each kind. A proposer never decides its own. */
@@ -412,6 +424,7 @@ export const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>
   role: [USER_ROLE],
   member: [USER_ROLE],
   retirement: [USER_ROLE],
+  archive: [USER_ROLE],
   channel: [USER_ROLE, "steward"],
   reallocation: [USER_ROLE, "steward"],
   skill: [USER_ROLE, "steward"],
@@ -455,6 +468,11 @@ export function describeCharter(kind: ProposalKind, charter: Record<string, unkn
       const parsed = SkillProposalSchema.safeParse(charter);
       if (!parsed.success) break;
       return `skill ${parsed.data.name}: ${parsed.data.summary.trim().replace(/\.+$/, "")}`;
+    }
+    case "archive": {
+      const parsed = ArchiveProposalSchema.safeParse(charter);
+      if (!parsed.success) break;
+      return `archive of project ${parsed.data.project}: ${parsed.data.reason}`;
     }
     default:
       break;

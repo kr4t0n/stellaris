@@ -6,6 +6,7 @@ export const BOARD_EVENT_TYPES = [
   "society.initialized",
   "project.added",
   "project.configured",
+  "project.archived",
   "agent.added",
   "agent.configured",
   "message.posted",

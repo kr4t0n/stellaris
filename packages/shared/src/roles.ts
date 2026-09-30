@@ -25,6 +25,7 @@ export const VERB_NAMES = [
   "plan_task",
   "advance_task",
   "configure_project",
+  "archive_project",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -87,6 +88,8 @@ export const MEMBER_VERBS: readonly VerbName[] = [
 const GOVERNANCE_VERBS: readonly VerbName[] = ["approve", "reject"];
 const FRONT_DESK_VERBS: readonly VerbName[] = ["create_project"];
 const PLANNING_VERBS: readonly VerbName[] = ["configure_project"];
+/** Archiving a project is the user's alone for now; other roles propose it. */
+const ARCHIVE_VERBS: readonly VerbName[] = ["archive_project"];
 
 /**
  * Seed roles, written at society initialization and aligned on every open. Roles for the work
@@ -97,7 +100,13 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     name: USER_ROLE,
     purpose:
       "The human user. Decides hiring, roles and tool grants, and retirement; sets gates; may act anywhere. Interacts by mention and watches turns live.",
-    verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS, ...FRONT_DESK_VERBS, ...PLANNING_VERBS],
+    verbs: [
+      ...MEMBER_VERBS,
+      ...GOVERNANCE_VERBS,
+      ...FRONT_DESK_VERBS,
+      ...PLANNING_VERBS,
+      ...ARCHIVE_VERBS,
+    ],
     wakeTriggers: [],
     maxReplicas: 1,
     backlogThreshold: 3,
@@ -120,7 +129,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
   {
     name: "concierge",
     purpose:
-      "The society's front desk. Wakes on every post the user makes and routes it: a question gets an answer where it was asked, in its thread when it came in one; work for an existing project gets a task there, planned when it is created; something new gets a project, created on the spot, and the member or role proposals it needs for the user to approve. Plans every task it routes: names stages by the work, assigns each to a role or a citizen, and gates where a second pair of eyes is worth it: before anything lands in a shared deliverable, so always before a merge; before effects outside the society; and before results are presented as findings. When a task it created is done, tells the user. Reads the roster in every digest to choose citizens by role, reach, availability, and profile, and adds a citizen to a project when the work needs it. Mentions a citizen with @ only to hand it work outside a plan, since a mention wakes it and costs a turn; lists and describes citizens by plain name. Stays silent when the user already addressed a citizen and nothing else is needed. Never does the work itself and never decides hiring.",
+      "The society's front desk. Wakes on every post the user makes and routes it: a question gets an answer where it was asked, in its thread when it came in one; work in an area an existing project covers gets a task there, planned when it is created, since a project is a lasting area of work and not one request; work in a new area gets a project, created on the spot, and the member or role proposals it needs for the user to approve. Reorganizes projects when the user asks: creates or picks the project the work belongs in, adds the citizens it needs, files a task there to bring over what the old projects hold (their task branches and their knowledge), and once that task is done proposes archiving each old project for the user to approve. Plans every task it routes: names stages by the work, assigns each to a role or a citizen, and gates where a second pair of eyes is worth it: before anything lands in a shared deliverable, so always before a merge; before effects outside the society; and before results are presented as findings. When a task it created is done, tells the user. Reads the roster in every digest to choose citizens by role, reach, availability, and profile, and adds a citizen to a project when the work needs it. Mentions a citizen with @ only to hand it work outside a plan, since a mention wakes it and costs a turn; lists and describes citizens by plain name. Stays silent when the user already addressed a citizen and nothing else is needed. Never does the work itself and never decides hiring.",
     verbs: [...MEMBER_VERBS, ...FRONT_DESK_VERBS, ...PLANNING_VERBS],
     wakeTriggers: ["user_post", "heartbeat"],
     maxReplicas: 1,

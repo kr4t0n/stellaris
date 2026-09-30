@@ -56,10 +56,11 @@ function ChannelStream({ channel }: { channel: string }) {
 
   const [first, second] = channel.split("/");
   const name = second ?? first ?? channel;
-  const place =
-    second === undefined
-      ? "society"
-      : (projects.data?.find((project) => project.slug === first)?.name ?? first);
+  const project =
+    second === undefined ? undefined : projects.data?.find((each) => each.slug === first);
+  const place = second === undefined ? "society" : (project?.name ?? first);
+  // An archived project's channels are read-only: the board refuses posts and threads there.
+  const archived = project?.archived !== undefined;
   const open = items.filter((item) => item.kind === "thread" && item.thread.state === "open");
 
   return (
@@ -69,7 +70,11 @@ function ChannelStream({ channel }: { channel: string }) {
         subtitle={`${place} · ${messages.data?.length ?? 0} messages${
           open.length > 0 ? ` · ${open.length} open threads` : ""
         }`}
-        trailing={starting ? null : <Button onClick={() => setStarting(true)}>New thread</Button>}
+        trailing={
+          starting || archived ? null : (
+            <Button onClick={() => setStarting(true)}>New thread</Button>
+          )
+        }
       />
       {starting ? <NewThreadForm channel={channel} onDone={() => setStarting(false)} /> : null}
       <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
@@ -89,7 +94,11 @@ function ChannelStream({ channel }: { channel: string }) {
           )
         )}
       </div>
-      {messages.data === undefined ? null : (
+      {messages.data === undefined ? null : archived ? (
+        <p className="border-t border-line px-4 py-3 text-meta">
+          {place} is archived, so its channels are read-only.
+        </p>
+      ) : (
         <Composer target={{ channel }} placeholder={`Message #${name}`} />
       )}
     </>

@@ -157,6 +157,14 @@ describe("governance", () => {
     expect(consequenceOf(rewrite, board)).toBe(
       "Rewrites the researcher charter; no active member holds the role.",
     );
+    const archive = proposal({
+      id: skill.id,
+      kind: "archive",
+      charter: { project: "iphone-duo", reason: "merged into phones" },
+    });
+    expect(consequenceOf(archive, board)).toBe(
+      "Archives iphone-duo: its members leave, its open threads close, and it takes no more work; its channels, tasks, and history stay readable.",
+    );
     expect(consequenceOf(proposal({ id: skill.id, kind: "member", charter: {} }), board)).toMatch(
       /does not parse/,
     );

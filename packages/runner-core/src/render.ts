@@ -48,15 +48,16 @@ const PLANNING = [
 
 /** How the society changes itself: proposals, who decides them, and the charter each kind takes. */
 const GOVERNANCE = [
-  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. It opens the proposal's thread in governance with your rationale, where it is discussed and where the decision is posted. Approval provisions it on the spot, and either decision wakes the proposer. The user decides members, roles, and retirements; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
+  "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. It opens the proposal's thread in governance with your rationale, where it is discussed and where the decision is posted. Approval provisions it on the spot, and either decision wakes the proposer. The user decides members, roles, retirements, and archives; the steward may also decide channels, reallocations, and skills. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
   '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
   '  - role: {"name", "purpose", "verbs": [board verbs], "wakeTriggers"?: any of "user_post", "ops_event", "heartbeat" (heartbeat when omitted), "maxReplicas"?, "backlogThreshold"?}. Mentions, stages that become yours, and finished tasks you created wake every role; a heartbeat wakes you when something is unread, held, or waiting for you.',
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',
+  '  - archive: {"project", "reason"}: approval archives the project: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay; refused while a task there is in play',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
-  "- Projects and membership: `create_project` opens a project with its general channel (front desk and user), and `configure_project` sets its completion effect (user, steward, concierge). `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
+  "- Projects and membership: a project is a lasting area of work, not one request; `create_project` opens one with its general channel (front desk and user), and `configure_project` sets its completion effect (user, steward, concierge). A project whose work is finished or has moved to another project is archived by proposal, once no task there is in play. `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by work a project needs that no existing role covers. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals are counters and timers the board logs, listed in the prompt of a role that reads them: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are not posts in any channel; interpreting them is your judgment.",
 ].join("\n");

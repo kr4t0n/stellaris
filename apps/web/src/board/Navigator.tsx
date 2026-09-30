@@ -110,7 +110,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
 /**
  * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and a dot when something is new since
- * this browser looked.
+ * this browser looked, and last the archived projects, each opening its overview.
  */
 export function Navigator({
   activeChannel,
@@ -141,11 +141,17 @@ export function Navigator({
     }
   }, [channels.data]);
 
+  const ordered = useMemo(
+    () =>
+      (projects.data ?? []).toSorted(
+        (a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug),
+      ),
+    [projects.data],
+  );
+  const archived = ordered.filter((project) => project.archived !== undefined);
+
   const groups = useMemo<Group[]>(() => {
     const all = channels.data ?? [];
-    const ordered = (projects.data ?? []).toSorted(
-      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug),
-    );
     return [
       {
         key: "society",
@@ -153,14 +159,16 @@ export function Navigator({
         project: null,
         channels: all.filter((c) => c.project === null),
       },
-      ...ordered.map((project) => ({
-        key: project.slug,
-        label: project.name,
-        project: project.slug,
-        channels: all.filter((channel) => channel.project === project.slug),
-      })),
+      ...ordered
+        .filter((project) => project.archived === undefined)
+        .map((project) => ({
+          key: project.slug,
+          label: project.name,
+          project: project.slug,
+          channels: all.filter((channel) => channel.project === project.slug),
+        })),
     ];
-  }, [channels.data, projects.data]);
+  }, [channels.data, ordered]);
 
   const openThreads = useMemo(() => {
     const counts = new Map<string, number>();
@@ -244,6 +252,29 @@ export function Navigator({
             </ul>
           </section>
         ))}
+        {archived.length === 0 ? null : (
+          <section aria-label="Archived projects" className="mt-3">
+            <h3 className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">
+              Archived
+            </h3>
+            <ul>
+              {archived.map((project) => (
+                <li key={project.slug}>
+                  <Link
+                    to="/p/$slug"
+                    params={{ slug: project.slug }}
+                    className={`${ROW} ${activeOverview === project.slug ? ROW_ACTIVE : ROW_IDLE}`}
+                  >
+                    <span aria-hidden="true" className="text-fg-muted">
+                      ▫
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </nav>
     </Island>
   );

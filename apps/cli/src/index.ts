@@ -133,6 +133,19 @@ project
   });
 
 project
+  .command("archive <slug>")
+  .description("Archive a project with no task in play: its members leave and its threads close")
+  .requiredOption("--reason <text>", "why the project is archived")
+  .action(async (slug: string, opts: { reason: string }) => {
+    const board = await open();
+    const archived = await board.archiveProject(board.userActor(), {
+      project: slug,
+      reason: opts.reason,
+    });
+    print(archived, () => `Project ${archived.slug} archived`);
+  });
+
+project
   .command("list")
   .description("List projects")
   .action(async () => {
@@ -140,7 +153,11 @@ project
     const projects = await board.listProjects();
     print(projects, () =>
       projects
-        .map((p) => `${p.slug}\t${p.name}\tmembers: ${p.members.join(", ") || "none"}`)
+        .map((p) =>
+          p.archived === undefined
+            ? `${p.slug}\t${p.name}\tmembers: ${p.members.join(", ") || "none"}`
+            : `${p.slug}\t${p.name}\tarchived ${p.archived.at} by ${p.archived.by}`,
+        )
         .join("\n"),
     );
   });

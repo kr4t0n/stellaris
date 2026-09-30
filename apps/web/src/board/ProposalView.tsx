@@ -28,6 +28,7 @@ const ProvisionSchema = z.object({
   skill: z.string().optional(),
   replaced: z.boolean().optional(),
   releasedTasks: z.array(z.string()).optional(),
+  project: z.string().optional(),
 });
 
 /** What approval created, with a way to it where the board has a view of it. */
@@ -66,6 +67,17 @@ function Provisioned({ proposal }: { proposal: Proposal }) {
       <p className="mt-1">
         Retired {made.agent}; {released === 1 ? "1 stage went" : `${released} stages went`} back to
         open.
+      </p>
+    );
+  }
+  if (proposal.kind === "archive" && made.project !== undefined) {
+    return (
+      <p className="mt-1">
+        Archived{" "}
+        <Link to="/p/$slug" params={{ slug: made.project }} className={link}>
+          {made.project}
+        </Link>
+        ; its members left and its threads closed.
       </p>
     );
   }

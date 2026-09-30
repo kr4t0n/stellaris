@@ -107,44 +107,29 @@ project
   .option("--name <name>", "display name")
   .option("--repo <url>", "git remote")
   .option("--on-done <effect>", "what finishing a task does: none, or merge its branch")
-  .option("--plan <json>", 'default plan, for example \'[{"name":"draft","role":"writer"}]\'')
-  .action(
-    async (
-      slug: string,
-      opts: { name?: string; repo?: string; onDone?: string; plan?: string },
-    ) => {
-      const board = await open();
-      const added = await board.addProject(board.userActor(), {
-        slug,
-        name: opts.name,
-        repo: opts.repo ?? null,
-        ...(opts.onDone === undefined ? {} : { onDone: CompletionEffectSchema.parse(opts.onDone) }),
-        ...(opts.plan === undefined ? {} : { defaultPlan: parsePlan(opts.plan) }),
-      });
-      print(added, () => `Project ${added.slug} added with channels ${added.channels.join(", ")}`);
-    },
-  );
+  .action(async (slug: string, opts: { name?: string; repo?: string; onDone?: string }) => {
+    const board = await open();
+    const added = await board.addProject(board.userActor(), {
+      slug,
+      name: opts.name,
+      repo: opts.repo ?? null,
+      ...(opts.onDone === undefined ? {} : { onDone: CompletionEffectSchema.parse(opts.onDone) }),
+    });
+    print(added, () => `Project ${added.slug} added with channels ${added.channels.join(", ")}`);
+  });
 
 project
   .command("configure <slug>")
-  .description("Set a project's default plan and completion effect")
-  .option("--on-done <effect>", "none, or merge")
-  .option("--plan <json>", "default plan as a JSON list of stages")
+  .description("Set a project's completion effect")
+  .requiredOption("--on-done <effect>", "none, or merge")
   .option("--as <agent>", "act as this agent instead of the user")
-  .action(async (slug: string, opts: { onDone?: string; plan?: string; as?: string }) => {
+  .action(async (slug: string, opts: { onDone: string; as?: string }) => {
     const board = await open();
     const configured = await board.configureProject(await actorFor(board, opts.as), {
       project: slug,
-      ...(opts.onDone === undefined ? {} : { on_done: CompletionEffectSchema.parse(opts.onDone) }),
-      ...(opts.plan === undefined ? {} : { default_plan: parsePlan(opts.plan) }),
+      on_done: CompletionEffectSchema.parse(opts.onDone),
     });
-    print(
-      configured,
-      () =>
-        `Project ${configured.slug}: on done ${configured.onDone}, default plan ${
-          configured.defaultPlan.map((stage) => stage.name).join(" -> ") || "none"
-        }`,
-    );
+    print(configured, () => `Project ${configured.slug}: on done ${configured.onDone}`);
   });
 
 project
@@ -450,7 +435,7 @@ const task = program.command("task").description("Manage tasks");
 
 task
   .command("create <project> <title>")
-  .description("Create a task with a plan, or with the project's default plan")
+  .description("Create a task with a plan, or with one stage anyone in the project may take")
   .option("--body <text>", "task body", "")
   .option("--parent <id>", "parent task id")
   .option("--plan <json>", 'stages, for example \'[{"name":"analysis","role":"analyst"}]\'')

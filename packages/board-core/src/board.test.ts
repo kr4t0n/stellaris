@@ -359,14 +359,7 @@ describe("Board", () => {
         wakeTriggers: [],
       });
     }
-    const lab = await board.addProject(USER, {
-      slug: "lab",
-      defaultPlan: [
-        { name: "experiment", role: "researcher", gate: false },
-        { name: "write-up", role: "researcher", gate: false },
-        { name: "referee review", role: "editor", gate: true },
-      ],
-    });
+    const lab = await board.addProject(USER, { slug: "lab" });
     expect(lab.onDone).toBe("none");
     for (const [name, role] of [
       ["res-1", "researcher"],
@@ -379,8 +372,15 @@ describe("Board", () => {
     const ED1: Actor = { name: "ed-1", role: "editor" };
     const ED2: Actor = { name: "ed-2", role: "editor" };
 
-    // The project's default plan applies when the creator gives none.
-    const task = await board.createTask(USER, { project: "lab", title: "Churn model" });
+    const task = await board.createTask(USER, {
+      project: "lab",
+      title: "Churn model",
+      stages: [
+        { name: "experiment", role: "researcher" },
+        { name: "write-up", role: "researcher" },
+        { name: "referee review", role: "editor", gate: true },
+      ],
+    });
     expect(task.stages.map((s) => `${s.id}:${s.name}:${s.gate}`)).toEqual([
       "s1:experiment:false",
       "s2:write-up:false",
@@ -514,14 +514,14 @@ describe("Board", () => {
     await expect(
       board.configureProject(ENG, { project: "demo", on_done: "merge" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    const configured = await board.configureProject(USER, {
-      project: "demo",
-      on_done: "merge",
-      default_plan: [{ name: "build", role: "engineer" }],
-    });
+    const configured = await board.configureProject(USER, { project: "demo", on_done: "merge" });
     expect(configured).toMatchObject({ onDone: "merge" });
 
+    // Without a plan, a task gets one stage anyone in the project may take.
     const task = await board.createTask(USER, { project: "demo", title: "Add hello.txt" });
+    expect(task.stages.map((s) => `${s.name}:${s.role ?? s.agent ?? "anyone"}:${s.gate}`)).toEqual([
+      "work:anyone:false",
+    ]);
     expect(task.onDone).toBe("merge");
     await expect(
       board.planTask(ENG, {

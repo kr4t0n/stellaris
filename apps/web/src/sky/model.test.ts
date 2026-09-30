@@ -35,7 +35,6 @@ function project(slug: string, createdAt: string): Project {
     approvers: ["user"],
     requiredCapabilities: [],
     createdAt,
-    defaultPlan: [],
     onDone: "none",
   };
 }

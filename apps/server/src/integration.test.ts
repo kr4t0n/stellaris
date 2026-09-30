@@ -23,14 +23,7 @@ describe("Phase 1 exit criterion", () => {
 
   it("two agents carry a planned task through a gated review and a send-back to a merge, with the user participating by mention", async () => {
     const { board } = await Board.init(dir, { name: "e2e" });
-    await board.addProject(USER, {
-      slug: "demo",
-      onDone: "merge",
-      defaultPlan: [
-        { name: "build", role: "engineer", gate: false },
-        { name: "review", role: "reviewer", gate: true },
-      ],
-    });
+    await board.addProject(USER, { slug: "demo", onDone: "merge" });
     await addWorkRoles(board);
     // One agent per CLI: the board must not care which body a citizen runs on.
     await board.addAgent(USER, {
@@ -73,11 +66,15 @@ describe("Phase 1 exit criterion", () => {
     await settle();
     expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(2);
 
-    // The task takes the project's default plan; its first stage and the user's mention both wake eng-1.
+    // The task is planned when it is filed; its first stage and the user's mention both wake eng-1.
     const task = await board.createTask(USER, {
       project: "demo",
       title: "Add hello.txt",
       body: "One file, one line.",
+      stages: [
+        { name: "build", role: "engineer" },
+        { name: "review", role: "reviewer", gate: true },
+      ],
     });
     const mention = await board.postMessage(USER, {
       channel: "demo/general",

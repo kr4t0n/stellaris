@@ -215,16 +215,10 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       lines.push("None yet.");
     }
     for (const project of society.projects) {
-      const plan = project.defaultPlan
-        .map(
-          (stage) =>
-            `${stage.name} (${stage.gate ? "gate, " : ""}${stage.agent ?? stage.role ?? "anyone"})`,
-        )
-        .join(", ");
       lines.push(
         `- ${project.slug} "${project.name}": channels ${project.channels.join(", ")}; members ${
           project.members.length === 0 ? "none" : project.members.join(", ")
-        }; on done ${project.onDone}; default plan ${plan.length === 0 ? "none" : plan}`,
+        }; on done ${project.onDone}`,
       );
     }
     lines.push("", "### Citizens", "");

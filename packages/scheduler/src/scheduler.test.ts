@@ -233,15 +233,15 @@ describe("Scheduler", () => {
       await scheduler.tick();
       await scheduler.drain();
     };
-    await board.configureProject(USER, {
+    await board.configureProject(USER, { project: "demo", on_done: "merge" });
+    const task = await board.createTask(ENG, {
       project: "demo",
-      on_done: "merge",
-      default_plan: [
+      title: "t",
+      stages: [
         { name: "build", role: "engineer" },
-        { name: "review", role: "reviewer", gate: true },
+        { name: "review", role: "reviewer" },
       ],
     });
-    const task = await board.createTask(ENG, { project: "demo", title: "t" });
     await settle();
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.trigger.taskId])).toEqual([
       ["eng-1", "stage", task.id],

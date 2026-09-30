@@ -84,7 +84,6 @@ const PROJECT = {
   approvers: [],
   requiredCapabilities: [],
   createdAt: CREATED,
-  defaultPlan: [],
   onDone: "none",
 };
 

@@ -134,7 +134,6 @@ export interface AddProjectInput {
   readonly defaultBranch?: string | undefined;
   readonly channels?: readonly Name[] | undefined;
   readonly requiredCapabilities?: readonly string[] | undefined;
-  readonly defaultPlan?: readonly PlanStage[] | undefined;
   readonly onDone?: CompletionEffect | undefined;
 }
 
@@ -1177,7 +1176,6 @@ export class Board {
     if (await exists(file)) {
       throw new BoardError("ALREADY_EXISTS", `project ${input.slug} already exists`);
     }
-    await this.validateAssignees(input.defaultPlan ?? []);
     const project: Project = ProjectSchema.parse({
       slug: input.slug,
       name: input.name ?? input.slug,
@@ -1188,7 +1186,6 @@ export class Board {
       approvers: [USER_NAME],
       requiredCapabilities: [...(input.requiredCapabilities ?? [])],
       createdAt: this.now().toISOString(),
-      defaultPlan: [...(input.defaultPlan ?? [])],
       onDone: input.onDone ?? "none",
     });
     await writeMarkdown(file, project, `# ${project.name}\n`);
@@ -1993,9 +1990,7 @@ export class Board {
       if (args.stages?.some((stage) => stage.gate) === true) {
         this.assertMayGate(actor, "set a gate");
       }
-      const planned: readonly PlanStage[] =
-        args.stages ??
-        (project.defaultPlan.length > 0 ? project.defaultPlan : [{ name: "work", gate: false }]);
+      const planned: readonly PlanStage[] = args.stages ?? [{ name: "work", gate: false }];
       await this.validateAssignees(planned);
       const stages = planned.map((stage, index) => stageFrom(stage, `s${index + 1}`));
       const first = stages[0];
@@ -2547,30 +2542,24 @@ export class Board {
         ...(args.name === undefined ? {} : { name: args.name }),
         repo: args.repo,
         defaultBranch: args.default_branch,
-        ...(args.default_plan === undefined ? {} : { defaultPlan: args.default_plan }),
         ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
       }),
     );
   }
 
-  /** Sets a project's default plan and completion effect. */
+  /** Sets a project's completion effect. */
   async configureProject(actor: Actor, input: VerbInput<"configure_project">): Promise<Project> {
     const args = VerbInputs.configure_project.parse(input);
     await this.authorize(actor, "configure_project");
     return this.mutex.run(async () => {
       await this.readProject(args.project);
-      if (args.default_plan !== undefined) {
-        await this.validateAssignees(args.default_plan);
-      }
       const project = await this.updateProject(args.project, (current) => ({
         ...current,
-        ...(args.default_plan === undefined ? {} : { defaultPlan: args.default_plan }),
-        ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
+        onDone: args.on_done,
       }));
       await this.events.append("project.configured", actor.name, {
         slug: project.slug,
         onDone: project.onDone,
-        defaultPlan: project.defaultPlan.map((stage) => stage.name),
       });
       return project;
     });

@@ -95,8 +95,6 @@ export const ProjectSchema = z.object({
   approvers: z.array(NameSchema),
   requiredCapabilities: z.array(z.string()),
   createdAt: IsoDateTimeSchema,
-  /** The plan a task gets when its creator gives none. */
-  defaultPlan: z.array(PlanStageSchema).default([]),
   onDone: CompletionEffectSchema.default("none"),
 });
 export type Project = z.infer<typeof ProjectSchema>;

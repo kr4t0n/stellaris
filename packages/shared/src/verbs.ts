@@ -45,7 +45,7 @@ export const VerbInputs = {
     body: z.string().default(""),
     parent_id: UlidSchema.optional(),
     required_capabilities: z.array(z.string()).default([]),
-    /** The plan; without it the task gets the project's default plan, else one stage called work. */
+    /** The plan; without it the task gets one stage, work, that anyone in the project may take. */
     stages: z.array(PlanStageSchema).min(1).optional(),
   }),
   claim_task: z.object({ task_id: UlidSchema }),
@@ -74,7 +74,6 @@ export const VerbInputs = {
     name: z.string().min(1).optional(),
     repo: z.string().min(1).nullable().default(null),
     default_branch: z.string().min(1).default("main"),
-    default_plan: z.array(PlanStageSchema).optional(),
     on_done: CompletionEffectSchema.optional(),
   }),
   join_project: z.object({ project: NameSchema, agent: NameSchema.optional() }),
@@ -94,8 +93,7 @@ export const VerbInputs = {
   advance_task: z.object({ task_id: UlidSchema, note: z.string().min(1).optional() }),
   configure_project: z.object({
     project: NameSchema,
-    default_plan: z.array(PlanStageSchema).optional(),
-    on_done: CompletionEffectSchema.optional(),
+    on_done: CompletionEffectSchema,
   }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
@@ -114,7 +112,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   close_thread:
     "Close a thread with a summary that is posted to the thread's channel. A task's thread closes with its task, a proposal's with its decision.",
   create_task:
-    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets the project's default plan. Its thread opens with it, under the task's id, for everything said about the work.",
+    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets one stage, work, that anyone in the project may take. Its thread opens with it, under the task's id, for everything said about the work.",
   claim_task:
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
@@ -130,7 +128,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   reject:
     "Reject a proposal with a reason, posted in the proposal's thread, which closes. User and steward only, never on your own proposal.",
   create_project:
-    "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a default plan and a completion effect (none or merge).",
+    "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a completion effect (none or merge).",
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
@@ -141,5 +139,5 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   advance_task:
     "Finish the stage you hold, with a note for the task's thread on what you did. The next stage becomes current; past the last one the task is done.",
   configure_project:
-    "Set a project's default plan and its completion effect: none, or merge to land each finished task's branch on the default branch.",
+    "Set a project's completion effect: none, or merge to land each finished task's branch on the default branch.",
 };

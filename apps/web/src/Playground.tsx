@@ -20,7 +20,6 @@ import {
   useNow,
   useProjects,
   useProposals,
-  useRoles,
   useScheduler,
   useSession,
   useSociety,
@@ -71,7 +70,6 @@ export function Playground() {
   const society = useSociety();
   const members = useMembers();
   const projects = useProjects();
-  const roles = useRoles();
   const scheduler = useScheduler();
   const threads = useThreads();
   const tasks = useAllTasks();
@@ -151,7 +149,7 @@ export function Playground() {
     return () => window.removeEventListener("keydown", close);
   }, [boardOpen, logsOpen, navigate]);
 
-  const rejected = [society, members, projects, roles, scheduler].some(
+  const rejected = [society, members, projects, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
   );
   useEffect(() => {
@@ -207,7 +205,6 @@ export function Playground() {
   const member = members.data?.find((candidate) => candidate.name === star?.name);
   // A queued star waits at the core; its card says where the turn will run.
   const place = star === undefined ? "the society" : placeName(star.queuedFor ?? star.anchor);
-  const purpose = roles.data?.find((role) => role.name === member?.role)?.purpose;
   const openStar = (id: string): void => {
     const chosen = model.stars.find((candidate) => candidate.id === id);
     if (chosen !== undefined) {
@@ -247,13 +244,7 @@ export function Playground() {
               mark !== undefined ? (
                 <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
               ) : star === undefined || member === undefined ? null : (
-                <CitizenCard
-                  member={member}
-                  star={star}
-                  purpose={purpose}
-                  place={place}
-                  now={now}
-                />
+                <CitizenCard member={member} star={star} place={place} now={now} />
               )
             }
           />

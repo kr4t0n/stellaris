@@ -19,6 +19,26 @@ test("a task in play is a mark in the sky whose card says where it stands", asyn
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
 
+test("a citizen's card says who it is and what it is doing, and its star opens the rest", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/");
+
+  const star = page.getByRole("button", { name: "desk, idle" });
+  await star.focus();
+  const card = page.getByRole("article", { name: "desk, concierge" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("concierge · claude-opus-5-5");
+  await expect(card).toContainText("resting");
+  await expect(card).toContainText("No turns yet");
+  // Projects, stages, skills, and the profile are the citizen view's, not the card's.
+  await expect(card).not.toContainText("Projects");
+
+  await star.press("Enter");
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+});
+
 test("dragging the sky moves it without opening what the drag began on", async ({ page }) => {
   // Without motion the camera lands at once, so the last click finds the sky where home puts it
   // rather than wherever the ease back has got to.

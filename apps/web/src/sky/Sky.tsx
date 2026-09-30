@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
-import type { SkyModel } from "./model.js";
+import { postedLine, type LiveStore } from "../lib/live.js";
+import { starOf, type SkyModel } from "./model.js";
 import { SkyScene, type ScreenPoint } from "./scene.js";
 
 export interface Insets {
@@ -10,7 +11,7 @@ export interface Insets {
 interface SkyProps {
   readonly model: SkyModel;
   readonly paused: boolean;
-  /** The id of the hovered star. */
+  /** What is hovered: a star's id, or `task:<id>` for a task's mark. */
   readonly hovered: string | null;
   readonly onHover: (id: string | null) => void;
   /** Screen space covered by islands at each side; the sky fits between them. */
@@ -19,9 +20,18 @@ interface SkyProps {
   readonly focus: string | null;
   readonly onSelectAnchor: (anchor: string) => void;
   readonly onSelectStar: (id: string) => void;
-  /** Shown beside the hovered star and moved with it every frame. */
+  readonly onSelectTask: (id: string) => void;
+  /** The live turn stream, whose tool calls flicker stars and whose posts rise from them. */
+  readonly live: LiveStore;
+  /** Shown beside what is hovered and moved with it every frame. */
   readonly card: ReactNode;
 }
+
+/**
+ * Events older than this are the server's buffer replayed on connect, not motion now. Measured on
+ * the browser's clock against the server's stamps, so it allows for some drift between the two.
+ */
+const RECENT_MS = 15_000;
 
 const CARD_GAP = 26;
 const EDGE = 12;
@@ -61,6 +71,8 @@ export function Sky({
   focus,
   onSelectAnchor,
   onSelectStar,
+  onSelectTask,
+  live,
   card,
 }: SkyProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,6 +83,11 @@ export function Sky({
   useLayoutEffect(() => {
     insetsRef.current = insets;
   }, [insets]);
+  // The stream's listener outlives renders too, and finds stars in the latest model.
+  const modelRef = useRef(model);
+  useLayoutEffect(() => {
+    modelRef.current = model;
+  }, [model]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -99,6 +116,30 @@ export function Sky({
   useEffect(() => {
     sceneRef.current?.setModel(model);
   }, [model]);
+  // Motion is set off by the live stream and fades on its own; nothing about it is kept.
+  useEffect(
+    () =>
+      live.listen((item) => {
+        const scene = sceneRef.current;
+        if (
+          scene === null ||
+          item.event.type !== "tool_call" ||
+          Date.now() - Date.parse(item.ts) > RECENT_MS
+        ) {
+          return;
+        }
+        const star = starOf(modelRef.current, item.agent, item.project);
+        if (star === null) {
+          return;
+        }
+        scene.flash(star);
+        const line = postedLine(item.event.name, item.event.input);
+        if (line !== null) {
+          scene.say(star, line);
+        }
+      }),
+    [live],
+  );
   useEffect(() => {
     sceneRef.current?.setPaused(paused);
   }, [paused]);
@@ -121,7 +162,9 @@ export function Sky({
         onPointerMove={(event) => {
           const scene = sceneRef.current;
           const { offsetX, offsetY } = event.nativeEvent;
-          const id = scene?.hitTest(offsetX, offsetY) ?? null;
+          const star = scene?.hitTest(offsetX, offsetY) ?? null;
+          const mark = star === null ? (scene?.hitTestMark(offsetX, offsetY) ?? null) : null;
+          const id = star ?? (mark === null ? null : `task:${mark}`);
           const sphere = id === null ? (scene?.hitTestAnchor(offsetX, offsetY) ?? null) : null;
           event.currentTarget.style.cursor = id !== null || sphere !== null ? "pointer" : "";
           if (id !== hovered) {
@@ -136,9 +179,13 @@ export function Sky({
             return;
           }
           const id = scene.hitTest(offsetX, offsetY);
-          const sphere = id === null ? scene.hitTestAnchor(offsetX, offsetY) : null;
+          const mark = id === null ? scene.hitTestMark(offsetX, offsetY) : null;
+          const sphere =
+            id === null && mark === null ? scene.hitTestAnchor(offsetX, offsetY) : null;
           if (id !== null) {
             onSelectStar(id);
+          } else if (mark !== null) {
+            onSelectTask(mark);
           } else if (sphere !== null) {
             onSelectAnchor(sphere);
           }

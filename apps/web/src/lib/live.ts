@@ -299,6 +299,16 @@ export function transcriptTurn(
   return turns.get(pairKey(agent, scope));
 }
 
+/** The first line a `post_message` call posts, for the bubble that rises from its star. */
+export function postedLine(name: string, input: unknown): string | null {
+  if (toolLabel(name) !== "post_message") {
+    return null;
+  }
+  const body = record(input)["body"];
+  const line = typeof body === "string" ? firstLine(body).replace(/^[#>*\-\s]+/, "") : "";
+  return line === "" ? null : clip(line, SUMMARY_LIMIT);
+}
+
 /** The newest step of a turn in one line, for lists. */
 export function lastLine(turn: LiveTurn): string | null {
   const step = turn.steps.at(-1);
@@ -332,6 +342,7 @@ export function elapsed(since: string, now: number): string {
 export class LiveStore {
   private turns: LiveTurns = new Map();
   private readonly listeners = new Set<() => void>();
+  private readonly eventListeners = new Set<(item: LiveTurnEvent) => void>();
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -341,6 +352,17 @@ export class LiveStore {
   };
 
   readonly snapshot = (): LiveTurns => this.turns;
+
+  /**
+   * Every event as it arrives, for motion in the sky. A connection replays the server's buffer
+   * first, so a listener that only wants what is happening now checks the event's time.
+   */
+  readonly listen = (listener: (item: LiveTurnEvent) => void): (() => void) => {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  };
 
   follow(token: string): () => void {
     return followStream({
@@ -354,6 +376,9 @@ export class LiveStore {
         const parsed = LiveTurnEventSchema.safeParse(JSON.parse(data));
         if (parsed.success) {
           this.turns = applyLive(this.turns, parsed.data);
+          for (const listener of this.eventListeners) {
+            listener(parsed.data);
+          }
         }
       },
       onBatch: () => this.emit(),

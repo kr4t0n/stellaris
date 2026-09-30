@@ -5,6 +5,7 @@ import {
   describeCall,
   elapsed,
   lastLine,
+  postedLine,
   toolLabel,
   transcriptTurn,
   turnsOf,
@@ -176,5 +177,16 @@ describe("live turns", () => {
     expect(turn?.steps).toHaveLength(450);
     expect(turn?.fromStart).toBe(true);
     expect(turn?.steps.every((step) => step.kind === "tool" && step.output === "x")).toBe(true);
+  });
+
+  it("takes a post's first line for its bubble, and nothing from other tools", () => {
+    expect(
+      postedLine("mcp__board__post_message", {
+        channel: "general",
+        body: "\n## Survey done\n\nDetails follow.",
+      }),
+    ).toBe("Survey done");
+    expect(postedLine("mcp__board__claim_task", { body: "x" })).toBeNull();
+    expect(postedLine("mcp__board__post_message", { body: "   " })).toBeNull();
   });
 });

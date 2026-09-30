@@ -1,6 +1,6 @@
 import type { CliKind } from "@stellaris/shared";
 import { CLI_MARKS } from "../lib/marks.js";
-import type { Anchor, SkyModel, Star } from "./model.js";
+import type { Anchor, SkyModel, Star, TaskMark } from "./model.js";
 
 export interface ScreenPoint {
   readonly x: number;
@@ -26,6 +26,25 @@ interface Body {
   presence: number;
   leaving: boolean;
   screen: ScreenPoint;
+  /** 1 when the citizen calls a tool, fading to 0: the star flickers with each call. */
+  flash: number;
+}
+
+/** A task's mark as the scene draws it: eased toward its place on the orbit, fading in and out. */
+interface MarkBody {
+  mark: TaskMark;
+  x: number;
+  y: number;
+  presence: number;
+  leaving: boolean;
+  screen: ScreenPoint;
+}
+
+/** The first line of a post, rising from its author's star until it fades. */
+interface Bubble {
+  text: string;
+  /** Seconds on the scene's clock when it was said. */
+  born: number;
 }
 
 /** A sphere as the scene draws it: eased toward its anchor's place and size, like the stars. */
@@ -54,6 +73,17 @@ const FG_MUTED = "115, 115, 115";
 const LABEL_FAMILY = '"Instrument Sans Variable", ui-sans-serif, sans-serif';
 const ANCHOR_FONT = '500 12px "Onest Variable", ui-sans-serif, sans-serif';
 const SOCIETY_FONT = '600 10px "Onest Variable", ui-sans-serif, sans-serif';
+
+/** Task phases, in the colors the task views use for them. */
+const PHASE_COLOR: Record<TaskMark["phase"], string> = {
+  waiting: "#fcd34d",
+  working: "#6ee7b7",
+  returned: "#fdba74",
+  landing: "#7dd3fc",
+};
+const BUBBLE_FONT = `500 11px ${LABEL_FAMILY}`;
+const BUBBLE_LIFE = 5;
+const BUBBLE_WIDTH = 240;
 
 const CORE_RADIUS = 15;
 const SPRING = 5;
@@ -113,6 +143,10 @@ export class SkyScene {
   private readonly glyphs: Record<CliKind, Path2D>;
   private readonly glows = new Map<string, HTMLCanvasElement>();
   private readonly bodies = new Map<string, Body>();
+  private readonly marks = new Map<string, MarkBody>();
+  private readonly bubbles = new Map<string, Bubble>();
+  /** Seconds on the frame clock, which keeps running when motion is reduced. */
+  private clock = 0;
   private readonly specks: Speck[];
   private readonly spheres = new Map<string, Sphere>();
   private radius = 400;
@@ -205,6 +239,7 @@ export class SkyScene {
         presence: this.options.reducedMotion ? 1 : 0,
         leaving: false,
         screen: { x: 0, y: 0 },
+        flash: 0,
       });
     }
     for (const [, body] of departing) {
@@ -213,6 +248,44 @@ export class SkyScene {
       if (into !== undefined) {
         body.star = { ...body.star, x: into.x, y: into.y };
       }
+    }
+
+    const marked = new Set(model.tasks.map((mark) => mark.id));
+    for (const mark of model.tasks) {
+      const body = this.marks.get(mark.id);
+      if (body === undefined) {
+        this.marks.set(mark.id, {
+          mark,
+          x: mark.x,
+          y: mark.y,
+          presence: this.options.reducedMotion ? 1 : 0,
+          leaving: false,
+          screen: { x: 0, y: 0 },
+        });
+      } else {
+        body.mark = mark;
+        body.leaving = false;
+      }
+    }
+    for (const [id, body] of this.marks) {
+      if (!marked.has(id)) {
+        body.leaving = true;
+      }
+    }
+  }
+
+  /** A star flickers: its citizen just called a tool. */
+  flash(id: string): void {
+    const body = this.bodies.get(id);
+    if (body !== undefined && !this.options.reducedMotion) {
+      body.flash = 1;
+    }
+  }
+
+  /** A post's first line rises from its author's star, replacing one still rising there. */
+  say(id: string, text: string): void {
+    if (this.bodies.has(id)) {
+      this.bubbles.set(id, { text, born: this.clock });
     }
   }
 
@@ -258,6 +331,20 @@ export class SkyScene {
     this.canvas.height = Math.round(height * dpr);
   }
 
+  /** The id of the task whose mark is under a point in CSS pixels, if any. */
+  hitTestMark(x: number, y: number): string | null {
+    let best: string | null = null;
+    let bestDistance = 10;
+    for (const [id, body] of this.marks) {
+      const distance = Math.hypot(body.screen.x - x, body.screen.y - y);
+      if (!body.leaving && distance < bestDistance) {
+        best = id;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
   /** The id of the star under a point in CSS pixels, if any. */
   hitTest(x: number, y: number): string | null {
     let best: string | null = null;
@@ -291,6 +378,7 @@ export class SkyScene {
 
   private readonly frame = (now: number): void => {
     const t = now / 1000;
+    this.clock = t;
     const dt = Math.min(0.05, Math.max(0, t - this.last));
     this.last = t;
     this.step(dt);
@@ -326,8 +414,24 @@ export class SkyScene {
         const toward = body.leaving ? 0 : 1;
         body.presence += (toward - body.presence) * Math.min(1, dt * 2.5);
       }
+      body.flash = Math.max(0, body.flash - dt * 2.2);
       if (body.leaving && body.presence < 0.02) {
         this.bodies.delete(id);
+      }
+    }
+    for (const [id, body] of this.marks) {
+      body.x += (body.mark.x - body.x) * ease;
+      body.y += (body.mark.y - body.y) * ease;
+      const toward = body.leaving ? 0 : 1;
+      body.presence +=
+        (toward - body.presence) * (this.options.reducedMotion ? 1 : Math.min(1, dt * 2.5));
+      if (body.leaving && body.presence < 0.02) {
+        this.marks.delete(id);
+      }
+    }
+    for (const [id, bubble] of this.bubbles) {
+      if (this.clock - bubble.born > BUBBLE_LIFE || this.bodies.get(id)?.leaving !== false) {
+        this.bubbles.delete(id);
       }
     }
   }
@@ -352,14 +456,137 @@ export class SkyScene {
     ctx.fillRect(0, 0, this.width, this.height);
     this.drawSpecks(t);
     this.drawAnchors();
+    this.drawTasks(t);
     const order = [...this.bodies.values()].toSorted(
       (a, b) => Number(a.star.id === this.hovered) - Number(b.star.id === this.hovered),
     );
     for (const body of order) {
       this.drawBody(body, t);
     }
-    const hovered = this.hovered === null ? undefined : this.bodies.get(this.hovered);
+    this.drawBubbles();
+    const task = this.hovered?.startsWith("task:") === true ? this.hovered.slice(5) : null;
+    const hovered =
+      task === null
+        ? this.hovered === null
+          ? undefined
+          : this.bodies.get(this.hovered)
+        : this.marks.get(task);
     this.options.onHoverPosition(hovered === undefined || hovered.leaving ? null : hovered.screen);
+  }
+
+  /**
+   * Every task in play as a mark on its project's orbit, and a thread of light from each held
+   * task to its holder's star while the holder is in a turn there, with a spark running along it.
+   */
+  private drawTasks(t: number): void {
+    const { ctx } = this;
+    for (const body of this.marks.values()) {
+      body.screen = this.toScreen(body.x, body.y);
+    }
+    ctx.save();
+    ctx.lineWidth = 1;
+    for (const body of this.marks.values()) {
+      const holder = body.mark.linked === null ? undefined : this.bodies.get(body.mark.linked);
+      if (holder === undefined || holder.leaving) {
+        continue;
+      }
+      const color = rgb(PHASE_COLOR[body.mark.phase]);
+      const alpha = Math.min(body.presence, holder.presence);
+      const from = body.screen;
+      const to = holder.screen;
+      const line = ctx.createLinearGradient(from.x, from.y, to.x, to.y);
+      line.addColorStop(0, `rgba(${color}, ${(0.55 * alpha).toFixed(3)})`);
+      line.addColorStop(1, `rgba(${color}, ${(0.12 * alpha).toFixed(3)})`);
+      ctx.strokeStyle = line;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      if (t !== 0) {
+        const along = (t * 0.45 + holder.phase) % 1;
+        ctx.beginPath();
+        ctx.arc(
+          to.x + (from.x - to.x) * along,
+          to.y + (from.y - to.y) * along,
+          1.4,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = `rgba(${color}, ${(0.85 * alpha).toFixed(3)})`;
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    for (const [id, body] of this.marks) {
+      const { mark, screen } = body;
+      const hovered = this.hovered === `task:${id}`;
+      const color = PHASE_COLOR[mark.phase];
+      // A task waiting for someone to take it breathes; the others hold steady.
+      const breath =
+        mark.phase === "waiting" && t !== 0 ? 0.65 + 0.35 * Math.sin(t * 1.6 + screen.x) : 1;
+      const size = Math.max(3, 4 * this.scale) * (hovered ? 1.5 : 1);
+      ctx.save();
+      ctx.globalAlpha = body.presence * breath * (this.paused ? 0.7 : 1);
+      ctx.globalCompositeOperation = "lighter";
+      const glow = size * 7;
+      ctx.drawImage(this.glow(color), screen.x - glow / 2, screen.y - glow / 2, glow, glow);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.translate(screen.x, screen.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = color;
+      ctx.fillRect(-size / 2, -size / 2, size, size);
+      if (hovered) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-size / 2 - 2, -size / 2 - 2, size + 4, size + 4);
+      }
+      ctx.restore();
+    }
+  }
+
+  /** Each post's first line in a small card above its star, rising and fading as it goes. */
+  private drawBubbles(): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.font = BUBBLE_FONT;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const [id, bubble] of this.bubbles) {
+      const body = this.bodies.get(id);
+      if (body === undefined) {
+        continue;
+      }
+      const age = this.clock - bubble.born;
+      const alpha = Math.min(1, age / 0.25, (BUBBLE_LIFE - age) / 1.2) * body.presence;
+      if (alpha <= 0) {
+        continue;
+      }
+      let text = bubble.text;
+      if (ctx.measureText(text).width > BUBBLE_WIDTH) {
+        while (text.length > 1 && ctx.measureText(`${text}…`).width > BUBBLE_WIDTH) {
+          text = text.slice(0, -1);
+        }
+        text = `${text.trimEnd()}…`;
+      }
+      const width = ctx.measureText(text).width + 16;
+      const height = 22;
+      const rise = this.options.reducedMotion ? 0 : age * 7;
+      const radius = Math.max(10, CORE_RADIUS * this.scale);
+      const x = body.screen.x - width / 2;
+      const y = body.screen.y - radius - 14 - height - rise;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, 7);
+      ctx.fillStyle = "rgba(23, 23, 23, 0.92)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = `rgba(${FG_SECONDARY}, 1)`;
+      ctx.fillText(text, x + 8, y + height / 2 + 0.5);
+    }
+    ctx.restore();
   }
 
   private drawSpecks(t: number): void {
@@ -460,7 +687,8 @@ export class SkyScene {
       : star.state === "queued"
         ? 0.7 + 0.2 * breath
         : 0.5 + 0.2 * breath;
-    const intensity = (base + (hovered ? 0.25 : 0)) * body.presence * (this.paused ? 0.7 : 1);
+    const intensity =
+      (base + (hovered ? 0.25 : 0) + 0.8 * body.flash) * body.presence * (this.paused ? 0.7 : 1);
     const radius = Math.max(10, CORE_RADIUS * this.scale);
 
     const glowSize = (working ? 170 : 130) * this.scale * (0.9 + 0.15 * breath);
@@ -485,6 +713,14 @@ export class SkyScene {
       ctx.beginPath();
       ctx.arc(at.x, at.y, radius + (6 + 30 * progress) * this.scale, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(${accent}, ${(0.4 * (1 - progress)).toFixed(3)})`;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+    }
+    if (body.flash > 0) {
+      // A tool call: a quick bright ring that opens and fades.
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, radius + (3 + 12 * (1 - body.flash)) * this.scale, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${(0.55 * body.flash).toFixed(3)})`;
       ctx.lineWidth = 1.25;
       ctx.stroke();
     }

@@ -1,4 +1,12 @@
-import { SOCIETY_SCOPE, type CliKind, type Member, type Project } from "@stellaris/shared";
+import {
+  currentStage,
+  SOCIETY_SCOPE,
+  type CliKind,
+  type Member,
+  type Project,
+  type Task,
+} from "@stellaris/shared";
+import { assigneeOf, phaseOf, type TaskPhase } from "../board/tasks.js";
 import type { SchedulerView } from "../lib/api.js";
 
 export type StarState = "idle" | "queued" | "working";
@@ -33,10 +41,30 @@ export interface Star {
   readonly y: number;
 }
 
+/** A task in play: a mark orbiting its project's sphere, in its phase's color. */
+export interface TaskMark {
+  /** The task's id. */
+  readonly id: string;
+  readonly title: string;
+  readonly project: string;
+  readonly phase: Exclude<TaskPhase, "done" | "abandoned">;
+  /** The current stage's name. */
+  readonly stage: string;
+  /** Who holds the current stage, if anyone does. */
+  readonly holder: string | null;
+  /** Who may take the current stage while nobody holds it, in words. */
+  readonly waitingFor: string | null;
+  /** The holder's star when it is in a turn at the task's project: the link joins the two. */
+  readonly linked: string | null;
+  readonly x: number;
+  readonly y: number;
+}
+
 /** Where everything sits, in world units around the origin. The scene eases toward it. */
 export interface SkyModel {
   readonly anchors: readonly Anchor[];
   readonly stars: readonly Star[];
+  readonly tasks: readonly TaskMark[];
   /** Every sphere and its name fits in this radius around the origin. */
   readonly radius: number;
 }
@@ -45,6 +73,8 @@ export interface SkySnapshot {
   readonly members: readonly Member[];
   readonly projects: readonly Project[];
   readonly scheduler: SchedulerView;
+  /** Every project's tasks; the ones in play orbit their project. */
+  readonly tasks?: readonly Task[] | undefined;
 }
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -52,8 +82,14 @@ const STAR_SPACING = 68;
 /** Room inside a sphere beyond its outermost star: the star itself and its name below it. */
 const SPHERE_PAD = 44;
 const SPHERE_MIN = 58;
-/** Room outside a sphere for the project's name under it. */
+/** Room outside a sphere for the project's name under it, which also holds the task orbit. */
 const NAME_ROOM = 26;
+/** How far outside its sphere a project's tasks orbit. */
+const TASK_ORBIT = 13;
+/** The angle between neighbouring tasks on the orbit. */
+const TASK_STEP = 0.3;
+/** Tasks fill the orbit from the top down both sides and stop short of the name at the bottom. */
+const TASK_ARC = 1.5 * Math.PI;
 /** The least space between two spheres, or a sphere and the core. */
 const GAP = 28;
 const RING_MIN = 280;
@@ -184,10 +220,71 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
     };
   });
 
+  const tasks = placeTasks(snapshot.tasks ?? [], anchors, stars);
   const radius = Math.max(
     ...anchors.map((anchor) => Math.hypot(anchor.x, anchor.y) + footprint(anchor.radius)),
   );
-  return { anchors, stars, radius: Math.round(radius + MARGIN) };
+  return { anchors, stars, tasks, radius: Math.round(radius + MARGIN) };
+}
+
+/**
+ * A project's tasks in play on an orbit just outside its sphere, oldest first: the first at the
+ * top, the next ones alternating right and left of it, so a new task takes the next place and none
+ * moves. The orbit tightens when a project has more tasks than fit the arc.
+ */
+function placeTasks(
+  tasks: readonly Task[],
+  anchors: readonly Anchor[],
+  stars: readonly Star[],
+): TaskMark[] {
+  const marks: TaskMark[] = [];
+  for (const anchor of anchors) {
+    if (anchor.kind !== "project") {
+      continue;
+    }
+    const inPlay = tasks
+      .filter((task) => task.project === anchor.id)
+      .flatMap((task) => {
+        const phase = phaseOf(task);
+        return phase === "done" || phase === "abandoned" ? [] : [{ task, phase }];
+      })
+      .toSorted((a, b) => a.task.id.localeCompare(b.task.id));
+    const step = Math.min(TASK_STEP, TASK_ARC / Math.max(1, inPlay.length));
+    const orbit = anchor.radius + TASK_ORBIT;
+    inPlay.forEach(({ task, phase }, index) => {
+      const side = index % 2 === 0 ? 1 : -1;
+      const angle = -Math.PI / 2 + side * Math.ceil(index / 2) * step;
+      const holder = phase === "landing" ? null : (task.claimedBy ?? null);
+      const stage = currentStage(task);
+      const linked =
+        holder === null
+          ? null
+          : (stars.find((star) => star.name === holder && star.anchor === anchor.id)?.id ?? null);
+      marks.push({
+        id: task.id,
+        title: task.title,
+        project: anchor.id,
+        phase,
+        stage: stage?.name ?? task.stage,
+        holder,
+        waitingFor:
+          holder === null && phase !== "landing" && stage !== undefined ? assigneeOf(stage) : null,
+        linked,
+        x: Math.round(anchor.x + orbit * Math.cos(angle)),
+        y: Math.round(anchor.y + orbit * Math.sin(angle)),
+      });
+    });
+  }
+  return marks;
+}
+
+/**
+ * The star a live event belongs to: the citizen's star at the event's scope when it is in a turn
+ * there, else its only star. The stream names a scope the sky may not have caught up with yet.
+ */
+export function starOf(model: SkyModel, agent: string, scope: string): string | null {
+  const stars = model.stars.filter((star) => star.name === agent);
+  return (stars.find((star) => star.anchor === scope) ?? stars[0])?.id ?? null;
 }
 
 /**

@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import type { Task } from "@stellaris/shared";
+import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { CliKind } from "@stellaris/shared";
 import type { Api } from "./api.js";
@@ -64,6 +65,24 @@ export function useTasks(slug: string) {
     queryKey: ["tasks", slug],
     queryFn: () => api.tasks(slug),
     refetchInterval: 60_000,
+  });
+}
+
+function everyTask(results: ReadonlyArray<UseQueryResult<Task[]>>): Task[] {
+  return results.flatMap((result) => result.data ?? []);
+}
+
+/** Every project's tasks, from the same cache the tasks views read. */
+export function useAllTasks(): Task[] {
+  const { api } = useSession();
+  const projects = useProjects();
+  return useQueries({
+    queries: (projects.data ?? []).map((project) => ({
+      queryKey: ["tasks", project.slug],
+      queryFn: () => api.tasks(project.slug),
+      refetchInterval: 60_000,
+    })),
+    combine: everyTask,
   });
 }
 

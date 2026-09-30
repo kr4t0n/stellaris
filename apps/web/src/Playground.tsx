@@ -7,10 +7,12 @@ import { useNeedsYou } from "./board/useNeedsYou.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
+import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
 import {
+  useAllTasks,
   useMembers,
   useNow,
   useProjects,
@@ -68,6 +70,7 @@ export function Playground() {
   const roles = useRoles();
   const scheduler = useScheduler();
   const threads = useThreads();
+  const tasks = useAllTasks();
   const navigate = useNavigate();
   const pause = useMutation({
     mutationFn: (paused: boolean) => api.setPaused(paused),
@@ -75,7 +78,8 @@ export function Playground() {
   });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useSearch({ strict: false });
-  // The id of the hovered star: a citizen in turns in two projects has a star in each.
+  // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
+  // `task:<id>` for a task's mark.
   const [hovered, setHovered] = useState<string | null>(null);
   const now = useNow(30_000);
   const width = useWindowWidth();
@@ -144,8 +148,13 @@ export function Playground() {
     () =>
       members.data === undefined || projects.data === undefined || scheduler.data === undefined
         ? null
-        : skyModel({ members: members.data, projects: projects.data, scheduler: scheduler.data }),
-    [members.data, projects.data, scheduler.data],
+        : skyModel({
+            members: members.data,
+            projects: projects.data,
+            scheduler: scheduler.data,
+            tasks,
+          }),
+    [members.data, projects.data, scheduler.data, tasks],
   );
 
   if (model === null) {
@@ -178,6 +187,7 @@ export function Playground() {
       ? "the society"
       : (projects.data?.find((project) => project.slug === scope)?.name ?? scope);
   const star = model.stars.find((candidate) => candidate.id === hovered);
+  const mark = model.tasks.find((candidate) => `task:${candidate.id}` === hovered);
   const member = members.data?.find((candidate) => candidate.name === star?.name);
   // A queued star waits at the core; its card says where the turn will run.
   const place = star === undefined ? "the society" : placeName(star.queuedFor ?? star.anchor);
@@ -191,6 +201,9 @@ export function Playground() {
         search: chosen.state === "working" ? { scope: chosen.anchor } : {},
       });
     }
+  };
+  const openTask = (id: string): void => {
+    void navigate({ to: "/task/$taskId", params: { taskId: id } });
   };
   const working = model.stars.filter((candidate) => candidate.state === "working");
   const openProject = (anchor: string): void => {
@@ -211,8 +224,12 @@ export function Playground() {
           focus={focus}
           onSelectAnchor={openProject}
           onSelectStar={openStar}
+          onSelectTask={openTask}
+          live={live}
           card={
-            star === undefined || member === undefined ? null : (
+            mark !== undefined ? (
+              <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
+            ) : star === undefined || member === undefined ? null : (
               <CitizenCard member={member} star={star} purpose={purpose} place={place} now={now} />
             )
           }
@@ -259,7 +276,21 @@ export function Playground() {
             <code className="font-mono text-fg-secondary">stellaris agent add</code>.
           </p>
         ) : null}
-        {/* The sky for keyboards and screen readers: focusing a citizen shows its card, choosing it opens it. */}
+        {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}
+        <ul className="sr-only" aria-label="Tasks in play">
+          {model.tasks.map((candidate) => (
+            <li key={candidate.id}>
+              <button
+                type="button"
+                onFocus={() => setHovered(`task:${candidate.id}`)}
+                onBlur={() => setHovered(null)}
+                onClick={() => openTask(candidate.id)}
+              >
+                Task {candidate.title}, {candidate.phase} at {placeName(candidate.project)}
+              </button>
+            </li>
+          ))}
+        </ul>
         <ul className="sr-only" aria-label="Citizens">
           {model.stars.map((candidate) => (
             <li key={candidate.id}>

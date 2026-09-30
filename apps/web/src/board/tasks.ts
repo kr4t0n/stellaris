@@ -12,6 +12,16 @@ export const PHASES: ReadonlyArray<{ readonly phase: TaskPhase; readonly label: 
   { phase: "abandoned", label: "Abandoned" },
 ];
 
+/** Each phase's chip, as the task views and the sky's task card show it. */
+export const PHASE_STYLE: Record<TaskPhase, string> = {
+  returned: "bg-orange-500/15 text-orange-300",
+  waiting: "bg-amber-500/15 text-amber-300",
+  working: "bg-emerald-500/15 text-emerald-300",
+  landing: "bg-sky-500/15 text-sky-300",
+  done: "bg-surface-2 text-fg-secondary",
+  abandoned: "bg-surface-2 text-fg-muted",
+};
+
 export function phaseOf(task: Task): TaskPhase {
   if (task.status === "done" || task.status === "abandoned") {
     return task.status;

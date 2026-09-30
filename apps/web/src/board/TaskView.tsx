@@ -20,21 +20,12 @@ import {
   assigneeOf,
   inPlay,
   isCurrent,
+  PHASE_STYLE,
   PHASES,
   phaseOf,
   progressOf,
   stageName,
-  type TaskPhase,
 } from "./tasks.js";
-
-const PHASE_STYLE: Record<TaskPhase, string> = {
-  returned: "bg-orange-500/15 text-orange-300",
-  waiting: "bg-amber-500/15 text-amber-300",
-  working: "bg-emerald-500/15 text-emerald-300",
-  landing: "bg-sky-500/15 text-sky-300",
-  done: "bg-surface-2 text-fg-secondary",
-  abandoned: "bg-surface-2 text-fg-muted",
-};
 
 function StageItem({
   stage,

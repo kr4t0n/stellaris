@@ -1,7 +1,7 @@
-import type { Member, Project } from "@stellaris/shared";
+import { TaskFrontmatterSchema, type Member, type Project, type Task } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import type { SchedulerView } from "../lib/api.js";
-import { skyModel, type SkySnapshot } from "./model.js";
+import { skyModel, starOf, type SkySnapshot } from "./model.js";
 
 const ts = "2026-09-29T10:00:00.000Z";
 
@@ -37,6 +37,31 @@ function project(slug: string, createdAt: string): Project {
     createdAt,
     defaultPlan: [],
     onDone: "none",
+  };
+}
+
+function task(id: string, extra: Record<string, unknown> = {}): Task {
+  return {
+    ...TaskFrontmatterSchema.parse({
+      id,
+      project: "lab",
+      title: `task ${id.slice(-1)}`,
+      status: "open",
+      createdBy: "desk",
+      createdAt: ts,
+      updatedAt: ts,
+      blockedBy: [],
+      requiredCapabilities: [],
+      stages: [
+        { id: "s1", name: "Work", role: "researcher" },
+        { id: "s2", name: "Review", role: "referee", gate: true },
+      ],
+      stage: "s1",
+      stageSince: ts,
+      stageSeq: 2,
+      ...extra,
+    }),
+    body: "",
   };
 }
 
@@ -193,5 +218,60 @@ describe("skyModel", () => {
     );
     expect(Math.min(...gaps)).toBeGreaterThan(30);
     expect(skyModel(board)).toEqual(model);
+  });
+
+  it("orbits a project's tasks in play outside its sphere, oldest at the top, in their phase", () => {
+    const model = skyModel(
+      snapshot({
+        members: [member("ada", { memberships: ["lab"] }), member("ref", { memberships: ["lab"] })],
+        projects: [project("lab", ts)],
+        scheduler: { ...idle, running: ["ada/lab"] },
+        tasks: [
+          task("01M3Q2AAAAAAAAAAAAAAAAAAA3", { status: "claimed", claimedBy: "ref" }),
+          task("01M3Q2AAAAAAAAAAAAAAAAAAA1", { status: "claimed", claimedBy: "ada" }),
+          task("01M3Q2AAAAAAAAAAAAAAAAAAA2"),
+          task("01M3Q2AAAAAAAAAAAAAAAAAAA4", { status: "done" }),
+          task("01M3Q2AAAAAAAAAAAAAAAAAAA5", {
+            stage: "s1",
+            returned: { from: "s2", by: "ref", at: ts },
+          }),
+        ],
+      }),
+    );
+    const lab = model.anchors.find((anchor) => anchor.id === "lab");
+    if (lab === undefined) throw new Error("no lab");
+    expect(
+      model.tasks.map((mark) => [mark.id.slice(-1), mark.phase, mark.holder, mark.linked]),
+    ).toEqual([
+      ["1", "working", "ada", "ada/lab"],
+      ["2", "waiting", null, null],
+      ["3", "working", "ref", null],
+      ["5", "returned", null, null],
+    ]);
+    const [first, second, third] = model.tasks;
+    // Outside the sphere, and inside the room the layout keeps around it.
+    for (const mark of model.tasks) {
+      const distance = Math.hypot(mark.x - lab.x, mark.y - lab.y);
+      expect(distance).toBeGreaterThan(lab.radius);
+      expect(distance).toBeLessThan(lab.radius + 26);
+    }
+    expect(first?.y).toBeLessThan(lab.y);
+    expect(first?.x).toBe(lab.x);
+    // The next ones alternate either side of the first.
+    expect(Math.sign((second?.x ?? 0) - lab.x)).toBe(-Math.sign((third?.x ?? 0) - lab.x));
+  });
+
+  it("finds the star a live event belongs to", () => {
+    const model = skyModel(
+      snapshot({
+        members: [member("ada", { memberships: ["lab"] }), member("desk")],
+        projects: [project("lab", ts)],
+        scheduler: { ...idle, running: ["ada/lab"] },
+      }),
+    );
+    expect(starOf(model, "ada", "lab")).toBe("ada/lab");
+    expect(starOf(model, "ada", "pi-study")).toBe("ada/lab");
+    expect(starOf(model, "desk", "society")).toBe("desk");
+    expect(starOf(model, "nobody", "lab")).toBeNull();
   });
 });

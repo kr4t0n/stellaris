@@ -129,7 +129,7 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
 
-test("the citizen count opens every citizen by role, with its model, and each opens its view", async ({
+test("the citizen count opens every citizen with its role and model, and each opens its view", async ({
   page,
 }) => {
   await fakeBoard(page);
@@ -141,13 +141,15 @@ test("the citizen count opens every citizen by role, with its model, and each op
 
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("heading", { name: "Citizens" })).toBeVisible();
-  await expect(view.getByRole("heading", { name: /concierge/ })).toBeVisible();
-  await expect(view.getByRole("heading", { name: /steward/ })).toBeVisible();
+  await expect(view).toContainText("2 active in 2 roles");
   const desk = view.getByRole("link", { name: /^desk/ });
+  await expect(desk).toContainText("concierge");
   await expect(desk).toContainText("claude-opus-5-5");
   await expect(desk).toContainText("lab");
   await expect(desk).toContainText("resting");
-  await expect(view.getByRole("link", { name: /^stew/ })).toContainText("no projects");
+  const stew = view.getByRole("link", { name: /^stew/ });
+  await expect(stew).toContainText("steward");
+  await expect(stew).toContainText("no projects");
 
   await desk.click();
   await expect(page).toHaveURL(/\/citizen\/desk$/);

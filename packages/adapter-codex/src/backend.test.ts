@@ -153,6 +153,30 @@ function fakeAppServer(
           );
           return;
         }
+        case "model/list":
+          send({
+            id: message.id,
+            result:
+              message.params?.["cursor"] === "page-2"
+                ? {
+                    data: [{ id: "gpt-6-luna", model: "gpt-6-luna", displayName: "GPT-6-Luna" }],
+                    nextCursor: null,
+                  }
+                : {
+                    data: [
+                      {
+                        id: "gpt-6-astra",
+                        model: "gpt-6-astra",
+                        displayName: "GPT-6-Astra",
+                        description: "Frontier intelligence.",
+                        isDefault: true,
+                      },
+                      { id: "broken", model: "has space", displayName: "Broken" },
+                    ],
+                    nextCursor: "page-2",
+                  },
+          });
+          return;
         case "turn/interrupt":
           send({ id: message.id, result: {} });
           if (running !== null) complete(running, "interrupted");
@@ -471,6 +495,29 @@ describe("CodexBackend cold turns", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("CodexBackend models", () => {
+  it("lists the app server's models across pages, skipping names a CLI would not take", async () => {
+    const fake = fakeAppServer();
+    const models = await new CodexBackend({ spawn: fake.spawn }).listModels();
+    expect(models).toEqual([
+      {
+        id: "gpt-6-astra",
+        name: "GPT-6-Astra",
+        description: "Frontier intelligence.",
+        isDefault: true,
+      },
+      { id: "gpt-6-luna", name: "GPT-6-Luna", description: "", isDefault: false },
+    ]);
+    expect(fake.received.map((m) => m.method)).toEqual([
+      "initialize",
+      "initialized",
+      "model/list",
+      "model/list",
+    ]);
+    expect(fake.killed()).toBe(1);
   });
 });
 

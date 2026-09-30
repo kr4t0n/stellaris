@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   getSessionInfo,
   query,
+  type ModelInfo,
   type Options,
   type PermissionMode,
   type SDKMessage,
@@ -24,6 +26,7 @@ import {
   AGENT_TOKEN_ENV,
   capOutput,
   type AgentEvent,
+  type ModelOption,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
@@ -34,7 +37,39 @@ export { parseTurnStatus };
 export type QueryStream = AsyncIterable<SDKMessage> & {
   interrupt?: () => Promise<unknown>;
   close?: () => void;
+  supportedModels?: () => Promise<ModelInfo[]>;
 };
+
+/** Streaming input that never sends a message, for a query opened only to ask the CLI something. */
+function silentInput(): AsyncIterable<SDKUserMessage> {
+  return {
+    [Symbol.asyncIterator]: () => ({
+      next: () => new Promise<IteratorResult<SDKUserMessage>>(() => undefined),
+    }),
+  };
+}
+
+/**
+ * The SDK's model list as choices. Its `default` entry is the CLI's own default rather than a model
+ * to pin, so it only marks the first model it resolves to.
+ */
+export function modelOptions(models: readonly ModelInfo[]): ModelOption[] {
+  const fallback = models.find((model) => model.value === "default");
+  const target = fallback === undefined ? undefined : (fallback.resolvedModel ?? fallback.value);
+  let marked = false;
+  return models
+    .filter((model) => model.value !== "default")
+    .map((model) => {
+      const isDefault = !marked && (model.resolvedModel ?? model.value) === target;
+      marked ||= isDefault;
+      return {
+        id: model.value,
+        name: model.displayName,
+        description: model.description,
+        isDefault,
+      };
+    });
+}
 
 /** The SDK entry point, injectable so tests can replay recorded message streams. */
 export type QueryFn = (params: {
@@ -506,6 +541,29 @@ export class ClaudeAgentBackend implements AgentBackend {
   /** The session id is chosen up front so the runner can record it before the turn starts. */
   newSession(): Promise<SessionId> {
     return Promise.resolve(randomUUID());
+  }
+
+  /** The models the CLI offers, asked of a query that is closed before it takes a turn. */
+  async listModels(): Promise<ModelOption[]> {
+    const listing = this.queryFn({
+      prompt: silentInput(),
+      options: {
+        cwd: os.tmpdir(),
+        settingSources: [],
+        env: subprocessEnv(process.env, this.options.env ?? {}, ""),
+        ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),
+        ...(this.options.pathToClaudeCodeExecutable === undefined
+          ? {}
+          : { pathToClaudeCodeExecutable: this.options.pathToClaudeCodeExecutable }),
+      },
+    });
+    try {
+      return listing.supportedModels === undefined
+        ? []
+        : modelOptions(await listing.supportedModels());
+    } finally {
+      listing.close?.();
+    }
   }
 
   async runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {

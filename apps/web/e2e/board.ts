@@ -5,11 +5,18 @@ export const SKILL_PROPOSAL = "01M3PY56V68VFS0EG5ER4B9AMD";
 
 const CREATED = "2026-09-29T09:00:00.000Z";
 
-function member(name: string, charter: string, memberships: string[] = []) {
+function member(
+  name: string,
+  charter: string,
+  memberships: string[] = [],
+  model: string | null = null,
+) {
   return {
     name,
     role: charter,
     cli: "claude",
+    ...(model === null ? {} : { model }),
+    lastModel: "claude-opus-5-5",
     homeRunner: "server",
     status: "active",
     resident: false,
@@ -23,7 +30,7 @@ function member(name: string, charter: string, memberships: string[] = []) {
   };
 }
 
-function role(name: string, wakeTriggers: string[]) {
+function role(name: string, wakeTriggers: string[], resident = false) {
   return {
     name,
     purpose: `The ${name}.`,
@@ -31,7 +38,7 @@ function role(name: string, wakeTriggers: string[]) {
     wakeTriggers,
     maxReplicas: 1,
     backlogThreshold: 3,
-    resident: false,
+    resident,
     societyScope: true,
     reflects: true,
   };
@@ -222,6 +229,7 @@ export async function fakeBoard(
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
+  let deskModel: string | null = null;
   const proposal: Proposal = {
     id: SKILL_PROPOSAL,
     kind: "skill",
@@ -275,7 +283,7 @@ export async function fakeBoard(
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
-    if (request.method() === "POST") {
+    if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
       switch (pathname) {
@@ -283,6 +291,12 @@ export async function fakeBoard(
           return decide(route, "approved", body);
         case "/api/verbs/reject":
           return decide(route, "rejected", body);
+        case "/api/agents/desk/model":
+          deskModel = typeof body["model"] === "string" ? body["model"] : null;
+          return json(route, {
+            ...member("desk", "concierge", ["lab"], deskModel),
+            homeRunner: "server",
+          });
         case "/api/wake":
           return json(route, {
             id: "01M3Q2EEEEEEEEEEEEEEEEEEE1",
@@ -314,7 +328,15 @@ export async function fakeBoard(
           channels: ["general", "governance", "decisions"],
         });
       case "/api/members":
-        return json(route, [member("desk", "concierge", ["lab"]), member("stew", "steward")]);
+        return json(route, [
+          member("desk", "concierge", ["lab"], deskModel),
+          member("stew", "steward"),
+        ]);
+      case "/api/models/claude":
+        return json(route, [
+          { id: "opus", name: "Opus 5.5", description: "For complex work.", isDefault: true },
+          { id: "sonnet", name: "Sonnet 5", description: "Efficient for routine tasks." },
+        ]);
       case "/api/agents/desk/turns":
         return json(route, [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
@@ -337,7 +359,10 @@ export async function fakeBoard(
       case "/api/society/knowledge":
         return json(route, []);
       case "/api/roles":
-        return json(route, [role("concierge", ["user_post"]), role("steward", ["ops_event"])]);
+        return json(route, [
+          role("concierge", ["user_post"], true),
+          role("steward", ["ops_event"]),
+        ]);
       case "/api/projects":
         return json(route, [PROJECT]);
       case "/api/projects/lab/tasks":

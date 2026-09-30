@@ -13,6 +13,7 @@ import {
   mayHoldStage,
   MemberProposalSchema,
   MemberSchema,
+  ModelNameSchema,
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
@@ -2878,6 +2879,32 @@ export class Board {
         this.tokenIndex.set(agent.tokenHash, { name: agent.name, role: agent.role });
       }
     }
+  }
+
+  /**
+   * Sets the model a citizen's turns run with, or clears it for the CLI's default. It applies from
+   * the citizen's next turn; the runner starts a warm session afresh when the model changes.
+   */
+  async setAgentModel(actor: Actor, name: Name, model: string | null): Promise<Agent> {
+    this.assertUser(actor, "only the user may change a citizen's model");
+    const chosen = model === null ? null : ModelNameSchema.parse(model);
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.status !== "active" || current.cli === null) {
+        throw new BoardError("INVALID_STATE", `${name} takes no turns, so it has no model to set`);
+      }
+      const { model: previous, ...rest } = current;
+      const next = await this.updateAgent(name, () =>
+        chosen === null ? rest : { ...rest, model: chosen },
+      );
+      await this.refreshMember(name);
+      await this.events.append("agent.configured", actor.name, {
+        agent: name,
+        model: chosen,
+        previous: previous ?? null,
+      });
+      return next;
+    });
   }
 
   private async updateAgent(name: Name, mutate: (agent: Agent) => Agent): Promise<Agent> {

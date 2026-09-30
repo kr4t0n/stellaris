@@ -1,6 +1,8 @@
 import { isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
+  CliKindSchema,
+  ModelNameSchema,
   NameSchema,
   RoleCharterSchema,
   VerbNameSchema,
@@ -10,6 +12,7 @@ import {
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
+import type { ModelSource } from "./models.js";
 import type { TurnHub } from "./turn-hub.js";
 
 /** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
@@ -27,6 +30,8 @@ export interface AppDependencies {
   readonly version: string;
   readonly turns?: TurnHub | undefined;
   readonly scheduler?: SchedulerView | undefined;
+  /** The models each CLI offers, for choosing a citizen's model. */
+  readonly models?: ModelSource | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -42,6 +47,8 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
 };
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
+/** A model for a citizen, or null for its CLI's own default. */
+const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const ChannelBodySchema = z.object({
   project: NameSchema.nullable().default(null),
   name: NameSchema,
@@ -56,7 +63,7 @@ function bearer(c: Context<Env>): string | null {
 
 /** The board server's HTTP surface: health, an authenticated API for the user and tools, and the MCP endpoint. */
 export function createApp(deps: AppDependencies): Hono<Env> {
-  const { board, version, turns, scheduler } = deps;
+  const { board, version, turns, scheduler, models } = deps;
   const app = new Hono<Env>();
 
   app.get("/health", (c) => c.json({ ok: true, version }));
@@ -129,6 +136,20 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       reason: body.reason,
     });
     return c.json(agent);
+  });
+  api.put("/agents/:name/model", async (c) => {
+    const body = ModelBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.setAgentModel(
+      c.get("actor"),
+      c.req.param("name"),
+      body.model,
+    );
+    return c.json(agent);
+  });
+  // What each CLI offers, asked of the CLI itself.
+  api.get("/models/:cli", async (c) => {
+    const cli = CliKindSchema.parse(c.req.param("cli"));
+    return c.json(models === undefined ? [] : await models.list(cli));
   });
   api.put("/roles/:name", async (c) => {
     const charter = RoleCharterSchema.parse({

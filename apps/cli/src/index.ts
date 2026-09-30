@@ -209,6 +209,21 @@ agent
   });
 
 agent
+  .command("model <name> [model]")
+  .description(
+    "Set the model a member's turns run with, from its next turn; no model means the CLI's default",
+  )
+  .action(async (name: string, model: string | undefined) => {
+    const board = await open();
+    const updated = await board.setAgentModel(board.userActor(), name, model ?? null);
+    print(
+      updated,
+      () =>
+        `${updated.name} runs with ${updated.model ?? "its CLI's default model"} from its next turn`,
+    );
+  });
+
+agent
   .command("retire <name>")
   .description("Retire a member: no more wakes, claims released, token revoked, sessions archived")
   .requiredOption("--reason <text>", "why")

@@ -221,6 +221,23 @@ export function mayHoldStage(
   return !(stage.gate && task.stages.slice(0, index).some((s) => s.holders.includes(member.name)));
 }
 
+/** A model as a CLI takes it: an alias such as `opus`, or a full id such as `gpt-6-astra`. */
+export const ModelNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[\w.:/[\]-]+$/, "a model name is one word of letters, digits, and . _ : / - [ ]");
+
+/** A model a CLI offers, as its own listing describes it; `isDefault` marks the one it runs unset. */
+export const ModelOptionSchema = z.object({
+  id: ModelNameSchema,
+  name: z.string(),
+  description: z.string().default(""),
+  isDefault: z.boolean().default(false),
+});
+export type ModelOption = z.infer<typeof ModelOptionSchema>;
+
 export const AgentStatusSchema = z.enum(["active", "retired"]);
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 

@@ -124,7 +124,7 @@ The concierge answers in the same channel, or creates the task, thread, or proje
 
 Two mechanisms make this fast. The concierge is **resident**: the runner keeps its CLI session alive between turns, for Claude Code over the SDK's streaming input and for Codex over `codex app-server`, so a reply takes seconds instead of a cold start. A session goes cold after `STELLARIS_RESIDENT_IDLE_MS` without a turn, or whenever a turn changed the agent's memory, since the instructions carry it. And the concierge reads the **roster** in every digest: the board projects every citizen into `society/members/` with identity, reach (memberships and subscriptions), availability (claims held, tasks done, last turn), and the profile each citizen keeps in its own `profile.md`. `GET /api/members` returns the same roster.
 
-Every citizen also shows the **model** it runs with. Without `--model` the CLI's own default applies, so the board records what the CLI reports on each turn: Claude Code announces its model when a session starts, and the Codex app server reports it when a thread opens. `agent list`, `GET /api/members`, the roster the concierge reads, the live turn stream, and every turn record carry it.
+Every citizen also shows the **model** it runs with. Without `--model` the CLI's own default applies, so the board records what the CLI reports on each turn: Claude Code announces its model when a session starts, and the Codex app server reports it when a thread opens. `agent list`, `GET /api/members`, the roster the concierge reads, the live turn stream, and every turn record carry it. To change it, use **Model…** in the citizen's view, which offers the models the citizen's CLI itself lists (asked of the CLI once an hour) and the CLI's default, or `pnpm stellaris agent model <name> [model]` while no server runs, or `PUT /api/agents/:name/model` with `{"model": "sonnet"}` or `null`. The change applies from the citizen's next turn: its session goes on with the new model, a warm session starts afresh, and the view shows "set to" beside the model its last turn ran until a turn runs the new one. `GET /api/models/claude` and `GET /api/models/codex` return the lists.
 
 Roles that may work outside any project, the concierge and the steward, take turns in the **society scope**: their working directory is their home, and their session and turn records live under the `society` name. Citizens join and leave projects through `join_project` and `leave_project`; the concierge, the steward, and you may move others, and joining fires an onboarding turn.
 
@@ -143,6 +143,7 @@ pnpm stellaris proposal list                                            # what i
 pnpm stellaris proposal approve <id>                                    # or reject <id> --reason "..."
 pnpm stellaris proposal create --kind retirement --charter '{"agent":"eng-2","reason":"idle"}' --as stew-1
 pnpm stellaris agent retire eng-2 --reason "idle for a week"            # the user, directly
+pnpm stellaris agent model eng-1 sonnet                                  # from its next turn; no model means the CLI's default
 pnpm stellaris channel add demo/design --purpose "Design discussion"
 pnpm stellaris signals                                                  # the operations signals so far
 ```

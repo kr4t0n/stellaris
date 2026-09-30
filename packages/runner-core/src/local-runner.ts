@@ -67,6 +67,8 @@ const USER_POST_TRIGGER = "user_post";
 interface Resident {
   readonly session: ResidentSession;
   readonly token: string;
+  /** The model the session started with; a citizen given another model gets a fresh session. */
+  readonly model: string | undefined;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -448,6 +450,10 @@ export class LocalRunner {
       throw new Error("backend cannot host resident sessions");
     }
     const ttl = this.tokenLifetime(this.residentIdleMs + 60_000);
+    const warm = this.residents.get(input.key);
+    if (warm !== undefined && warm.model !== spec.model) {
+      await this.closeResident(input.key, "model changed");
+    }
     let resident = this.residents.get(input.key);
     if (resident === undefined) {
       const token = this.board.issueTurnToken(input.agent.name, input.agent.role, ttl);
@@ -461,7 +467,7 @@ export class LocalRunner {
         env: input.env,
         costSoFarUsd: input.costSoFarUsd,
       });
-      resident = { session, token, timer: null };
+      resident = { session, token, model: spec.model, timer: null };
       this.residents.set(input.key, resident);
       this.log.info({ pair: input.key, session: session.session }, "resident session started");
     } else {

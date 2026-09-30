@@ -3,7 +3,9 @@ import {
   ChannelRefSchema,
   DecisionSchema,
   KnowledgeSchema,
+  AgentSchema,
   MemberSchema,
+  ModelOptionSchema,
   MessageFrontmatterSchema,
   NameSchema,
   ProjectSchema,
@@ -17,6 +19,7 @@ import {
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
   UlidSchema,
+  type CliKind,
 } from "@stellaris/shared";
 import { z } from "zod";
 
@@ -110,7 +113,8 @@ async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promis
 const ErrorBodySchema = z.object({ message: z.string() });
 
 /** A write as the signed-in actor; the board's refusal comes back as an ApiError with its reason. */
-async function post<T>(
+async function write<T>(
+  method: "POST" | "PUT",
   path: string,
   token: string,
   input: Record<string, unknown>,
@@ -119,7 +123,7 @@ async function post<T>(
   let response: Response;
   try {
     response = await fetch(path, {
-      method: "POST",
+      method,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(input),
     });
@@ -143,10 +147,11 @@ function invoke<T>(
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
 ): Promise<T> {
-  return post(`/api/verbs/${verb}`, token, input, schema);
+  return write("POST", `/api/verbs/${verb}`, token, input, schema);
 }
 
 const PausedSchema = z.object({ paused: z.boolean() });
+const AgentRecordSchema = AgentSchema.omit({ tokenHash: true });
 
 /** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
 export function createApi(token: string) {
@@ -216,9 +221,20 @@ export function createApi(token: string) {
       project: string;
       reason?: string;
       kind: "manual" | "reflection";
-    }) => post("/api/wake", token, input, BoardEventSchema),
+    }) => write("POST", "/api/wake", token, input, BoardEventSchema),
     setPaused: (paused: boolean) =>
-      post(paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
+      write("POST", paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
+    /** The models a CLI offers, from its own listing. */
+    models: (cli: CliKind) => get(`/api/models/${cli}`, token, ModelOptionSchema.array()),
+    /** Sets the model a citizen's turns run with from its next turn, or null for its CLI's default. */
+    setModel: (name: string, model: string | null) =>
+      write(
+        "PUT",
+        `/api/agents/${encodeURIComponent(name)}/model`,
+        token,
+        { model },
+        AgentRecordSchema,
+      ),
   };
 }
 export type Api = ReturnType<typeof createApi>;

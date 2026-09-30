@@ -8,10 +8,11 @@ import type {
   TurnRequest,
   TurnResult,
 } from "@stellaris/runner-core";
-import type { AgentEvent } from "@stellaris/shared";
+import type { AgentEvent, ModelOption } from "@stellaris/shared";
 import { z } from "zod";
 import {
   CodexAppServerSession,
+  listAppServerModels,
   PENDING_THREAD_PREFIX,
   type AppServerSessionOptions,
   type SpawnAppServer,
@@ -53,6 +54,11 @@ export class CodexBackend implements AgentBackend {
 
   startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
     return CodexAppServerSession.start(this.sessionOptions(), spec, start);
+  }
+
+  /** The models the app server offers, asked of a server started for the question. */
+  listModels(): Promise<ModelOption[]> {
+    return listAppServerModels(this.sessionOptions());
   }
 
   async runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {

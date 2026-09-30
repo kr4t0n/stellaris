@@ -162,6 +162,30 @@ describe("Board", () => {
     );
   });
 
+  it("lets the user set a citizen's model and clear it back to the CLI's default", async () => {
+    const { board } = await society();
+    const set = await board.setAgentModel(USER, "eng-1", "sonnet");
+    expect(set.model).toBe("sonnet");
+    expect((await board.listMembers()).find((m) => m.name === "eng-1")?.model).toBe("sonnet");
+    const cleared = await board.setAgentModel(USER, "eng-1", null);
+    expect(cleared.model).toBeUndefined();
+    expect((await board.readAgent("eng-1")).model).toBeUndefined();
+
+    const events = (await board.readEvents(null)).filter((e) => e.type === "agent.configured");
+    expect(events.map((e) => e.payload)).toEqual([
+      { agent: "eng-1", model: "sonnet", previous: null },
+      { agent: "eng-1", model: null, previous: "sonnet" },
+    ]);
+
+    await expect(
+      board.setAgentModel({ name: "stew", role: "steward" }, "eng-1", "opus"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.setAgentModel(USER, "eng-1", "opus 5")).rejects.toThrow(/one word/);
+    await expect(board.setAgentModel(USER, "user", "opus")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+  });
+
   it("treats claims as leases: expired ones can be taken over and are released by the sweep", async () => {
     const { board } = await society();
     const task = await board.createTask(USER, { project: "demo", title: "t" });

@@ -7,6 +7,7 @@ import { parseTimings, Scheduler } from "@stellaris/scheduler";
 import { loadServerConfig, SERVER_RUNNER } from "@stellaris/shared";
 import pino from "pino";
 import { createApp } from "./app.js";
+import { ModelCatalog } from "./models.js";
 import { TurnHub } from "./turn-hub.js";
 
 const VERSION = "0.0.0";
@@ -17,25 +18,27 @@ const board = await Board.open(config.dataDir);
 const mcpUrl = `http://${config.host}:${config.port}/mcp`;
 const turns = new TurnHub();
 
+const backends = {
+  claude: new ClaudeAgentBackend({
+    stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
+    recordDir: process.env["STELLARIS_RECORD_DIR"],
+  }),
+  codex: new CodexBackend({
+    stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
+    recordDir: process.env["STELLARIS_RECORD_DIR"],
+    // Full access by default: no sandbox, no approvals. A runner that wants Codex's own
+    // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
+    sandbox: CodexSandboxSchema.parse(
+      process.env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access",
+    ),
+  }),
+};
+
 const runner = new LocalRunner({
   board,
   runnerName: SERVER_RUNNER,
   mcpUrl,
-  backends: {
-    claude: new ClaudeAgentBackend({
-      stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
-      recordDir: process.env["STELLARIS_RECORD_DIR"],
-    }),
-    codex: new CodexBackend({
-      stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
-      recordDir: process.env["STELLARIS_RECORD_DIR"],
-      // Full access by default: no sandbox, no approvals. A runner that wants Codex's own
-      // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
-      sandbox: CodexSandboxSchema.parse(
-        process.env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access",
-      ),
-    }),
-  },
+  backends,
   log,
   turnTimeoutMs: config.turnTimeoutMs,
   maxTurns: config.toolRounds,
@@ -67,7 +70,13 @@ const view = {
     return scheduler.activeSignals;
   },
 };
-const app = createApp({ board, version: VERSION, turns, scheduler: view });
+const app = createApp({
+  board,
+  version: VERSION,
+  turns,
+  scheduler: view,
+  models: new ModelCatalog(backends),
+});
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
     { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl },

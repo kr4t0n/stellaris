@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
+import type { CliKind } from "@stellaris/shared";
 import type { Api } from "./api.js";
 
 export interface Session {
@@ -141,6 +142,18 @@ export function useKnowledge(scope: string) {
     queryKey: ["knowledge", scope],
     queryFn: () => api.knowledge(scope),
     refetchInterval: 120_000,
+  });
+}
+
+/** The models a CLI offers; asking starts the CLI, so the server keeps the list and so does this. */
+export function useModels(cli: CliKind | null) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["models", cli],
+    queryFn: () => api.models(cli ?? "claude"),
+    enabled: cli !== null,
+    staleTime: 10 * 60_000,
+    retry: false,
   });
 }
 

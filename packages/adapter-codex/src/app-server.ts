@@ -1,4 +1,5 @@
 import { appendFile, mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
@@ -15,7 +16,9 @@ import {
 import {
   AGENT_TOKEN_ENV,
   capOutput,
+  ModelOptionSchema,
   type AgentEvent,
+  type ModelOption,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
@@ -317,6 +320,65 @@ function toolOutputOf(item: Dict): string {
     }
     default:
       return "";
+  }
+}
+
+function modelOf(raw: unknown): ModelOption | null {
+  if (!isDict(raw)) {
+    return null;
+  }
+  const parsed = ModelOptionSchema.safeParse({
+    id: str(raw["model"]) ?? str(raw["id"]),
+    name: str(raw["displayName"]) ?? str(raw["model"]) ?? "",
+    description: str(raw["description"]) ?? "",
+    isDefault: raw["isDefault"] === true,
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+/** The models the app server offers, from `model/list` on a server started only to ask. */
+export async function listAppServerModels(
+  options: Omit<AppServerSessionOptions, "sandbox">,
+): Promise<ModelOption[]> {
+  const args = ["app-server", "--stdio"];
+  for (const override of options.extraConfig ?? []) {
+    args.push("-c", override);
+  }
+  const spawn = options.spawn ?? defaultSpawnAppServer(options.codexPath ?? "codex");
+  const child = spawn(args, { cwd: os.tmpdir(), env: { ...process.env, ...options.env } });
+  const client = new JsonRpcClient(child, {
+    notification: () => undefined,
+    stderr: (line) => options.stderr?.(line),
+    line: () => undefined,
+    exit: () => undefined,
+  });
+  try {
+    await client.request("initialize", {
+      clientInfo: {
+        name: "stellaris",
+        title: "Stellaris runner",
+        version: options.clientVersion ?? "0.0.0",
+      },
+      capabilities: null,
+    });
+    client.notify("initialized", {});
+    const models: ModelOption[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await client.request("model/list", {
+        includeHidden: false,
+        ...(cursor === null ? {} : { cursor }),
+      });
+      const data = isDict(page) && Array.isArray(page["data"]) ? page["data"] : [];
+      for (const raw of data) {
+        const model = modelOf(raw);
+        if (model !== null) models.push(model);
+      }
+      cursor = isDict(page) ? (str(page["nextCursor"]) ?? null) : null;
+    } while (cursor !== null);
+    return models;
+  } finally {
+    client.close();
   }
 }
 

@@ -43,6 +43,29 @@ test("after a restart the Now tab shows the last turn from its transcript", asyn
   await expect(view).toContainText("The turn completed");
 });
 
+test("a citizen's model is chosen from its CLI's list and shows until its next turn", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("concierge · claude-opus-5-5");
+
+  await view.getByRole("button", { name: "Model…" }).click();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  await expect(form.getByLabel("Model")).toHaveValue("");
+  await expect(form.getByRole("option", { name: "CLI default · Opus 5.5" })).toBeAttached();
+  await expect(form.getByRole("button", { name: "Use this model" })).toBeDisabled();
+  await form.getByLabel("Model").selectOption("sonnet");
+  await expect(form).toContainText("Efficient for routine tasks.");
+  await expect(form).toContainText("warm session starts afresh");
+  await form.getByRole("button", { name: "Use this model" }).click();
+
+  await expect(form).toHaveCount(0);
+  await expect(view).toContainText("concierge · claude-opus-5-5 · set to sonnet");
+  expect(board.writes).toEqual([{ path: "/api/agents/desk/model", body: { model: "sonnet" } }]);
+});
+
 test("waking a citizen says what it does and sends the wake the scheduler takes", async ({
   page,
 }) => {

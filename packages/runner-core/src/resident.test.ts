@@ -24,6 +24,7 @@ function completed(summary: string, memoryUpdated = false): TurnResult {
 class ResidentBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly starts: string[] = [];
+  readonly models: Array<string | undefined> = [];
   readonly closes: string[] = [];
   readonly prompts: string[] = [];
   readonly coldTurns: string[] = [];
@@ -38,8 +39,12 @@ class ResidentBackend implements AgentBackend {
     return Promise.resolve(completed("cold turn"));
   }
 
-  startResident(spec: { agent: string }, start: { session: string }): Promise<ResidentSession> {
+  startResident(
+    spec: { agent: string; model?: string | undefined },
+    start: { session: string },
+  ): Promise<ResidentSession> {
     this.starts.push(`${spec.agent}:${start.session}`);
+    this.models.push(spec.model);
     const session: ResidentSession = {
       session: start.session,
       runTurn: (prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> => {
@@ -182,6 +187,37 @@ describe("LocalRunner resident sessions and the society scope", () => {
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
     await runner.runTurn(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
+  });
+
+  it("starts a warm session afresh when the citizen's model changes", async () => {
+    const { board } = await Board.init(dir, { name: "resident" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const backend = new ResidentBackend();
+    const runner = new LocalRunner({
+      board,
+      runnerName: "server",
+      backends: { claude: backend },
+      mcpUrl: "http://127.0.0.1:0/mcp",
+      residentIdleMs: 60_000,
+    });
+    const dispatch = {
+      agent: "desk",
+      project: "society",
+      trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
+      priority: 2,
+      onboarding: false,
+    };
+    await runner.runTurn(dispatch);
+    await runner.runTurn(dispatch);
+    expect(backend.models).toEqual([undefined]);
+
+    await board.setAgentModel(USER, "desk", "sonnet");
+    await runner.runTurn(dispatch);
+    expect(backend.closes).toEqual(["desk:session-1"]);
+    expect(backend.models).toEqual([undefined, "sonnet"]);
+    await runner.runTurn(dispatch);
+    expect(backend.models).toHaveLength(2);
+    await runner.close();
   });
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {

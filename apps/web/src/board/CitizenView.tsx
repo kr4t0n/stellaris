@@ -17,6 +17,7 @@ import {
 import { CitizenMemory } from "./CitizenMemory.js";
 import { CitizenTurns } from "./CitizenTurns.js";
 import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
+import { ModelForm } from "./ModelForm.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { useStickyScroll } from "./useStickyScroll.js";
@@ -89,7 +90,7 @@ function CitizenPage({
   const roles = useRoles();
   const scheduler = useScheduler();
   const live = useLiveTurns();
-  const [waking, setWaking] = useState(false);
+  const [open, setOpen] = useState<"wake" | "model" | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
   if (member === undefined) {
@@ -106,7 +107,10 @@ function CitizenPage({
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
   const latest = turnsOf(live, name)[0];
-  const model = latest?.model ?? member.lastModel ?? member.model ?? "CLI default";
+  // What the CLI last reported, then what the citizen is set to when that differs.
+  const observed = latest?.model ?? member.lastModel;
+  const model = observed ?? member.model ?? "CLI default";
+  const setTo = member.model !== undefined && member.model !== observed ? member.model : null;
   const charter = roles.data?.find((role) => role.name === member.role);
   const scopes = wakeScopes(member, charter);
   const wakeable = member.status === "active" && member.cli !== null && scopes.length > 0;
@@ -125,12 +129,18 @@ function CitizenPage({
         subtitle={
           <>
             {member.role} · {model}
+            {setTo === null ? "" : ` · set to ${setTo}`}
             {member.status === "retired" ? " · retired" : ""}
           </>
         }
         trailing={
           <>
-            {wakeable && !waking ? <Button onClick={() => setWaking(true)}>Wake…</Button> : null}
+            {wakeable && open === null ? (
+              <>
+                <Button onClick={() => setOpen("model")}>Model…</Button>
+                <Button onClick={() => setOpen("wake")}>Wake…</Button>
+              </>
+            ) : null}
             <span
               className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATE_STYLE[state]}`}
             >
@@ -139,14 +149,21 @@ function CitizenPage({
           </>
         }
       />
-      {waking ? (
+      {open === "wake" ? (
         <WakeForm
           member={member}
           scopes={scopes}
           preferred={chosen ?? latest?.scope ?? null}
           running={runningScopes}
           paused={scheduler.data?.paused ?? false}
-          onDone={() => setWaking(false)}
+          onDone={() => setOpen(null)}
+        />
+      ) : open === "model" ? (
+        <ModelForm
+          member={member}
+          charter={charter}
+          observed={observed}
+          onDone={() => setOpen(null)}
         />
       ) : null}
       <nav aria-label="Citizen views" className="flex gap-1 border-b border-line px-3 py-2">

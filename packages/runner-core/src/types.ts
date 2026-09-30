@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   CliKind,
+  ModelOption,
   Name,
   TurnExitReason,
   TurnStatus,
@@ -101,6 +102,8 @@ export interface AgentBackend {
   interrupt?(session: SessionId): Promise<void>;
   /** Backends that can keep a session warm implement this; the runner uses it for resident roles. */
   startResident?(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession>;
+  /** The models the CLI offers, from its own listing, for choosing a citizen's model. */
+  listModels?(): Promise<ModelOption[]>;
 }
 
 export const ZERO_USAGE: Usage = Object.freeze({

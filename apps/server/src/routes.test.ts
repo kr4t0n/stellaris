@@ -231,6 +231,55 @@ describe("board server routes", () => {
     ).toBe("reflection");
   });
 
+  it("lists each CLI's models and sets a citizen's model for its next turn", async () => {
+    const app = createApp({
+      board,
+      version: "t",
+      models: {
+        list: (cli) =>
+          Promise.resolve(
+            cli === "claude"
+              ? [{ id: "sonnet", name: "Sonnet 5", description: "", isDefault: false }]
+              : [],
+          ),
+      },
+    });
+    expect(
+      z
+        .array(z.object({ id: z.string() }))
+        .parse(await (await app.request("/api/models/claude", { headers })).json()),
+    ).toEqual([expect.objectContaining({ id: "sonnet" })]);
+    expect((await app.request("/api/models/gemini", { headers })).status).toBe(400);
+
+    const set = await app.request("/api/agents/eng-1/model", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "sonnet" }),
+    });
+    expect(set.status).toBe(200);
+    const agent = z.record(z.string(), z.unknown()).parse(await set.json());
+    expect(agent["model"]).toBe("sonnet");
+    expect(agent["tokenHash"]).toBeUndefined();
+    expect((await board.readAgent("eng-1")).model).toBe("sonnet");
+
+    const cleared = await app.request("/api/agents/eng-1/model", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: null }),
+    });
+    expect(cleared.status).toBe(200);
+    expect((await board.readAgent("eng-1")).model).toBeUndefined();
+    expect(
+      (
+        await app.request("/api/agents/eng-1/model", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ model: "two words" }),
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   it("serves a citizen's turn history and memory core", async () => {
     const app = createApp({ board, version: "t" });
     const turn = {

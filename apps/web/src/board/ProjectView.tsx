@@ -80,30 +80,6 @@ export function ProjectView() {
               ? `When its last stage is done, the board merges task/<id> onto ${project.defaultBranch}.`
               : "When its last stage is done, it is done; nothing is merged."}
           </p>
-          {project.defaultPlan.length === 0 ? (
-            <p className="mt-2 text-meta">
-              No default plan: each task is planned when it is filed.
-            </p>
-          ) : (
-            <ol className="mt-2 space-y-1">
-              {project.defaultPlan.map((stage, index) => (
-                <li key={`${index}-${stage.name}`} className="flex items-center gap-2 text-sm">
-                  <span className="grid size-5 shrink-0 place-items-center rounded-full bg-surface-2 text-[10px] text-fg-muted">
-                    {index + 1}
-                  </span>
-                  <span className="text-fg-secondary">{stage.name}</span>
-                  <span className="text-meta">
-                    for {stage.agent ?? (stage.role === undefined ? "anyone" : `any ${stage.role}`)}
-                  </span>
-                  {stage.gate ? (
-                    <span className="rounded-md bg-sky-400/10 px-1.5 py-px text-[11px] text-sky-300">
-                      gate
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-          )}
         </Section>
         <Section title="Dashboard">
           {dashboard.data === undefined ? (

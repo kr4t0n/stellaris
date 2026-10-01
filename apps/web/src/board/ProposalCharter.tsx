@@ -122,7 +122,7 @@ function RoleCharterView({
         <Field label="Wake triggers">{listed(next.wakeTriggers)}</Field>
         <Field label="Replicas per project">{next.maxReplicas}</Field>
         <Field label="Warm session">{next.resident ? "yes" : "no"}</Field>
-        <Field label="Watches the society">{next.societyScope ? "yes" : "no"}</Field>
+        <Field label="Society role">{next.societyScope ? "yes, in no project" : "no"}</Field>
         <Field label="Reflects">{next.reflects ? "yes" : "no"}</Field>
       </Fields>
     </>

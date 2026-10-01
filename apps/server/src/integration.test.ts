@@ -307,10 +307,11 @@ describe("Phase 4 exit criterion", () => {
     for (const [name, role, cli] of [
       ["eng-1", "engineer", "codex"],
       ["rev-1", "reviewer", "claude"],
-      ["stew-1", "steward", "claude"],
     ] as const) {
       await board.addAgent(USER, { name, role, cli, memberships: ["demo"] });
     }
+    // The steward is a society role: in no project, it watches them all from outside.
+    await board.addAgent(USER, { name: "stew-1", role: "steward", cli: "claude" });
     const { society, backend } = await scripted(board);
     const { app } = society;
     const scheduler = new Scheduler({
@@ -334,7 +335,7 @@ describe("Phase 4 exit criterion", () => {
       (await app.request(route, { headers: user })).json();
 
     await settle();
-    expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(3);
+    expect(backend.prompts.filter((p) => p.includes("This is your first turn")).length).toBe(2);
 
     // Three stages for the engineer role and one engineer: depth three, the threshold.
     for (const title of ["Add hello.txt", "Add README", "Add a test"]) {
@@ -360,7 +361,7 @@ describe("Phase 4 exit criterion", () => {
     expect((await board.listThread(proposalId)).at(0)?.body).toContain(
       "member eng-2 as engineer on codex for demo",
     );
-    const stewardTurn = await board.readLastTurn("stew-1", "demo");
+    const stewardTurn = await board.readLastTurn("stew-1", "society");
     expect(stewardTurn?.trigger.kind).toBe("ops_event");
 
     // The user approves over the API.

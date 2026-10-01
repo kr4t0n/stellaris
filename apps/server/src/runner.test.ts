@@ -644,15 +644,21 @@ describe("turns on a runner over the runner protocol", () => {
   ): Promise<{ board: Board; core: string; run: TestSociety["run"] }> {
     const { board } = await Board.init(dir, { name: "two-machines" });
     await board.addProject(USER, { slug: "lab" });
+    await board.setRoleCharter(USER, {
+      name: "researcher",
+      purpose: "Researches.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
     await board.addAgent(USER, {
-      name: "stew",
-      role: "steward",
+      name: "sage",
+      role: "researcher",
       cli: "claude",
       memberships: ["lab"],
     });
-    const core = path.join(board.paths.agent("stew"), "memory", "core.md");
+    const core = path.join(board.paths.agent("sage"), "memory", "core.md");
     await writeFile(core, "# Core memory\n\n- one\n- two\n- three\n- four\n- five\n", "utf8");
-    await commitHome(board, "stew", "an earlier turn wrote the core");
+    await commitHome(board, "sage", "an earlier turn wrote the core");
     let arrived = 0;
     const { promise: both, resolve: together } = Promise.withResolvers<void>();
     const backendOn = ([line, changed]: [string, string]): AgentBackend => ({
@@ -679,13 +685,13 @@ describe("turns on a runner over the runner protocol", () => {
       extraRunners: [{ name: "b", backends: () => ({ claude: backendOn(edits.b) }) }],
     });
     // Its work outside projects runs on a, and the lab lives on b.
-    await board.setAgentRunner(USER, "stew", "a");
+    await board.setAgentRunner(USER, "sage", "a");
     await board.placeProject("lab", "b");
     const { run } = society;
     const [home, lab] = await Promise.all(
       (["society", "lab"] as const).map((project) =>
         run({
-          agent: "stew",
+          agent: "sage",
           project,
           trigger: { kind: "manual", fromUser: true, reason: "test" },
           priority: 1,
@@ -704,10 +710,10 @@ describe("turns on a runner over the runner protocol", () => {
     const merged = await readFile(core, "utf8");
     expect(merged).toContain("- one, from the society's work");
     expect(merged).toContain("- five, from the lab");
-    expect(await board.listHomeConflicts("stew")).toEqual([]);
-    const authors = await execa("git", ["log", "--format=%an"], { cwd: board.paths.agent("stew") });
+    expect(await board.listHomeConflicts("sage")).toEqual([]);
+    const authors = await execa("git", ["log", "--format=%an"], { cwd: board.paths.agent("sage") });
     expect(
-      authors.stdout.split("\n").filter((name) => name === "stew").length,
+      authors.stdout.split("\n").filter((name) => name === "sage").length,
     ).toBeGreaterThanOrEqual(2);
   });
 
@@ -721,21 +727,21 @@ describe("turns on a runner over the runner protocol", () => {
       prompts,
     );
     const kept = await readFile(core, "utf8");
-    const [conflict, ...more] = await board.listHomeConflicts("stew");
+    const [conflict, ...more] = await board.listHomeConflicts("sage");
     expect(more).toEqual([]);
     expect(conflict?.path).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
     expect(conflict?.file).toBe("memory/core.md");
     // The copy's age is the commit that brought it, made moments ago on a runner.
     expect(Date.now() - Date.parse(conflict?.since ?? "")).toBeLessThan(60_000);
     const other = await readFile(
-      path.join(board.paths.agent("stew"), conflict?.path ?? ""),
+      path.join(board.paths.agent("sage"), conflict?.path ?? ""),
       "utf8",
     );
     // One version is in place and the other beside it; neither is lost.
     expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
     expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
     // The history shows both turns' edits and the merge that kept the copy, with that alone.
-    const { changes } = await board.homeHistory("stew", 30);
+    const { changes } = await board.homeHistory("sage", 30);
     const turns = changes.filter((change) => change.turnId !== undefined);
     expect(turns.map((change) => change.kind)).toEqual(["turn", "turn"]);
     expect(
@@ -745,7 +751,7 @@ describe("turns on a runner over the runner protocol", () => {
       changes.filter((change) => change.kind === "merge").map((change) => change.files),
     ).toEqual([[{ path: conflict?.path, status: "added", added: 7, removed: 0 }]]);
     await run({
-      agent: "stew",
+      agent: "sage",
       project: "society",
       trigger: { kind: "manual", fromUser: true, reason: "test" },
       priority: 1,

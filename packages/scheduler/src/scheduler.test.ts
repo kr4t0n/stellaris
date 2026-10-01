@@ -625,15 +625,9 @@ describe("Scheduler", () => {
       wakeTriggers: ["heartbeat"],
       societyScope: true,
     });
-    await board.addAgent(USER, {
-      name: "lead-1",
-      role: "lead",
-      cli: "claude",
-      memberships: ["demo"],
-    });
+    // A society role, in no project; eng-1 and rev-1 follow general too but work in demo.
+    await board.addAgent(USER, { name: "lead-1", role: "lead", cli: "claude" });
     await scheduler.tick();
-    await scheduler.drain();
-    runner.dispatches.length = 0;
     // Every member follows general; a post there that mentions nobody is news, not a question.
     await board.postMessage(ENG, { channel: "general", body: "the build is green again" });
     advance(10_000);
@@ -835,15 +829,8 @@ describe("Scheduler", () => {
     const { board, runner, scheduler } = await setup({
       timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
-    await board.addAgent(USER, {
-      name: "stew-1",
-      role: "steward",
-      cli: "claude",
-      memberships: ["demo"],
-    });
-    await scheduler.tick();
-    await scheduler.drain(); // stew-1 onboarding
-    runner.dispatches.length = 0;
+    // A society role is in no project; signals about one reach it outside projects.
+    await board.addAgent(USER, { name: "stew-1", role: "steward", cli: "claude" });
     for (const title of ["a", "b", "c"]) {
       await board.createTask(USER, {
         project: "demo",
@@ -869,7 +856,7 @@ describe("Scheduler", () => {
     expect(signals[0]?.signal.summary).toContain("demo: 3 current stage(s)");
     // The signal event wakes the steward after the debounce; the engineer is not charted for it.
     await scheduler.tick();
-    expect(scheduler.pendingPairs).toEqual(["stew-1/demo"]);
+    expect(scheduler.pendingPairs).toEqual(["stew-1/society"]);
     advance(1_000);
     await scheduler.tick();
     await scheduler.drain();
@@ -949,15 +936,7 @@ describe("Scheduler", () => {
 
   it("signals a conflict copy left in a home past its age, without waking the steward", async () => {
     const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: 3_600_000 } });
-    await board.addAgent(USER, {
-      name: "stew-1",
-      role: "steward",
-      cli: "claude",
-      memberships: ["demo"],
-    });
-    await scheduler.tick();
-    await scheduler.drain(); // stew-1 onboarding
-    runner.dispatches.length = 0;
+    await board.addAgent(USER, { name: "stew-1", role: "steward", cli: "claude" });
     // A runner's merge brought the copy into eng-1's home at this moment.
     const home = board.paths.agent("eng-1");
     const copy = "memory/core.md.conflict-0000ABCD";
@@ -1067,7 +1046,7 @@ describe("Scheduler", () => {
     expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-3");
   });
 
-  it("wakes the front desk on every user post, where the post was made", async () => {
+  it("wakes the front desk, a society role, on every user post, outside projects", async () => {
     const { board, runner, scheduler } = await setup({
       timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
@@ -1103,16 +1082,14 @@ describe("Scheduler", () => {
         .toSorted((a, b) => a.localeCompare(b)),
     ).toEqual(["desk:user_post", "rev-1:mention"]);
 
-    // Joining a project fires an onboarding turn there; posts there route to that project, while
-    // a post in a society channel is still answered outside any project.
+    // The front desk is a society role: it never joins a project, and answers every post,
+    // in a society channel or a project's, outside projects.
     runner.dispatches.length = 0;
-    await board.joinProject(USER, { project: "demo", agent: "desk" });
-    await scheduler.tick();
-    await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
-      ["desk", "demo", "onboarding"],
-    ]);
-    runner.dispatches.length = 0;
+    await expect(board.joinProject(USER, { project: "demo", agent: "desk" })).rejects.toMatchObject(
+      {
+        code: "INVALID_STATE",
+      },
+    );
     await board.postMessage(USER, { channel: "general", body: "status?" });
     await scheduler.tick();
     await scheduler.drain();
@@ -1121,7 +1098,7 @@ describe("Scheduler", () => {
     await scheduler.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
       ["desk", "society", "user_post"],
-      ["desk", "demo", "user_post"],
+      ["desk", "society", "user_post"],
     ]);
 
     // The user's note on a step is the task's business: it wakes the stage, not the front desk.

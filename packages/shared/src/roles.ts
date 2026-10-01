@@ -53,9 +53,10 @@ export const RoleCharterSchema = z.object({
   /** The runner keeps a warm session between turns. */
   resident: z.boolean().default(false),
   /**
-   * The role keeps watch over the society: its heartbeat watches the society's channels and
-   * threads as it watches each project a member belongs to. Any citizen takes turns outside
-   * projects when asked there; this decides only whether unasked news there wakes it.
+   * A society role, which keeps watch over the whole society: its members are never in a project,
+   * every turn of theirs is outside projects, and their heartbeat wakes them for news there. Any
+   * citizen takes turns outside projects when asked there; a work role reads the news there at
+   * its next turn instead.
    */
   societyScope: z.boolean().default(false),
   /** The scheduler wakes the role for a reflection turn on the society's cadence. Off for humans. */

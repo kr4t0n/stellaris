@@ -263,6 +263,81 @@ describe("Board", () => {
     expect(await ids("demo")).toEqual([elsewhere.id]);
   });
 
+  it("carries news to a work role's next general conversation, in a project or outside, once", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const task = await board.createTask(USER, { project: "demo", title: "build" });
+    const ids = async (scope: string, thread?: string): Promise<string[]> =>
+      (
+        await board.readDigest(
+          { ...ENG, scope, ...(thread === undefined ? {} : { thread }) },
+          { advance: false },
+        )
+      ).messages.map((m) => m.id);
+
+    // News in general, which eng-1 follows: whichever general conversation reads first gets it,
+    // and a task's thread never does.
+    const news = await board.postMessage(REV, { channel: "general", body: "the build is green" });
+    expect(await ids("demo")).toEqual([news.id]);
+    expect(await ids("society")).toEqual([news.id]);
+    expect(await ids("demo", task.id)).toEqual([]);
+    // It is read once: a turn in demo read it, so the turn outside projects does not again.
+    await board.setDigestCursor("eng-1", "demo", news.id);
+    expect(await ids("society")).toEqual([]);
+
+    // A question in general is no news: it goes where it was asked, outside projects, alone.
+    const asked = await board.postMessage(USER, { channel: "general", body: "@eng-1 a question" });
+    const later = await board.postMessage(REV, { channel: "general", body: "and the docs too" });
+    expect(await ids("society")).toEqual([asked.id, later.id]);
+    expect(await ids("demo")).toEqual([later.id]);
+    await board.setDigestCursor("eng-1", "society", later.id);
+    expect(await ids("demo")).toEqual([]);
+
+    // News wakes no work role; a society role reads it in its own scope, where its heartbeat looks:
+    // rev-1's three posts, and the user's, which the front desk reads wherever it is.
+    await board.postMessage(REV, { channel: "general", body: "one more thing" });
+    expect(await board.unreadByConversation(ENG)).toEqual([]);
+    expect(await board.unreadByConversation({ name: "desk", role: "concierge" })).toEqual([
+      { scope: "society", thread: null, count: 4 },
+    ]);
+  });
+
+  it("keeps society roles out of every project, by every path", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const DESK = { name: "desk", role: "concierge" };
+    const refused = { code: "INVALID_STATE" };
+    // Joining itself, or being moved by the user.
+    await expect(board.joinProject(DESK, { project: "demo" })).rejects.toMatchObject(refused);
+    await expect(board.joinProject(USER, { project: "demo", agent: "desk" })).rejects.toMatchObject(
+      refused,
+    );
+    // Added, directly or by a member proposal, with a project.
+    await expect(
+      board.addAgent(USER, { name: "stew", role: "steward", cli: "claude", memberships: ["demo"] }),
+    ).rejects.toMatchObject(refused);
+    await expect(
+      board.propose(DESK, {
+        kind: "member",
+        charter: { name: "stew", role: "steward", cli: "claude", memberships: ["demo"] },
+      }),
+    ).rejects.toMatchObject(refused);
+    // A work role whose member is in a project cannot become a society role.
+    await expect(
+      board.setRoleCharter(USER, {
+        name: "engineer",
+        purpose: "Builds.",
+        verbs: [...MEMBER_VERBS],
+        societyScope: true,
+      }),
+    ).rejects.toMatchObject(refused);
+    // It still moves others: staffing a project is how the front desk routes work.
+    await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "claude" });
+    await board.joinProject(DESK, { project: "demo", agent: "eng-2" });
+    expect((await board.readAgent("eng-2")).memberships).toEqual(["demo"]);
+    expect((await board.readAgent("desk")).memberships).toEqual([]);
+  });
+
   it("files each thread in a conversation of its own, with its own cursor, session, and last turn", async () => {
     const { board } = await society();
     const task = await board.createTask(USER, {

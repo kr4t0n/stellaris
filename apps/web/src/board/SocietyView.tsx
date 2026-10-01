@@ -55,7 +55,7 @@ export function SocietyView() {
                     <span className="text-meta">
                       {holders === 1 ? "1 member" : `${holders} members`}
                       {role.resident ? " · warm session" : ""}
-                      {role.societyScope ? " · watches the society" : ""}
+                      {role.societyScope ? " · society role" : ""}
                     </span>
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">

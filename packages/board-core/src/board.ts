@@ -270,10 +270,20 @@ const CursorsSchema = z.object({
   digest: z.string().nullable(),
   scopes: z.record(z.string(), z.string()).default({}),
   threadsFrom: z.record(z.string(), z.string().nullable()).default({}),
+  /** How far a work role has read news, which goes to whichever of its general conversations reads first. */
+  news: z.string().optional(),
 });
 type Cursors = z.infer<typeof CursorsSchema>;
 
 const NO_CURSORS: Cursors = { digest: null, scopes: {}, threadsFrom: {} };
+
+/** A message of a digest, with the conversation it is filed in; news is read by any general one. */
+interface DigestEntry {
+  scope: Name;
+  thread: Ulid | null;
+  message: Message;
+  news?: true;
+}
 
 /** Where a conversation's cursor is kept. */
 function conversationKey(scope: string, thread: Ulid | null): string {
@@ -284,6 +294,21 @@ function conversationKey(scope: string, thread: Ulid | null): string {
 function threadStart(cursors: Cursors, scope: string): Ulid | null {
   const from = cursors.threadsFrom[scope];
   return from === undefined ? cursors.digest : from;
+}
+
+/**
+ * Where a citizen's news resumes: its own cursor, else as far as its general conversations have
+ * read, which is where news was filed before it had a cursor of its own.
+ */
+function newsStart(cursors: Cursors): Ulid | null {
+  if (cursors.news !== undefined) {
+    return cursors.news;
+  }
+  const homes = Object.entries(cursors.scopes)
+    .filter(([key]) => !key.includes("/"))
+    .map(([, id]) => id)
+    .toSorted();
+  return homes.at(-1) ?? cursors.digest;
 }
 
 /** Where a conversation's digest resumes: a scope's home, or one of its threads. */
@@ -1347,7 +1372,7 @@ export class Board {
     this.assertUser(actor, "only the user may write a role charter directly");
     const parsed = RoleCharterSchema.parse(charter);
     return this.mutex.run(async () => {
-      this.validateRole(parsed);
+      await this.validateRole(parsed);
       return (await this.writeRoleUnlocked(actor.name, parsed, {})).charter;
     });
   }
@@ -1611,11 +1636,12 @@ export class Board {
     return this.mutex.run(async () => {
       const counts = new Map<string, { scope: Name; thread: Ulid | null; count: number }>();
       const unscoped = { name: actor.name, role: actor.role };
-      for (const { scope, thread, message } of await this.digestSince(
+      for (const { scope, thread, message, news } of await this.digestSince(
         unscoped,
         await this.readCursors(actor.name),
       )) {
-        if (message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
+        // News waits for the citizen's next turn; it is never a reason for one.
+        if (news === true || message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
           continue;
         }
         const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
@@ -1636,14 +1662,19 @@ export class Board {
   }
 
   /** Moves each conversation's cursor to the newest message delivered there; a cursor never moves back. */
-  private async advanceCursors(
-    agent: Name,
-    filed: readonly { scope: Name; thread: Ulid | null; message: Message }[],
-  ): Promise<void> {
+  private async advanceCursors(agent: Name, filed: readonly DigestEntry[]): Promise<void> {
     const cursors = await this.readCursors(agent);
     const scopes = { ...cursors.scopes };
+    let news = newsStart(cursors);
     let moved = false;
-    for (const { scope, thread, message } of filed) {
+    for (const { scope, thread, message, news: isNews } of filed) {
+      if (isNews === true) {
+        if (news === null || message.id > news) {
+          news = message.id;
+          moved = true;
+        }
+        continue;
+      }
       const key = conversationKey(scope, thread);
       const current = scopes[key] ?? cursorOf(cursors, scope, thread);
       if (current === null || message.id > current) {
@@ -1652,7 +1683,11 @@ export class Board {
       }
     }
     if (moved) {
-      await writeJson(this.paths.agentCursors(agent), { ...cursors, scopes });
+      await writeJson(this.paths.agentCursors(agent), {
+        ...cursors,
+        scopes,
+        ...(news === null ? {} : { news }),
+      });
     }
   }
 
@@ -1668,7 +1703,7 @@ export class Board {
     actor: Actor,
     cursors: Cursors,
     conversation?: { scope: Name; thread: Ulid | null },
-  ): Promise<{ scope: Name; thread: Ulid | null; message: Message }[]> {
+  ): Promise<DigestEntry[]> {
     if (conversation !== undefined && conversation.thread !== null) {
       const { scope, thread } = conversation;
       const found = await this.tryFindThread(thread);
@@ -1689,15 +1724,21 @@ export class Board {
     const subscribed = new Set(agent.subscriptions);
     const frontDesk = charter.wakeTriggers.includes(FRONT_DESK_TRIGGER);
     const threadParticipation = new Map<Ulid, boolean>();
-    const collected: { scope: Name; thread: Ulid | null; message: Message }[] = [];
+    const collected: DigestEntry[] = [];
+    // A society role reads the society's news in its own scope; a work role reads it in whichever
+    // of its general conversations comes first.
+    const newsFrom = charter.societyScope ? undefined : newsStart(cursors);
     // Read from the oldest cursor any conversation of the scopes may resume from.
     const scopes =
       conversation !== undefined ? [conversation.scope] : [...agent.memberships, SOCIETY_SCOPE];
-    const starts = scopes.flatMap((each) =>
-      conversation === undefined
-        ? [cursorOf(cursors, each), threadStart(cursors, each)]
-        : [cursorOf(cursors, each)],
-    );
+    const starts = [
+      ...scopes.flatMap((each) =>
+        conversation === undefined
+          ? [cursorOf(cursors, each), threadStart(cursors, each)]
+          : [cursorOf(cursors, each)],
+      ),
+      ...(newsFrom === undefined ? [] : [newsFrom]),
+    ];
     const known = starts.filter((start): start is Ulid => start !== null);
     const since =
       known.length < starts.length
@@ -1706,10 +1747,28 @@ export class Board {
 
     for await (const message of this.iterateMessages(since)) {
       const filedIn = wakeScope(agent, parseChannelRef(message.channel).project);
+      const thread = message.thread ?? null;
+      const asked =
+        message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
+      // News: a post outside the citizen's projects, in a channel it follows, asking nothing of it.
+      if (newsFrom !== undefined && thread === null && filedIn === SOCIETY_SCOPE && !asked) {
+        if (
+          (newsFrom === null || message.id > newsFrom) &&
+          subscribed.has(message.channel) &&
+          message.author !== actor.name
+        ) {
+          collected.push({
+            scope: conversation?.scope ?? SOCIETY_SCOPE,
+            thread: null,
+            message,
+            news: true,
+          });
+        }
+        continue;
+      }
       if (conversation !== undefined && filedIn !== conversation.scope) {
         continue;
       }
-      const thread = message.thread ?? null;
       if (conversation !== undefined && thread !== null) {
         continue;
       }
@@ -1717,8 +1776,7 @@ export class Board {
       if (cursor !== null && message.id <= cursor) {
         continue;
       }
-      let include =
-        message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
+      let include = asked;
       if (!include && thread === null) {
         include = subscribed.has(message.channel);
       }
@@ -2746,6 +2804,7 @@ export class Board {
       if (current.memberships.includes(args.project)) {
         return current;
       }
+      await this.assertMayJoinProjects(target, current.role);
       const agent = await this.updateAgent(target, (a) => ({
         ...a,
         memberships: [...a.memberships, args.project],
@@ -3024,14 +3083,24 @@ export class Board {
     thread?: Ulid,
   ): Promise<void> {
     await this.mutex.run(async () => {
+      if (cursor === null) {
+        return;
+      }
       const cursors = await this.readCursors(agent);
       const current = cursorOf(cursors, scope, thread ?? null);
-      if (cursor === null || (current !== null && cursor <= current)) {
+      const news = newsStart(cursors);
+      // A general conversation's turn read the news up to where it read everything else.
+      const readNews = thread === undefined && (news === null || cursor > news);
+      if (current !== null && cursor <= current && !readNews) {
         return;
       }
       await writeJson(this.paths.agentCursors(agent), {
         ...cursors,
-        scopes: { ...cursors.scopes, [conversationKey(scope, thread ?? null)]: cursor },
+        scopes:
+          current !== null && cursor <= current
+            ? cursors.scopes
+            : { ...cursors.scopes, [conversationKey(scope, thread ?? null)]: cursor },
+        ...(readNews ? { news: cursor } : {}),
       });
     });
   }
@@ -3755,7 +3824,7 @@ export class Board {
         await this.validateAddChannel(ChannelProposalSchema.parse(charter));
         return;
       case "role":
-        this.validateRole(RoleCharterSchema.parse(charter));
+        await this.validateRole(RoleCharterSchema.parse(charter));
         return;
       case "retirement":
         await this.validateRetire(RetirementProposalSchema.parse(charter).agent);
@@ -3878,6 +3947,9 @@ export class Board {
     for (const slug of input.memberships ?? []) {
       await this.readActiveProject(slug);
     }
+    if ((input.memberships ?? []).length > 0) {
+      await this.assertMayJoinProjects(input.name, input.role);
+    }
     for (const ref of input.subscriptions ?? []) {
       await this.assertChannelOpen(ref);
     }
@@ -3975,9 +4047,36 @@ export class Board {
     return ref;
   }
 
-  private validateRole(charter: RoleCharter): void {
+  /** A role becomes a society role only while none of its members is in a project. */
+  private async validateRole(charter: RoleCharter): Promise<void> {
     if (charter.name === USER_ROLE) {
       throw new BoardError("FORBIDDEN", "the user charter is not subject to proposals");
+    }
+    if (!charter.societyScope) {
+      return;
+    }
+    const inProjects = (await this.listAgents()).filter(
+      (agent) =>
+        agent.role === charter.name && agent.status === "active" && agent.memberships.length > 0,
+    );
+    if (inProjects.length > 0) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `a society role has no members in projects; ${inProjects.map((agent) => agent.name).join(", ")} must leave them first`,
+      );
+    }
+  }
+
+  /**
+   * A society role, one that keeps watch over the whole society (`societyScope`), is never a member
+   * of a project; the user, who takes no turns, joins the projects it creates.
+   */
+  private async assertMayJoinProjects(name: Name, role: Name): Promise<void> {
+    if (role !== USER_ROLE && (await this.readRole(role)).societyScope) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `${name} is a ${role}, a society role, and never joins a project`,
+      );
     }
   }
 

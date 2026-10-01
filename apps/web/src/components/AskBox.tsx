@@ -25,14 +25,12 @@ function describe(state: AskState, ask: ThreadSummary): { text: string; tone: st
       return { text: "waiting for an answer", tone: "text-fg-muted" };
     case "answered":
       return { text: `answered by ${displayName(state.by)}`, tone: "text-fg-secondary" };
-    case "closed": {
-      const summary = firstParagraph(ask.body, 160);
-      return {
-        text: `closed by ${displayName(state.by ?? "board")}${summary === "" ? "" : ` · ${summary}`}`,
-        tone: "text-fg-muted",
-      };
-    }
   }
+  const summary = firstParagraph(ask.body, 160);
+  return {
+    text: `closed by ${displayName(state.by ?? "board")}${summary === "" ? "" : ` · ${summary}`}`,
+    tone: "text-fg-muted",
+  };
 }
 
 /**

@@ -1,16 +1,26 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { MEMBER_VERBS } from "@stellaris/shared";
+import { execa } from "execa";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, type Actor } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 
-function b64(text: string): string {
-  return Buffer.from(text).toString("base64");
+/** Git as eng-1, never throwing, for the home repository tests. */
+function git(cwd: string, ...args: string[]) {
+  return execa(
+    "git",
+    ["-c", "user.name=eng-1", "-c", "user.email=eng-1@stellaris.local", ...args],
+    {
+      cwd,
+      reject: false,
+    },
+  );
 }
+
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 
 describe("Board runtime support", () => {
@@ -85,45 +95,71 @@ describe("Board runtime support", () => {
     expect(placed.map((event) => event.payload)).toEqual([{ slug: "demo", runner: "pod" }]);
   });
 
-  it("serves an agent's home and the projection as files, and takes back only what the agent authors", async () => {
+  it("keeps each citizen's home as a repository whose working tree takes pushes and refuses the board's records", async () => {
     const board = await society();
     const home = board.paths.agent("eng-1");
-    await writeFile(path.join(home, "profile.md"), "Builds things.\n");
-    await board.writeSession("eng-1", "demo", "claude", "s-1", "pod");
-    const manifest = await board.homeManifest("eng-1");
-    expect(Object.keys(manifest).toSorted()).toEqual([
+    // Created as the home's first commit: what the citizen authors, and the ignore file.
+    expect((await git(home, "ls-files")).stdout.split("\n").toSorted()).toEqual([
+      ".gitignore",
       "memory/core.md",
       "profile.md",
-      "projects/demo/notes.md",
-      "role.md",
     ]);
-    const files = await board.readHomeFiles("eng-1", ["profile.md", "agent.json", "../secret"]);
-    expect(Object.keys(files)).toEqual(["profile.md"]);
-    expect(Buffer.from(files["profile.md"] ?? "", "base64").toString("utf8")).toBe(
-      "Builds things.\n",
-    );
+    // The board's own writes since, a session record and a joined project, leave the tree clean.
+    await board.writeSession("eng-1", "demo", "claude", "s-1", "pod");
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    expect((await git(home, "status", "--porcelain")).stdout).toBe("");
+    await expect(board.ensureHomeRepo("user")).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect(await board.ensureHomeRepo("eng-1")).toBe(home);
 
-    await board.writeHomeFiles("eng-1", {
-      put: {
-        "skills/uv/SKILL.md": b64("---\nname: uv\n---\n"),
-        "memory/core.md": b64("- a lesson\n"),
-      },
-      delete: ["profile.md"],
-    });
-    expect(await readFile(path.join(home, "memory", "core.md"), "utf8")).toBe("- a lesson\n");
-    expect(Object.keys(await board.homeManifest("eng-1")).toSorted()).toEqual([
-      "memory/core.md",
-      "projects/demo/notes.md",
-      "role.md",
-      "skills/uv/SKILL.md",
-    ]);
-    // The board's own records and the charter never come back from a runner.
-    for (const kept of ["agent.json", "role.md", "projects/demo/sessions.json", "../escape"]) {
-      await expect(
-        board.writeHomeFiles("eng-1", { put: { [kept]: b64("{}") }, delete: [] }),
-      ).rejects.toMatchObject({ code: "VALIDATION" });
+    // A runner's push lands in the working tree the board reads.
+    const copy = path.join(dir, "runner-copy");
+    expect((await git(dir, "clone", "--quiet", home, copy)).exitCode).toBe(0);
+    await writeFile(path.join(copy, "memory", "core.md"), "- A lesson.\n", "utf8");
+    await git(copy, "commit", "--quiet", "-am", "turn 1");
+    expect((await git(copy, "push", "--quiet", "origin", "HEAD:main")).exitCode).toBe(0);
+    expect(await board.readMemoryCore("eng-1")).toBe("- A lesson.\n");
+
+    // The hook refuses a push that would carry a record the board keeps, or rewrite the ignore file.
+    for (const [file, content] of [
+      ["agent.json", "{}"],
+      ["role.md", "# rewritten"],
+      ["projects/demo/sessions.json", "{}"],
+      [".gitignore", "*.md\n"],
+    ] as const) {
+      await git(copy, "reset", "--quiet", "--hard", "origin/main");
+      await mkdir(path.dirname(path.join(copy, file)), { recursive: true });
+      await writeFile(path.join(copy, file), content, "utf8");
+      await git(copy, "add", "--force", "--", file);
+      await git(copy, "commit", "--quiet", "-m", `sneak ${file}`);
+      const pushed = await git(copy, "push", "--quiet", "origin", "HEAD:main");
+      expect(pushed.exitCode).not.toBe(0);
+      expect(pushed.stderr).toMatch(/does not take|is the board's/);
     }
-    expect((await board.readAgent("eng-1")).name).toBe("eng-1");
+    expect((await board.readAgent("eng-1")).role).toBe("engineer");
+
+    // A push that would drop another machine's work, even forced, is refused before it touches the
+    // working tree, which stays clean and takes the merged push that follows.
+    const other = path.join(dir, "other-copy");
+    await git(copy, "reset", "--quiet", "--hard", "origin/main");
+    expect((await git(dir, "clone", "--quiet", home, other)).exitCode).toBe(0);
+    await writeFile(path.join(copy, "profile.md"), "From the first machine.\n", "utf8");
+    await git(copy, "commit", "--quiet", "-am", "turn 2");
+    expect((await git(copy, "push", "--quiet", "origin", "HEAD:main")).exitCode).toBe(0);
+    await writeFile(path.join(other, "memory", "core.md"), "- From the second machine.\n", "utf8");
+    await git(other, "commit", "--quiet", "-am", "turn 3");
+    const stale = await git(other, "push", "--quiet", "--force", "origin", "HEAD:main");
+    expect(stale.exitCode).not.toBe(0);
+    expect((await git(home, "status", "--porcelain")).stdout).toBe("");
+    await git(other, "pull", "--quiet", "--no-rebase", "--no-edit", "origin", "main");
+    expect((await git(other, "push", "--quiet", "origin", "HEAD:main")).exitCode).toBe(0);
+    expect(await board.readMemoryCore("eng-1")).toBe("- From the second machine.\n");
+    expect(await board.readProfile("eng-1")).toContain("From the first machine.");
+    // Only main moves.
+    await git(copy, "reset", "--quiet", "--hard", "origin/main");
+    expect(
+      (await git(copy, "push", "--quiet", "origin", "HEAD:refs/heads/side")).exitCode,
+    ).not.toBe(0);
 
     const projection = await board.boardManifest();
     expect(Object.keys(projection)).toContain("projects/demo/project.md");
@@ -131,6 +167,39 @@ describe("Board runtime support", () => {
     expect(
       Buffer.from(read["projects/demo/project.md"] ?? "", "base64").toString("utf8"),
     ).toContain("slug: demo");
+  });
+
+  it("pins a citizen's work outside projects to a runner once, moves it on request, and lets the user choose", async () => {
+    const board = await society();
+    await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "laptop");
+    expect(await board.pinAgent("eng-1", "pod")).toBe("pod");
+    expect(await board.pinAgent("eng-1", "laptop")).toBe("pod");
+    // A move names where the pin was, so two turns that find it gone move it once.
+    expect(await board.pinAgent("eng-1", "laptop", "pod")).toBe("laptop");
+    expect(await board.pinAgent("eng-1", "pod", "pod")).toBe("laptop");
+    const placed = (await board.readEvents(null, 500)).filter((e) => e.type === "agent.placed");
+    expect(placed.map((event) => event.payload)).toEqual([
+      { agent: "eng-1", runner: "pod" },
+      { agent: "eng-1", runner: "laptop", from: "pod" },
+    ]);
+
+    await expect(board.setAgentRunner(ENG, "eng-1", "pod")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.setAgentRunner(USER, "eng-1", "nowhere")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect((await board.setAgentRunner(USER, "eng-1", "pod")).homeRunner).toBe("pod");
+    expect((await board.listMembers()).find((m) => m.name === "eng-1")?.homeRunner).toBe("pod");
+    expect((await board.setAgentRunner(USER, "eng-1", null)).homeRunner).toBeUndefined();
+    const configured = (await board.readEvents(null, 500)).filter(
+      (e) => e.type === "agent.configured",
+    );
+    expect(configured.map((event) => event.payload)).toEqual([
+      { agent: "eng-1", homeRunner: "pod", previous: "laptop" },
+      { agent: "eng-1", homeRunner: null, previous: "pod" },
+    ]);
   });
 
   it("dispatches verbs by name and records manual wakes as events", async () => {

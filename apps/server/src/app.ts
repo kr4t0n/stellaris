@@ -57,6 +57,8 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
 const RunnerBodySchema = z.object({ name: NameSchema });
+/** The runner a citizen's work outside any project runs on, or null to pin it again on its next turn. */
+const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const ChannelBodySchema = z.object({
@@ -169,6 +171,15 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       c.get("actor"),
       c.req.param("name"),
       body.model,
+    );
+    return c.json(agent);
+  });
+  api.put("/agents/:name/runner", async (c) => {
+    const body = HomeRunnerBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.setAgentRunner(
+      c.get("actor"),
+      c.req.param("name"),
+      body.runner,
     );
     return c.json(agent);
   });

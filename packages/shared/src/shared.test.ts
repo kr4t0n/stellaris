@@ -3,7 +3,6 @@ import {
   capOutput,
   channelRef,
   IsoDateTimeSchema,
-  homeFileTravels,
   isSafeRelativePath,
   loadRunnerConfig,
   loadServerConfig,
@@ -168,27 +167,6 @@ describe("runner protocol files", () => {
     expect(isSafeRelativePath("memory/core.md")).toBe(true);
     for (const bad of ["", "/etc/passwd", "../x", "a/../b", "a//b", "./a", "a\\b"]) {
       expect(isSafeRelativePath(bad)).toBe(false);
-    }
-  });
-
-  it("moves what the agent authored both ways, the charter down, and the board's records nowhere", () => {
-    expect(homeFileTravels("memory/core.md")).toBe("both");
-    expect(homeFileTravels("skills/uv/SKILL.md")).toBe("both");
-    expect(homeFileTravels("profile.md")).toBe("both");
-    expect(homeFileTravels("projects/lab/notes.md")).toBe("both");
-    expect(homeFileTravels("role.md")).toBe("down");
-    for (const kept of [
-      "agent.json",
-      "cursors.json",
-      "turns/01M3S0000000000000000000AA.jsonl",
-      ".claude/CLAUDE.md",
-      ".codex/AGENTS.md",
-      "projects/lab/sessions.json",
-      "projects/lab/sessions.archived.2026-10-01T00-00-00-000Z.json",
-      "projects/lab/last-turn.json",
-      "projects/lab/threads/01M3S0000000000000000000AA/sessions.json",
-    ]) {
-      expect(homeFileTravels(kept)).toBeNull();
     }
   });
 });

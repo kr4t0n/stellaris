@@ -22,4 +22,5 @@ export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export type { BoardErrorCode } from "./errors.js";
 export { BoardPaths } from "./paths.js";
+export { HOME_GITIGNORE } from "./homes.js";
 export { hashToken, mintToken } from "./tokens.js";

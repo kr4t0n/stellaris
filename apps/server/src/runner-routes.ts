@@ -1,7 +1,7 @@
 import type { Board } from "@stellaris/board-core";
+import path from "node:path";
 import {
   FileReadSchema,
-  FileWriteSchema,
   NameSchema,
   RunnerAnswerSchema,
   RunnerHelloSchema,
@@ -15,6 +15,7 @@ import {
 import type { RunnerHub } from "@stellaris/turn-host";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
+import { HomeGit } from "./home-git.js";
 
 type RunnerEnv = { Variables: { runner: Name } };
 
@@ -29,7 +30,8 @@ function bearer(c: Context<RunnerEnv>): string | null {
 /**
  * The runner protocol of PLAN.md section 7.1 over HTTP, under `/runner`, authenticated with runner
  * tokens: registration, the event stream jobs and requests go down, and the posts that come back,
- * turn events and outcomes, answers, warm sessions, and the file API for homes and the projection.
+ * turn events and outcomes, answers, and warm sessions; the board's projection as files; and each
+ * agent's home as a git repository.
  */
 export function runnerRoutes(board: Board, hub: RunnerHub): Hono<RunnerEnv> {
   const routes = new Hono<RunnerEnv>();
@@ -130,23 +132,20 @@ export function runnerRoutes(board: Board, hub: RunnerHub): Hono<RunnerEnv> {
     }
     await next();
   });
-  home.get("/manifest", async (c) =>
-    c.json({ files: await board.homeManifest(NameSchema.parse(c.req.param("agent"))) }),
-  );
-  home.post("/read", async (c) =>
-    c.json({
-      files: await board.readHomeFiles(
-        NameSchema.parse(c.req.param("agent")),
-        FileReadSchema.parse(await c.req.json()).paths,
-      ),
-    }),
-  );
-  home.post("/write", async (c) => {
-    await board.writeHomeFiles(
-      NameSchema.parse(c.req.param("agent")),
-      FileWriteSchema.parse(await c.req.json()),
-    );
-    return c.json({ ok: true });
+  // The home's repository over git's smart HTTP protocol, which the runner clones and pushes to.
+  const homeGit = new HomeGit();
+  home.all("/git/*", async (c) => {
+    const agent = NameSchema.parse(c.req.param("agent"));
+    const repository = await board.ensureHomeRepo(agent);
+    const marker = `/homes/${agent}/git`;
+    const at = c.req.path.indexOf(marker);
+    return homeGit.serve({
+      root: path.dirname(repository),
+      agent,
+      rest: at === -1 ? "" : c.req.path.slice(at + marker.length),
+      request: c.req.raw,
+      runner: c.get("runner"),
+    });
   });
   routes.route("/homes/:agent", home);
 

@@ -58,6 +58,11 @@ export interface TurnPromptInput {
     | ReadonlyArray<{ readonly ts: string; readonly signal: OpsSignal }>
     | null
     | undefined;
+  /**
+   * Files in the citizen's home that two of its turns changed at once on different runners: the
+   * kept copies, each beside the file whose version won.
+   */
+  readonly conflicts?: readonly string[] | undefined;
 }
 
 /** A thread's conversation as its turn's prompt describes it. */
@@ -286,6 +291,18 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       `## Project ${project.slug}`,
       "",
       `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself.`,
+    );
+  }
+
+  const conflicts = input.conflicts ?? [];
+  if (conflicts.length > 0) {
+    lines.push(
+      "",
+      "## Edits to reconcile in your home",
+      "",
+      "Two of your turns changed these files at once on different runners. The file in place kept the other turn's version; yours is the copy named here, beside it. Merge what still holds into the file, then delete the copy.",
+      "",
+      ...conflicts.map((file) => `- ${file}`),
     );
   }
 

@@ -19,12 +19,12 @@
     "@stellaris/scheduler": "workspace:*",
     "@stellaris/shared": "workspace:*",
     "@stellaris/turn-host": "workspace:*",
+    "execa": "10.0.1",
     "hono": "4.13.10",
     "pino": "10.3.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.30.1",
-    "execa": "10.0.1"
+    "@modelcontextprotocol/sdk": "1.30.1"
   }
 }

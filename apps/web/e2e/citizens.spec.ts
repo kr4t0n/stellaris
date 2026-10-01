@@ -74,6 +74,42 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
   expect(board.writes).toEqual([{ path: "/api/agents/desk/model", body: { model: "sonnet" } }]);
 });
 
+test("a citizen's work outside projects is moved to another runner, or left to be pinned again", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("concierge · claude-opus-5-5 · on pod");
+
+  await view.getByRole("button", { name: "Runner…" }).click();
+  const form = page.getByRole("form", { name: "Runner of desk" });
+  const picker = form.getByRole("button", { name: /^Runner: / });
+  await expect(picker).toHaveAccessibleName("Runner: pod · linux");
+  await expect(form.getByRole("button", { name: "Run here" })).toBeDisabled();
+  await expect(form).toContainText("memory and skills follow it");
+
+  await picker.click();
+  await expect(form).toContainText("disconnected · claude · gpu");
+  await form.getByRole("button", { name: /^laptop/ }).click();
+  await form.getByRole("button", { name: "Run here" }).click();
+  await expect(form).toHaveCount(0);
+  await expect(view).toContainText("concierge · claude-opus-5-5 · on laptop");
+
+  await view.getByRole("button", { name: "Runner…" }).click();
+  await page
+    .getByRole("form", { name: "Runner of desk" })
+    .getByRole("button", { name: /^Runner: / })
+    .click();
+  await page.getByRole("button", { name: /^Any runner/ }).click();
+  await page.getByRole("button", { name: "Run here" }).click();
+  await expect(view).not.toContainText(" · on ");
+  expect(board.writes).toEqual([
+    { path: "/api/agents/desk/runner", body: { runner: "laptop" } },
+    { path: "/api/agents/desk/runner", body: { runner: null } },
+  ]);
+});
+
 test("waking a citizen says what it does and sends the wake the scheduler takes", async ({
   page,
 }) => {

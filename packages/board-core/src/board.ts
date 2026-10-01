@@ -1,4 +1,4 @@
-import { readFile, rename, stat } from "node:fs/promises";
+import { readdir, readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
@@ -91,13 +91,12 @@ import {
   METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
-  homeFileTravels,
   RunnerOsSchema,
-  type FileWrite,
 } from "@stellaris/shared";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
+import { HomeRepos } from "./homes.js";
 import { computeMetrics } from "./metrics.js";
 import {
   ensureDir,
@@ -189,6 +188,9 @@ export interface SignalRecord {
   readonly ts: string;
   readonly signal: OpsSignal;
 }
+
+/** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
+const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -503,9 +505,11 @@ export class Board {
   /** Runner token hashes to runner names. */
   private readonly runnerTokens = new Map<string, Name>();
   private readonly files = new FileTree();
+  private readonly homes: HomeRepos;
 
   private constructor(dataDir: string, options: BoardOptions) {
     this.paths = new BoardPaths(dataDir);
+    this.homes = new HomeRepos(path.join(this.paths.state(), "home-hooks"));
     this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
     this.now = options.now ?? (() => new Date());
     this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
@@ -521,6 +525,7 @@ export class Board {
     if (await exists(board.paths.societyFile())) {
       throw new BoardError("ALREADY_EXISTS", `a society already exists in ${dataDir}`);
     }
+    await board.homes.installHooks();
     const userToken = await board.mutex.run(() => board.initialize(input));
     return { board, userToken };
   }
@@ -534,6 +539,7 @@ export class Board {
     await board.mutex.run(() => board.applyAlignments());
     await board.loadTokenIndex();
     await board.loadRunnerTokens();
+    await board.homes.installHooks();
     return board;
   }
 
@@ -3341,38 +3347,93 @@ export class Board {
     });
   }
 
-  /** The files of an agent's home a runner pulls before a turn, by relative path, with their hashes. */
-  async homeManifest(agent: Name): Promise<Record<string, string>> {
-    await this.readAgent(agent);
-    return this.files.manifest(this.paths.agent(agent), (file) => homeFileTravels(file) !== null);
-  }
-
-  async readHomeFiles(agent: Name, paths: readonly string[]): Promise<Record<string, string>> {
-    await this.readAgent(agent);
-    return this.files.read(
-      this.paths.agent(agent),
-      paths,
-      (file) => homeFileTravels(file) !== null,
-    );
+  /**
+   * An agent's home as a repository runners clone and push to, made one if it was not yet, and
+   * the directory it lives in, which the git endpoint serves.
+   */
+  async ensureHomeRepo(agent: Name): Promise<string> {
+    const record = await this.readAgent(agent);
+    if (record.cli === null) {
+      throw new BoardError("INVALID_STATE", `${agent} takes no turns, so its home is not shared`);
+    }
+    const home = this.paths.agent(agent);
+    await this.mutex.run(() => this.homes.ensure(home));
+    return home;
   }
 
   /**
-   * Writes back what an agent changed in its home during a turn on a runner. Only files the agent
-   * authors are accepted; the board's own records in the home never come back from a runner.
+   * Conflict copies in an agent's home: files a runner kept beside the board's version when two of
+   * the agent's turns changed them at once, by relative path, until the agent merges and deletes them.
    */
-  async writeHomeFiles(agent: Name, write: FileWrite): Promise<void> {
-    await this.readAgent(agent);
-    await this.mutex.run(async () => {
-      try {
-        await this.files.write(
-          this.paths.agent(agent),
-          write.put,
-          write.delete,
-          (file) => homeFileTravels(file) === "both",
-        );
-      } catch (error) {
-        throw new BoardError("VALIDATION", error instanceof Error ? error.message : String(error));
+  async listHomeConflicts(agent: Name): Promise<string[]> {
+    const found: string[] = [];
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        if (prefix === "" && SKIPPED_IN_HOME.has(entry.name)) {
+          continue;
+        }
+        const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+        if (entry.isDirectory()) {
+          await walk(path.join(dir, entry.name), relative);
+        } else if (entry.isFile() && /\.conflict-[^/.]+$/.test(entry.name)) {
+          found.push(relative);
+        }
       }
+    };
+    await walk(this.paths.agent(agent), "");
+    return found.toSorted();
+  }
+
+  /**
+   * Pins an agent's work outside any project to a runner, unless it is pinned already, and returns
+   * where it is pinned. With `from`, it moves the pin only while it still names `from`, so two
+   * turns that both find a runner gone move it once.
+   */
+  async pinAgent(name: Name, runner: Name, from?: Name): Promise<Name> {
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.homeRunner !== undefined && current.homeRunner !== from) {
+        return current.homeRunner;
+      }
+      await this.readRunner(runner);
+      await this.updateAgent(name, (agent) => ({ ...agent, homeRunner: runner }));
+      await this.refreshMember(name);
+      await this.events.append("agent.placed", SYSTEM_ACTOR.name, {
+        agent: name,
+        runner,
+        ...(from === undefined ? {} : { from }),
+      });
+      return runner;
+    });
+  }
+
+  /**
+   * Sets the runner an agent's work outside any project runs on, or clears it so the next such
+   * turn pins it again. The user's choice: its conversations there start afresh on the new runner,
+   * while its memory and skills follow it in its home.
+   */
+  async setAgentRunner(actor: Actor, name: Name, runner: Name | null): Promise<Agent> {
+    this.assertUser(actor, "only the user may move a citizen to another runner");
+    const chosen = runner === null ? null : NameSchema.parse(runner);
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.status !== "active" || current.cli === null) {
+        throw new BoardError("INVALID_STATE", `${name} takes no turns, so it runs nowhere`);
+      }
+      if (chosen !== null) {
+        await this.readRunner(chosen);
+      }
+      const { homeRunner: previous, ...rest } = current;
+      const next = await this.updateAgent(name, () =>
+        chosen === null ? rest : { ...rest, homeRunner: chosen },
+      );
+      await this.refreshMember(name);
+      await this.events.append("agent.configured", actor.name, {
+        agent: name,
+        homeRunner: chosen,
+        previous: previous ?? null,
+      });
+      return next;
     });
   }
 
@@ -3506,22 +3567,24 @@ export class Board {
     for (const slug of agent.memberships) {
       await this.ensureAgentProject(agent.name, slug);
     }
+    // A home is a repository from its first commit, which holds the files written above.
+    if (agent.cli !== null) {
+      await this.homes.ensure(this.paths.agent(agent.name));
+    }
     this.tokenIndex.set(agent.tokenHash, { name: agent.name, role: agent.role });
     await this.refreshMember(agent.name);
   }
 
+  /**
+   * The directory a scope's session records live in. The working notes beside them are the
+   * citizen's to create: the board writes no tracked file in a home after creating it, or the
+   * home's working tree would no longer take pushes.
+   */
   private async ensureAgentProject(name: Name, slug: Name): Promise<void> {
     const dir = this.paths.agentProject(name, slug);
     await ensureDir(dir);
     if (!(await exists(path.join(dir, "sessions.json")))) {
       await writeJson(path.join(dir, "sessions.json"), {});
-    }
-    if (!(await exists(path.join(dir, "notes.md")))) {
-      await writeMarkdown(
-        path.join(dir, "notes.md"),
-        { project: slug },
-        `# Working notes for ${slug}\n`,
-      );
     }
   }
 

@@ -14,6 +14,7 @@ import {
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
+  RunnerSchema,
   SkillSchema,
   SOCIETY_SCOPE,
   SocietySchema,
@@ -249,6 +250,20 @@ export function createApi(token: string) {
       write("POST", paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
     /** The models a CLI offers, from its own listing. */
     models: (cli: CliKind) => get(`/api/models/${cli}`, token, ModelOptionSchema.array()),
+    /** The runners the society has, connected or not, with what each offers. */
+    runners: () => get("/api/runners", token, RunnerSchema.array()),
+    /**
+     * Sets the runner a citizen's work outside any project runs on, from its next turn, or null to
+     * pin it again on that turn.
+     */
+    setRunner: (name: string, runner: string | null) =>
+      write(
+        "PUT",
+        `/api/agents/${encodeURIComponent(name)}/runner`,
+        token,
+        { runner },
+        AgentRecordSchema,
+      ),
     /** Sets the model a citizen's turns run with from its next turn, or null for its CLI's default. */
     setModel: (name: string, model: string | null) =>
       write(

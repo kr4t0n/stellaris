@@ -11,6 +11,7 @@ function member(
   charter: string,
   memberships: string[] = [],
   model: string | null = null,
+  runner: string | null = "pod",
 ) {
   return {
     name,
@@ -18,7 +19,7 @@ function member(
     cli: "claude",
     ...(model === null ? {} : { model }),
     lastModel: "claude-opus-5-5",
-    homeRunner: "server",
+    ...(runner === null ? {} : { homeRunner: runner }),
     status: "active",
     resident: false,
     skills: [],
@@ -462,6 +463,7 @@ export async function fakeBoard(
   let refusal: string | null = null;
   let paused = false;
   let deskModel: string | null = null;
+  let deskRunner: string | null = "pod";
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
   const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
@@ -547,10 +549,10 @@ export async function fakeBoard(
           return decide(route, "rejected", body);
         case "/api/agents/desk/model":
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
-          return json(route, {
-            ...member("desk", "concierge", ["lab"], deskModel),
-            homeRunner: "server",
-          });
+          return json(route, member("desk", "concierge", ["lab"], deskModel, deskRunner));
+        case "/api/agents/desk/runner":
+          deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
+          return json(route, member("desk", "concierge", ["lab"], deskModel, deskRunner));
         case "/api/wake":
           return json(route, {
             id: "01M3Q2EEEEEEEEEEEEEEEEEEE1",
@@ -634,8 +636,25 @@ export async function fakeBoard(
         });
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", ["lab"], deskModel),
+          member("desk", "concierge", ["lab"], deskModel, deskRunner),
           member("stew", "steward"),
+        ]);
+      case "/api/runners":
+        return json(route, [
+          {
+            name: "pod",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+          },
+          {
+            name: "laptop",
+            os: "darwin",
+            clis: ["claude"],
+            capabilities: ["gpu"],
+            status: "disconnected",
+          },
         ]);
       case "/api/models/claude":
         return json(route, [

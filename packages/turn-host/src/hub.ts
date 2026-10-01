@@ -77,6 +77,8 @@ export class RunnerHub implements TurnRunner {
   private readonly now: () => Date;
   private readonly log: HostLog;
   private readonly seats = new Map<Name, Seat>();
+  /** When this hub started, which counts as when a runner that has not connected since went away. */
+  private readonly startedAt: number;
   private readonly pending = new Map<string, Pending>();
   /** Disconnects being recorded, which `close` waits for. */
   private readonly detaching = new Set<Promise<void>>();
@@ -89,6 +91,7 @@ export class RunnerHub implements TurnRunner {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? SILENT;
+    this.startedAt = this.now().getTime();
   }
 
   /** Runners with a stream open now. */
@@ -257,23 +260,7 @@ export class RunnerHub implements TurnRunner {
       (seat.hello.slots === null || seat.inUse < seat.hello.slots);
     let chosen: Seat | undefined;
     if (dispatch.project === SOCIETY_SCOPE) {
-      const sessions = await this.board.readSessions(
-        agent.name,
-        SOCIETY_SCOPE,
-        dispatch.thread?.id,
-      );
-      const own = sessions.runner === undefined ? undefined : this.seats.get(sessions.runner);
-      if (own !== undefined && own.send === null && this.recentlyAway(own)) {
-        // Its session's runner was here a moment ago, as across a restart: wait rather than start afresh.
-        return null;
-      }
-      if (own !== undefined && own.send !== null && own.hello.clis.includes(cli) && !free(own)) {
-        // Its session's runner is busy: wait for a slot there rather than lose the conversation.
-        return null;
-      }
-      chosen = [own, this.homeSeat(agent.homeRunner), ...this.byLoad()].find(
-        (seat): seat is Seat => seat !== undefined && free(seat),
-      );
+      chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);
     } else {
       const project = await this.board.readProject(dispatch.project);
       let home = project.runner;
@@ -431,10 +418,51 @@ export class RunnerHub implements TurnRunner {
     this.log.warn({ runner: seat.name }, "runner disconnected");
   }
 
-  private recentlyAway(seat: Seat): boolean {
-    return (
-      seat.disconnectedAt !== null && this.now().getTime() - seat.disconnectedAt < this.graceMs
-    );
+  /**
+   * Where a citizen's work outside any project goes: the runner it is pinned to, waiting while that
+   * runner is busy or away for less than the grace period. A citizen not pinned yet is pinned to the
+   * least busy runner that can take it, and one whose runner has been gone longer, or lacks its CLI,
+   * is moved there, starting its conversations afresh while its home follows it.
+   */
+  private async pinnedSeat(
+    agent: Name,
+    pinned: Name | undefined,
+    cli: CliKind,
+    free: (seat: Seat) => boolean,
+  ): Promise<Seat | undefined> {
+    if (pinned !== undefined) {
+      const seat = this.seats.get(pinned);
+      if (seat !== undefined && seat.send !== null && seat.hello.clis.includes(cli)) {
+        return free(seat) ? seat : undefined;
+      }
+      const lacksCli = seat !== undefined && seat.send !== null;
+      if (!lacksCli && this.awayFor(pinned) < this.graceMs) {
+        return undefined;
+      }
+    }
+    const candidate = this.byLoad().find(free);
+    if (candidate === undefined) {
+      return undefined;
+    }
+    const home = await this.board.pinAgent(agent, candidate.name, pinned);
+    if (home === candidate.name) {
+      this.log.info(
+        { agent, runner: home, ...(pinned === undefined ? {} : { from: pinned }) },
+        pinned === undefined ? "citizen pinned" : "citizen moved",
+      );
+      return candidate;
+    }
+    const seat = this.seats.get(home);
+    return seat !== undefined && free(seat) ? seat : undefined;
+  }
+
+  /** How long a runner has been away: since it disconnected, or since this server started when it has not connected to it. */
+  private awayFor(name: Name): number {
+    const seat = this.seats.get(name);
+    if (seat?.send !== null && seat !== undefined) {
+      return 0;
+    }
+    return this.now().getTime() - (seat?.disconnectedAt ?? this.startedAt);
   }
 
   private homeSeat(name: Name | undefined): Seat | undefined {

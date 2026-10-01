@@ -230,6 +230,34 @@ agent
   );
 
 agent
+  .command("runner <name> [runner]")
+  .description(
+    "Show or set the runner a citizen's work outside any project runs on; `none` pins it again on its next turn",
+  )
+  .action(async (name: string, chosen: string | undefined) => {
+    const board = await open();
+    if (chosen === undefined) {
+      const current = await board.readAgent(name);
+      print({ agent: name, homeRunner: current.homeRunner ?? null }, () =>
+        current.homeRunner === undefined
+          ? `${name} is not pinned; its next turn outside a project pins it`
+          : `${name} runs on ${current.homeRunner}`,
+      );
+      return;
+    }
+    const updated = await board.setAgentRunner(
+      board.userActor(),
+      name,
+      chosen === "none" ? null : chosen,
+    );
+    print({ agent: name, homeRunner: updated.homeRunner ?? null }, () =>
+      updated.homeRunner === undefined
+        ? `${name} will be pinned on its next turn`
+        : `${name} runs on ${updated.homeRunner} from its next turn`,
+    );
+  });
+
+agent
   .command("list")
   .description("List agents")
   .action(async () => {

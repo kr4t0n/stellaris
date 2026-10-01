@@ -1,6 +1,5 @@
 import os from "node:os";
 import {
-  homeFileTravels,
   RUNNER_PROTOCOL,
   type AgentEvent,
   type CliKind,
@@ -12,6 +11,7 @@ import {
 } from "@stellaris/shared";
 import { RunnerClient } from "./client.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
+import { HomeSync } from "./home.js";
 import type { GitOps } from "./git.js";
 import { RunnerLayout } from "./layout.js";
 import type { AgentBackend } from "./types.js";
@@ -97,7 +97,7 @@ export class RunnerDaemon {
   private readonly log: RunnerLog;
   private readonly retryMs: number;
   private readonly running = new Map<string, Promise<void>>();
-  private readonly homes = new Map<Name, TreeCopy>();
+  private readonly homes: HomeSync;
   private readonly board: TreeCopy;
   private abort: AbortController | null = null;
   private stopped = false;
@@ -115,11 +115,8 @@ export class RunnerDaemon {
     this.capabilities = options.capabilities ?? [];
     this.log = options.log ?? SILENT;
     this.retryMs = options.retryMs ?? 1_000;
-    this.board = new TreeCopy(
-      options.layout.board,
-      options.layout.syncState("board"),
-      () => "down",
-    );
+    this.board = new TreeCopy(options.layout.board, options.layout.syncState("board"));
+    this.homes = new HomeSync(options.layout, options.client.homeRemote(), this.log);
   }
 
   /** The name the server knows this runner by, once it has welcomed it. */
@@ -247,11 +244,10 @@ export class RunnerDaemon {
 
   private async runJob(job: TurnJob): Promise<void> {
     const sender = new EventSender((entries) => this.client.events(job.turnId, entries), this.log);
-    const home = this.homeCopy(job.agent);
     let outcome: TurnOutcome;
     try {
       await this.board.pull(this.client.boardTree());
-      await home.pull(this.client.homeTree(job.agent));
+      await this.homes.prepare(job.agent);
       outcome = await this.executor.run(job, (event) => sender.push(event));
     } catch (error) {
       outcome = {
@@ -266,7 +262,7 @@ export class RunnerDaemon {
       };
     }
     try {
-      await home.push(this.client.homeTree(job.agent));
+      await this.homes.publish(job.agent, job.turnId);
     } catch (error) {
       this.log.warn({ agent: job.agent, error: String(error) }, "could not push the agent's home");
     }
@@ -294,19 +290,6 @@ export class RunnerDaemon {
       }
     }
     return null;
-  }
-
-  private homeCopy(agent: Name): TreeCopy {
-    let copy = this.homes.get(agent);
-    if (copy === undefined) {
-      copy = new TreeCopy(
-        this.layout.agent(agent),
-        this.layout.syncState(`home-${agent}`),
-        homeFileTravels,
-      );
-      this.homes.set(agent, copy);
-    }
-    return copy;
   }
 }
 

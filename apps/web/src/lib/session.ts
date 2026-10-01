@@ -191,6 +191,12 @@ export function useKnowledge(scope: string) {
   });
 }
 
+/** The society's runners and whether each is connected. */
+export function useRunners() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["runners"], queryFn: () => api.runners(), refetchInterval: 60_000 });
+}
+
 /** The models a CLI offers; asking starts the CLI, so the server keeps the list and so does this. */
 export function useModels(cli: CliKind | null) {
   const { api } = useSession();

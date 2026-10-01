@@ -26,6 +26,7 @@ import { CitizenMemory } from "./CitizenMemory.js";
 import { CitizenTurns } from "./CitizenTurns.js";
 import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { ModelForm } from "./ModelForm.js";
+import { RunnerForm } from "./RunnerForm.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { useStickyScroll } from "./useStickyScroll.js";
@@ -98,7 +99,7 @@ function CitizenPage({
   const roles = useRoles();
   const scheduler = useScheduler();
   const live = useLiveTurns();
-  const [open, setOpen] = useState<"wake" | "model" | null>(null);
+  const [open, setOpen] = useState<"wake" | "model" | "runner" | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
   if (member === undefined) {
@@ -138,6 +139,7 @@ function CitizenPage({
           <>
             {member.role} · {model}
             {setTo === null ? "" : ` · set to ${setTo}`}
+            {member.homeRunner === undefined ? "" : ` · on ${member.homeRunner}`}
             {member.status === "retired" ? " · retired" : ""}
           </>
         }
@@ -146,6 +148,7 @@ function CitizenPage({
             {wakeable && open === null ? (
               <>
                 <Button onClick={() => setOpen("model")}>Model…</Button>
+                <Button onClick={() => setOpen("runner")}>Runner…</Button>
                 <Button onClick={() => setOpen("wake")}>Wake…</Button>
               </>
             ) : null}
@@ -168,6 +171,8 @@ function CitizenPage({
         />
       ) : open === "model" ? (
         <ModelForm member={member} onDone={() => setOpen(null)} />
+      ) : open === "runner" ? (
+        <RunnerForm member={member} onDone={() => setOpen(null)} />
       ) : null}
       <nav aria-label="Citizen views" className="flex gap-1 border-b border-line px-3 py-2">
         {TABS.map((each) => (

@@ -12,6 +12,7 @@ import {
   type TurnAck,
   type TurnOutcome,
 } from "@stellaris/shared";
+import type { HomeRemote } from "./home.js";
 import type { RemoteTree } from "./sync.js";
 
 export class RunnerHttpError extends Error {
@@ -124,17 +125,14 @@ export class RunnerClient {
     };
   }
 
-  /** An agent's home, readable and writable while the runner has a turn of the agent in flight. */
-  homeTree(agent: string): RemoteTree {
-    const base = `/runner/homes/${encodeURIComponent(agent)}`;
+  /**
+   * Agents' home repositories on the server, which this runner may clone, fetch, and push while it
+   * runs a turn of the agent.
+   */
+  homeRemote(): HomeRemote {
     return {
-      manifest: async () =>
-        FileManifestSchema.parse(await this.call("GET", `${base}/manifest`)).files,
-      read: async (paths) =>
-        FileContentsSchema.parse(await this.call("POST", `${base}/read`, { paths })).files,
-      write: async (put, remove) => {
-        await this.call("POST", `${base}/write`, { put, delete: remove });
-      },
+      url: (agent) => `${this.baseUrl}/runner/homes/${encodeURIComponent(agent)}/git`,
+      authorization: `Authorization: Bearer ${this.token}`,
     };
   }
 

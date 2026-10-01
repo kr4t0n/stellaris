@@ -9,11 +9,7 @@ export interface RemoteTree {
   manifest(): Promise<Record<string, string>>;
   /** Contents by relative path, base64. */
   read(paths: readonly string[]): Promise<Record<string, string>>;
-  write?(put: Record<string, string>, remove: readonly string[]): Promise<void>;
 }
-
-/** How a file travels: both ways, down only, or not at all. */
-export type Travels = (file: string) => "both" | "down" | null;
 
 const SyncStateSchema = z.object({ files: z.record(z.string(), z.string()) });
 const READ_BATCH = 200;
@@ -25,11 +21,9 @@ function isMissing(error: unknown): boolean {
 }
 
 /**
- * A runner's copy of a tree on the server: an agent's home, or the board's projection. It keeps
- * the hashes both sides last agreed on, so a pull knows what changed on each side since: a file
- * the server changed is taken from it, and a file changed only here, by a turn that has not pushed
- * yet, is kept. A push sends what changed here. The server is the source of truth, so where both
- * changed a file, the server's wins.
+ * A runner's read-only mirror of a tree on the server, the board's projection: a pull fetches
+ * every file whose hash differs from the server's and removes what the server no longer has.
+ * Nothing here is written back, so the server's version always wins. Pulls run one at a time.
  */
 export class TreeCopy {
   private readonly hashes = new Map<string, { mtimeMs: number; size: number; sha: string }>();
@@ -38,95 +32,39 @@ export class TreeCopy {
   constructor(
     private readonly root: string,
     private readonly stateFile: string,
-    private readonly travels: Travels,
   ) {}
 
-  /** Brings the copy up to the server's tree. Pulls and pushes of one copy run one at a time. */
   pull(remote: RemoteTree): Promise<void> {
-    return this.serial(() => this.pullNow(remote));
-  }
-
-  /** Sends what changed here since the last agreement, of the files that travel both ways. */
-  push(remote: RemoteTree): Promise<void> {
-    return this.serial(() => this.pushNow(remote));
-  }
-
-  private serial(work: () => Promise<void>): Promise<void> {
-    const run = this.chain.then(work, work);
+    const run = this.chain.then(
+      () => this.pullNow(remote),
+      () => this.pullNow(remote),
+    );
     this.chain = run.catch(() => undefined);
     return run;
   }
 
   private async pullNow(remote: RemoteTree): Promise<void> {
-    const agreed = await this.readState();
+    const known = await this.readState();
     const theirs = await remote.manifest();
-    const ours = await this.manifest((file) => this.travels(file) !== null);
-    const fetch: string[] = [];
-    for (const [file, sha] of Object.entries(theirs)) {
-      if (!isSafeRelativePath(file) || this.travels(file) === null) {
-        continue;
-      }
-      if (ours[file] === sha) {
-        agreed[file] = sha;
-        continue;
-      }
-      const changedHere = ours[file] !== undefined && ours[file] !== agreed[file];
-      const changedThere = agreed[file] !== sha;
-      if (changedHere && !changedThere) {
-        continue;
-      }
-      fetch.push(file);
-    }
+    const ours = await this.manifest();
+    const fetch = Object.entries(theirs)
+      .filter(([file, sha]) => isSafeRelativePath(file) && ours[file] !== sha)
+      .map(([file]) => file);
     for (let index = 0; index < fetch.length; index += READ_BATCH) {
       const batch = fetch.slice(index, index + READ_BATCH);
       const contents = await remote.read(batch);
       for (const [file, content] of Object.entries(contents)) {
-        if (!batch.includes(file)) {
-          continue;
+        if (batch.includes(file)) {
+          await this.writeAtomic(file, Buffer.from(content, "base64"));
         }
-        const bytes = Buffer.from(content, "base64");
-        await this.writeAtomic(file, bytes);
-        agreed[file] = createHash("sha256").update(bytes).digest("hex");
       }
     }
-    // Gone from the server since the last agreement, and untouched here: gone here too.
-    for (const [file, sha] of Object.entries(agreed)) {
+    for (const file of new Set([...Object.keys(ours), ...Object.keys(known)])) {
       if (theirs[file] === undefined) {
-        if (ours[file] === sha || ours[file] === undefined) {
-          await rm(this.absolute(file), { force: true });
-        }
-        delete agreed[file];
+        await rm(this.absolute(file), { force: true });
       }
     }
-    await this.writeState(agreed);
-  }
-
-  private async pushNow(remote: RemoteTree): Promise<void> {
-    if (remote.write === undefined) {
-      return;
-    }
-    const agreed = await this.readState();
-    const ours = await this.manifest((file) => this.travels(file) === "both");
-    const put: Record<string, string> = {};
-    for (const [file, sha] of Object.entries(ours)) {
-      if (agreed[file] !== sha) {
-        put[file] = (await readFile(this.absolute(file))).toString("base64");
-      }
-    }
-    const remove = Object.keys(agreed).filter(
-      (file) => this.travels(file) === "both" && ours[file] === undefined,
-    );
-    if (Object.keys(put).length === 0 && remove.length === 0) {
-      return;
-    }
-    await remote.write(put, remove);
-    for (const [file, sha] of Object.entries(ours)) {
-      agreed[file] = sha;
-    }
-    for (const file of remove) {
-      delete agreed[file];
-    }
-    await this.writeState(agreed);
+    await this.writeState(theirs);
   }
 
   private absolute(file: string): string {
@@ -159,8 +97,8 @@ export class TreeCopy {
     await rename(tmp, this.stateFile);
   }
 
-  /** The files of the local copy that pass `include`, with their hashes; symbolic links are skipped. */
-  private async manifest(include: (file: string) => boolean): Promise<Record<string, string>> {
+  /** The files of the local copy with their hashes; symbolic links are skipped. */
+  private async manifest(): Promise<Record<string, string>> {
     const files: Record<string, string> = {};
     const walk = async (prefix: string): Promise<void> => {
       let entries;
@@ -178,7 +116,7 @@ export class TreeCopy {
         const file = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
         if (entry.isDirectory()) {
           await walk(file);
-        } else if (entry.isFile() && !entry.name.endsWith(".tmp") && include(file)) {
+        } else if (entry.isFile() && !entry.name.endsWith(".tmp")) {
           const sha = await this.hash(file);
           if (sha !== null) {
             files[file] = sha;

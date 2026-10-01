@@ -315,6 +315,7 @@ export class TurnHost {
       societyView,
       knowledge,
       signals,
+      conflicts: await this.board.listHomeConflicts(agent.name),
     });
 
     // Residency keeps a role's home conversation warm; its thread conversations run cold.

@@ -162,7 +162,7 @@ export type RunnerAnswer = z.infer<typeof RunnerAnswerSchema>;
 /** The conversations a runner keeps warm right now, by session key. */
 export const WarmSessionsSchema = z.object({ warm: z.array(z.string()) });
 
-/** Files as the file API lists them: a relative path, with forward slashes, to its SHA-256. */
+/** The board's files as the file API lists them: a relative path, with forward slashes, to its SHA-256. */
 export const FileManifestSchema = z.object({ files: z.record(z.string(), z.string()) });
 export type FileManifest = z.infer<typeof FileManifestSchema>;
 
@@ -171,12 +171,6 @@ export const FileReadSchema = z.object({ paths: z.array(z.string()) });
 /** File contents by relative path, base64. */
 export const FileContentsSchema = z.object({ files: z.record(z.string(), z.string()) });
 export type FileContents = z.infer<typeof FileContentsSchema>;
-
-export const FileWriteSchema = z.object({
-  put: z.record(z.string(), z.string()).default({}),
-  delete: z.array(z.string()).default([]),
-});
-export type FileWrite = z.infer<typeof FileWriteSchema>;
 
 /**
  * A relative path the file API accepts: forward slashes, no empty, `.`, or `..` segment, nothing
@@ -187,36 +181,4 @@ export function isSafeRelativePath(file: string): boolean {
     return false;
   }
   return file.split("/").every((part) => part !== "" && part !== "." && part !== "..");
-}
-
-/**
- * How a file of an agent's home travels: both ways, down to the runner only, or not at all. The
- * board keeps the agent record, cursors, session records, last turns, and transcripts; the charter
- * file is the board's to write and the agent's to read; the CLIs' configuration directories stay on
- * the runner that rendered them. Everything else the agent authored.
- */
-export function homeFileTravels(file: string): "both" | "down" | null {
-  const parts = file.split("/");
-  const [top] = parts;
-  if (
-    top === undefined ||
-    top === ".claude" ||
-    top === ".codex" ||
-    top === "turns" ||
-    file === "agent.json" ||
-    file === "cursors.json"
-  ) {
-    return null;
-  }
-  if (top === "projects" && parts.length >= 3) {
-    const rest = parts.slice(2);
-    if (
-      rest[0] === "threads" ||
-      (rest.length === 1 &&
-        (rest[0] === "last-turn.json" || /^sessions(\..*)?\.json$/.test(rest[0] ?? "")))
-    ) {
-      return null;
-    }
-  }
-  return file === "role.md" ? "down" : "both";
 }

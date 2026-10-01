@@ -32,6 +32,16 @@ export interface TestSocietyOptions {
   readonly capabilities?: readonly string[] | undefined;
   /** Routes only a test has, added before the server answers anything. */
   readonly routes?: ((app: TestApp) => void) | undefined;
+  /** How long a runner may be away before the hub moves or fails its work. */
+  readonly graceMs?: number | undefined;
+  /** More runners, each a machine of its own with a data directory of its own. */
+  readonly extraRunners?:
+    | ReadonlyArray<{
+        readonly name: string;
+        readonly backends: (app: TestApp) => Partial<Record<CliKind, AgentBackend>>;
+        readonly capabilities?: readonly string[] | undefined;
+      }>
+    | undefined;
 }
 
 export interface TestSociety {
@@ -40,6 +50,8 @@ export interface TestSociety {
   readonly host: TurnHost;
   readonly hub: RunnerHub;
   readonly runner: RunnerDaemon;
+  /** Every runner by name, the first included. */
+  readonly runners: ReadonlyMap<string, RunnerDaemon>;
   readonly turns: TurnHub;
   /** One turn start to finish, placed and run as the scheduler would. */
   readonly run: (dispatch: z.input<typeof TurnDispatchSchema>) => Promise<TurnRecord>;
@@ -77,7 +89,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     residentIdleMs: options.residentIdleMs ?? 60_000,
     onEvent: (agent, scope, event, thread) => turns.push(agent, scope, event, thread),
   });
-  const hub = new RunnerHub({ board, host, version: "test", graceMs: 5_000 });
+  const hub = new RunnerHub({ board, host, version: "test", graceMs: options.graceMs ?? 5_000 });
   const app = createApp({
     board,
     version: "test",
@@ -90,20 +102,36 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   options.routes?.(app);
   fetcher = app.fetch;
 
-  const name = options.runnerName ?? "pod";
-  const { token } = await board.addRunner(USER, name);
-  const runnerDir = await mkdtemp(path.join(os.tmpdir(), "stellaris-runner-"));
-  const runner = createRunner({
-    serverUrl: url,
-    token,
-    dataDir: runnerDir,
-    backends: options.backends(app),
-    version: "test",
-    slots: options.slots ?? null,
-    capabilities: options.capabilities,
-    retryMs: 50,
-  });
-  await runner.start();
+  const runners = new Map<string, RunnerDaemon>();
+  const runnerDirs: string[] = [];
+  for (const each of [
+    {
+      name: options.runnerName ?? "pod",
+      backends: options.backends,
+      capabilities: options.capabilities,
+    },
+    ...(options.extraRunners ?? []),
+  ]) {
+    const { token } = await board.addRunner(USER, each.name);
+    const runnerDir = await mkdtemp(path.join(os.tmpdir(), "stellaris-runner-"));
+    runnerDirs.push(runnerDir);
+    const daemon = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: runnerDir,
+      backends: each.backends(app),
+      version: "test",
+      slots: options.slots ?? null,
+      capabilities: each.capabilities,
+      retryMs: 50,
+    });
+    await daemon.start();
+    runners.set(each.name, daemon);
+  }
+  const [runner] = runners.values();
+  if (runner === undefined) {
+    throw new Error("the society has no runner");
+  }
 
   return {
     url,
@@ -111,6 +139,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     host,
     hub,
     runner,
+    runners,
     turns,
     run: async (input) => {
       const dispatch = TurnDispatchSchema.parse(input);
@@ -121,7 +150,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       return hub.runTurn(dispatch, assignment);
     },
     stop: async () => {
-      await runner.stop();
+      await Promise.all([...runners.values()].map((each) => each.stop()));
       await hub.close();
       // Event streams never end on their own, and close() waits for every connection.
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
@@ -129,7 +158,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
         server.closeAllConnections();
       }
       await closed;
-      await rm(runnerDir, { recursive: true, force: true });
+      await Promise.all(runnerDirs.map((each) => rm(each, { recursive: true, force: true })));
     },
   };
 }

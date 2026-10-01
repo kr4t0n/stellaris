@@ -91,6 +91,24 @@ class TotalingBackend implements AgentBackend {
   }
 }
 
+/** Commits what a test wrote into a home on the board's side, as an earlier turn's push would have. */
+async function commitHome(board: Board, agent: string, message: string): Promise<void> {
+  await execa(
+    "git",
+    [
+      "-c",
+      `user.name=${agent}`,
+      "-c",
+      `user.email=${agent}@x`,
+      "commit",
+      "--quiet",
+      "-am",
+      message,
+    ],
+    { cwd: board.paths.agent(agent) },
+  );
+}
+
 const deskPost = {
   agent: "desk",
   project: "society",
@@ -407,7 +425,8 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo"],
     });
     const backend = new ResidentBackend();
-    const { run, hub, runner } = await start(board, backend, { residentIdleMs: 80 });
+    // Long enough to outlast the home's commit and push between two turns, short enough to wait out.
+    const { run, hub, runner } = await start(board, backend, { residentIdleMs: 1_000 });
 
     // Two turns, one session and one token: the society scope needs no repository, and the
     // roster rides in the prompt.
@@ -433,7 +452,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.starts).toHaveLength(2);
 
     // Idle sessions go cold on their own.
-    await vi.waitFor(() => expect(hub.residentPairs).toEqual([]));
+    await vi.waitFor(() => expect(hub.residentPairs).toEqual([]), { timeout: 3_000 });
     expect(backend.closes).toHaveLength(2);
     await run(deskPost);
     expect(hub.residentPairs).toEqual(["desk/society"]);
@@ -460,6 +479,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { board } = await Board.init(dir, { name: "homes" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     await writeFile(path.join(board.paths.agent("stew"), "profile.md"), "Watches.\n", "utf8");
+    await commitHome(board, "stew", "an earlier turn wrote the profile");
     let pulled = "";
     const backend: AgentBackend = {
       kind: "claude",
@@ -487,6 +507,170 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await readFile(path.join(home, "notes.md"), "utf8")).toBe("scratch\n");
     expect((await board.readAgent("stew")).name).toBe("stew");
     expect(await readFile(path.join(home, "role.md"), "utf8")).not.toContain("rewritten");
+    // The turn is a commit in the citizen's home, by the citizen.
+    const log = await execa("git", ["log", "-1", "--format=%an %s"], { cwd: home });
+    expect(log.stdout).toMatch(/^stew turn [0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+
+  it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {
+    const { board } = await Board.init(dir, { name: "pins" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const fresh: Record<string, boolean[]> = { a: [], b: [] };
+    const backendOn = (runner: "a" | "b"): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${runner}`),
+      runTurn: (request) => {
+        fresh[runner]?.push(request.newSession);
+        return Promise.resolve(completed(`ran on ${runner}`));
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "a",
+      backends: () => ({ claude: backendOn("a") }),
+      extraRunners: [{ name: "b", backends: () => ({ claude: backendOn("b") }) }],
+      graceMs: 300,
+    });
+    const { run, hub, runners } = society;
+    const turn = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+
+    // The first turn pins it to the least busy runner, and every later one goes there too.
+    expect((await run(turn)).runner).toBe("a");
+    expect((await run(turn)).runner).toBe("a");
+    expect((await board.readAgent("stew")).homeRunner).toBe("a");
+    expect(fresh).toEqual({ a: [true, false], b: [] });
+
+    // The user moves it: its conversation starts afresh there.
+    await board.setAgentRunner(USER, "stew", "b");
+    expect((await run(turn)).runner).toBe("b");
+    expect(fresh["b"]).toEqual([true]);
+
+    // Its runner goes away: the turn waits through the grace period, then moves.
+    await runners.get("b")?.stop();
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a"]));
+    expect(
+      await hub.assign({
+        ...turn,
+        trigger: { ...turn.trigger, from: undefined },
+        onboarding: false,
+      }),
+    ).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect((await run(turn)).runner).toBe("a");
+    expect((await board.readAgent("stew")).homeRunner).toBe("a");
+    const moved = (await board.readEvents(null, 500)).filter((e) => e.type === "agent.placed");
+    expect(moved.map((event) => event.payload)).toEqual([
+      { agent: "stew", runner: "a" },
+      { agent: "stew", runner: "a", from: "b" },
+    ]);
+  });
+
+  /**
+   * One citizen's turn outside projects on runner a and its turn in the lab on runner b, run at once,
+   * each after both have read the same memory, each making one edit to its core memory.
+   */
+  async function twoMachines(
+    edits: { a: [string, string]; b: [string, string] },
+    prompts: string[] = [],
+  ): Promise<{ board: Board; core: string; run: TestSociety["run"] }> {
+    const { board } = await Board.init(dir, { name: "two-machines" });
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, {
+      name: "stew",
+      role: "steward",
+      cli: "claude",
+      memberships: ["lab"],
+    });
+    const core = path.join(board.paths.agent("stew"), "memory", "core.md");
+    await writeFile(core, "# Core memory\n\n- one\n- two\n- three\n- four\n- five\n", "utf8");
+    await commitHome(board, "stew", "an earlier turn wrote the core");
+    let arrived = 0;
+    const { promise: both, resolve: together } = Promise.withResolvers<void>();
+    const backendOn = ([line, changed]: [string, string]): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        prompts.push(request.prompt);
+        arrived += 1;
+        if (arrived === 2) {
+          together();
+        }
+        if (arrived <= 2) {
+          await both;
+          const file = path.join(request.spec.configHome, "memory", "core.md");
+          await writeFile(file, (await readFile(file, "utf8")).replace(line, changed), "utf8");
+        }
+        return completed(`changed ${line}`);
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "a",
+      backends: () => ({ claude: backendOn(edits.a) }),
+      extraRunners: [{ name: "b", backends: () => ({ claude: backendOn(edits.b) }) }],
+    });
+    // Its work outside projects runs on a, and the lab lives on b.
+    await board.setAgentRunner(USER, "stew", "a");
+    await board.placeProject("lab", "b");
+    const { run } = society;
+    const [home, lab] = await Promise.all(
+      (["society", "lab"] as const).map((project) =>
+        run({
+          agent: "stew",
+          project,
+          trigger: { kind: "manual", fromUser: true, reason: "test" },
+          priority: 1,
+        }),
+      ),
+    );
+    expect([home?.runner, lab?.runner]).toEqual(["a", "b"]);
+    return { board, core, run };
+  }
+
+  it("merges what one citizen wrote to its memory on two machines at once", async () => {
+    const { board, core } = await twoMachines({
+      a: ["- one", "- one, from the society's work"],
+      b: ["- five", "- five, from the lab"],
+    });
+    const merged = await readFile(core, "utf8");
+    expect(merged).toContain("- one, from the society's work");
+    expect(merged).toContain("- five, from the lab");
+    expect(await board.listHomeConflicts("stew")).toEqual([]);
+    const authors = await execa("git", ["log", "--format=%an"], { cwd: board.paths.agent("stew") });
+    expect(
+      authors.stdout.split("\n").filter((name) => name === "stew").length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps both versions of a line two machines changed at once, and asks the citizen to reconcile them", async () => {
+    const prompts: string[] = [];
+    const { board, core, run } = await twoMachines(
+      {
+        a: ["- three", "- three, as the society's work saw it"],
+        b: ["- three", "- three, as the lab saw it"],
+      },
+      prompts,
+    );
+    const kept = await readFile(core, "utf8");
+    const [conflict] = await board.listHomeConflicts("stew");
+    expect(conflict).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
+    const other = await readFile(path.join(board.paths.agent("stew"), conflict ?? ""), "utf8");
+    // One version is in place and the other beside it; neither is lost.
+    expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
+    expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
+    await run({
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual", fromUser: true, reason: "test" },
+      priority: 1,
+    });
+    expect(prompts.at(-1)).toContain("## Edits to reconcile in your home");
+    expect(prompts.at(-1)).toContain(`- ${conflict}`);
   });
 
   it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {
@@ -586,7 +770,9 @@ describe("turns on a runner over the runner protocol", () => {
       }),
     });
     expect(hello.status).toBe(409);
-    expect((await call("/runner/homes/stew/manifest")).status).toBe(403);
+    expect((await call("/runner/homes/stew/git/info/refs?service=git-upload-pack")).status).toBe(
+      403,
+    );
     expect((await call("/runner/board/manifest")).status).toBe(200);
 
     // The interface's model list is asked of a runner that has the CLI.

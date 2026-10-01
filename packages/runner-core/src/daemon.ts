@@ -1,4 +1,5 @@
 import os from "node:os";
+import { setTimeout as wait } from "node:timers/promises";
 import {
   RUNNER_PROTOCOL,
   type AgentEvent,
@@ -36,10 +37,12 @@ const MAX_RETRY_MS = 15_000;
 /** Steps of a turn travel in small batches, so the live picture lags by at most this much. */
 const EVENT_BATCH_MS = 100;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref?.();
-  });
+/**
+ * Waits, or until `signal` aborts. The timer holds the process open: while the server is away and
+ * no turn runs, it is all that does, and an unref'd one let the runner exit in its first wait.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return wait(ms, undefined, signal === undefined ? {} : { signal }).catch(() => undefined);
 }
 
 /** The steps of one turn, posted in order and in batches as they arrive. */
@@ -100,6 +103,8 @@ export class RunnerDaemon {
   private readonly homes: HomeSync;
   private readonly board: TreeCopy;
   private abort: AbortController | null = null;
+  /** Aborted by `stop`, which ends the wait between connections at once. */
+  private readonly stopping = new AbortController();
   private stopped = false;
   private loop: Promise<void> | null = null;
   private assigned: Name | null = null;
@@ -152,6 +157,7 @@ export class RunnerDaemon {
   async stop(): Promise<void> {
     this.stopped = true;
     this.abort?.abort();
+    this.stopping.abort();
     await Promise.allSettled(this.running.values());
     await this.executor.close();
     await this.warmChain;
@@ -208,7 +214,7 @@ export class RunnerDaemon {
       if (this.stopped) {
         break;
       }
-      await sleep(delay);
+      await sleep(delay, this.stopping.signal);
       delay = Math.min(delay * 2, MAX_RETRY_MS);
     }
   }

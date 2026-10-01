@@ -330,6 +330,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { board } = await Board.init(dir, { name: "asks" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     let mention = false;
+    let proposeRole = false;
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
@@ -338,6 +339,15 @@ describe("turns on a runner over the runner protocol", () => {
           await board.postMessage(
             { name: "stew", role: "steward" },
             { channel: "general", body: "@user which project should this go in?" },
+          );
+        }
+        if (proposeRole) {
+          await board.propose(
+            { name: "stew", role: "steward" },
+            {
+              kind: "role",
+              charter: { name: "researcher", purpose: "Researches.", verbs: ["read_inbox"] },
+            },
           );
         }
         const base = completed("which project should the survey go in?");
@@ -371,6 +381,14 @@ describe("turns on a runner over the runner protocol", () => {
     mention = true;
     await run(dispatch);
     expect(await board.listThreads()).toHaveLength(1);
+    expect(await board.listRequests()).toHaveLength(2);
+    // Nor does one that proposed what the user decides: the proposal is the question, and it
+    // leaves the user's list when decided, where a mention would stay.
+    mention = false;
+    proposeRole = true;
+    await run(dispatch);
+    const asked = (await board.listThreads()).filter((thread) => thread.openedBy === "stew");
+    expect(asked.map((thread) => thread.channel)).toEqual(["general", "governance"]);
     expect(await board.listRequests()).toHaveLength(2);
   });
 

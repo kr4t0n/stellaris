@@ -2,9 +2,11 @@ import type { Actor, Board } from "@stellaris/board-core";
 import {
   mayHoldStage,
   PATH_TOKENS,
+  ROLE_KIND_APPROVERS,
   sessionKey,
   SOCIETY_SCOPE,
   USER_NAME,
+  USER_ROLE,
   wakeScope,
   type AgentEvent,
   type Message,
@@ -598,7 +600,9 @@ export class TurnHost {
    * the user, which is what puts it before them. One that mentioned the user nowhere asks in its
    * own thread when it was in one that is still open, so the answer comes back to the same
    * conversation, and otherwise in a thread of its own on its scope's general channel, opened as the
-   * citizen with its summary.
+   * citizen with its summary. One that proposed something the user decides has put its decision
+   * before the user already, where deciding it clears it; a mention would stay until the user
+   * posted beside it.
    */
   private async askUser(
     actor: Actor,
@@ -609,6 +613,15 @@ export class TurnHost {
   ): Promise<void> {
     try {
       if (await this.board.hasMentioned(actor.name, USER_NAME, since)) {
+        return;
+      }
+      const proposed = (await this.board.listProposals()).some(
+        (proposal) =>
+          proposal.proposedBy === actor.name &&
+          proposal.createdAt >= since &&
+          ROLE_KIND_APPROVERS[proposal.kind].includes(USER_ROLE),
+      );
+      if (proposed) {
         return;
       }
       const current =

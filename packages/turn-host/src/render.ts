@@ -33,7 +33,7 @@ const TURN_CONTRACT = [
   '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
   "- To ask the user something, mention @user where the question belongs: the task's thread for a task, the proposal's thread for a proposal, and for anything else a thread you open on your scope's general channel, titled with the question. The user answers in the same thread, and the answer comes back to that thread's conversation. A proposal waiting on the user is already in front of them and needs no mention.",
-  "- End every turn with the status object: summary, claims held, what is blocked, and whether the user must decide. If you report that the user must decide and mentioned @user nowhere this turn, the runner asks in this turn's thread when it has one, and otherwise opens a thread on your scope's general channel with your summary as the question.",
+  "- End every turn with the status object: summary, claims held, what is blocked, and whether the user must decide. If you report that the user must decide, mentioned @user nowhere this turn, and proposed nothing for the user to decide, the runner asks in this turn's thread when it has one, and otherwise opens a thread on your scope's general channel with your summary as the question.",
 ].join("\n");
 
 /** How work is planned: stages between open and done, written and reshaped by the participants. */

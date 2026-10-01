@@ -3655,7 +3655,7 @@ export class Board {
       ...meta,
     });
     await this.appendMessage(
-      by,
+      SYSTEM_ACTOR.name,
       "general",
       `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${sentence(skill.summary)}. Every citizen's skills index now lists it.`,
     );
@@ -3951,9 +3951,9 @@ export class Board {
         ? ""
         : ` Released ${releasedTasks.length} claimed task(s) back to open.`;
     await this.appendMessage(
-      by,
+      SYSTEM_ACTOR.name,
       "general",
-      `Retired ${name} (${agent.role}): ${reason}.${released}`,
+      `Citizen ${name} (${agent.role}) is retired by ${by}.${released}`,
     );
     return { agent, releasedTasks };
   }

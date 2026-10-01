@@ -940,7 +940,12 @@ describe("Board", () => {
       "rev-1",
       "user",
     ]);
-    expect((await board.listChannel("general")).at(-1)?.body).toContain("Retired eng-1");
+    // The notice is the board's, and leaves the reason, free text, out of a post nobody wrote.
+    const notice = (await board.listChannel("general")).at(-1);
+    expect(notice).toMatchObject({ author: "board" });
+    expect(notice?.body.trim()).toBe(
+      "Citizen eng-1 (engineer) is retired by user. Released 1 claimed task(s) back to open.",
+    );
     expect((await board.readProposal(retirement.id)).provision).toMatchObject({
       agent: "eng-1",
       releasedTasks: [task.id],
@@ -1562,7 +1567,11 @@ describe("Board", () => {
     expect((await board.search(REV, { query: "uv sync" })).map((h) => h.ref)).toEqual([
       "society/skills/uv-setup",
     ]);
-    expect((await board.listChannel("general")).at(-1)?.body).toContain("Skill uv-setup promoted");
+    // The board announces it, so the decider's name on it wakes nobody as theirs.
+    expect((await board.listChannel("general")).at(-1)).toMatchObject({
+      author: "board",
+      body: expect.stringContaining("Skill uv-setup promoted"),
+    });
 
     // A reflection can be requested ahead of the cadence.
     const wake = await board.requestWake(USER, {

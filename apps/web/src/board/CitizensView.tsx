@@ -23,8 +23,8 @@ function byRole(a: Member, b: Member): number {
 }
 
 /**
- * Every citizen at a glance, one row each in columns, ordered by role: its CLI, role, model,
- * projects, and what it is doing; each opens the citizen's own view.
+ * Every citizen at a glance, one row each in columns, ordered by role: its CLI, role, model, the
+ * runner it is pinned to, projects, and what it is doing; each opens the citizen's own view.
  */
 export function CitizensView() {
   const members = useMembers();
@@ -71,12 +71,23 @@ export function CitizensView() {
           Rows are subgrids of one grid, so each column is as wide as its widest cell. In a narrow
           island the model cuts before the projects go under 3rem.
         */}
-        <ul className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3">
+        <ul className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3">
           {active.map((member) => {
             const now = state(member);
             const model = modelOf(member);
             const projects =
               member.memberships.length === 0 ? "no projects" : member.memberships.join(", ");
+            // Its work outside projects runs on this runner; a project's turns run on the project's.
+            const runner =
+              member.homeRunner === undefined
+                ? {
+                    label: "no runner yet",
+                    detail: "pinned to a runner on its first turn outside a project",
+                  }
+                : {
+                    label: `on ${member.homeRunner}`,
+                    detail: `its work outside projects runs on ${member.homeRunner}`,
+                  };
             return (
               <li key={member.name} className="col-span-full grid grid-cols-subgrid">
                 <Link
@@ -91,6 +102,9 @@ export function CitizensView() {
                   <span className="text-fg-secondary">{member.role}</span>
                   <span className="truncate text-fg-secondary" title={model}>
                     {model}
+                  </span>
+                  <span className="text-xs text-fg-muted" title={runner.detail}>
+                    {runner.label}
                   </span>
                   <span className="truncate text-xs text-fg-muted" title={projects}>
                     {projects}

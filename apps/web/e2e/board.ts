@@ -683,7 +683,7 @@ export async function fakeBoard(
       case "/api/members":
         return json(route, [
           member("desk", "concierge", ["lab"], deskModel, deskRunner),
-          member("stew", "steward"),
+          member("stew", "steward", [], null, null),
         ]);
       case "/api/runners":
         return json(route, [

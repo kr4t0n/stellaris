@@ -378,6 +378,66 @@ function askFixtures(): Map<string, AskFixture> {
   ]);
 }
 
+/** A week of metrics, or more decisions over the whole log, so the window switch shows. */
+function metrics(window: string) {
+  return {
+    window,
+    since: window === "all" ? null : "2026-09-22T09:00:00.000Z",
+    until: "2026-09-29T09:00:00.000Z",
+    idle: {
+      turns: 12,
+      idle: 3,
+      unknown: 1,
+      byTrigger: [
+        { trigger: "heartbeat", turns: 4, idle: 3 },
+        { trigger: "stage", turns: 8, idle: 0 },
+      ],
+      byAgent: [
+        { agent: "stew", role: "steward", turns: 4, idle: 3 },
+        { agent: "desk", role: "concierge", turns: 8, idle: 0 },
+      ],
+    },
+    sentBack: {
+      finished: 2,
+      sendBacks: 1,
+      tasksSentBack: 1,
+      byStage: [{ project: "lab", stage: "Sign off", count: 1 }],
+      bySender: [{ agent: "user", count: 1 }],
+    },
+    messages: {
+      finished: 2,
+      messages: 9,
+      byProject: [{ project: "lab", finished: 2, messages: 9 }],
+      busiest: [{ taskId: STAGE_TASK, title: TASK.title, project: "lab", messages: 6 }],
+    },
+    latency: {
+      mentions: 3,
+      unanswered: 1,
+      medianMs: 30_000,
+      slowestMs: 95_000,
+      byAgent: [{ agent: "desk", mentions: 3, medianMs: 30_000, slowestMs: 95_000 }],
+    },
+    decisions: {
+      total: window === "all" ? 5 : 2,
+      byDay: [
+        { day: "2026-09-29", proposals: 1, answers: 1, stages: 0 },
+        ...(window === "all" ? [{ day: "2026-09-20", proposals: 2, answers: 0, stages: 1 }] : []),
+      ],
+    },
+    blocked: [
+      {
+        taskId: STAGE_TASK,
+        title: TASK.title,
+        project: "lab",
+        summary: "needs gpu and no connected runner offers it",
+        firstAt: CREATED,
+        lastAt: CREATED,
+        holds: true,
+      },
+    ],
+  };
+}
+
 export interface FakeBoard {
   /** Every write the interface sent, in order. */
   readonly writes: Write[];
@@ -550,6 +610,9 @@ export async function fakeBoard(
         default:
           return json(route, { message: `no fake for ${pathname}` }, 404);
       }
+    }
+    if (pathname === "/api/metrics") {
+      return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
     const ask = asks.get(pathname.slice("/api/threads/".length));
     if (pathname.startsWith("/api/threads/") && ask !== undefined) {

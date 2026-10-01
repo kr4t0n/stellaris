@@ -25,14 +25,20 @@ describe("board events", () => {
       ["tasks"],
       ["task", id],
       ["members"],
+      ["metrics"],
     ]);
-    expect(staleKeys(event("turn.started", {}, id))).toEqual([["scheduler"], ["members"]]);
+    expect(staleKeys(event("turn.started", {}, id))).toEqual([
+      ["scheduler"],
+      ["members"],
+      ["metrics"],
+    ]);
     expect(staleKeys(event("turn.completed", { project: "lab" }, id))).toEqual([
       ["scheduler"],
       ["members"],
       ["turns", "ada"],
       ["memory", "ada"],
       ["agent-skills", "ada"],
+      ["metrics"],
     ]);
     expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([
       ["knowledge", "society"],
@@ -43,8 +49,13 @@ describe("board events", () => {
     expect(staleKeys(event("proposal.decided", { proposalId: id }, id))).toEqual([
       ["proposals"],
       ["proposal", id],
+      ["metrics"],
     ]);
-    expect(staleKeys(event("ops.signal", {}, id))).toEqual([["signals"], ["scheduler"]]);
+    expect(staleKeys(event("ops.signal", {}, id))).toEqual([
+      ["signals"],
+      ["scheduler"],
+      ["metrics"],
+    ]);
   });
 
   it("reads frames split across chunks and resumes after the last event it saw", async () => {

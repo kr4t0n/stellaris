@@ -44,7 +44,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
     return [["threads"], ["thread", text(payload["threadId"])], ["channel"], ["requests"]];
   }
   if (type.startsWith("task.") || type.startsWith("merge.") || type === "lease.expired") {
-    return [["tasks"], ["task", text(payload["taskId"])], ["members"]];
+    return [["tasks"], ["task", text(payload["taskId"])], ["members"], ["metrics"]];
   }
   if (type === "turn.completed" || type === "turn.failed") {
     // A turn may have rewritten the citizen's memory and skills as well as its history.
@@ -54,7 +54,11 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["turns", actor],
       ["memory", actor],
       ["agent-skills", actor],
+      ["metrics"],
     ];
+  }
+  if (type === "turn.started") {
+    return [["scheduler"], ["members"], ["metrics"]];
   }
   if (type.startsWith("turn.") || type === "wake.requested" || type === "paused.changed") {
     return [["scheduler"], ["members"]];
@@ -72,13 +76,13 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
     return [["roles"]];
   }
   if (type.startsWith("proposal.")) {
-    return [["proposals"], ["proposal", text(payload["proposalId"])]];
+    return [["proposals"], ["proposal", text(payload["proposalId"])], ["metrics"]];
   }
   if (type === "skill.promoted") {
     return [["skills"]];
   }
   if (type === "ops.signal") {
-    return [["signals"], ["scheduler"]];
+    return [["signals"], ["scheduler"], ["metrics"]];
   }
   return [];
 }

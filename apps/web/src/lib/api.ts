@@ -5,6 +5,7 @@ import {
   KnowledgeSchema,
   AgentSchema,
   MemberSchema,
+  MetricsSchema,
   ModelOptionSchema,
   MessageFrontmatterSchema,
   NameSchema,
@@ -22,6 +23,7 @@ import {
   TurnHistoryEntrySchema,
   UlidSchema,
   type CliKind,
+  type MetricsWindow,
 } from "@stellaris/shared";
 import { z } from "zod";
 
@@ -180,6 +182,7 @@ export function createApi(token: string) {
     /** The operations log, oldest first. */
     signals: (limit: number) =>
       get(`/api/signals?limit=${limit}`, token, SignalRecordSchema.array()),
+    metrics: (window: MetricsWindow) => get(`/api/metrics?window=${window}`, token, MetricsSchema),
     channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
     channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),

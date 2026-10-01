@@ -1,7 +1,7 @@
 import type { Task } from "@stellaris/shared";
 import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
-import type { CliKind } from "@stellaris/shared";
+import type { CliKind, MetricsWindow } from "@stellaris/shared";
 import type { Api } from "./api.js";
 
 export interface Session {
@@ -62,6 +62,16 @@ export function useSignals(enabled: boolean) {
     queryKey: ["signals"],
     queryFn: () => api.signals(200),
     enabled,
+    refetchInterval: 60_000,
+  });
+}
+
+/** How the society works over a window; it reads the whole log, so it refreshes on events that change it. */
+export function useMetrics(window: MetricsWindow) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["metrics", window],
+    queryFn: () => api.metrics(window),
     refetchInterval: 60_000,
   });
 }

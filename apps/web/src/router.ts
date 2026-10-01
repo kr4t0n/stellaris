@@ -4,6 +4,7 @@ import {
   createRouter,
   lazyRouteComponent,
 } from "@tanstack/react-router";
+import { MetricsWindowSchema, type MetricsWindow } from "@stellaris/shared";
 import type { CitizenTab } from "./board/citizen.js";
 import { Playground } from "./Playground.js";
 
@@ -52,6 +53,16 @@ const routeTree = rootRoute.addChildren([
     getParentRoute: () => rootRoute,
     path: "/task/$taskId",
     component: lazyRouteComponent(() => import("./board/TaskView.js"), "TaskView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/metrics",
+    // `window` picks how far back the metrics look; a week when none is named.
+    validateSearch: (search: Record<string, unknown>): { window?: MetricsWindow } => {
+      const window = MetricsWindowSchema.safeParse(search["window"]);
+      return window.success ? { window: window.data } : {};
+    },
+    component: lazyRouteComponent(() => import("./board/MetricsView.js"), "MetricsView"),
   }),
   createRoute({
     getParentRoute: () => rootRoute,

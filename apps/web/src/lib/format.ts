@@ -16,6 +16,19 @@ export function ago(iso: string, now: number): string {
   return "just now";
 }
 
+/** A length of time as "42s", "4m", or "1h 12m". */
+export function span(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 /** The first paragraph of a markdown text that is not a heading, as plain text. */
 export function firstParagraph(markdown: string, limit = 220): string {
   const paragraph =

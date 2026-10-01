@@ -6,6 +6,7 @@ import {
   type TurnExitReason,
 } from "@stellaris/shared";
 import { createContext, useContext, useSyncExternalStore } from "react";
+import { span } from "./format.js";
 import { followStream } from "./sse.js";
 
 interface StepBase {
@@ -342,15 +343,7 @@ export function lastLine(turn: LiveTurn): string | null {
 
 /** "42s", "4m", or "1h 12m" since a moment. */
 export function elapsed(since: string, now: number): string {
-  const seconds = Math.max(0, Math.round((now - Date.parse(since)) / 1000));
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return span(now - Date.parse(since));
 }
 
 /**

@@ -217,9 +217,9 @@ export function Playground() {
     );
   }
 
-  // Governance belongs to the society as a whole.
+  // Governance and the metrics belong to the society as a whole.
   const focus =
-    (activeGovernance === null ? null : SOCIETY_SCOPE) ??
+    (activeGovernance === null && pathname !== "/metrics" ? null : SOCIETY_SCOPE) ??
     activeOverview ??
     activeTasks ??
     (activeChannel === null
@@ -319,6 +319,7 @@ export function Playground() {
               activeScope={activeScope}
               activeGovernance={activeGovernance}
               activeOverview={activeOverview}
+              activeMetrics={pathname === "/metrics"}
             />
           ) : null}
           {boardOpen ? (

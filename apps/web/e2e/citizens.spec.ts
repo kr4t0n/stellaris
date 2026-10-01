@@ -213,14 +213,15 @@ test("the citizen count opens every citizen with its role and model, and each op
   await expect(desk).toContainText("claude-opus-5-5");
   await expect(desk).toContainText("lab");
   await expect(desk).toContainText("resting");
-  await expect(desk.getByText("on pod")).toHaveAttribute(
+  // Its work outside projects runs where it is pinned, and its work in lab where lab lives.
+  await expect(desk.getByText("on pod, laptop")).toHaveAttribute(
     "title",
-    "its work outside projects runs on pod",
+    "outside projects: pod; lab: laptop",
   );
   const stew = view.getByRole("link", { name: /^stew/ });
   await expect(stew).toContainText("steward");
   await expect(stew).toContainText("no projects");
-  // Not pinned until its first turn outside a project.
+  // In no project, and not pinned until its first turn outside one.
   await expect(stew).toContainText("no runner yet");
 
   await desk.click();

@@ -4,6 +4,7 @@ import {
   costLabel,
   endingOf,
   historyTotals,
+  runnersOf,
   turnLength,
   wakeScopes,
   withoutTitle,
@@ -63,5 +64,39 @@ describe("citizen", () => {
   it("drops a leading heading that repeats the section's title", () => {
     expect(withoutTitle("# Core memory\n\n- one", "Core memory")).toBe("- one");
     expect(withoutTitle("# Notes\n\n- one", "Core memory")).toBe("# Notes\n\n- one");
+  });
+
+  it("names the runners a citizen's turns run on, its pin and its projects' places", () => {
+    const base = MemberSchema.parse({
+      name: "sage",
+      role: "researcher",
+      cli: "claude",
+      status: "active",
+      memberships: ["model-research", "lab"],
+      subscriptions: [],
+      createdAt: "2026-10-01T12:48:00.000Z",
+    });
+    const sage = { ...base, profile: "" };
+    // A project member that works outside no project has no pin, yet runs where its projects live.
+    expect(runnersOf(sage, new Map([["model-research", "pod"]]))).toEqual({
+      label: "on pod",
+      detail: "model-research: pod; lab: placed on its first turn",
+    });
+    expect(
+      runnersOf(
+        { ...sage, homeRunner: "laptop" },
+        new Map([
+          ["model-research", "pod"],
+          ["lab", "pod"],
+        ]),
+      ),
+    ).toEqual({
+      label: "on laptop, pod",
+      detail: "outside projects: laptop; model-research: pod; lab: pod",
+    });
+    expect(runnersOf({ ...sage, memberships: [] }, new Map())).toEqual({
+      label: "no runner yet",
+      detail: "pinned to a runner on its first turn",
+    });
   });
 });

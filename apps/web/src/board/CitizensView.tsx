@@ -2,8 +2,8 @@ import type { Member } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
-import { useMembers, useScheduler } from "../lib/session.js";
-import { scopeName } from "./citizen.js";
+import { useMembers, useProjects, useScheduler } from "../lib/session.js";
+import { runnersOf, scopeName } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
 /** The model a citizen runs: what its CLI last reported, else what it is set to, else the CLI's own. */
@@ -24,11 +24,12 @@ function byRole(a: Member, b: Member): number {
 
 /**
  * Every citizen at a glance, one row each in columns, ordered by role: its CLI, role, model, the
- * runner it is pinned to, projects, and what it is doing; each opens the citizen's own view.
+ * runners its turns run on, projects, and what it is doing; each opens the citizen's own view.
  */
 export function CitizensView() {
   const members = useMembers();
   const scheduler = useScheduler();
+  const projectList = useProjects();
   if (members.data === undefined) {
     return <PaneNote>Reading the roster…</PaneNote>;
   }
@@ -39,6 +40,11 @@ export function CitizensView() {
   const roles = new Set(active.map((member) => member.role)).size;
   const running = pairsOf(scheduler.data?.running ?? []);
   const pending = pairsOf(scheduler.data?.pending ?? []);
+  const placed = new Map(
+    (projectList.data ?? []).flatMap((project) =>
+      project.runner === undefined ? [] : [[project.slug, project.runner] as const],
+    ),
+  );
 
   // One word each, so the column stays narrow; where a turn runs is on hover and in Working now.
   const state = (member: Member): { label: string; detail: string; tone: string } => {
@@ -77,17 +83,7 @@ export function CitizensView() {
             const model = modelOf(member);
             const projects =
               member.memberships.length === 0 ? "no projects" : member.memberships.join(", ");
-            // Its work outside projects runs on this runner; a project's turns run on the project's.
-            const runner =
-              member.homeRunner === undefined
-                ? {
-                    label: "no runner yet",
-                    detail: "pinned to a runner on its first turn outside a project",
-                  }
-                : {
-                    label: `on ${member.homeRunner}`,
-                    detail: `its work outside projects runs on ${member.homeRunner}`,
-                  };
+            const runner = runnersOf(member, placed);
             return (
               <li key={member.name} className="col-span-full grid grid-cols-subgrid">
                 <Link
@@ -100,7 +96,7 @@ export function CitizensView() {
                   </span>
                   <span className="text-fg-primary">{member.name}</span>
                   <span className="text-fg-secondary">{member.role}</span>
-                  <span className="truncate text-fg-secondary" title={model}>
+                  <span className="truncate text-xs text-fg-muted" title={model}>
                     {model}
                   </span>
                   <span className="text-xs text-fg-muted" title={runner.detail}>

@@ -71,3 +71,29 @@ export function withoutTitle(markdown: string, title: string): string {
     ? markdown.slice(match[0].length).trim()
     : markdown;
 }
+
+/**
+ * Where a citizen's turns run: its work outside projects on the runner it is pinned to, and its
+ * work in each project on the runner that project lives on. Either is set by the first such turn.
+ */
+export function runnersOf(
+  member: Member,
+  placed: ReadonlyMap<string, string>,
+): { label: string; detail: string } {
+  const places = [
+    ...(member.homeRunner === undefined
+      ? []
+      : [{ what: "outside projects", runner: member.homeRunner }]),
+    ...member.memberships.map((slug) => ({ what: slug, runner: placed.get(slug) })),
+  ];
+  const runners = [
+    ...new Set(places.flatMap((place) => (place.runner === undefined ? [] : [place.runner]))),
+  ];
+  const detail = places
+    .map((place) => `${place.what}: ${place.runner ?? "placed on its first turn"}`)
+    .join("; ");
+  return {
+    label: runners.length === 0 ? "no runner yet" : `on ${runners.join(", ")}`,
+    detail: detail === "" ? "pinned to a runner on its first turn" : detail,
+  };
+}

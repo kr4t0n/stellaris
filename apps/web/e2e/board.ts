@@ -87,6 +87,7 @@ const PROJECT = {
   requiredCapabilities: [],
   createdAt: CREATED,
   onDone: "none",
+  runner: "laptop",
 };
 
 /** A project archived after its work moved to lab, with the one post it kept. */

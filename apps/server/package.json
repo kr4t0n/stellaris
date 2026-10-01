@@ -2,7 +2,7 @@
   "name": "@stellaris/server",
   "version": "0.0.0",
   "private": true,
-  "description": "The board server: core library, scheduler, HTTP API, SSE feed, MCP endpoint, runner registry, embedded runner",
+  "description": "The board server: core library, scheduler, HTTP API, SSE feed, MCP endpoint, and the hub runners connect to; it runs no turns",
   "bin": {
     "stellaris-server": "./dist/index.js"
   },
@@ -13,13 +13,12 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
-    "@stellaris/adapter-claude": "workspace:*",
-    "@stellaris/adapter-codex": "workspace:*",
     "@stellaris/board-core": "workspace:*",
     "@stellaris/board-mcp": "workspace:*",
     "@stellaris/runner-core": "workspace:*",
     "@stellaris/scheduler": "workspace:*",
     "@stellaris/shared": "workspace:*",
+    "@stellaris/turn-host": "workspace:*",
     "hono": "4.13.10",
     "pino": "10.3.1",
     "zod": "4.6.5"

@@ -2,13 +2,34 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import { LocalRunner } from "@stellaris/runner-core";
 import { Scheduler } from "@stellaris/scheduler";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createApp } from "./app.js";
+import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { USER, ScriptedBackend, addWorkRoles } from "./testing/scripted-backend.js";
+
+/** The society each test runs, stopped after it: a server and a runner over the runner protocol. */
+let current: TestSociety | null = null;
+
+async function scripted(
+  board: Board,
+  options: { residentIdleMs?: number } = {},
+): Promise<{ society: TestSociety; backend: ScriptedBackend }> {
+  let backend: ScriptedBackend | null = null;
+  current = await startTestSociety({
+    board,
+    ...options,
+    backends: (app) => {
+      backend = new ScriptedBackend(app);
+      return { claude: backend, codex: backend };
+    },
+  });
+  if (backend === null) {
+    throw new Error("the runner was started without its backend");
+  }
+  return { society: current, backend };
+}
 
 describe("Phase 1 exit criterion", () => {
   let dir: string;
@@ -18,6 +39,8 @@ describe("Phase 1 exit criterion", () => {
   });
 
   afterEach(async () => {
+    await current?.stop();
+    current = null;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -39,17 +62,10 @@ describe("Phase 1 exit criterion", () => {
       memberships: ["demo"],
     });
 
-    const app = createApp({ board, version: "test" });
-    const backend = new ScriptedBackend(app);
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend, codex: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { society, backend } = await scripted(board);
     const scheduler = new Scheduler({
       board,
-      runner,
+      runner: society.hub,
       timings: {
         debounceMs: 0,
         userDebounceMs: 0,
@@ -112,18 +128,19 @@ describe("Phase 1 exit criterion", () => {
     ]);
     expect(final.stages.map((stage) => stage.completedBy)).toEqual(["eng-1", "rev-1"]);
 
-    const mainLog = await execa("git", ["log", "--oneline", "main"], {
-      cwd: board.paths.repo("demo"),
-    });
+    // The project lives on the runner that took its first turn, and so does its repository.
+    expect((await board.readProject("demo")).runner).toBe("pod");
+    const places = society.runner.paths;
+    const mainLog = await execa("git", ["log", "--oneline", "main"], { cwd: places.repo("demo") });
     expect(mainLog.stdout).toContain("feat: add hello.txt");
     expect(mainLog.stdout).toContain("feat: add the second line the review asked for");
     expect(mainLog.stdout).toContain(`merge: land task/${task.id} on main`);
-    expect(await readFile(path.join(board.paths.repo("demo"), "hello.txt"), "utf8")).toBe(
+    expect(await readFile(path.join(places.repo("demo"), "hello.txt"), "utf8")).toBe(
       "hello from eng-1\nand a second line\n",
     );
     // Each worktree is back on its agent's own branch, so the task branch was free to hand over.
     const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: board.paths.worktree("eng-1", "demo"),
+      cwd: places.worktree("eng-1", "demo"),
     });
     expect(head.stdout).toBe("agent/eng-1");
 
@@ -148,13 +165,18 @@ describe("Phase 1 exit criterion", () => {
     );
     expect(types).not.toContain("turn.failed");
 
+    // The runner renders the instructions with its own paths; the board never sees them.
     const rendered = await readFile(
-      path.join(board.paths.agent("eng-1"), ".claude", "CLAUDE.md"),
+      path.join(places.agent("eng-1"), ".claude", "CLAUDE.md"),
       "utf8",
     );
     expect(rendered).toContain("## Role");
     expect(rendered).toContain("## Planning");
-    expect(rendered).toContain(board.paths.board);
+    expect(rendered).toContain(places.board);
+    expect(rendered).not.toContain("{{stellaris:");
+    // The work each turn left is on its record: the task branch and its commit.
+    const lastBuild = await board.readLastTurn("eng-1", "demo", task.id);
+    expect(lastBuild?.work).toMatchObject({ branch: `task/${task.id}` });
     // The user's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readDigest({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
@@ -169,6 +191,8 @@ describe("Phase 5 exit criterion", () => {
   });
 
   afterEach(async () => {
+    await current?.stop();
+    current = null;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -183,18 +207,11 @@ describe("Phase 5 exit criterion", () => {
       memberships: ["demo"],
     });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
-    const app = createApp({ board, version: "test" });
-    const backend = new ScriptedBackend(app);
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend, codex: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-      residentIdleMs: 60_000,
-    });
+    const { society, backend } = await scripted(board, { residentIdleMs: 60_000 });
+    const { app } = society;
     const scheduler = new Scheduler({
       board,
-      runner,
+      runner: society.hub,
       timings: {
         debounceMs: 0,
         userDebounceMs: 0,
@@ -265,7 +282,7 @@ describe("Phase 5 exit criterion", () => {
     expect((await board.readLastTurn("desk", "society"))?.trigger.kind).toBe("proposal_decided");
     const types = (await board.readEvents(null)).map((e) => e.type);
     expect(types).not.toContain("turn.failed");
-    await runner.close();
+    await society.runner.stop();
     expect(backend.residentCloses).toEqual(["desk/society"]);
   });
 });
@@ -278,6 +295,8 @@ describe("Phase 4 exit criterion", () => {
   });
 
   afterEach(async () => {
+    await current?.stop();
+    current = null;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -292,17 +311,11 @@ describe("Phase 4 exit criterion", () => {
     ] as const) {
       await board.addAgent(USER, { name, role, cli, memberships: ["demo"] });
     }
-    const app = createApp({ board, version: "test" });
-    const backend = new ScriptedBackend(app);
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend, codex: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { society, backend } = await scripted(board);
+    const { app } = society;
     const scheduler = new Scheduler({
       board,
-      runner,
+      runner: society.hub,
       concurrency: 3,
       timings: {
         debounceMs: 0,
@@ -413,6 +426,8 @@ describe("Phase 6 exit criterion", () => {
   });
 
   afterEach(async () => {
+    await current?.stop();
+    current = null;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -428,19 +443,13 @@ describe("Phase 6 exit criterion", () => {
       memberships: ["alpha"],
     });
     await board.addAgent(USER, { name: "stew-1", role: "steward", cli: "claude" });
-    const app = createApp({ board, version: "test" });
-    const backend = new ScriptedBackend(app);
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend, codex: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { society, backend } = await scripted(board);
+    const { app } = society;
     // The scheduler runs on its own clock so the reflection cadence and the heartbeat can be reached.
     let clock = Date.now();
     const scheduler = new Scheduler({
       board,
-      runner,
+      runner: society.hub,
       now: () => new Date(clock),
       timings: {
         debounceMs: 0,

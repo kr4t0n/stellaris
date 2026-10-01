@@ -1,17 +1,12 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { Project } from "@stellaris/shared";
+import type { MergeOutcome, ProjectRepo } from "@stellaris/shared";
 import { execa } from "execa";
-
-export interface MergeOutcome {
-  readonly ok: boolean;
-  readonly detail: string;
-}
 
 /** The git operations a runner needs. */
 export interface GitOps {
   /** The project's canonical clone on this runner, created from its remote or initialized empty. */
-  ensureRepo(project: Project, dir: string): Promise<string>;
+  ensureRepo(project: ProjectRepo, dir: string): Promise<string>;
   /** One persistent worktree for an agent-project pair on the agent's own branch. */
   ensureWorktree(
     repoDir: string,
@@ -22,6 +17,8 @@ export interface GitOps {
   /** Lands a branch on the default branch in the canonical clone. Aborts cleanly on conflict. */
   merge(repoDir: string, into: string, branch: string): Promise<MergeOutcome>;
   branchExists(repoDir: string, branch: string): Promise<boolean>;
+  /** The commit a branch points at, or null when it does not exist. */
+  head(repoDir: string, branch: string): Promise<string | null>;
   /** Creates `branch` from `base` in the clone unless it exists. */
   ensureBranch(repoDir: string, branch: string, base: string): Promise<void>;
   /**
@@ -92,14 +89,14 @@ async function must(args: readonly string[], cwd?: string): Promise<string> {
 }
 
 export class ExecaGit implements GitOps {
-  async ensureRepo(project: Project, requestedDir: string): Promise<string> {
+  async ensureRepo(project: ProjectRepo, requestedDir: string): Promise<string> {
     const dir = path.resolve(requestedDir);
     if (await exists(path.join(dir, ".git"))) {
       return dir;
     }
     await mkdir(path.dirname(dir), { recursive: true });
-    if (project.repo !== null) {
-      await must(["clone", "--branch", project.defaultBranch, project.repo, dir]);
+    if (project.origin !== null) {
+      await must(["clone", "--branch", project.defaultBranch, project.origin, dir]);
       return dir;
     }
     await must(["init", "-b", project.defaultBranch, dir]);
@@ -133,6 +130,11 @@ export class ExecaGit implements GitOps {
   async branchExists(repoDir: string, branch: string): Promise<boolean> {
     const result = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], repoDir);
     return result.exitCode === 0;
+  }
+
+  async head(repoDir: string, branch: string): Promise<string | null> {
+    const result = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], repoDir);
+    return result.exitCode === 0 ? result.stdout.trim() : null;
   }
 
   async ensureBranch(repoDir: string, branch: string, base: string): Promise<void> {

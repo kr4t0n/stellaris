@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CliKindSchema } from "./board.js";
 import { TurnExitReasonSchema, TurnStatusSchema, UsageSchema } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
+import { TurnWorkSchema } from "./runner.js";
 
 /**
  * What caused a wake. `stage`: a stage became current and is the member's to take. `task_done`: a
@@ -97,11 +98,17 @@ export const TurnRecordSchema = z.object({
   toolCalls: z.number().int().nonnegative().default(0),
   /** The model the CLI reported for this turn, else the model configured for the agent, else null. */
   model: z.string().nullable().default(null),
+  /** The task branch the turn left work on, with its commit, as the runner reported it. */
+  work: TurnWorkSchema.optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 
-/** Session ids per CLI for one conversation, pinned to the runner where they began. */
-export const SessionsFileSchema = z.record(z.string(), z.string());
+/** Session ids per CLI for one conversation, and the runner where they began, which keeps them. */
+export const SessionsFileSchema = z.object({
+  claude: z.string().optional(),
+  codex: z.string().optional(),
+  runner: NameSchema.optional(),
+});
 export type SessionsFile = z.infer<typeof SessionsFileSchema>;
 
 export const WakeRequestSchema = z.object({

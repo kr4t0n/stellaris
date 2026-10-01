@@ -1,0 +1,21 @@
+{
+  "name": "@stellaris/turn-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The server side of a turn: building jobs from dispatches, recording outcomes, and the hub runners connect to",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@stellaris/board-core": "workspace:*",
+    "@stellaris/scheduler": "workspace:*",
+    "@stellaris/shared": "workspace:*"
+  }
+}

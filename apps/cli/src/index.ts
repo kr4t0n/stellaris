@@ -13,7 +13,6 @@ import {
   PlanEditSchema,
   PlanSchema,
   ProposalKindSchema,
-  SERVER_RUNNER,
   stageIndex,
   VerbNameSchema,
   type Task,
@@ -162,6 +161,43 @@ project
     );
   });
 
+const runner = program.command("runner").description("Manage runners");
+
+runner
+  .command("add <name>")
+  .description("Register a runner and print its token once")
+  .action(async (name: string) => {
+    const board = await open();
+    const { runner: added, token } = await board.addRunner(board.userActor(), name);
+    print({ runner: added, token }, () =>
+      [
+        `Runner ${added.name} added`,
+        `Token (shown once): ${token}`,
+        "Start it with STELLARIS_RUNNER_TOKEN set to the token and STELLARIS_SERVER_URL to the board server.",
+      ].join("\n"),
+    );
+  });
+
+runner
+  .command("list")
+  .description("List runners and what they offer")
+  .action(async () => {
+    const board = await open();
+    const runners = await board.listRunners();
+    print(runners, () =>
+      runners.length === 0
+        ? "No runners yet; add one with `runner add <name>`."
+        : runners
+            .map(
+              (each) =>
+                `${each.name}  ${each.status}  ${each.os}  ${each.clis.join(",") || "no CLIs yet"}${
+                  each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
+                }`,
+            )
+            .join("\n"),
+    );
+  });
+
 const agent = program.command("agent").description("Manage agents");
 
 agent
@@ -170,12 +206,12 @@ agent
   .requiredOption("--role <role>", "role charter name")
   .option("--cli <cli>", "claude or codex")
   .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
-  .option("--runner <name>", "home runner", SERVER_RUNNER)
+  .option("--runner <name>", "runner preferred for its turns; any with its CLI otherwise")
   .option("-p, --project <slug...>", "project memberships")
   .action(
     async (
       name: string,
-      opts: { role: string; cli?: string; model?: string; runner: string; project?: string[] },
+      opts: { role: string; cli?: string; model?: string; runner?: string; project?: string[] },
     ) => {
       const board = await open();
       const cli = opts.cli === undefined ? null : CliKindSchema.parse(opts.cli);
@@ -184,7 +220,7 @@ agent
         role: opts.role,
         cli,
         ...(opts.model === undefined ? {} : { model: opts.model }),
-        homeRunner: opts.runner,
+        ...(opts.runner === undefined ? {} : { homeRunner: opts.runner }),
         memberships: opts.project ?? [],
       });
       print({ agent: added, token }, () =>

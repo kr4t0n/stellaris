@@ -2,7 +2,7 @@
   "name": "@stellaris/runner-core",
   "version": "0.0.0",
   "private": true,
-  "description": "Runner internals: adapter interface, config-home rendering, git worktrees, prompt building, the local runner",
+  "description": "The runner side of the runner protocol: the executor, worktrees, home and mirror sync, and the client and daemon",
   "files": [
     "dist"
   ],
@@ -14,8 +14,8 @@
     }
   },
   "dependencies": {
-    "@stellaris/board-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
-    "execa": "10.0.1"
+    "execa": "10.0.1",
+    "zod": "4.6.5"
   }
 }

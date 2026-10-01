@@ -3,6 +3,9 @@ import {
   capOutput,
   channelRef,
   IsoDateTimeSchema,
+  homeFileTravels,
+  isSafeRelativePath,
+  loadRunnerConfig,
   loadServerConfig,
   mayHoldStage,
   parseChannelRef,
@@ -105,12 +108,20 @@ describe("server config", () => {
       dataDir: "./data",
       host: "127.0.0.1",
       port: 4700,
+      publicUrl: "http://127.0.0.1:4700",
       logLevel: "info",
-      concurrency: 2,
+      concurrency: null,
       turnTimeoutMs: 1_200_000,
       toolRounds: 60,
+      residentIdleMs: 600_000,
     });
-    expect(loadServerConfig({ STELLARIS_PORT: "5000" }).port).toBe(5000);
+    expect(loadServerConfig({ STELLARIS_PORT: "5000" })).toMatchObject({
+      port: 5000,
+      publicUrl: "http://127.0.0.1:5000",
+    });
+    expect(loadServerConfig({ STELLARIS_PUBLIC_URL: "https://board.example/" }).publicUrl).toBe(
+      "https://board.example",
+    );
   });
 
   it("reads a limit as a number or as unlimited", () => {
@@ -126,6 +137,59 @@ describe("server config", () => {
     ]);
     expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
+  });
+});
+
+describe("runner config", () => {
+  it("reads the environment with defaults, and needs a token", () => {
+    expect(loadRunnerConfig({ STELLARIS_RUNNER_TOKEN: "stl_runner" })).toEqual({
+      serverUrl: "http://127.0.0.1:4700",
+      token: "stl_runner",
+      dataDir: "./runner-data",
+      logLevel: "info",
+      slots: 2,
+      clis: ["claude", "codex"],
+      capabilities: [],
+    });
+    expect(
+      loadRunnerConfig({
+        STELLARIS_RUNNER_TOKEN: "stl_runner",
+        STELLARIS_CONCURRENCY: "unlimited",
+        STELLARIS_CLIS: "codex",
+        STELLARIS_CAPABILITIES: "gpu, docker",
+      }),
+    ).toMatchObject({ slots: null, clis: ["codex"], capabilities: ["gpu", "docker"] });
+    expect(() => loadRunnerConfig({})).toThrow(/token/);
+  });
+});
+
+describe("runner protocol files", () => {
+  it("accepts relative paths only", () => {
+    expect(isSafeRelativePath("memory/core.md")).toBe(true);
+    for (const bad of ["", "/etc/passwd", "../x", "a/../b", "a//b", "./a", "a\\b"]) {
+      expect(isSafeRelativePath(bad)).toBe(false);
+    }
+  });
+
+  it("moves what the agent authored both ways, the charter down, and the board's records nowhere", () => {
+    expect(homeFileTravels("memory/core.md")).toBe("both");
+    expect(homeFileTravels("skills/uv/SKILL.md")).toBe("both");
+    expect(homeFileTravels("profile.md")).toBe("both");
+    expect(homeFileTravels("projects/lab/notes.md")).toBe("both");
+    expect(homeFileTravels("role.md")).toBe("down");
+    for (const kept of [
+      "agent.json",
+      "cursors.json",
+      "turns/01M3S0000000000000000000AA.jsonl",
+      ".claude/CLAUDE.md",
+      ".codex/AGENTS.md",
+      "projects/lab/sessions.json",
+      "projects/lab/sessions.archived.2026-10-01T00-00-00-000Z.json",
+      "projects/lab/last-turn.json",
+      "projects/lab/threads/01M3S0000000000000000000AA/sessions.json",
+    ]) {
+      expect(homeFileTravels(kept)).toBeNull();
+    }
   });
 });
 

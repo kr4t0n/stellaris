@@ -12,7 +12,7 @@ import {
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Scheduler, type TurnRunner } from "./scheduler.js";
+import { Scheduler, type TurnAssignment, type TurnRunner } from "./scheduler.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -30,6 +30,13 @@ class FakeRunner implements TurnRunner {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  /** Runners that are away: a turn waits until one is back. */
+  away = false;
+
+  async assign(): Promise<TurnAssignment | null> {
+    return this.away ? null : { runner: "test" };
+  }
+
   async runTurn(dispatch: TurnDispatch): Promise<TurnRecord> {
     this.dispatches.push(dispatch);
     if (this.hold) {
@@ -40,7 +47,7 @@ class FakeRunner implements TurnRunner {
     const record: TurnRecord = {
       agent: dispatch.agent,
       project: dispatch.project,
-      runner: "server",
+      runner: "test",
       cli: "claude",
       session: "s",
       trigger: dispatch.trigger,
@@ -68,8 +75,12 @@ class FakeRunner implements TurnRunner {
     this.releases = [];
   }
 
-  async completeTask(project: Name, taskId: Ulid): Promise<void> {
+  async completeTask(project: Name, taskId: Ulid): Promise<"done" | "deferred"> {
+    if (this.away) {
+      return "deferred";
+    }
     this.completions.push({ project, taskId });
+    return "done";
   }
 }
 
@@ -203,6 +214,35 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.dispatches).toHaveLength(1);
+  });
+
+  it("keeps a turn queued while no runner can take it, and retries a landing a runner deferred", async () => {
+    const { board, runner, scheduler } = await setup();
+    runner.away = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 when you can" });
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(runner.dispatches).toHaveLength(0);
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
+    runner.away = false;
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.agent)).toEqual(["eng-1"]);
+
+    await board.configureProject(USER, { project: "demo", on_done: "merge" });
+    const task = await board.createTask(USER, { project: "demo", title: "t" });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    runner.away = true;
+    await scheduler.tick();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.completions).toEqual([]);
+    runner.away = false;
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.completions).toEqual([{ project: "demo", taskId: task.id }]);
   });
 
   it("respects the concurrency cap and never runs one pair twice at once", async () => {
@@ -760,6 +800,38 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
     expect(runner.dispatches.map((d) => d.agent)).not.toContain("rev-1");
     expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("measures a placed project's capabilities against its own runner", async () => {
+    const { board, scheduler } = await setup();
+    for (const [name, capabilities] of [
+      ["gpu-box", ["gpu"]],
+      ["laptop", []],
+    ] as const) {
+      await board.addRunner(USER, name);
+      await board.markRunner(name, { status: "connected", clis: ["claude"], capabilities });
+    }
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "needs gpu",
+      required_capabilities: ["gpu"],
+    });
+    const blocked = async (): Promise<string[]> =>
+      (await board.listSignals())
+        .filter((record) => record.signal.key === `blocked_capability:${task.id}`)
+        .map((record) => record.signal.summary);
+    // Not placed yet: a connected runner offers it, so the project could still go there.
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await blocked()).toEqual([]);
+    // Placed on the laptop, its turns run there, and the laptop has no GPU.
+    await board.placeProject("demo", "laptop");
+    advance(6 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await blocked()).toEqual([
+      expect.stringContaining("which its project's runner laptop does not offer"),
+    ]);
   });
 
   it("scales a role within its replica cap when the backlog per member reaches the threshold", async () => {

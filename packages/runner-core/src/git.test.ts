@@ -5,18 +5,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ExecaGit, taskBranch } from "./git.js";
 
-const project = {
-  slug: "demo",
-  name: "Demo",
-  repo: null,
-  defaultBranch: "main",
-  channels: ["general"],
-  members: [],
-  approvers: [],
-  requiredCapabilities: [],
-  createdAt: "2026-09-28T10:00:00.000Z",
-  onDone: "none" as const,
-};
+const project = { slug: "demo", origin: null, defaultBranch: "main" };
 
 describe("ExecaGit", () => {
   let dir: string;
@@ -107,6 +96,9 @@ describe("ExecaGit", () => {
     expect(head.stdout).toBe("agent/eng-1");
     const log = await execa("git", ["log", "-1", "--format=%an %s", branch], { cwd: repoDir });
     expect(log.stdout).toBe("eng-1 wip: left uncommitted by eng-1 at the end of a turn");
+    const tip = await execa("git", ["rev-parse", branch], { cwd: repoDir });
+    expect(await git.head(repoDir, branch)).toBe(tip.stdout.trim());
+    expect(await git.head(repoDir, "task/none")).toBeNull();
 
     // The next holder, in another worktree, can check the branch out and finds the work.
     const other = await git.ensureWorktree(

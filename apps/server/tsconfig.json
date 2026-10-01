@@ -11,8 +11,7 @@
     { "path": "../../packages/board-core" },
     { "path": "../../packages/board-mcp" },
     { "path": "../../packages/scheduler" },
-    { "path": "../../packages/runner-core" },
-    { "path": "../../packages/adapter-claude" },
-    { "path": "../../packages/adapter-codex" }
+    { "path": "../../packages/turn-host" },
+    { "path": "../../packages/runner-core" }
   ]
 }

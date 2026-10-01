@@ -37,9 +37,6 @@ export function wakeScope(
   return member.memberships[0] ?? (charter.societyScope ? SOCIETY_SCOPE : null);
 }
 
-/** The runner embedded in the board server. Runners on other machines register under their own names. */
-export const SERVER_RUNNER = "server";
-
 export const CliKindSchema = z.enum(["claude", "codex"]);
 export type CliKind = z.infer<typeof CliKindSchema>;
 
@@ -96,6 +93,8 @@ export const ProjectSchema = z.object({
   requiredCapabilities: z.array(z.string()),
   createdAt: IsoDateTimeSchema,
   onDone: CompletionEffectSchema.default("none"),
+  /** The runner the project lives on, which holds its repository; set on the project's first turn. */
+  runner: NameSchema.optional(),
   /** Set once the project is archived: nobody belongs to it, and nothing more is posted, filed, or joined there. */
   archived: z
     .object({ at: IsoDateTimeSchema, by: NameSchema, reason: z.string().min(1) })
@@ -293,7 +292,8 @@ export const AgentSchema = z.object({
   role: NameSchema,
   cli: CliKindSchema.nullable(),
   model: z.string().optional(),
-  homeRunner: NameSchema,
+  /** The runner preferred for the agent's turns where nothing else decides; any runner with its CLI otherwise. */
+  homeRunner: NameSchema.optional(),
   memberships: z.array(NameSchema),
   subscriptions: z.array(ChannelRefSchema),
   status: AgentStatusSchema,
@@ -313,7 +313,7 @@ export const MemberSchema = z.object({
   name: NameSchema,
   role: NameSchema,
   cli: CliKindSchema.nullable(),
-  homeRunner: NameSchema,
+  homeRunner: NameSchema.optional(),
   status: AgentStatusSchema,
   resident: z.boolean().default(false),
   /** The model configured on the record, if any; the CLI's own default applies otherwise. */
@@ -373,7 +373,7 @@ export const MemberProposalSchema = z.object({
   role: NameSchema,
   cli: CliKindSchema,
   model: z.string().optional(),
-  homeRunner: NameSchema.default(SERVER_RUNNER),
+  homeRunner: NameSchema.optional(),
   memberships: z.array(NameSchema).default([]),
   subscriptions: z.array(ChannelRefSchema).default([]),
   seedInstructions: z.string().optional(),

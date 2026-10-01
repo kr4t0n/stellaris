@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { MEMBER_VERBS } from "@stellaris/shared";
@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Board, type Actor } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
+
+function b64(text: string): string {
+  return Buffer.from(text).toString("base64");
+}
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 
 describe("Board runtime support", () => {
@@ -58,6 +62,77 @@ describe("Board runtime support", () => {
     expect(board.resolveToken(token)).toBeNull();
   });
 
+  it("adds runners with a token, places a project once, and survives a reopen", async () => {
+    const board = await society();
+    await expect(board.addRunner(ENG, "pod")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const { runner, token } = await board.addRunner(USER, "pod");
+    expect(runner).toMatchObject({ name: "pod", status: "disconnected", clis: [] });
+    await expect(board.addRunner(USER, "pod")).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    expect(board.resolveRunnerToken("stl_nothing")).toBeNull();
+    // The token's hash stays out of the projection agents read.
+    expect(JSON.stringify(await board.boardManifest())).not.toContain("tokenHash");
+    expect((await Board.open(dir, { now })).resolveRunnerToken(token)).toBe("pod");
+
+    await board.addRunner(USER, "laptop");
+    await expect(board.placeProject("demo", "nowhere")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(await board.placeProject("demo", "pod")).toBe("pod");
+    expect(await board.placeProject("demo", "laptop")).toBe("pod");
+    expect((await board.readProject("demo")).runner).toBe("pod");
+    const placed = (await board.readEvents(null, 500)).filter((e) => e.type === "project.placed");
+    expect(placed.map((event) => event.payload)).toEqual([{ slug: "demo", runner: "pod" }]);
+  });
+
+  it("serves an agent's home and the projection as files, and takes back only what the agent authors", async () => {
+    const board = await society();
+    const home = board.paths.agent("eng-1");
+    await writeFile(path.join(home, "profile.md"), "Builds things.\n");
+    await board.writeSession("eng-1", "demo", "claude", "s-1", "pod");
+    const manifest = await board.homeManifest("eng-1");
+    expect(Object.keys(manifest).toSorted()).toEqual([
+      "memory/core.md",
+      "profile.md",
+      "projects/demo/notes.md",
+      "role.md",
+    ]);
+    const files = await board.readHomeFiles("eng-1", ["profile.md", "agent.json", "../secret"]);
+    expect(Object.keys(files)).toEqual(["profile.md"]);
+    expect(Buffer.from(files["profile.md"] ?? "", "base64").toString("utf8")).toBe(
+      "Builds things.\n",
+    );
+
+    await board.writeHomeFiles("eng-1", {
+      put: {
+        "skills/uv/SKILL.md": b64("---\nname: uv\n---\n"),
+        "memory/core.md": b64("- a lesson\n"),
+      },
+      delete: ["profile.md"],
+    });
+    expect(await readFile(path.join(home, "memory", "core.md"), "utf8")).toBe("- a lesson\n");
+    expect(Object.keys(await board.homeManifest("eng-1")).toSorted()).toEqual([
+      "memory/core.md",
+      "projects/demo/notes.md",
+      "role.md",
+      "skills/uv/SKILL.md",
+    ]);
+    // The board's own records and the charter never come back from a runner.
+    for (const kept of ["agent.json", "role.md", "projects/demo/sessions.json", "../escape"]) {
+      await expect(
+        board.writeHomeFiles("eng-1", { put: { [kept]: b64("{}") }, delete: [] }),
+      ).rejects.toMatchObject({ code: "VALIDATION" });
+    }
+    expect((await board.readAgent("eng-1")).name).toBe("eng-1");
+
+    const projection = await board.boardManifest();
+    expect(Object.keys(projection)).toContain("projects/demo/project.md");
+    const read = await board.readBoardFiles(["projects/demo/project.md"]);
+    expect(
+      Buffer.from(read["projects/demo/project.md"] ?? "", "base64").toString("utf8"),
+    ).toContain("slug: demo");
+  });
+
   it("dispatches verbs by name and records manual wakes as events", async () => {
     const board = await society();
     const created = await board.invoke(ENG, "create_task", { project: "demo", title: "t" });
@@ -90,9 +165,22 @@ describe("Board runtime support", () => {
   it("keeps sessions, turn records, cursors, and state files", async () => {
     const board = await society();
     expect(await board.readSessions("eng-1", "demo")).toEqual({});
-    await board.writeSession("eng-1", "demo", "claude", "11111111-1111-4111-8111-111111111111");
+    await board.writeSession(
+      "eng-1",
+      "demo",
+      "claude",
+      "11111111-1111-4111-8111-111111111111",
+      "pod",
+    );
     expect(await board.readSessions("eng-1", "demo")).toEqual({
       claude: "11111111-1111-4111-8111-111111111111",
+      runner: "pod",
+    });
+    // A session begun on another runner replaces the record: sessions stay where they began.
+    await board.writeSession("eng-1", "demo", "codex", "thread-2", "laptop");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      codex: "thread-2",
+      runner: "laptop",
     });
 
     expect(await board.readLastTurn("eng-1", "demo")).toBeNull();

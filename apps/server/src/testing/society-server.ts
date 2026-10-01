@@ -1,15 +1,10 @@
-import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { serve } from "@hono/node-server";
 import { Board } from "@stellaris/board-core";
-import { LocalRunner } from "@stellaris/runner-core";
 import { Scheduler } from "@stellaris/scheduler";
-import { SERVER_RUNNER } from "@stellaris/shared";
 import { z } from "zod";
-import { createApp } from "../app.js";
-import { TurnHub } from "../turn-hub.js";
+import { startTestSociety } from "./harness.js";
 import { addWorkRoles, ScriptedBackend, USER } from "./scripted-backend.js";
 
 export interface SocietyServer {
@@ -27,8 +22,8 @@ const ReleaseSchema = z.object({ agent: z.string() });
 /**
  * A whole board server on a fresh society, with scripted citizens standing in for the CLIs: what
  * the browser session of Phase 7's exit test drives. Everything else is the production path: the
- * API, the event and turn streams, the scheduler on its own loop, the runner with real git and
- * merges, and the built interface served from disk.
+ * API, the event and turn streams, the scheduler on its own loop, a runner connected over the
+ * runner protocol with real git and merges, and the built interface served from disk.
  *
  * A scripted turn stops at its checkpoint until the test releases it, so the browser can look at
  * the sky while the turn is running. Two routes exist only here: `POST /test/token` hands over the
@@ -68,58 +63,46 @@ export async function startSocietyServer(options: {
         })
       : Promise.resolve();
 
-  const turns = new TurnHub();
   let scheduler: Scheduler | null = null;
-  const view = {
-    get pendingPairs() {
-      return scheduler?.pendingPairs ?? [];
-    },
-    get runningPairs() {
-      return scheduler?.runningPairs ?? [];
-    },
-    get residentPairs() {
-      return runner.residentPairs;
-    },
-    get activeSignals() {
-      return scheduler?.activeSignals ?? [];
-    },
-  };
-  const app = createApp({
+  const society = await startTestSociety({
     board,
-    version: "exit-test",
-    turns,
-    scheduler: view,
+    port: options.port,
     webDir: options.webDir,
-  });
-  app.post("/test/token", (c) => c.json({ token: userToken }));
-  app.post("/test/release", async (c) => {
-    const { agent } = ReleaseSchema.parse(await c.req.json());
-    const [first, ...rest] = held.get(agent) ?? [];
-    if (first === undefined) {
-      return c.json({ held: false }, 409);
-    }
-    held.set(agent, rest);
-    first.release();
-    return c.json({ released: first.moment });
-  });
-
-  const server = serve({ fetch: app.fetch, port: options.port, hostname: "127.0.0.1" });
-  await once(server, "listening");
-  const address = server.address();
-  const url = `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : options.port}`;
-
-  const backend = new ScriptedBackend(app, checkpoint);
-  const runner = new LocalRunner({
-    board,
-    runnerName: SERVER_RUNNER,
-    mcpUrl: `${url}/mcp`,
-    backends: { claude: backend, codex: backend },
-    residentIdleMs: 60_000,
-    onEvent: (agent, project, event, thread) => turns.push(agent, project, event, thread),
+    backends: (app) => {
+      const backend = new ScriptedBackend(app, checkpoint);
+      return { claude: backend, codex: backend };
+    },
+    scheduler: {
+      get pendingPairs() {
+        return scheduler?.pendingPairs ?? [];
+      },
+      get runningPairs() {
+        return scheduler?.runningPairs ?? [];
+      },
+      get residentPairs() {
+        return society.hub.residentPairs;
+      },
+      get activeSignals() {
+        return scheduler?.activeSignals ?? [];
+      },
+    },
+    routes: (app) => {
+      app.post("/test/token", (c) => c.json({ token: userToken }));
+      app.post("/test/release", async (c) => {
+        const { agent } = ReleaseSchema.parse(await c.req.json());
+        const [first, ...rest] = held.get(agent) ?? [];
+        if (first === undefined) {
+          return c.json({ held: false }, 409);
+        }
+        held.set(agent, rest);
+        first.release();
+        return c.json({ released: first.moment });
+      });
+    },
   });
   scheduler = new Scheduler({
     board,
-    runner,
+    runner: society.hub,
     concurrency: 4,
     timings: {
       pollMs: 200,
@@ -129,11 +112,6 @@ export async function startSocietyServer(options: {
       waitingStageMs: 3_600_000,
     },
   });
-  await board.markRunner(SERVER_RUNNER, {
-    status: "connected",
-    clis: ["claude", "codex"],
-    capabilities: [],
-  });
   for (let round = 0; round < 3; round += 1) {
     await scheduler.tick();
     await scheduler.drain();
@@ -142,7 +120,7 @@ export async function startSocietyServer(options: {
   await scheduler.start();
 
   return {
-    url,
+    url: society.url,
     async stop() {
       for (const each of held.values()) {
         for (const turn of each) {
@@ -150,13 +128,7 @@ export async function startSocietyServer(options: {
         }
       }
       await scheduler?.stop();
-      await runner.close();
-      // The page's event streams never end on their own, and close() waits for every connection.
-      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-      if ("closeAllConnections" in server) {
-        server.closeAllConnections();
-      }
-      await closed;
+      await society.stop();
       await rm(dataDir, { recursive: true, force: true });
     },
   };

@@ -308,11 +308,15 @@ describe("Board", () => {
     expect(await ids(topic.id)).toEqual([]);
 
     // Sessions and last turns are kept per conversation; the latest of a scope is any of them.
-    await board.writeSession("eng-1", "demo", "claude", "home-session");
-    await board.writeSession("eng-1", "demo", "claude", "task-session", task.id);
-    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "home-session" });
+    await board.writeSession("eng-1", "demo", "claude", "home-session", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "task-session", "pod", task.id);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      claude: "home-session",
+      runner: "pod",
+    });
     expect(await board.readSessions("eng-1", "demo", task.id)).toEqual({
       claude: "task-session",
+      runner: "pod",
     });
     // Two turns in one scope at once: each pairs its start with its own end.
     clock = new Date("2026-09-28T10:01:00.000Z");
@@ -1122,7 +1126,8 @@ describe("Board", () => {
     expect((await board.society()).channels).toContain("random");
 
     // Runner state changes are recorded and signalled; signals are readable back.
-    const runner = await board.markRunner("server", { status: "connected", clis: ["claude"] });
+    await board.addRunner(USER, "pod");
+    const runner = await board.markRunner("pod", { status: "connected", clis: ["claude"] });
     expect(runner.status).toBe("connected");
     await board.publishSignal({
       kind: "backlog",
@@ -1593,8 +1598,7 @@ describe("Board", () => {
       "steward",
       "user",
     ]);
-    expect(path.isAbsolute(board.paths.worktree("eng-1", "demo"))).toBe(true);
-    expect(board.paths.repo("demo")).toBe(path.join(dir, "repos", "demo"));
+    expect(path.isAbsolute(board.paths.agent("eng-1"))).toBe(true);
     expect((await Board.open(relative)).paths.agent("eng-1")).toBe(
       path.join(dir, "agents", "eng-1"),
     );

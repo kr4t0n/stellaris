@@ -10,19 +10,21 @@ import {
   WakeRequestSchema,
   type LiveTurnEvent,
 } from "@stellaris/shared";
+import { RunnerProtocolError, type RunnerHub } from "@stellaris/turn-host";
 import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import type { ModelSource } from "./models.js";
+import { runnerRoutes } from "./runner-routes.js";
 import { spaHandler } from "./static.js";
 import type { TurnHub } from "./turn-hub.js";
 
-/** What the API shows of the scheduler and the runner. The Scheduler class satisfies the first two. */
+/** What the API shows of the scheduler and the runners. The Scheduler class satisfies the first two. */
 export interface SchedulerView {
   readonly pendingPairs: string[];
   readonly runningPairs: string[];
-  /** Agent-scope pairs with a warm session on the embedded runner. */
+  /** Conversations with a warm session on a connected runner. */
   readonly residentPairs?: string[] | undefined;
   /** Keys of the operations conditions holding right now. */
   readonly activeSignals?: string[] | undefined;
@@ -35,6 +37,8 @@ export interface AppDependencies {
   readonly scheduler?: SchedulerView | undefined;
   /** The models each CLI offers, for choosing a citizen's model. */
   readonly models?: ModelSource | undefined;
+  /** The runners' way in: the runner protocol is served under `/runner` when set. */
+  readonly runners?: RunnerHub | undefined;
   /** The built interface. When set, every path the API and MCP do not answer serves it. */
   readonly webDir?: string | undefined;
 }
@@ -52,6 +56,7 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
 };
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
+const RunnerBodySchema = z.object({ name: NameSchema });
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const ChannelBodySchema = z.object({
@@ -82,6 +87,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     if (error instanceof ZodError) {
       return c.json({ error: "VALIDATION", message: error.message }, 400);
+    }
+    if (error instanceof RunnerProtocolError) {
+      return c.json({ error: "RUNNER_PROTOCOL", message: error.message }, 409);
     }
     return c.json({ error: "INTERNAL", message: error.message }, 500);
   });
@@ -127,6 +135,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
+  // A new runner's token is shown once, here; the runner reports what it offers when it connects.
+  api.post("/runners", async (c) => {
+    const body = RunnerBodySchema.parse(await c.req.json());
+    return c.json(await board.addRunner(c.get("actor"), body.name));
+  });
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
   api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
   api.get("/signals", async (c) =>
@@ -162,7 +175,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // What each CLI offers, asked of the CLI itself.
   api.get("/models/:cli", async (c) => {
     const cli = CliKindSchema.parse(c.req.param("cli"));
-    return c.json(models === undefined ? [] : await models.list(cli));
+    // No runner with the CLI connected, or the CLI failed to list: the interface offers its default.
+    return c.json(models === undefined ? [] : await models.list(cli).catch(() => []));
   });
   api.put("/roles/:name", async (c) => {
     const charter = RoleCharterSchema.parse({
@@ -298,6 +312,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
 
   app.route("/api", api);
+  if (deps.runners !== undefined) {
+    app.route("/runner", runnerRoutes(board, deps.runners));
+  }
 
   app.all("/mcp", async (c) => {
     const token = bearer(c);

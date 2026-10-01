@@ -108,8 +108,21 @@ describe("board server routes", () => {
       .object({ body: z.string() })
       .parse(await (await app.request("/api/projects/demo/dashboard", { headers })).json());
     expect(dashboard.body).toContain("dashboard");
+    // A society starts with no runner; the user adds one and is shown its token once.
+    expect(await (await app.request("/api/runners", { headers })).json()).toEqual([]);
+    const added = z.object({ runner: z.object({ name: z.string() }), token: z.string() }).parse(
+      await (
+        await app.request("/api/runners", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ name: "pod" }),
+        })
+      ).json(),
+    );
+    expect(added.runner.name).toBe("pod");
+    expect(board.resolveRunnerToken(added.token)).toBe("pod");
     expect(await (await app.request("/api/runners", { headers })).json()).toMatchObject([
-      { name: "server" },
+      { name: "pod", status: "disconnected" },
     ]);
     expect(
       z

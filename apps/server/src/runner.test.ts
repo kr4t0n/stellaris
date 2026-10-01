@@ -1,12 +1,17 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
+import {
+  ZERO_USAGE,
+  type AgentBackend,
+  type ResidentSession,
+  type TurnResult,
+} from "@stellaris/runner-core";
+import { MEMBER_VERBS, RUNNER_PROTOCOL, type AgentEvent } from "@stellaris/shared";
 import { execa } from "execa";
-import { MEMBER_VERBS, type AgentEvent } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LocalRunner } from "./local-runner.js";
-import { ZERO_USAGE, type AgentBackend, type ResidentSession, type TurnResult } from "./types.js";
+import { startTestSociety, type TestSociety } from "./testing/harness.js";
 
 const USER = { name: "user", role: "user" } as const;
 
@@ -86,16 +91,36 @@ class TotalingBackend implements AgentBackend {
   }
 }
 
-describe("LocalRunner resident sessions and the society scope", () => {
+const deskPost = {
+  agent: "desk",
+  project: "society",
+  trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
+  priority: 2,
+};
+
+describe("turns on a runner over the runner protocol", () => {
   let dir: string;
+  let society: TestSociety | null = null;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-resident-"));
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-runner-test-"));
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    await society?.stop();
+    society = null;
     await rm(dir, { recursive: true, force: true });
   });
+
+  async function start(
+    board: Board,
+    backend: AgentBackend,
+    options: { turnTimeoutMs?: number | null; residentIdleMs?: number } = {},
+  ): Promise<TestSociety> {
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }), ...options });
+    return society;
+  }
 
   it("runs a turn without a time limit, renewing its leases while it runs", async () => {
     let clock = new Date("2026-09-29T10:00:00.000Z");
@@ -138,25 +163,15 @@ describe("LocalRunner resident sessions and the society scope", () => {
         return completed("long turn");
       },
     };
+    const { run } = await start(board, backend, { turnTimeoutMs: null });
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      const runner = new LocalRunner({
-        board,
-        runnerName: "server",
-        backends: { claude: backend },
-        mcpUrl: "http://127.0.0.1:0/mcp",
-        turnTimeoutMs: null,
-      });
-      await runner.runTurn({
-        agent: "eng-1",
-        project: "demo",
-        trigger: { kind: "manual", fromUser: false, reason: "test" },
-        priority: 1,
-        onboarding: false,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    vi.useRealTimers();
     expect(seen).toEqual([{ timeoutMs: null, live: true }]);
     expect(board.resolveToken(token)).toBeNull();
     expect((await board.getTask(USER, { task_id: task.id })).status).toBe("claimed");
@@ -202,20 +217,14 @@ describe("LocalRunner resident sessions and the society scope", () => {
         return completed("done");
       },
     };
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { run, runner } = await start(board, backend);
     const turn = (project: string, thread?: string) =>
-      runner.runTurn({
+      run({
         agent: "eng-1",
         project,
         ...(thread === undefined ? {} : { thread: { id: thread, task: true } }),
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
-        onboarding: false,
       });
     // All at once, as the scheduler runs a citizen's conversations.
     await Promise.all([turn("demo"), turn("demo", demoTask.id), turn("lab")]);
@@ -234,7 +243,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     expect(task?.prompt).toContain("## The thread so far (1)");
     expect(task?.prompt).toContain("the task's spec");
     expect(task?.prompt).not.toContain("the demo handover");
-    expect(task?.cwd).toBe(path.resolve(board.paths.taskWorktree("eng-1", demoTask.id)));
+    expect(task?.cwd).toBe(runner.paths.taskWorktree("eng-1", demoTask.id));
     expect(task?.branch).toBe(`task/${demoTask.id}`);
     expect(lab?.prompt).toContain("the lab question");
     expect(lab?.prompt).not.toContain("the demo handover");
@@ -257,7 +266,10 @@ describe("LocalRunner resident sessions and the society scope", () => {
     }
     expect(await board.readSessions("eng-1", "demo", demoTask.id)).toEqual({
       claude: "session-1",
+      runner: "pod",
     });
+    // Both projects were placed on the runner that took their first turns.
+    expect((await board.listProjects()).map((project) => project.runner)).toEqual(["pod", "pod"]);
   });
 
   it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {
@@ -272,18 +284,12 @@ describe("LocalRunner resident sessions and the society scope", () => {
         return Promise.resolve(completed("read the signals"));
       },
     };
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { run } = await start(board, backend);
     const dispatch = {
       agent: "stew",
       project: "society",
       trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
       priority: 0,
-      onboarding: false,
     };
     await board.publishSignal({
       kind: "role_gap",
@@ -291,8 +297,8 @@ describe("LocalRunner resident sessions and the society scope", () => {
       summary: "a stage waits on the referee role, which nobody fills",
       value: 1,
     });
-    await runner.runTurn(dispatch);
-    await runner.runTurn(dispatch);
+    await run(dispatch);
+    await run(dispatch);
     expect(prompts[0]).toContain("role_gap: a stage waits on the referee role, which nobody fills");
     expect(prompts[1]).toContain("## Operations signals\n\nNone since your last turn here.");
   });
@@ -318,20 +324,14 @@ describe("LocalRunner resident sessions and the society scope", () => {
         };
       },
     };
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { run } = await start(board, backend);
     const dispatch = {
       agent: "stew",
       project: "society",
       trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
       priority: 1,
-      onboarding: false,
     };
-    await runner.runTurn(dispatch);
+    await run(dispatch);
     const threads = await board.listThreads();
     expect(threads).toEqual([
       expect.objectContaining({
@@ -346,7 +346,7 @@ describe("LocalRunner resident sessions and the society scope", () => {
     expect(await board.listRequests()).toHaveLength(1);
     // A turn that asked the user itself gets no second question.
     mention = true;
-    await runner.runTurn(dispatch);
+    await run(dispatch);
     expect(await board.listThreads()).toHaveLength(1);
     expect(await board.listRequests()).toHaveLength(2);
   });
@@ -355,27 +355,21 @@ describe("LocalRunner resident sessions and the society scope", () => {
     const { board } = await Board.init(dir, { name: "totals" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const backend = new TotalingBackend();
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-    });
+    const { run } = await start(board, backend);
     const dispatch = {
       agent: "stew",
       project: "society",
       trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
       priority: 1,
-      onboarding: false,
     };
-    await runner.runTurn(dispatch);
-    const second = await runner.runTurn(dispatch);
+    await run(dispatch);
+    const second = await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25]);
     expect(second).toMatchObject({ costUsd: 0.25, sessionCostUsd: 0.5 });
     // A record from before the running total was kept held it as the turn's cost.
     const { sessionCostUsd: _total, ...legacy } = second;
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
-    await runner.runTurn(dispatch);
+    await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
   });
 
@@ -383,31 +377,17 @@ describe("LocalRunner resident sessions and the society scope", () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     const backend = new ResidentBackend();
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-      residentIdleMs: 60_000,
-    });
-    const dispatch = {
-      agent: "desk",
-      project: "society",
-      trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
-      priority: 2,
-      onboarding: false,
-    };
-    await runner.runTurn(dispatch);
-    await runner.runTurn(dispatch);
+    const { run } = await start(board, backend);
+    await run(deskPost);
+    await run(deskPost);
     expect(backend.models).toEqual([undefined]);
 
     await board.setAgentModel(USER, "desk", "sonnet");
-    await runner.runTurn(dispatch);
+    await run(deskPost);
     expect(backend.closes).toEqual(["desk:session-1"]);
     expect(backend.models).toEqual([undefined, "sonnet"]);
-    await runner.runTurn(dispatch);
+    await run(deskPost);
     expect(backend.models).toHaveLength(2);
-    await runner.close();
   });
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {
@@ -427,30 +407,18 @@ describe("LocalRunner resident sessions and the society scope", () => {
       memberships: ["demo"],
     });
     const backend = new ResidentBackend();
-    const runner = new LocalRunner({
-      board,
-      runnerName: "server",
-      backends: { claude: backend },
-      mcpUrl: "http://127.0.0.1:0/mcp",
-      residentIdleMs: 80,
-    });
-    const dispatch = {
-      agent: "desk",
-      project: "society",
-      trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
-      priority: 2,
-      onboarding: false,
-    };
+    const { run, hub, runner } = await start(board, backend, { residentIdleMs: 80 });
 
-    // Two turns, one session: the society scope needs no repository, and the roster rides in the prompt.
-    const first = await runner.runTurn(dispatch);
+    // Two turns, one session and one token: the society scope needs no repository, and the
+    // roster rides in the prompt.
+    const first = await run(deskPost);
     expect(first.exitReason).toBe("completed");
     expect(first.project).toBe("society");
     expect(backend.starts).toEqual(["desk:session-1"]);
     expect(backend.prompts[0]).toContain("## The society");
     expect(backend.prompts[0]).toContain("- eng-1: engineer on claude");
-    expect(runner.residentPairs).toEqual(["desk/society"]);
-    await runner.runTurn(dispatch);
+    expect(hub.residentPairs).toEqual(["desk/society"]);
+    await run(deskPost);
     expect(backend.starts).toHaveLength(1);
     expect(backend.prompts).toHaveLength(2);
     expect(backend.coldTurns).toEqual([]);
@@ -458,33 +426,175 @@ describe("LocalRunner resident sessions and the society scope", () => {
 
     // A turn that updated memory makes the next one start fresh, since the instructions carry it.
     backend.memoryUpdatedNext = true;
-    await runner.runTurn(dispatch);
+    await run(deskPost);
     expect(backend.closes).toEqual(["desk:session-1"]);
-    expect(runner.residentPairs).toEqual([]);
-    await runner.runTurn(dispatch);
+    expect(hub.residentPairs).toEqual([]);
+    await run(deskPost);
     expect(backend.starts).toHaveLength(2);
 
-    // Idle sessions go cold on their own; shutdown closes whatever is left.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(runner.residentPairs).toEqual([]);
+    // Idle sessions go cold on their own.
+    await vi.waitFor(() => expect(hub.residentPairs).toEqual([]));
     expect(backend.closes).toHaveLength(2);
-    await runner.runTurn(dispatch);
-    expect(runner.residentPairs).toEqual(["desk/society"]);
-    await runner.close();
-    expect(runner.residentPairs).toEqual([]);
-    expect(backend.closes).toHaveLength(3);
+    await run(deskPost);
+    expect(hub.residentPairs).toEqual(["desk/society"]);
 
     // Non-resident roles still take cold turns, and an engineer cannot use the society scope.
-    await runner.runTurn({
+    await run({
       agent: "eng-1",
       project: "demo",
       trigger: { kind: "manual" as const, fromUser: true, reason: "dev" },
       priority: 2,
-      onboarding: false,
     });
     expect(backend.coldTurns).toEqual(["cold"]);
-    const refused = await runner.runTurn({ ...dispatch, agent: "eng-1" });
+    const refused = await run({ ...deskPost, agent: "eng-1" });
     expect(refused.exitReason).toBe("error");
     expect(refused.error).toContain("society-scope");
+
+    // Stopping the runner lets whatever is warm go.
+    await runner.stop();
+    expect(backend.closes).toHaveLength(3);
+    expect(hub.residentPairs).toEqual([]);
+  });
+
+  it("brings an agent's own files back to the board after a turn, and never the board's records", async () => {
+    const { board } = await Board.init(dir, { name: "homes" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    await writeFile(path.join(board.paths.agent("stew"), "profile.md"), "Watches.\n", "utf8");
+    let pulled = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const home = request.spec.configHome;
+        pulled = await readFile(path.join(home, "profile.md"), "utf8");
+        await writeFile(path.join(home, "memory", "core.md"), "- A lesson.\n", "utf8");
+        await writeFile(path.join(home, "notes.md"), "scratch\n", "utf8");
+        await writeFile(path.join(home, "agent.json"), "{}", "utf8");
+        await writeFile(path.join(home, "role.md"), "# rewritten\n", "utf8");
+        return completed("learned something");
+      },
+    };
+    const { run } = await start(board, backend);
+    await run({
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    });
+    expect(pulled).toBe("Watches.\n");
+    const home = board.paths.agent("stew");
+    expect(await board.readMemoryCore("stew")).toBe("- A lesson.\n");
+    expect(await readFile(path.join(home, "notes.md"), "utf8")).toBe("scratch\n");
+    expect((await board.readAgent("stew")).name).toBe("stew");
+    expect(await readFile(path.join(home, "role.md"), "utf8")).not.toContain("rewritten");
+  });
+
+  it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {
+    const { board } = await Board.init(dir, { name: "away" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const gate: { release: (() => void) | null; holding: boolean } = {
+      release: null,
+      holding: true,
+    };
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async () => {
+        if (gate.holding) {
+          await new Promise<void>((resolve) => {
+            gate.release = resolve;
+          });
+        }
+        return completed("done");
+      },
+    };
+    const { run, hub, runner } = await start(board, backend);
+    const dispatch = {
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 2,
+    };
+
+    // A runner that registers again without a turn it was running: that turn ends as failed.
+    const running = run(dispatch);
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    const dropped = await running;
+    expect(dropped).toMatchObject({
+      exitReason: "error",
+      error: expect.stringContaining("restarted"),
+    });
+    gate.holding = false;
+    gate.release?.();
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(0));
+    expect((await board.readProject("demo")).runner).toBe("pod");
+
+    // With the project's runner gone, its turns wait rather than go anywhere else.
+    await runner.stop();
+    await vi.waitFor(() => expect(hub.connected).toEqual([]));
+    expect(await hub.assign({ ...dispatch, onboarding: false })).toBeNull();
+  });
+
+  it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {
+    const { board } = await Board.init(dir, { name: "auth" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+      listModels: () =>
+        Promise.resolve([{ id: "opus", name: "Opus", description: "", isDefault: true }]),
+    };
+    const { app } = await start(board, backend);
+    const { token } = await board.addRunner(USER, "laptop");
+    const call = (route: string, init: RequestInit = {}, bearer = token) =>
+      app.request(route, {
+        ...init,
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      });
+    expect((await call("/runner/board/manifest", {}, "stl_nothing")).status).toBe(401);
+    const hello = await call("/runner/hello", {
+      method: "POST",
+      body: JSON.stringify({
+        protocol: RUNNER_PROTOCOL + 1,
+        version: "future",
+        os: "linux",
+        clis: ["claude"],
+        slots: 1,
+      }),
+    });
+    expect(hello.status).toBe(409);
+    expect((await call("/runner/homes/stew/manifest")).status).toBe(403);
+    expect((await call("/runner/board/manifest")).status).toBe(200);
+
+    // The interface's model list is asked of a runner that has the CLI.
+    const models = await app.request("/api/models/claude", {
+      headers: { authorization: `Bearer ${board.issueTurnToken("user", "user", 60_000)}` },
+    });
+    expect(await models.json()).toEqual([
+      { id: "opus", name: "Opus", description: "", isDefault: true },
+    ]);
   });
 });

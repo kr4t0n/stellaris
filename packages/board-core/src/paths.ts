@@ -190,25 +190,6 @@ export class BoardPaths {
     return path.join(this.agent(name), "cursors.json");
   }
 
-  // Canonical clones, one per project, owned by the runner. Worktrees hang off these.
-  repos(): string {
-    return path.join(this.dataDir, "repos");
-  }
-  repo(slug: Name): string {
-    return path.join(this.repos(), slug);
-  }
-
-  worktrees(): string {
-    return path.join(this.dataDir, "worktrees");
-  }
-  worktree(agent: Name, slug: Name): string {
-    return path.join(this.worktrees(), agent, slug);
-  }
-  /** A task conversation's own worktree. The dot keeps it apart from every project slug. */
-  taskWorktree(agent: Name, taskId: string): string {
-    return path.join(this.worktrees(), agent, ".tasks", taskId);
-  }
-
   events(): string {
     return path.join(this.dataDir, "events");
   }

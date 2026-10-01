@@ -223,12 +223,6 @@ importers:
       '@hono/node-server':
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.10)
-      '@stellaris/adapter-claude':
-        specifier: workspace:*
-        version: link:../../packages/adapter-claude
-      '@stellaris/adapter-codex':
-        specifier: workspace:*
-        version: link:../../packages/adapter-codex
       '@stellaris/board-core':
         specifier: workspace:*
         version: link:../../packages/board-core
@@ -244,6 +238,9 @@ importers:
       '@stellaris/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@stellaris/turn-host':
+        specifier: workspace:*
+        version: link:../../packages/turn-host
       hono:
         specifier: 4.13.10
         version: 4.13.10
@@ -378,15 +375,15 @@ importers:
 
   packages/runner-core:
     dependencies:
-      '@stellaris/board-core':
-        specifier: workspace:*
-        version: link:../board-core
       '@stellaris/shared':
         specifier: workspace:*
         version: link:../shared
       execa:
         specifier: 10.0.1
         version: 10.0.1
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/scheduler:
     dependencies:
@@ -405,6 +402,18 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  packages/turn-host:
+    dependencies:
+      '@stellaris/board-core':
+        specifier: workspace:*
+        version: link:../board-core
+      '@stellaris/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+      '@stellaris/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

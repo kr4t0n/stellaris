@@ -1,12 +1,10 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { serve } from "@hono/node-server";
-import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
-import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { Board } from "@stellaris/board-core";
-import { LocalRunner } from "@stellaris/runner-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
-import { loadServerConfig, SERVER_RUNNER } from "@stellaris/shared";
+import { loadServerConfig } from "@stellaris/shared";
+import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import pino from "pino";
 import { createApp } from "./app.js";
 import { ModelCatalog } from "./models.js";
@@ -17,47 +15,30 @@ const VERSION = "0.0.0";
 const config = loadServerConfig(process.env);
 const log = pino({ level: config.logLevel });
 const board = await Board.open(config.dataDir);
-const mcpUrl = `http://${config.host}:${config.port}/mcp`;
+const mcpUrl = `${config.publicUrl}/mcp`;
 const turns = new TurnHub();
 
-const backends = {
-  claude: new ClaudeAgentBackend({
-    stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
-    recordDir: process.env["STELLARIS_RECORD_DIR"],
-  }),
-  codex: new CodexBackend({
-    stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
-    recordDir: process.env["STELLARIS_RECORD_DIR"],
-    // Full access by default: no sandbox, no approvals. A runner that wants Codex's own
-    // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
-    sandbox: CodexSandboxSchema.parse(
-      process.env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access",
-    ),
-  }),
-};
-
-const runner = new LocalRunner({
+// The server runs no turns: it prepares each one as a job for a runner that connected to it.
+const host = new TurnHost({
   board,
-  runnerName: SERVER_RUNNER,
   mcpUrl,
-  backends,
-  log,
   turnTimeoutMs: config.turnTimeoutMs,
   maxTurns: config.toolRounds,
-  // Resident roles keep a warm session this long after their last turn.
-  residentIdleMs: Number(process.env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
-  onEvent: (agent, project, event, thread) => {
-    turns.push(agent, project, event, thread);
-    log.debug({ agent, project, thread, event }, "agent event");
+  residentIdleMs: config.residentIdleMs,
+  log,
+  onEvent: (agent, scope, event, thread) => {
+    turns.push(agent, scope, event, thread);
+    log.debug({ agent, scope, thread, event }, "agent event");
   },
 });
+const runners = new RunnerHub({ board, host, version: VERSION, log });
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
 const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
-const scheduler = new Scheduler({ board, runner, log, concurrency, timings });
+const scheduler = new Scheduler({ board, runner: runners, log, concurrency, timings });
 
-// What the API shows: the scheduler's queues and the runner's warm sessions, read live.
+// What the API shows: the scheduler's queues and the runners' warm sessions, read live.
 const view = {
   get pendingPairs() {
     return scheduler.pendingPairs;
@@ -66,7 +47,7 @@ const view = {
     return scheduler.runningPairs;
   },
   get residentPairs() {
-    return runner.residentPairs;
+    return runners.residentPairs;
   },
   get activeSignals() {
     return scheduler.activeSignals;
@@ -85,7 +66,8 @@ const app = createApp({
   version: VERSION,
   turns,
   scheduler: view,
-  models: new ModelCatalog(backends),
+  models: new ModelCatalog((cli) => runners.models(cli)),
+  runners,
   webDir,
 });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
@@ -95,16 +77,6 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   );
 });
 
-// The embedded runner is this machine. Its record is what capability signals are computed against.
-const capabilities = (process.env["STELLARIS_CAPABILITIES"] ?? "")
-  .split(",")
-  .map((item) => item.trim())
-  .filter((item) => item.length > 0);
-await board.markRunner(SERVER_RUNNER, {
-  status: "connected",
-  clis: ["claude", "codex"],
-  capabilities,
-});
 await scheduler.start();
 log.info(
   {
@@ -117,12 +89,10 @@ log.info(
 );
 
 const shutdown = async (signal: string): Promise<void> => {
-  log.info({ signal }, "shutting down; waiting for running turns");
+  log.info({ signal }, "shutting down; waiting for running turns to report");
+  // The runners keep posting while the scheduler drains, so the server answers until then.
   await scheduler.stop();
-  await runner.close();
-  await board.markRunner(SERVER_RUNNER, { status: "disconnected" }).catch((error: unknown) => {
-    log.warn({ error: String(error) }, "could not record runner shutdown");
-  });
+  await runners.close();
   server.close();
   process.exit(0);
 };

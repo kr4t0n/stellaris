@@ -9,17 +9,16 @@ export type {
   TurnResult,
 } from "./types.js";
 export { ZERO_USAGE } from "./types.js";
-export {
-  renderClaudeMcpConfig,
-  renderCodexMcpConfig,
-  renderInstructions,
-  renderOnboardingPreamble,
-} from "./render.js";
-export type { ClaudeMcpConfig, OnboardingContext, RenderInstructionsInput } from "./render.js";
-export { buildTurnPrompt } from "./prompt.js";
+export { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
+export type { ClaudeMcpConfig } from "./config-home.js";
 export { parseTurnStatus } from "./status.js";
-export type { SocietyView, TurnPromptInput } from "./prompt.js";
 export { ExecaGit, taskBranch } from "./git.js";
-export type { GitAuthor, GitOps, MergeOutcome } from "./git.js";
-export { LocalRunner } from "./local-runner.js";
-export type { LocalRunnerOptions, RunnerLog } from "./local-runner.js";
+export type { GitAuthor, GitOps } from "./git.js";
+export { RunnerLayout } from "./layout.js";
+export { TreeCopy } from "./sync.js";
+export type { RemoteTree, Travels } from "./sync.js";
+export { RunnerClient, RunnerHttpError } from "./client.js";
+export { TurnExecutor } from "./executor.js";
+export type { RunnerLog, TurnExecutorOptions } from "./executor.js";
+export { createRunner, RunnerDaemon } from "./daemon.js";
+export type { CreateRunnerOptions, RunnerDaemonOptions } from "./daemon.js";

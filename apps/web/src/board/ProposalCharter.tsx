@@ -218,7 +218,9 @@ export function ProposalCharter({
             </Field>
             <Field label="Projects">{listed(hire.memberships)}</Field>
             <Field label="Also follows">{listed(hire.subscriptions)}</Field>
-            <Field label="Runs on">{hire.homeRunner}</Field>
+            {hire.homeRunner === undefined ? null : (
+              <Field label="Runs on">{hire.homeRunner}</Field>
+            )}
           </Fields>
           {hire.seedInstructions === undefined ? null : (
             <Block>

@@ -30,7 +30,6 @@ import {
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
-  SERVER_RUNNER,
   SkillProposalSchema,
   stageIndex,
   SOCIETY_CHANNELS,
@@ -92,9 +91,13 @@ import {
   METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
+  homeFileTravels,
+  RunnerOsSchema,
+  type FileWrite,
 } from "@stellaris/shared";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
+import { FileTree } from "./files.js";
 import { computeMetrics } from "./metrics.js";
 import {
   ensureDir,
@@ -176,6 +179,7 @@ export interface AddReplicaInput {
 
 export interface RunnerPatch {
   readonly status?: Runner["status"] | undefined;
+  readonly os?: Runner["os"] | undefined;
   readonly clis?: readonly CliKind[] | undefined;
   readonly capabilities?: readonly string[] | undefined;
 }
@@ -185,6 +189,11 @@ export interface SignalRecord {
   readonly ts: string;
   readonly signal: OpsSignal;
 }
+
+/** Runner token hashes by runner name, kept in the state directory rather than the projection. */
+const RunnerTokensSchema = z.object({
+  runners: z.record(z.string(), z.object({ tokenHash: z.string().min(1) })),
+});
 
 const TurnHistoryPayloadSchema = z.object({
   project: NameSchema,
@@ -491,6 +500,9 @@ export class Board {
   private readonly roleCache = new Map<Name, RoleCharter>();
   private readonly tokenIndex = new Map<string, Actor>();
   private readonly turnTokens = new Map<string, { actor: Actor; expiresAt: number }>();
+  /** Runner token hashes to runner names. */
+  private readonly runnerTokens = new Map<string, Name>();
+  private readonly files = new FileTree();
 
   private constructor(dataDir: string, options: BoardOptions) {
     this.paths = new BoardPaths(dataDir);
@@ -499,7 +511,7 @@ export class Board {
     this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
   }
 
-  /** Creates a society: channels, seed roles, the local runner, and the user. Returns the user token once. */
+  /** Creates a society: channels, seed roles, and the user. Returns the user token once. */
   static async init(
     dataDir: string,
     input: InitInput,
@@ -521,6 +533,7 @@ export class Board {
     await board.mutex.run(() => board.ensureSeedRoles());
     await board.mutex.run(() => board.applyAlignments());
     await board.loadTokenIndex();
+    await board.loadRunnerTokens();
     return board;
   }
 
@@ -1369,7 +1382,7 @@ export class Board {
           role: template.role,
           cli: template.cli,
           ...(template.model === undefined ? {} : { model: template.model }),
-          homeRunner: template.homeRunner,
+          ...(template.homeRunner === undefined ? {} : { homeRunner: template.homeRunner }),
           memberships: [input.project],
         },
         { scaledFrom: template.name },
@@ -1389,6 +1402,7 @@ export class Board {
       const next: Runner = RunnerSchema.parse({
         ...doc.data,
         ...(patch.status === undefined ? {} : { status: patch.status }),
+        ...(patch.os === undefined ? {} : { os: patch.os }),
         ...(patch.clis === undefined ? {} : { clis: [...patch.clis] }),
         ...(patch.capabilities === undefined ? {} : { capabilities: [...patch.capabilities] }),
         lastSeen: this.now().toISOString(),
@@ -3035,11 +3049,16 @@ export class Board {
     return (await exists(file)) ? readJson(file, SessionsFileSchema) : {};
   }
 
+  /**
+   * Records a conversation's session for a CLI and the runner it began on. A session started on
+   * another runner replaces the record, since sessions do not move between machines.
+   */
   async writeSession(
     agent: Name,
     project: Name,
     cli: CliKind,
     sessionId: string,
+    runner: Name,
     thread?: Ulid,
   ): Promise<void> {
     await this.mutex.run(async () => {
@@ -3047,7 +3066,8 @@ export class Board {
       await ensureDir(dir);
       const file = path.join(dir, "sessions.json");
       const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
-      await writeJson(file, { ...current, [cli]: sessionId });
+      const kept = current.runner === undefined || current.runner === runner ? current : {};
+      await writeJson(file, { ...kept, [cli]: sessionId, runner });
     });
   }
 
@@ -3245,6 +3265,126 @@ export class Board {
     return (await readMarkdown(file, RunnerSchema)).data;
   }
 
+  /**
+   * Registers a runner and mints its token, returned once; only its hash is kept, outside the
+   * projection. The runner reports its operating system, CLIs, and capabilities when it connects.
+   */
+  async addRunner(actor: Actor, name: Name): Promise<{ runner: Runner; token: string }> {
+    if (actor.role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user adds runners");
+    }
+    const parsed = NameSchema.parse(name);
+    return this.mutex.run(async () => {
+      if (await exists(this.paths.runner(parsed))) {
+        throw new BoardError("ALREADY_EXISTS", `runner ${parsed} already exists`);
+      }
+      const runner = RunnerSchema.parse({
+        name: parsed,
+        os: RunnerOsSchema.parse(
+          process.platform === "win32"
+            ? "windows"
+            : process.platform === "darwin"
+              ? "darwin"
+              : "linux",
+        ),
+        clis: [],
+        capabilities: [],
+        status: "disconnected",
+      });
+      await writeMarkdown(this.paths.runner(parsed), runner, `# ${parsed}\n`);
+      const token = mintToken();
+      const tokens = await this.readRunnerTokens();
+      await writeJson(this.runnerTokensFile(), {
+        runners: { ...tokens, [parsed]: { tokenHash: hashToken(token) } },
+      });
+      this.runnerTokens.set(hashToken(token), parsed);
+      await this.events.append("runner.added", actor.name, { name: parsed });
+      return { runner, token };
+    });
+  }
+
+  /** Maps a runner token to its runner's name, or null when unknown. */
+  resolveRunnerToken(token: string): Name | null {
+    return this.runnerTokens.get(hashToken(token)) ?? null;
+  }
+
+  private runnerTokensFile(): string {
+    return path.join(this.paths.state(), "runners.json");
+  }
+
+  private async readRunnerTokens(): Promise<Record<Name, { tokenHash: string }>> {
+    const file = this.runnerTokensFile();
+    return (await exists(file)) ? (await readJson(file, RunnerTokensSchema)).runners : {};
+  }
+
+  private async loadRunnerTokens(): Promise<void> {
+    this.runnerTokens.clear();
+    for (const [name, { tokenHash }] of Object.entries(await this.readRunnerTokens())) {
+      this.runnerTokens.set(tokenHash, name);
+    }
+  }
+
+  /**
+   * Places a project on the runner that will hold its repository, unless it already lives on one,
+   * and returns where it lives. Placement is once: every later turn of the project goes there.
+   */
+  async placeProject(slug: Name, runner: Name): Promise<Name> {
+    return this.mutex.run(async () => {
+      const project = await this.readProject(slug);
+      if (project.runner !== undefined) {
+        return project.runner;
+      }
+      await this.readRunner(runner);
+      await this.updateProject(slug, (current) => ({ ...current, runner }));
+      await this.events.append("project.placed", SYSTEM_ACTOR.name, { slug, runner });
+      return runner;
+    });
+  }
+
+  /** The files of an agent's home a runner pulls before a turn, by relative path, with their hashes. */
+  async homeManifest(agent: Name): Promise<Record<string, string>> {
+    await this.readAgent(agent);
+    return this.files.manifest(this.paths.agent(agent), (file) => homeFileTravels(file) !== null);
+  }
+
+  async readHomeFiles(agent: Name, paths: readonly string[]): Promise<Record<string, string>> {
+    await this.readAgent(agent);
+    return this.files.read(
+      this.paths.agent(agent),
+      paths,
+      (file) => homeFileTravels(file) !== null,
+    );
+  }
+
+  /**
+   * Writes back what an agent changed in its home during a turn on a runner. Only files the agent
+   * authors are accepted; the board's own records in the home never come back from a runner.
+   */
+  async writeHomeFiles(agent: Name, write: FileWrite): Promise<void> {
+    await this.readAgent(agent);
+    await this.mutex.run(async () => {
+      try {
+        await this.files.write(
+          this.paths.agent(agent),
+          write.put,
+          write.delete,
+          (file) => homeFileTravels(file) === "both",
+        );
+      } catch (error) {
+        throw new BoardError("VALIDATION", error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
+
+  /** The projection a runner mirrors for its agents to read, by relative path, with hashes. */
+  async boardManifest(): Promise<Record<string, string>> {
+    return this.files.manifest(this.paths.board, () => true);
+  }
+
+  async readBoardFiles(paths: readonly string[]): Promise<Record<string, string>> {
+    return this.files.read(this.paths.board, paths, () => true);
+  }
+
   private async writeTurnRecord(record: TurnRecord): Promise<void> {
     const dir = this.sessionDir(record.agent, record.project, record.thread);
     await ensureDir(dir);
@@ -3275,7 +3415,6 @@ export class Board {
       this.paths.agents(),
       this.paths.events(),
       this.paths.state(),
-      this.paths.worktrees(),
     ]) {
       await ensureDir(dir);
     }
@@ -3291,23 +3430,6 @@ export class Board {
       );
       this.roleCache.set(charter.name, charter);
     }
-    const runner: Runner = RunnerSchema.parse({
-      name: SERVER_RUNNER,
-      os:
-        process.platform === "win32"
-          ? "windows"
-          : process.platform === "darwin"
-            ? "darwin"
-            : "linux",
-      clis: [],
-      capabilities: [],
-      status: "disconnected",
-    });
-    await writeMarkdown(
-      this.paths.runner(runner.name),
-      runner,
-      `# ${runner.name}\n\nThe runner embedded in the board server.\n`,
-    );
     await writeJson(this.paths.pausedFile(), { paused: false });
 
     const userToken = mintToken();
@@ -3316,7 +3438,6 @@ export class Board {
       name: USER_NAME,
       role: USER_ROLE,
       cli: null,
-      homeRunner: SERVER_RUNNER,
       memberships: [],
       subscriptions: [],
       status: "active",
@@ -3446,7 +3567,7 @@ export class Board {
       name: agent.name,
       role: agent.role,
       cli: agent.cli,
-      homeRunner: agent.homeRunner,
+      ...(agent.homeRunner === undefined ? {} : { homeRunner: agent.homeRunner }),
       status: agent.status,
       resident: charter.resident,
       ...(agent.model === undefined ? {} : { model: agent.model }),
@@ -3667,7 +3788,9 @@ export class Board {
       throw new BoardError("ALREADY_EXISTS", `agent ${input.name} already exists`);
     }
     await this.readRole(input.role);
-    await this.readRunner(input.homeRunner ?? SERVER_RUNNER);
+    if (input.homeRunner !== undefined) {
+      await this.readRunner(input.homeRunner);
+    }
     for (const slug of input.memberships ?? []) {
       await this.readActiveProject(slug);
     }
@@ -3695,7 +3818,7 @@ export class Board {
       role: input.role,
       cli: input.cli,
       ...(input.model === undefined ? {} : { model: input.model }),
-      homeRunner: input.homeRunner ?? SERVER_RUNNER,
+      ...(input.homeRunner === undefined ? {} : { homeRunner: input.homeRunner }),
       memberships,
       subscriptions,
       status: "active",

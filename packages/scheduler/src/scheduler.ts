@@ -29,11 +29,19 @@ import {
 import { z } from "zod";
 import { decideWake } from "./wake.js";
 
-/** What the scheduler needs from a runner. */
+/** Where a queued turn runs: on a runner, or nowhere, with the reason it never can. */
+export type TurnAssignment = { readonly runner: Name } | { readonly refused: string };
+
+/** What the scheduler needs from the runners: placing turns, running them, and landing tasks. */
 export interface TurnRunner {
-  runTurn(dispatch: TurnDispatch): Promise<TurnRecord>;
-  /** Runs a completing task's completion effect and records the outcome on the board. */
-  completeTask(project: Name, taskId: Ulid): Promise<void>;
+  /** Where a queued turn may start now, holding a slot there, or null to keep it queued. */
+  assign(dispatch: TurnDispatch): Promise<TurnAssignment | null>;
+  runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord>;
+  /**
+   * Runs a completing task's completion effect and records the outcome on the board, or reports
+   * `deferred` when the runner it needs is away, to be tried again.
+   */
+  completeTask(project: Name, taskId: Ulid): Promise<"done" | "deferred">;
 }
 
 export interface SchedulerLog {
@@ -1087,8 +1095,9 @@ export class Scheduler {
   private async collectSignals(now: number): Promise<OpsSignal[]> {
     const signals: OpsSignal[] = [];
     const roles = (await this.board.listRoles()).filter((role) => role.name !== USER_ROLE);
-    const offered = new Set(
-      (await this.board.listRunners())
+    const runners = await this.board.listRunners();
+    const anywhere = new Set(
+      runners
         .filter((runner) => runner.status === "connected")
         .flatMap((runner) => runner.capabilities),
     );
@@ -1096,6 +1105,9 @@ export class Scheduler {
     for (const project of await this.board.listProjects()) {
       const slug = project.slug;
       const tasks = await this.board.listTasks(slug);
+      // A placed project's turns run on its own runner, so only that runner's capabilities count.
+      const home = runners.find((runner) => runner.name === project.runner);
+      const offered = home === undefined ? anywhere : new Set(home.capabilities);
       const members = (await this.board.projectMembers(slug)).filter(
         (member) => member.cli !== null,
       );
@@ -1159,7 +1171,11 @@ export class Scheduler {
             signals.push({
               kind: "blocked_capability",
               key: `blocked_capability:${task.id}`,
-              summary: `task ${task.id} "${task.title}" in ${slug} needs ${missing.join(", ")} and no connected runner offers it`,
+              summary: `task ${task.id} "${task.title}" in ${slug} needs ${missing.join(", ")}, which ${
+                home === undefined
+                  ? "no connected runner offers"
+                  : `its project's runner ${home.name} does not offer`
+              }`,
               value: missing.length,
               project: slug,
               taskId: task.id,
@@ -1354,6 +1370,12 @@ export class Scheduler {
         }
         dispatch = { ...dispatch, trigger: current };
       }
+      const assignment = await this.runner.assign(dispatch);
+      if (assignment === null) {
+        // No runner can take it now: its project's runner is away or busy. It waits as it was.
+        this.pending.set(key, item);
+        continue;
+      }
       this.log.info(
         {
           agent: dispatch.agent,
@@ -1365,7 +1387,7 @@ export class Scheduler {
       );
       const promise = (async (): Promise<void> => {
         try {
-          const record = await this.runner.runTurn(dispatch);
+          const record = await this.runner.runTurn(dispatch, assignment);
           this.log.info(
             {
               agent: dispatch.agent,
@@ -1398,6 +1420,13 @@ export class Scheduler {
       this.completions.delete(taskId);
       const promise: Promise<void> = this.runner
         .completeTask(item.project, taskId)
+        .then((outcome) => {
+          // The project's runner is away: the completion waits in the queue for it.
+          if (outcome === "deferred" && !this.completions.has(taskId)) {
+            this.completions.set(taskId, item);
+          }
+          return undefined;
+        })
         .catch((error: unknown) => {
           this.log.error(
             { project: item.project, taskId, error: String(error) },

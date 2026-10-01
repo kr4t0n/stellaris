@@ -59,20 +59,6 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
   );
 }
 
-/** The society's metrics: how it works, counted from its event log. */
-function MetricsEntry({ active }: { active: boolean }) {
-  return (
-    <li>
-      <Link to="/metrics" className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}>
-        <span aria-hidden="true" className="text-fg-muted">
-          ∿
-        </span>
-        <span className="min-w-0 flex-1 truncate">metrics</span>
-      </Link>
-    </li>
-  );
-}
-
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
     <span title={title} className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300">
@@ -133,7 +119,6 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
-  activeMetrics,
 }: {
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
@@ -144,7 +129,6 @@ export function Navigator({
   activeGovernance: GovernanceView | null;
   /** The project slug, or the society scope, whose overview or knowledge is open. */
   activeOverview: string | null;
-  activeMetrics: boolean;
 }) {
   const channels = useChannels();
   const projects = useProjects();
@@ -262,9 +246,7 @@ export function Navigator({
                   </li>
                 );
               })}
-              {group.project === null ? (
-                <MetricsEntry active={activeMetrics} />
-              ) : (
+              {group.project === null ? null : (
                 <TasksEntry slug={group.project} active={group.project === activeTasks} />
               )}
             </ul>

@@ -39,12 +39,17 @@ function decimal(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-/** A count with its share of a whole beside it, muted, and none beside a zero. */
+/**
+ * A count with its share of a whole beside it, muted, and none beside a zero. The share keeps its
+ * width when empty, so the counts of a column line up.
+ */
 function Part({ part, whole }: { part: number; whole: number }) {
   return (
     <>
       {part}
-      {part === 0 ? null : <span className="ml-1.5 text-fg-muted">{share(part, whole)}</span>}
+      <span className="ml-1.5 inline-block w-9 text-right text-fg-muted">
+        {part === 0 ? "" : share(part, whole)}
+      </span>
     </>
   );
 }
@@ -57,7 +62,10 @@ function Note({ children }: { children: ReactNode }) {
   return <p className="mt-1 text-meta">{children}</p>;
 }
 
-/** A small table: the labels are field labels, the cells names and counts. */
+/**
+ * A small table: the labels are field labels, the cells names and counts. The layout is fixed and
+ * every number column one width, so the columns of every table in the view line up from the right.
+ */
 function Table({
   label,
   columns,
@@ -68,7 +76,13 @@ function Table({
   rows: ReadonlyArray<readonly ReactNode[]>;
 }) {
   return rows.length === 0 ? null : (
-    <table aria-label={label} className="mt-3 w-full text-sm">
+    <table aria-label={label} className="mt-3 w-full table-fixed text-sm">
+      <colgroup>
+        <col />
+        {columns.slice(1).map((column) => (
+          <col key={column} className="w-24" />
+        ))}
+      </colgroup>
       <thead>
         <tr>
           {columns.map((column, index) => (
@@ -88,7 +102,7 @@ function Table({
             {row.map((cell, column) => (
               <td
                 key={column}
-                className={`py-1.5 ${column === 0 ? "text-fg-primary" : "text-right text-fg-secondary tabular-nums"}`}
+                className={`py-1.5 ${column === 0 ? "pr-3 text-fg-primary" : "text-right text-fg-secondary tabular-nums"}`}
               >
                 {cell}
               </td>

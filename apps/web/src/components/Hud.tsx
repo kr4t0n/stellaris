@@ -13,6 +13,9 @@ interface HudProps {
   readonly pauseBusy: boolean;
   readonly boardOpen: boolean;
   readonly onToggleBoard: () => void;
+  /** Whether the metrics view is open; the button opens and closes it. */
+  readonly metricsOpen: boolean;
+  readonly onToggleMetrics: () => void;
   /** Whether the operations log floats open; it is the server's, not the board's. */
   readonly logsOpen: boolean;
   readonly onToggleLogs: () => void;
@@ -32,6 +35,8 @@ export function Hud({
   pauseBusy,
   boardOpen,
   onToggleBoard,
+  metricsOpen,
+  onToggleMetrics,
   logsOpen,
   onToggleLogs,
   onSignOut,
@@ -90,6 +95,16 @@ export function Hud({
           }`}
         >
           Board
+        </button>
+        <button
+          type="button"
+          aria-pressed={metricsOpen}
+          onClick={onToggleMetrics}
+          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+            metricsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
+          }`}
+        >
+          Metrics
         </button>
         <button
           type="button"

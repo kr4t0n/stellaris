@@ -308,6 +308,10 @@ export function Playground() {
               void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
             }
             logsOpen={logsOpen}
+            metricsOpen={pathname === "/metrics"}
+            onToggleMetrics={() =>
+              void navigate(pathname === "/metrics" ? { to: "/" } : { to: "/metrics" })
+            }
             onToggleLogs={() => setLogsOpen(!logsOpen)}
             onSignOut={signOut}
           />
@@ -319,7 +323,6 @@ export function Playground() {
               activeScope={activeScope}
               activeGovernance={activeGovernance}
               activeOverview={activeOverview}
-              activeMetrics={pathname === "/metrics"}
             />
           ) : null}
           {boardOpen ? (

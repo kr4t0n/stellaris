@@ -670,13 +670,14 @@ claude -p --resume "$SESSION_ID" \
 
 Defined from the event log on day one, all mechanical:
 
-- Tasks completed per dollar
 - Work sent back to an earlier stage
 - Messages per completed task
 - Turns that took no action
 - User decisions per day
 - Wake latency from mention to turn start
 - Tasks blocked on a missing capability
+
+Tasks completed per dollar is deferred until Codex turns carry a cost: the Codex app server reports tokens but no price, so those turns are recorded at zero, and a ratio over them would flatter every society with a Codex citizen. It returns with a token price table.
 
 ## 12. Build order
 

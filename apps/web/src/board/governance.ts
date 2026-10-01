@@ -128,7 +128,7 @@ const ROLE_FIELDS: ReadonlyArray<readonly [keyof RoleCharter, string]> = [
   ["maxReplicas", "replicas per project"],
   ["backlogThreshold", "backlog per member before scaling"],
   ["resident", "warm session"],
-  ["societyScope", "turns outside projects"],
+  ["societyScope", "watching the society"],
   ["reflects", "reflects"],
   ["reviewDate", "review date"],
 ];

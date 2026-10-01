@@ -15,7 +15,6 @@ export interface MetricsCitizen {
   readonly name: string;
   readonly role: string;
   readonly memberships: readonly string[];
-  readonly societyScope: boolean;
 }
 
 export interface MetricsInput {
@@ -269,7 +268,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
             agent: name,
             at: Date.parse(event.ts),
             thread,
-            scopes: [project, wakeScope(citizen, citizen, project)].filter(
+            scopes: [project, wakeScope(citizen, project)].filter(
               (scope): scope is string => scope !== null,
             ),
           });

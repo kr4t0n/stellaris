@@ -366,6 +366,28 @@ describe("buildTurnPrompt", () => {
     expect(reader).not.toContain("## Operations signals");
   });
 
+  it("tells a turn outside projects when it was asked from a project the citizen is not in", () => {
+    const base = { messages: [], heldClaims: [], lastTurn: null, onboarding: null };
+    const asked = (channel: string, project = "society"): string =>
+      buildTurnPrompt({
+        ...base,
+        dispatch: {
+          agent: "sage",
+          project,
+          trigger: TriggerSchema.parse({ kind: "mention", from: "user", channel }),
+          priority: 2,
+          onboarding: false,
+        },
+      });
+    expect(asked("lab/general")).toContain(
+      "You were asked in lab/general, in project lab, which you are not a member of",
+    );
+    expect(asked("lab/general")).toContain("join it with join_project");
+    // Asked in a society channel, or in its own project, there is nothing to explain.
+    expect(asked("general")).not.toContain("You were asked in");
+    expect(asked("lab/general", "lab")).not.toContain("You were asked in");
+  });
+
   it("frames a reflection turn as memory work and lists the scope's knowledge topics", () => {
     const dispatch = {
       agent: "eng-1",

@@ -74,9 +74,9 @@ function input(events: BoardEvent[], extra: Partial<MetricsInput> = {}): Metrics
     events,
     tasks: [task(A, "Add hello.txt"), task(B, "Fix the seed"), task(C, "Run on the GPU")],
     citizens: [
-      { name: "desk", role: "concierge", memberships: [], societyScope: true },
-      { name: "eng-1", role: "engineer", memberships: ["lab"], societyScope: false },
-      { name: "rev-1", role: "reviewer", memberships: ["lab"], societyScope: false },
+      { name: "desk", role: "concierge", memberships: [] },
+      { name: "eng-1", role: "engineer", memberships: ["lab"] },
+      { name: "rev-1", role: "reviewer", memberships: ["lab"] },
     ],
     actions: new Map(),
     activeSignals: new Set(),

@@ -247,12 +247,6 @@ export class RunnerHub implements TurnRunner {
     if (agent.cli === null) {
       return { refused: `${agent.name} has no CLI binding` };
     }
-    if (
-      dispatch.project === SOCIETY_SCOPE &&
-      !(await this.board.readRole(agent.role)).societyScope
-    ) {
-      return { refused: `${agent.role} cannot take society-scope turns` };
-    }
     const cli = agent.cli;
     const free = (seat: Seat): boolean =>
       seat.send !== null &&

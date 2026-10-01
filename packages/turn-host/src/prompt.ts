@@ -1,4 +1,6 @@
 import {
+  parseChannelRef,
+  SOCIETY_SCOPE,
   stageIndex,
   type HomeConflict,
   type Knowledge,
@@ -189,6 +191,15 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   lines.push(`Trigger: ${dispatch.trigger.kind}${from}. ${dispatch.trigger.reason}`.trim());
   if (dispatch.trigger.taskId !== undefined) {
     lines.push(`Task in question: ${dispatch.trigger.taskId}`);
+  }
+  const askedIn =
+    dispatch.trigger.channel === undefined
+      ? null
+      : parseChannelRef(dispatch.trigger.channel).project;
+  if (dispatch.project === SOCIETY_SCOPE && askedIn !== null) {
+    lines.push(
+      `You were asked in ${dispatch.trigger.channel}, in project ${askedIn}, which you are not a member of, so this turn is outside any project. Answer there with post_message. If the work needs you in ${askedIn}, ask the concierge or @user to add you, or join it with join_project if your charter grants that verb.`,
+    );
   }
   if (dispatch.trigger.kind === "ops_event") {
     lines.push(

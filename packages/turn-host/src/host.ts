@@ -184,9 +184,6 @@ export class TurnHost {
     }
     const charter = await this.board.readRole(agent.role);
     const societyScope = dispatch.project === SOCIETY_SCOPE;
-    if (societyScope && !charter.societyScope) {
-      return { failed: await this.fail(base, `${agent.role} cannot take society-scope turns`) };
-    }
 
     const taskId = thread?.task === true ? thread.id : undefined;
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
@@ -278,7 +275,7 @@ export class TurnHost {
         ? (await this.board.listSignals(500))
             .filter(
               (record) =>
-                wakeScope(agent, charter, record.signal.project ?? null) === dispatch.project &&
+                wakeScope(agent, record.signal.project ?? null) === dispatch.project &&
                 (lastTurn === null || record.ts > lastTurn.startedAt),
             )
             .slice(-MAX_SIGNALS)

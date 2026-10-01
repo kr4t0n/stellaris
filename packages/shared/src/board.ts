@@ -20,21 +20,17 @@ export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 export const SOCIETY_SCOPE = "society";
 
 /**
- * Where a citizen takes a turn for something in `project`, or in a society channel when it is null:
- * that project when the citizen belongs to it, else its first project, else the society scope when
- * its charter allows work outside projects, else nowhere. The scheduler wakes by it and the board
- * files the digest by it, so a turn reads what it was woken for and nothing another turn of the
- * same citizen, in another scope, will read.
+ * Where a citizen takes a turn for something in `project`, or in a society channel when it is
+ * null: where it was asked, so that project when the citizen belongs to it, and otherwise the
+ * society scope, outside any project, with a context of its own. The scheduler wakes by it and the
+ * board files the digest by it, so a turn reads what it was woken for and nothing another turn of
+ * the same citizen, in another scope, will read.
  */
 export function wakeScope(
   member: { readonly memberships: readonly string[] },
-  charter: { readonly societyScope: boolean },
   project: string | null,
-): string | null {
-  if (project !== null && member.memberships.includes(project)) {
-    return project;
-  }
-  return member.memberships[0] ?? (charter.societyScope ? SOCIETY_SCOPE : null);
+): string {
+  return project !== null && member.memberships.includes(project) ? project : SOCIETY_SCOPE;
 }
 
 export const CliKindSchema = z.enum(["claude", "codex"]);

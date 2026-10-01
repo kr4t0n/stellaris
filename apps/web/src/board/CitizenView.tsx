@@ -133,8 +133,8 @@ function CitizenPage({
   const model = observed ?? member.model ?? "CLI default";
   const setTo = member.model !== undefined && member.model !== observed ? member.model : null;
   const charter = roles.data?.find((role) => role.name === member.role);
-  const scopes = wakeScopes(member, charter);
-  const wakeable = member.status === "active" && member.cli !== null && scopes.length > 0;
+  const scopes = wakeScopes(member);
+  const wakeable = member.status === "active" && member.cli !== null;
 
   return (
     <>

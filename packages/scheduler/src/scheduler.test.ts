@@ -599,6 +599,51 @@ describe("Scheduler", () => {
     ]);
   });
 
+  it("wakes a citizen where it was asked, and outside its projects for anything asked elsewhere", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.addProject(USER, { slug: "lab" });
+    // A society channel, and a project the citizen is not in, each get a turn outside projects
+    // rather than one in its first project, with the channel the question came from.
+    await board.postMessage(USER, { channel: "general", body: "@eng-1 a general question" });
+    await board.postMessage(USER, { channel: "lab/general", body: "@rev-1 a lab question" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@rev-1 a demo question" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(
+      runner.dispatches
+        .map((d) => `${d.agent}:${d.project}:${d.trigger.channel ?? "-"}`)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["eng-1:society:general", "rev-1:demo:demo/general", "rev-1:society:lab/general"]);
+  });
+
+  it("wakes only a role that watches the society for news outside projects", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.setRoleCharter(USER, {
+      name: "lead",
+      purpose: "Leads.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+      societyScope: true,
+    });
+    await board.addAgent(USER, {
+      name: "lead-1",
+      role: "lead",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    // Every member follows general; a post there that mentions nobody is news, not a question.
+    await board.postMessage(ENG, { channel: "general", body: "the build is green again" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["lead-1", "society", "heartbeat"],
+    ]);
+  });
+
   it("wakes a heartbeat only in the scope its reasons belong to", async () => {
     const { board, runner, scheduler } = await setup();
     await board.addProject(USER, { slug: "lab" });
@@ -1022,7 +1067,7 @@ describe("Scheduler", () => {
     expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-3");
   });
 
-  it("wakes the front desk on every user post, in the society scope until it joins a project", async () => {
+  it("wakes the front desk on every user post, where the post was made", async () => {
     const { board, runner, scheduler } = await setup({
       timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
@@ -1058,7 +1103,8 @@ describe("Scheduler", () => {
         .toSorted((a, b) => a.localeCompare(b)),
     ).toEqual(["desk:user_post", "rev-1:mention"]);
 
-    // Joining a project fires an onboarding turn there, and later posts route to that project.
+    // Joining a project fires an onboarding turn there; posts there route to that project, while
+    // a post in a society channel is still answered outside any project.
     runner.dispatches.length = 0;
     await board.joinProject(USER, { project: "demo", agent: "desk" });
     await scheduler.tick();
@@ -1070,7 +1116,11 @@ describe("Scheduler", () => {
     await board.postMessage(USER, { channel: "general", body: "status?" });
     await scheduler.tick();
     await scheduler.drain();
+    await board.postMessage(USER, { channel: "demo/general", body: "and the build?" });
+    await scheduler.tick();
+    await scheduler.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["desk", "society", "user_post"],
       ["desk", "demo", "user_post"],
     ]);
 

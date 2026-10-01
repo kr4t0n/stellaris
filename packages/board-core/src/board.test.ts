@@ -232,16 +232,17 @@ describe("Board", () => {
         )
       ).messages.map((m) => m.id);
 
-    // A society channel is filed where a mention there wakes eng-1: its first project.
-    expect(await ids("demo")).toEqual([inDemo.id, inSociety.id]);
+    // A society channel is filed where a mention there wakes eng-1: outside any project.
+    expect(await ids("demo")).toEqual([inDemo.id]);
     expect(await ids("lab")).toEqual([inLab.id]);
+    expect(await ids("society")).toEqual([inSociety.id]);
     expect(await ids()).toEqual([inDemo.id, inLab.id, inSociety.id]);
 
     // A turn in lab moves lab's cursor alone, and a turn that read earlier but ends later cannot
     // rewind demo's.
     await board.setDigestCursor("eng-1", "lab", inLab.id);
     expect(await ids("lab")).toEqual([]);
-    expect(await ids("demo")).toEqual([inDemo.id, inSociety.id]);
+    expect(await ids("demo")).toEqual([inDemo.id]);
     await board.setDigestCursor("eng-1", "demo", inSociety.id);
     await board.setDigestCursor("eng-1", "demo", inDemo.id);
     expect(await ids("demo")).toEqual([]);
@@ -1454,12 +1455,14 @@ describe("Board", () => {
       (await board.readDigest(REV, { advance: false })).messages.map((m) => m.id),
     ).not.toContain(aside.id);
 
-    // Society-scope wakes are for roles that may work outside projects.
+    // Any citizen may be woken outside projects; inside one, only where it is a member.
+    for (const agent of ["desk", "eng-1"]) {
+      await expect(
+        board.requestWake(USER, { agent, project: "society", reason: "dev" }),
+      ).resolves.toMatchObject({ type: "wake.requested" });
+    }
     await expect(
-      board.requestWake(USER, { agent: "desk", project: "society", reason: "dev" }),
-    ).resolves.toMatchObject({ type: "wake.requested" });
-    await expect(
-      board.requestWake(USER, { agent: "eng-1", project: "society", reason: "dev" }),
+      board.requestWake(USER, { agent: "desk", project: "demo", reason: "dev" }),
     ).rejects.toMatchObject({ code: "VALIDATION" });
 
     // Turn tokens can be extended for a resident session and revoked when it closes.

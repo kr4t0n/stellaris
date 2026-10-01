@@ -13,6 +13,7 @@ import {
   TaskFrontmatterSchema,
   turnStatusJsonSchema,
   VerbInputs,
+  wakeScope,
 } from "./index.js";
 
 describe("turn status schema", () => {
@@ -176,5 +177,16 @@ describe("tool output", () => {
     expect(capOutput("ok")).toBe("ok");
     const long = `${"a".repeat(30)}${"b".repeat(30)}`;
     expect(capOutput(long, 20)).toBe(`${"a".repeat(10)}\n… 40 characters cut …\n${"b".repeat(10)}`);
+  });
+});
+
+describe("wake scope", () => {
+  it("wakes a citizen where it was asked: its project, else outside any project", () => {
+    const sage = { memberships: ["model-research", "lab"] };
+    expect(wakeScope(sage, "lab")).toBe("lab");
+    // A society channel, or a project sage is not in, gets a turn outside projects, not its first.
+    expect(wakeScope(sage, null)).toBe("society");
+    expect(wakeScope(sage, "pi-study")).toBe("society");
+    expect(wakeScope({ memberships: [] }, null)).toBe("society");
   });
 });

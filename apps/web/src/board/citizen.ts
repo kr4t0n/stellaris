@@ -1,10 +1,4 @@
-import {
-  SOCIETY_SCOPE,
-  type CliKind,
-  type Member,
-  type RoleCharter,
-  type TurnHistoryEntry,
-} from "@stellaris/shared";
+import { SOCIETY_SCOPE, type CliKind, type Member, type TurnHistoryEntry } from "@stellaris/shared";
 import { elapsed } from "../lib/live.js";
 
 /** The citizen view's tabs; the transcript of what it is doing now is the default. */
@@ -14,9 +8,9 @@ export function scopeName(scope: string): string {
   return scope === SOCIETY_SCOPE ? "the society" : scope;
 }
 
-/** Where a citizen may be woken: its projects, and the society when its charter allows it. */
-export function wakeScopes(member: Member, charter: RoleCharter | undefined): string[] {
-  return [...member.memberships, ...(charter?.societyScope === true ? [SOCIETY_SCOPE] : [])];
+/** Where a citizen may be woken: each of its projects, and the society, outside any project. */
+export function wakeScopes(member: Member): string[] {
+  return [...member.memberships, SOCIETY_SCOPE];
 }
 
 /** How long a finished turn ran, from the start the log recorded; null when that is missing. */

@@ -381,11 +381,7 @@ export class Scheduler {
           if (agent === null) {
             continue;
           }
-          const charter = await this.board.readRole(agent.role);
-          const scope = this.scopeFor(agent, charter, channel);
-          if (scope === null) {
-            continue;
-          }
+          const scope = this.scopeFor(agent, channel);
           this.enqueue(
             agent.name,
             scope,
@@ -395,6 +391,7 @@ export class Scheduler {
               fromUser: event.actor === USER_NAME,
               reason: `mentioned by ${event.actor}`,
               ...(messageId === undefined ? {} : { messageId }),
+              ...(channel === null ? {} : { channel }),
             },
             now,
             threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
@@ -577,10 +574,7 @@ export class Scheduler {
       if (!charter.wakeTriggers.includes(OPS_TRIGGER)) {
         continue;
       }
-      const scope = this.scopeForProject(agent, charter, signal.project ?? null);
-      if (scope === null) {
-        continue;
-      }
+      const scope = this.scopeForProject(agent, signal.project ?? null);
       this.enqueue(
         agent.name,
         scope,
@@ -610,10 +604,7 @@ export class Scheduler {
       if (!charter.wakeTriggers.includes(USER_POST_TRIGGER)) {
         continue;
       }
-      const scope = this.scopeFor(agent, charter, channel);
-      if (scope === null) {
-        continue;
-      }
+      const scope = this.scopeFor(agent, channel);
       this.enqueue(
         agent.name,
         scope,
@@ -623,6 +614,7 @@ export class Scheduler {
           fromUser: true,
           reason: `the user posted in ${channel ?? "a channel"}`,
           ...(messageId === undefined ? {} : { messageId }),
+          ...(channel === null ? {} : { channel }),
         },
         now,
         threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
@@ -716,11 +708,7 @@ export class Scheduler {
     if (agent.status !== "active" || agent.cli === null) {
       return null;
     }
-    const charter = await this.board.readRole(agent.role);
-    const scope = this.scopeForProject(agent, charter, task.project);
-    if (scope === null) {
-      return null;
-    }
+    const scope = this.scopeForProject(agent, task.project);
     const name = currentStage(task)?.name ?? task.stage;
     this.enqueue(
       agent.name,
@@ -784,11 +772,7 @@ export class Scheduler {
     if (agent === null) {
       return;
     }
-    const charter = await this.board.readRole(agent.role);
-    const scope = this.scopeForProject(agent, charter, project);
-    if (scope === null) {
-      return;
-    }
+    const scope = this.scopeForProject(agent, project);
     this.enqueue(
       agent.name,
       scope,
@@ -808,10 +792,7 @@ export class Scheduler {
     if (agent === null) {
       return;
     }
-    const scope = this.scopeForProject(agent, await this.board.readRole(agent.role), null);
-    if (scope === null) {
-      return;
-    }
+    const scope = this.scopeForProject(agent, null);
     const kind = stringOf(event.payload["kind"]) ?? "";
     const outcome = stringOf(event.payload["outcome"]) ?? "decided";
     this.enqueue(
@@ -851,17 +832,13 @@ export class Scheduler {
     }
   }
 
-  /**
-   * A turn needs a scope: the channel's project if the agent belongs, else its first membership,
-   * else the society scope for roles allowed to work outside projects, else nothing.
-   */
-  private scopeFor(agent: Agent, charter: RoleCharter, channel: string | null): Name | null {
-    const project = channel === null ? null : parseChannelRef(channel).project;
-    return this.scopeForProject(agent, charter, project);
+  /** A turn's scope is where it was asked: the channel's project if the agent belongs, else the society. */
+  private scopeFor(agent: Agent, channel: string | null): Name {
+    return this.scopeForProject(agent, channel === null ? null : parseChannelRef(channel).project);
   }
 
-  private scopeForProject(agent: Agent, charter: RoleCharter, project: Name | null): Name | null {
-    return wakeScope(agent, charter, project);
+  private scopeForProject(agent: Agent, project: Name | null): Name {
+    return wakeScope(agent, project);
   }
 
   /** Queues a wake in one conversation: a thread's, or without one, the scope's home. */
@@ -953,12 +930,8 @@ export class Scheduler {
       if (!charter.wakeTriggers.includes(HEARTBEAT_TRIGGER)) {
         continue;
       }
-      const scopes =
-        agent.memberships.length > 0
-          ? agent.memberships
-          : charter.societyScope
-            ? [SOCIETY_SCOPE]
-            : [];
+      // Unasked news outside projects wakes only a role that keeps watch over the society.
+      const scopes = [...agent.memberships, ...(charter.societyScope ? [SOCIETY_SCOPE] : [])];
       const actor = { name: agent.name, role: agent.role };
       let unread: { scope: Name; thread: Ulid | null; count: number }[] | undefined;
       let held: readonly Task[] | undefined;
@@ -1064,7 +1037,7 @@ export class Scheduler {
       if (now - Date.parse(last) < this.timings.reflectionMs) {
         continue;
       }
-      const latest = await this.latestWorkingTurn(agent, charter);
+      const latest = await this.latestWorkingTurn(agent);
       if (latest === null) {
         this.state.lastReflection[agent.name] = iso(now);
         continue;
@@ -1088,15 +1061,9 @@ export class Scheduler {
   }
 
   /** The member's most recent turn that was not itself a reflection, with the scope it ran in. */
-  private async latestWorkingTurn(
-    agent: Agent,
-    charter: RoleCharter,
-  ): Promise<{ scope: Name; endedAt: string } | null> {
-    const scopes = charter.societyScope
-      ? [...agent.memberships, SOCIETY_SCOPE]
-      : [...agent.memberships];
+  private async latestWorkingTurn(agent: Agent): Promise<{ scope: Name; endedAt: string } | null> {
     let latest: { scope: Name; endedAt: string } | null = null;
-    for (const scope of scopes) {
+    for (const scope of [...agent.memberships, SOCIETY_SCOPE]) {
       const turn = await this.board.readLatestTurn(agent.name, scope);
       if (turn === null || turn.trigger.kind === "reflection") {
         continue;

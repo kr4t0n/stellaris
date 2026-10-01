@@ -52,7 +52,11 @@ export const RoleCharterSchema = z.object({
   backlogThreshold: z.number().positive().default(3),
   /** The runner keeps a warm session between turns. */
   resident: z.boolean().default(false),
-  /** The role may take turns in the society scope, outside any project, with its home as the working directory. */
+  /**
+   * The role keeps watch over the society: its heartbeat watches the society's channels and
+   * threads as it watches each project a member belongs to. Any citizen takes turns outside
+   * projects when asked there; this decides only whether unasked news there wakes it.
+   */
   societyScope: z.boolean().default(false),
   /** The scheduler wakes the role for a reflection turn on the society's cadence. Off for humans. */
   reflects: z.boolean().default(true),

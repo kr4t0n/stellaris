@@ -1692,11 +1692,7 @@ export class Board {
     const collected: { scope: Name; thread: Ulid | null; message: Message }[] = [];
     // Read from the oldest cursor any conversation of the scopes may resume from.
     const scopes =
-      conversation !== undefined
-        ? [conversation.scope]
-        : agent.memberships.length > 0
-          ? agent.memberships
-          : [SOCIETY_SCOPE];
+      conversation !== undefined ? [conversation.scope] : [...agent.memberships, SOCIETY_SCOPE];
     const starts = scopes.flatMap((each) =>
       conversation === undefined
         ? [cursorOf(cursors, each), threadStart(cursors, each)]
@@ -1709,8 +1705,8 @@ export class Board {
         : (known.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0] ?? null);
 
     for await (const message of this.iterateMessages(since)) {
-      const filedIn = wakeScope(agent, charter, parseChannelRef(message.channel).project);
-      if (filedIn === null || (conversation !== undefined && filedIn !== conversation.scope)) {
+      const filedIn = wakeScope(agent, parseChannelRef(message.channel).project);
+      if (conversation !== undefined && filedIn !== conversation.scope) {
         continue;
       }
       const thread = message.thread ?? null;
@@ -2886,12 +2882,7 @@ export class Board {
     this.assertAdmin(actor);
     const args = WakeRequestSchema.parse(input);
     const agent = await this.readAgent(args.agent);
-    if (args.project === SOCIETY_SCOPE) {
-      const charter = await this.readRole(agent.role);
-      if (!charter.societyScope) {
-        throw new BoardError("VALIDATION", `${args.agent} cannot take society-scope turns`);
-      }
-    } else {
+    if (args.project !== SOCIETY_SCOPE) {
       await this.readProject(args.project);
       if (!agent.memberships.includes(args.project)) {
         throw new BoardError("VALIDATION", `${args.agent} is not a member of ${args.project}`);
@@ -2962,13 +2953,7 @@ export class Board {
     const citizens = [];
     for (const agent of await this.listAgents()) {
       if (agent.cli !== null) {
-        const charter = await this.readRole(agent.role).catch(() => null);
-        citizens.push({
-          name: agent.name,
-          role: agent.role,
-          memberships: agent.memberships,
-          societyScope: charter?.societyScope ?? false,
-        });
+        citizens.push({ name: agent.name, role: agent.role, memberships: agent.memberships });
       }
     }
     const span = METRICS_WINDOW_MS[window];

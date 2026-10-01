@@ -480,7 +480,7 @@ describe("turns on a runner over the runner protocol", () => {
     await run(deskPost);
     expect(hub.residentPairs).toEqual(["desk/society"]);
 
-    // Non-resident roles still take cold turns, and an engineer cannot use the society scope.
+    // Non-resident roles still take cold turns, in their projects and, asked there, outside them.
     await run({
       agent: "eng-1",
       project: "demo",
@@ -488,9 +488,9 @@ describe("turns on a runner over the runner protocol", () => {
       priority: 2,
     });
     expect(backend.coldTurns).toEqual(["cold"]);
-    const refused = await run({ ...deskPost, agent: "eng-1" });
-    expect(refused.exitReason).toBe("error");
-    expect(refused.error).toContain("society-scope");
+    const outside = await run({ ...deskPost, agent: "eng-1" });
+    expect(outside.exitReason).toBe("completed");
+    expect(backend.coldTurns).toEqual(["cold", "cold"]);
 
     // Stopping the runner lets whatever is warm go.
     await runner.stop();

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CliKindSchema } from "./board.js";
 import { TurnExitReasonSchema, TurnStatusSchema, UsageSchema } from "./events.js";
-import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
+import { ChannelRefSchema, IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import { TurnWorkSchema } from "./runner.js";
 
 /**
@@ -30,6 +30,8 @@ export const TriggerSchema = z.object({
   reason: z.string().default(""),
   taskId: UlidSchema.optional(),
   messageId: UlidSchema.optional(),
+  /** The channel the waking message was posted in. */
+  channel: ChannelRefSchema.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;

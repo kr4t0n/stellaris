@@ -1,4 +1,4 @@
-import { MemberSchema, RoleCharterSchema, type TurnHistoryEntry } from "@stellaris/shared";
+import { MemberSchema, type TurnHistoryEntry } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
   costLabel,
@@ -27,7 +27,7 @@ function entry(overrides: Partial<TurnHistoryEntry> = {}): TurnHistoryEntry {
 }
 
 describe("citizen", () => {
-  it("offers a citizen's projects, and the society only when its charter allows it", () => {
+  it("offers a citizen's projects, and the society outside them, whatever its charter", () => {
     const member = {
       ...MemberSchema.parse({
         name: "desk",
@@ -41,9 +41,8 @@ describe("citizen", () => {
       }),
       profile: "",
     };
-    const charter = RoleCharterSchema.parse({ name: "concierge", purpose: "p", verbs: [] });
-    expect(wakeScopes(member, charter)).toEqual(["lab"]);
-    expect(wakeScopes(member, { ...charter, societyScope: true })).toEqual(["lab", "society"]);
+    expect(wakeScopes(member)).toEqual(["lab", "society"]);
+    expect(wakeScopes({ ...member, memberships: [] })).toEqual(["society"]);
   });
 
   it("reads a finished turn's length, ending, and cost", () => {

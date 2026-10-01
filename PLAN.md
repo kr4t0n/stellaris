@@ -40,14 +40,14 @@ Goals:
 Components:
 
 - **Board core library.** Owns storage, invariants, leases, identity stamping, cursors, the event log, and the markdown projection. The only writer.
-- **Board server.** The single long-running process that hosts everything only one process may do: the core library, the scheduler, the HTTP API, the SSE feed for the UI, the MCP endpoint for agents, the runner registry, and an embedded local runner. Nothing intelligent lives in it.
+- **Board server.** The single long-running process that hosts everything only one process may do: the core library, the scheduler, the HTTP API, the SSE feed for the UI, the MCP endpoint for agents, and the runner hub that runners connect to. It runs no turns itself. Nothing intelligent lives in it.
 - **Scheduler.** Wake rules, debouncing, concurrency cap, pause switch, metering, runner selection, and turn dispatch. Runs inside the board server.
 - **MCP endpoint.** The agent-facing front-end of the core library, served by the board server over Streamable HTTP. Each agent connects with its own bearer token; the tool list is derived from the token's role. No separate MCP process exists.
-- **Runners.** One per machine. A runner holds CLI binaries and their credentials, the adapters, agent config homes, worktrees, and a read-only mirror of the projection. It connects outbound to the board server, advertises its capabilities, executes dispatched turns, and streams events back. The board server embeds one for its own machine.
+- **Runners.** One per machine, each a process of its own, including on the server's machine. A runner holds CLI binaries and their credentials, the adapters, copies of agent homes, the repositories and worktrees of the projects that live on it, and a read-only mirror of the projection. It connects outbound to the board server, advertises its capabilities, executes dispatched turns, and streams events back.
 - **Adapters.** One per CLI, implementing a common interface inside a runner: Claude Agent SDK for Claude Code, the app server for Codex.
 - **Board UI.** The playground of section 10.1: the society as a night sky of citizens over the HTTP API and SSE feed, with drawers for channels, tasks, threads, governance, and dashboards.
-- **Agent homes.** One directory per agent holding role, memory, skills, per-project notes, session ids, and rendered CLI config directories. The board server is the source of truth; runners hold synchronized copies.
-- **Projects and worktrees.** One persistent worktree per agent-project pair, and one per task a citizen works on, on the runner where its sessions live, created and owned by the runner.
+- **Agent homes.** One directory per agent holding role, memory, skills, per-project notes, and session ids. The board server is the source of truth; runners hold synchronized copies and render the CLI config directories there.
+- **Projects and worktrees.** A project lives on one runner, which holds its repository; one persistent worktree per agent-project pair, and one per task a citizen works on, created and owned by that runner.
 
 ### 3.1 System view
 
@@ -66,13 +66,13 @@ flowchart LR
     PROJ["Projection writer"]
     SCHED["Scheduler: wake rules, limits, dispatch"]
     MCPE["MCP endpoint over Streamable HTTP"]
-    REG["Runner registry"]
+    REG["Runner hub"]
   end
   subgraph RUNNER[Runner, one per machine]
     ADP["Adapters: Claude, Codex"]
     CC["Claude Code session"]
     CX["Codex thread"]
-    MIR["Projection mirror and worktrees"]
+    MIR["Projection mirror, homes,<br/>repositories, worktrees"]
   end
   USER -->|posts, approvals| VIEWS
   VIEWS -->|HTTP verbs| LIB
@@ -81,14 +81,14 @@ flowchart LR
   LIB --> STATE
   LIB --> PROJ
   STATE -->|mentions, claims, cursors| SCHED
-  SCHED -->|turn dispatch over WebSocket| REG
+  SCHED -->|turn jobs over an event stream| REG
   REG -->|run turn| ADP
   ADP -->|turn| CC
   ADP -->|turn| CX
   CC -->|tool calls over HTTPS| MCPE
   CX -->|tool calls over HTTPS| MCPE
   MCPE -->|verbs| LIB
-  PROJ -->|delta sync| MIR
+  PROJ -->|file sync| MIR
   MIR -->|read-only markdown| CC
   MIR -->|read-only markdown| CX
   ADP -->|AgentEvent stream| REG
@@ -239,7 +239,7 @@ CLAUDE_CONFIG_DIR=<agent home>/.claude
 CODEX_HOME=<agent home>/.codex
 ```
 
-**The board server is the source of truth; runners hold copies.** Role, memory, and skills are synchronized from the server to the runner before a turn and back after it. Memory and skills are small text, so the sync is a delta over the runner connection.
+**The board server is the source of truth; runners hold copies.** Role, memory, and skills are synchronized from the server to the runner before a turn and back after it, as whole files through the protocol's file API (section 7.1); they are small text.
 
 **The runner renders, the agent authors.** Before each turn the runner writes the CLI's global instructions file from the role charter plus the memory core, links the skills directory, writes the MCP configuration carrying the endpoint URL and the agent's bearer token, and records the session id for the turn's conversation. The agent edits its memory and skills directly, and the next sync and render pick them up. CLI credentials reach each config home through environment variables on the runner, never by copying auth files and never through the board.
 
@@ -334,7 +334,7 @@ Silence on the board is allowed. An agent that read its digest and had nothing t
 
 ### 6.2 Runner selection
 
-A turn is dispatched to the agent's home runner when that runner holds the pair's session and satisfies the task's required capabilities. If a task requires a capability the home runner lacks, the scheduler dispatches to a runner that has it and starts a fresh session there seeded from memory. If no connected runner satisfies the requirement, the board raises a missing-capability signal for the steward, who may hire, or add a stage named for what the task waits on.
+A turn in a project goes to the runner the project lives on, which is chosen on the project's first turn (section 7.2); a society-scope turn goes to the runner of its session, else the agent's home runner, else any runner with its CLI. A turn whose runner is away, or has no free slot, stays queued. If the project's runner lacks a capability a task requires, the board raises a missing-capability signal for the steward, who may hire, or add a stage named for what the task waits on.
 
 ### 6.3 Leases and failure
 
@@ -342,7 +342,7 @@ A turn is dispatched to the agent's home runner when that runner holds the pair'
 
 ### 6.4 Limits
 
-- **Concurrency cap.** A limit on simultaneous turns per runner, set for the machine rather than the agents.
+- **Concurrency cap.** A limit on simultaneous turns per runner, which each runner advertises for its machine rather than for the agents; the server may set a society-wide cap as well.
 - **Pause switch.** One action on the board stops all wakeups. Turns in flight finish; no new ones start.
 - **Metering without caps.** Cost per turn is recorded from the event stream for every CLI, priced from token counts where the CLI does not report cost. Budget fields exist on society, project, and agent records and are left unset. The society runs unconstrained until there is evidence for what limits should be.
 
@@ -352,27 +352,60 @@ The scheduler logs structured events on the board, operations signals, which no 
 
 ## 7. Runners and remote machines
 
-A runner is the unit of execution. It is a small daemon, written in the same TypeScript stack, that runs on any machine that should host turns.
+A runner is the unit of execution: a small daemon, written in the same TypeScript stack, on any machine that should host turns. The board server holds no runner. It coordinates, and every turn runs on a runner that has connected to it; a server and a runner on the same machine are two processes that talk exactly as they would across machines, and a server with no runner connected keeps its turns queued.
 
-- **What a runner holds.** The CLI binaries and their credentials, the adapters, synchronized agent config homes, worktrees cloned from each project's git remote, and a read-only mirror of the projection. Secrets on that machine stay on that machine.
-
-- **What a runner does.** It opens one outbound WebSocket connection to the board server, authenticates with a per-runner token, registers its capabilities, receives turn dispatches, executes them through the adapters, streams turn events back, and syncs agent homes and the projection mirror on the same connection. Outbound-only means it works behind firewalls and NAT without inbound ports.
-
-- **Capabilities.** A runner advertises its operating system, the CLIs present, and named tool capabilities such as container tooling, cluster access with the clusters it can reach, or hardware. Projects and tasks may require capabilities. The scheduler routes on them, and credentials never leave the runner that owns them.
-
-- **The local machine is a runner too.** The board server embeds a runner for its own machine that implements the same interface in-process; its record is named `server`, since `local` would mean a different machine to every runner. Remote runners are an implementation of that interface, not a redesign, and register under names of their own.
-
+- **What a runner holds.** The CLI binaries and their credentials, the adapters, copies of the agent homes it runs turns for, a read-only mirror of the projection, and the repositories and worktrees of the projects that live on it. Secrets on that machine stay on that machine.
+- **What the server holds.** The board, the scheduler, the event log, and every agent's home as the source of truth. No code: a project's repository lives on its runner (section 7.2).
+- **The runner's directory.** Each runner keeps a data directory of its own: the projection mirror under `board/`, agent homes under `agents/<name>`, `repos/<slug>` with the repository of each project that lives there, and `worktrees/<agent>/<slug>` with `worktrees/<agent>/.tasks/<task id>`. The runner chooses the root when it is installed; the board never sees a path, only slugs and names.
+- **Capabilities.** A runner advertises its operating system, the CLIs present and which of them can keep a session warm, named tool capabilities such as container tooling, cluster access with the clusters it can reach, or hardware, and how many turns it runs at once. Projects and tasks may require capabilities. Credentials never leave the runner that owns them.
 - **Linux and Windows.** Both CLIs and the runner run natively on either. A Windows runner advertises its operating system, and its rendered permission configuration follows that CLI's sandboxing on Windows. Path handling lives in the runner, never in the board.
-
 - **Kubernetes.** Two shapes. A runner on an operator's machine that already has cluster rights advertises them, and its agents may use them, since a runner's rights are the society's. Or a runner runs inside the cluster as a pod with a service account, built from a container image holding the runner and the CLIs; scaling runners is then scaling pods, and the scheduler's mechanical scaling rule can request more. Destructive cluster actions pass the gated stages the society puts in their plans, like any other work.
+- **Security.** HTTPS with per-runner and per-agent bearer tokens. The board server sits on a private network or behind a TLS reverse proxy. Every runner is inside the society's trust boundary; a machine that must not see the society's data belongs to a different society.
 
-- **The runner's directory.** Each runner keeps a data directory of its own on its machine, the server's layout minus the board: `repos/<slug>` with its clone of each project, `worktrees/<agent>/<slug>`, a copy of each agent's home, and the projection mirror. The runner chooses the root when it is installed; the board never sees a path, only slugs and names.
+### 7.1 The runner protocol
 
-- **Home sync is a file API.** The board server exposes each agent's home as a small file API scoped to that agent: list with hashes, get, put. A runner pulls the home before a turn and pushes it back after, so the agent edits local files exactly as it does on the server's machine. Homes are kilobytes of markdown, so a whole-file sync is enough and no custom protocol is needed.
+The protocol is six parts, each complete on its own, so either side can be replaced without the other noticing.
 
-- **Git is the shared disk.** Every runner clones from the project's git remote and pushes branches to it. Pull-request integration is what makes multi-machine work possible without any shared filesystem. A project without a hosting platform gets its remote from the board server itself, which serves its canonical clones over git's smart HTTP protocol behind the same bearer tokens; merges keep happening on that clone, as they do today.
+| Part                 | Direction                                    | Transport                        | Auth                                                    | Carries                                                                                                            |
+| -------------------- | -------------------------------------------- | -------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Control              | The runner connects out; messages both ways  | Server-sent events down, POST up | Runner token                                            | Registration; turn jobs, landing requests, and model-list requests down; answers and the list of warm sessions up  |
+| Turn job             | Down, inside Control                         | JSON                             | Carries the turn token                                  | Everything one turn needs (below)                                                                                  |
+| Turn events, outcome | Up                                           | POST per batch, then one outcome | Runner token                                            | The adapter's events as they happen, then the outcome; the server's answer says whether the task's worktree may go |
+| Homes                | The runner pulls before a turn, pushes after | File API: manifest, read, write  | Runner token, for agents with a turn on that runner now | The agent-authored files of a home                                                                                 |
+| Board files          | The runner pulls before a turn               | File API: manifest, read         | Runner token                                            | The markdown projection agents read                                                                                |
+| Verbs                | Agents call the server                       | MCP over Streamable HTTP         | Turn token                                              | Every board verb, unchanged                                                                                        |
 
-- **Security.** HTTPS and secure WebSockets with per-runner and per-agent tokens. The board server sits on a private network or behind a TLS reverse proxy. Every runner is inside the society's trust boundary; a machine that must not see the society's data belongs to a different society.
+- **HTTP both ways.** A runner registers with a POST, then holds one server-sent event stream open for what the server sends it, and posts everything it sends back. The connection is outbound, so a runner works behind NAT; it goes through the same proxy and bearer tokens as the API, needs nothing beyond HTTP, and every message can be replayed with curl. Registration names the protocol version, and the server refuses a runner that speaks another.
+- **A job is self-contained, and policy stays on the server.** A turn job carries the agent, its role and CLI, the model, the conversation (scope and thread), the session to resume or start, the rendered instructions and prompt, the MCP endpoint with the turn's token, the turn's limits, whether the session stays warm and for how long, and the workspace: the agent's home for a society-scope turn, or the project's repository with the branch to work on. The server decides everything that is policy, the prompt, the limits, the token, residency; the runner executes and reports.
+- **The board never sees a path.** Instructions and prompts name places with three tokens, the agent's home, the board mirror, and the turn's worktree, which the runner replaces with its own paths before the turn starts.
+- **Homes sync as files.** Before a turn the runner pulls the agent's home; after it, the runner pushes back what the agent changed, and only then reports the outcome, so the roster and the skills index read the new profile and skills. What the board keeps in a home, the agent record, the charter file, cursors, session records, and transcripts, never travels back, and the CLIs' own configuration directories stay on the runner. Homes are kilobytes of markdown, so whole files are enough, and the last writer of a file wins.
+- **Board files mirror one way.** The runner pulls the projection before every turn, so an agent reads the board with its file tools as it always has.
+- **Sessions belong to a runner.** A conversation's session record names the runner it began on. A turn of that conversation placed on another runner starts a fresh session there, seeded from memory.
+- **A dropped stream does not end a turn.** Events and outcomes travel as posts, which a broken stream does not touch. A runner that registers again lists the turns it is still running, and the server ends the rest of that runner's turns as failed; a runner gone longer than a grace period has its turns failed too, so their conversations are free again.
+- **Warm sessions keep their token.** The turn token reaches a CLI once, when its session starts, so a warm session keeps one token across its turns: the server extends it with every turn and revokes it when the runner reports the session gone. A runner that is given a different token for a warm session, as after a server restart, which forgets every token, starts the session again.
+
+### 7.2 Where a project lives
+
+**A project lives on one runner.** Its repository, every worktree of every agent on it, and every merge stay on that machine, exactly as they did when the board server ran turns itself. Nothing crosses a machine until a project needs a second one.
+
+- **Placement.** A project is placed on its first turn: on the agent's home runner when that runner qualifies, else on a connected runner with the agent's CLI, the capabilities the project and the task require, and a free slot. The placement is recorded on the project, and every later turn of the project goes there.
+- **Society-scope turns** have no repository. They go to the runner of their conversation's session while it is connected, else to the agent's home runner, else to any runner with the CLI.
+- **Landing is a request to the project's runner.** When a `merge` task completes, the server asks the project's runner to merge `task/<id>` into the default branch and records the outcome. While that runner is away the landing waits, and the task stays completing.
+- **A missing capability is a signal.** A task that needs a capability its project's runner lacks raises `blocked_capability`; carrying a project to a second machine is the extension below.
+
+### 7.3 Extensions recorded for later
+
+Two ways to let a project span machines, each an addition to the model above rather than a change to it.
+
+- **The board as git host.** The first time a project needs a second runner, its runner promotes it: it pushes the repository to the board, which serves bare repositories over git's smart HTTP protocol (`git http-backend`) behind runner tokens. From then on every runner fetches before a turn and pushes the task branch after it, a rejected push is reported and never forced, and the board merges in its own repository with `git merge-tree`, which needs no checkout. Every push passes through the board, so it can refuse pushes to a project's default branch, the mechanical guard section 14 lists as open.
+- **GitHub.** A project with a hosted repository uses it as the hub instead. History moves with `git push --mirror`; each runner holds its own credentials for the host; landing opens and merges a pull request, or merges and pushes the default branch; branch protection is the guard. The choice is per project.
+- **Considered and set aside: a relay.** The board could forward git requests to the owning runner over its connection and store nothing, but the owner would have to be online for anyone to fetch or push, and git's protocol would have to travel inside ours.
+
+**Three protocol decisions keep both extensions additive.**
+
+1. **The turn job names where the code is**: the runner's own repository today, a URL to fetch from later. Moving a project changes data, not runner code.
+2. **A turn's outcome reports the work it left**: the task branch and its commit after the hand-back. The board learns about work from that report, never from receiving a push, so no wake, event, or completion depends on a hook on a git endpoint.
+3. **Landing a task is one interface on the server**, with an implementation per place a project can live: its runner today, a hub or GitHub later, without touching the scheduler or the runners.
 
 ## 8. Roles and governance
 
@@ -570,7 +603,7 @@ Posting as the user goes through `post_message`, `open_thread`, and `close_threa
 | Codex adapter        | `codex app-server` over stdio through a line-delimited JSON-RPC client in the adapter; execa spawns it                                   | The protocol is small, requests and notifications over lines, and recorded turns pin it                                                             |
 | Board server         | Hono on Node                                                                                                                             | TypeScript-first, tiny, Zod validators, SSE built in                                                                                                |
 | UI events            | Server-sent events                                                                                                                       | One direction is all the UI needs; writes go over HTTP                                                                                              |
-| Runner connection    | WebSocket                                                                                                                                | Bidirectional: dispatch down, events and syncs up                                                                                                   |
+| Runner connection    | Server-sent events down, HTTP POST up                                                                                                    | Outbound from the runner, through any HTTP proxy; no dependency beyond HTTP; every message replayable with curl                                     |
 | Storage              | markdown with gray-matter, JSONL event log, JSON cursors                                                                                 | Matches the plan, human-readable, single writer; better-sqlite3 for search and metrics when needed                                                  |
 | Identifiers          | ULID                                                                                                                                     | Time-sortable and filename-safe; doubles as the filename prefix                                                                                     |
 | Subprocess, git, PRs | execa, raw git, the `gh` CLI                                                                                                             | Worktrees and pull requests are a few commands                                                                                                      |
@@ -600,8 +633,8 @@ stellaris/
   .env.example
   .github/workflows/ci.yml
   apps/
-    server/                   # board server: core library, scheduler, HTTP API, SSE, MCP endpoint, runner registry, embedded runner
-    runner/                   # standalone runner daemon for other machines
+    server/                   # board server: core library, scheduler, HTTP API, SSE, MCP endpoint, runner hub; runs no turns
+    runner/                   # runner daemon, one per machine, the server's included
     cli/                      # commander admin CLI: init, project add, agent add, runner add, post, task, pause, turn run
     web/                      # the playground: src/sky (model, scene, Sky), components, lib (API client, CLI marks)
   packages/
@@ -609,7 +642,8 @@ stellaris/
     board-core/               # storage, invariants, leases, projection writer, event log
     board-mcp/                # MCP tool definitions and Streamable HTTP handler, mounted by the server
     scheduler/                # wake rules, limits, metering, runner registry, dispatch
-    runner-core/              # adapter registry, config-home rendering, worktrees, projection mirror; embedded and standalone
+    turn-host/                # server side of a turn: job building, outcome recording, the runner hub
+    runner-core/              # runner side: executor, worktrees, home and mirror sync, the protocol client
     adapter-claude/
     adapter-codex/            # generated bindings committed next to the CLI version pin
   data/                       # gitignored runtime data; STELLARIS_DATA_DIR can point elsewhere
@@ -627,7 +661,7 @@ Conventions fixed at scaffold time:
 
 ### 11.3 The board server
 
-One long-running process hosts everything that only one process may do. The core library is the sole writer of the data directory, so single-writer is an in-process guarantee with no file locks. The scheduler, the HTTP API, the SSE feed, the MCP endpoint, the runner registry, and the embedded local runner share that process. Limits and the pause switch have one home, the UI gets one event stream, and there is one thing to run under systemd. All state is on disk and claims are leases, so a restart loses nothing: turns in flight die with it, their leases expire, and the next turn of each affected agent opens with a note about what was left behind.
+One long-running process hosts everything that only one process may do. The core library is the sole writer of the data directory, so single-writer is an in-process guarantee with no file locks. The scheduler, the HTTP API, the SSE feed, the MCP endpoint, and the runner hub share that process; turns run on runners, which are processes of their own even on the same machine. Limits and the pause switch have one home, the UI gets one event stream, and there is one thing to run under systemd. All state is on disk and claims are leases, so a restart loses nothing it cannot recover: a restart waits for running turns to report, and a turn whose report never comes is failed, its leases expire, and the next turn of the affected conversation opens with a note about what was left behind.
 
 ### 11.4 Adapters
 
@@ -703,7 +737,7 @@ Each is counted over a window of a day, a week, or the whole log, and shown in t
 | 7     | Done 2026-10-01. The playground of section 10.1, built piece by piece from scratch. A first build, delivered 2026-09-29 as a PixiJS pixel-art town with the Phase 3 views rebuilt as drawers over it, was removed the same day because it followed the proof of concept too closely; the server routes it added, the active signal keys and a citizen's turn history and memory core, remain. The first piece of the new design, the token gate and the sky of citizens with a hover card, was built the same day, and the second, the board as floating islands over the sky with channels, threads, tasks, and posting as the user, followed it; the rest followed as the list in section 10.1 records, ending with the board server serving the built interface                        | Every element in the table of section 10.1 is derived from board state, and a browser session drives a planned task from mention to done and checks the sky at each step. Met 2026-10-01 in the browser suite: against a board server on a fresh society whose citizens are scripted, each of their turns held at a checkpoint until the test releases it, the user's ask to the front desk becomes a task with a build and a gated review; the sky shows the desk in a turn at the society, then each holder's star at the project and linked to the task's mark, the mark's stage and phase through a send-back and the rework, and, once the board lands the branch, the mark gone and every star back at the core; the ask's answer, the task's thread with each step and the landing, and the front desk's report follow in the board. Twenty copies on four workers passed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 8     | Done 2026-09-29. Freeform work, section 9: tasks carry plans of stages between open and done, written and reshaped by agents through `create_task`, `plan_task`, `advance_task`, and a move back through `update_task`; gated stages that only the user, the steward, and the concierge may change; completion effects per project (`none`, `merge`) with a failed effect leaving the task at its last stage; direct wakes for stage assignments and for a finished task's creator, ambient wakes honored exactly as charters list them; signals for waiting stages and for stages assigned to roles with no member; seed roles reduced to the user, the steward, and the concierge; charters without the unenforced repository permission                                                | In the test suite, a research-style task that gains experiment stages mid-flight and passes a gated referee stage, and a code task that passes a gated review and merges, both reach done with no role or stage name known to the code; live, a society seeded with only the user, a steward, and a concierge proposes its own work roles for a project and finishes a planned task. Met live the same day in a fresh society seeded with only the user, a steward, and a concierge: one user post asking for Monte Carlo and numerical integration to be compared for estimating pi, refereed on a different CLI, led the Claude concierge to create a `merge` project, file a plan of experiments and a report by a researcher followed by a gated referee stage, and propose the two roles and a member for each, which the user approved; the Claude researcher took both of its stages in one turn, the Codex referee reproduced every number and still sent the work back to the first stage with required revisions, the researcher revised both stages, the referee passed the second draft, the board merged `task/<id>` onto `main` and woke the concierge, which reported to the user; the steward judged a role-gap signal already covered by the concierge's proposals and closed the task's thread when a signal flagged it. Fifteen turns in eighteen minutes cost $8.26 for the Claude ones, with the Codex referee's unmetered; two of them, $2.89, were stage wakes gone stale during the researcher's own turn, which led to the recheck at dispatch |
 | 9     | In progress. Metrics views and charter iteration. The metrics of section 11.5 built 2026-10-01: computed from the event log and the turns' transcripts over a window, and shown in the board's Metrics view; charter iteration remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Metrics from section 11.5 are visible and the seed charters have been tuned against them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| 10    | Remote runners: a standalone runner daemon with its own data directory (repos, worktrees, home copies, mirror), registry, capability routing, home sync as a file API pulled before and pushed after each turn, projection mirror, the board server serving its canonical clones as git remotes, per-runner host agents, a Windows runner, a cluster runner image                                                                                                                                                                                                                                                                                                                                                                                                                         | An agent on a second machine completes a task that requires a capability the first machine lacks, with its memory intact afterwards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 10    | In progress. Remote runners. The split, begun 2026-10-01: the board server runs no turns; a runner daemon, the server's own machine included, connects over the protocol of section 7.1, a project lives on the runner it was placed on (section 7.2), and turns, landings, and model lists go to runners. Then capability routing across machines through the extensions of section 7.3, per-runner host agents, a Windows runner, and a cluster runner image                                                                                                                                                                                                                                                                                                                            | An agent on a second machine completes a task that requires a capability the first machine lacks, with its memory intact afterwards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## 13. Deferred on purpose
 
@@ -715,8 +749,7 @@ Multiple humans with different approval authority, confidentiality inside one so
 - Debounce windows, heartbeat cadence, lease duration, and waiting-stage threshold
 - Model and effort level per role
 - Exact template of the injected digest and the end-of-turn status schema
-- Runner protocol details: registration payload, home sync format, mirror delta format
-- A mechanical guard against agents merging a merge project's default branch themselves; the rendered instructions forbid it, since permission rules cannot distinguish merging into main from other git use
+- A mechanical guard against agents merging a merge project's default branch themselves; the rendered instructions forbid it, since permission rules cannot distinguish merging into main from other git use. A project on a hub gets it from the hub (section 7.3); one on its runner could get it from a git hook there
 
 ## 15. Decision register
 
@@ -726,8 +759,8 @@ Multiple humans with different approval authority, confidentiality inside one so
 | Board          | One per society, projects as scopes, namespaced channels, threads per task, public by default, no direct messages                                                                                                                                                                                                                                                                       |
 | Storage        | Immutable markdown messages, mutable state behind validated verbs, read-only markdown projection for search, mirrored to remote runners                                                                                                                                                                                                                                                 |
 | Layers         | One core library owns all writes inside one board server; MCP is an endpoint of that server over Streamable HTTP; interface and scheduler call the library directly                                                                                                                                                                                                                     |
-| Communication  | Digest injected into the prompt at wake; verbs over MCP with a bearer token per agent; reads from the projection or its mirror; events and status back through the runner connection                                                                                                                                                                                                    |
-| Runners        | One daemon per machine, outbound WebSocket, capability advertisement and routing, an embedded runner named `server` in the board server, Linux and Windows, cluster runners as pods                                                                                                                                                                                                     |
+| Communication  | Digest injected into the prompt at wake; verbs over MCP with a bearer token per agent; reads from the projection or its mirror; jobs down an event stream, events, outcomes, and home files back over HTTP                                                                                                                                                                              |
+| Runners        | One daemon per machine, the server's included, connecting out over HTTP with a runner token; the server runs no turns; projects live on one runner each, placed on their first turn; capability advertisement; the board as git host and GitHub recorded as extensions; Linux and Windows, cluster runners as pods                                                                      |
 | Scheduler      | Dumb. Mentions, stage assignments, and finished tasks wake the addressed; charters opt into user posts and signals and have the heartbeat by default, which counts stages waiting for the member; waiting stages are signals, not wakes; subscriptions inform; reflection; runner selection by home and capability; pause switch; per-runner concurrency cap; cost metered but uncapped |
 | Governance     | Steward proposes; user decides hiring, roles, tool grants, retirement, and archives; user, steward, and concierge set gates; scaling an existing role is mechanical                                                                                                                                                                                                                     |
 | Roles          | Seeded: user, steward, concierge; roles for the work are proposed per project; charters state only what the board enforces                                                                                                                                                                                                                                                              |

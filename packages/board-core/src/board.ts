@@ -2199,7 +2199,7 @@ export class Board {
         this.assertMayGate(actor, "set a gate");
       }
       const planned: readonly PlanStage[] = args.stages ?? [{ name: "work", gate: false }];
-      await this.validateAssignees(planned);
+      await this.validateAssignees(project.slug, planned);
       const stages = planned.map((stage, index) => stageFrom(stage, `s${index + 1}`));
       const first = stages[0];
       if (first === undefined) {
@@ -2499,7 +2499,7 @@ export class Board {
       if (guarded.length > 0) {
         this.assertMayGate(actor, guarded.join(", "));
       }
-      await this.validateAssignees(replanned);
+      await this.validateAssignees(current.project, replanned);
       const stages = [...current.stages.slice(0, from), ...replanned];
       const now = stages[index];
       if (now === undefined) {
@@ -4395,14 +4395,27 @@ export class Board {
   }
 
   /** A stage may name any role, so a missing one surfaces as a role gap; a named citizen must exist. */
-  private async validateAssignees(stages: readonly { agent?: Name | undefined }[]): Promise<void> {
+  /**
+   * A stage may name only an active member of its task's project, who alone could claim it, or the
+   * user, who may hold any stage; a name the stage could never be held by is refused when planned.
+   */
+  private async validateAssignees(
+    project: Name,
+    stages: readonly { agent?: Name | undefined }[],
+  ): Promise<void> {
     for (const stage of stages) {
-      if (stage.agent === undefined) {
+      if (stage.agent === undefined || stage.agent === USER_NAME) {
         continue;
       }
       const agent = await this.readAgent(stage.agent);
       if (agent.status !== "active") {
         throw new BoardError("INVALID_STATE", `${stage.agent} is retired`);
+      }
+      if (!agent.memberships.includes(project)) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `${stage.agent} is not a member of ${project}, so could never hold the stage; add them to the project first, or assign the stage to a role`,
+        );
       }
     }
   }

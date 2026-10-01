@@ -302,6 +302,54 @@ describe("Board", () => {
     ]);
   });
 
+  it("names on a stage only a citizen who could hold it", async () => {
+    const { board } = await society();
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["lab"],
+    });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const refused = { code: "INVALID_STATE" };
+    // A member, a role, nobody, and the user, who may hold any stage, are all fine.
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [
+        { name: "build", agent: "eng-1" },
+        { name: "review", role: "reviewer" },
+        { name: "polish" },
+        { name: "sign off", agent: "user" },
+      ],
+    });
+    // A citizen of another project could never claim it, nor could a society role.
+    for (const agent of ["eng-2", "desk"]) {
+      await expect(
+        board.createTask(USER, { project: "demo", title: "u", stages: [{ name: "build", agent }] }),
+      ).rejects.toMatchObject(refused);
+      await expect(
+        board.planTask(USER, {
+          task_id: task.id,
+          stages: [
+            { id: "s1", name: "build", agent: "eng-1" },
+            { name: "extra", agent },
+          ],
+        }),
+      ).rejects.toMatchObject(refused);
+    }
+    // Once added to the project, it may be named.
+    await board.joinProject(USER, { project: "demo", agent: "eng-2" });
+    await board.planTask(USER, {
+      task_id: task.id,
+      stages: [
+        { id: "s1", name: "build", agent: "eng-1" },
+        { name: "extra", agent: "eng-2" },
+      ],
+    });
+  });
+
   it("keeps society roles out of every project, by every path", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

@@ -1,7 +1,7 @@
 import { TaskFrontmatterSchema, type Member, type Project, type Task } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import type { SchedulerView } from "../lib/api.js";
-import { skyModel, starOf, type SkySnapshot } from "./model.js";
+import { markLabel, skyModel, starOf, type SkySnapshot } from "./model.js";
 
 const ts = "2026-09-29T10:00:00.000Z";
 
@@ -247,6 +247,13 @@ describe("skyModel", () => {
       ["2", "waiting", null, null],
       ["3", "working", "ref", null],
       ["5", "returned", null, null],
+    ]);
+    // The keyboard's copy of the sky says the same in words, link included.
+    expect(model.tasks.map((mark) => markLabel(mark, "Lab"))).toEqual([
+      "Task task 1 at Lab, stage Work, being worked, held by ada, in a turn there",
+      "Task task 2 at Lab, stage Work, waiting for a holder, for any researcher",
+      "Task task 3 at Lab, stage Work, being worked, held by ref",
+      "Task task 5 at Lab, stage Work, sent back, for any researcher",
     ]);
     const [first, second, third] = model.tasks;
     // Outside the sphere, and inside the room the layout keeps around it.

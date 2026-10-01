@@ -29,7 +29,7 @@ import {
   useTask,
   useThreads,
 } from "./lib/session.js";
-import { skyModel } from "./sky/model.js";
+import { markLabel, skyModel } from "./sky/model.js";
 import { Sky, type Insets } from "./sky/Sky.js";
 
 const NO_INSETS: Insets = { left: 0, right: 0 };
@@ -357,7 +357,7 @@ export function Playground() {
                   onBlur={() => setHovered(null)}
                   onClick={() => openTask(candidate.id)}
                 >
-                  Task {candidate.title}, {candidate.phase} at {placeName(candidate.project)}
+                  {markLabel(candidate, placeName(candidate.project))}
                 </button>
               </li>
             ))}

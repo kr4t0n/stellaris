@@ -7,7 +7,9 @@ test("a task in play is a mark in the sky whose card says where it stands", asyn
 
   // The keyboard mirror of the sky lists the marks; focusing one shows its card.
   const mark = page.getByRole("button", { name: /^Task Compare shortest-path algorithms/ });
-  await expect(mark).toHaveAccessibleName("Task Compare shortest-path algorithms, waiting at Lab");
+  await expect(mark).toHaveAccessibleName(
+    "Task Compare shortest-path algorithms at Lab, stage Sign off, waiting for a holder, for user",
+  );
   await mark.focus();
   const card = page.getByRole("article", { name: "Task Compare shortest-path algorithms" });
   await expect(card).toBeVisible();

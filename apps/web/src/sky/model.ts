@@ -7,7 +7,7 @@ import {
   type Project,
   type Task,
 } from "@stellaris/shared";
-import { assigneeOf, phaseOf, type TaskPhase } from "../board/tasks.js";
+import { assigneeOf, PHASES, phaseOf, type TaskPhase } from "../board/tasks.js";
 import type { SchedulerView } from "../lib/api.js";
 
 export type StarState = "idle" | "queued" | "working";
@@ -59,6 +59,23 @@ export interface TaskMark {
   readonly linked: string | null;
   readonly x: number;
   readonly y: number;
+}
+
+/**
+ * A task mark in words, for the copy of the sky that keyboards and screen readers use: its stage,
+ * its phase, and who holds it, with the link when the holder is in a turn there, or who may take it.
+ */
+export function markLabel(mark: TaskMark, place: string): string {
+  const phase = PHASES.find((each) => each.phase === mark.phase)?.label.toLowerCase();
+  const who =
+    mark.holder === null
+      ? mark.waitingFor === null
+        ? null
+        : `for ${mark.waitingFor}`
+      : `held by ${mark.holder}${mark.linked === null ? "" : ", in a turn there"}`;
+  return [`Task ${mark.title} at ${place}`, `stage ${mark.stage}`, phase, who]
+    .filter((part) => part !== null && part !== undefined)
+    .join(", ");
 }
 
 /** Where everything sits, in world units around the origin. The scene eases toward it. */

@@ -61,6 +61,8 @@ const RunnerBodySchema = z.object({ name: NameSchema });
 const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
+/** How many commits of a home's history one request reads. */
+const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
 const ChannelBodySchema = z.object({
   project: NameSchema.nullable().default(null),
   name: NameSchema,
@@ -120,7 +122,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
   // A member's finished turns from the event log and each one's steps, its memory core, its own
-  // skills, and the conflict copies in its home, read only.
+  // skills, the conflict copies in its home, and the home's history, read only.
   api.get("/agents/:name/turns", async (c) =>
     c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
   );
@@ -139,6 +141,13 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     await board.readAgent(c.req.param("name"));
     return c.json(await board.listHomeConflicts(c.req.param("name")));
   });
+  api.get("/agents/:name/history", async (c) => {
+    const limit = HistoryLimitSchema.parse(c.req.query("limit") ?? "30");
+    return c.json(await board.homeHistory(c.req.param("name"), limit));
+  });
+  api.get("/agents/:name/history/:commit", async (c) =>
+    c.json(await board.homeChange(c.req.param("name"), c.req.param("commit"))),
+  );
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.

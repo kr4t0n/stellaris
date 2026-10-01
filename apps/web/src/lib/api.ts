@@ -3,6 +3,8 @@ import {
   ChannelRefSchema,
   DecisionSchema,
   HomeConflictSchema,
+  HomeFileDiffSchema,
+  HomeHistorySchema,
   KnowledgeSchema,
   AgentSchema,
   MemberSchema,
@@ -215,6 +217,20 @@ export function createApi(token: string) {
       get(`/api/agents/${encodeURIComponent(name)}/memory`, token, BodySchema),
     agentSkills: (name: string) =>
       get(`/api/agents/${encodeURIComponent(name)}/skills`, token, SkillSchema.array()),
+    /** The newest changes to a citizen's home. */
+    history: (name: string, limit: number) =>
+      get(
+        `/api/agents/${encodeURIComponent(name)}/history?limit=${limit}`,
+        token,
+        HomeHistorySchema,
+      ),
+    /** One change to a citizen's home, file by file with its patch. */
+    change: (name: string, commit: string) =>
+      get(
+        `/api/agents/${encodeURIComponent(name)}/history/${encodeURIComponent(commit)}`,
+        token,
+        HomeFileDiffSchema.array(),
+      ),
     /** Conflict copies waiting in a citizen's home for it to reconcile. */
     conflicts: (name: string) =>
       get(`/api/agents/${encodeURIComponent(name)}/conflicts`, token, HomeConflictSchema.array()),

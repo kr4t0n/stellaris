@@ -22,6 +22,7 @@ import {
   useTasks,
   useTurnHistory,
 } from "../lib/session.js";
+import { CitizenHistory } from "./CitizenHistory.js";
 import { CitizenMemory } from "./CitizenMemory.js";
 import { CitizenTurns } from "./CitizenTurns.js";
 import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
@@ -76,24 +77,35 @@ function HeldTasks({ project, name }: { project: string; name: string }) {
 /** A citizen: what it is doing now, the turns it took, and what it remembers. */
 export function CitizenView() {
   const { name } = useParams({ from: "/citizen/$name" });
-  const { scope, tab } = useSearch({ from: "/citizen/$name" });
-  return <CitizenPage key={name} name={name} chosen={scope ?? null} tab={tab ?? "now"} />;
+  const { scope, tab, turn } = useSearch({ from: "/citizen/$name" });
+  return (
+    <CitizenPage
+      key={name}
+      name={name}
+      chosen={scope ?? null}
+      tab={tab ?? "now"}
+      turn={turn ?? null}
+    />
+  );
 }
 
 const TABS: ReadonlyArray<{ readonly tab: CitizenTab; readonly label: string }> = [
   { tab: "now", label: "Now" },
   { tab: "turns", label: "Turns" },
   { tab: "memory", label: "Memory" },
+  { tab: "history", label: "History" },
 ];
 
 function CitizenPage({
   name,
   chosen,
   tab,
+  turn,
 }: {
   name: string;
   chosen: string | null;
   tab: CitizenTab;
+  turn: string | null;
 }) {
   const members = useMembers();
   const roles = useRoles();
@@ -197,9 +209,11 @@ function CitizenPage({
         ))}
       </nav>
       {tab === "turns" ? (
-        <CitizenTurns name={name} cli={member.cli} />
+        <CitizenTurns key={turn} name={name} cli={member.cli} opened={turn} />
       ) : tab === "memory" ? (
         <CitizenMemory member={member} charter={charter} />
+      ) : tab === "history" ? (
+        <CitizenHistory name={name} />
       ) : (
         <NowTab
           name={name}

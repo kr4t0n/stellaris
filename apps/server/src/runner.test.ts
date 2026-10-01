@@ -716,6 +716,16 @@ describe("turns on a runner over the runner protocol", () => {
     // One version is in place and the other beside it; neither is lost.
     expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
     expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
+    // The history shows both turns' edits and the merge that kept the copy, with that alone.
+    const { changes } = await board.homeHistory("stew", 30);
+    const turns = changes.filter((change) => change.turnId !== undefined);
+    expect(turns.map((change) => change.kind)).toEqual(["turn", "turn"]);
+    expect(
+      turns.every((change) => change.files.some((file) => file.path === "memory/core.md")),
+    ).toBe(true);
+    expect(
+      changes.filter((change) => change.kind === "merge").map((change) => change.files),
+    ).toEqual([[{ path: conflict?.path, status: "added", added: 7, removed: 0 }]]);
     await run({
       agent: "stew",
       project: "society",

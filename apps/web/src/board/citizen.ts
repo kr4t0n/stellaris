@@ -8,7 +8,7 @@ import {
 import { elapsed } from "../lib/live.js";
 
 /** The citizen view's tabs; the transcript of what it is doing now is the default. */
-export type CitizenTab = "now" | "turns" | "memory";
+export type CitizenTab = "now" | "turns" | "memory" | "history";
 
 export function scopeName(scope: string): string {
   return scope === SOCIETY_SCOPE ? "the society" : scope;

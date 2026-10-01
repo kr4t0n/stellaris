@@ -8,6 +8,8 @@ import {
   currentStage,
   channelRef,
   ChannelProposalSchema,
+  CommitIdSchema,
+  conflictCopyOf,
   DecisionSchema,
   describeCharter,
   KnowledgeSchema,
@@ -46,6 +48,8 @@ import {
   type CliKind,
   type Decision,
   type HomeConflict,
+  type HomeFileDiff,
+  type HomeHistory,
   type Knowledge,
   type Member,
   type MemberProposal,
@@ -192,8 +196,6 @@ export interface SignalRecord {
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
-/** A runner's conflict copy, `<file>.conflict-<label>`, capturing the file it sits beside. */
-const CONFLICT_COPY = /^(.+)\.conflict-[^/.]+$/;
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -3382,8 +3384,8 @@ export class Board {
           await walk(path.join(dir, entry.name), relative);
           continue;
         }
-        const file = entry.isFile() ? CONFLICT_COPY.exec(relative)?.[1] : undefined;
-        if (file !== undefined) {
+        const file = entry.isFile() ? conflictCopyOf(relative) : null;
+        if (file !== null) {
           // A push that reconciled the copy may have removed it since the walk read the directory.
           const since =
             (await this.homes.changedAt(home, relative)) ??
@@ -3396,6 +3398,23 @@ export class Board {
     };
     await walk(home, "");
     return found.toSorted((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** The newest `limit` changes to an agent's home, newest first; empty while it is no repository. */
+  async homeHistory(agent: Name, limit: number): Promise<HomeHistory> {
+    await this.readAgent(agent);
+    return this.homes.history(this.paths.agent(agent), limit);
+  }
+
+  /** One change to an agent's home, file by file with its patch. */
+  async homeChange(agent: Name, commit: string): Promise<HomeFileDiff[]> {
+    await this.readAgent(agent);
+    const id = CommitIdSchema.safeParse(commit);
+    const files = id.success ? await this.homes.change(this.paths.agent(agent), id.data) : null;
+    if (files === null) {
+      throw new BoardError("NOT_FOUND", `${agent}'s home has no commit ${commit}`);
+    }
+    return files;
   }
 
   /**

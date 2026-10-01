@@ -88,10 +88,16 @@ const routeTree = rootRoute.addChildren([
     getParentRoute: () => rootRoute,
     path: "/citizen/$name",
     // `scope` picks which of a citizen's turns to show, when it is in more than one; `tab` picks
-    // its history or its memory over what it is doing now.
-    validateSearch: (search: Record<string, unknown>): { scope?: string; tab?: CitizenTab } => ({
+    // its turns, its memory, or its home's history over what it is doing now; `turn` opens one of
+    // its finished turns.
+    validateSearch: (
+      search: Record<string, unknown>,
+    ): { scope?: string; tab?: CitizenTab; turn?: string } => ({
       ...(typeof search["scope"] === "string" ? { scope: search["scope"] } : {}),
-      ...(search["tab"] === "turns" || search["tab"] === "memory" ? { tab: search["tab"] } : {}),
+      ...(search["tab"] === "turns" || search["tab"] === "memory" || search["tab"] === "history"
+        ? { tab: search["tab"] }
+        : {}),
+      ...(typeof search["turn"] === "string" ? { turn: search["turn"] } : {}),
     }),
     component: lazyRouteComponent(() => import("./board/CitizenView.js"), "CitizenView"),
   }),

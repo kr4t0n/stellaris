@@ -37,6 +37,33 @@ test("a finished turn opens to every tool call with what it returned", async ({ 
   await expect(view).toContainText('{"id":"01M3Q2AAAAAAAAAAAAAAAAAAA1"}');
 });
 
+test("a home's history opens each change to its patch and to the turn that made it", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("link", { name: "History" }).click();
+  await expect(page).toHaveURL(/\/citizen\/desk\?tab=history$/);
+
+  const turn = view.locator("summary", {
+    hasText: "memory/core.md +1 −0, skills/routing/SKILL.md new",
+  });
+  await expect(turn).toContainText("turn");
+  await expect(view.locator("summary", { hasText: "board" })).toContainText("memory/core.md new");
+  await turn.click();
+  const added = view.getByText("+- The user writes names plainly.");
+  await expect(added).toBeVisible();
+  await expect(added).toHaveClass(/text-emerald-300/);
+  await expect(view).toContainText("+description: Send a post to who can act on it.");
+
+  // The change names its turn, which opens in the Turns tab with its steps.
+  await view.getByRole("link", { name: "Open the turn that made it" }).click();
+  await expect(page).toHaveURL(/\/citizen\/desk\?tab=turns&turn=01M3Q2DDDDDDDDDDDDDDDDDDD2$/);
+  await expect(view).toContainText("Looking at the request.");
+  await expect(view.locator("summary", { hasText: "ls lab/bench" })).toBeVisible();
+});
+
 test("after a restart the Now tab shows the last turn from its transcript", async ({ page }) => {
   await fakeBoard(page);
   await page.goto("/citizen/desk");

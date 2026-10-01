@@ -504,6 +504,58 @@ export const HomeConflictSchema = z.object({
 });
 export type HomeConflict = z.infer<typeof HomeConflictSchema>;
 
+/** A runner's conflict copy, `<file>.conflict-<label>`, capturing the file it sits beside. */
+const CONFLICT_COPY = /^(.+)\.conflict-[^/.]+$/;
+
+/** The file a conflict copy sits beside, or null when the path is not a conflict copy. */
+export function conflictCopyOf(copy: string): string | null {
+  return CONFLICT_COPY.exec(copy)?.[1] ?? null;
+}
+
+/** A commit id in a home's repository, as git prints it in full. */
+export const CommitIdSchema = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
+
+/** One file a change to a home touched. */
+export const HomeFileChangeSchema = z.object({
+  path: z.string().min(1),
+  status: z.enum(["added", "modified", "deleted"]),
+  /** Lines added and removed, or null for a binary file. */
+  added: z.number().int().nonnegative().nullable(),
+  removed: z.number().int().nonnegative().nullable(),
+});
+export type HomeFileChange = z.infer<typeof HomeFileChangeSchema>;
+
+/**
+ * One change in a home's history: what a turn left, what the board wrote, or a merge of two
+ * runners' work that kept conflict copies, listing only those copies.
+ */
+export const HomeChangeSchema = z.object({
+  commit: CommitIdSchema,
+  at: IsoDateTimeSchema,
+  kind: z.enum(["turn", "board", "merge"]),
+  author: z.string(),
+  /** The turn that made it, from the runner's commit message. */
+  turnId: UlidSchema.optional(),
+  subject: z.string(),
+  files: z.array(HomeFileChangeSchema),
+});
+export type HomeChange = z.infer<typeof HomeChangeSchema>;
+
+export const HomeHistorySchema = z.object({
+  changes: z.array(HomeChangeSchema),
+  /** Whether older commits remain past the ones read. */
+  more: z.boolean(),
+});
+export type HomeHistory = z.infer<typeof HomeHistorySchema>;
+
+/** One file of a change with its patch: the hunks, or null for a binary file. */
+export const HomeFileDiffSchema = HomeFileChangeSchema.pick({ path: true, status: true }).extend({
+  patch: z.string().nullable(),
+  /** The patch was cut at its size limit. */
+  truncated: z.boolean(),
+});
+export type HomeFileDiff = z.infer<typeof HomeFileDiffSchema>;
+
 /** A knowledge topic: a project's, or the society's when the project is null. */
 export const KnowledgeSchema = z.object({
   topic: NameSchema,

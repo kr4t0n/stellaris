@@ -1,5 +1,5 @@
 import type { Task } from "@stellaris/shared";
-import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { CliKind, MetricsWindow } from "@stellaris/shared";
 import type { Api } from "./api.js";
@@ -169,6 +169,27 @@ export function useMemoryCore(name: string) {
 export function useAgentSkills(name: string) {
   const { api } = useSession();
   return useQuery({ queryKey: ["agent-skills", name], queryFn: () => api.agentSkills(name) });
+}
+
+/** The newest changes to a citizen's home. */
+export function useHomeHistory(name: string, limit: number) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["history", name, limit],
+    queryFn: () => api.history(name, limit),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** One change to a citizen's home, read when it is opened; a commit never changes. */
+export function useHomeChange(name: string, commit: string, enabled: boolean) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["home-change", name, commit],
+    queryFn: () => api.change(name, commit),
+    enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 }
 
 /** The conflict copies a citizen has yet to reconcile in its home. */

@@ -267,6 +267,52 @@ const DESK_TRANSCRIPT = [
   },
 ];
 
+const DESK_TURN_COMMIT = "a".repeat(40);
+const DESK_HOME_COMMIT = "b".repeat(40);
+
+/** desk's home history: what its turn changed, after the board created the home. */
+const DESK_HISTORY = {
+  changes: [
+    {
+      commit: DESK_TURN_COMMIT,
+      at: "2026-09-29T09:03:01.000Z",
+      kind: "turn",
+      author: "desk",
+      turnId: DESK_TURN_ID,
+      subject: `turn ${DESK_TURN_ID}`,
+      files: [
+        { path: "memory/core.md", status: "modified", added: 1, removed: 0 },
+        { path: "skills/routing/SKILL.md", status: "added", added: 4, removed: 0 },
+      ],
+    },
+    {
+      commit: DESK_HOME_COMMIT,
+      at: "2026-09-29T08:00:00.000Z",
+      kind: "board",
+      author: "stellaris-board",
+      subject: "home: created by the board",
+      files: [{ path: "memory/core.md", status: "added", added: 1, removed: 0 }],
+    },
+  ],
+  more: false,
+};
+
+const DESK_TURN_CHANGE = [
+  {
+    path: "memory/core.md",
+    status: "modified",
+    patch: "@@ -1 +1,3 @@\n # Core memory\n+\n+- The user writes names plainly.",
+    truncated: false,
+  },
+  {
+    path: "skills/routing/SKILL.md",
+    status: "added",
+    patch:
+      "@@ -0,0 +1,4 @@\n+---\n+name: routing\n+description: Send a post to who can act on it.\n+---",
+    truncated: false,
+  },
+];
+
 const LAB_TOPIC = {
   topic: "experiments",
   project: "lab",
@@ -676,6 +722,10 @@ export async function fakeBoard(
             path: "/x",
           },
         ]);
+      case "/api/agents/desk/history":
+        return json(route, DESK_HISTORY);
+      case `/api/agents/desk/history/${DESK_TURN_COMMIT}`:
+        return json(route, DESK_TURN_CHANGE);
       case "/api/agents/desk/conflicts":
         return json(route, [
           {

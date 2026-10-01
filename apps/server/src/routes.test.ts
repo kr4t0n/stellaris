@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import { TranscriptEntrySchema, TurnHistoryEntrySchema } from "@stellaris/shared";
+import {
+  HomeFileDiffSchema,
+  HomeHistorySchema,
+  TranscriptEntrySchema,
+  TurnHistoryEntrySchema,
+} from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -398,6 +403,28 @@ describe("board server routes", () => {
       },
     ]);
     expect((await app.request("/api/agents/nobody/conflicts", { headers })).status).toBe(404);
+
+    // The home's history so far is the board creating it, and each change opens to its patch.
+    const history = HomeHistorySchema.parse(
+      await (await app.request("/api/agents/eng-1/history?limit=10", { headers })).json(),
+    );
+    expect(history.more).toBe(false);
+    expect(history.changes.map((change) => [change.kind, change.subject])).toEqual([
+      ["board", "home: created by the board"],
+    ]);
+    const created = history.changes[0]?.commit ?? "";
+    const files = HomeFileDiffSchema.array().parse(
+      await (await app.request(`/api/agents/eng-1/history/${created}`, { headers })).json(),
+    );
+    expect(files.map((file) => file.path)).toContain("memory/core.md");
+    for (const wrong of ["0".repeat(40), "HEAD", "--output=x"]) {
+      expect(
+        (await app.request(`/api/agents/eng-1/history/${encodeURIComponent(wrong)}`, { headers }))
+          .status,
+      ).toBe(404);
+    }
+    expect((await app.request("/api/agents/eng-1/history?limit=0", { headers })).status).toBe(400);
+    expect((await app.request("/api/agents/nobody/history", { headers })).status).toBe(404);
   });
 
   it("serves the roster with profiles and the runner's resident pairs", async () => {

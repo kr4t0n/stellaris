@@ -1,5 +1,5 @@
 import type { CliKind, TurnHistoryEntry } from "@stellaris/shared";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LinkedText, useEntities } from "../components/Entities.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
@@ -15,13 +15,22 @@ function TurnRow({
   entry,
   cli,
   now,
+  opened,
 }: {
   name: string;
   entry: TurnHistoryEntry;
   cli: CliKind | null;
   now: number;
+  /** The turn the address names: it starts open and in view. */
+  opened: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(opened);
+  const row = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (opened) {
+      row.current?.scrollIntoView({ block: "start" });
+    }
+  }, [opened]);
   const entities = useEntities();
   const length = turnLength(entry);
   const about =
@@ -29,8 +38,12 @@ function TurnRow({
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (
-    <li className="border-b border-line/60 last:border-b-0">
-      <details className="group" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <li ref={row} className="border-b border-line/60 last:border-b-0">
+      <details
+        className="group"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
         <summary className="block cursor-pointer list-none px-4 py-2.5 transition-colors hover:bg-surface-2/30 group-open:bg-surface-2/20">
           <span className="flex items-center gap-2 text-xs">
             <span className="min-w-0 truncate text-fg-secondary">
@@ -113,9 +126,17 @@ function TurnBody({
 
 /**
  * Every turn the citizen finished, newest first, with how each ended, what it cost, and its report;
- * a turn opens to every step it took.
+ * a turn opens to every step it took, and the one the address names starts open.
  */
-export function CitizenTurns({ name, cli }: { name: string; cli: CliKind | null }) {
+export function CitizenTurns({
+  name,
+  cli,
+  opened,
+}: {
+  name: string;
+  cli: CliKind | null;
+  opened: string | null;
+}) {
   const [limit, setLimit] = useState(PAGE);
   const history = useTurnHistory(name, limit);
   const now = useNow(30_000);
@@ -134,9 +155,23 @@ export function CitizenTurns({ name, cli }: { name: string; cli: CliKind | null 
         {totals.turns === 1 ? "1 turn" : `${totals.turns} turns`}
         {totals.failed === 0 ? "" : `, ${totals.failed} not completed`} · {metered}
       </p>
+      {opened !== null && !entries.some((entry) => entry.turnId === opened) ? (
+        <p className="px-4 pb-1 text-meta">
+          {history.data.length === limit
+            ? "The turn this address opens is further back; show earlier turns to reach it."
+            : "The turn this address opens is not in this citizen's history."}
+        </p>
+      ) : null}
       <ol>
         {entries.map((entry) => (
-          <TurnRow key={entry.id} name={name} entry={entry} cli={cli} now={now} />
+          <TurnRow
+            key={entry.id}
+            name={name}
+            entry={entry}
+            cli={cli}
+            now={now}
+            opened={opened !== null && entry.turnId === opened}
+          />
         ))}
       </ol>
       {history.data.length === limit ? (

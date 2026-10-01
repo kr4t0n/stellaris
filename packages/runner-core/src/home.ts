@@ -1,6 +1,6 @@
-import { access, mkdir, rename, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Name } from "@stellaris/shared";
+import { HOME_FILE_LIMIT_BYTES, type Name } from "@stellaris/shared";
 import { execa } from "execa";
 import type { RunnerLog } from "./executor.js";
 import type { RunnerLayout } from "./layout.js";
@@ -78,6 +78,7 @@ export class HomeSync {
         return [];
       }
       await this.must(home, ["add", "--all"]);
+      await this.leaveOutLarge(agent, home);
       const staged = await this.git(home, ["diff", "--cached", "--quiet"]);
       if (!staged.ok) {
         await this.must(home, [
@@ -104,6 +105,37 @@ export class HomeSync {
       this.log.warn({ agent, turnId }, "home not pushed; the next turn of the agent tries again");
       return conflicts;
     });
+  }
+
+  /**
+   * Unstages every file over the size a home keeps and excludes it from this copy, so it stays on
+   * this machine and never blocks a push; the board would refuse it anyway, and history would keep
+   * it for good.
+   */
+  private async leaveOutLarge(agent: Name, home: string): Promise<void> {
+    const staged = (await this.must(home, ["diff", "--cached", "--name-only", "--diff-filter=AM"]))
+      .split("\n")
+      .filter((file) => file.length > 0);
+    const large: string[] = [];
+    for (const file of staged) {
+      const info = await stat(path.join(home, file)).catch(() => null);
+      if (info !== null && info.size > HOME_FILE_LIMIT_BYTES) {
+        large.push(file);
+      }
+    }
+    if (large.length === 0) {
+      return;
+    }
+    await this.must(home, ["rm", "--cached", "--quiet", "--", ...large]);
+    await appendFile(
+      path.join(home, ".git", "info", "exclude"),
+      `${large.map((file) => `/${file}`).join("\n")}\n`,
+      "utf8",
+    );
+    this.log.warn(
+      { agent, files: large, limitBytes: HOME_FILE_LIMIT_BYTES },
+      "left files too large for a home out of it; they stay on this runner",
+    );
   }
 
   private async clone(agent: Name, home: string): Promise<void> {

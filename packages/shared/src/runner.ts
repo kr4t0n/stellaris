@@ -26,6 +26,16 @@ export const PATH_TOKENS = {
   worktree: "{{stellaris:worktree}}",
 } as const;
 
+/**
+ * The folder inside an agent's home where its turns outside any project work, the working
+ * directory of those turns: never committed, never shared, so downloads, environments, and other
+ * working files stay on the machine that made them.
+ */
+export const HOME_SCRATCH = "scratch";
+
+/** The largest file a home keeps: a runner leaves larger ones uncommitted, and the board refuses them. */
+export const HOME_FILE_LIMIT_BYTES = 8 * 1024 * 1024;
+
 export const RunnerHelloSchema = z.object({
   protocol: z.number().int().positive(),
   version: z.string().min(1),

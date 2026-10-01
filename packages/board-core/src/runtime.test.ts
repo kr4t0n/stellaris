@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS } from "@stellaris/shared";
+import { HOME_FILE_LIMIT_BYTES, MEMBER_VERBS } from "@stellaris/shared";
 import { execa } from "execa";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Board, type Actor } from "./index.js";
+import { Board, HOME_GITIGNORE, type Actor } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 
@@ -138,6 +138,29 @@ describe("Board runtime support", () => {
     }
     expect((await board.readAgent("eng-1")).role).toBe("engineer");
 
+    // Tools' byproducts and the scratch folder are never tracked, wherever they appear.
+    for (const ignored of [
+      "scratch/data.csv",
+      "skills/x/node_modules/a.js",
+      "memory/.venv/bin/py",
+    ]) {
+      expect((await git(home, "check-ignore", "--quiet", ignored)).exitCode).toBe(0);
+    }
+    // A file over the size limit is refused, even when a later commit of the same push removed it.
+    await git(copy, "reset", "--quiet", "--hard", "origin/main");
+    await writeFile(
+      path.join(copy, "memory", "paper.pdf"),
+      Buffer.alloc(HOME_FILE_LIMIT_BYTES + 1),
+    );
+    await git(copy, "add", "--all");
+    await git(copy, "commit", "--quiet", "-m", "keep a paper");
+    await git(copy, "rm", "--quiet", "memory/paper.pdf");
+    await git(copy, "commit", "--quiet", "-m", "drop it again");
+    const heavy = await git(copy, "push", "--quiet", "origin", "HEAD:main");
+    expect(heavy.exitCode).not.toBe(0);
+    expect(heavy.stderr).toContain("does not take files over");
+    expect((await git(home, "status", "--porcelain")).stdout).toBe("");
+
     // A push that would drop another machine's work, even forced, is refused before it touches the
     // working tree, which stays clean and takes the merged push that follows.
     const other = path.join(dir, "other-copy");
@@ -155,6 +178,18 @@ describe("Board runtime support", () => {
     expect((await git(other, "push", "--quiet", "origin", "HEAD:main")).exitCode).toBe(0);
     expect(await board.readMemoryCore("eng-1")).toBe("- From the second machine.\n");
     expect(await board.readProfile("eng-1")).toContain("From the first machine.");
+    // A home whose ignore file predates the board's current one gets it as the board's commit.
+    await writeFile(path.join(home, ".gitignore"), "/agent.json\n", "utf8");
+    await git(home, "commit", "--quiet", "-am", "an older ignore file");
+    const reopened = await Board.open(dir);
+    await reopened.ensureHomeRepo("eng-1");
+    expect(await readFile(path.join(home, ".gitignore"), "utf8")).toBe(
+      `${HOME_GITIGNORE.join("\n")}\n`,
+    );
+    expect((await git(home, "log", "-1", "--format=%s")).stdout).toBe(
+      "home: the board's ignore file",
+    );
+    expect((await git(home, "status", "--porcelain")).stdout).toBe("");
     // Only main moves.
     await git(copy, "reset", "--quiet", "--hard", "origin/main");
     expect(

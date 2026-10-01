@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -8,7 +8,12 @@ import {
   type ResidentSession,
   type TurnResult,
 } from "@stellaris/runner-core";
-import { MEMBER_VERBS, RUNNER_PROTOCOL, type AgentEvent } from "@stellaris/shared";
+import {
+  HOME_FILE_LIMIT_BYTES,
+  MEMBER_VERBS,
+  RUNNER_PROTOCOL,
+  type AgentEvent,
+} from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
@@ -510,6 +515,47 @@ describe("turns on a runner over the runner protocol", () => {
     // The turn is a commit in the citizen's home, by the citizen.
     const log = await execa("git", ["log", "-1", "--format=%an %s"], { cwd: home });
     expect(log.stdout).toMatch(/^stew turn [0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+
+  it("works outside projects in a scratch folder, and keeps byproducts and oversized files out of the home", async () => {
+    const { board } = await Board.init(dir, { name: "scratch" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    let cwd = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        cwd = request.spec.cwd;
+        const home = request.spec.configHome;
+        await writeFile(path.join(cwd, "download.html"), "<html></html>", "utf8");
+        await mkdir(path.join(home, "skills", "chart", "node_modules"), { recursive: true });
+        await writeFile(path.join(home, "skills", "chart", "SKILL.md"), "# Chart\n", "utf8");
+        await writeFile(path.join(home, "skills", "chart", "node_modules", "x.js"), "1", "utf8");
+        await writeFile(
+          path.join(home, "memory", "paper.pdf"),
+          Buffer.alloc(HOME_FILE_LIMIT_BYTES + 1),
+        );
+        await writeFile(path.join(home, "memory", "core.md"), "- Kept.\n", "utf8");
+        return completed("worked in scratch");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = await run({
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    });
+    expect(turn.exitReason).toBe("completed");
+    expect(cwd).toBe(path.join(runner.paths.agent("stew"), "scratch"));
+    // Memory and the skill reach the board; the scratch folder, a tool's byproducts, and the
+    // oversized file stay on the runner.
+    const home = board.paths.agent("stew");
+    expect(await board.readMemoryCore("stew")).toBe("- Kept.\n");
+    const tracked = (await execa("git", ["ls-files"], { cwd: home })).stdout.split("\n");
+    expect(tracked).toContain("skills/chart/SKILL.md");
+    expect(tracked.filter((file) => /scratch|node_modules|paper\.pdf/.test(file))).toEqual([]);
+    await expect(readFile(path.join(cwd, "download.html"), "utf8")).resolves.toContain("html");
   });
 
   it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {

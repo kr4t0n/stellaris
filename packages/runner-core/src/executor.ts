@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   CliKindSchema,
+  HOME_SCRATCH,
   PATH_TOKENS,
   turnStatusJsonSchema,
   type AgentEvent,
@@ -254,12 +255,16 @@ export class TurnExecutor {
   /**
    * Makes sure of the project's repository and the worktree a turn runs in: the pair's own for its
    * home conversation and its proposal and topic threads, or, for a task's conversation, one of its
-   * own on the task's branch. A society-scope turn runs in the agent's home.
+   * own on the task's branch. A society-scope turn runs in the scratch folder of the agent's home.
    */
   private async prepare(job: TurnJob, home: string): Promise<Workspace> {
     const { workspace } = job;
     if (workspace.kind === "home") {
-      return { cwd: home, repoDir: home, handBack: null, taskBranch: null };
+      // Outside any project a turn works in its home's scratch folder, which is never committed,
+      // so what its tools leave behind stays on this machine; memory and skills sit beside it.
+      const cwd = path.join(home, HOME_SCRATCH);
+      await mkdir(cwd, { recursive: true });
+      return { cwd, repoDir: home, handBack: null, taskBranch: null };
     }
     const { repo } = workspace;
     return this.withProjectLock(repo.slug, async () => {

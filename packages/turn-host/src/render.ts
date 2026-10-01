@@ -1,4 +1,4 @@
-import type { Name, Skill } from "@stellaris/shared";
+import { HOME_FILE_LIMIT_BYTES, HOME_SCRATCH, type Name, type Skill } from "@stellaris/shared";
 
 export interface OnboardingContext {
   readonly agentName: Name;
@@ -118,7 +118,8 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     "",
     "## Where things are",
     "",
-    `- Your home directory: ${input.homeDir}. memory/core.md is loaded every turn; memory/<topic>.md is your archive; skills/<name>/SKILL.md are your skills; projects/<slug>/notes.md are your notes. You may read and write all of it, and the board's search covers your archive and skills for you alone. The runner keeps it in git and shares it with the board after every turn, so whatever machine your next turn runs on has it; leave git there to the runner.`,
+    `- Your home directory: ${input.homeDir}. memory/core.md is loaded every turn; memory/<topic>.md is your archive; skills/<name>/SKILL.md are your skills; projects/<slug>/notes.md are your notes. You may read and write all of it, and the board's search covers your archive and skills for you alone. The runner keeps it in git and shares it with the board after every turn, so whatever machine your next turn runs on has it; leave git there to the runner. Files over ${HOME_FILE_LIMIT_BYTES / (1024 * 1024)} MB are not kept.`,
+    `- ${HOME_SCRATCH}/ in your home is your working folder in turns outside any project: it is never kept or shared, so put downloads, environments, and other working files there, and keep the rest of your home for what you mean to remember.`,
     `- The board projection: ${input.boardDir} (read-only markdown: society and project channels, tasks, threads; shared knowledge under projects/<slug>/knowledge/ and society/knowledge/; the society's skills under society/skills/). Search it with your file tools; act through the board tools.`,
     "",
     "## Turn contract",

@@ -226,14 +226,13 @@ export class TurnHost {
       task === null
         ? []
         : (await this.board.heldClaims(agent.name)).filter((each) => each.id === task.id);
-    const worktree = societyScope ? PATH_TOKENS.home : PATH_TOKENS.worktree;
     const onboarding: OnboardingContext | null =
       dispatch.onboarding || (newSession && thread === undefined)
         ? {
             agentName: agent.name,
             roleSummary: charter.purpose,
             project: dispatch.project,
-            worktree,
+            worktree: PATH_TOKENS.worktree,
           }
         : null;
     const instructions = renderInstructions({

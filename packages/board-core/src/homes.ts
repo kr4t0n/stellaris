@@ -1,12 +1,14 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { HOME_FILE_LIMIT_BYTES, HOME_SCRATCH } from "@stellaris/shared";
 import { execa } from "execa";
 import { exists } from "./fs.js";
 
 /**
  * What a home's repository never tracks: the records the board keeps in a home (the agent record,
- * the charter file, cursors, session records, last turns, transcripts) and the CLI configuration a
- * runner renders there. Everything else in a home is the citizen's, and travels.
+ * the charter file, cursors, session records, last turns, transcripts), the CLI configuration a
+ * runner renders there, the scratch folder turns outside any project work in, and the byproducts
+ * of tools wherever they appear. Everything else in a home is the citizen's, and travels.
  */
 export const HOME_GITIGNORE = [
   "/agent.json",
@@ -18,14 +20,29 @@ export const HOME_GITIGNORE = [
   "/projects/*/sessions*.json",
   "/projects/*/last-turn.json",
   "/projects/*/threads/",
+  `/${HOME_SCRATCH}/`,
   "*.tmp",
+  "node_modules/",
+  ".venv/",
+  "venv/",
+  "__pycache__/",
+  "*.pyc",
+  ".pytest_cache/",
+  ".mypy_cache/",
+  ".ruff_cache/",
+  ".ipynb_checkpoints/",
+  ".cache/",
+  ".DS_Store",
 ];
+
+const IGNORE_FILE = `${HOME_GITIGNORE.join("\n")}\n`;
 
 /**
  * The hook every home runs before it takes a push: only `main` moves, from where it is now, and
  * never out of existence; the ignore file stays the board's; and no pushed tree may hold a path the
  * board keeps, since git treats an ignored file as expendable and would overwrite the board's copy.
- * The check that `main` has not moved must be here: with `updateInstead`, git rewrites the working
+ * Nor may a push carry a file over the size limit, in any of its commits, since history keeps
+ * every file it ever held. The check that `main` has not moved must be here: with `updateInstead`, git rewrites the working
  * tree and index before it checks the branch, so a push from a stale view, refused only then, would
  * leave the home half-updated and refusing every later push. The server takes one push per home at
  * a time, so nothing moves `main` between this check and the update.
@@ -45,6 +62,15 @@ while read old new ref; do
     *[!0]*) ;;
     *) echo "a home's main may not be deleted" >&2; exit 1 ;;
   esac
+  case "$old" in
+    *[!0]*) range="$old..$new" ;;
+    *) range="$new" ;;
+  esac
+  big=$(git rev-list --objects $range | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | awk -v cap=${HOME_FILE_LIMIT_BYTES} '$1 == "blob" && $2 > cap { print $3 }')
+  if [ -n "$big" ]; then
+    echo "a home does not take files over ${HOME_FILE_LIMIT_BYTES} bytes: $big" >&2
+    exit 1
+  fi
   bad=$(git ls-tree -r --name-only "$new" | grep -E "$forbidden")
   if [ -n "$bad" ]; then
     echo "a home does not take the board's own records: $bad" >&2
@@ -90,7 +116,7 @@ async function git(args: readonly string[], cwd: string): Promise<string> {
  * tracked files only when it creates a home, as its first commit.
  */
 export class HomeRepos {
-  private readonly ready = new Set<string>();
+  private readonly ready = new Map<string, Promise<void>>();
 
   constructor(private readonly hooksDir: string) {}
 
@@ -104,25 +130,37 @@ export class HomeRepos {
 
   /**
    * Makes a home a repository if it is not one yet, committing what is in it, and configures it to
-   * take pushes into its working tree through the board's hook. Idempotent, and cheap after the
-   * first call in a process.
+   * take pushes into its working tree through the board's hook. A home whose ignore file predates
+   * the board's current one gets the current one as a commit by the board, before any push is taken.
+   * Runs once per home in a process; every later call waits for that run.
    */
-  async ensure(home: string): Promise<void> {
-    if (this.ready.has(home)) {
-      return;
+  ensure(home: string): Promise<void> {
+    let run = this.ready.get(home);
+    if (run === undefined) {
+      run = this.prepare(home);
+      this.ready.set(home, run);
+      run.catch(() => this.ready.delete(home));
     }
+    return run;
+  }
+
+  private async prepare(home: string): Promise<void> {
+    const ignore = path.join(home, ".gitignore");
     if (!(await exists(path.join(home, ".git")))) {
       await mkdir(home, { recursive: true });
       await git(["init", "--quiet", "--initial-branch=main"], home);
-      await writeFile(path.join(home, ".gitignore"), `${HOME_GITIGNORE.join("\n")}\n`, "utf8");
+      await writeFile(ignore, IGNORE_FILE, "utf8");
       await git(["add", "--all"], home);
       await git(["commit", "--quiet", "--allow-empty", "-m", "home: created by the board"], home);
+    } else if ((await readFile(ignore, "utf8").catch(() => "")) !== IGNORE_FILE) {
+      await writeFile(ignore, IGNORE_FILE, "utf8");
+      await git(["add", ".gitignore"], home);
+      await git(["commit", "--quiet", "-m", "home: the board's ignore file"], home);
     }
     await git(["config", "receive.denyCurrentBranch", "updateInstead"], home);
     // A forced push would drop what another runner pushed; git refuses one before the tree moves.
     await git(["config", "receive.denyNonFastForwards", "true"], home);
     await git(["config", "core.hooksPath", this.hooksDir], home);
     await git(["config", "http.receivepack", "true"], home);
-    this.ready.add(home);
   }
 }

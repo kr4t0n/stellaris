@@ -2231,10 +2231,13 @@ export class Board {
       if (lapsed !== undefined && lapsed !== actor.name) {
         await this.refreshMember(lapsed);
       }
+      // The claimer's conversation, so the scheduler can tell a claim made elsewhere from one made
+      // in the task's own thread, where the work happens.
       await this.events.append("task.claimed", actor.name, {
         taskId: task.id,
         project: location.project,
         stage: task.stage,
+        ...(actor.thread === undefined ? {} : { thread: actor.thread }),
       });
       return task;
     });

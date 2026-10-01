@@ -139,6 +139,7 @@ const PendingSchema = z.object({
   dispatch: TurnDispatchSchema,
   readyAt: z.number(),
   stageWakes: z.array(TriggerSchema).optional(),
+  holder: z.boolean().optional(),
 });
 
 const StateSchema = z.object({
@@ -165,6 +166,8 @@ interface PendingTurn {
   readyAt: number;
   /** Present while every wake merged into this turn is a stage wake; they are rechecked at dispatch. */
   stageWakes?: Trigger[] | undefined;
+  /** One of those is for a stage the agent claimed outside this conversation, due while it holds it. */
+  holder?: boolean | undefined;
 }
 
 const SILENT_LOG: SchedulerLog = { info() {}, warn() {}, error() {} };
@@ -418,6 +421,13 @@ export class Scheduler {
         }
         return;
       }
+      case "task.claimed": {
+        const taskId = stringOf(payload["taskId"]);
+        if (taskId !== null && stringOf(payload["thread"]) !== taskId) {
+          await this.wakeHolder(taskId, event.actor, now);
+        }
+        return;
+      }
       case "task.completing": {
         const taskId = stringOf(payload["taskId"]);
         const project = stringOf(payload["project"]);
@@ -495,6 +505,7 @@ export class Scheduler {
         }
         for (const project of memberships) {
           this.enqueue(name, project, { kind: "onboarding", reason: "joined the project" }, now);
+          await this.wakeNewcomer(name, project, now);
         }
         return;
       }
@@ -519,6 +530,7 @@ export class Scheduler {
           return;
         }
         this.enqueue(name, project, { kind: "onboarding", reason: "joined the project" }, now);
+        await this.wakeNewcomer(name, project, now);
         return;
       }
       case "agent.left": {
@@ -622,7 +634,7 @@ export class Scheduler {
    * Entering a stage wakes its named citizen, else its last holder when work returns to it, else
    * the project's members of its role, else every member of the project who may hold it.
    */
-  private async wakeStage(taskId: Ulid, from: Name, now: number): Promise<void> {
+  private async wakeStage(taskId: Ulid, from: Name, now: number, only?: Name): Promise<void> {
     let task: Task;
     try {
       task = (await this.board.findTask(taskId)).task;
@@ -643,32 +655,98 @@ export class Scheduler {
             ? (await this.board.membersWithRole(task.project, stage.role)).map((a) => a.name)
             : (await this.board.projectMembers(task.project)).map((a) => a.name);
     for (const name of targets) {
+      if (only !== undefined && name !== only) {
+        continue;
+      }
       const agent = await this.tryReadAgent(name);
       if (agent === null || !mayHoldStage(agent, task)) {
         continue;
       }
-      const charter = await this.board.readRole(agent.role);
-      const scope = this.scopeForProject(agent, charter, task.project);
-      if (scope === null) {
-        continue;
-      }
-      this.enqueue(
-        agent.name,
-        scope,
-        {
-          kind: "stage",
-          from,
-          reason: `stage "${stage.name}" of task ${task.id} "${task.title}" is waiting for you`,
-          taskId: task.id,
-        },
-        now,
-        { id: task.id, task: scope === task.project },
-      );
+      await this.enqueueStage(agent, task, from, now, "is waiting for you");
     }
   }
 
-  /** The first of these stage wakes whose task still waits, unheld, on a stage the agent may hold. */
-  private async stillWaiting(name: Name, wakes: Trigger[]): Promise<Trigger | undefined> {
+  /**
+   * A member that joins a project is woken, in each task's conversation, for every stage there that
+   * would have woken it had it been a member when the stage came up.
+   */
+  private async wakeNewcomer(name: Name, project: Name, now: number): Promise<void> {
+    for (const task of await this.board.openTasks(project).catch(() => [])) {
+      await this.wakeStage(task.id, name, now, name);
+    }
+  }
+
+  /**
+   * A stage claimed outside its task's conversation, as a home turn may claim one it found, is
+   * worked in that conversation, which nothing else would start before the next heartbeat. Turns
+   * of one conversation run one at a time, so the turn this queues is the one that sees the claim.
+   */
+  private async wakeHolder(taskId: Ulid, holder: Name, now: number): Promise<void> {
+    let task: Task;
+    try {
+      task = (await this.board.findTask(taskId)).task;
+    } catch {
+      return;
+    }
+    const agent = await this.tryReadAgent(holder);
+    if (agent === null || task.status !== "claimed" || task.claimedBy !== holder) {
+      return;
+    }
+    const key = await this.enqueueStage(
+      agent,
+      task,
+      holder,
+      now,
+      "is yours; its work happens here",
+    );
+    const item = key === null ? undefined : this.pending.get(key);
+    if (item?.stageWakes !== undefined) {
+      item.holder = true;
+    }
+  }
+
+  /** Queues a stage wake in the task's conversation and returns its key, or null for no wake. */
+  private async enqueueStage(
+    agent: Agent,
+    task: Task,
+    from: Name,
+    now: number,
+    state: string,
+  ): Promise<string | null> {
+    if (agent.status !== "active" || agent.cli === null) {
+      return null;
+    }
+    const charter = await this.board.readRole(agent.role);
+    const scope = this.scopeForProject(agent, charter, task.project);
+    if (scope === null) {
+      return null;
+    }
+    const name = currentStage(task)?.name ?? task.stage;
+    this.enqueue(
+      agent.name,
+      scope,
+      {
+        kind: "stage",
+        from,
+        reason: `stage "${name}" of task ${task.id} "${task.title}" ${state}`,
+        taskId: task.id,
+      },
+      now,
+      { id: task.id, task: scope === task.project },
+    );
+    return sessionKey(agent.name, scope, task.id);
+  }
+
+  /**
+   * The first of these stage wakes still due: its task waits, unheld, on a stage the agent may
+   * hold, or, with `holder`, the agent holds it, having claimed it outside the task's conversation.
+   * A wake for a stage the agent took in the turn the wake waited on is dropped.
+   */
+  private async stillWaiting(
+    name: Name,
+    wakes: Trigger[],
+    holder: boolean,
+  ): Promise<Trigger | undefined> {
     const agent = await this.tryReadAgent(name);
     if (agent === null) {
       return undefined;
@@ -679,12 +757,13 @@ export class Scheduler {
       }
       try {
         const { task } = await this.board.findTask(wake.taskId);
-        if (
-          task.status === "open" &&
-          !task.completing &&
-          currentStage(task) !== undefined &&
-          mayHoldStage(agent, task)
-        ) {
+        if (task.completing || currentStage(task) === undefined) {
+          continue;
+        }
+        if (task.status === "open" && mayHoldStage(agent, task)) {
+          return wake;
+        }
+        if (holder && task.status === "claimed" && task.claimedBy === agent.name) {
           return wake;
         }
       } catch {
@@ -834,7 +913,10 @@ export class Scheduler {
       },
       readyAt: Math.min(existing.readyAt, readyAt),
       ...(existing.stageWakes !== undefined && trigger.kind === "stage"
-        ? { stageWakes: [...existing.stageWakes, trigger] }
+        ? {
+            stageWakes: [...existing.stageWakes, trigger],
+            ...(existing.holder === true ? { holder: true } : {}),
+          }
         : {}),
     });
   }
@@ -1382,7 +1464,11 @@ export class Scheduler {
       if (item.stageWakes !== undefined) {
         // A stage wake queued during the agent's own turn is often stale by now: it took the stage
         // itself, or someone else did, or the task moved on.
-        const current = await this.stillWaiting(dispatch.agent, item.stageWakes);
+        const current = await this.stillWaiting(
+          dispatch.agent,
+          item.stageWakes,
+          item.holder === true,
+        );
         if (current === undefined) {
           this.log.info(
             { agent: dispatch.agent, project: dispatch.project },

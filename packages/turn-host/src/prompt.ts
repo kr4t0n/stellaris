@@ -197,7 +197,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "stage") {
     lines.push(
-      "A stage is waiting for you: claim it with claim_task, do the work in your worktree, which is on the task's branch, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
+      "A stage is waiting for you: claim it with claim_task unless you hold it already, do the work in your worktree, which is on the task's branch, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
     );
   }
   if (dispatch.trigger.kind === "task_done") {

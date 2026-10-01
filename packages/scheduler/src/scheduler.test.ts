@@ -390,6 +390,100 @@ describe("Scheduler", () => {
     ]);
   });
 
+  it("works a stage claimed outside its task's conversation in that conversation, once", async () => {
+    const { board, runner, scheduler } = await setup({ record: true });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    await settle();
+    expect(runner.dispatches.map((d) => [d.agent, d.thread?.id])).toEqual([["eng-1", task.id]]);
+    runner.dispatches.length = 0;
+
+    // That turn left the stage alone; a later home turn claims it, and the task's own
+    // conversation is woken to do the work rather than waiting for a heartbeat.
+    const home = { ...ENG, scope: "demo" };
+    await board.claimTask(home, { task_id: task.id });
+    await settle();
+    expect(runner.dispatches.map((d) => [d.agent, d.thread?.id, d.trigger.kind])).toEqual([
+      ["eng-1", task.id, "stage"],
+    ]);
+    expect(runner.dispatches[0]?.trigger.reason).toContain("is yours; its work happens here");
+
+    // A claim made in the task's own conversation is that conversation's work already.
+    runner.dispatches.length = 0;
+    await board.releaseTask(home, { task_id: task.id });
+    await board.claimTask({ ...home, thread: task.id }, { task_id: task.id });
+    await settle();
+    expect(runner.dispatches).toEqual([]);
+
+    // A stage claimed elsewhere and finished before the wake comes up needs no turn.
+    await board.releaseTask(home, { task_id: task.id });
+    await board.claimTask(home, { task_id: task.id });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", task.id)]);
+    await board.advanceTask(home, { task_id: task.id });
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("wakes a newcomer for a stage that waited on its role, in the task's conversation", async () => {
+    const { board, runner, scheduler } = await setup({ record: true });
+    await board.setRoleCharter(USER, {
+      name: "researcher",
+      purpose: "Researches.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "survey",
+      stages: [{ name: "research", role: "researcher" }],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(scheduler.pendingCount).toBe(0);
+
+    // Its first turn, at home, claims the stage it found and leaves the work to the task's
+    // conversation, which starts once the debounce is over.
+    await board.addAgent(USER, {
+      name: "sage",
+      role: "researcher",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    runner.hold = true;
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual(["sage/demo"]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("sage", "demo", task.id)]);
+    await board.claimTask(
+      { name: "sage", role: "researcher", scope: "demo" },
+      { task_id: task.id },
+    );
+    await scheduler.tick();
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.thread?.id ?? null, d.trigger.kind])).toEqual([
+      ["sage", null, "onboarding"],
+      ["sage", task.id, "stage"],
+    ]);
+  });
+
   it("signals a stage left waiting past the threshold once, and wakes nobody by it", async () => {
     const { board, runner, scheduler } = await setup();
     // A stage for the user wakes no citizen, so only the timer notices it.
@@ -532,7 +626,9 @@ describe("Scheduler", () => {
       ["eng-1", "lab", "stage"],
     ]);
     runner.dispatches.length = 0;
-    await board.claimTask(ENG, { task_id: task.id });
+    // Claimed in the task's own conversation, by that stage turn; a claim from elsewhere would
+    // wake the conversation at once instead of waiting for the heartbeat.
+    await board.claimTask({ ...ENG, scope: "lab", thread: task.id }, { task_id: task.id });
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();

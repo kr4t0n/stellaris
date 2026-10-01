@@ -619,6 +619,23 @@ describe("Scheduler", () => {
     expect(Object.keys(state.lastReflection).toSorted()).toEqual(["eng-1", "rev-1"]);
   });
 
+  it("lets a pass under way finish and save its cursor before it stops", async () => {
+    const { board, scheduler } = await setup();
+    await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "@eng-1 a note before shutdown",
+    });
+    const last = (await board.readEvents(null)).at(-1)?.id;
+    // The pass is under way when the stop comes, as one started by the timer would be.
+    const pass = scheduler.tick();
+    await scheduler.stop();
+    const state = await board.readState("scheduler", z.object({ cursor: z.string().nullable() }), {
+      cursor: null,
+    });
+    expect(state.cursor).toBe(last);
+    await pass;
+  });
+
   it("manual wakes go through the same dispatch", async () => {
     const { board, runner, scheduler } = await setup();
     await board.requestWake(USER, { agent: "rev-1", project: "demo", reason: "dev" });

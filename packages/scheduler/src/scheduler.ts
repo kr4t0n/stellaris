@@ -214,7 +214,8 @@ export class Scheduler {
     lastHeartbeat: {},
   });
   private loaded = false;
-  private ticking = false;
+  /** The pass under way, which stop() lets finish so its consumed events and cursor are saved. */
+  private passing: Promise<void> | null = null;
   private lastSweep = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -264,51 +265,57 @@ export class Scheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
+    await this.passing?.catch(() => undefined);
     await Promise.allSettled([
       ...[...this.running.values()].map((turn) => turn.promise),
       ...this.completing,
     ]);
   }
 
-  /** One pass: consume events, check heartbeats and waiting stages, run operations, sweep leases, dispatch. */
+  /** One pass, unless one is under way already. */
   async tick(): Promise<void> {
-    if (this.ticking) {
+    if (this.passing !== null) {
       return;
     }
-    this.ticking = true;
+    this.passing = this.pass();
     try {
-      await this.load();
-      const now = this.now().getTime();
-      const paused = await this.board.isPaused();
-      const events = await this.board.readEvents(this.state.cursor, 500);
-      for (const event of events) {
-        await this.handleEvent(event, now);
-        this.state.cursor = event.id;
-      }
-      if (!paused) {
-        await this.checkHeartbeats(now);
-        await this.checkWaitingStages(now);
-        await this.checkReflections(now);
-        if (
-          this.state.lastOps === null ||
-          now - Date.parse(this.state.lastOps) >= this.timings.opsIntervalMs
-        ) {
-          await this.runOperations(now);
-          this.state.lastOps = iso(now);
-        }
-      }
-      if (now - this.lastSweep >= this.timings.leaseSweepMs) {
-        await this.board.expireLeases();
-        this.lastSweep = now;
-      }
-      this.runCompletions();
-      if (!paused) {
-        await this.dispatchReady(now);
-      }
-      await this.save();
+      await this.passing;
     } finally {
-      this.ticking = false;
+      this.passing = null;
     }
+  }
+
+  /** Consume events, check heartbeats and waiting stages, run operations, sweep leases, dispatch. */
+  private async pass(): Promise<void> {
+    await this.load();
+    const now = this.now().getTime();
+    const paused = await this.board.isPaused();
+    const events = await this.board.readEvents(this.state.cursor, 500);
+    for (const event of events) {
+      await this.handleEvent(event, now);
+      this.state.cursor = event.id;
+    }
+    if (!paused) {
+      await this.checkHeartbeats(now);
+      await this.checkWaitingStages(now);
+      await this.checkReflections(now);
+      if (
+        this.state.lastOps === null ||
+        now - Date.parse(this.state.lastOps) >= this.timings.opsIntervalMs
+      ) {
+        await this.runOperations(now);
+        this.state.lastOps = iso(now);
+      }
+    }
+    if (now - this.lastSweep >= this.timings.leaseSweepMs) {
+      await this.board.expireLeases();
+      this.lastSweep = now;
+    }
+    this.runCompletions();
+    if (!paused) {
+      await this.dispatchReady(now);
+    }
+    await this.save();
   }
 
   /** Waits for every running turn and in-flight completion to settle. Used by tests and by stop(). */

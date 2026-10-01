@@ -65,6 +65,12 @@ export function remembered(summary: string): TurnResult {
 }
 
 /**
+ * Where a scripted turn may pause, named by the citizen and the moment, until whoever watches it
+ * lets it go on; the browser session uses it to look at the sky while a turn is visibly running.
+ */
+export type Checkpoint = (agent: string, moment: string) => Promise<void>;
+
+/**
  * A scripted stand-in for a CLI agent. It reads the prompt like an agent would, acts through the
  * HTTP verbs with the turn token it was handed, and edits code in its worktree with git.
  * The real adapters replace it; everything around it is the production path.
@@ -77,6 +83,7 @@ export class ScriptedBackend implements AgentBackend {
 
   constructor(
     private readonly app: Hono<{ Variables: { actor: { name: string; role: string } } }>,
+    private readonly checkpoint: Checkpoint = () => Promise.resolve(),
   ) {}
 
   newSession(): Promise<string> {
@@ -133,7 +140,7 @@ export class ScriptedBackend implements AgentBackend {
       if (request.prompt.includes("Trigger: task_done")) {
         await verb("post_message", {
           channel: "general",
-          body: "The health endpoint is in: its task is done.",
+          body: "What you asked for is in: its task is done.",
         });
         return done("told the user the task is done");
       }
@@ -148,6 +155,30 @@ export class ScriptedBackend implements AgentBackend {
           stages: [{ name: "build", role: "engineer" }],
         });
         return done("planned the request as a task on demo for its engineers");
+      }
+      // An ask in a thread of its own: planned with a gated review, and answered where it was asked.
+      // Matched on the ask's words, since an engineer's posts about hello.txt reach the desk too.
+      if (request.prompt.includes("Please add hello.txt")) {
+        await this.checkpoint("desk", "routing");
+        const task = z.object({ id: z.string() }).parse(
+          await verb("create_task", {
+            project: "demo",
+            title: "Add hello.txt",
+            body: "A greeting in hello.txt, as the user asked.",
+            stages: [
+              { name: "build", role: "engineer" },
+              { name: "review", role: "reviewer", gate: true },
+            ],
+          }),
+        );
+        const thread = /thread_id ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1];
+        if (thread !== undefined) {
+          await verb("post_message", {
+            thread_id: thread,
+            body: `Filed it as task ${task.id} on demo: eng-1 builds it and rev-1 reviews it.`,
+          });
+        }
+        return done("planned the ask as a reviewed task on demo");
       }
       if (request.prompt.includes("new project called api")) {
         await verb("create_project", { slug: "api", name: "Public API" });
@@ -282,6 +313,7 @@ export class ScriptedBackend implements AgentBackend {
     // The engineer builds on the task's branch; a second pass adds what the review asked for.
     if (request.spec.agent === "eng-1") {
       await verb("claim_task", { task_id: taskId });
+      await this.checkpoint("eng-1", "building");
       await git("switch", branch);
       const file = path.join(request.spec.cwd, "hello.txt");
       const again = await readFile(file, "utf8").then(
@@ -307,6 +339,7 @@ export class ScriptedBackend implements AgentBackend {
     // The reviewer holds the gated stage: it sends the work back once, then approves.
     if (request.spec.agent === "rev-1") {
       await verb("claim_task", { task_id: taskId });
+      await this.checkpoint("rev-1", "reviewing");
       const content = await git("show", `${branch}:hello.txt`);
       if (content.stdout.split("\n").length < 2) {
         const task = z

@@ -33,7 +33,7 @@ Copy `.env.example` to `.env` and adjust it. The runtime data directory holds th
 ```bash
 pnpm build          # compile every package and app with tsc -b
 pnpm test           # vitest across packages and apps, including an end-to-end run with a scripted agent
-pnpm test:e2e       # the built interface in headless Chromium against a fake board; run pnpm build:web first
+pnpm test:e2e       # the built interface in headless Chromium against a fake board, and the exit test against a board server of scripted citizens; run pnpm build and pnpm build:web first
 pnpm lint           # oxlint with type-aware rules; run after build
 pnpm fmt            # oxfmt, writes formatting
 pnpm fmt:check      # oxfmt, verifies formatting

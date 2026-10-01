@@ -68,6 +68,8 @@ export interface SchedulerTimings {
   readonly staleThreadMs: number;
   /** A member with no completed turn for this long is idle. */
   readonly idleMemberMs: number;
+  /** A conflict copy left in a member's home this long is signalled. */
+  readonly homeConflictMs: number;
   /** At most one replica per role and project within this window. */
   readonly scaleCooldownMs: number;
   /** Cadence of reflection turns for roles that reflect, counted from the scheduler's first sight of the member. */
@@ -86,6 +88,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   costReportMs: 3_600_000,
   staleThreadMs: 24 * 3_600_000,
   idleMemberMs: 3 * 24 * 3_600_000,
+  homeConflictMs: 24 * 3_600_000,
   scaleCooldownMs: 3_600_000,
   reflectionMs: 24 * 3_600_000,
 });
@@ -104,6 +107,7 @@ export const SchedulerTimingsSchema = z
     costReportMs: z.number().positive(),
     staleThreadMs: z.number().positive(),
     idleMemberMs: z.number().positive(),
+    homeConflictMs: z.number().positive(),
     scaleCooldownMs: z.number().positive(),
     reflectionMs: z.number().positive(),
   })
@@ -1226,6 +1230,24 @@ export class Scheduler {
           summary: `${agent.name} (${agent.role}) has not completed a turn for ${describeDuration(idle)}`,
           value: idle,
           threshold: this.timings.idleMemberMs,
+          agent: agent.name,
+          role: agent.role,
+        });
+      }
+
+      const left = (await this.board.listHomeConflicts(agent.name)).filter(
+        (conflict) => now - Date.parse(conflict.since) >= this.timings.homeConflictMs,
+      );
+      if (left.length > 0) {
+        const oldest = Math.max(...left.map((conflict) => now - Date.parse(conflict.since)));
+        signals.push({
+          kind: "home_conflict",
+          key: `home_conflict:${agent.name}`,
+          summary: `${agent.name} (${agent.role}) has not reconciled ${left
+            .map((conflict) => conflict.path)
+            .join(", ")} in its home, the oldest copy waiting ${describeDuration(oldest)}`,
+          value: oldest,
+          threshold: this.timings.homeConflictMs,
           agent: agent.name,
           role: agent.role,
         });

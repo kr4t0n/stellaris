@@ -703,9 +703,16 @@ describe("turns on a runner over the runner protocol", () => {
       prompts,
     );
     const kept = await readFile(core, "utf8");
-    const [conflict] = await board.listHomeConflicts("stew");
-    expect(conflict).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
-    const other = await readFile(path.join(board.paths.agent("stew"), conflict ?? ""), "utf8");
+    const [conflict, ...more] = await board.listHomeConflicts("stew");
+    expect(more).toEqual([]);
+    expect(conflict?.path).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(conflict?.file).toBe("memory/core.md");
+    // The copy's age is the commit that brought it, made moments ago on a runner.
+    expect(Date.now() - Date.parse(conflict?.since ?? "")).toBeLessThan(60_000);
+    const other = await readFile(
+      path.join(board.paths.agent("stew"), conflict?.path ?? ""),
+      "utf8",
+    );
     // One version is in place and the other beside it; neither is lost.
     expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
     expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
@@ -716,7 +723,7 @@ describe("turns on a runner over the runner protocol", () => {
       priority: 1,
     });
     expect(prompts.at(-1)).toContain("## Edits to reconcile in your home");
-    expect(prompts.at(-1)).toContain(`- ${conflict}`);
+    expect(prompts.at(-1)).toContain(`- ${conflict?.path}, beside memory/core.md, since`);
   });
 
   it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {

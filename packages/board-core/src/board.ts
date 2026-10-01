@@ -45,6 +45,7 @@ import {
   type CompletionEffect,
   type CliKind,
   type Decision,
+  type HomeConflict,
   type Knowledge,
   type Member,
   type MemberProposal,
@@ -191,6 +192,8 @@ export interface SignalRecord {
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
+/** A runner's conflict copy, `<file>.conflict-<label>`, capturing the file it sits beside. */
+const CONFLICT_COPY = /^(.+)\.conflict-[^/.]+$/;
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -3363,10 +3366,12 @@ export class Board {
 
   /**
    * Conflict copies in an agent's home: files a runner kept beside the board's version when two of
-   * the agent's turns changed them at once, by relative path, until the agent merges and deletes them.
+   * the agent's turns changed them at once, until the agent merges and deletes them, by path, each
+   * with when it reached the board.
    */
-  async listHomeConflicts(agent: Name): Promise<string[]> {
-    const found: string[] = [];
+  async listHomeConflicts(agent: Name): Promise<HomeConflict[]> {
+    const home = this.paths.agent(agent);
+    const found: HomeConflict[] = [];
     const walk = async (dir: string, prefix: string): Promise<void> => {
       for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
         if (prefix === "" && SKIPPED_IN_HOME.has(entry.name)) {
@@ -3375,13 +3380,22 @@ export class Board {
         const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
         if (entry.isDirectory()) {
           await walk(path.join(dir, entry.name), relative);
-        } else if (entry.isFile() && /\.conflict-[^/.]+$/.test(entry.name)) {
-          found.push(relative);
+          continue;
+        }
+        const file = entry.isFile() ? CONFLICT_COPY.exec(relative)?.[1] : undefined;
+        if (file !== undefined) {
+          // A push that reconciled the copy may have removed it since the walk read the directory.
+          const since =
+            (await this.homes.changedAt(home, relative)) ??
+            (await stat(path.join(home, relative)).catch(() => null))?.mtime.toISOString();
+          if (since !== undefined) {
+            found.push({ path: relative, file, since });
+          }
         }
       }
     };
-    await walk(this.paths.agent(agent), "");
-    return found.toSorted();
+    await walk(home, "");
+    return found.toSorted((a, b) => a.path.localeCompare(b.path));
   }
 
   /**

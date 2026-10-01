@@ -15,6 +15,7 @@ export const SIGNAL_LABEL: Readonly<Record<OpsSignalKind, string>> = {
   turn_cost: "spend",
   scaled: "replica added",
   runner: "runner",
+  home_conflict: "edits to reconcile",
 };
 
 /** Whether a signal of this kind wakes the roles that read signals, the steward among them. */

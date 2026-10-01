@@ -163,4 +163,20 @@ export class HomeRepos {
     await git(["config", "core.hooksPath", this.hooksDir], home);
     await git(["config", "http.receivepack", "true"], home);
   }
+
+  /**
+   * When a file in a home last changed in its history, or null when the history does not hold it.
+   * Plain history simplification is what finds a file a merge added: `--diff-filter=A` shows no
+   * merge, and a later merge that only carries the file in is skipped as unchanged.
+   */
+  async changedAt(home: string, file: string): Promise<string | null> {
+    const result = await execa("git", ["log", "-1", "--format=%ct", "--", file], {
+      cwd: home,
+      reject: false,
+    });
+    const seconds = Number.parseInt(result.stdout.trim(), 10);
+    return result.exitCode === 0 && Number.isFinite(seconds)
+      ? new Date(seconds * 1000).toISOString()
+      : null;
+  }
 }

@@ -412,4 +412,37 @@ describe("buildTurnPrompt", () => {
     expect(listed).toContain("- testing: updated by eng-1 at 2026-09-28T10:00:00.000Z");
     expect(listed).not.toContain("Run the tests with uv.");
   });
+
+  it("makes reconciling a home's conflict copies the first step of a reflection", () => {
+    const dispatch = {
+      agent: "eng-1",
+      project: "demo",
+      trigger: TriggerSchema.parse({ kind: "reflection", reason: "scheduled reflection" }),
+      priority: 0,
+      onboarding: false,
+    };
+    const base = { messages: [], heldClaims: [], lastTurn: null, onboarding: null };
+    const conflict = {
+      path: "memory/core.md.conflict-0000ABCD",
+      file: "memory/core.md",
+      since: "2026-09-30T08:00:00.000Z",
+    };
+    expect(buildTurnPrompt({ ...base, dispatch })).not.toContain("Reconcile first");
+
+    const reflection = buildTurnPrompt({ ...base, dispatch, conflicts: [conflict] });
+    expect(reflection).toContain("then:\n- Reconcile first: merge each copy");
+    expect(reflection.indexOf("Reconcile first")).toBeLessThan(reflection.indexOf("Consolidate"));
+    expect(reflection).toContain(
+      "- memory/core.md.conflict-0000ABCD, beside memory/core.md, since 2026-09-30T08:00:00.000Z",
+    );
+
+    // Any other turn lists the copies without the reflection's step.
+    const heartbeat = buildTurnPrompt({
+      ...base,
+      dispatch: { ...dispatch, trigger: TriggerSchema.parse({ kind: "heartbeat" }) },
+      conflicts: [conflict],
+    });
+    expect(heartbeat).toContain("## Edits to reconcile in your home");
+    expect(heartbeat).not.toContain("Reconcile first");
+  });
 });

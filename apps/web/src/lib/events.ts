@@ -47,13 +47,15 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
     return [["tasks"], ["task", text(payload["taskId"])], ["members"], ["metrics"]];
   }
   if (type === "turn.completed" || type === "turn.failed") {
-    // A turn may have rewritten the citizen's memory and skills as well as its history.
+    // A turn may have rewritten the citizen's memory and skills, or reconciled or left a conflict
+    // copy, as well as its history.
     return [
       ["scheduler"],
       ["members"],
       ["turns", actor],
       ["memory", actor],
       ["agent-skills", actor],
+      ["conflicts", actor],
       ["metrics"],
     ];
   }

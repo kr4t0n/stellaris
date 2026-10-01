@@ -1,6 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { Board, SYSTEM_ACTOR, type Actor } from "@stellaris/board-core";
 import {
   MEMBER_VERBS,
@@ -13,6 +15,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Scheduler, type TurnAssignment, type TurnRunner } from "./scheduler.js";
+
+const run = promisify(execFile);
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -800,6 +804,56 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
     expect(runner.dispatches.map((d) => d.agent)).not.toContain("rev-1");
     expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("signals a conflict copy left in a home past its age, without waking the steward", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: 3_600_000 } });
+    await board.addAgent(USER, {
+      name: "stew-1",
+      role: "steward",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    await scheduler.drain(); // stew-1 onboarding
+    runner.dispatches.length = 0;
+    // A runner's merge brought the copy into eng-1's home at this moment.
+    const home = board.paths.agent("eng-1");
+    const copy = "memory/core.md.conflict-0000ABCD";
+    await writeFile(path.join(home, copy), "- three, as the lab saw it\n", "utf8");
+    await run("git", ["add", "--all"], { cwd: home });
+    await run(
+      "git",
+      ["-c", "user.name=eng-1", "-c", "user.email=eng-1@stellaris.local", "commit", "-qm", "turn"],
+      { cwd: home, env: { ...process.env, GIT_COMMITTER_DATE: clock.toISOString() } },
+    );
+    const conflicts = async (): Promise<string[]> =>
+      (await board.listSignals())
+        .filter((record) => record.signal.kind === "home_conflict")
+        .map((record) => record.signal.summary);
+
+    advance(23 * 3_600_000);
+    await scheduler.tick();
+    expect(await conflicts()).toEqual([]);
+
+    advance(3_600_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await conflicts()).toEqual([
+      `eng-1 (engineer) has not reconciled ${copy} in its home, the oldest copy waiting 24h`,
+    ]);
+    expect(scheduler.activeSignals).toContain("home_conflict:eng-1");
+    advance(60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
+
+    // Reconciled: the condition clears, and nothing more is logged.
+    await rm(path.join(home, copy));
+    advance(5 * 60_000);
+    await scheduler.tick();
+    expect(scheduler.activeSignals).not.toContain("home_conflict:eng-1");
+    expect(await conflicts()).toHaveLength(1);
   });
 
   it("measures a placed project's capabilities against its own runner", async () => {

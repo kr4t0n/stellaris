@@ -17,6 +17,7 @@ export const OPS_SIGNAL_KINDS = [
   "turn_cost",
   "scaled",
   "runner",
+  "home_conflict",
 ] as const;
 export const OpsSignalKindSchema = z.enum(OPS_SIGNAL_KINDS);
 export type OpsSignalKind = z.infer<typeof OpsSignalKindSchema>;

@@ -1,7 +1,8 @@
 import type { Member, RoleCharter } from "@stellaris/shared";
 import type { ReactNode } from "react";
 import { Markdown } from "../components/Markdown.js";
-import { useAgentSkills, useMemoryCore } from "../lib/session.js";
+import { ago } from "../lib/format.js";
+import { useAgentSkills, useHomeConflicts, useMemoryCore, useNow } from "../lib/session.js";
 import { withoutTitle } from "./citizen.js";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -14,8 +15,9 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /**
- * What a citizen carries from turn to turn: the profile it keeps for others, the core memory every
- * turn loads, its own skills, and the charter of its role.
+ * What a citizen carries from turn to turn: the edits it has yet to reconcile, when there are any,
+ * the profile it keeps for others, the core memory every turn loads, its own skills, and the
+ * charter of its role.
  */
 export function CitizenMemory({
   member,
@@ -26,8 +28,30 @@ export function CitizenMemory({
 }) {
   const memory = useMemoryCore(member.name);
   const skills = useAgentSkills(member.name);
+  const conflicts = useHomeConflicts(member.name);
+  const now = useNow(30_000);
   return (
     <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+      {conflicts.data === undefined || conflicts.data.length === 0 ? null : (
+        <Section title="Edits to reconcile">
+          <p className="text-sm text-fg-secondary">
+            Two turns on different runners changed these files at once. Each file kept one version;
+            the other waits beside it until {member.name} merges it in and deletes the copy.
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {conflicts.data.map((conflict) => (
+              <li key={conflict.path} className="text-sm">
+                <span className="text-fg-primary">{conflict.file}</span>
+                <span className="text-meta">
+                  {" "}
+                  · {conflict.path.slice(conflict.path.lastIndexOf("/") + 1)} · left{" "}
+                  {ago(conflict.since, now)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
       <Section title="Profile">
         {member.profile.trim() === "" ? (
           <p className="text-meta">No profile yet. The citizen writes its own profile.md.</p>

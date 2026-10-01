@@ -676,6 +676,14 @@ export async function fakeBoard(
             path: "/x",
           },
         ]);
+      case "/api/agents/desk/conflicts":
+        return json(route, [
+          {
+            path: "memory/core.md.conflict-0000ABCD",
+            file: "memory/core.md",
+            since: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+          },
+        ]);
       case "/api/projects/lab/dashboard":
         return json(route, { data: {}, body: "# Lab dashboard\n\nThroughput is steady." });
       case "/api/projects/lab/knowledge":

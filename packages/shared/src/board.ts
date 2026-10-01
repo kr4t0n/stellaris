@@ -489,6 +489,21 @@ export const SkillSchema = z.object({
 });
 export type Skill = z.infer<typeof SkillSchema>;
 
+/**
+ * A conflict copy in an agent's home: the agent's own version of a file, which a runner kept
+ * beside the board's when two of its turns changed the same lines on different runners, until the
+ * agent merges it into the file and deletes it.
+ */
+export const HomeConflictSchema = z.object({
+  /** The copy, relative to the home. */
+  path: z.string().min(1),
+  /** The file beside it, whose version the board kept. */
+  file: z.string().min(1),
+  /** When the copy reached the board. */
+  since: IsoDateTimeSchema,
+});
+export type HomeConflict = z.infer<typeof HomeConflictSchema>;
+
 /** A knowledge topic: a project's, or the society's when the project is null. */
 export const KnowledgeSchema = z.object({
   topic: NameSchema,

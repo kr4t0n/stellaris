@@ -171,6 +171,12 @@ export function useAgentSkills(name: string) {
   return useQuery({ queryKey: ["agent-skills", name], queryFn: () => api.agentSkills(name) });
 }
 
+/** The conflict copies a citizen has yet to reconcile in its home. */
+export function useHomeConflicts(name: string) {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["conflicts", name], queryFn: () => api.conflicts(name) });
+}
+
 /** Agents edit the dashboard file directly and no event says so, so it polls. */
 export function useDashboard(slug: string) {
   const { api } = useSession();

@@ -381,6 +381,23 @@ describe("board server routes", () => {
         .parse(await (await app.request("/api/agents/eng-1/memory", { headers })).json()).body,
     ).toContain("Core memory");
     expect((await app.request("/api/agents/nobody/memory", { headers })).status).toBe(404);
+    const conflicts = async (): Promise<unknown> =>
+      (await app.request("/api/agents/eng-1/conflicts", { headers })).json();
+    expect(await conflicts()).toEqual([]);
+    // A copy the home's history does not hold yet is as old as the file.
+    await writeFile(
+      path.join(board.paths.agent("eng-1"), "memory", "core.md.conflict-0000ABCD"),
+      "- mine\n",
+      "utf8",
+    );
+    expect(await conflicts()).toEqual([
+      {
+        path: "memory/core.md.conflict-0000ABCD",
+        file: "memory/core.md",
+        since: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+      },
+    ]);
+    expect((await app.request("/api/agents/nobody/conflicts", { headers })).status).toBe(404);
   });
 
   it("serves the roster with profiles and the runner's resident pairs", async () => {

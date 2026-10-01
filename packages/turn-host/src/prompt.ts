@@ -1,5 +1,6 @@
 import {
   stageIndex,
+  type HomeConflict,
   type Knowledge,
   type Member,
   type Message,
@@ -62,7 +63,7 @@ export interface TurnPromptInput {
    * Files in the citizen's home that two of its turns changed at once on different runners: the
    * kept copies, each beside the file whose version won.
    */
-  readonly conflicts?: readonly string[] | undefined;
+  readonly conflicts?: readonly HomeConflict[] | undefined;
 }
 
 /** A thread's conversation as its turn's prompt describes it. */
@@ -73,14 +74,20 @@ export interface Conversation {
 }
 
 /** What a reflection turn is for. It replaces new work, not the unread messages. */
-const REFLECTION = [
-  "This turn is for your memory; take no new work, and answer unread messages only where a reply is needed. Read memory/core.md and your recent turn records, then:",
+const REFLECTION_INTRO =
+  "This turn is for your memory; take no new work, and answer unread messages only where a reply is needed. Read memory/core.md and your recent turn records, then:";
+
+/** The first step of a reflection while edits wait in the home, so what it consolidates is whole. */
+const RECONCILE =
+  "- Reconcile first: merge each copy listed under Edits to reconcile in your home into the file beside it, then delete the copy.";
+
+const REFLECTION_STEPS = [
   "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
   '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps. Propose it with kind "skill" when other citizens would use it.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
   "- Share: a durable fact about this scope's codebase or process goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
   "- Report memoryUpdated: true in the status object when core.md or a skill changed.",
-].join("\n");
+];
 
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
@@ -228,8 +235,16 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
+  const conflicts = input.conflicts ?? [];
   if (dispatch.trigger.kind === "reflection") {
-    lines.push("", "## Reflection", "", REFLECTION);
+    lines.push(
+      "",
+      "## Reflection",
+      "",
+      REFLECTION_INTRO,
+      ...(conflicts.length > 0 ? [RECONCILE] : []),
+      ...REFLECTION_STEPS,
+    );
   }
 
   if (input.onboarding !== null) {
@@ -294,7 +309,6 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     );
   }
 
-  const conflicts = input.conflicts ?? [];
   if (conflicts.length > 0) {
     lines.push(
       "",
@@ -302,7 +316,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "Two of your turns changed these files at once on different runners. The file in place kept the other turn's version; yours is the copy named here, beside it. Merge what still holds into the file, then delete the copy.",
       "",
-      ...conflicts.map((file) => `- ${file}`),
+      ...conflicts.map(
+        (conflict) => `- ${conflict.path}, beside ${conflict.file}, since ${conflict.since}`,
+      ),
     );
   }
 

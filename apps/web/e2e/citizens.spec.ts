@@ -15,6 +15,9 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await expect(view).toContainText("The user writes names plainly.");
   await expect(view).toContainText("routing · Send a post to who can act on it.");
   await expect(view).toContainText("Charter of concierge");
+  // A conflict copy two of its turns left waits at the top until the citizen reconciles it.
+  await expect(view.getByRole("heading", { name: "Edits to reconcile" })).toBeVisible();
+  await expect(view).toContainText("memory/core.md · core.md.conflict-0000ABCD · left 2 days ago");
 });
 
 test("a finished turn opens to every tool call with what it returned", async ({ page }) => {

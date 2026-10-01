@@ -2,6 +2,7 @@ import {
   BoardEventSchema,
   ChannelRefSchema,
   DecisionSchema,
+  HomeConflictSchema,
   KnowledgeSchema,
   AgentSchema,
   MemberSchema,
@@ -214,6 +215,9 @@ export function createApi(token: string) {
       get(`/api/agents/${encodeURIComponent(name)}/memory`, token, BodySchema),
     agentSkills: (name: string) =>
       get(`/api/agents/${encodeURIComponent(name)}/skills`, token, SkillSchema.array()),
+    /** Conflict copies waiting in a citizen's home for it to reconcile. */
+    conflicts: (name: string) =>
+      get(`/api/agents/${encodeURIComponent(name)}/conflicts`, token, HomeConflictSchema.array()),
     dashboard: (slug: string) =>
       get(`/api/projects/${encodeURIComponent(slug)}/dashboard`, token, DashboardSchema),
     /** A project's knowledge topics, or the society's for the society scope. */

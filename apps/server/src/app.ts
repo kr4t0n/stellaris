@@ -2,6 +2,7 @@ import { isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
   CliKindSchema,
+  MetricsWindowSchema,
   ModelNameSchema,
   NameSchema,
   RoleCharterSchema,
@@ -131,6 +132,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
   );
+  // How the society works over a window, with the conditions that hold now marked.
+  api.get("/metrics", async (c) => {
+    const window = MetricsWindowSchema.parse(c.req.query("window") ?? "7d");
+    return c.json(await board.metrics(window, new Set(scheduler?.activeSignals ?? [])));
+  });
   // The shared memory tiers: the society's knowledge topics and its promoted skills.
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));

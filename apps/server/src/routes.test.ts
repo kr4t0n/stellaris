@@ -515,6 +515,21 @@ describe("board server routes", () => {
     expect((await app.request("/health")).status).toBe(200);
   });
 
+  it("serves the society's metrics for a window, and refuses a window it does not know", async () => {
+    const app = createApp({ board, version: "t" });
+    const week = await app.request("/api/metrics", { headers });
+    expect(week.status).toBe(200);
+    expect(await week.json()).toMatchObject({
+      window: "7d",
+      idle: { turns: 0, idle: 0, unknown: 0 },
+      sentBack: { finished: 0 },
+      latency: { medianMs: null },
+      blocked: [],
+    });
+    expect((await app.request("/api/metrics?window=all", { headers })).status).toBe(200);
+    expect((await app.request("/api/metrics?window=year", { headers })).status).toBe(400);
+  });
+
   it("says the interface is not built when its directory has no page", async () => {
     const app = createApp({ board, version: "t", webDir: path.join(dir, "missing") });
     const page = await app.request("/");

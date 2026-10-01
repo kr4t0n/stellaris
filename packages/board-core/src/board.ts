@@ -88,9 +88,14 @@ import {
   type TurnHistoryEntry,
   type TurnRecord,
   type WakeRequestInput,
+  isBoardAction,
+  METRICS_WINDOW_MS,
+  type Metrics,
+  type MetricsWindow,
 } from "@stellaris/shared";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
+import { computeMetrics } from "./metrics.js";
 import {
   ensureDir,
   exists,
@@ -480,6 +485,7 @@ export class Board {
   private readonly mutex = new Mutex();
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
+  private readonly actionCounts = new Map<string, number | null>();
   private readonly leaseMs: number;
   private readonly now: () => Date;
   private readonly roleCache = new Map<Name, RoleCharter>();
@@ -2911,6 +2917,66 @@ export class Board {
   }
 
   /** The steps of one finished turn, as the runner handed them over when it ended. */
+  /**
+   * Six measures of how the society works over a window, from the event log and the board actions
+   * in each finished turn's transcript; `activeSignals` says which blocked tasks are blocked still.
+   */
+  async metrics(
+    window: MetricsWindow,
+    activeSignals: ReadonlySet<string> = new Set(),
+  ): Promise<Metrics> {
+    const now = this.now();
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    const tasks: Task[] = [];
+    for (const project of await listDirs(this.paths.projects())) {
+      tasks.push(...(await this.listTasks(project)));
+    }
+    const citizens = [];
+    for (const agent of await this.listAgents()) {
+      if (agent.cli !== null) {
+        const charter = await this.readRole(agent.role).catch(() => null);
+        citizens.push({
+          name: agent.name,
+          role: agent.role,
+          memberships: agent.memberships,
+          societyScope: charter?.societyScope ?? false,
+        });
+      }
+    }
+    const span = METRICS_WINDOW_MS[window];
+    const since = span === null ? null : now.getTime() - span;
+    const actions = new Map<string, number | null>();
+    for (const event of events) {
+      const turnId = event.payload["turnId"];
+      if (
+        event.type === "turn.completed" &&
+        typeof turnId === "string" &&
+        (since === null || Date.parse(event.ts) >= since)
+      ) {
+        actions.set(turnId, await this.turnActions(event.actor, turnId));
+      }
+    }
+    return computeMetrics({ events, tasks, citizens, actions, activeSignals, window, now });
+  }
+
+  /** The board actions a finished turn took, from its transcript; null when it kept none. */
+  private async turnActions(agent: Name, turnId: string): Promise<number | null> {
+    // A transcript is written before its turn's end is logged and never changes after.
+    const known = this.actionCounts.get(turnId);
+    if (known !== undefined) {
+      return known;
+    }
+    const count = await this.readTranscript(agent, turnId).then(
+      (entries) =>
+        entries.filter(
+          ({ event }) => event.type === "tool_result" && event.ok && isBoardAction(event.name),
+        ).length,
+      () => null,
+    );
+    this.actionCounts.set(turnId, count);
+    return count;
+  }
+
   async readTranscript(agent: Name, turnId: string): Promise<TranscriptEntry[]> {
     // The id names a file, so only a ULID may reach the path.
     const id = UlidSchema.safeParse(turnId);

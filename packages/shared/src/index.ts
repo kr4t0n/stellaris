@@ -5,4 +5,5 @@ export * from "./verbs.js";
 export * from "./events.js";
 export * from "./turns.js";
 export * from "./ops.js";
+export * from "./metrics.js";
 export * from "./config.js";

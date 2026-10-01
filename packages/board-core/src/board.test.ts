@@ -12,6 +12,12 @@ const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
 
 /** A turn record of eng-1 in demo, in a thread's conversation or at home. */
+/** A tool's result as a turn's transcript keeps it. */
+const result = (name: string, ok: boolean) => ({
+  ts: "2026-09-28T10:00:30.000Z",
+  event: { type: "tool_result" as const, name, ok },
+});
+
 const turnIn = (thread: Ulid | undefined, at: string) => ({
   agent: "eng-1",
   project: "demo",
@@ -1583,5 +1589,31 @@ describe("Board", () => {
     expect((await Board.open(relative)).paths.agent("eng-1")).toBe(
       path.join(dir, "agents", "eng-1"),
     );
+  });
+
+  it("counts a turn's board actions from its transcript for the metrics", async () => {
+    const { board } = await society();
+    const finish = async (transcript: ReturnType<typeof result>[]) => {
+      const turn = await board.beginTurn(turnIn(undefined, "2026-09-28T10:00:00.000Z"));
+      await board.finishTurn(
+        { ...turn, endedAt: "2026-09-28T10:01:00.000Z", exitReason: "completed" },
+        transcript,
+      );
+    };
+    // A post changes the board; a read, a failed claim, and a shell command do not.
+    await finish([result("mcp__board__post_message", true)]);
+    await finish([
+      result("Bash", true),
+      result("mcp__board__get_task", true),
+      result("mcp__board__claim_task", false),
+    ]);
+    // A turn that kept no transcript is counted apart.
+    await finish([]);
+    expect((await board.metrics("all")).idle).toMatchObject({
+      turns: 2,
+      idle: 1,
+      unknown: 1,
+      byAgent: [{ agent: "eng-1", role: "engineer", turns: 2, idle: 1 }],
+    });
   });
 });

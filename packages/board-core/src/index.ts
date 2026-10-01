@@ -18,6 +18,8 @@ export type {
   TaskLocation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";
+export { computeMetrics } from "./metrics.js";
+export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export type { BoardErrorCode } from "./errors.js";
 export { BoardPaths } from "./paths.js";
 export { hashToken, mintToken } from "./tokens.js";

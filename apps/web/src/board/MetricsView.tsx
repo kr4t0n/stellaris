@@ -161,10 +161,18 @@ export function MetricsView() {
     </nav>
   );
 
+  // The same header while a window loads, so switching windows never changes its height.
+  const header = (
+    <PaneHeader
+      title="Metrics"
+      subtitle="How the society works, counted from its event log"
+      trailing={switcher}
+    />
+  );
   if (metrics.data === undefined) {
     return (
       <>
-        <PaneHeader title="Metrics" trailing={switcher} />
+        {header}
         <PaneNote>
           {metrics.error instanceof ApiError ? metrics.error.message : "Counting the event log…"}
         </PaneNote>
@@ -176,11 +184,7 @@ export function MetricsView() {
 
   return (
     <>
-      <PaneHeader
-        title="Metrics"
-        subtitle="How the society works, counted from its event log"
-        trailing={switcher}
-      />
+      {header}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         <Section title="Turns that did nothing">
           {idle.turns === 0 ? (

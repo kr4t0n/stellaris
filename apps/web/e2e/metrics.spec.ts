@@ -60,3 +60,26 @@ test("the metrics open from the top bar, and the window is part of the address",
   await button.click();
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("the header keeps its height while another window is counted", async ({ page }) => {
+  await fakeBoard(page);
+  const { promise: counted, resolve: count } = Promise.withResolvers<void>();
+  // Registered after the fake board, so it answers first and holds the all-time window back.
+  await page.route("**/api/metrics?window=all", async (route) => {
+    await counted;
+    await route.fallback();
+  });
+  await page.goto("/metrics");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("3 of 12 turns changed nothing on the board");
+  const header = view.locator("header").first();
+  const height = (await header.boundingBox())?.height;
+
+  await view.getByRole("link", { name: "All time" }).click();
+  await expect(view).toContainText("Counting the event log…");
+  await expect(header).toContainText("How the society works, counted from its event log");
+  expect((await header.boundingBox())?.height).toBe(height);
+  count();
+  await expect(view).toContainText("5 decisions, about 2.5 a day");
+  expect((await header.boundingBox())?.height).toBe(height);
+});

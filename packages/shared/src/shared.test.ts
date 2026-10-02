@@ -108,7 +108,7 @@ describe("server config", () => {
       dataDir: "./data",
       host: "127.0.0.1",
       port: 4700,
-      publicUrl: "http://127.0.0.1:4700",
+      publicUrl: null,
       logLevel: "info",
       concurrency: null,
       turnTimeoutMs: 1_200_000,
@@ -117,7 +117,7 @@ describe("server config", () => {
     });
     expect(loadServerConfig({ STELLARIS_PORT: "5000" })).toMatchObject({
       port: 5000,
-      publicUrl: "http://127.0.0.1:5000",
+      publicUrl: null,
     });
     expect(loadServerConfig({ STELLARIS_PUBLIC_URL: "https://board.example/" }).publicUrl).toBe(
       "https://board.example",

@@ -27,6 +27,12 @@ export const PATH_TOKENS = {
 } as const;
 
 /**
+ * The board server's address in a job, which each runner fills with the address it reaches the
+ * server at, so runners on different networks each give their agents an address that works there.
+ */
+export const SERVER_TOKEN = "{{stellaris:server}}";
+
+/**
  * The folder inside an agent's home where its turns outside any project work, the working
  * directory of those turns: never committed, never shared, so downloads, environments, and other
  * working files stay on the machine that made them.

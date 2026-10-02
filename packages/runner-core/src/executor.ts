@@ -4,6 +4,7 @@ import {
   CliKindSchema,
   HOME_SCRATCH,
   PATH_TOKENS,
+  SERVER_TOKEN,
   turnStatusJsonSchema,
   type AgentEvent,
   type CliKind,
@@ -41,6 +42,8 @@ export interface TurnExecutorOptions {
   readonly log?: RunnerLog | undefined;
   /** Called whenever the set of warm sessions changes, with their keys. */
   readonly onWarmChanged?: ((keys: string[]) => void) | undefined;
+  /** Where this runner reaches the board server, which a job's `SERVER_TOKEN` stands for. */
+  readonly serverUrl: string;
 }
 
 /** Where a turn runs: the working directory, the repository, and what to hand the worktree back to. */
@@ -64,9 +67,10 @@ const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 
 /**
  * Runs turn jobs on this machine: makes sure of the project's repository and the turn's worktree,
- * fills the job's path tokens with this runner's paths, renders the CLI config files, runs the
- * turn through the CLI's adapter, cold or on a warm session, and hands the worktree back. It also
- * lands tasks in the repositories that live here and lists a CLI's models.
+ * fills the job's path tokens with this runner's paths and its server token with this runner's
+ * address for the server, renders the CLI config files, runs the turn through the CLI's adapter,
+ * cold or on a warm session, and hands the worktree back. It also lands tasks in the repositories
+ * that live here and lists a CLI's models.
  */
 export class TurnExecutor {
   private readonly layout: RunnerLayout;
@@ -75,6 +79,7 @@ export class TurnExecutor {
   private readonly git: GitOps;
   private readonly log: RunnerLog;
   private readonly onWarmChanged: ((keys: string[]) => void) | undefined;
+  private readonly serverUrl: string;
   private readonly projectLocks = new Map<Name, Promise<void>>();
   private readonly residents = new Map<string, Resident>();
 
@@ -85,6 +90,7 @@ export class TurnExecutor {
     this.git = options.git ?? new ExecaGit();
     this.log = options.log ?? SILENT;
     this.onWarmChanged = options.onWarmChanged;
+    this.serverUrl = options.serverUrl;
   }
 
   /** The CLIs this runner has an adapter for, and those that can keep a session warm. */
@@ -98,7 +104,11 @@ export class TurnExecutor {
     return [...this.residents.keys()].toSorted();
   }
 
-  async run(job: TurnJob, onEvent: (event: AgentEvent) => void): Promise<TurnOutcome> {
+  async run(received: TurnJob, onEvent: (event: AgentEvent) => void): Promise<TurnOutcome> {
+    const job: TurnJob = {
+      ...received,
+      mcp: { ...received.mcp, url: received.mcp.url.replaceAll(SERVER_TOKEN, this.serverUrl) },
+    };
     const backend = this.backends[job.cli];
     const fallbackSession = job.session ?? "unstarted";
     if (backend === undefined) {

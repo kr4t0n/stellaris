@@ -5,7 +5,7 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import type { Board } from "@stellaris/board-core";
 import { createRunner, type AgentBackend, type RunnerDaemon } from "@stellaris/runner-core";
-import { TurnDispatchSchema, type CliKind, type TurnRecord } from "@stellaris/shared";
+import { SERVER_TOKEN, TurnDispatchSchema, type CliKind, type TurnRecord } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import type { Hono } from "hono";
 import type { z } from "zod";
@@ -83,7 +83,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   const turns = options.turns ?? new TurnHub();
   const host = new TurnHost({
     board,
-    mcpUrl: `${url}/mcp`,
+    mcpUrl: `${SERVER_TOKEN}/mcp`,
     turnTimeoutMs: options.turnTimeoutMs,
     maxTurns: options.maxTurns,
     residentIdleMs: options.residentIdleMs ?? 60_000,

@@ -8,8 +8,11 @@ export const ServerConfigSchema = z.object({
   dataDir: z.string().min(1),
   host: z.string().min(1),
   port: z.number().int().positive().max(65535),
-  /** Where runners and their agents reach this server, for example https://board.example; the MCP endpoint is under it. */
-  publicUrl: z.string().min(1),
+  /**
+   * An address every runner's agents reach this server at, for example https://board.example, or
+   * null for each runner to use the address it reaches the server at itself.
+   */
+  publicUrl: z.string().min(1).nullable(),
   logLevel: LogLevelSchema,
   /** Turns running at once across every runner, or null for no limit beyond each runner's own. */
   concurrency: z.number().int().positive().nullable(),
@@ -43,13 +46,11 @@ export const AGENT_TOKEN_ENV = "STELLARIS_AGENT_TOKEN";
 
 /** Builds the server configuration from an environment map. Callers pass `process.env`. */
 export function loadServerConfig(env: Readonly<Record<string, string | undefined>>): ServerConfig {
-  const host = env["STELLARIS_HOST"] ?? "127.0.0.1";
-  const port = Number(env["STELLARIS_PORT"] ?? "4700");
   return ServerConfigSchema.parse({
     dataDir: env["STELLARIS_DATA_DIR"] ?? "./data",
-    host,
-    port,
-    publicUrl: (env["STELLARIS_PUBLIC_URL"] ?? `http://${host}:${port}`).replace(/\/+$/, ""),
+    host: env["STELLARIS_HOST"] ?? "127.0.0.1",
+    port: Number(env["STELLARIS_PORT"] ?? "4700"),
+    publicUrl: env["STELLARIS_PUBLIC_URL"]?.replace(/\/+$/, "") ?? null,
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     concurrency: limit(env["STELLARIS_CONCURRENCY"], null),
     turnTimeoutMs: limit(env["STELLARIS_TURN_TIMEOUT_MS"], 20 * 60_000),

@@ -326,6 +326,7 @@ export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
     git: options.git,
     log: options.log,
     onWarmChanged: (keys) => daemon?.reportWarm(keys),
+    serverUrl: options.serverUrl,
   });
   daemon = new RunnerDaemon({
     client,

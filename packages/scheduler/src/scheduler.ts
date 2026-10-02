@@ -129,7 +129,7 @@ export interface SchedulerOptions {
   readonly board: Board;
   readonly runner: TurnRunner;
   readonly timings?: Partial<SchedulerTimings> | undefined;
-  /** Simultaneous turns on this machine. A machine limit, not an agent budget. */
+  /** Turns running at once across every runner, the society's brake; each runner caps its own. */
   readonly concurrency?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: SchedulerLog | undefined;

@@ -145,6 +145,40 @@ describe("turns on a runner over the runner protocol", () => {
     return society;
   }
 
+  it("hands an agent the board at the address its runner reaches the server by", async () => {
+    const { board } = await Board.init(dir, { name: "address" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const urls: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        urls.push(request.mcp.url);
+        return Promise.resolve(completed("done"));
+      },
+    };
+    const { run, url } = await start(board, backend);
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    expect(urls).toEqual([`${url}/mcp`]);
+  });
+
   it("runs a turn without a time limit, renewing its leases while it runs", async () => {
     let clock = new Date("2026-09-29T10:00:00.000Z");
     const { board } = await Board.init(dir, { name: "long" }, { now: () => clock });

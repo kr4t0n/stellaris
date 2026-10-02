@@ -3,7 +3,7 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import { Board } from "@stellaris/board-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
-import { loadServerConfig } from "@stellaris/shared";
+import { SERVER_TOKEN, loadServerConfig } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import pino from "pino";
 import { createApp } from "./app.js";
@@ -15,7 +15,7 @@ const VERSION = "0.0.0";
 const config = loadServerConfig(process.env);
 const log = pino({ level: config.logLevel });
 const board = await Board.open(config.dataDir);
-const mcpUrl = `${config.publicUrl}/mcp`;
+const mcpUrl = `${config.publicUrl ?? SERVER_TOKEN}/mcp`;
 const turns = new TurnHub();
 
 // The server runs no turns: it prepares each one as a job for a runner that connected to it.

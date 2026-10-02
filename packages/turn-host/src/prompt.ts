@@ -8,6 +8,7 @@ import {
   type Message,
   type OpsSignal,
   type Project,
+  type Runner,
   type Stage,
   type Task,
   isTaskStep,
@@ -23,6 +24,15 @@ import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 export interface SocietyView {
   readonly projects: readonly Project[];
   readonly members: readonly Member[];
+}
+
+/**
+ * The machines turns run on, for the society roles that plan: each runner with what it offers, and
+ * the projects, each living on the runner that took its first turn.
+ */
+export interface RunnersView {
+  readonly runners: readonly Runner[];
+  readonly projects: readonly Project[];
 }
 
 /** The shared knowledge of the turn's scope: the project's topics, or the society's in the society scope. */
@@ -44,6 +54,8 @@ export interface TurnPromptInput {
   readonly onboarding: OnboardingContext | null;
   /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
+  /** Present for society roles, which plan where work runs; absent for everyone else. */
+  readonly runners?: RunnersView | null | undefined;
   readonly knowledge?: KnowledgeView | null | undefined;
   /** The threads the unread messages belong to, by id, for their titles. */
   readonly threads?: ReadonlyMap<Ulid, Thread> | undefined;
@@ -149,6 +161,22 @@ function signalLine(ts: string, signal: OpsSignal): string {
     signal.taskId === undefined ? "" : `task ${signal.taskId}`,
   ].filter((fact) => fact.length > 0);
   return `- [${ts}] ${signal.kind}: ${signal.summary} (${facts.join("; ")})`;
+}
+
+/** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
+function runnerLine(runner: Runner, projects: readonly Project[]): string {
+  const living = projects
+    .filter((project) => project.runner === runner.name)
+    .map((project) => project.slug);
+  const state =
+    runner.status === "connected"
+      ? "connected"
+      : `away${runner.lastSeen === undefined ? "" : ` since ${runner.lastSeen}`}`;
+  return `- ${runner.name}: ${state}; ${runner.os}; CLIs ${
+    runner.clis.length === 0 ? "none" : runner.clis.join(", ")
+  }; offers ${runner.capabilities.length === 0 ? "nothing beyond its CLIs" : runner.capabilities.join(", ")}; ${
+    living.length === 0 ? "no projects" : `projects ${living.join(", ")}`
+  }`;
 }
 
 /** The first line of a profile that is not a heading, clipped. */
@@ -283,12 +311,33 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       lines.push(
         `- ${project.slug} "${project.name}": channels ${project.channels.join(", ")}; members ${
           project.members.length === 0 ? "none" : project.members.join(", ")
-        }; on done ${project.onDone}`,
+        }; on done ${project.onDone}; ${
+          project.runner === undefined
+            ? "not placed on a runner yet"
+            : `on runner ${project.runner}`
+        }`,
       );
     }
     lines.push("", "### Citizens", "");
     for (const member of society.members) {
       lines.push(rosterLine(member));
+    }
+  }
+
+  const machines = input.runners;
+  if (machines !== undefined && machines !== null) {
+    lines.push(
+      "",
+      "## Runners",
+      "",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and never moves. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits.",
+      "",
+    );
+    if (machines.runners.length === 0) {
+      lines.push("None registered yet.");
+    }
+    for (const runner of machines.runners) {
+      lines.push(runnerLine(runner, machines.projects));
     }
   }
 

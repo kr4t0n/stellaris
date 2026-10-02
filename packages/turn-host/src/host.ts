@@ -27,6 +27,7 @@ import {
   buildTurnPrompt,
   type Conversation,
   type KnowledgeView,
+  type RunnersView,
   type SocietyView,
 } from "./prompt.js";
 import { renderInstructions, type OnboardingContext } from "./render.js";
@@ -260,6 +261,16 @@ export class TurnHost {
           members: await this.board.listMembers(),
         }
       : null;
+    // Society roles plan where work runs, so they see every machine and what lives on it.
+    const runners: RunnersView | null =
+      charter.societyScope && agent.role !== USER_ROLE
+        ? {
+            runners: await this.board.listRunners(),
+            projects: (await this.board.listProjects()).filter(
+              (each) => each.archived === undefined,
+            ),
+          }
+        : null;
     const knowledge: KnowledgeView = societyScope
       ? {
           dir: `${PATH_TOKENS.board}/society/knowledge`,
@@ -311,6 +322,7 @@ export class TurnHost {
       lastTurn,
       onboarding,
       societyView,
+      runners,
       knowledge,
       signals,
       conflicts: await this.board.listHomeConflicts(agent.name),

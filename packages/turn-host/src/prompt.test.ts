@@ -2,6 +2,23 @@ import { TaskFrontmatterSchema, TriggerSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
+/** A project as the board lists it, placed on a runner or not yet. */
+function listedProject(slug: string, runner?: string) {
+  return {
+    slug,
+    name: slug,
+    repo: null,
+    defaultBranch: "main",
+    channels: ["general"],
+    members: [],
+    approvers: [],
+    requiredCapabilities: [],
+    createdAt: "2026-10-01T00:00:00.000Z",
+    onDone: "none" as const,
+    ...(runner === undefined ? {} : { runner }),
+  };
+}
+
 describe("buildTurnPrompt", () => {
   it("carries the trigger, held claims, unread messages with thread titles, and a failed-turn note", () => {
     const prompt = buildTurnPrompt({
@@ -364,6 +381,56 @@ describe("buildTurnPrompt", () => {
       onboarding: null,
     });
     expect(reader).not.toContain("## Operations signals");
+  });
+
+  it("shows a society role every runner, what it offers, and the projects living on it", () => {
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "desk",
+        project: "society",
+        trigger: TriggerSchema.parse({ kind: "user_post", fromUser: true }),
+        priority: 2,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      societyView: { projects: [listedProject("lab", "pod"), listedProject("new")], members: [] },
+      runners: {
+        runners: [
+          {
+            name: "pod",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+          },
+          {
+            name: "laptop",
+            os: "darwin",
+            clis: ["claude"],
+            capabilities: ["gpu", "xcode"],
+            status: "disconnected",
+            lastSeen: "2026-10-01T09:00:00.000Z",
+          },
+        ],
+        projects: [listedProject("lab", "pod"), listedProject("new")],
+      },
+    });
+    expect(prompt).toContain("## Runners");
+    expect(prompt).toContain(
+      "required_capabilities must name capabilities exactly as a runner below offers them",
+    );
+    expect(prompt).toContain(
+      "- pod: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; projects lab",
+    );
+    expect(prompt).toContain(
+      "- laptop: away since 2026-10-01T09:00:00.000Z; darwin; CLIs claude; offers gpu, xcode; no projects",
+    );
+    // The front desk's project list says where each project lives.
+    expect(prompt).toContain("on done none; on runner pod");
+    expect(prompt).toContain("on done none; not placed on a runner yet");
   });
 
   it("tells a turn outside projects when it was asked from a project the citizen is not in", () => {

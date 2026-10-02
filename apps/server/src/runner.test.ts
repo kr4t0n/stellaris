@@ -459,6 +459,11 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.starts).toEqual(["desk:session-1"]);
     expect(backend.prompts[0]).toContain("## The society");
     expect(backend.prompts[0]).toContain("- eng-1: engineer on claude");
+    // A society role plans where work runs, so it sees every machine and what lives on it.
+    expect(backend.prompts[0]).toContain("## Runners");
+    expect(backend.prompts[0]).toMatch(
+      /- pod: connected; \w+; CLIs claude; offers nothing beyond its CLIs; /,
+    );
     expect(hub.residentPairs).toEqual(["desk/society"]);
     await run(deskPost);
     expect(backend.starts).toHaveLength(1);

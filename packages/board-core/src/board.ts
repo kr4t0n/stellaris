@@ -3,6 +3,7 @@ import path from "node:path";
 import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
+  ASK_CHANNEL,
   AgentSchema,
   ArchiveProposalSchema,
   currentStage,
@@ -348,6 +349,9 @@ const FRONT_DESK_TRIGGER = "user_post";
 /** Where readers of operations signals follow governance; proposals reach them as threads. */
 const OPS_CHANNELS: readonly ChannelRef[] = ["governance"];
 
+/** Where the front desk follows the user's asks, whose closing summaries nobody else reads. */
+const FRONT_DESK_CHANNELS: readonly ChannelRef[] = [ASK_CHANNEL];
+
 /** One-time changes an existing society receives on open, by name, remembered once applied. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
 const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
@@ -357,6 +361,7 @@ const TASK_RETURNS = "task-returns-recorded";
 const OPS_CHANNEL_RETIRED = "ops-channel-retired";
 const DECISIONS_CHANNEL_RETIRED = "decisions-channel-retired";
 const THREAD_CONVERSATIONS = "thread-conversations";
+const ASKS_CHANNEL_OPENED = "asks-channel-opened";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -590,6 +595,7 @@ export class Board {
       OPS_CHANNEL_RETIRED,
       DECISIONS_CHANNEL_RETIRED,
       THREAD_CONVERSATIONS,
+      ASKS_CHANNEL_OPENED,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -614,6 +620,9 @@ export class Board {
     }
     if (pending.includes(THREAD_CONVERSATIONS)) {
       await this.startThreadCursors();
+    }
+    if (pending.includes(ASKS_CHANNEL_OPENED)) {
+      await this.openAsksChannel();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -677,6 +686,41 @@ export class Board {
         }));
         await this.refreshMember(agent.name);
       }
+    }
+  }
+
+  /**
+   * Asks once opened their threads in general, where closing one posted its summary to every
+   * citizen and woke the steward's heartbeat for it. The society gains the asks channel, and the
+   * front desk follows it.
+   */
+  private async openAsksChannel(): Promise<void> {
+    const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
+    if (!doc.data.channels.includes(ASK_CHANNEL)) {
+      await writeMarkdown(
+        this.paths.societyFile(),
+        { ...doc.data, channels: [...doc.data.channels, ASK_CHANNEL] },
+        doc.body,
+      );
+    }
+    await ensureDir(this.paths.societyChannel(ASK_CHANNEL));
+    for (const agent of await this.listAgents()) {
+      if (agent.status !== "active" || agent.subscriptions.includes(ASK_CHANNEL)) {
+        continue;
+      }
+      if (!(await this.readRole(agent.role)).wakeTriggers.includes(FRONT_DESK_TRIGGER)) {
+        continue;
+      }
+      await this.updateAgent(agent.name, (a) => ({
+        ...a,
+        subscriptions: [...a.subscriptions, ASK_CHANNEL],
+      }));
+      await this.refreshMember(agent.name);
+      await this.events.append("subscription.changed", agent.name, {
+        channel: ASK_CHANNEL,
+        subscribed: true,
+        aligned: true,
+      });
     }
   }
 
@@ -3966,6 +4010,7 @@ export class Board {
       "general",
       ...memberships.map((slug) => channelRef(slug, "general")),
       ...(charter.wakeTriggers.includes(OPS_WAKE_TRIGGER) ? OPS_CHANNELS : []),
+      ...(charter.wakeTriggers.includes(FRONT_DESK_TRIGGER) ? FRONT_DESK_CHANNELS : []),
     ];
     const subscriptions = [...new Set([...defaultSubscriptions, ...(input.subscriptions ?? [])])];
     const token = mintToken();

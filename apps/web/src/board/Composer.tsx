@@ -1,16 +1,16 @@
-import type { Message } from "@stellaris/shared";
+import { ASK_CHANNEL, type Message } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
-import { ASK_CHANNEL, askTitle } from "./asks.js";
+import { askTitle } from "./asks.js";
 import { completeMention, listed, mentionAt, wakesFor } from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
- * general channel titled by the post's first line.
+ * asks channel titled by the post's first line.
  */
 export type Target =
   | { readonly channel: string }

@@ -1,13 +1,10 @@
-import { USER_NAME } from "@stellaris/shared";
+import { ASK_CHANNEL, USER_NAME } from "@stellaris/shared";
 import type { ThreadSummary } from "../lib/api.js";
-
-/** The society's general channel, where every ask opens its thread. */
-export const ASK_CHANNEL = "general";
 
 const TITLE_LIMIT = 80;
 
 /**
- * The user's asks: topic threads the user opened on the society's general channel, newest first.
+ * The user's asks: topic threads the user opened on the society's asks channel, newest first.
  * Nothing marks a thread as an ask, so one opened there from the channel view counts too.
  */
 export function asksOf(threads: readonly ThreadSummary[]): ThreadSummary[] {

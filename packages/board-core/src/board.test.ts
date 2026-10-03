@@ -84,7 +84,7 @@ describe("Board", () => {
 
   it("initializes a society with seed roles, channels, the server runner, and a user", async () => {
     const { board, userToken } = await society();
-    expect((await board.society()).channels).toEqual(["general", "governance"]);
+    expect((await board.society()).channels).toEqual(["general", "governance", "asks"]);
     const roles = (await board.listRoles()).map((role) => role.name).toSorted();
     expect(roles).toEqual(["concierge", "engineer", "reviewer", "steward", "user"]);
     expect(board.resolveToken(userToken)).toEqual(USER);
@@ -1355,6 +1355,30 @@ describe("Board", () => {
     });
   });
 
+  it("opens the asks channel in an older society once, for the front desk to follow", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    expect((await board.readAgent("desk")).subscriptions).toEqual(["general", "asks"]);
+
+    // An older society had no asks channel: the user's asks opened their threads in general.
+    await board.unsubscribe(DESK, { channel: "asks" });
+    const file = board.paths.societyFile();
+    await writeFile(file, (await readFile(file, "utf8")).replace("\n  - asks", ""), "utf8");
+    expect((await board.society()).channels).toEqual(["general", "governance"]);
+    const reopened = await Board.open(dir);
+    expect((await reopened.society()).channels).toEqual(["general", "governance", "asks"]);
+    expect((await reopened.readAgent("desk")).subscriptions).toEqual(["general", "asks"]);
+    expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
+    expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("asks");
+
+    // Applied once: a front desk that leaves the channel afterwards keeps its choice.
+    await reopened.unsubscribe(DESK, { channel: "asks" });
+    await Board.open(dir);
+    expect((await reopened.readAgent("desk")).subscriptions).toEqual(["general"]);
+  });
+
   it("aligns an older society once: decisions for ops readers, thread records, the digest cursor", async () => {
     const { board, eng } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
@@ -1446,7 +1470,7 @@ describe("Board", () => {
     });
     expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
     expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
-    expect((await reopened.society()).channels).toEqual(["general", "governance"]);
+    expect((await reopened.society()).channels).toEqual(["general", "governance", "asks"]);
     expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
     expect(await reopened.readThread(live)).toMatchObject({
       channel: "demo/general",

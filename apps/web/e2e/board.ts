@@ -379,7 +379,7 @@ interface AskFixture {
 }
 
 function askMessage(id: string, thread: string, author: string, body: string) {
-  return { id, author, channel: "general", thread, ts: CREATED, mentions: [], body };
+  return { id, author, channel: "asks", thread, ts: CREATED, mentions: [], body };
 }
 
 /** Two asks the user made: one desk answered and nobody has read yet, one desk closed. */
@@ -390,7 +390,7 @@ function askFixtures(): Map<string, AskFixture> {
       {
         thread: {
           id: CLOSED_ASK,
-          channel: "general",
+          channel: "asks",
           title: "Merge the phone projects",
           state: "closed",
           openedBy: "user",
@@ -410,7 +410,7 @@ function askFixtures(): Map<string, AskFixture> {
       {
         thread: {
           id: ANSWERED_ASK,
-          channel: "general",
+          channel: "asks",
           title: "Who reviews the survey?",
           state: "open",
           openedBy: "user",
@@ -497,7 +497,7 @@ export interface FakeBoard {
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
  * an archived project sits beside lab and desk asks to archive lab too. With `asks`, the user has
- * asked twice before; a new ask opens a thread in general, and desk is in a turn on it once posted.
+ * asked twice before; a new ask opens a thread in asks, and desk is in a turn on it once posted.
  */
 export async function fakeBoard(
   page: Page,
@@ -679,7 +679,7 @@ export async function fakeBoard(
           name: "fixture",
           version: 1,
           createdAt: CREATED,
-          channels: ["general", "governance"],
+          channels: ["general", "governance", "asks"],
         });
       case "/api/members":
         return json(route, [
@@ -795,6 +795,7 @@ export async function fakeBoard(
       case "/api/skills":
       case "/api/channels/general":
       case "/api/channels/governance":
+      case "/api/channels/asks":
         return json(route, []);
       case "/api/scheduler":
         return json(route, {
@@ -810,6 +811,7 @@ export async function fakeBoard(
         return json(route, [
           channel("general"),
           channel("governance"),
+          channel("asks"),
           { ...channel("general"), ref: "lab/general", project: "lab" },
           ...(archived
             ? [{ ...channel("general"), ref: "iphone/general", project: "iphone", messages: 1 }]

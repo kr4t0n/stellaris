@@ -1,3 +1,4 @@
+import { ASK_CHANNEL } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import type { ThreadSummary } from "../lib/api.js";
 import { askState, asksOf, askTitle, hasUnseenReply } from "./asks.js";
@@ -8,7 +9,7 @@ const REPLY = "01M3S00000000000000000000R";
 function thread(fields: Partial<ThreadSummary> = {}): ThreadSummary {
   return {
     id: ASK,
-    channel: "general",
+    channel: ASK_CHANNEL,
     title: "Who reviews the survey?",
     state: "open",
     openedBy: "user",
@@ -22,7 +23,7 @@ function thread(fields: Partial<ThreadSummary> = {}): ThreadSummary {
 }
 
 describe("asks", () => {
-  it("are the topic threads the user opened in the society's general, newest first", () => {
+  it("are the topic threads the user opened in the society's asks channel, newest first", () => {
     const newer = thread({ id: "01M3S00000000000000000000B" });
     expect(
       asksOf([
@@ -30,6 +31,7 @@ describe("asks", () => {
         newer,
         thread({ id: "01M3S00000000000000000000C", openedBy: "desk" }),
         thread({ id: "01M3S00000000000000000000D", channel: "lab/general" }),
+        thread({ id: "01M3S00000000000000000000F", channel: "general" }),
         thread({ id: "01M3S00000000000000000000E", subject: { kind: "task", id: ASK } }),
       ]).map((ask) => ask.id),
     ).toEqual([newer.id, ASK]);

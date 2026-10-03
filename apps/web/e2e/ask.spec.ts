@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { ANSWERED_ASK, fakeBoard } from "./board.js";
 
-test("Space opens a composer in the sky, and an ask opens a thread in general for the front desk", async ({
+test("Space opens a composer in the sky, and an ask opens a thread in asks for the front desk", async ({
   page,
 }) => {
   const board = await fakeBoard(page, { asks: true });
@@ -30,7 +30,7 @@ test("Space opens a composer in the sky, and an ask opens a thread in general fo
   const [opened, posted] = board.writes;
   expect(opened).toEqual({
     path: "/api/verbs/open_thread",
-    body: { channel: "general", title: "Should lab fix a seed policy?" },
+    body: { channel: "asks", title: "Should lab fix a seed policy?" },
   });
   expect(posted?.path).toBe("/api/verbs/post_message");
   expect(posted?.body).toMatchObject({ body: "Should lab fix a seed policy?" });

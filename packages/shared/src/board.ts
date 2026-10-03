@@ -9,7 +9,12 @@ import {
 } from "./ids.js";
 import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
-export const SOCIETY_CHANNELS = ["general", "governance"] as const;
+/**
+ * The society channel the user's asks open their threads on, which the front desk follows. It
+ * keeps their closing summaries out of general, which every citizen reads.
+ */
+export const ASK_CHANNEL = "asks";
+export const SOCIETY_CHANNELS = ["general", "governance", ASK_CHANNEL] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 
 /**

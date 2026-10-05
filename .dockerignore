@@ -1,0 +1,16 @@
+# Images build from the sources, the manifests, and the lockfile; everything built is rebuilt.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/coverage
+**/test-results
+**/playwright-report
+.git
+.github
+.argus
+data
+*.log
+
+# Secrets never enter a build context.
+.env
+.env.*

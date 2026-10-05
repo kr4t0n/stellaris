@@ -1,15 +1,18 @@
 import { randomBytes } from "node:crypto";
 import type { Board } from "@stellaris/board-core";
 import type { GithubSignIn } from "@stellaris/shared";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 /** How long a sign-in lasts before the user signs in again. */
 export const SIGN_IN_TTL_MS = 30 * 24 * 3_600_000;
 /** How long a browser has to come back from GitHub with the state it was sent with. */
 const STATE_TTL_MS = 10 * 60_000;
-/** States waiting at once; the oldest go first, so nobody can grow the map without bound. */
-const MAX_STATES = 100;
+/**
+ * States waiting at once; the oldest go first, so nobody can grow the map without bound, and the
+ * rate limit per address keeps one client from churning out someone else's.
+ */
+const MAX_STATES = 1_000;
 
 const TokenAnswerSchema = z.object({ access_token: z.string().min(1) });
 const GithubUserSchema = z.object({ login: z.string().min(1), id: z.number().int() });
@@ -21,6 +24,8 @@ export interface GithubAuthOptions {
   readonly fetch?: typeof fetch | undefined;
   readonly now?: (() => number) | undefined;
   readonly log?: { warn(details: object, message: string): void } | undefined;
+  /** Limits starting a sign-in, which anyone may do. */
+  readonly limit?: MiddlewareHandler | undefined;
 }
 
 /** A path inside the board to land on after signing in; anything else lands on the sky. */
@@ -51,7 +56,7 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
     return routes;
   }
 
-  routes.get("/github", (c) => {
+  routes.get("/github", options.limit ?? ((_c, next) => next()), (c) => {
     for (const [state, pending] of states) {
       if (pending.expiresAt <= now() || states.size >= MAX_STATES) {
         states.delete(state);

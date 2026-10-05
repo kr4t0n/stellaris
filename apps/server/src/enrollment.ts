@@ -14,10 +14,11 @@ export const ENROLLMENT_TTL_MS = 10 * 60_000;
 /** How often a runner asks whether it was approved, unless the desk is told otherwise. */
 const POLL_INTERVAL_MS = 3_000;
 /**
- * Enrollments waiting at once. Asking needs no token, so the cap is what keeps strangers from
- * growing the desk without bound; a full desk refuses new asks until some expire.
+ * Enrollments waiting at once. Asking needs no token, so the cap keeps strangers from growing the
+ * desk without bound, and the rate limit per address keeps any one of them to a few of its places;
+ * a full desk refuses new asks until some expire.
  */
-const MAX_WAITING = 20;
+const MAX_WAITING = 100;
 /** No vowels, so no code spells a word, and nothing read as another: no 0, O, 1, or I. */
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ23456789";
 

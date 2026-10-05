@@ -89,6 +89,8 @@ const app = createApp({
   webDir,
   signIn: { github: config.github, log },
   enrollments: new EnrollmentDesk(board),
+  trustedProxies: config.trustedProxies,
+  log,
 });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
@@ -100,6 +102,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
       webDir,
       webBuilt,
       signIn: config.github === null ? "token" : `github (${config.github.users.join(", ")})`,
+      trustedProxies: config.trustedProxies,
     },
     "board server listening",
   );

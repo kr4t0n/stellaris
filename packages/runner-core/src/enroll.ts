@@ -110,9 +110,11 @@ export async function enrollRunner(
     });
     const text = await response.text();
     if (!response.ok) {
+      const retryAfter = Number(response.headers.get("retry-after") ?? Number.NaN);
       throw new RunnerHttpError(
         response.status,
         `POST ${path} answered ${response.status}: ${text.slice(0, 500)}`,
+        Number.isFinite(retryAfter) ? retryAfter * 1000 : undefined,
       );
     }
     return JSON.parse(text);
@@ -163,6 +165,14 @@ export async function enrollRunner(
             "the server does not enroll runners; register this runner on the board and set STELLARIS_RUNNER_TOKEN",
             { cause: error },
           );
+        }
+        if (error.status === 429 && error.retryAfterMs !== undefined) {
+          options.log?.warn(
+            { retryAfterMs: error.retryAfterMs },
+            "the server limits enrollment requests from this address; waiting",
+          );
+          await wait(error.retryAfterMs, undefined, signal === undefined ? {} : { signal });
+          continue;
         }
       }
       options.log?.warn({ error: String(error) }, "could not reach the server to enroll");

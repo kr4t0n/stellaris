@@ -15,7 +15,7 @@ import {
   type RunnerMessage,
 } from "@stellaris/shared";
 import type { RunnerHub } from "@stellaris/turn-host";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { EnrollmentDesk } from "./enrollment.js";
 import { HomeGit } from "./home-git.js";
@@ -40,13 +40,15 @@ export function runnerRoutes(
   board: Board,
   hub: RunnerHub,
   enrollments?: EnrollmentDesk,
+  /** Limits asking to enroll, which anyone may do. */
+  enrollLimit?: MiddlewareHandler,
 ): Hono<RunnerEnv> {
   const routes = new Hono<RunnerEnv>();
 
   // A runner with no token asks to be enrolled and polls until the user decides, so these two
   // answer before the token check below.
   if (enrollments !== undefined) {
-    routes.post("/enroll", async (c) =>
+    routes.post("/enroll", enrollLimit ?? ((_c, next) => next()), async (c) =>
       c.json(enrollments.open(RunnerEnrollRequestSchema.parse(await c.req.json()))),
     );
     routes.post("/enroll/poll", async (c) => {

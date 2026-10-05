@@ -55,7 +55,7 @@ Each listed login signs in as the user for 30 days; anyone else is turned away a
 
 ## Runners
 
-Start a runner on its machine with `STELLARIS_SERVER_URL` set to an address of this server it can reach. With no token, it asks the board to enroll it and prints a code and a link to the board's runners view, where you approve it under a name; it keeps the token approval gives it in its data directory and uses it from then on. A runner registered by hand (`POST /api/runners` with the user token, which shows the runner's token once) starts with `STELLARIS_RUNNER_TOKEN` instead. Each runner's agents reach the MCP endpoint at the runner's server address, unless `server.config.publicUrl` names one for every runner.
+Start a runner on its machine with `STELLARIS_SERVER_URL` set to an address of this server it can reach. Asking to enroll needs no token, so each client address may ask five times in ten minutes; the server finds the client's address behind the chart's Ingress from `X-Forwarded-For`, trusting one proxy, so set `server.config.trustedProxies` to 2 if another proxy that appends to it, such as Cloudflare, sits in front of the Ingress. Approve only the code your own runner printed, since anyone may ask and a request names whatever hostname it likes. With no token, it asks the board to enroll it and prints a code and a link to the board's runners view, where you approve it under a name; it keeps the token approval gives it in its data directory and uses it from then on. A runner registered by hand (`POST /api/runners` with the user token, which shows the runner's token once) starts with `STELLARIS_RUNNER_TOKEN` instead. Each runner's agents reach the MCP endpoint at the runner's server address, unless `server.config.publicUrl` names one for every runner.
 
 ## Ingress
 
@@ -90,31 +90,32 @@ helm upgrade stellaris stellaris/stellaris -n stellaris
 
 ## Values
 
-| Value                                  | Default                              | Meaning                                                                       |
-| -------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------- |
-| `image.tag`, `server.image.tag`        | the chart's `appVersion`             | The server image's tag                                                        |
-| `server.image.repository`              | `kr4t0n/stellaris-server`            | The server image                                                              |
-| `society.name`                         | `stellaris`                          | The society's name on first start                                             |
-| `society.citizens`                     | `desk` (concierge), `stew` (steward) | Citizens added on first start: `name`, `role`, `cli`, optional `model`        |
-| `auth.github.enabled`                  | `false`                              | Sign in with GitHub; the first start then writes no token file                |
-| `auth.github.clientId`                 | empty                                | The OAuth app's client id                                                     |
-| `auth.github.clientSecret`             | empty                                | Its client secret, for a Secret the chart creates                             |
-| `auth.github.existingSecret`, `Key`    | empty, `client-secret`               | A Secret of your own holding the client secret, and its key                   |
-| `auth.github.users`                    | empty                                | GitHub logins or numeric user ids allowed in                                  |
-| `server.config.logLevel`               | `info`                               | `STELLARIS_LOG_LEVEL`                                                         |
-| `server.config.publicUrl`              | empty                                | `STELLARIS_PUBLIC_URL`, one MCP address for every runner's agents             |
-| `server.config.concurrency`            | empty, no cap beyond each runner's   | `STELLARIS_CONCURRENCY`, turns at once across the society                     |
-| `server.config.turnTimeoutMs`          | empty, 20 minutes                    | `STELLARIS_TURN_TIMEOUT_MS`, or `unlimited`                                   |
-| `server.config.toolRounds`             | empty, 60                            | `STELLARIS_TOOL_ROUNDS`, or `unlimited`                                       |
-| `server.config.residentIdleMs`         | empty, 10 minutes                    | `STELLARIS_RESIDENT_IDLE_MS`                                                  |
-| `server.config.timings`                | `{}`                                 | `STELLARIS_TIMINGS`, scheduler timing overrides                               |
-| `server.terminationGracePeriodSeconds` | `1200`                               | How long a stopping server may drain running turns                            |
-| `server.extraEnv`, `extraEnvFrom`      | empty                                | More environment for the server                                               |
-| `persistence.size`                     | `10Gi`                               | The data volume's size                                                        |
-| `persistence.storageClass`             | the cluster's default                | `-` for none                                                                  |
-| `persistence.existingClaim`            | empty                                | A claim made outside the chart                                                |
-| `persistence.keepOnUninstall`          | `true`                               | Keep the chart's claim on `helm uninstall`                                    |
-| `ingress.*`                            | disabled                             | One Ingress for the server: `className`, `host`, `path`, `annotations`, `tls` |
+| Value                                  | Default                              | Meaning                                                                          |
+| -------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------- |
+| `image.tag`, `server.image.tag`        | the chart's `appVersion`             | The server image's tag                                                           |
+| `server.image.repository`              | `kr4t0n/stellaris-server`            | The server image                                                                 |
+| `society.name`                         | `stellaris`                          | The society's name on first start                                                |
+| `society.citizens`                     | `desk` (concierge), `stew` (steward) | Citizens added on first start: `name`, `role`, `cli`, optional `model`           |
+| `auth.github.enabled`                  | `false`                              | Sign in with GitHub; the first start then writes no token file                   |
+| `auth.github.clientId`                 | empty                                | The OAuth app's client id                                                        |
+| `auth.github.clientSecret`             | empty                                | Its client secret, for a Secret the chart creates                                |
+| `auth.github.existingSecret`, `Key`    | empty, `client-secret`               | A Secret of your own holding the client secret, and its key                      |
+| `auth.github.users`                    | empty                                | GitHub logins or numeric user ids allowed in                                     |
+| `server.config.logLevel`               | `info`                               | `STELLARIS_LOG_LEVEL`                                                            |
+| `server.config.publicUrl`              | empty                                | `STELLARIS_PUBLIC_URL`, one MCP address for every runner's agents                |
+| `server.config.concurrency`            | empty, no cap beyond each runner's   | `STELLARIS_CONCURRENCY`, turns at once across the society                        |
+| `server.config.turnTimeoutMs`          | empty, 20 minutes                    | `STELLARIS_TURN_TIMEOUT_MS`, or `unlimited`                                      |
+| `server.config.toolRounds`             | empty, 60                            | `STELLARIS_TOOL_ROUNDS`, or `unlimited`                                          |
+| `server.config.residentIdleMs`         | empty, 10 minutes                    | `STELLARIS_RESIDENT_IDLE_MS`                                                     |
+| `server.config.trustedProxies`         | empty, 1 with the Ingress, else 0    | `STELLARIS_TRUSTED_PROXIES`, proxies that append the client to `X-Forwarded-For` |
+| `server.config.timings`                | `{}`                                 | `STELLARIS_TIMINGS`, scheduler timing overrides                                  |
+| `server.terminationGracePeriodSeconds` | `1200`                               | How long a stopping server may drain running turns                               |
+| `server.extraEnv`, `extraEnvFrom`      | empty                                | More environment for the server                                                  |
+| `persistence.size`                     | `10Gi`                               | The data volume's size                                                           |
+| `persistence.storageClass`             | the cluster's default                | `-` for none                                                                     |
+| `persistence.existingClaim`            | empty                                | A claim made outside the chart                                                   |
+| `persistence.keepOnUninstall`          | `true`                               | Keep the chart's claim on `helm uninstall`                                       |
+| `ingress.*`                            | disabled                             | One Ingress for the server: `className`, `host`, `path`, `annotations`, `tls`    |
 
 The probes, resources, security contexts, and scheduling fields under `server` take the usual Kubernetes shapes; `values.yaml` documents each.
 

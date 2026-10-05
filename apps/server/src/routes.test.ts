@@ -159,6 +159,24 @@ describe("board server routes", () => {
     expect((await app.request("/api/me", { headers })).status).toBe(200);
   });
 
+  it("limits how many sign-ins one address may start", async () => {
+    const app = createApp({
+      board,
+      version: "t",
+      trustedProxies: 1,
+      signIn: { github: { clientId: "Iv1.test", clientSecret: "secret", users: ["kr4t0n"] } },
+    });
+    const start = (address: string) =>
+      app.request("/auth/github", { headers: { "x-forwarded-for": address } });
+    for (let n = 0; n < 20; n += 1) {
+      expect((await start("198.51.100.1")).status).toBe(302);
+    }
+    expect((await start("198.51.100.1")).status).toBe(429);
+    expect((await start("198.51.100.2")).status).toBe(302);
+    // Only starting is limited; the board's own config is not.
+    expect((await app.request("/auth/config")).status).toBe(200);
+  });
+
   it("offers no GitHub sign-in unless it is configured", async () => {
     const app = createApp({ board, version: "t" });
     expect(await (await app.request("/auth/config")).json()).toEqual({ github: false });

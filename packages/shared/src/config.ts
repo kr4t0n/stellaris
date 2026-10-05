@@ -36,6 +36,11 @@ export const ServerConfigSchema = z.object({
   residentIdleMs: z.number().int().positive(),
   /** Signing in to the board with GitHub, or null when only a token lets anyone in. */
   github: GithubSignInSchema.nullable(),
+  /**
+   * Reverse proxies in front of the server whose X-Forwarded-For entries name the client, for the
+   * rate limits on what anyone may ask without a token: 0 when clients connect directly.
+   */
+  trustedProxies: z.number().int().min(0).max(16),
 });
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 
@@ -88,6 +93,7 @@ export function loadServerConfig(env: Readonly<Record<string, string | undefined
     toolRounds: limit(env["STELLARIS_TOOL_ROUNDS"], 60),
     residentIdleMs: Number(env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
     github: githubSignIn(env),
+    trustedProxies: Number(env["STELLARIS_TRUSTED_PROXIES"] ?? "0"),
   });
 }
 

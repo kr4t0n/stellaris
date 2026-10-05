@@ -69,6 +69,10 @@ anything the init container's script would have to quote: names, roles, CLIs, an
 plain words by these checks.
 */}}
 {{- define "stellaris.validate" -}}
+{{- $proxies := .Values.server.config.trustedProxies -}}
+{{- if not (or (kindIs "invalid" $proxies) (regexMatch "^[0-9]*$" (toString $proxies))) -}}
+{{- fail (printf "server.config.trustedProxies must be a number of proxies or empty, not %q" (toString $proxies)) -}}
+{{- end -}}
 {{- $github := .Values.auth.github -}}
 {{- if $github.enabled -}}
 {{- if not $github.clientId -}}

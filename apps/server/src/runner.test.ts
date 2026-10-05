@@ -994,6 +994,26 @@ describe("turns on a runner over the runner protocol", () => {
     expect((await as(userToken, `/api/enrollments/${codes[1] ?? ""}/deny`, {})).status).toBe(200);
     await expect(denied).rejects.toBeInstanceOf(EnrollmentDeniedError);
 
+    // Asking is limited per address: two asks so far from this one, and three more are let through.
+    const askRaw = () =>
+      fetch(`${url}/runner/enroll`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          protocol: RUNNER_PROTOCOL,
+          version: "test",
+          hostname: "flood",
+          os: "linux",
+          clis: [],
+        }),
+      });
+    for (let n = 0; n < 3; n += 1) {
+      expect((await askRaw()).status).toBe(200);
+    }
+    const limited = await askRaw();
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+
     // A token the server does not know is refused at the start rather than tried forever.
     const stranger = createRunner({
       serverUrl: url,

@@ -69,6 +69,12 @@ server:
     toolRounds: ""
     # How long a resident session stays warm after its last turn, in milliseconds; empty is 10 minutes.
     residentIdleMs: ""
+    # Reverse proxies in front of the server that append the client's address to X-Forwarded-For,
+    # for the per-address limits on asking to enroll and starting a sign-in. Empty is 1 with the
+    # chart's Ingress and 0 without it; add one for each proxy in front of the Ingress that appends
+    # too, such as Cloudflare's (2). Too few and every client shares the proxy's limit; too many and
+    # a client can claim any address.
+    trustedProxies: ""
     # Scheduler timing overrides, for example {opsIntervalMs: 60000}, passed as STELLARIS_TIMINGS.
     timings: {}
 

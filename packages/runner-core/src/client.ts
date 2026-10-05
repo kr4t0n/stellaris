@@ -19,6 +19,8 @@ export class RunnerHttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** How long the server asked to wait, from a 429's Retry-After. */
+    readonly retryAfterMs?: number | undefined,
   ) {
     super(message);
   }

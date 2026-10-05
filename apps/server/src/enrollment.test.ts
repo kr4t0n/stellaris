@@ -45,13 +45,13 @@ describe("EnrollmentDesk", () => {
     });
   });
 
-  it("lets enrollments expire, and holds no more than twenty at once", () => {
+  it("lets enrollments expire, and holds no more than a hundred at once", () => {
     const first = desk.open(request);
-    for (let n = 1; n < 20; n += 1) {
+    for (let n = 1; n < 100; n += 1) {
       desk.open(request);
     }
-    expect(desk.waiting()).toHaveLength(20);
-    expect(() => desk.open(request)).toThrow(/20 runners already wait/);
+    expect(desk.waiting()).toHaveLength(100);
+    expect(() => desk.open(request)).toThrow(/100 runners already wait/);
     clock += ENROLLMENT_TTL_MS;
     expect(desk.poll(first.deviceCode)).toBeNull();
     expect(desk.waiting()).toEqual([]);

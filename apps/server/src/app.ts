@@ -18,6 +18,7 @@ import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import type { EnrollmentDesk } from "./enrollment.js";
 import { githubAuthRoutes, type GithubAuthOptions } from "./github-auth.js";
+import { ENROLL_LIMIT, RateLimiter, rateLimit, SIGN_IN_LIMIT } from "./rate-limit.js";
 import type { ModelSource } from "./models.js";
 import { runnerRoutes } from "./runner-routes.js";
 import { spaHandler } from "./static.js";
@@ -48,6 +49,10 @@ export interface AppDependencies {
   readonly signIn?: Omit<GithubAuthOptions, "board"> | undefined;
   /** Runners asking to be enrolled, which the user approves on the board. */
   readonly enrollments?: EnrollmentDesk | undefined;
+  /** Reverse proxies whose X-Forwarded-For entries name the client, for the rate limits; 0 by default. */
+  readonly trustedProxies?: number | undefined;
+  /** Where refusals by a rate limit are logged. */
+  readonly log?: { warn(details: object, message: string): void } | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -369,9 +374,29 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
 
   app.route("/api", api);
-  app.route("/auth", githubAuthRoutes({ board, github: null, ...deps.signIn }));
+  // What anyone may ask without a token, limited per client address.
+  const trustedProxies = deps.trustedProxies ?? 0;
+  const limited = (limit: { limit: number; windowMs: number }, what: string) =>
+    rateLimit({ limiter: new RateLimiter(limit), trustedProxies, what, log: deps.log });
+  app.route(
+    "/auth",
+    githubAuthRoutes({
+      board,
+      github: null,
+      ...deps.signIn,
+      limit: limited(SIGN_IN_LIMIT, "sign-ins"),
+    }),
+  );
   if (deps.runners !== undefined) {
-    app.route("/runner", runnerRoutes(board, deps.runners, deps.enrollments));
+    app.route(
+      "/runner",
+      runnerRoutes(
+        board,
+        deps.runners,
+        deps.enrollments,
+        limited(ENROLL_LIMIT, "enrollment requests"),
+      ),
+    );
   }
 
   app.all("/mcp", async (c) => {

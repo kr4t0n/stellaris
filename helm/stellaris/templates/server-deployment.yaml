@@ -2,6 +2,10 @@
 {{- if .Values.server.enabled -}}
 {{- $config := .Values.server.config -}}
 {{- $github := .Values.auth.github -}}
+{{- $proxies := $config.trustedProxies -}}
+{{- if or (kindIs "invalid" $proxies) (eq (toString $proxies) "") -}}
+{{- $proxies = ternary 1 0 .Values.ingress.enabled -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -125,6 +129,8 @@ spec:
             - name: STELLARIS_RESIDENT_IDLE_MS
               value: {{ . | toString | quote }}
             {{- end }}
+            - name: STELLARIS_TRUSTED_PROXIES
+              value: {{ $proxies | toString | quote }}
             {{- with $config.timings }}
             - name: STELLARIS_TIMINGS
               value: {{ toJson . | quote }}

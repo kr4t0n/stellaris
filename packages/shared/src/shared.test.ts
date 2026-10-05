@@ -115,6 +115,7 @@ describe("server config", () => {
       toolRounds: 60,
       residentIdleMs: 600_000,
       github: null,
+      trustedProxies: 0,
     });
     expect(loadServerConfig({ STELLARIS_PORT: "5000" })).toMatchObject({
       port: 5000,
@@ -137,6 +138,8 @@ describe("server config", () => {
       null,
     ]);
     expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
+    expect(loadServerConfig({ STELLARIS_TRUSTED_PROXIES: "1" }).trustedProxies).toBe(1);
+    expect(() => loadServerConfig({ STELLARIS_TRUSTED_PROXIES: "-1" })).toThrow(/0/);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
   });
 

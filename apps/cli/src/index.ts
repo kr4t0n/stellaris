@@ -4,6 +4,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { Board, BoardError, type Actor } from "@stellaris/board-core";
 import {
+  STELLARIS_VERSION,
   CharterTriggerSchema,
   CliKindSchema,
   CompletionEffectSchema,
@@ -23,7 +24,7 @@ const program = new Command();
 program
   .name("stellaris")
   .description("Admin CLI for a Stellaris society: setup, posting, tasks, governance, and control")
-  .version("0.0.0")
+  .version(STELLARIS_VERSION)
   .option("-d, --data <dir>", "data directory", process.env["STELLARIS_DATA_DIR"] ?? "./data")
   .option("--json", "print JSON instead of text", false);
 

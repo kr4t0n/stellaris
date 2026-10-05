@@ -1,0 +1,80 @@
+name: npm-publish
+
+# Publishes the npm packages, as nodex does: @kubitnodes/stellaris (the admin CLI and the board
+# server with its interface) and @kubitnodes/stellaris-runner. It uses npm's trusted publishing
+# (OIDC), with no token secret, so each package's trusted publisher must authorize
+# kr4t0n/stellaris and npm-publish.yml.
+#
+# A push to main packs the packages and smoke-tests them, so a broken package shows long before a
+# release; a `v*` tag, or a run by hand, also publishes. The version is STELLARIS_VERSION in
+# packages/shared/src/version.ts: a tag must match it, and a version already on npm is left alone,
+# since npm refuses a republish with an error that reads like a credentials problem.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # npm exchanges this workflow's OIDC identity for publish rights and attaches provenance.
+      id-token: write
+    env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.6.0
+      # No registry-url: setup-node would write an .npmrc that asks for a token instead.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Check that npm supports trusted publishing
+        run: |
+          node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); if (!(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))))) throw new Error("Trusted publishing needs npm 11.5.1 or newer");' "$(npm --version)"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm build:web
+      - run: pnpm pack:npm
+      - id: unpublished
+        name: Find the packages whose version is not on npm yet
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = branch ]; then
+            echo "A push to $GITHUB_REF_NAME packs and tests; a v* tag publishes."
+            echo "dirs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(node -p 'require("./release/manifest.json")[0].version')
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match STELLARIS_VERSION $version."
+            exit 1
+          fi
+          dirs=""
+          for row in $(node -p 'require("./release/manifest.json").map((p) => `${p.name}@${p.version}=${p.dir}`).join(" ")'); do
+            if npm view "${row%%=*}" version > /dev/null 2>&1; then
+              echo "::notice title=Already published::${row%%=*} is on npm and was left alone. Bump STELLARIS_VERSION to release changes."
+            else
+              dirs="$dirs ${row##*=}"
+            fi
+          done
+          echo "dirs=${dirs# }" >> "$GITHUB_OUTPUT"
+      # Proves the tarballs are what a user gets: installed from them, the CLI creates a society,
+      # the server serves the interface, and the runner connects.
+      - name: Pack and smoke-test the packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          npm pack ./release/stellaris ./release/stellaris-runner --pack-destination "$RUNNER_TEMP/tarballs"
+          scripts/npm/smoke.sh "$RUNNER_TEMP/tarballs"
+      - name: Publish
+        if: steps.unpublished.outputs.dirs != ''
+        env:
+          DIRS: ${{ steps.unpublished.outputs.dirs }}
+        run: |
+          for dir in $DIRS; do
+            npm publish "./release/$dir"
+          done

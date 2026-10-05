@@ -10,6 +10,9 @@ coverage/
 .env.*
 !.env.example
 
+# npm packages built by scripts/npm/pack.mjs
+release/
+
 # Runtime data: board projection, agent homes, worktrees (lives outside the code repo)
 data/
 

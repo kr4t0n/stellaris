@@ -169,6 +169,9 @@ importers:
       '@types/node':
         specifier: 24.19.0
         version: 24.19.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       oxfmt:
         specifier: 0.70.0
         version: 0.70.0

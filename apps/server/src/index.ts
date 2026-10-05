@@ -1,16 +1,33 @@
+#!/usr/bin/env node
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { serve } from "@hono/node-server";
 import { Board } from "@stellaris/board-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
-import { SERVER_TOKEN, loadServerConfig } from "@stellaris/shared";
+import { SERVER_TOKEN, STELLARIS_VERSION, loadServerConfig } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import pino from "pino";
 import { createApp } from "./app.js";
 import { ModelCatalog } from "./models.js";
 import { TurnHub } from "./turn-hub.js";
 
-const VERSION = "0.0.0";
+const VERSION = STELLARIS_VERSION;
+
+if (process.argv.includes("--version")) {
+  console.log(VERSION);
+  process.exit(0);
+}
+if (process.argv.includes("--help")) {
+  console.log(
+    [
+      "stellaris-server: the Stellaris board server, its API, its MCP endpoint, and the interface.",
+      "It opens the society in STELLARIS_DATA_DIR (./data), which `stellaris init` creates, and",
+      "listens on STELLARIS_HOST:STELLARIS_PORT (127.0.0.1:4700). Every setting is a STELLARIS_*",
+      "variable: https://github.com/kr4t0n/stellaris#environment-variables",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
 
 const config = loadServerConfig(process.env);
 const log = pino({ level: config.logLevel });

@@ -2,10 +2,27 @@
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import { createRunner, type AgentBackend } from "@stellaris/runner-core";
-import { loadRunnerConfig, type CliKind } from "@stellaris/shared";
+import { STELLARIS_VERSION, loadRunnerConfig, type CliKind } from "@stellaris/shared";
 import pino from "pino";
 
-const VERSION = "0.0.0";
+const VERSION = STELLARIS_VERSION;
+
+if (process.argv.includes("--version")) {
+  console.log(VERSION);
+  process.exit(0);
+}
+if (process.argv.includes("--help")) {
+  console.log(
+    [
+      "stellaris-runner: runs a Stellaris society's turns on this machine with Claude Code and Codex.",
+      "Register it on the board server, which shows its token once, then start it with",
+      "STELLARIS_SERVER_URL and STELLARIS_RUNNER_TOKEN set; it keeps its files in",
+      "STELLARIS_RUNNER_DIR (./runner-data). Every setting is a STELLARIS_* variable:",
+      "https://github.com/kr4t0n/stellaris#environment-variables",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
 
 const config = loadRunnerConfig(process.env);
 const log = pino({ level: config.logLevel });

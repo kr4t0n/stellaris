@@ -8,3 +8,4 @@ export * from "./ops.js";
 export * from "./metrics.js";
 export * from "./config.js";
 export * from "./runner.js";
+export * from "./version.js";

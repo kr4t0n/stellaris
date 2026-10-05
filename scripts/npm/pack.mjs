@@ -16,6 +16,7 @@ const { STELLARIS_VERSION } = await import(
 
 const common = {
   version: STELLARIS_VERSION,
+  license: "MIT",
   homepage: "https://github.com/kr4t0n/stellaris",
   repository: { type: "git", url: "git+https://github.com/kr4t0n/stellaris.git" },
   bugs: "https://github.com/kr4t0n/stellaris/issues",
@@ -133,6 +134,7 @@ for (const pkg of PACKAGES) {
     await cp(path.join(root, "apps/web/dist"), path.join(out, "web/dist"), { recursive: true });
   }
   await cp(path.join(import.meta.dirname, `${pkg.dir}.md`), path.join(out, "README.md"));
+  await cp(path.join(root, "LICENSE"), path.join(out, "LICENSE"));
   await writeFile(
     path.join(out, "package.json"),
     `${JSON.stringify(

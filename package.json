@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "A society of autonomous CLI agents coordinated through one shared board",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "tsc -b",

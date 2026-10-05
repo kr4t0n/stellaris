@@ -299,3 +299,7 @@ helm install stellaris stellaris/stellaris --namespace stellaris --create-namesp
 ```
 
 On its first start on an empty volume, the chart creates the society with `desk` and `stew` and writes the user token to `/data/initial-user-token` rather than to any log. It runs one replica, replaced with `Recreate` since the server is the data directory's only writer, and keeps its volume on uninstall. [`helm/stellaris/README.md`](./helm/stellaris/README.md) covers the first start, runners, the Ingress a server's event streams and git pushes need, upgrades, and every value.
+
+## License
+
+MIT, in [`LICENSE`](./LICENSE). The npm packages carry it too.

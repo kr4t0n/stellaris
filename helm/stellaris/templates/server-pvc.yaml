@@ -1,0 +1,26 @@
+{{- if and .Values.server.enabled .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "stellaris.server.claimName" . }}
+  labels:
+    {{- include "stellaris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  {{- $annotations := merge (deepCopy .Values.persistence.annotations) .Values.commonAnnotations }}
+  {{- if .Values.persistence.keepOnUninstall }}
+  {{- $_ := set $annotations "helm.sh/resource-policy" "keep" }}
+  {{- end }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ if eq "-" .Values.persistence.storageClass }}""{{ else }}{{ .Values.persistence.storageClass | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

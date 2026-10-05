@@ -244,6 +244,7 @@ packages/
   runner-core/     the runner side: adapter interface, executor, git worktrees and merges, home and mirror sync, protocol client, daemon
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex app-server`, JSON-RPC over stdio
+helm/stellaris/    the Helm chart for the board server, published to GitHub Pages
 data/              runtime data, ignored by git
 ```
 
@@ -266,3 +267,14 @@ docker run -d --name stellaris -p 4700:4700 -v stellaris-data:/data --stop-timeo
 ```
 
 Run the CLI's setup commands before the server starts, or act through the API while it runs, so that one process writes the data directory at a time. A directory mounted at `/data` must be writable by uid 1000. On SIGTERM the server waits for running turns to report before it exits, so give it a stop timeout as long as the turn timeout, 20 minutes by default: `--stop-timeout` for Docker, `terminationGracePeriodSeconds` for Kubernetes. Every server variable in the table above applies; the image sets `STELLARIS_DATA_DIR`, `STELLARIS_HOST`, `STELLARIS_PORT`, and `STELLARIS_WEB_DIR`.
+
+### The Helm chart
+
+`helm/stellaris` deploys the board server's image on Kubernetes, and `helm-publish.yml` publishes it to the `helm/` folder of the `gh-pages` branch whenever its `version` changes:
+
+```bash
+helm repo add stellaris https://kr4t0n.github.io/stellaris/helm
+helm install stellaris stellaris/stellaris --namespace stellaris --create-namespace
+```
+
+On its first start on an empty volume, the chart creates the society with `desk` and `stew` and writes the user token to `/data/initial-user-token` rather than to any log. It runs one replica, replaced with `Recreate` since the server is the data directory's only writer, and keeps its volume on uninstall. [`helm/stellaris/README.md`](./helm/stellaris/README.md) covers the first start, runners, the Ingress a server's event streams and git pushes need, upgrades, and every value.

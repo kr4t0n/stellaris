@@ -1,0 +1,167 @@
+{{- include "stellaris.validate" . -}}
+{{- if .Values.server.enabled -}}
+{{- $config := .Values.server.config -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stellaris.server.fullname" . }}
+  labels:
+    {{- include "stellaris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  # The board server is the data directory's only writer, so there is never a second pod: one
+  # replica, and an upgrade stops the old pod before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "stellaris.server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "stellaris.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.server.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.server.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.server.terminationGracePeriodSeconds }}
+      initContainers:
+        # Creates the society on an empty volume and leaves one that holds a society alone. The
+        # user token goes to a file only its owner can read, never to the log; the citizens'
+        # tokens are never needed, since turns get tokens of their own.
+        - name: init-society
+          image: {{ include "stellaris.server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              if [ -f /data/board/society/society.md ]; then
+                echo "the society exists already"
+                exit 0
+              fi
+              umask 077
+              stellaris init --name "$SOCIETY_NAME" > /data/initial-user-token
+              {{- range .Values.society.citizens }}
+              stellaris agent add {{ .name }} --role {{ .role }}{{ with .cli }} --cli {{ . }}{{ end }}{{ with .model }} --model {{ . }}{{ end }} > /dev/null
+              echo "added {{ .name }} as {{ .role }}"
+              {{- end }}
+              echo "society $SOCIETY_NAME created; the user token is in /data/initial-user-token"
+          env:
+            - name: SOCIETY_NAME
+              value: {{ .Values.society.name | quote }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: server
+          image: {{ include "stellaris.server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.containerPort }}
+              protocol: TCP
+          env:
+            - name: STELLARIS_PORT
+              value: {{ .Values.server.containerPort | quote }}
+            {{- with $config.logLevel }}
+            - name: STELLARIS_LOG_LEVEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $config.publicUrl }}
+            - name: STELLARIS_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $config.concurrency }}
+            - name: STELLARIS_CONCURRENCY
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- with $config.turnTimeoutMs }}
+            - name: STELLARIS_TURN_TIMEOUT_MS
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- with $config.toolRounds }}
+            - name: STELLARIS_TOOL_ROUNDS
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- with $config.residentIdleMs }}
+            - name: STELLARIS_RESIDENT_IDLE_MS
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- with $config.timings }}
+            - name: STELLARIS_TIMINGS
+              value: {{ toJson . | quote }}
+            {{- end }}
+            {{- with .Values.server.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.server.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "stellaris.server.claimName" . }}
+          {{- else }}
+          # Without persistence the society lives only as long as the pod.
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

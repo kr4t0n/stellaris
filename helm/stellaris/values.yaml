@@ -1,0 +1,153 @@
+# Default values for the stellaris chart.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Added to every object.
+commonLabels: {}
+commonAnnotations: {}
+
+image:
+  registry: docker.io
+  pullPolicy: IfNotPresent
+  # Every component's tag when its own is empty; the chart's appVersion when this is empty too.
+  tag: ""
+
+imagePullSecrets: []
+
+# What the first start on an empty volume creates. An init container runs `stellaris init`, then
+# adds each citizen below, and writes the user token, printed nowhere else, to
+# /data/initial-user-token. Read it once and delete it (see the notes after install). A volume that
+# already holds a society is left as it is, so changing these later changes nothing.
+society:
+  name: stellaris
+  # Only the seed roles, `concierge` and `steward`, exist at this point; work roles come later, by
+  # charter. `cli` is `claude` or `codex`; `model` is optional and the CLI's default otherwise.
+  citizens:
+    - name: desk
+      role: concierge
+      cli: claude
+    - name: stew
+      role: steward
+      cli: claude
+
+server:
+  enabled: true
+  image:
+    repository: kr4t0n/stellaris-server
+    tag: ""
+
+  # The server's settings, passed as its STELLARIS_* variables; an empty value keeps the server's
+  # default. See the repository README's environment table.
+  config:
+    logLevel: info
+    # One address every runner's agents reach the board's MCP endpoint at; empty lets each runner
+    # use the address it reaches the server by.
+    publicUrl: ""
+    # Turns running at once across every runner: a number, or empty for no cap beyond each runner's.
+    concurrency: ""
+    # How long one turn may run, in milliseconds, or `unlimited`; empty is 20 minutes.
+    turnTimeoutMs: ""
+    # Rounds of tool calls in one Claude turn, or `unlimited`; empty is 60.
+    toolRounds: ""
+    # How long a resident session stays warm after its last turn, in milliseconds; empty is 10 minutes.
+    residentIdleMs: ""
+    # Scheduler timing overrides, for example {opsIntervalMs: 60000}, passed as STELLARIS_TIMINGS.
+    timings: {}
+
+  containerPort: 4700
+  service:
+    type: ClusterIP
+    port: 4700
+    annotations: {}
+
+  # On SIGTERM the server waits for running turns to report before it exits, so give it as long as
+  # the turn timeout. Pause the society before an upgrade (see the chart's README).
+  terminationGracePeriodSeconds: 1200
+
+  extraEnv: []
+  extraEnvFrom: []
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # The first open of a large society aligns it before the server listens, so the startup probe
+  # allows a few minutes.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 5
+    failureThreshold: 60
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # The image runs as node (uid 1000); fsGroup makes the data volume writable by it, and
+  # OnRootMismatch skips the recursive chown of a volume that is already right, which agents'
+  # home repositories would make slow.
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+
+# The society's data directory: the board, the event log, and every agent's home as a git
+# repository. It is the only copy, so the claim the chart creates is kept on uninstall.
+persistence:
+  enabled: true
+  # Use a claim made outside the chart instead of creating one.
+  existingClaim: ""
+  # Empty uses the cluster's default class; `-` asks for no class.
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  keepOnUninstall: true
+  annotations: {}
+
+# One Ingress for the whole server: the interface, the API, the runner protocol, and the MCP
+# endpoint share its port. Runners and browsers hold server-sent event streams open and runners
+# push agents' homes over git, so the proxy needs long read timeouts, no response buffering, and
+# room for a push, for example with ingress-nginx:
+#   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+#   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+#   nginx.ingress.kubernetes.io/proxy-buffering: "off"
+#   nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: stellaris.example.com
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""

@@ -1,0 +1,75 @@
+name: helm-publish
+
+# Publishes the chart to the `helm/` folder of the gh-pages branch, which GitHub Pages serves at
+# https://kr4t0n.github.io/stellaris/helm, as argus's chart is. Bumping `version` in
+# helm/stellaris/Chart.yaml is the release: a version once published is never replaced, so a push
+# that changes the chart without bumping it publishes nothing. The first run starts the branch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "helm/**"
+      - ".github/workflows/helm-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Every workflow that pushes to gh-pages shares this group, so their pushes never race.
+concurrency:
+  group: gh-pages-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - name: Lint the chart
+        run: helm lint --strict helm/stellaris
+      - name: Check out gh-pages, or start it
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code --heads origin gh-pages > /dev/null; then
+            git fetch --depth=1 origin gh-pages:gh-pages
+            git worktree add pages gh-pages
+          else
+            git worktree add --detach pages
+            git -C pages checkout --orphan gh-pages
+            git -C pages rm -rf --quiet .
+            touch pages/.nojekyll
+          fi
+      - name: Package the chart, and index it if its version is new
+        id: package
+        env:
+          # The index lists absolute download addresses, so this must be the live Pages address.
+          REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/helm
+        run: |
+          mkdir -p pages/helm "$RUNNER_TEMP/chart"
+          helm package helm/stellaris --destination "$RUNNER_TEMP/chart"
+          for tarball in "$RUNNER_TEMP"/chart/*.tgz; do
+            name=$(basename "$tarball")
+            if [ -e "pages/helm/$name" ]; then
+              echo "$name is published already; bump version in Chart.yaml to publish a change"
+              echo "new=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cp "$tarball" pages/helm/
+          done
+          if [ -f pages/helm/index.yaml ]; then
+            helm repo index pages/helm --url "$REPO_URL" --merge pages/helm/index.yaml
+          else
+            helm repo index pages/helm --url "$REPO_URL"
+          fi
+          echo "new=true" >> "$GITHUB_OUTPUT"
+      - name: Push to gh-pages
+        if: steps.package.outputs.new == 'true'
+        working-directory: pages
+        run: |
+          git add --all
+          git commit -m "chore(helm): publish the chart from ${GITHUB_SHA::7}"
+          git push origin gh-pages

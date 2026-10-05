@@ -1,4 +1,3 @@
-import os from "node:os";
 import { setTimeout as wait } from "node:timers/promises";
 import {
   RUNNER_PROTOCOL,
@@ -10,7 +9,8 @@ import {
   type TurnJob,
   type TurnOutcome,
 } from "@stellaris/shared";
-import { RunnerClient } from "./client.js";
+import { RunnerClient, RunnerHttpError } from "./client.js";
+import { runnerOs } from "./enroll.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
 import { HomeSync } from "./home.js";
 import type { GitOps } from "./git.js";
@@ -142,10 +142,13 @@ export class RunnerDaemon {
     return [...this.running.keys()];
   }
 
-  /** Connects, and keeps connecting after the stream ends. Resolves once the first stream is open. */
+  /**
+   * Connects, and keeps connecting after the stream ends. Resolves once the first stream is open,
+   * and rejects with the server's 401 if it refuses the token before then.
+   */
   async start(): Promise<void> {
-    const { promise: first, resolve: opened } = Promise.withResolvers<void>();
-    this.loop = this.connectLoop(opened);
+    const { promise: first, resolve: opened, reject: refused } = Promise.withResolvers<void>();
+    this.loop = this.connectLoop(opened, refused);
     await first;
   }
 
@@ -177,16 +180,19 @@ export class RunnerDaemon {
     );
   }
 
-  private async connectLoop(opened: () => void): Promise<void> {
+  private async connectLoop(
+    opened: () => void,
+    refused: (error: RunnerHttpError) => void,
+  ): Promise<void> {
     let delay = this.retryMs;
+    let everOpened = false;
     while (!this.stopped) {
       try {
         const { all, resident } = this.executor.clis;
         const welcome = await this.client.hello({
           protocol: RUNNER_PROTOCOL,
           version: this.version,
-          os:
-            os.platform() === "win32" ? "windows" : os.platform() === "darwin" ? "darwin" : "linux",
+          os: runnerOs(),
           clis: all,
           residentClis: resident,
           capabilities: [...this.capabilities],
@@ -200,6 +206,7 @@ export class RunnerDaemon {
         await this.client.stream(this.abort.signal, {
           onOpen: () => {
             delay = this.retryMs;
+            everOpened = true;
             opened();
           },
           onMessage: (message) => this.handle(message),
@@ -207,6 +214,13 @@ export class RunnerDaemon {
             this.log.warn({ problem }, "skipped a message the runner does not understand"),
         });
       } catch (error) {
+        // A token refused before the first connection will not be accepted by waiting; one refused
+        // later may be a server restored from an older copy, so the runner keeps trying.
+        if (!everOpened && error instanceof RunnerHttpError && error.status === 401) {
+          this.stopped = true;
+          refused(error);
+          return;
+        }
         if (!this.stopped) {
           this.log.warn({ error: String(error) }, "runner connection failed");
         }

@@ -8,6 +8,7 @@ import { SERVER_TOKEN, STELLARIS_VERSION, loadServerConfig } from "@stellaris/sh
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import pino from "pino";
 import { createApp } from "./app.js";
+import { EnrollmentDesk } from "./enrollment.js";
 import { ModelCatalog } from "./models.js";
 import { TurnHub } from "./turn-hub.js";
 
@@ -86,10 +87,20 @@ const app = createApp({
   models: new ModelCatalog((cli) => runners.models(cli)),
   runners,
   webDir,
+  signIn: { github: config.github, log },
+  enrollments: new EnrollmentDesk(board),
 });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   log.info(
-    { host: info.address, port: info.port, dataDir: config.dataDir, mcpUrl, webDir, webBuilt },
+    {
+      host: info.address,
+      port: info.port,
+      dataDir: config.dataDir,
+      mcpUrl,
+      webDir,
+      webBuilt,
+      signIn: config.github === null ? "token" : `github (${config.github.users.join(", ")})`,
+    },
     "board server listening",
   );
 });

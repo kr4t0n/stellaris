@@ -67,6 +67,104 @@ describe("board server routes", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("signs the user in with GitHub when the login is on the list, and out again", async () => {
+    let login = "Kr4t0n";
+    const asked: string[] = [];
+    const github: typeof fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      asked.push(url);
+      if (url === "https://github.com/login/oauth/access_token") {
+        const body = typeof init?.body === "string" ? init.body : "{}";
+        const { code } = z.object({ code: z.string() }).parse(JSON.parse(body));
+        // GitHub answers a bad code with 200 and an error.
+        return Response.json(
+          code === "good" ? { access_token: "gho_test" } : { error: "bad_verification_code" },
+        );
+      }
+      return url === "https://api.github.com/user"
+        ? Response.json({ login, id: login === "kr4t0n" ? 1001 : 666 })
+        : new Response("unexpected", { status: 500 });
+    };
+    const app = createApp({
+      board,
+      version: "t",
+      signIn: {
+        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["kr4t0n"] },
+        fetch: github,
+      },
+    });
+    expect(await (await app.request("/auth/config")).json()).toEqual({ github: true });
+
+    const leave = async (next: string): Promise<string> => {
+      const response = await app.request(`/auth/github?next=${encodeURIComponent(next)}`);
+      expect(response.status).toBe(302);
+      const authorize = new URL(response.headers.get("location") ?? "");
+      expect(`${authorize.origin}${authorize.pathname}`).toBe(
+        "https://github.com/login/oauth/authorize",
+      );
+      expect(authorize.searchParams.get("client_id")).toBe("Iv1.test");
+      // GitHub sends the browser to the one callback the OAuth app registers.
+      expect(authorize.searchParams.has("redirect_uri")).toBe(false);
+      return authorize.searchParams.get("state") ?? "";
+    };
+    const back = async (state: string, code = "good"): Promise<string> => {
+      const response = await app.request(`/auth/github/callback?code=${code}&state=${state}`);
+      expect(response.status).toBe(302);
+      return response.headers.get("location") ?? "";
+    };
+
+    const state = await leave("/runners?code=BCDF-GHJK");
+    const landing = await back(state);
+    expect(landing).toMatch(/^\/runners\?code=BCDF-GHJK#session=/);
+    const token = decodeURIComponent(landing.split("#session=")[1] ?? "");
+    const me = await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } });
+    expect(await me.json()).toEqual(USER);
+    // A state is good for one return.
+    expect(await back(state)).toBe("/#signin-error=expired");
+
+    expect(await back(await leave("/"), "stale")).toBe("/#signin-error=github");
+    login = "mallory";
+    expect(await back(await leave("/"))).toBe("/#signin-error=not-allowed");
+    // A listed id lets its account in under any login.
+    const byId = createApp({
+      board,
+      version: "t",
+      signIn: {
+        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["666"] },
+        fetch: github,
+      },
+    });
+    const idState = new URL(
+      (await byId.request("/auth/github")).headers.get("location") ?? "",
+    ).searchParams.get("state");
+    const idLanding = await byId.request(`/auth/github/callback?code=good&state=${idState}`);
+    expect(idLanding.headers.get("location")).toMatch(/^\/#session=/);
+    // Only a path on the board is somewhere to land.
+    login = "kr4t0n";
+    expect(await back(await leave("//evil.example/"))).toMatch(/^\/#session=/);
+    expect(asked.every((url) => url.startsWith("https://"))).toBe(true);
+
+    const out = await app.request("/api/sign-in", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(await out.json()).toEqual({ signedOut: true });
+    expect(
+      (await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } })).status,
+    ).toBe(401);
+    // The user's own token is no sign-in, and signing out leaves it valid.
+    expect(await (await app.request("/api/sign-in", { method: "DELETE", headers })).json()).toEqual(
+      { signedOut: false },
+    );
+    expect((await app.request("/api/me", { headers })).status).toBe(200);
+  });
+
+  it("offers no GitHub sign-in unless it is configured", async () => {
+    const app = createApp({ board, version: "t" });
+    expect(await (await app.request("/auth/config")).json()).toEqual({ github: false });
+    expect((await app.request("/auth/github")).status).toBe(404);
+  });
+
   it("exposes scheduler state with pause, resume, and manual wakes", async () => {
     const app = createApp({
       board,

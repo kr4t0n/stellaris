@@ -1,6 +1,7 @@
 {{- include "stellaris.validate" . -}}
 {{- if .Values.server.enabled -}}
 {{- $config := .Values.server.config -}}
+{{- $github := .Values.auth.github -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,9 +30,15 @@ spec:
         {{- with .Values.server.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.server.podAnnotations }}
+      {{- if or .Values.server.podAnnotations (and $github.enabled (not $github.existingSecret)) }}
       annotations:
+        {{- with .Values.server.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if and $github.enabled (not $github.existingSecret) }}
+        # The server reads the secret at start, so a new one restarts it.
+        checksum/github: {{ include (print $.Template.BasePath "/server-secret.yaml") . | sha256sum }}
+        {{- end }}
       {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -45,8 +52,9 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.server.terminationGracePeriodSeconds }}
       initContainers:
         # Creates the society on an empty volume and leaves one that holds a society alone. The
-        # user token goes to a file only its owner can read, never to the log; the citizens'
-        # tokens are never needed, since turns get tokens of their own.
+        # user token goes to a file only its owner can read, never to the log, or nowhere when
+        # GitHub sign-in is on; the citizens' tokens are never needed, since turns get tokens of
+        # their own.
         - name: init-society
           image: {{ include "stellaris.server.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -58,12 +66,20 @@ spec:
                 exit 0
               fi
               umask 077
+              {{- if $github.enabled }}
+              stellaris init --name "$SOCIETY_NAME" > /dev/null
+              {{- else }}
               stellaris init --name "$SOCIETY_NAME" > /data/initial-user-token
+              {{- end }}
               {{- range .Values.society.citizens }}
               stellaris agent add {{ .name }} --role {{ .role }}{{ with .cli }} --cli {{ . }}{{ end }}{{ with .model }} --model {{ . }}{{ end }} > /dev/null
               echo "added {{ .name }} as {{ .role }}"
               {{- end }}
+              {{- if $github.enabled }}
+              echo "society $SOCIETY_NAME created; sign in with GitHub"
+              {{- else }}
               echo "society $SOCIETY_NAME created; the user token is in /data/initial-user-token"
+              {{- end }}
           env:
             - name: SOCIETY_NAME
               value: {{ .Values.society.name | quote }}
@@ -112,6 +128,17 @@ spec:
             {{- with $config.timings }}
             - name: STELLARIS_TIMINGS
               value: {{ toJson . | quote }}
+            {{- end }}
+            {{- if $github.enabled }}
+            - name: STELLARIS_GITHUB_CLIENT_ID
+              value: {{ $github.clientId | quote }}
+            - name: STELLARIS_GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "stellaris.github.secretName" . }}
+                  key: {{ ternary $github.existingSecretKey "client-secret" (not (empty $github.existingSecret)) }}
+            - name: STELLARIS_GITHUB_USERS
+              value: {{ join "," $github.users | quote }}
             {{- end }}
             {{- with .Values.server.extraEnv }}
             {{- toYaml . | nindent 12 }}

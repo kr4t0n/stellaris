@@ -6,23 +6,32 @@ import { clearToken, createApi, storedToken, storeToken } from "./lib/api.js";
 import { SessionContext, type Session } from "./lib/session.js";
 import { router } from "./router.js";
 
-export function App() {
+export function App({ signInError }: { signInError: string | null }) {
   const client = useQueryClient();
   const [token, setToken] = useState<string | null>(storedToken);
-  const signOut = useCallback(() => {
+  const expire = useCallback(() => {
     clearToken();
     client.clear();
     setToken(null);
-    void router.navigate({ to: "/" });
   }, [client]);
+  const signOut = useCallback(() => {
+    if (token !== null) {
+      void createApi(token)
+        .signOut()
+        .catch(() => undefined);
+    }
+    expire();
+    void router.navigate({ to: "/" });
+  }, [token, expire]);
   const session = useMemo<Session | null>(
-    () => (token === null ? null : { api: createApi(token), token, signOut }),
-    [token, signOut],
+    () => (token === null ? null : { api: createApi(token), token, signOut, expire }),
+    [token, signOut, expire],
   );
 
   if (session === null) {
     return (
       <TokenGate
+        initialError={signInError}
         onEnter={(value) => {
           storeToken(value);
           setToken(value);

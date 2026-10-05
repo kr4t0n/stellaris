@@ -1,8 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
 import {
+  createRunner,
+  EnrollmentDeniedError,
+  enrollRunner,
+  readCredentials,
+  RunnerLayout,
+  saveCredentials,
   ZERO_USAGE,
   type AgentBackend,
   type ResidentSession,
@@ -908,5 +914,96 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await models.json()).toEqual([
       { id: "opus", name: "Opus", description: "", isDefault: true },
     ]);
+  });
+
+  it("enrolls a runner the user approves on the board, hands its token over once, and refuses a denied one", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "enroll" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { app, url } = await start(board, backend);
+    const as = (bearer: string, route: string, body?: unknown) =>
+      app.request(route, {
+        ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      });
+    const codes: string[] = [];
+    const ask = () =>
+      enrollRunner({
+        serverUrl: `${url}/`,
+        version: "test",
+        clis: ["claude"],
+        capabilities: ["gpu"],
+        hostname: "studio.local",
+        onCode: (enrollment, approveUrl) => {
+          codes.push(enrollment.userCode);
+          expect(approveUrl).toBe(`${url}/runners?code=${enrollment.userCode}`);
+        },
+      });
+
+    const enrolled = ask();
+    await vi.waitFor(() => expect(codes).toHaveLength(1));
+    const code = codes[0] ?? "";
+    expect(await (await as(userToken, "/api/enrollments")).json()).toMatchObject([
+      { userCode: code, hostname: "studio.local", clis: ["claude"], capabilities: ["gpu"] },
+    ]);
+    // Only the user lets a machine in.
+    const stew = board.issueTurnToken("stew", "steward", 60_000);
+    expect((await as(stew, "/api/enrollments")).status).toBe(403);
+    expect((await as(stew, `/api/enrollments/${code}/approve`, { name: "studio" })).status).toBe(
+      403,
+    );
+    // A code as typed, in lower case and without its hyphen, is the same code.
+    const typed = code.toLowerCase().replace("-", "");
+    expect(
+      (await as(userToken, `/api/enrollments/${typed}/approve`, { name: "studio" })).status,
+    ).toBe(200);
+    const { name, token } = await enrolled;
+    expect(name).toBe("studio");
+    expect(await (await as(userToken, "/api/enrollments")).json()).toEqual([]);
+    const added = (await board.readEvents(null)).find(
+      (event) => event.type === "runner.added" && event.payload["name"] === "studio",
+    );
+    expect(added?.payload["enrolledFrom"]).toBe("studio.local");
+
+    // What approval returned is the runner's, kept readable by its user alone, for its server.
+    const runnerDir = path.join(dir, "studio-runner");
+    const layout = new RunnerLayout(runnerDir);
+    await saveCredentials(layout, { serverUrl: `${url}/`, name, token });
+    expect(await readCredentials(layout, url)).toEqual({ serverUrl: `${url}/`, name, token });
+    expect(await readCredentials(layout, "http://127.0.0.1:1")).toBeNull();
+    expect((await stat(layout.credentials)).mode & 0o777).toBe(0o600);
+    const studio = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: runnerDir,
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 50,
+    });
+    await studio.start();
+    expect(studio.name).toBe("studio");
+    await studio.stop();
+
+    const denied = ask();
+    await vi.waitFor(() => expect(codes).toHaveLength(2));
+    expect((await as(userToken, `/api/enrollments/${codes[1] ?? ""}/deny`, {})).status).toBe(200);
+    await expect(denied).rejects.toBeInstanceOf(EnrollmentDeniedError);
+
+    // A token the server does not know is refused at the start rather than tried forever.
+    const stranger = createRunner({
+      serverUrl: url,
+      token: "stl_nothing",
+      dataDir: path.join(dir, "stranger"),
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 50,
+    });
+    await expect(stranger.start()).rejects.toMatchObject({ status: 401 });
   });
 });

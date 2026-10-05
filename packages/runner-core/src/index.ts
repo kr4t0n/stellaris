@@ -23,4 +23,13 @@ export { RunnerClient, RunnerHttpError } from "./client.js";
 export { TurnExecutor } from "./executor.js";
 export type { RunnerLog, TurnExecutorOptions } from "./executor.js";
 export { createRunner, RunnerDaemon } from "./daemon.js";
+export {
+  EnrollmentDeniedError,
+  enrollRunner,
+  forgetCredentials,
+  readCredentials,
+  runnerOs,
+  saveCredentials,
+} from "./enroll.js";
+export type { EnrollRunnerOptions, RunnerCredentials } from "./enroll.js";
 export type { CreateRunnerOptions, RunnerDaemonOptions } from "./daemon.js";

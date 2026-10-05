@@ -99,6 +99,29 @@ program
     );
   });
 
+const user = program.command("user").description("The user's own access");
+
+user
+  .command("token")
+  .description("Issue the user a new token and print it once; the old one stops working")
+  .option("--rotate", "replace the token", false)
+  .action(async (opts: { rotate: boolean }) => {
+    if (!opts.rotate) {
+      throw new BoardError(
+        "VALIDATION",
+        "the board keeps only a hash of the user token, so it cannot show it again; `user token --rotate` issues a new one",
+      );
+    }
+    const board = await open();
+    const userToken = await board.rotateUserToken();
+    print({ userToken }, () =>
+      [
+        `User token (shown once): ${userToken}`,
+        "A board server running on this data directory reads the new token only when it restarts.",
+      ].join("\n"),
+    );
+  });
+
 const project = program.command("project").description("Manage projects");
 
 project

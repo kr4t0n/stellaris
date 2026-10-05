@@ -493,15 +493,27 @@ export interface FakeBoard {
   refuseNext(message: string): void;
 }
 
+/** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
+export const ENROLLING_CODE = "BCDF-GHJK";
+
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
  * an archived project sits beside lab and desk asks to archive lab too. With `asks`, the user has
  * asked twice before; a new ask opens a thread in asks, and desk is in a turn on it once posted.
+ * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
+ * offers GitHub sign-in, and with `signedOut` the browser starts with no token.
  */
 export async function fakeBoard(
   page: Page,
-  options: { asked?: boolean; archived?: boolean; asks?: boolean } = {},
+  options: {
+    asked?: boolean;
+    archived?: boolean;
+    asks?: boolean;
+    enrolling?: boolean;
+    github?: boolean;
+    signedOut?: boolean;
+  } = {},
 ): Promise<FakeBoard> {
   const archived = options.archived === true;
   const asks = options.asks === true ? askFixtures() : new Map<string, AskFixture>();
@@ -582,7 +594,22 @@ export async function fakeBoard(
     body: "",
   });
 
-  await page.addInitScript((token) => localStorage.setItem("stellaris.token", token), TOKEN);
+  let enrolling = options.enrolling === true;
+  const enrollment = {
+    userCode: ENROLLING_CODE,
+    hostname: "Studio.local",
+    os: "darwin",
+    clis: ["claude"],
+    capabilities: ["gpu"],
+    version: "0.1.0",
+    requestedAt: CREATED,
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  };
+
+  if (options.signedOut !== true) {
+    await page.addInitScript((token) => localStorage.setItem("stellaris.token", token), TOKEN);
+  }
+  await page.route("**/auth/config", (route) => json(route, { github: options.github === true }));
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -656,6 +683,18 @@ export async function fakeBoard(
         case "/api/resume":
           paused = pathname === "/api/pause";
           return json(route, { paused });
+        case `/api/enrollments/${ENROLLING_CODE}/approve`:
+          enrolling = false;
+          return json(route, {
+            name: body["name"],
+            os: "darwin",
+            clis: [],
+            capabilities: [],
+            status: "disconnected",
+          });
+        case `/api/enrollments/${ENROLLING_CODE}/deny`:
+          enrolling = false;
+          return json(route, { denied: true });
         default:
           return json(route, { message: `no fake for ${pathname}` }, 404);
       }
@@ -807,6 +846,8 @@ export async function fakeBoard(
         });
       case "/api/signals":
         return json(route, SIGNALS);
+      case "/api/enrollments":
+        return json(route, enrolling ? [enrollment] : []);
       case "/api/channels":
         return json(route, [
           channel("general"),

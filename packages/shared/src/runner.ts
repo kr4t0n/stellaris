@@ -6,7 +6,7 @@ import {
   TurnStatusSchema,
   UsageSchema,
 } from "./events.js";
-import { NameSchema, UlidSchema } from "./ids.js";
+import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 
 /**
  * The runner protocol of PLAN.md section 7.1. A runner registers, holds one event stream open for
@@ -60,6 +60,57 @@ export type RunnerHelloInput = z.input<typeof RunnerHelloSchema>;
 
 export const RunnerWelcomeSchema = z.object({ name: NameSchema, version: z.string() });
 export type RunnerWelcome = z.infer<typeof RunnerWelcomeSchema>;
+
+/**
+ * A runner without a token asks to be enrolled, describing its machine, which the user sees when
+ * approving it on the board. Nothing in it is trusted: approval is the user's, and the runner
+ * reports what it really offers when it registers.
+ */
+export const RunnerEnrollRequestSchema = z.object({
+  protocol: z.number().int().positive(),
+  version: z.string().min(1).max(64),
+  hostname: z.string().min(1).max(253),
+  os: RunnerOsSchema,
+  clis: z.array(CliKindSchema).max(8),
+  capabilities: z.array(z.string().min(1).max(64)).max(32).default([]),
+});
+export type RunnerEnrollRequest = z.infer<typeof RunnerEnrollRequestSchema>;
+export type RunnerEnrollRequestInput = z.input<typeof RunnerEnrollRequestSchema>;
+
+/**
+ * An enrollment the server opened: the device code only the runner knows and polls with, and the
+ * short user code the user approves on the board.
+ */
+export const RunnerEnrollmentSchema = z.object({
+  deviceCode: z.string().min(1),
+  userCode: z.string().min(1),
+  expiresAt: IsoDateTimeSchema,
+  intervalMs: z.number().int().positive(),
+});
+export type RunnerEnrollment = z.infer<typeof RunnerEnrollmentSchema>;
+
+export const RunnerEnrollPollSchema = z.object({ deviceCode: z.string().min(1) });
+
+/** Where an enrollment stands; an approved one carries the runner's token, once. */
+export const RunnerEnrollStatusSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("pending") }),
+  z.object({ status: z.literal("approved"), name: NameSchema, token: z.string().min(1) }),
+  z.object({ status: z.literal("denied") }),
+]);
+export type RunnerEnrollStatus = z.infer<typeof RunnerEnrollStatusSchema>;
+
+/** An enrollment waiting for the user, as the board shows it: never the device code. */
+export const PendingEnrollmentSchema = z.object({
+  userCode: z.string().min(1),
+  hostname: z.string(),
+  os: RunnerOsSchema,
+  clis: z.array(CliKindSchema),
+  capabilities: z.array(z.string()),
+  version: z.string(),
+  requestedAt: IsoDateTimeSchema,
+  expiresAt: IsoDateTimeSchema,
+});
+export type PendingEnrollment = z.infer<typeof PendingEnrollmentSchema>;
 
 /**
  * Where a project's code is: its slug, the origin its repository is first cloned from, or null for

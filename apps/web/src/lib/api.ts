@@ -14,6 +14,7 @@ import {
   NameSchema,
   OpsSignalSchema,
   parseSessionKey,
+  PendingEnrollmentSchema,
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
@@ -43,6 +44,21 @@ export function storeToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+const AuthConfigSchema = z.object({ github: z.boolean() });
+
+/**
+ * How this board lets people in. Asked before anyone has a token; a server from before GitHub
+ * sign-in serves the interface at `/auth/config`, which reads as tokens only.
+ */
+export async function authConfig(): Promise<{ github: boolean }> {
+  try {
+    const parsed = AuthConfigSchema.safeParse(await (await fetch("/auth/config")).json());
+    return parsed.success ? parsed.data : { github: false };
+  } catch {
+    return { github: false };
+  }
 }
 
 /** A failed API call. Status 0 means the board server could not be reached at all. */
@@ -133,7 +149,7 @@ const ErrorBodySchema = z.object({ message: z.string() });
 
 /** A write as the signed-in actor; the board's refusal comes back as an ApiError with its reason. */
 async function write<T>(
-  method: "POST" | "PUT",
+  method: "POST" | "PUT" | "DELETE",
   path: string,
   token: string,
   input: Record<string, unknown>,
@@ -173,11 +189,15 @@ const PausedSchema = z.object({ paused: z.boolean() });
 const SignalRecordSchema = z.object({ id: UlidSchema, ts: z.string(), signal: OpsSignalSchema });
 export type SignalRecord = z.infer<typeof SignalRecordSchema>;
 const AgentRecordSchema = AgentSchema.omit({ tokenHash: true });
+const SignedOutSchema = z.object({ signedOut: z.boolean() });
+const DeniedSchema = z.object({ denied: z.boolean() });
 
 /** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
 export function createApi(token: string) {
   return {
     me: () => get("/api/me", token, ActorSchema),
+    /** Ends a GitHub sign-in on the board; the user's own token is not one and stays valid. */
+    signOut: () => write("DELETE", "/api/sign-in", token, {}, SignedOutSchema),
     society: () => get("/api/society", token, SocietySchema),
     members: () => get("/api/members", token, RosterSchema),
     projects: () => get("/api/projects", token, ProjectSchema.array()),
@@ -272,6 +292,19 @@ export function createApi(token: string) {
     models: (cli: CliKind) => get(`/api/models/${cli}`, token, ModelOptionSchema.array()),
     /** The runners the society has, connected or not, with what each offers. */
     runners: () => get("/api/runners", token, RunnerSchema.array()),
+    /** Runners that asked to join and wait for the user's approval, newest first. */
+    enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),
+    /** Registers a waiting runner under `name`; the runner picks up its token on its next poll. */
+    approveEnrollment: (code: string, name: string) =>
+      write(
+        "POST",
+        `/api/enrollments/${encodeURIComponent(code)}/approve`,
+        token,
+        { name },
+        RunnerSchema,
+      ),
+    denyEnrollment: (code: string) =>
+      write("POST", `/api/enrollments/${encodeURIComponent(code)}/deny`, token, {}, DeniedSchema),
     /**
      * Sets the runner a citizen's work outside any project runs on, from its next turn, or null to
      * pin it again on that turn.

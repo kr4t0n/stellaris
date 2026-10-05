@@ -1,4 +1,4 @@
-import { isBoardError, type Actor, type Board } from "@stellaris/board-core";
+import { BoardError, isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
   CliKindSchema,
@@ -6,6 +6,7 @@ import {
   ModelNameSchema,
   NameSchema,
   RoleCharterSchema,
+  USER_ROLE,
   VerbNameSchema,
   WakeRequestSchema,
   type LiveTurnEvent,
@@ -15,6 +16,8 @@ import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
+import type { EnrollmentDesk } from "./enrollment.js";
+import { githubAuthRoutes, type GithubAuthOptions } from "./github-auth.js";
 import type { ModelSource } from "./models.js";
 import { runnerRoutes } from "./runner-routes.js";
 import { spaHandler } from "./static.js";
@@ -41,6 +44,10 @@ export interface AppDependencies {
   readonly runners?: RunnerHub | undefined;
   /** The built interface. When set, every path the API and MCP do not answer serves it. */
   readonly webDir?: string | undefined;
+  /** Signing in with GitHub, under `/auth`; without it the board takes tokens only. */
+  readonly signIn?: Omit<GithubAuthOptions, "board"> | undefined;
+  /** Runners asking to be enrolled, which the user approves on the board. */
+  readonly enrollments?: EnrollmentDesk | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -57,6 +64,7 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
 const RunnerBodySchema = z.object({ name: NameSchema });
+const EnrollmentApprovalSchema = z.object({ name: NameSchema });
 /** The runner a citizen's work outside any project runs on, or null to pin it again on its next turn. */
 const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
 /** A model for a citizen, or null for its CLI's own default. */
@@ -116,6 +124,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   // Identity and society
   api.get("/me", (c) => c.json(c.get("actor")));
+  // Signing out ends the sign-in the bearer token belongs to; the user's own token is not one.
+  api.delete("/sign-in", async (c) => c.json({ signedOut: await board.signOut(bearer(c) ?? "") }));
   api.get("/society", async (c) => c.json(await board.society()));
   api.get("/agents", async (c) =>
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
@@ -155,6 +165,29 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const body = RunnerBodySchema.parse(await c.req.json());
     return c.json(await board.addRunner(c.get("actor"), body.name));
   });
+  // Runners waiting to be enrolled, which only the user approves, under a name, or denies.
+  const enrollments = deps.enrollments;
+  if (enrollments !== undefined) {
+    const forUser = (c: Context<Env>): void => {
+      if (c.get("actor").role !== USER_ROLE) {
+        throw new BoardError("FORBIDDEN", "only the user enrolls runners");
+      }
+    };
+    api.get("/enrollments", (c) => {
+      forUser(c);
+      return c.json(enrollments.waiting());
+    });
+    api.post("/enrollments/:code/approve", async (c) => {
+      forUser(c);
+      const body = EnrollmentApprovalSchema.parse(await c.req.json());
+      return c.json(await enrollments.approve(c.get("actor"), c.req.param("code"), body.name));
+    });
+    api.post("/enrollments/:code/deny", (c) => {
+      forUser(c);
+      enrollments.deny(c.req.param("code"));
+      return c.json({ denied: true });
+    });
+  }
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
   api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
   api.get("/signals", async (c) =>
@@ -336,8 +369,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
 
   app.route("/api", api);
+  app.route("/auth", githubAuthRoutes({ board, github: null, ...deps.signIn }));
   if (deps.runners !== undefined) {
-    app.route("/runner", runnerRoutes(board, deps.runners));
+    app.route("/runner", runnerRoutes(board, deps.runners, deps.enrollments));
   }
 
   app.all("/mcp", async (c) => {

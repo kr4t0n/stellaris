@@ -76,6 +76,14 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({
     getParentRoute: () => rootRoute,
+    path: "/runners",
+    // `code` is the enrollment a runner printed a link to, shown first and marked.
+    validateSearch: (search: Record<string, unknown>): { code?: string } =>
+      typeof search["code"] === "string" ? { code: search["code"] } : {},
+    component: lazyRouteComponent(() => import("./board/RunnersView.js"), "RunnersView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
     path: "/proposals",
     component: lazyRouteComponent(() => import("./board/ProposalsView.js"), "ProposalsView"),
   }),

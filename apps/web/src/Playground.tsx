@@ -58,7 +58,7 @@ function after(pathname: string, prefix: string): string | null {
  * live picture of what citizens are doing.
  */
 export function Playground() {
-  const { api, token, signOut } = useSession();
+  const { api, token, signOut, expire } = useSession();
   const client = useQueryClient();
   useEffect(
     () =>
@@ -132,7 +132,9 @@ export function Playground() {
       ? "needs-you"
       : pathname === "/proposals" || pathname.startsWith("/proposal/")
         ? "proposals"
-        : null;
+        : pathname === "/runners"
+          ? "runners"
+          : null;
   const attention = useNeedsYou().length;
   const activeOverview =
     pathname === "/society"
@@ -189,9 +191,9 @@ export function Playground() {
   );
   useEffect(() => {
     if (rejected) {
-      signOut();
+      expire();
     }
-  }, [rejected, signOut]);
+  }, [rejected, expire]);
 
   const model = useMemo(
     () =>

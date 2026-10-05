@@ -14,7 +14,7 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
-    proxy: { "/api": board, "/health": board },
+    proxy: { "/api": board, "/auth": board, "/health": board },
   },
   preview: { host: "127.0.0.1" },
 });

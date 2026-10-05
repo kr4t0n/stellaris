@@ -114,6 +114,7 @@ describe("server config", () => {
       turnTimeoutMs: 1_200_000,
       toolRounds: 60,
       residentIdleMs: 600_000,
+      github: null,
     });
     expect(loadServerConfig({ STELLARIS_PORT: "5000" })).toMatchObject({
       port: 5000,
@@ -138,10 +139,27 @@ describe("server config", () => {
     expect(loadServerConfig({ STELLARIS_CONCURRENCY: "4" }).concurrency).toBe(4);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
   });
+
+  it("reads GitHub sign-in whole or not at all", () => {
+    const github = {
+      STELLARIS_GITHUB_CLIENT_ID: "Iv1.abc",
+      STELLARIS_GITHUB_CLIENT_SECRET: "secret",
+      STELLARIS_GITHUB_USERS: "Kr4t0n, octocat",
+    };
+    expect(loadServerConfig(github).github).toEqual({
+      clientId: "Iv1.abc",
+      clientSecret: "secret",
+      users: ["kr4t0n", "octocat"],
+    });
+    expect(() =>
+      loadServerConfig({ ...github, STELLARIS_GITHUB_CLIENT_SECRET: undefined }),
+    ).toThrow(/together/);
+    expect(() => loadServerConfig({ ...github, STELLARIS_GITHUB_USERS: " " })).toThrow(/together/);
+  });
 });
 
 describe("runner config", () => {
-  it("reads the environment with defaults, and needs a token", () => {
+  it("reads the environment with defaults", () => {
     expect(loadRunnerConfig({ STELLARIS_RUNNER_TOKEN: "stl_runner" })).toEqual({
       serverUrl: "http://127.0.0.1:4700",
       token: "stl_runner",
@@ -159,7 +177,9 @@ describe("runner config", () => {
         STELLARIS_CAPABILITIES: "gpu, docker",
       }),
     ).toMatchObject({ slots: null, clis: ["codex"], capabilities: ["gpu", "docker"] });
-    expect(() => loadRunnerConfig({})).toThrow(/token/);
+    // Without a token the runner enrolls, or uses what an enrollment saved.
+    expect(loadRunnerConfig({ STELLARIS_RUNNER_TOKEN: " " }).token).toBeNull();
+    expect(loadRunnerConfig({}).token).toBeNull();
   });
 });
 

@@ -13,6 +13,7 @@ import {
   conflictCopyOf,
   DecisionSchema,
   describeCharter,
+  IsoDateTimeSchema,
   KnowledgeSchema,
   mayHoldStage,
   MemberProposalSchema,
@@ -202,6 +203,21 @@ const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 const RunnerTokensSchema = z.object({
   runners: z.record(z.string(), z.object({ tokenHash: z.string().min(1) })),
 });
+
+/** The user's sign-ins, by token hash; kept outside the projection, like every token. */
+const SignInsSchema = z.object({
+  signIns: z
+    .array(
+      z.object({
+        tokenHash: z.string().min(1),
+        login: z.string().min(1),
+        createdAt: IsoDateTimeSchema,
+        expiresAt: IsoDateTimeSchema,
+      }),
+    )
+    .default([]),
+});
+type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
 const TurnHistoryPayloadSchema = z.object({
   project: NameSchema,
@@ -539,6 +555,8 @@ export class Board {
   private readonly turnTokens = new Map<string, { actor: Actor; expiresAt: number }>();
   /** Runner token hashes to runner names. */
   private readonly runnerTokens = new Map<string, Name>();
+  /** Sign-ins by token hash, each acting as the user until it expires. */
+  private readonly signIns = new Map<string, { login: string; expiresAt: number }>();
   private readonly files = new FileTree();
   private readonly homes: HomeRepos;
 
@@ -574,6 +592,7 @@ export class Board {
     await board.mutex.run(() => board.applyAlignments());
     await board.loadTokenIndex();
     await board.loadRunnerTokens();
+    await board.loadSignIns();
     await board.homes.installHooks();
     return board;
   }
@@ -942,6 +961,14 @@ export class Board {
     if (persistent !== undefined) {
       return persistent;
     }
+    const signIn = this.signIns.get(hash);
+    if (signIn !== undefined) {
+      if (signIn.expiresAt > this.now().getTime()) {
+        return this.userActor();
+      }
+      this.signIns.delete(hash);
+      return null;
+    }
     const temporary = this.turnTokens.get(hash);
     if (temporary === undefined) {
       return null;
@@ -989,6 +1016,83 @@ export class Board {
 
   userActor(): Actor {
     return { name: USER_NAME, role: USER_ROLE };
+  }
+
+  /**
+   * Signs the user in, as `login` on the identity provider, for `ttlMs`, and returns the sign-in's
+   * token, shown once. Only its hash is kept, in `state/sign-ins.json`, so a sign-in outlives a
+   * restart; it acts as the user, like the user's own token, until it expires or is signed out.
+   */
+  async signIn(login: string, ttlMs: number): Promise<string> {
+    return this.mutex.run(async () => {
+      const token = mintToken();
+      const now = this.now().getTime();
+      const record: SignInRecord = {
+        tokenHash: hashToken(token),
+        login,
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + ttlMs).toISOString(),
+      };
+      const live = (await this.readSignIns()).filter((each) => Date.parse(each.expiresAt) > now);
+      await writeJson(this.signInsFile(), { signIns: [...live, record] });
+      this.signIns.set(record.tokenHash, { login, expiresAt: Date.parse(record.expiresAt) });
+      await this.events.append("user.signed_in", USER_NAME, { login });
+      return token;
+    });
+  }
+
+  /** Ends the sign-in a token belongs to; false for a token that is no sign-in's. */
+  async signOut(token: string): Promise<boolean> {
+    const hash = hashToken(token);
+    return this.mutex.run(async () => {
+      const signIn = this.signIns.get(hash);
+      if (signIn === undefined) {
+        return false;
+      }
+      this.signIns.delete(hash);
+      await writeJson(this.signInsFile(), {
+        signIns: (await this.readSignIns()).filter((each) => each.tokenHash !== hash),
+      });
+      await this.events.append("user.signed_out", USER_NAME, { login: signIn.login });
+      return true;
+    });
+  }
+
+  /**
+   * Issues the user a new token and revokes the old one, returning the new one, shown once: the way
+   * back in when the token is lost. A server already running keeps the old token's hash in memory
+   * until it restarts, since the admin CLI that calls this writes the data directory beside it.
+   */
+  async rotateUserToken(): Promise<string> {
+    return this.mutex.run(async () => {
+      const previous = await this.readAgent(USER_NAME);
+      const token = mintToken();
+      await this.updateAgent(USER_NAME, (agent) => ({ ...agent, tokenHash: hashToken(token) }));
+      this.tokenIndex.delete(previous.tokenHash);
+      this.tokenIndex.set(hashToken(token), this.userActor());
+      await this.events.append("user.token_rotated", USER_NAME, {});
+      return token;
+    });
+  }
+
+  private signInsFile(): string {
+    return path.join(this.paths.state(), "sign-ins.json");
+  }
+
+  private async readSignIns(): Promise<SignInRecord[]> {
+    const file = this.signInsFile();
+    return (await exists(file)) ? (await readJson(file, SignInsSchema)).signIns : [];
+  }
+
+  private async loadSignIns(): Promise<void> {
+    this.signIns.clear();
+    const now = this.now().getTime();
+    for (const signIn of await this.readSignIns()) {
+      const expiresAt = Date.parse(signIn.expiresAt);
+      if (expiresAt > now) {
+        this.signIns.set(signIn.tokenHash, { login: signIn.login, expiresAt });
+      }
+    }
   }
 
   async actorFor(name: Name): Promise<Actor> {
@@ -3380,8 +3484,13 @@ export class Board {
   /**
    * Registers a runner and mints its token, returned once; only its hash is kept, outside the
    * projection. The runner reports its operating system, CLIs, and capabilities when it connects.
+   * An enrolled runner names the machine that asked, which the event records.
    */
-  async addRunner(actor: Actor, name: Name): Promise<{ runner: Runner; token: string }> {
+  async addRunner(
+    actor: Actor,
+    name: Name,
+    enrolled?: { hostname: string },
+  ): Promise<{ runner: Runner; token: string }> {
     if (actor.role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", "only the user adds runners");
     }
@@ -3410,7 +3519,10 @@ export class Board {
         runners: { ...tokens, [parsed]: { tokenHash: hashToken(token) } },
       });
       this.runnerTokens.set(hashToken(token), parsed);
-      await this.events.append("runner.added", actor.name, { name: parsed });
+      await this.events.append("runner.added", actor.name, {
+        name: parsed,
+        ...(enrolled === undefined ? {} : { enrolledFrom: enrolled.hostname }),
+      });
       return { runner, token };
     });
   }

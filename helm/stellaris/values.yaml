@@ -16,9 +16,9 @@ image:
 imagePullSecrets: []
 
 # What the first start on an empty volume creates. An init container runs `stellaris init`, then
-# adds each citizen below, and writes the user token, printed nowhere else, to
-# /data/initial-user-token. Read it once and delete it (see the notes after install). A volume that
-# already holds a society is left as it is, so changing these later changes nothing.
+# adds each citizen below, and, unless GitHub sign-in is on, writes the user token, printed nowhere
+# else, to /data/initial-user-token. Read it once and delete it (see the notes after install). A
+# volume that already holds a society is left as it is, so changing these later changes nothing.
 society:
   name: stellaris
   # Only the seed roles, `concierge` and `steward`, exist at this point; work roles come later, by
@@ -30,6 +30,23 @@ society:
     - name: stew
       role: steward
       cli: claude
+
+# Signing in to the board with GitHub instead of the user token. Create a GitHub OAuth app whose
+# authorization callback URL is the board's address followed by /auth/github/callback, and list the
+# GitHub logins that may sign in; each signs in as the user, for 30 days. With it on, the first start
+# writes no token file and runners enroll from the board, so the user token is never needed; a
+# script that wants one runs `stellaris user token --rotate` in the pod and restarts it.
+auth:
+  github:
+    enabled: false
+    clientId: ""
+    # The OAuth app's client secret, kept in a Secret the chart creates; or name a Secret of your
+    # own in existingSecret, holding it under existingSecretKey.
+    clientSecret: ""
+    existingSecret: ""
+    existingSecretKey: client-secret
+    # GitHub logins allowed in, in any case, or numeric user ids, which survive a rename.
+    users: []
 
 server:
   enabled: true

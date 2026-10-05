@@ -4,6 +4,8 @@ import {
   FileReadSchema,
   NameSchema,
   RunnerAnswerSchema,
+  RunnerEnrollPollSchema,
+  RunnerEnrollRequestSchema,
   RunnerHelloSchema,
   TurnEventsSchema,
   TurnOutcomeSchema,
@@ -15,6 +17,7 @@ import {
 import type { RunnerHub } from "@stellaris/turn-host";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { EnrollmentDesk } from "./enrollment.js";
 import { HomeGit } from "./home-git.js";
 
 type RunnerEnv = { Variables: { runner: Name } };
@@ -33,8 +36,27 @@ function bearer(c: Context<RunnerEnv>): string | null {
  * turn events and outcomes, answers, and warm sessions; the board's projection as files; and each
  * agent's home as a git repository.
  */
-export function runnerRoutes(board: Board, hub: RunnerHub): Hono<RunnerEnv> {
+export function runnerRoutes(
+  board: Board,
+  hub: RunnerHub,
+  enrollments?: EnrollmentDesk,
+): Hono<RunnerEnv> {
   const routes = new Hono<RunnerEnv>();
+
+  // A runner with no token asks to be enrolled and polls until the user decides, so these two
+  // answer before the token check below.
+  if (enrollments !== undefined) {
+    routes.post("/enroll", async (c) =>
+      c.json(enrollments.open(RunnerEnrollRequestSchema.parse(await c.req.json()))),
+    );
+    routes.post("/enroll/poll", async (c) => {
+      const { deviceCode } = RunnerEnrollPollSchema.parse(await c.req.json());
+      const status = enrollments.poll(deviceCode);
+      return status === null
+        ? c.json({ error: "NOT_FOUND", message: "no such enrollment; it may have expired" }, 404)
+        : c.json(status);
+    });
+  }
 
   routes.use("*", async (c, next): Promise<Response | void> => {
     const token = bearer(c);

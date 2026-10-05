@@ -37,6 +37,11 @@ export class RunnerLayout {
     return path.join(this.root, "worktrees", agent, ".tasks", taskId);
   }
 
+  /** The name and token an enrollment returned, with the server they belong to. */
+  get credentials(): string {
+    return path.join(this.root, "credentials.json");
+  }
+
   /** The hashes a copied tree last agreed on with the server. */
   syncState(tree: string): string {
     return path.join(this.root, "sync", `${tree}.json`);

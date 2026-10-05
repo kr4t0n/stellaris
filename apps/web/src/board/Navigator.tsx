@@ -3,14 +3,21 @@ import { useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
-import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
+import {
+  useChannels,
+  useEnrollments,
+  useProjects,
+  useProposals,
+  useTasks,
+  useThreads,
+} from "../lib/session.js";
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
 /** The governance view that is open, if one is. */
-export type GovernanceView = "needs-you" | "proposals";
+export type GovernanceView = "needs-you" | "proposals" | "runners";
 
 interface Group {
   readonly key: string;
@@ -67,11 +74,15 @@ function Count({ value, title }: { value: number; title: string }) {
   );
 }
 
-/** Where the user decides: what waits on the user, and the proposals, each with its count. */
+/**
+ * Where the user decides: what waits on the user, the proposals, and the runners asking to join,
+ * each with its count.
+ */
 function Governance({ active }: { active: GovernanceView | null }) {
   const proposals = useProposals();
   const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
   const attention = useNeedsYou().length;
+  const enrolling = useEnrollments().data?.length ?? 0;
   return (
     <section aria-label="Governance" className="mt-3">
       <h3 className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-muted uppercase">
@@ -100,6 +111,15 @@ function Governance({ active }: { active: GovernanceView | null }) {
             </span>
             <span className="min-w-0 flex-1 truncate">proposals</span>
             <Count value={waiting} title={`${waiting} waiting on you`} />
+          </Link>
+        </li>
+        <li>
+          <Link to="/runners" className={`${ROW} ${active === "runners" ? ROW_ACTIVE : ROW_IDLE}`}>
+            <span aria-hidden="true" className="text-fg-muted">
+              ▣
+            </span>
+            <span className="min-w-0 flex-1 truncate">runners</span>
+            <Count value={enrolling} title={`${enrolling} waiting for approval`} />
           </Link>
         </li>
       </ul>

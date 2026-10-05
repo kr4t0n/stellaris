@@ -8,6 +8,8 @@ export interface Session {
   readonly api: Api;
   readonly token: string;
   readonly signOut: () => void;
+  /** Forgets a token the board no longer takes, keeping the address to come back to after signing in. */
+  readonly expire: () => void;
 }
 
 export const SessionContext = createContext<Session | null>(null);
@@ -222,6 +224,12 @@ export function useKnowledge(scope: string) {
 export function useRunners() {
   const { api } = useSession();
   return useQuery({ queryKey: ["runners"], queryFn: () => api.runners(), refetchInterval: 60_000 });
+}
+
+/** Runners waiting for the user's approval. They live in the server's memory and no event announces them, so this polls. */
+export function useEnrollments() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["enrollments"], queryFn: api.enrollments, refetchInterval: 5_000 });
 }
 
 /** The models a CLI offers; asking starts the CLI, so the server keeps the list and so does this. */

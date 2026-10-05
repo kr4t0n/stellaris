@@ -55,6 +55,10 @@ The component's tag, else the top-level tag, else the chart's appVersion.
 {{- printf "%s/%s:%s" $registry .Values.server.image.repository $tag -}}
 {{- end -}}
 
+{{- define "stellaris.github.secretName" -}}
+{{- .Values.auth.github.existingSecret | default (printf "%s-github" (include "stellaris.server.fullname" .)) -}}
+{{- end -}}
+
 {{- define "stellaris.server.claimName" -}}
 {{- .Values.persistence.existingClaim | default (printf "%s-data" (include "stellaris.server.fullname" .)) -}}
 {{- end -}}
@@ -65,6 +69,23 @@ anything the init container's script would have to quote: names, roles, CLIs, an
 plain words by these checks.
 */}}
 {{- define "stellaris.validate" -}}
+{{- $github := .Values.auth.github -}}
+{{- if $github.enabled -}}
+{{- if not $github.clientId -}}
+{{- fail "auth.github.clientId is required when GitHub sign-in is enabled" -}}
+{{- end -}}
+{{- if not (or $github.clientSecret $github.existingSecret) -}}
+{{- fail "auth.github needs clientSecret, or existingSecret naming a Secret that holds it" -}}
+{{- end -}}
+{{- if not $github.users -}}
+{{- fail "auth.github.users must list the GitHub logins allowed to sign in" -}}
+{{- end -}}
+{{- range $github.users -}}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$" (toString .)) -}}
+{{- fail (printf "auth.github.users: %q is not a GitHub login or user id" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- range .Values.society.citizens -}}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9-]{0,31}$" (toString .name)) -}}
 {{- fail (printf "society.citizens: %q is not a citizen name (lowercase letters, digits, and dashes, up to 32)" (toString .name)) -}}

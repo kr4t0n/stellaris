@@ -4,6 +4,18 @@ import { CliKindSchema } from "./board.js";
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export type LogLevel = z.infer<typeof LogLevelSchema>;
 
+/**
+ * A GitHub OAuth app the board signs the user in with, and the GitHub logins it lets in, every one
+ * of them as the board's one user. The app's callback is `<board address>/auth/github/callback`.
+ */
+export const GithubSignInSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  /** Logins, lowercased; GitHub logins are case-insensitive. */
+  users: z.array(z.string().min(1)).min(1),
+});
+export type GithubSignIn = z.infer<typeof GithubSignInSchema>;
+
 export const ServerConfigSchema = z.object({
   dataDir: z.string().min(1),
   host: z.string().min(1),
@@ -22,6 +34,8 @@ export const ServerConfigSchema = z.object({
   toolRounds: z.number().int().positive().nullable(),
   /** How long a resident session stays warm after its last turn. */
   residentIdleMs: z.number().int().positive(),
+  /** Signing in to the board with GitHub, or null when only a token lets anyone in. */
+  github: GithubSignInSchema.nullable(),
 });
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 
@@ -45,6 +59,23 @@ function list(value: string | undefined): string[] {
 export const AGENT_TOKEN_ENV = "STELLARIS_AGENT_TOKEN";
 
 /** Builds the server configuration from an environment map. Callers pass `process.env`. */
+/** GitHub sign-in from the environment: all three variables, or none of them. */
+function githubSignIn(env: Readonly<Record<string, string | undefined>>): GithubSignIn | null {
+  const clientId = env["STELLARIS_GITHUB_CLIENT_ID"] ?? "";
+  const clientSecret = env["STELLARIS_GITHUB_CLIENT_SECRET"] ?? "";
+  // Logins, or numeric user ids, which survive a rename.
+  const users = list(env["STELLARIS_GITHUB_USERS"]).map((login) => login.toLowerCase());
+  if (clientId === "" && clientSecret === "" && users.length === 0) {
+    return null;
+  }
+  if (clientId === "" || clientSecret === "" || users.length === 0) {
+    throw new Error(
+      "GitHub sign-in needs STELLARIS_GITHUB_CLIENT_ID, STELLARIS_GITHUB_CLIENT_SECRET, and STELLARIS_GITHUB_USERS together",
+    );
+  }
+  return GithubSignInSchema.parse({ clientId, clientSecret, users });
+}
+
 export function loadServerConfig(env: Readonly<Record<string, string | undefined>>): ServerConfig {
   return ServerConfigSchema.parse({
     dataDir: env["STELLARIS_DATA_DIR"] ?? "./data",
@@ -56,14 +87,18 @@ export function loadServerConfig(env: Readonly<Record<string, string | undefined
     turnTimeoutMs: limit(env["STELLARIS_TURN_TIMEOUT_MS"], 20 * 60_000),
     toolRounds: limit(env["STELLARIS_TOOL_ROUNDS"], 60),
     residentIdleMs: Number(env["STELLARIS_RESIDENT_IDLE_MS"] ?? String(10 * 60_000)),
+    github: githubSignIn(env),
   });
 }
 
 export const RunnerConfigSchema = z.object({
   /** The board server, for example http://127.0.0.1:4700. */
   serverUrl: z.string().url(),
-  /** The runner's token, minted by `runner add`. */
-  token: z.string().min(1),
+  /**
+   * The runner's token, from `runner add`, or null for the one it saved when it was enrolled, or
+   * to enroll it.
+   */
+  token: z.string().min(1).nullable(),
   /** The runner's own data directory: the board mirror, agent homes, repositories, worktrees. */
   dataDir: z.string().min(1),
   logLevel: LogLevelSchema,
@@ -79,7 +114,7 @@ export function loadRunnerConfig(env: Readonly<Record<string, string | undefined
   const clis = list(env["STELLARIS_CLIS"]);
   return RunnerConfigSchema.parse({
     serverUrl: (env["STELLARIS_SERVER_URL"] ?? "http://127.0.0.1:4700").replace(/\/+$/, ""),
-    token: env["STELLARIS_RUNNER_TOKEN"] ?? "",
+    token: env["STELLARIS_RUNNER_TOKEN"]?.trim() || null,
     dataDir: env["STELLARIS_RUNNER_DIR"] ?? "./runner-data",
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     slots: limit(env["STELLARIS_CONCURRENCY"], 2),

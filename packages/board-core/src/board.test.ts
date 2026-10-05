@@ -97,6 +97,43 @@ describe("Board", () => {
     });
   });
 
+  it("signs the user in for a while, across a restart, until signed out or expired", async () => {
+    const { board, userToken } = await society();
+    const first = await board.signIn("kr4t0n", 60_000);
+    const second = await board.signIn("kr4t0n", 120_000);
+    expect(board.resolveToken(first)).toEqual(USER);
+    // The board keeps only hashes of sign-ins, as of every other token.
+    const stored = await readFile(path.join(board.paths.state(), "sign-ins.json"), "utf8");
+    expect(stored).not.toContain(first);
+
+    expect(await board.signOut(first)).toBe(true);
+    expect(await board.signOut(first)).toBe(false);
+    expect(await board.signOut(userToken)).toBe(false);
+    expect(board.resolveToken(first)).toBeNull();
+    expect(board.resolveToken(userToken)).toEqual(USER);
+
+    const reopened = await Board.open(dir, { now });
+    expect(reopened.resolveToken(second)).toEqual(USER);
+    clock = new Date(clock.getTime() + 120_000);
+    expect(reopened.resolveToken(second)).toBeNull();
+    const types = (await reopened.readEvents(null)).map((event) => event.type);
+    expect(types.filter((type) => type.startsWith("user.signed"))).toEqual([
+      "user.signed_in",
+      "user.signed_in",
+      "user.signed_out",
+    ]);
+  });
+
+  it("rotates the user token: the old one stops working, the new one lasts", async () => {
+    const { board, userToken } = await society();
+    const rotated = await board.rotateUserToken();
+    expect(board.resolveToken(userToken)).toBeNull();
+    expect(board.resolveToken(rotated)).toEqual(USER);
+    const reopened = await Board.open(dir);
+    expect(reopened.resolveToken(userToken)).toBeNull();
+    expect(reopened.resolveToken(rotated)).toEqual(USER);
+  });
+
   it("post, claim, review, close: the Phase 0 exit criterion", async () => {
     const { board, eng } = await society();
     expect(board.resolveToken(eng.token)).toEqual(ENG);

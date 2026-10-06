@@ -243,7 +243,7 @@ Tokens are minted once and stored only as hashes: the user's, each runner's, eac
 ```
 apps/
   server/          board server: core library, scheduler, HTTP API, SSE, MCP endpoint, the runner protocol; runs no turns; its image's Dockerfile
-  runner/          runner daemon, one per machine, the server's own included
+  runner/          runner daemon, one per machine, the server's own included; its image's Dockerfile
   cli/             admin CLI
   web/             the playground: the token gate, the sky of citizens, and the board (Vite, React, Tailwind, 2D canvas)
 packages/
@@ -297,6 +297,22 @@ docker run -d --name stellaris -p 4700:4700 -v stellaris-data:/data --stop-timeo
 ```
 
 Run the CLI's setup commands before the server starts, or act through the API while it runs, so that one process writes the data directory at a time. A directory mounted at `/data` must be writable by uid 1000. On SIGTERM the server waits for running turns to report before it exits, so give it a stop timeout as long as the turn timeout, 20 minutes by default: `--stop-timeout` for Docker, `terminationGracePeriodSeconds` for Kubernetes. Every server variable in the table above applies; the image sets `STELLARIS_DATA_DIR`, `STELLARIS_HOST`, `STELLARIS_PORT`, and `STELLARIS_WEB_DIR`.
+
+### The runner's image
+
+The same workflow pushes `kr4t0n/stellaris-runner`, with the same tags. It is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, pinned by `CLIMAGE_VERSION` in `apps/runner/Dockerfile`, which brings Claude Code, Codex, Node, Python with uv, Go, Rust, and the command-line tools agents shell out to. It runs as `climage` (uid 1000, group `users`, gid 100) and keeps everything in its home: the runner's data directory at `/home/climage/stellaris-runner` (its saved credentials, agents' homes, and its projects' repositories and worktrees), the CLIs' logins in `~/.claude` and `~/.codex`, and whatever agents install. One volume at `/home/climage` keeps all of it across restarts:
+
+```bash
+IMAGE=kr4t0n/stellaris-runner
+docker volume create stellaris-runner-home
+docker run --rm -it -v stellaris-runner-home:/home/climage $IMAGE claude auth login
+docker run --rm -it -v stellaris-runner-home:/home/climage $IMAGE codex login --device-auth
+docker run -d --name stellaris-runner -v stellaris-runner-home:/home/climage \
+  -e STELLARIS_SERVER_URL=https://stellaris.example.com --stop-timeout 1200 $IMAGE
+docker logs stellaris-runner   # the enrollment code and link to approve on the board
+```
+
+`ANTHROPIC_API_KEY` signs Claude Code in without a saved login; `CLAUDE_CODE_OAUTH_TOKEN` does not reach the CLI, since the runner drops every `CLAUDE_CODE_*` variable before starting it. Every runner variable in the table above applies. In Kubernetes, give the pod `fsGroup: 100` so the volume is writable by the image's user, and a termination grace period as long as the turn timeout, since a stopping runner drains its turns. The image is built per platform rather than once, because the Claude Agent SDK runs Claude Code from a per-platform binary, the SDK's own, which is the Claude Code the runner's turns use; climage's `claude` is the same login.
 
 ### The Helm chart
 

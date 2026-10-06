@@ -28,6 +28,8 @@ jobs:
         image:
           - name: stellaris-server
             dockerfile: apps/server/Dockerfile
+          - name: stellaris-runner
+            dockerfile: apps/runner/Dockerfile
         platform:
           - { name: linux/amd64, slug: amd64, runner: ubuntu-24.04 }
           - { name: linux/arm64, slug: arm64, runner: ubuntu-24.04-arm }
@@ -78,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [stellaris-server]
+        image: [stellaris-server, stellaris-runner]
     env:
       IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
     steps:

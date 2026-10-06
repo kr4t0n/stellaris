@@ -1,10 +1,13 @@
 {{- $name := include "stellaris.server.fullname" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $github := .Values.auth.github -}}
+{{- $runner := .Values.runner -}}
+{{- $runnerName := include "stellaris.runner.fullname" . -}}
 {{- $url := printf "http://127.0.0.1:%v" .Values.server.service.port -}}
 {{- if .Values.ingress.enabled -}}
 {{- $url = printf "http%s://%s" (ternary "s" "" .Values.ingress.tls.enabled) .Values.ingress.host -}}
 {{- end -}}
+{{- if .Values.server.enabled -}}
 The Stellaris board server is starting.
 
 {{- if $github.enabled }}
@@ -31,6 +34,7 @@ Open the board
     kubectl -n {{ $ns }} port-forward svc/{{ $name }} {{ .Values.server.service.port }}:{{ .Values.server.service.port }}
   then open {{ $url }}{{ if not $github.enabled }} and enter the token{{ end }}.
 {{- end }}
+{{- if not $runner.enabled }}
 
 Connect a runner
   Turns run on runners, on the machines where the Claude Code and Codex CLIs and their logins are.
@@ -39,11 +43,38 @@ Connect a runner
     STELLARIS_SERVER_URL={{ $url }} stellaris-runner
 
   It prints a code and a link; approve it on the board under runners. It keeps the token approval
-  gives it in its data directory and connects with it from then on.
+  gives it in its data directory and connects with it from then on. Or set runner.enabled to run
+  runners in the cluster.
+{{- end }}
+{{- end }}
+{{- if $runner.enabled }}
+{{- if .Values.server.enabled }}
+
+{{ end -}}
+Runners in the cluster
+  {{ $runnerName }} runs {{ $runner.replicas }} runner{{ if ne (int $runner.replicas) 1 }}s{{ end }} ({{ $runnerName }}-0{{ if gt (int $runner.replicas) 1 }} to {{ $runnerName }}-{{ sub (int $runner.replicas) 1 }}{{ end }}) against
+  {{ include "stellaris.runner.serverUrl" . }}. A pod keeps its CLI logins{{ if not $runner.existingSecret }} and its token{{ end }} on a
+  volume of its own, and its CLIs start logged out: log each pod in once{{ if not $runner.existingSecret }}, and approve its enrollment{{ end }}.
+  For the first pod:
+
+    kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- claude auth login
+    kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- codex login --device-auth
+{{- if not $runner.existingSecret }}
+    kubectl -n {{ $ns }} logs {{ $runnerName }}-0 -c runner | grep approve
+
+  The last line carries the code to approve on the board under runners, where the pod's name is
+  the suggested one. A code lasts ten minutes, and the runner asks again with a new one after that.
+{{- end }}
+{{- if not $runner.networkPolicy.enabled }}
+
+  Agents run with every permission, so these pods run whatever they decide with the pod's network.
+  runner.networkPolicy.enabled keeps them from the cluster's private addresses.
+{{- end }}
+{{- end }}
 
 Before an upgrade, pause the society with the board's Pause switch and let running turns end, then
 resume after it.
-{{- if not .Values.persistence.enabled }}
+{{- if and .Values.server.enabled (not .Values.persistence.enabled) }}
 
 Persistence is off: the society lives only as long as this pod.
 {{- end }}

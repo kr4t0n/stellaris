@@ -174,3 +174,111 @@ ingress:
   tls:
     enabled: false
     secretName: ""
+
+# Runners in the cluster, which run the turns: a StatefulSet of the runner image, which brings
+# Claude Code, Codex, and the toolchains agents use, each pod a runner of its own with a volume of
+# its own. Runners on other machines connect as before, with or without these.
+#
+# Agents run with every permission and no sandbox, so a runner pod runs whatever they decide with
+# the pod's network. The pod gets no service-account token, and networkPolicy keeps it from the
+# cluster's private addresses.
+runner:
+  enabled: false
+  # Each replica enrolls on its first start, under the name you approve on the board, which
+  # suggests the pod's. A project lives on the runner of its first turn, so scaling down leaves
+  # the projects on the runners removed waiting for them to come back.
+  replicas: 1
+  image:
+    repository: kr4t0n/stellaris-runner
+    tag: ""
+
+  # The board server as the runners reach it; empty is the chart's Service, so agents reach the
+  # board's MCP endpoint inside the cluster. Required when server.enabled is false.
+  serverUrl: ""
+
+  # A Secret holding a token from `stellaris runner add` or POST /api/runners under
+  # existingSecretKey, for a runner registered by hand instead of enrolled. A token is one runner,
+  # so this needs one replica.
+  existingSecret: ""
+  existingSecretKey: token
+
+  # The runner's settings, passed as its STELLARIS_* variables; an empty value keeps its default.
+  config:
+    logLevel: info
+    # Turns each runner runs at once: a number, or `unlimited`; empty is 2.
+    concurrency: ""
+    # The CLIs it runs turns with; empty is claude and codex.
+    clis: []
+    # What it offers, matched against what projects and tasks require, such as `gpu`.
+    capabilities: []
+    # Codex's sandbox; empty runs Codex without one. `read-only` and `workspace-write` need user
+    # namespaces, which a pod rarely has.
+    codexSandbox: ""
+
+  # A stopping runner drains its turns first, so give it as long as the turn timeout.
+  terminationGracePeriodSeconds: 1200
+
+  # More environment, such as an API key for a CLI not logged in from the pod:
+  #   extraEnv:
+  #     - name: ANTHROPIC_API_KEY
+  #       valueFrom: {secretKeyRef: {name: anthropic, key: api-key}}
+  # A CLAUDE_CODE_* variable never reaches Claude Code: the runner drops them before starting it.
+  extraEnv: []
+  extraEnvFrom: []
+
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+
+  # Each runner's home: the CLIs' logins, its token, the agents' homes, and the repositories and
+  # worktrees of the projects living on it, their only copy. The claims are kept when the
+  # StatefulSet is scaled down or uninstalled, and Kubernetes refuses a change to these after
+  # install; resize a claim itself instead.
+  persistence:
+    # Empty uses the cluster's default class; `-` asks for no class.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 50Gi
+    annotations: {}
+
+  # An egress policy for the runner pods: DNS, the chart's server, and the internet outside
+  # deniedCidrs, by default the private ranges a cluster's pods, services, and nodes live in, the
+  # shared range, and link-local, where cloud metadata services answer. Nothing may connect in.
+  # It takes effect only under a network plugin that enforces NetworkPolicy.
+  networkPolicy:
+    enabled: false
+    deniedCidrs:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 100.64.0.0/10
+      - 169.254.0.0/16
+      - fc00::/7
+      - fe80::/10
+    # More egress rules in NetworkPolicy's shape, for something in those ranges agents need, such
+    # as a serverUrl at a private address or a package mirror.
+    extraEgress: []
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # The image runs as stellaris (uid 1000) in the shared `users` group (gid 100), which fsGroup
+  # gives the volume; OnRootMismatch skips the recursive chown of a volume that is already right.
+  podSecurityContext:
+    fsGroup: 100
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 100

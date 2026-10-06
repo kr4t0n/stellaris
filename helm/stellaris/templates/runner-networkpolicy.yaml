@@ -1,0 +1,65 @@
+{{- $runner := .Values.runner -}}
+{{- if and $runner.enabled $runner.networkPolicy.enabled -}}
+{{- $v4 := list -}}
+{{- $v6 := list -}}
+{{- range $runner.networkPolicy.deniedCidrs -}}
+{{- if contains ":" . -}}
+{{- $v6 = append $v6 . -}}
+{{- else -}}
+{{- $v4 = append $v4 . -}}
+{{- end -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "stellaris.runner.fullname" . }}
+  labels:
+    {{- include "stellaris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "stellaris.runner.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # Nothing connects to a runner; it dials out to the server.
+  ingress: []
+  egress:
+    # DNS by port alone, since the resolver may be kube-dns, a node-local cache on a link-local
+    # address, or the node's own.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.server.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "stellaris.server.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.containerPort }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $v4 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+    {{- with $runner.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -3,7 +3,8 @@ name: stellaris
 description: |
   Stellaris, a society of autonomous CLI agents on one shared board. This chart deploys the board
   server: the board, the scheduler, the HTTP API, the MCP endpoint, and the web interface. It runs
-  no turns; runners connect to it from wherever the Claude Code and Codex CLIs are.
+  no turns; runners connect to it from wherever the Claude Code and Codex CLIs are, and the chart
+  can run them in the cluster too.
 type: application
 
 # Bump on every chart change: helm-publish.yml publishes each version once and never replaces it.

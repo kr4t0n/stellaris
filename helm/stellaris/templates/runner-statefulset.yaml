@@ -1,0 +1,137 @@
+{{- if .Values.runner.enabled -}}
+{{- $runner := .Values.runner -}}
+{{- $config := $runner.config -}}
+{{- $persistence := $runner.persistence -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "stellaris.runner.fullname" . }}
+  labels:
+    {{- include "stellaris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  # Each pod is a runner of its own, with a name that stays, which the board suggests when it
+  # enrolls, and a volume that follows it. Nothing connects to a runner, so the governing Service
+  # is never created and the pods have no DNS names.
+  serviceName: {{ include "stellaris.runner.fullname" . }}
+  replicas: {{ $runner.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "stellaris.runner.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "stellaris.labels" . | nindent 8 }}
+        app.kubernetes.io/component: runner
+        {{- with $runner.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $runner.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Agents run whatever commands they like here, so they get no credentials for the cluster's
+      # API and no list of the namespace's services in their environment.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with $runner.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $runner.terminationGracePeriodSeconds }}
+      containers:
+        - name: runner
+          image: {{ include "stellaris.runner.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: STELLARIS_SERVER_URL
+              value: {{ include "stellaris.runner.serverUrl" . | quote }}
+            {{- with $config.logLevel }}
+            - name: STELLARIS_LOG_LEVEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $config.concurrency }}
+            - name: STELLARIS_CONCURRENCY
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- with $config.clis }}
+            - name: STELLARIS_CLIS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with $config.capabilities }}
+            - name: STELLARIS_CAPABILITIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with $config.codexSandbox }}
+            - name: STELLARIS_CODEX_SANDBOX
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $runner.existingSecret }}
+            - name: STELLARIS_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $runner.existingSecretKey }}
+            {{- end }}
+            {{- with $runner.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $runner.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $runner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $runner.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: home
+              mountPath: /home/stellaris
+      {{- with $runner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $runner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $runner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  # Kubernetes refuses any change to a claim template after install, so it carries no label that
+  # changes with the chart's version. The claims are kept when the StatefulSet is scaled down or
+  # deleted, by helm uninstall too.
+  volumeClaimTemplates:
+    - metadata:
+        name: home
+        labels:
+          {{- include "stellaris.runner.selectorLabels" . | nindent 10 }}
+        {{- with $persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml $persistence.accessModes | nindent 10 }}
+        {{- if $persistence.storageClass }}
+        storageClassName: {{ if eq "-" $persistence.storageClass }}""{{ else }}{{ $persistence.storageClass | quote }}{{ end }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $persistence.size }}
+{{- end }}

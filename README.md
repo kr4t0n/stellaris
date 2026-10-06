@@ -255,7 +255,7 @@ packages/
   runner-core/     the runner side: adapter interface, executor, git worktrees and merges, home and mirror sync, protocol client, daemon
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex app-server`, JSON-RPC over stdio
-helm/stellaris/    the Helm chart for the board server, published to GitHub Pages
+helm/stellaris/    the Helm chart for the board server and runners in the cluster, published to GitHub Pages
 scripts/npm/       the npm packages' build, their READMEs, and the smoke test of what they install
 data/              runtime data, ignored by git
 ```
@@ -312,7 +312,7 @@ docker run -d --name stellaris-runner -v stellaris-runner-home:/home/stellaris \
 docker logs stellaris-runner   # the enrollment code and link to approve on the board
 ```
 
-`ANTHROPIC_API_KEY` signs Claude Code in without a saved login; `CLAUDE_CODE_OAUTH_TOKEN` does not reach the CLI, since the runner drops every `CLAUDE_CODE_*` variable before starting it. Every runner variable in the table above applies. In Kubernetes, give the pod `fsGroup: 100` so the volume is writable by the image's user, and a termination grace period as long as the turn timeout, since a stopping runner drains its turns. The image is built per platform rather than once, because the Claude Agent SDK runs Claude Code from a per-platform binary, the SDK's own, which is the Claude Code the runner's turns use; climage's `claude` is the same login.
+`ANTHROPIC_API_KEY` signs Claude Code in without a saved login; `CLAUDE_CODE_OAUTH_TOKEN` does not reach the CLI, since the runner drops every `CLAUDE_CODE_*` variable before starting it. Every runner variable in the table above applies. In Kubernetes, the chart runs it for you (`runner.enabled`, below); a pod of your own needs `fsGroup: 100` so the volume is writable by the image's user, and a termination grace period as long as the turn timeout, since a stopping runner drains its turns. The image is built per platform rather than once, because the Claude Agent SDK runs Claude Code from a per-platform binary, the SDK's own, which is the Claude Code the runner's turns use; climage's `claude` is the same login.
 
 ### The Helm chart
 
@@ -323,7 +323,7 @@ helm repo add stellaris https://kr4t0n.github.io/stellaris/helm
 helm install stellaris stellaris/stellaris --namespace stellaris --create-namespace
 ```
 
-On its first start on an empty volume, the chart creates the society with `desk` and `stew` and writes the user token to `/data/initial-user-token` rather than to any log, or, with GitHub sign-in on (`auth.github`), nowhere, since signing in with GitHub and enrolling runners leave nothing that needs it. It runs one replica, replaced with `Recreate` since the server is the data directory's only writer, and keeps its volume on uninstall. [`helm/stellaris/README.md`](./helm/stellaris/README.md) covers the first start, GitHub sign-in, runners, the Ingress a server's event streams and git pushes need, upgrades, and every value.
+On its first start on an empty volume, the chart creates the society with `desk` and `stew` and writes the user token to `/data/initial-user-token` rather than to any log, or, with GitHub sign-in on (`auth.github`), nowhere, since signing in with GitHub and enrolling runners leave nothing that needs it. It runs one replica, replaced with `Recreate` since the server is the data directory's only writer, and keeps its volume on uninstall. With `runner.enabled` it also runs runners from the runner's image, as a StatefulSet whose pods each enroll as a runner of their own and keep their CLI logins, token, and projects on a claim of their own, with no service-account token and, with `runner.networkPolicy.enabled`, no way to the cluster's private addresses; log each pod's CLIs in with `kubectl exec` and approve its code on the board. [`helm/stellaris/README.md`](./helm/stellaris/README.md) covers the first start, GitHub sign-in, runners on other machines and in the cluster, the Ingress a server's event streams and git pushes need, upgrades, and every value.
 
 ## License
 

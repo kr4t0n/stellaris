@@ -65,6 +65,11 @@ test("dragging the sky moves it without opening what the drag began on", async (
   await page.getByRole("button", { name: "Fit the whole sky" }).click();
   await expect(page).toHaveURL(/\/$/);
 
+  // The scene moves its camera on its next frame, so a click in the same frame would land on the
+  // panned view the drag left.
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   await page.mouse.click(center.x, center.y);
   await expect(page).toHaveURL(/\/citizen\/desk$/);
 });

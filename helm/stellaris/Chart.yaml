@@ -8,9 +8,9 @@ description: |
 type: application
 
 # Bump on every chart change: helm-publish.yml publishes each version once and never replaces it.
-version: 0.2.0
+version: 0.3.0
 # The image tag pulled by default, which the publish workflow pushes from a `v<appVersion>` git tag.
-appVersion: "0.2.0"
+appVersion: "0.3.0"
 
 home: https://github.com/kr4t0n/stellaris
 sources:

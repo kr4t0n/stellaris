@@ -1,16 +1,14 @@
 name: npm-publish
 
-# Stages the npm packages for release: @kubitnodes/stellaris (the admin CLI and the board server
-# with its interface) and @kubitnodes/stellaris-runner. It uses npm's trusted publishing (OIDC),
-# with no token secret, and each package's trusted publisher authorizes kr4t0n/stellaris and
-# npm-publish.yml to stage only, so nothing reaches users until a maintainer approves the staged
-# version with 2FA: `npm stage list <package>`, then `npm stage approve <stage id>`.
+# Publishes the npm packages, as nodex does: @kubitnodes/stellaris (the admin CLI and the board
+# server with its interface) and @kubitnodes/stellaris-runner. It uses npm's trusted publishing
+# (OIDC), with no token secret, so each package's trusted publisher must authorize
+# kr4t0n/stellaris and npm-publish.yml.
 #
 # A push to main packs the packages and smoke-tests them, so a broken package shows long before a
-# release; a `v*` tag, or a run by hand, also stages. The version is STELLARIS_VERSION in
+# release; a `v*` tag, or a run by hand, also publishes. The version is STELLARIS_VERSION in
 # packages/shared/src/version.ts: a tag must match it, and a version already on npm is left alone,
-# since npm refuses a republish with an error that reads like a credentials problem. A version
-# already staged and waiting cannot be staged again either, so that package fails alone.
+# since npm refuses a republish with an error that reads like a credentials problem.
 on:
   push:
     branches: [main]
@@ -22,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      # npm exchanges this workflow's OIDC identity for the right to stage, and attaches provenance.
+      # npm exchanges this workflow's OIDC identity for publish rights and attaches provenance.
       id-token: write
     env:
       NPM_CONFIG_REGISTRY: https://registry.npmjs.org
@@ -36,9 +34,9 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - name: Check that npm can stage a publish
+      - name: Check that npm supports trusted publishing
         run: |
-          npm stage publish --help > /dev/null || { echo "::error::npm $(npm --version) cannot stage a publish; staged publishing needs a newer npm."; exit 1; }
+          node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); if (!(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))))) throw new Error("Trusted publishing needs npm 11.5.1 or newer");' "$(npm --version)"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm build:web
@@ -47,7 +45,7 @@ jobs:
         name: Find the packages whose version is not on npm yet
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = branch ]; then
-            echo "A push to $GITHUB_REF_NAME packs and tests; a v* tag stages a release."
+            echo "A push to $GITHUB_REF_NAME packs and tests; a v* tag publishes."
             echo "dirs=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -72,24 +70,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/tarballs"
           npm pack ./release/stellaris ./release/stellaris-runner --pack-destination "$RUNNER_TEMP/tarballs"
           scripts/npm/smoke.sh "$RUNNER_TEMP/tarballs"
-      # Each package is staged on its own, so one that fails, such as a version already staged,
-      # leaves the other staged; the run fails if either does.
-      - name: Stage for approval
+      - name: Publish
         if: steps.unpublished.outputs.dirs != ''
         env:
           DIRS: ${{ steps.unpublished.outputs.dirs }}
         run: |
-          set -o pipefail
-          failed=""
           for dir in $DIRS; do
-            name=$(node -p "require('./release/$dir/package.json').name")
-            version=$(node -p "require('./release/$dir/package.json').version")
-            if staged=$(npm stage publish "./release/$dir" 2>&1 | tee /dev/stderr); then
-              id=$(grep -o 'staged with id [0-9a-f-]*' <<< "$staged" | awk '{print $4}')
-              echo "- \`$name@$version\` staged; approve with \`npm stage approve ${id:-<id from npm stage list $name>}\`" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::error::Could not stage $name@$version."
-              failed="$failed $name"
-            fi
+            npm publish "./release/$dir"
           done
-          [ -z "$failed" ]

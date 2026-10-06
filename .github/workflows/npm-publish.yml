@@ -79,12 +79,14 @@ jobs:
         env:
           DIRS: ${{ steps.unpublished.outputs.dirs }}
         run: |
+          set -o pipefail
           failed=""
           for dir in $DIRS; do
             name=$(node -p "require('./release/$dir/package.json').name")
             version=$(node -p "require('./release/$dir/package.json').version")
-            if npm stage publish "./release/$dir"; then
-              echo "- \`$name@$version\` staged: \`npm stage list $name\`, then \`npm stage approve <stage id>\`" >> "$GITHUB_STEP_SUMMARY"
+            if staged=$(npm stage publish "./release/$dir" 2>&1 | tee /dev/stderr); then
+              id=$(grep -o 'staged with id [0-9a-f-]*' <<< "$staged" | awk '{print $4}')
+              echo "- \`$name@$version\` staged; approve with \`npm stage approve ${id:-<id from npm stage list $name>}\`" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "::error::Could not stage $name@$version."
               failed="$failed $name"

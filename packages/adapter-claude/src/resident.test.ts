@@ -80,6 +80,9 @@ function scripted(stallOn: number | null = null, savedCost = 0) {
         prompts.push(
           typeof message.message.content === "string" ? message.message.content : "<blocks>",
         );
+        // The CLI echoes each user message it takes.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        yield { ...message, session_id: start.session, isReplay: true } as unknown as SDKMessage;
         for (const frame of frames(
           turn,
           `reply ${turn}`,

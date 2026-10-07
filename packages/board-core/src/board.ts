@@ -3253,6 +3253,31 @@ export class Board {
     });
   }
 
+  /** Where a conversation's digest resumes: the newest message a turn there was shown. */
+  async digestCursor(agent: Name, scope: Name, thread?: Ulid): Promise<Ulid | null> {
+    return this.mutex.run(async () =>
+      cursorOf(await this.readCursors(agent), scope, thread ?? null),
+    );
+  }
+
+  /** Records that a running turn took posts delivered into it, which wake latency counts to. */
+  async recordSteered(input: {
+    turnId: Ulid;
+    agent: Name;
+    project: Name;
+    thread?: Ulid | undefined;
+    messages: readonly Ulid[];
+  }): Promise<void> {
+    await this.mutex.run(async () => {
+      await this.events.append("turn.steered", input.agent, {
+        turnId: input.turnId,
+        project: input.project,
+        ...(input.thread === undefined ? {} : { thread: input.thread }),
+        messages: [...input.messages],
+      });
+    });
+  }
+
   /** Where a conversation's session ids and last turn are kept: the scope's home, or a thread's. */
   private sessionDir(agent: Name, scope: Name, thread?: Ulid): string {
     return thread === undefined
@@ -3339,6 +3364,14 @@ export class Board {
       }
       await this.writeTurnRecord(parsed);
       await this.refreshMember(parsed.agent);
+      if (parsed.exitReason === "stopped") {
+        await this.events.append("turn.stopped", parsed.stoppedBy ?? USER_NAME, {
+          ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
+          agent: parsed.agent,
+          project: parsed.project,
+          ...(parsed.thread === undefined ? {} : { thread: parsed.thread }),
+        });
+      }
       await this.events.append(failed ? "turn.failed" : "turn.completed", parsed.agent, {
         ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
         project: parsed.project,

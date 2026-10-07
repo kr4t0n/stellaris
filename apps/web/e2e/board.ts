@@ -496,13 +496,17 @@ export interface FakeBoard {
 /** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
 export const ENROLLING_CODE = "BCDF-GHJK";
 
+/** The turn desk is in at the society with `inFlight`, which its runner can steer and stop. */
+export const DESK_TURN_IN_FLIGHT = "01M3Q2TTTTTTTTTTTTTTTTTTT1";
+
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
  * an archived project sits beside lab and desk asks to archive lab too. With `asks`, the user has
  * asked twice before; a new ask opens a thread in asks, and desk is in a turn on it once posted.
  * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
- * offers GitHub sign-in, and with `signedOut` the browser starts with no token.
+ * offers GitHub sign-in, and with `signedOut` the browser starts with no token. With `inFlight`,
+ * desk is in a turn at the society until the user stops it.
  */
 export async function fakeBoard(
   page: Page,
@@ -513,8 +517,10 @@ export async function fakeBoard(
     enrolling?: boolean;
     github?: boolean;
     signedOut?: boolean;
+    inFlight?: boolean;
   } = {},
 ): Promise<FakeBoard> {
+  let inFlight = options.inFlight === true;
   const archived = options.archived === true;
   const asks = options.asks === true ? askFixtures() : new Map<string, AskFixture>();
   let answering: string | null = null;
@@ -695,6 +701,12 @@ export async function fakeBoard(
         case `/api/enrollments/${ENROLLING_CODE}/deny`:
           enrolling = false;
           return json(route, { denied: true });
+        case `/api/turns/${DESK_TURN_IN_FLIGHT}/stop`:
+          if (!inFlight) {
+            return json(route, { message: "the turn is not in flight" }, 404);
+          }
+          inFlight = false;
+          return json(route, { stopped: true });
         default:
           return json(route, { message: `no fake for ${pathname}` }, 404);
       }
@@ -839,10 +851,26 @@ export async function fakeBoard(
       case "/api/scheduler":
         return json(route, {
           paused,
-          running: answering === null ? [] : [`desk/society/${answering}`],
+          running: [
+            ...(answering === null ? [] : [`desk/society/${answering}`]),
+            ...(inFlight ? ["desk/society"] : []),
+          ],
           pending: [],
           resident: [],
           signals: ["role_gap:lab:referee"],
+          turns: inFlight
+            ? [
+                {
+                  turnId: DESK_TURN_IN_FLIGHT,
+                  agent: "desk",
+                  scope: "society",
+                  cli: "claude",
+                  channel: "general",
+                  steerable: true,
+                  stoppable: true,
+                },
+              ]
+            : [],
         });
       case "/api/signals":
         return json(route, SIGNALS);

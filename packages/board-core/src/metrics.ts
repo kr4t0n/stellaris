@@ -44,10 +44,12 @@ const TaskPayload = z.object({
   from: z.string().optional(),
 });
 const MessagePayload = z.object({
+  id: z.string().optional(),
   channel: z.string(),
   thread: z.string().nullable().optional(),
   mentions: z.array(z.string()).default([]),
 });
+const SteeredPayload = z.object({ messages: z.array(z.string()) });
 const SignalPayload = z.object({
   kind: z.string(),
   key: z.string(),
@@ -79,6 +81,8 @@ function byCount<T extends { count: number }>(a: T, b: T): number {
 interface Mention {
   readonly agent: string;
   readonly at: number;
+  /** The post that made it, which a turn already running may have been handed. */
+  readonly message: string | null;
   /** The thread it was made in, or null for a channel, whose wake goes to the scope's home. */
   readonly thread: string | null;
   /**
@@ -200,6 +204,29 @@ export function computeMetrics(input: MetricsInput): Metrics {
         }
         break;
       }
+      case "turn.steered": {
+        // A mention delivered into a turn already running in its conversation is answered there.
+        const steered = SteeredPayload.safeParse(event.payload);
+        if (!steered.success) {
+          break;
+        }
+        const delivered = new Set(steered.data.messages);
+        const at = Date.parse(event.ts);
+        const answered = waiting.filter(
+          (mention) =>
+            mention.agent === event.actor &&
+            mention.message !== null &&
+            delivered.has(mention.message),
+        );
+        if (answered.length > 0) {
+          latencies.set(event.actor, [
+            ...(latencies.get(event.actor) ?? []),
+            ...answered.map((mention) => at - mention.at),
+          ]);
+          waiting = waiting.filter((mention) => !answered.includes(mention));
+        }
+        break;
+      }
       case "task.completed": {
         const task = TaskPayload.safeParse(event.payload);
         if (counted && task.success) {
@@ -267,6 +294,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
           waiting.push({
             agent: name,
             at: Date.parse(event.ts),
+            message: message.data.id ?? null,
             thread,
             scopes: [project, wakeScope(citizen, project)].filter(
               (scope): scope is string => scope !== null,

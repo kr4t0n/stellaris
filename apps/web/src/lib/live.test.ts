@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyLive,
   describeCall,
+  describeSteer,
   elapsed,
   lastLine,
   postedLine,
@@ -207,5 +208,45 @@ describe("live turns", () => {
     ).toBe("Survey done");
     expect(postedLine("mcp__board__claim_task", { body: "x" })).toBeNull();
     expect(postedLine("mcp__board__post_message", { body: "   " })).toBeNull();
+  });
+
+  it("shows a steer where the citizen took it: how many posts, from whom, and the posts", () => {
+    const text = [
+      "## New in this conversation while you work (2)",
+      "",
+      "The board delivered these into your turn as they arrived.",
+      "",
+      "### [2026-09-29T13:00:00.000Z] lab/general from @user (message 01M3Q2AAAAAAAAAAAAAAAAAAB1)",
+      "",
+      "also add a test",
+      "",
+      "### [2026-09-29T13:00:01.000Z] lab/general from @ref (message 01M3Q2AAAAAAAAAAAAAAAAAAB2)",
+      "",
+      "and run it",
+    ].join("\n");
+    expect(describeSteer(text)).toEqual({
+      posts: [
+        {
+          at: "2026-09-29T13:00:00.000Z",
+          where: "lab/general",
+          author: "user",
+          body: "also add a test",
+        },
+        { at: "2026-09-29T13:00:01.000Z", where: "lab/general", author: "ref", body: "and run it" },
+      ],
+      from: ["user", "ref"],
+    });
+    const turns = replay([
+      item("ada", "lab", STARTED),
+      item("ada", "lab", {
+        type: "steered",
+        steer: "s-1",
+        messages: ["01M3Q2AAAAAAAAAAAAAAAAAAB1", "01M3Q2AAAAAAAAAAAAAAAAAAB2"],
+        text,
+      }),
+    ]);
+    const turn = turns.get("ada/lab");
+    expect(turn?.steps).toMatchObject([{ kind: "steer", from: ["user", "ref"] }]);
+    expect(turn === undefined ? null : lastLine(turn)).toBe("took 2 posts from user, ref");
   });
 });

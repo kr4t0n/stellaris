@@ -209,6 +209,47 @@ function rosterLine(member: Member): string {
   return `- ${member.name}: ${parts.join("; ")}. Profile: ${profileLine(member.profile)}`;
 }
 
+/** Messages as the digest shows them: where and when each was posted, by whom, and its body. */
+function messageLines(
+  messages: readonly Message[],
+  threads: ReadonlyMap<Ulid, Thread> | undefined,
+): string[] {
+  const lines: string[] = [];
+  for (const message of messages) {
+    const thread = message.thread === undefined ? undefined : threads?.get(message.thread);
+    const where =
+      message.thread === undefined
+        ? message.channel
+        : thread === undefined
+          ? `${message.channel} thread ${message.thread}`
+          : `${message.channel} thread "${thread.title}" (${message.thread})`;
+    const step = message.step === undefined ? "" : `, who ${stepPhrase(message.step)}`;
+    lines.push(
+      `### [${message.ts}] ${where} from @${message.author}${step} (message ${message.id})`,
+      "",
+      clip(message.body),
+      "",
+    );
+  }
+  return lines;
+}
+
+/** What a steer hands a running turn: the messages that arrived in its conversation meanwhile. */
+export function buildSteerText(
+  messages: readonly Message[],
+  threads?: ReadonlyMap<Ulid, Thread>,
+): string {
+  return `${[
+    `## New in this conversation while you work (${messages.length})`,
+    "",
+    "The board delivered these into your turn as they arrived, as it delivers the digest. Act on them now, after the step in hand, or not at all; the turn still ends with one status object covering everything it did.",
+    "",
+    ...messageLines(messages, threads),
+  ]
+    .join("\n")
+    .trimEnd()}\n`;
+}
+
 /** The digest injected into every turn's prompt. */
 export function buildTurnPrompt(input: TurnPromptInput): string {
   const { dispatch } = input;
@@ -291,6 +332,14 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
 
   const last = input.lastTurn;
+  if (last?.exitReason === "stopped") {
+    lines.push(
+      "",
+      "## The user stopped your previous turn",
+      "",
+      `It was ended on purpose at ${last.endedAt ?? "its end"}, not by a failure. Do not pick its work up again unless this turn asks for it. The worktree may hold uncommitted changes; run git status before doing anything else.`,
+    );
+  }
   if (last !== null && (last.exitReason === "error" || last.exitReason === "timeout")) {
     lines.push(
       "",
@@ -433,22 +482,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (input.messages.length === 0) {
     lines.push("Nothing new.");
   } else {
-    for (const message of input.messages) {
-      const thread = message.thread === undefined ? undefined : input.threads?.get(message.thread);
-      const where =
-        message.thread === undefined
-          ? message.channel
-          : thread === undefined
-            ? `${message.channel} thread ${message.thread}`
-            : `${message.channel} thread "${thread.title}" (${message.thread})`;
-      const step = message.step === undefined ? "" : `, who ${stepPhrase(message.step)}`;
-      lines.push(
-        `### [${message.ts}] ${where} from @${message.author}${step} (message ${message.id})`,
-        "",
-        clip(message.body),
-        "",
-      );
-    }
+    lines.push(...messageLines(input.messages, input.threads));
   }
 
   lines.push(

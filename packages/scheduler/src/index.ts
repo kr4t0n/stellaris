@@ -5,6 +5,7 @@ export type {
   SchedulerLog,
   SchedulerOptions,
   SchedulerTimings,
+  SteerOutcome,
   TurnAssignment,
   TurnRunner,
 } from "./scheduler.js";

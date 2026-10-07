@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, type UUID } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +19,7 @@ import {
   type ResidentSession,
   type ResidentStart,
   type SessionId,
+  type TurnControl,
   type TurnRequest,
   type TurnResult,
 } from "@stellaris/runner-core";
@@ -244,6 +245,10 @@ function handleMessage(
       return;
     }
     case "user": {
+      // The CLI echoes the user messages it takes; the prompt and the steers are not steps.
+      if ("isReplay" in message && message.isReplay) {
+        return;
+      }
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
           const output = resultText(block.content);
@@ -371,11 +376,47 @@ class PushSource<T> implements AsyncIterable<T> {
   }
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(id: string): id is UUID {
+  return UUID_PATTERN.test(id);
+}
+
+/**
+ * A user message for the CLI's streaming input, with an id the CLI echoes when it takes it. A
+ * steer goes in with priority `next`, which the CLI folds into the running turn between steps;
+ * left unset, the priority may be `later`, which waits for the turn to end, and `now` would
+ * interrupt the step in flight.
+ */
+function userMessage(text: string, uuid: UUID, steer = false): SDKUserMessage {
+  return {
+    type: "user",
+    message: { role: "user", content: text },
+    parent_tool_use_id: null,
+    uuid,
+    ...(steer ? { priority: "next" as const } : {}),
+  };
+}
+
+/** The id of the user message a message echoes, as the CLI does for each one it takes. */
+function echoed(message: SDKMessage): string | null {
+  return message.type === "user" && "isReplay" in message && message.isReplay ? message.uuid : null;
+}
+
 interface ActiveTurn {
   readonly state: TurnState;
   readonly emit: (event: AgentEvent) => void;
   readonly toolNames: Map<string, string>;
   readonly settle: () => void;
+  /**
+   * The prompt's id, and whether the CLI has taken it. A resumed session can run a turn of its own
+   * first, for a background task left from before, whose result does not end this turn.
+   */
+  readonly prompt: string;
+  promptTaken: boolean;
+  /** Steers pushed into the turn and not yet echoed: the turn waits for them before it ends. */
+  readonly outstanding: Set<string>;
+  stopped: boolean;
 }
 
 const INTERRUPT_GRACE_MS = 15_000;
@@ -427,8 +468,21 @@ class ClaudeResident implements ResidentSession {
         if (turn === null) {
           continue;
         }
+        const echo = echoed(message);
+        if (echo === turn.prompt) {
+          turn.promptTaken = true;
+          continue;
+        }
+        if (echo !== null && turn.outstanding.delete(echo)) {
+          turn.emit({ type: "steered", steer: echo });
+          continue;
+        }
         handleMessage(message, this.context, turn.emit, turn.toolNames, turn.state);
-        if (message.type === "result") {
+        // A steer pushed as the CLI ended its turn runs at once as a continuation; the turn waits for it.
+        if (
+          message.type === "result" &&
+          (turn.stopped || (turn.promptTaken && turn.outstanding.size === 0))
+        ) {
           turn.settle();
         }
       }
@@ -448,7 +502,11 @@ class ClaudeResident implements ResidentSession {
     }
   }
 
-  async runTurn(prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {
+  async runTurn(
+    prompt: string,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
     if (this.ended) {
       throw new Error(this.endedWith ?? "the resident session has ended");
     }
@@ -466,7 +524,18 @@ class ClaudeResident implements ResidentSession {
       this.active = null;
       resolve();
     };
-    this.active = { state, emit, toolNames: new Map(), settle };
+    const promptId = randomUUID();
+    const turn: ActiveTurn = {
+      state,
+      emit,
+      toolNames: new Map(),
+      settle,
+      prompt: promptId,
+      promptTaken: false,
+      outstanding: new Set(),
+      stopped: false,
+    };
+    this.active = turn;
     emit({
       type: "turn_started",
       agent: this.context.agent,
@@ -490,15 +559,37 @@ class ClaudeResident implements ResidentSession {
               }
             }, INTERRUPT_GRACE_MS).unref?.();
           }, limit);
-    this.source.push({
-      type: "user",
-      message: { role: "user", content: prompt },
-      parent_tool_use_id: null,
+    this.source.push(userMessage(prompt, promptId));
+    const detach = control?.attach({
+      steer: (steer) => {
+        if (this.active !== turn || turn.stopped || !isUuid(steer.id)) {
+          return Promise.resolve(false);
+        }
+        turn.outstanding.add(steer.id);
+        this.source.push(userMessage(steer.text, steer.id, true));
+        return Promise.resolve(true);
+      },
+      stop: () => {
+        if (this.active !== turn || turn.stopped) {
+          return;
+        }
+        turn.stopped = true;
+        void this.stream.interrupt?.().catch(() => undefined);
+        setTimeout(() => {
+          if (this.active === turn) {
+            turn.settle();
+          }
+        }, INTERRUPT_GRACE_MS).unref?.();
+      },
     });
     await done;
+    detach?.();
     clearTimeout(timer);
 
-    if (timedOut) {
+    if (turn.stopped) {
+      state.exitReason = "stopped";
+      state.error = undefined;
+    } else if (timedOut) {
       state.exitReason = "timeout";
       state.error = `turn exceeded ${limit} ms`;
     } else if (!state.sawResult && state.error === undefined) {
@@ -530,6 +621,8 @@ class ClaudeResident implements ResidentSession {
  */
 export class ClaudeAgentBackend implements AgentBackend {
   readonly kind = "claude" as const;
+  readonly steers = true;
+  readonly stops = true;
   private readonly queryFn: QueryFn;
   private readonly sessionExists: (session: SessionId, cwd: string) => Promise<boolean>;
 
@@ -566,7 +659,17 @@ export class ClaudeAgentBackend implements AgentBackend {
     }
   }
 
-  async runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {
+  /**
+   * One turn over streaming input, so the turn can be steered: its prompt is the first message, and
+   * each steer is pushed while it runs. The turn ends at a result with no steer outstanding, after
+   * which no steer is taken and the input closes; a steer pushed as the CLI ended its turn runs at
+   * once in the same process, and the turn ends with that run's result.
+   */
+  async runTurn(
+    request: TurnRequest,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
     const events: AgentEvent[] = [];
     const emit = (event: AgentEvent): void => {
       events.push(event);
@@ -574,7 +677,15 @@ export class ClaudeAgentBackend implements AgentBackend {
     };
     const abort = new AbortController();
     const limit = request.limits.timeoutMs;
-    const timer = limit === null ? undefined : setTimeout(() => abort.abort(), limit);
+    let timedOut = false;
+    const timer =
+      limit === null
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            abort.abort();
+          }, limit);
+    let stopTimer: ReturnType<typeof setTimeout> | undefined;
     const toolNames = new Map<string, string>();
     const recorded: string[] = [];
     const state = freshState();
@@ -590,29 +701,89 @@ export class ClaudeAgentBackend implements AgentBackend {
       ? false
       : await this.sessionExists(request.session, request.spec.cwd);
 
+    const source = new PushSource<SDKUserMessage>();
+    const promptId = randomUUID();
+    source.push(userMessage(request.prompt, promptId));
+    // A resumed session can run a turn of its own before the prompt, for a background task left
+    // from before; only a result after the CLI took the prompt can end this turn.
+    let promptTaken = false;
+    const outstanding = new Set<string>();
+    let open = true;
+    let stopped = false;
+    const stream = this.queryFn({
+      prompt: source,
+      options: this.buildOptions(request, abort, resumable),
+    });
+    const detach = control?.attach({
+      steer: (steer) => {
+        if (!open || !isUuid(steer.id)) {
+          return Promise.resolve(false);
+        }
+        outstanding.add(steer.id);
+        source.push(userMessage(steer.text, steer.id, true));
+        return Promise.resolve(true);
+      },
+      stop: () => {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+        open = false;
+        void stream.interrupt?.().catch(() => undefined);
+        // An interrupt normally yields a result; if none comes, the process goes.
+        stopTimer = setTimeout(() => abort.abort(), INTERRUPT_GRACE_MS);
+        stopTimer.unref?.();
+      },
+    });
+
     try {
-      for await (const message of this.queryFn({
-        prompt: request.prompt,
-        options: this.buildOptions(request, abort, resumable),
-      })) {
+      for await (const message of stream) {
         if (this.options.recordDir !== undefined) {
           recorded.push(JSON.stringify(message));
         }
+        const echo = echoed(message);
+        if (echo === promptId) {
+          promptTaken = true;
+          continue;
+        }
+        if (echo !== null && outstanding.delete(echo)) {
+          emit({ type: "steered", steer: echo });
+          continue;
+        }
         handleMessage(message, context, emit, toolNames, state);
+        if (message.type !== "result") {
+          continue;
+        }
+        if (stopped) {
+          // Steers still queued in the CLI would run after the interrupt; the process goes instead.
+          open = false;
+          source.end();
+          stream.close?.();
+        } else if (promptTaken && outstanding.size === 0) {
+          open = false;
+          source.end();
+        }
       }
     } catch (caught) {
-      if (!abort.signal.aborted) {
+      if (!abort.signal.aborted && !stopped) {
         state.exitReason = "error";
         state.error = caught instanceof Error ? caught.message : String(caught);
       }
     } finally {
+      open = false;
+      detach?.();
+      source.end();
       clearTimeout(timer);
+      clearTimeout(stopTimer);
     }
 
     if (this.options.recordDir !== undefined && recorded.length > 0) {
       await this.record(request.spec.agent, recorded);
     }
-    if (abort.signal.aborted) {
+    if (stopped) {
+      state.exitReason = "stopped";
+      state.error = undefined;
+    } else if (timedOut) {
       state.exitReason = "timeout";
       state.error = `turn exceeded ${limit} ms`;
     } else if (!state.sawResult && state.error === undefined) {
@@ -709,6 +880,8 @@ export class ClaudeAgentBackend implements AgentBackend {
         ? {}
         : { maxBudgetUsd: request.limits.maxBudgetUsd }),
       outputFormat: { type: "json_schema", schema: request.statusSchema },
+      // The CLI echoes each user message as it takes it, which is how a steer is known delivered.
+      extraArgs: { "replay-user-messages": null },
       abortController: abort,
       env: subprocessEnv(process.env, { ...this.options.env, ...request.env }, request.mcp.token),
       ...(model === undefined ? {} : { model }),

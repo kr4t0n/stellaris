@@ -2,7 +2,7 @@ import type { TurnExitReason } from "@stellaris/shared";
 import { useState, type ReactNode } from "react";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
-import { elapsed, toolLabel, type LiveTurn, type Step } from "../lib/live.js";
+import { elapsed, postCount, toolLabel, type LiveTurn, type Step } from "../lib/live.js";
 
 const OUTCOME: Record<TurnExitReason, string> = {
   completed: "completed",
@@ -10,6 +10,7 @@ const OUTCOME: Record<TurnExitReason, string> = {
   error: "failed",
   interrupted: "was interrupted",
   blocked: "was blocked",
+  stopped: "was stopped by you",
 };
 
 export function time(iso: string): string {
@@ -50,6 +51,43 @@ export function StepItem({ step, open }: { step: Step; open: boolean }) {
     return (
       <li className="py-1 font-mono text-xs break-words text-red-400" title={time(step.at)}>
         {step.message}
+      </li>
+    );
+  }
+  if (step.kind === "steer") {
+    return (
+      <li>
+        <details open={open} className="group rounded-md open:bg-surface-2/30">
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-surface-2/40">
+            <span aria-hidden="true" className="grid w-3 shrink-0 place-items-center text-sky-300">
+              ↳
+            </span>
+            <span className="shrink-0 text-fg-tertiary">Took {postCount(step.posts.length)}</span>
+            <span className="min-w-0 flex-1 truncate text-fg-secondary">
+              {step.from.length === 0 ? "" : `from ${step.from.join(", ")}, delivered mid-turn`}
+            </span>
+            <span className="shrink-0 font-mono text-[10px] text-fg-muted">{time(step.at)}</span>
+          </summary>
+          <ul className="space-y-1.5 px-1.5 pb-1.5">
+            {step.posts.map((post) => (
+              <li
+                key={`${post.at}-${post.author}`}
+                className="rounded-md bg-surface-0/40 px-2.5 py-2"
+              >
+                <p className="flex gap-1.5 text-meta">
+                  <span className="text-fg-secondary">{post.author}</span>
+                  <span className="min-w-0 truncate">in {post.where}</span>
+                  {post.at === "" ? null : (
+                    <span className="ml-auto shrink-0 font-mono">{time(post.at)}</span>
+                  )}
+                </p>
+                <div className="mt-1 text-sm">
+                  <Markdown text={post.body} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
       </li>
     );
   }

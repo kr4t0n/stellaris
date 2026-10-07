@@ -2,8 +2,14 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import type { AgentSpec, ResidentStart, TurnRequest } from "@stellaris/runner-core";
-import { describe, expect, it } from "vitest";
+import {
+  TurnControl,
+  type AgentSpec,
+  type ResidentStart,
+  type TurnRequest,
+} from "@stellaris/runner-core";
+import type { AgentEvent } from "@stellaris/shared";
+import { describe, expect, it, vi } from "vitest";
 import type { AppServerProcess, SpawnAppServer } from "./app-server.js";
 import { CodexBackend } from "./backend.js";
 
@@ -88,7 +94,14 @@ function ordinaryTurn(turn: TurnContext): void {
  * plays each `turn/start` through `turn`; an interrupt ends the running turn as interrupted.
  */
 function fakeAppServer(
-  script: { known?: readonly string[]; turn?: (turn: TurnContext) => void } = {},
+  script: {
+    known?: readonly string[];
+    turn?: (turn: TurnContext) => void;
+    /** A steer the server accepted for the running turn, as `turn/steer` carried it. */
+    steered?: (params: Record<string, unknown>, turn: TurnContext) => void;
+    /** Refuses every steer, as the server does for a review or a compaction. */
+    refuseSteers?: boolean;
+  } = {},
 ): {
   spawn: SpawnAppServer;
   received: Received[];
@@ -110,6 +123,7 @@ function fakeAppServer(
     const threadId = "thread-7";
     let turns = 0;
     let running: string | null = null;
+    let context: TurnContext | null = null;
     const complete = (turnId: string, status: string, error?: string): void => {
       running = null;
       send({
@@ -181,6 +195,23 @@ function fakeAppServer(
           send({ id: message.id, result: {} });
           if (running !== null) complete(running, "interrupted");
           return;
+        case "turn/steer":
+          if (running === null || message.params?.["expectedTurnId"] !== running) {
+            send({ id: message.id, error: { code: -32600, message: "no active turn to steer" } });
+            return;
+          }
+          if (script.refuseSteers === true) {
+            send({
+              id: message.id,
+              error: { code: -32600, message: "active turn is not steerable" },
+            });
+            return;
+          }
+          send({ id: message.id, result: { turnId: running } });
+          if (context !== null && message.params !== undefined) {
+            script.steered?.(message.params, context);
+          }
+          return;
         case "turn/start": {
           turns += 1;
           const turnId = `turn-${turns}`;
@@ -189,7 +220,7 @@ function fakeAppServer(
             id: message.id,
             result: { turn: { id: turnId, items: [], status: "inProgress" } },
           });
-          (script.turn ?? ordinaryTurn)({
+          context = {
             turnId,
             turns,
             item: (method, item) => send({ method, params: { threadId, turnId, item } }),
@@ -203,7 +234,8 @@ function fakeAppServer(
               stderr.write(`${said}\n`);
               setTimeout(() => exit(1), 5);
             },
-          });
+          };
+          (script.turn ?? ordinaryTurn)(context);
           return;
         }
         default:
@@ -537,5 +569,121 @@ describe("CodexBackend resident sessions", () => {
     await session.close();
     expect(fake.killed()).toBe(1);
     await expect(session.runTurn("late")).rejects.toThrow(/ended/);
+  });
+});
+
+/** A turn that starts a long command and waits: whatever ends it comes from the test. */
+function longCommand(turn: TurnContext): void {
+  turn.item("item/started", {
+    type: "commandExecution",
+    id: "c1",
+    command: "make",
+    status: "inProgress",
+  });
+}
+
+describe("steering and stopping a Codex turn", () => {
+  const steer = { id: "0f8b2c55-6b1e-4d6a-9f3e-2a7c1d9e4b10", text: "Also add a test." };
+
+  it("sends a steer to the running turn and reports it when it arrives as a user message", async () => {
+    const fake = fakeAppServer({
+      turn: longCommand,
+      steered: (params, turn) => {
+        turn.item("item/completed", {
+          type: "commandExecution",
+          id: "c1",
+          command: "make",
+          status: "completed",
+          exitCode: 0,
+        });
+        const message = {
+          type: "userMessage",
+          id: "u2",
+          clientId: params["clientUserMessageId"],
+          content: [],
+        };
+        turn.item("item/started", message);
+        turn.item("item/completed", message);
+        turn.item("item/completed", {
+          type: "agentMessage",
+          id: "a1",
+          text: STATUS("built, with a test"),
+        });
+        turn.complete("completed");
+      },
+    });
+    const control = new TurnControl();
+    const events: AgentEvent[] = [];
+    const running = new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request(),
+      (event) => events.push(event),
+      control,
+    );
+    await vi.waitFor(() => expect(fake.received.some((m) => m.method === "turn/start")).toBe(true));
+    await vi.waitFor(async () => expect(await control.steer(steer)).toBe(true));
+    const result = await running;
+
+    expect(paramsOf(fake.received, "turn/steer")).toEqual({
+      threadId: "thread-7",
+      input: [{ type: "text", text: steer.text, text_elements: [] }],
+      expectedTurnId: "turn-1",
+      clientUserMessageId: steer.id,
+    });
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("built, with a test");
+    expect(events.filter((event) => event.type === "steered")).toEqual([
+      { type: "steered", steer: steer.id },
+    ]);
+    expect(await control.steer({ ...steer, id: "1f8b2c55-6b1e-4d6a-9f3e-2a7c1d9e4b10" })).toBe(
+      false,
+    );
+  });
+
+  it("reports a steer the app server refuses as not taken", async () => {
+    const finishing = Promise.withResolvers<void>();
+    const fake = fakeAppServer({
+      refuseSteers: true,
+      turn: (turn) => {
+        longCommand(turn);
+        void finishing.promise.then(() => {
+          turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("built") });
+          turn.complete("completed");
+          return undefined;
+        });
+      },
+    });
+    const control = new TurnControl();
+    const events: AgentEvent[] = [];
+    const running = new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request(),
+      (event) => events.push(event),
+      control,
+    );
+    await vi.waitFor(() => expect(fake.received.some((m) => m.method === "turn/start")).toBe(true));
+    // Once the turn is attached, the steer reaches the server, which refuses it.
+    await vi.waitFor(async () => {
+      expect(await control.steer(steer)).toBe(false);
+      expect(fake.received.some((m) => m.method === "turn/steer")).toBe(true);
+    });
+    finishing.resolve();
+    const result = await running;
+    expect(result.exitReason).toBe("completed");
+    expect(events.some((event) => event.type === "steered")).toBe(false);
+  });
+
+  it("stops a running turn with turn/interrupt and reports it stopped", async () => {
+    const fake = fakeAppServer({ turn: longCommand });
+    const control = new TurnControl();
+    const running = new CodexBackend({ spawn: fake.spawn }).runTurn(request(), undefined, control);
+    await vi.waitFor(() => expect(fake.received.some((m) => m.method === "turn/start")).toBe(true));
+    // Asked before the turn's id is known, the stop waits for it and interrupts then.
+    control.stop();
+    await vi.waitFor(() =>
+      expect(fake.received.some((m) => m.method === "turn/interrupt")).toBe(true),
+    );
+    const result = await running;
+    expect(result.exitReason).toBe("stopped");
+    expect(result.error).toBeUndefined();
+    expect(result.events.at(-1)).toMatchObject({ type: "turn_completed", exitReason: "stopped" });
   });
 });

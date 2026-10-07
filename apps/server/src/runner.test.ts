@@ -853,6 +853,8 @@ describe("turns on a runner over the runner protocol", () => {
       os: "linux",
       clis: ["claude"],
       residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
       capabilities: [],
       slots: null,
       turns: [],

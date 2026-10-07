@@ -49,6 +49,10 @@ export const RunnerHelloSchema = z.object({
   clis: z.array(CliKindSchema),
   /** The CLIs whose adapter can keep a session warm between turns. */
   residentClis: z.array(CliKindSchema).default([]),
+  /** The CLIs whose adapter can take input into a running turn; the server steers only these. */
+  steerableClis: z.array(CliKindSchema).default([]),
+  /** The CLIs whose adapter can stop a running turn; the server stops only these. */
+  stoppableClis: z.array(CliKindSchema).default([]),
   capabilities: z.array(z.string()).default([]),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
@@ -211,11 +215,24 @@ export type MergeOutcome = z.infer<typeof MergeOutcomeSchema>;
 
 export const ModelListSchema = z.array(ModelOptionSchema);
 
+/** Input for a running turn: what arrived in its conversation since it was last shown anything. */
+export const TurnSteerSchema = z.object({ id: z.uuid(), text: z.string().min(1) });
+export type TurnSteer = z.infer<typeof TurnSteerSchema>;
+
 /** What the server sends a runner on its event stream, by event name. */
 export const RunnerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn"), job: TurnJobSchema }),
   z.object({ type: z.literal("land"), request: z.string().min(1), land: LandRequestSchema }),
   z.object({ type: z.literal("models"), request: z.string().min(1), cli: CliKindSchema }),
+  /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
+  z.object({
+    type: z.literal("steer"),
+    request: z.string().min(1),
+    turnId: UlidSchema,
+    steer: TurnSteerSchema,
+  }),
+  /** Answered with whether the turn was there to stop; it ends `stopped`. */
+  z.object({ type: z.literal("stop"), request: z.string().min(1), turnId: UlidSchema }),
 ]);
 export type RunnerMessage = z.infer<typeof RunnerMessageSchema>;
 

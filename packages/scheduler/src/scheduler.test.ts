@@ -14,7 +14,7 @@ import {
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Scheduler, type TurnAssignment, type TurnRunner } from "./scheduler.js";
+import { Scheduler, type SteerOutcome, type TurnAssignment, type TurnRunner } from "./scheduler.js";
 
 const run = promisify(execFile);
 
@@ -36,6 +36,15 @@ class FakeRunner implements TurnRunner {
 
   /** Runners that are away: a turn waits until one is back. */
   away = false;
+
+  /** Conversations a steer was asked for, as session keys, and what each ask answers. */
+  readonly steered: string[] = [];
+  steerOutcome: SteerOutcome = "sent";
+
+  async steer(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome> {
+    this.steered.push(sessionKey(conversation.agent, conversation.project, conversation.thread));
+    return this.steerOutcome;
+  }
 
   async assign(): Promise<TurnAssignment | null> {
     return this.away ? null : { runner: "test" };
@@ -388,6 +397,74 @@ describe("Scheduler", () => {
       ["eng-1", "mention"],
       ["eng-1", "stage"],
     ]);
+  });
+
+  it("steers a mention into the turn running in its conversation, and drops it once read there", async () => {
+    const { board, runner, scheduler } = await setup();
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    expect(runner.dispatches).toHaveLength(1);
+
+    // A runner with a steer not yet taken is busy: the next pass asks again.
+    runner.steerOutcome = "busy";
+    const more = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "@eng-1 and a test",
+    });
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(runner.steered).toEqual(["eng-1/demo", "eng-1/demo"]);
+    runner.steerOutcome = "sent";
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(runner.steered).toHaveLength(3);
+
+    // The turn took it, so its conversation's cursor passed it: the wake needs no turn of its own.
+    await board.setDigestCursor("eng-1", "demo", more.id);
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toHaveLength(1);
+    expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("runs a turn for a steered mention the running turn did not take, and for any other wake merged in", async () => {
+    const { board, runner, scheduler } = await setup();
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    // Accepted but never taken: the turn ends with the cursor short of the message.
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and a test" });
+    await scheduler.tick();
+    expect(runner.steered).toEqual(["eng-1/demo"]);
+    runner.releaseHeld();
+    runner.hold = false;
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.reason)).toEqual([
+      "mentioned by user",
+      "mentioned by user",
+    ]);
+
+    // A wake that is not about a message runs even when every message in it was read.
+    runner.hold = true;
+    const third = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "@eng-1 hold on",
+    });
+    await scheduler.tick();
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "check in" });
+    await scheduler.tick();
+    await board.setDigestCursor("eng-1", "demo", third.id);
+    runner.releaseHeld();
+    runner.hold = false;
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind).slice(-2)).toEqual(["mention", "manual"]);
   });
 
   it("works a stage claimed outside its task's conversation in that conversation, once", async () => {

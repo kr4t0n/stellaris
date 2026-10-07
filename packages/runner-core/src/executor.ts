@@ -17,6 +17,7 @@ import {
   type TurnWork,
 } from "@stellaris/shared";
 import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
+import { TurnControl } from "./control.js";
 import { ExecaGit, taskBranch, type GitOps } from "./git.js";
 import type { RunnerLayout } from "./layout.js";
 import {
@@ -93,10 +94,18 @@ export class TurnExecutor {
     this.serverUrl = options.serverUrl;
   }
 
-  /** The CLIs this runner has an adapter for, and those that can keep a session warm. */
-  get clis(): { all: CliKind[]; resident: CliKind[] } {
+  /**
+   * The CLIs this runner has an adapter for, those that can keep a session warm, and those whose
+   * running turns take steers and stops.
+   */
+  get clis(): { all: CliKind[]; resident: CliKind[]; steerable: CliKind[]; stoppable: CliKind[] } {
     const all = CliKindSchema.options.filter((cli) => this.backends[cli] !== undefined);
-    return { all, resident: all.filter((cli) => this.backends[cli]?.startResident !== undefined) };
+    return {
+      all,
+      resident: all.filter((cli) => this.backends[cli]?.startResident !== undefined),
+      steerable: all.filter((cli) => this.backends[cli]?.steers === true),
+      stoppable: all.filter((cli) => this.backends[cli]?.stops === true),
+    };
   }
 
   /** Conversations with a warm session right now, as session keys. */
@@ -104,7 +113,11 @@ export class TurnExecutor {
     return [...this.residents.keys()].toSorted();
   }
 
-  async run(received: TurnJob, onEvent: (event: AgentEvent) => void): Promise<TurnOutcome> {
+  async run(
+    received: TurnJob,
+    onEvent: (event: AgentEvent) => void,
+    control: TurnControl = new TurnControl(),
+  ): Promise<TurnOutcome> {
     const job: TurnJob = {
       ...received,
       mcp: { ...received.mcp, url: received.mcp.url.replaceAll(SERVER_TOKEN, this.serverUrl) },
@@ -163,7 +176,10 @@ export class TurnExecutor {
     };
     let result: TurnResult;
     try {
-      if (job.resident !== undefined && backend.startResident !== undefined) {
+      if (control.stopped) {
+        // Stopped while its workspace was being prepared: the CLI never starts.
+        result = { ...stoppedResult(events), session };
+      } else if (job.resident !== undefined && backend.startResident !== undefined) {
         result = await this.runResident(backend, spec, job, {
           session,
           newSession,
@@ -173,6 +189,7 @@ export class TurnExecutor {
           statusSchema,
           env,
           onEvent: collect,
+          control,
         });
       } else {
         result = await backend.runTurn(
@@ -189,6 +206,7 @@ export class TurnExecutor {
             costSoFarUsd: job.costSoFarUsd,
           },
           collect,
+          control,
         );
       }
     } catch (error) {
@@ -201,6 +219,10 @@ export class TurnExecutor {
         exitReason: "error",
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+    // A turn the user stopped ended because of it, however its CLI reported the end.
+    if (control.stopped && result.exitReason !== "completed") {
+      result = { ...result, exitReason: "stopped" };
     }
     const work = await this.handBack(job.agent, workspace);
     this.log.info(
@@ -351,6 +373,7 @@ export class TurnExecutor {
       statusSchema: Record<string, unknown>;
       env: Readonly<Record<string, string>>;
       onEvent: (event: AgentEvent) => void;
+      control: TurnControl;
     },
   ): Promise<TurnResult> {
     const resident = job.resident;
@@ -382,7 +405,7 @@ export class TurnExecutor {
       clearTimeout(current.timer);
       current.timer = null;
     }
-    const result = await current.session.runTurn(input.prompt, input.onEvent);
+    const result = await current.session.runTurn(input.prompt, input.onEvent, input.control);
     const stale = result.status?.memoryUpdated === true || result.exitReason !== "completed";
     if (stale) {
       // The instructions carry the memory core; a changed memory or a broken turn means a fresh start next time.
@@ -452,6 +475,18 @@ export class TurnExecutor {
     await writeFile(path.join(codexDir, "AGENTS.md"), instructions, "utf8");
     await writeFile(path.join(codexDir, "board.mcp.toml"), renderCodexMcpConfig(mcpUrl), "utf8");
   }
+}
+
+/** A turn stopped before its CLI started. */
+function stoppedResult(events: AgentEvent[]): TurnResult {
+  return {
+    events,
+    finalText: "",
+    usage: ZERO_USAGE,
+    costUsd: 0,
+    status: null,
+    exitReason: "stopped",
+  };
 }
 
 /** The outcome of a turn that never reached its CLI. */

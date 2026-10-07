@@ -6,6 +6,7 @@ import {
   ModelNameSchema,
   NameSchema,
   RoleCharterSchema,
+  UlidSchema,
   USER_ROLE,
   VerbNameSchema,
   WakeRequestSchema,
@@ -297,7 +298,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     });
   });
 
-  // Scheduler state and controls
+  // Scheduler state and controls; `turns` says of each turn in flight whether it can be steered
+  // and stopped.
   api.get("/scheduler", async (c) =>
     c.json({
       paused: await board.isPaused(),
@@ -305,8 +307,25 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       pending: scheduler?.pendingPairs ?? [],
       resident: scheduler?.residentPairs ?? [],
       signals: scheduler?.activeSignals ?? [],
+      turns: deps.runners?.liveTurns() ?? [],
     }),
   );
+  // The user stops a turn in flight; the turn ends `stopped`, which counts as a decision.
+  api.post("/turns/:turnId/stop", async (c) => {
+    const actor = c.get("actor");
+    if (actor.role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user stops a turn");
+    }
+    const turnId = UlidSchema.parse(c.req.param("turnId"));
+    const stopped = (await deps.runners?.stop(turnId, actor.name)) ?? false;
+    if (!stopped) {
+      throw new BoardError(
+        "NOT_FOUND",
+        `turn ${turnId} is not in flight, or its runner cannot stop it`,
+      );
+    }
+    return c.json({ stopped });
+  });
   api.post("/pause", async (c) => {
     await board.setPaused(c.get("actor"), true);
     return c.json({ paused: true });

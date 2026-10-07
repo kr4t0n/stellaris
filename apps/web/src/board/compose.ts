@@ -1,4 +1,10 @@
-import type { Member, RoleCharter } from "@stellaris/shared";
+import {
+  parseChannelRef,
+  wakeScope,
+  type Member,
+  type RoleCharter,
+  type RunningTurn,
+} from "@stellaris/shared";
 import { mentionsIn } from "../lib/mentions.js";
 
 /** The `@name` being typed where the caret is: where it starts and what is typed so far. */
@@ -41,6 +47,45 @@ export function wakesFor(
     active.some((member) => member.name === name),
   );
   return [...new Set([...frontDesk, ...mentioned])];
+}
+
+/**
+ * Which of the citizens a post wakes are in a turn of the very conversation it goes to, whose
+ * runner delivers it into that turn rather than waking another: the thread's, or for a channel
+ * post the home of the scope the wake rule gives.
+ */
+export function reachedTurns(
+  names: readonly string[],
+  members: readonly Member[],
+  turns: readonly RunningTurn[],
+  place: { readonly channel: string } | { readonly thread: string },
+): string[] {
+  return names.filter((name) =>
+    turns.some((turn) => {
+      if (turn.agent !== name || !turn.steerable) {
+        return false;
+      }
+      if ("thread" in place) {
+        return turn.thread === place.thread;
+      }
+      const member = members.find((each) => each.name === name);
+      return (
+        member !== undefined &&
+        turn.thread === undefined &&
+        turn.scope === wakeScope(member, parseChannelRef(place.channel).project)
+      );
+    }),
+  );
+}
+
+/** The line under the composer: whom sending reaches in a turn under way, and whom it wakes. */
+export function wakeLine(reached: readonly string[], woken: readonly string[]): string | null {
+  const reaches = reached.length === 0 ? null : `reaches ${listed(reached)} in the turn under way`;
+  const wakes = woken.length === 0 ? null : `wakes ${listed(woken)}: a turn each`;
+  if (reaches === null && wakes === null) {
+    return null;
+  }
+  return `Sending ${[reaches, wakes].filter((part) => part !== null).join(" and ")}.`;
 }
 
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fakeBoard, STAGE_TASK } from "./board.js";
+import { DESK_TURN_IN_FLIGHT, fakeBoard, STAGE_TASK } from "./board.js";
 
 test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await fakeBoard(page);
@@ -62,6 +62,35 @@ test("a home's history opens each change to its patch and to the turn that made 
   await expect(page).toHaveURL(/\/citizen\/desk\?tab=turns&turn=01M3Q2DDDDDDDDDDDDDDDDDDD2$/);
   await expect(view).toContainText("Looking at the request.");
   await expect(view.locator("summary", { hasText: "ls lab/bench" })).toBeVisible();
+});
+
+test("a turn in flight takes a post into its conversation, and stops on a second click", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page, { inFlight: true });
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  const box = view.getByLabel("Message desk while it works");
+  await expect(box).toHaveValue("@desk ");
+  await box.fill("@desk also check the runners");
+  await expect(view.getByText("Sending reaches desk in the turn under way.")).toBeVisible();
+  await box.press("Enter");
+  await expect
+    .poll(() => board.writes.find((write) => write.path === "/api/verbs/post_message")?.body)
+    .toEqual({ channel: "general", body: "@desk also check the runners" });
+  await expect(box).toHaveValue("@desk ");
+
+  // The first click says what stopping does; only the second stops.
+  await view.getByRole("button", { name: "Stop…" }).click();
+  await expect(view).toContainText("What it was shown counts as read");
+  expect(board.writes.some((write) => write.path.endsWith("/stop"))).toBe(false);
+  await view.getByRole("button", { name: "Stop the turn" }).click();
+  await expect
+    .poll(() => board.writes.map((write) => write.path))
+    .toContain(`/api/turns/${DESK_TURN_IN_FLIGHT}/stop`);
+  // The turn is no longer in flight, so its controls go.
+  await expect(view.getByRole("button", { name: "Stop…" })).toBeHidden();
+  await expect(view.getByLabel("Message desk while it works")).toBeHidden();
 });
 
 test("after a restart the Now tab shows the last turn from its transcript", async ({ page }) => {

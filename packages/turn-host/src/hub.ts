@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
-import type { TurnAssignment, TurnRunner } from "@stellaris/scheduler";
+import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/scheduler";
 import {
   MergeOutcomeSchema,
   ModelListSchema,
@@ -13,6 +13,7 @@ import {
   type RunnerHello,
   type RunnerMessage,
   type RunnerWelcome,
+  type RunningTurn,
   type TranscriptEntry,
   type TurnAck,
   type TurnDispatch,
@@ -61,6 +62,8 @@ export class RunnerProtocolError extends Error {}
 const SILENT: HostLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_GRACE_MS = 2 * 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
+/** A steer or a stop is answered at once by a runner that has the turn; waiting longer is pointless. */
+const CONTROL_TIMEOUT_MS = 15_000;
 
 /**
  * The runners connected to the board server, and the scheduler's way to them. It places each
@@ -196,7 +199,7 @@ export class RunnerHub implements TurnRunner {
 
   async turnEvents(runner: Name, turnId: Ulid, entries: readonly TranscriptEntry[]): Promise<void> {
     this.assertOwns(runner, turnId);
-    this.host.addEvents(turnId, entries);
+    await this.host.addEvents(turnId, entries);
   }
 
   async turnOutcome(runner: Name, turnId: Ulid, outcome: TurnOutcome): Promise<TurnAck> {
@@ -232,9 +235,88 @@ export class RunnerHub implements TurnRunner {
     return this.host.hasTurnFor(runner, agent);
   }
 
+  /** The turns in flight, and whether each one's runner can steer and stop it. */
+  liveTurns(): RunningTurn[] {
+    return this.host.runningTurns().map(({ runner, ...turn }) => {
+      const seat = this.seats.get(runner);
+      const connected = seat !== undefined && seat.send !== null;
+      return {
+        ...turn,
+        steerable: connected && seat.hello.steerableClis.includes(turn.cli),
+        stoppable: connected && seat.hello.stoppableClis.includes(turn.cli),
+      };
+    });
+  }
+
+  /**
+   * Stops a turn in flight, as the user asked: its runner interrupts the CLI and the turn ends
+   * `stopped`. False for a turn not in flight or on a runner that cannot stop it.
+   */
+  async stop(turnId: Ulid, by: Name): Promise<boolean> {
+    const runner = this.host.runnerOf(turnId);
+    const seat = runner === undefined ? undefined : this.seats.get(runner);
+    const cli = this.host.runningTurns().find((turn) => turn.turnId === turnId)?.cli;
+    if (seat === undefined || seat.send === null || cli === undefined) {
+      return false;
+    }
+    if (!seat.hello.stoppableClis.includes(cli) || !this.host.requestStop(turnId, by)) {
+      return false;
+    }
+    try {
+      const answered = await this.request(
+        seat,
+        (request) => ({ type: "stop", request, turnId }),
+        CONTROL_TIMEOUT_MS,
+      );
+      this.log.info({ turnId, runner: seat.name, by }, "turn stop requested");
+      return answered === true;
+    } catch (error) {
+      this.log.warn({ turnId, error: String(error) }, "could not stop a turn");
+      return false;
+    }
+  }
+
   // -------------------------------------------------------------------------------------------
   // The scheduler's runner
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * Delivers what arrived in a conversation into its turn in flight, when that turn's runner can
+   * steer its CLI. `refused` leaves the wake to a turn of its own once this one ends.
+   */
+  async steer(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome> {
+    const turn = this.host.turnIn(conversation.agent, conversation.project, conversation.thread);
+    const seat = turn === null ? undefined : this.seats.get(turn.runner);
+    if (turn === null || seat === undefined || seat.send === null) {
+      return "refused";
+    }
+    if (!seat.hello.steerableClis.includes(turn.cli)) {
+      return "refused";
+    }
+    const steer = await this.host.prepareSteer(turn.turnId);
+    if (steer === "busy" || steer === "nothing") {
+      return steer;
+    }
+    if (steer === "gone") {
+      return "refused";
+    }
+    let accepted = false;
+    try {
+      accepted =
+        (await this.request(
+          seat,
+          (request) => ({ type: "steer", request, turnId: turn.turnId, steer }),
+          CONTROL_TIMEOUT_MS,
+        )) === true;
+    } catch (error) {
+      this.log.warn({ turnId: turn.turnId, error: String(error) }, "could not steer a turn");
+    }
+    this.host.steerAnswered(turn.turnId, steer.id, accepted);
+    if (accepted) {
+      this.log.info({ ...conversation, turnId: turn.turnId }, "steered a turn in flight");
+    }
+    return accepted ? "sent" : "refused";
+  }
 
   async assign(dispatch: TurnDispatch): Promise<TurnAssignment | null> {
     const agent = await this.board.readAgent(dispatch.agent).catch(() => null);
@@ -474,6 +556,8 @@ export class RunnerHub implements TurnRunner {
     return {
       name: seat.name,
       residentClis: seat.hello.residentClis,
+      steerableClis: seat.hello.steerableClis,
+      stoppableClis: seat.hello.stoppableClis,
       isWarm: (key) => seat.warm.has(key),
     };
   }
@@ -485,13 +569,17 @@ export class RunnerHub implements TurnRunner {
     }
   }
 
-  private request(seat: Seat, message: (request: string) => RunnerMessage): Promise<unknown> {
+  private request(
+    seat: Seat,
+    message: (request: string) => RunnerMessage,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<unknown> {
     const request = randomUUID();
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(request);
         reject(new Error(`runner ${seat.name} did not answer in time`));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
       timer.unref?.();
       this.pending.set(request, { runner: seat.name, resolve, reject, timer });
       if (seat.send === null || !seat.send(message(request))) {

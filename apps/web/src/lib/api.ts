@@ -19,6 +19,7 @@ import {
   ProposalFrontmatterSchema,
   RoleCharterSchema,
   RunnerSchema,
+  RunningTurnSchema,
   SkillSchema,
   SOCIETY_SCOPE,
   SocietySchema,
@@ -80,6 +81,9 @@ const SchedulerViewSchema = z.object({
   pending: z.array(z.string()),
   resident: z.array(z.string()),
   signals: z.array(z.string()),
+  // Each turn in flight, and whether a post reaches it and Stop ends it; a server from before
+  // steering leaves it out.
+  turns: z.array(RunningTurnSchema).default([]),
 });
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
@@ -191,6 +195,7 @@ export type SignalRecord = z.infer<typeof SignalRecordSchema>;
 const AgentRecordSchema = AgentSchema.omit({ tokenHash: true });
 const SignedOutSchema = z.object({ signedOut: z.boolean() });
 const DeniedSchema = z.object({ denied: z.boolean() });
+const StoppedSchema = z.object({ stopped: z.boolean() });
 
 /** The board's HTTP API as the signed-in actor, validated against the shared schemas. */
 export function createApi(token: string) {
@@ -288,6 +293,9 @@ export function createApi(token: string) {
     }) => write("POST", "/api/wake", token, input, BoardEventSchema),
     setPaused: (paused: boolean) =>
       write("POST", paused ? "/api/pause" : "/api/resume", token, {}, PausedSchema),
+    /** Ends a turn in flight; it ends `stopped`, and what it was shown counts as read. */
+    stopTurn: (turnId: string) =>
+      write("POST", `/api/turns/${encodeURIComponent(turnId)}/stop`, token, {}, StoppedSchema),
     /** The models a CLI offers, from its own listing. */
     models: (cli: CliKind) => get(`/api/models/${cli}`, token, ModelOptionSchema.array()),
     /** The runners the society has, connected or not, with what each offers. */

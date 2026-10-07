@@ -10,6 +10,7 @@ import {
   SOCIETY_SCOPE,
   TriggerSchema,
   TurnDispatchSchema,
+  UlidSchema,
   WAKING_SIGNAL_KINDS,
   wakeScope,
   type Agent,
@@ -32,10 +33,19 @@ import { decideWake } from "./wake.js";
 /** Where a queued turn runs: on a runner, or nowhere, with the reason it never can. */
 export type TurnAssignment = { readonly runner: Name } | { readonly refused: string };
 
+/**
+ * What came of delivering a conversation's news into its turn in flight: `sent` into the CLI,
+ * `nothing` new beyond what the turn was shown, `busy` with a steer it has not taken yet, or
+ * `refused` because it cannot take one, which leaves the wake to a turn of its own.
+ */
+export type SteerOutcome = "sent" | "nothing" | "busy" | "refused";
+
 /** What the scheduler needs from the runners: placing turns, running them, and landing tasks. */
 export interface TurnRunner {
   /** Where a queued turn may start now, holding a slot there, or null to keep it queued. */
   assign(dispatch: TurnDispatch): Promise<TurnAssignment | null>;
+  /** Delivers what arrived in a conversation into the turn running there; absent, nothing steers. */
+  steer?(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome>;
   runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord>;
   /**
    * Runs a completing task's completion effect and records the outcome on the board, or reports
@@ -140,6 +150,9 @@ const PendingSchema = z.object({
   readyAt: z.number(),
   stageWakes: z.array(TriggerSchema).optional(),
   holder: z.boolean().optional(),
+  newestMessage: UlidSchema.optional(),
+  onlyMessages: z.boolean().optional(),
+  steeredThrough: UlidSchema.optional(),
 });
 
 const StateSchema = z.object({
@@ -168,6 +181,23 @@ interface PendingTurn {
   stageWakes?: Trigger[] | undefined;
   /** One of those is for a stage the agent claimed outside this conversation, due while it holds it. */
   holder?: boolean | undefined;
+  /** The newest message among the wakes merged here that a message caused: mentions and user posts. */
+  newestMessage?: Ulid | undefined;
+  /** Every wake merged here was caused by a message; at dispatch it is dropped once all were read. */
+  onlyMessages?: boolean | undefined;
+  /** The newest of those messages already steered into the conversation's turn in flight. */
+  steeredThrough?: Ulid | undefined;
+}
+
+/** The message a wake was caused by, for the wakes a post makes: a mention, or a post by the user. */
+function messageOf(trigger: Trigger): Ulid | undefined {
+  return trigger.kind === "mention" || trigger.kind === "user_post" ? trigger.messageId : undefined;
+}
+
+function later(a: Ulid | undefined, b: Ulid | undefined): Ulid | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return a > b ? a : b;
 }
 
 const SILENT_LOG: SchedulerLog = { info() {}, warn() {}, error() {} };
@@ -221,6 +251,8 @@ export class Scheduler {
   private readonly pending = new Map<string, PendingTurn>();
   /** Turns in flight by session key, each with the lane it holds (see `laneOf`). */
   private readonly running = new Map<string, { lane: string; promise: Promise<void> }>();
+  /** Steers under way, by session key; a pass does not wait for a runner to answer one. */
+  private readonly steering = new Map<string, Promise<void>>();
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
   private readonly completing = new Set<Promise<void>>();
@@ -284,6 +316,7 @@ export class Scheduler {
     await Promise.allSettled([
       ...[...this.running.values()].map((turn) => turn.promise),
       ...this.completing,
+      ...this.steering.values(),
     ]);
   }
 
@@ -336,6 +369,7 @@ export class Scheduler {
   /** Waits for every running turn and in-flight completion to settle. Used by tests and by stop(). */
   async drain(): Promise<void> {
     await Promise.allSettled([
+      ...this.steering.values(),
       ...[...this.running.values()].map((turn) => turn.promise),
       ...this.completing,
     ]);
@@ -864,6 +898,7 @@ export class Scheduler {
     const key = sessionKey(agent, project, thread?.id);
     const readyAt = now + debounce;
     const existing = this.pending.get(key);
+    const message = messageOf(trigger);
     if (existing === undefined) {
       this.pending.set(key, {
         dispatch: {
@@ -876,9 +911,12 @@ export class Scheduler {
         },
         readyAt,
         ...(trigger.kind === "stage" ? { stageWakes: [trigger] } : {}),
+        ...(message === undefined ? {} : { newestMessage: message }),
+        onlyMessages: message !== undefined,
       });
       return;
     }
+    const newestMessage = later(existing.newestMessage, message);
     const keepNew = decision.priority > existing.dispatch.priority;
     const priority = keepNew ? decision.priority : existing.dispatch.priority;
     this.pending.set(key, {
@@ -895,6 +933,9 @@ export class Scheduler {
             ...(existing.holder === true ? { holder: true } : {}),
           }
         : {}),
+      ...(newestMessage === undefined ? {} : { newestMessage }),
+      onlyMessages: existing.onlyMessages === true && message !== undefined,
+      ...(existing.steeredThrough === undefined ? {} : { steeredThrough: existing.steeredThrough }),
     });
   }
 
@@ -1412,7 +1453,67 @@ export class Scheduler {
     return false;
   }
 
+  /**
+   * Delivers ready message wakes into the turn already running in their conversation, rather than
+   * keeping them for a turn of their own. Each stays queued until that turn ends and is checked
+   * again then, so a steer refused, or left untaken, loses nothing. A pass never waits on a runner.
+   */
+  private steerRunning(now: number): void {
+    const steer = this.runner.steer?.bind(this.runner);
+    if (steer === undefined) {
+      return;
+    }
+    for (const [key, item] of this.pending) {
+      const through = item.newestMessage;
+      if (
+        item.readyAt > now ||
+        through === undefined ||
+        !this.running.has(key) ||
+        this.steering.has(key) ||
+        (item.steeredThrough !== undefined && through <= item.steeredThrough)
+      ) {
+        continue;
+      }
+      const { dispatch } = item;
+      const attempt = steer({
+        agent: dispatch.agent,
+        project: dispatch.project,
+        ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
+      })
+        .then((outcome) => {
+          // A busy turn has a steer it has not taken yet; the next pass tries again.
+          const current = this.pending.get(key);
+          if (outcome !== "busy" && current !== undefined) {
+            current.steeredThrough = later(current.steeredThrough, through);
+          }
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          this.log.warn({ key, error: String(error) }, "steering failed");
+        })
+        .finally(() => {
+          this.steering.delete(key);
+        });
+      this.steering.set(key, attempt);
+    }
+  }
+
+  /** Whether every message that woke a queued turn was read in its conversation, by a turn already. */
+  private async alreadyRead(item: PendingTurn): Promise<boolean> {
+    if (item.onlyMessages !== true || item.newestMessage === undefined) {
+      return false;
+    }
+    const { dispatch } = item;
+    const cursor = await this.board.digestCursor(
+      dispatch.agent,
+      dispatch.project,
+      dispatch.thread?.id,
+    );
+    return cursor !== null && cursor >= item.newestMessage;
+  }
+
   private async dispatchReady(now: number): Promise<void> {
+    this.steerRunning(now);
     const ready = [...this.pending.entries()]
       .filter(([key, item]) => item.readyAt <= now && !this.running.has(key))
       .toSorted(
@@ -1427,6 +1528,14 @@ export class Scheduler {
         continue;
       }
       this.pending.delete(key);
+      if (await this.alreadyRead(item)) {
+        // Steered into the turn that ran here, or in the digest it opened with.
+        this.log.info(
+          { agent: item.dispatch.agent, project: item.dispatch.project },
+          "dropping message wake, its conversation has read the message",
+        );
+        continue;
+      }
       let { dispatch } = item;
       if (item.stageWakes !== undefined) {
         // A stage wake queued during the agent's own turn is often stale by now: it took the stage

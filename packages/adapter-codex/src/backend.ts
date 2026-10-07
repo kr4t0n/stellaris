@@ -5,6 +5,7 @@ import type {
   ResidentSession,
   ResidentStart,
   SessionId,
+  TurnControl,
   TurnRequest,
   TurnResult,
 } from "@stellaris/runner-core";
@@ -44,6 +45,8 @@ export interface CodexOptions {
  */
 export class CodexBackend implements AgentBackend {
   readonly kind = "codex" as const;
+  readonly steers = true;
+  readonly stops = true;
 
   constructor(private readonly options: CodexOptions = {}) {}
 
@@ -61,10 +64,14 @@ export class CodexBackend implements AgentBackend {
     return listAppServerModels(this.sessionOptions());
   }
 
-  async runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {
+  async runTurn(
+    request: TurnRequest,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
     const session = await CodexAppServerSession.start(this.sessionOptions(), request.spec, request);
     try {
-      return await session.runTurn(request.prompt, onEvent);
+      return await session.runTurn(request.prompt, onEvent, control);
     } finally {
       await session.close();
     }

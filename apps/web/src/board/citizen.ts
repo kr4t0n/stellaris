@@ -24,9 +24,10 @@ const ENDINGS: Readonly<Record<string, string>> = {
   error: "failed",
   interrupted: "interrupted",
   blocked: "blocked",
+  stopped: "stopped by you",
 };
 
-/** How a finished turn ended, in a word or two. */
+/** How a finished turn ended, in a word or two. A stop is the user's decision, not a failure. */
 export function endingOf(entry: TurnHistoryEntry): string {
   if (entry.exitReason !== null) {
     return ENDINGS[entry.exitReason] ?? entry.exitReason;
@@ -36,7 +37,10 @@ export function endingOf(entry: TurnHistoryEntry): string {
 
 export function failed(entry: TurnHistoryEntry): boolean {
   return (
-    entry.outcome === "failed" || (entry.exitReason !== null && entry.exitReason !== "completed")
+    entry.outcome === "failed" ||
+    (entry.exitReason !== null &&
+      entry.exitReason !== "completed" &&
+      entry.exitReason !== "stopped")
   );
 }
 

@@ -7,6 +7,7 @@ import type {
   TurnStatus,
   Usage,
 } from "@stellaris/shared";
+import type { TurnControl } from "./control.js";
 
 export type SessionId = string;
 
@@ -90,15 +91,27 @@ export interface ResidentStart {
 export interface ResidentSession {
   /** The session in use, which may differ from the requested one for CLIs that assign their own ids. */
   readonly session: SessionId;
-  runTurn(prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult>;
+  runTurn(
+    prompt: string,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult>;
   close(): Promise<void>;
 }
 
 /** One interface for every CLI. */
 export interface AgentBackend {
   readonly kind: CliKind;
+  /** Whether a running turn takes input through its `TurnControl`, cold or warm. */
+  readonly steers?: boolean | undefined;
+  /** Whether a running turn stops through its `TurnControl`, ending `stopped`. */
+  readonly stops?: boolean | undefined;
   newSession(spec: AgentSpec): Promise<SessionId>;
-  runTurn(request: TurnRequest, onEvent?: (event: AgentEvent) => void): Promise<TurnResult>;
+  runTurn(
+    request: TurnRequest,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult>;
   interrupt?(session: SessionId): Promise<void>;
   /** Backends that can keep a session warm implement this; the runner uses it for resident roles. */
   startResident?(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession>;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Actor, Board } from "@stellaris/board-core";
 import {
   mayHoldStage,
@@ -9,10 +10,12 @@ import {
   USER_ROLE,
   wakeScope,
   type AgentEvent,
+  type CliKind,
   type Message,
   type Name,
   type Project,
   type ProjectRepo,
+  type RunningTurn,
   type Task,
   type Thread,
   type TranscriptEntry,
@@ -20,10 +23,12 @@ import {
   type TurnJob,
   type TurnOutcome,
   type TurnRecord,
+  type TurnSteer,
   type TurnWorkspace,
   type Ulid,
 } from "@stellaris/shared";
 import {
+  buildSteerText,
   buildTurnPrompt,
   type Conversation,
   type KnowledgeView,
@@ -43,6 +48,9 @@ export interface RunnerSeat {
   readonly name: Name;
   /** The CLIs whose sessions the runner can keep warm. */
   readonly residentClis: readonly string[];
+  /** The CLIs whose running turns the runner can steer and stop. */
+  readonly steerableClis?: readonly string[] | undefined;
+  readonly stoppableClis?: readonly string[] | undefined;
   /** Whether the runner reports the conversation's session warm right now. */
   isWarm(key: string): boolean;
 }
@@ -65,13 +73,27 @@ export interface TurnHostOptions {
     | undefined;
 }
 
+/** A steer sent into a turn: the newest message it delivers, and what it delivers. */
+interface SentSteer {
+  readonly through: Ulid;
+  readonly messages: readonly Ulid[];
+  readonly text: string;
+}
+
 /** A turn whose job went out and whose outcome has not come back. */
 interface OpenTurn {
   readonly job: TurnJob;
   readonly runner: Name;
   readonly actor: Actor;
   readonly record: TurnRecord;
-  readonly cursorAfter: Ulid | null;
+  /** The newest message the turn has been shown, at its start or by a steer it took. */
+  delivered: Ulid | null;
+  /** Every steer sent into the turn, by id, so one taken late still moves `delivered`. */
+  readonly steers: Map<string, SentSteer>;
+  /** The steer sent and not yet taken or refused; a turn has at most one. */
+  outstanding: string | null;
+  /** Who asked the turn to stop. */
+  stopRequestedBy: Name | null;
   readonly held: readonly Ulid[];
   readonly taskId: Ulid | undefined;
   readonly costSoFarUsd: number;
@@ -388,7 +410,10 @@ export class TurnHost {
       runner: runner.name,
       actor,
       record,
-      cursorAfter,
+      delivered: cursorAfter,
+      steers: new Map(),
+      outstanding: null,
+      stopRequestedBy: null,
       held: held.map((each) => each.id),
       taskId,
       costSoFarUsd,
@@ -414,16 +439,146 @@ export class TurnHost {
     return { job, ended };
   }
 
-  /** Steps of a turn in flight, as the runner received them. */
-  addEvents(turnId: Ulid, entries: readonly TranscriptEntry[]): void {
+  /**
+   * Steps of a turn in flight, as the runner received them. A steer the CLI took moves what the
+   * turn has been shown past its messages, and its step carries them and the text it delivered.
+   */
+  async addEvents(turnId: Ulid, entries: readonly TranscriptEntry[]): Promise<void> {
     const turn = this.open.get(turnId);
     if (turn === undefined) {
       return;
     }
-    for (const entry of entries) {
+    for (const received of entries) {
+      let entry = received;
+      const { event } = received;
+      if (event.type === "steered") {
+        const sent = turn.steers.get(event.steer);
+        if (sent !== undefined) {
+          entry = {
+            ...received,
+            event: { ...event, messages: [...sent.messages], text: sent.text },
+          };
+          if (turn.delivered === null || sent.through > turn.delivered) {
+            turn.delivered = sent.through;
+          }
+          if (turn.outstanding === event.steer) {
+            turn.outstanding = null;
+          }
+          await this.board
+            .recordSteered({
+              turnId,
+              agent: turn.job.agent,
+              project: turn.job.scope,
+              thread: turn.job.thread,
+              messages: sent.messages,
+            })
+            .catch((error: unknown) => {
+              this.log.warn({ turnId, error: String(error) }, "could not record a steer");
+            });
+        }
+      }
       turn.transcript.push(entry);
       this.onEvent?.(turn.job.agent, turn.job.scope, entry.event, turn.job.thread);
     }
+  }
+
+  /** The turn in flight in a conversation, if any. */
+  turnIn(
+    agent: Name,
+    scope: Name,
+    thread?: Ulid,
+  ): { turnId: Ulid; runner: Name; cli: CliKind } | null {
+    for (const turn of this.open.values()) {
+      const { job } = turn;
+      if (job.agent === agent && job.scope === scope && job.thread === thread) {
+        return { turnId: job.turnId, runner: turn.runner, cli: job.cli };
+      }
+    }
+    return null;
+  }
+
+  /** The turns in flight, for the interface: their conversations and where a mention reaches them. */
+  runningTurns(): Array<Omit<RunningTurn, "steerable" | "stoppable"> & { runner: Name }> {
+    return [...this.open.values()].map((turn) => ({
+      turnId: turn.job.turnId,
+      agent: turn.job.agent,
+      scope: turn.job.scope,
+      ...(turn.job.thread === undefined ? {} : { thread: turn.job.thread }),
+      cli: turn.job.cli,
+      ...(turn.record.trigger.channel === undefined
+        ? {}
+        : { channel: turn.record.trigger.channel }),
+      runner: turn.runner,
+    }));
+  }
+
+  /**
+   * What a steer into a turn would deliver: the conversation's digest from what the turn has been
+   * shown, rendered as the prompt renders its digest. `busy` while a steer it was sent is not yet
+   * taken or refused, and `nothing` when everything new was in what it was shown.
+   */
+  async prepareSteer(turnId: Ulid): Promise<TurnSteer | "busy" | "nothing" | "gone"> {
+    const turn = this.open.get(turnId);
+    if (turn === undefined || turn.stopRequestedBy !== null) {
+      return "gone";
+    }
+    if (turn.outstanding !== null) {
+      return "busy";
+    }
+    const { job } = turn;
+    const digest = await this.board.readDigest(
+      {
+        ...turn.actor,
+        scope: job.scope,
+        ...(job.thread === undefined ? {} : { thread: job.thread }),
+      },
+      {
+        ...(turn.delivered === null ? {} : { since_cursor: turn.delivered }),
+        advance: false,
+        limit: 50,
+      },
+    );
+    const last = digest.messages.at(-1);
+    // The turn may have ended, or taken another steer, while the digest was read.
+    if (!this.open.has(turnId) || turn.outstanding !== null) {
+      return "gone";
+    }
+    if (last === undefined) {
+      return "nothing";
+    }
+    const threads = new Map<Ulid, Thread>();
+    for (const id of new Set(digest.messages.flatMap((message) => message.thread ?? []))) {
+      const record = await this.board.readThread(id).catch(() => undefined);
+      if (record !== undefined) {
+        threads.set(id, record);
+      }
+    }
+    const steer: TurnSteer = { id: randomUUID(), text: buildSteerText(digest.messages, threads) };
+    turn.steers.set(steer.id, {
+      through: last.id,
+      messages: digest.messages.map((message) => message.id),
+      text: steer.text,
+    });
+    turn.outstanding = steer.id;
+    return steer;
+  }
+
+  /** The runner's answer to a steer: one it did not take frees the turn for the next. */
+  steerAnswered(turnId: Ulid, steerId: string, accepted: boolean): void {
+    const turn = this.open.get(turnId);
+    if (turn !== undefined && !accepted && turn.outstanding === steerId) {
+      turn.outstanding = null;
+    }
+  }
+
+  /** Marks a turn stopped by `by`; returns false for a turn not in flight. */
+  requestStop(turnId: Ulid, by: Name): boolean {
+    const turn = this.open.get(turnId);
+    if (turn === undefined) {
+      return false;
+    }
+    turn.stopRequestedBy ??= by;
+    return true;
   }
 
   /**
@@ -465,10 +620,18 @@ export class TurnHost {
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
       model: outcome.model ?? turn.configuredModel,
       ...(outcome.work === null ? {} : { work: outcome.work }),
+      ...(outcome.exitReason === "stopped" ? { stoppedBy: turn.stopRequestedBy ?? USER_NAME } : {}),
     };
-    if (outcome.exitReason === "completed" || outcome.exitReason === "blocked") {
-      // The digest was delivered; only now does the cursor move past it.
-      await this.board.setDigestCursor(job.agent, job.scope, turn.cursorAfter, job.thread);
+    // A stop is the user's decision on work it watched, not a failure: what the turn was shown
+    // counts as read, so nothing restarts the work, and its stages stay held.
+    if (
+      outcome.exitReason === "completed" ||
+      outcome.exitReason === "blocked" ||
+      outcome.exitReason === "stopped"
+    ) {
+      // The digest was delivered, at the start and by the steers the turn took; only now does the
+      // cursor move past it.
+      await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, job.thread);
       await this.renewLeases(turn.actor, turn.held);
       if (outcome.status?.needsUserDecision === true) {
         await this.askUser(

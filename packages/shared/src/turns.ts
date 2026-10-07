@@ -102,8 +102,26 @@ export const TurnRecordSchema = z.object({
   model: z.string().nullable().default(null),
   /** The task branch the turn left work on, with its commit, as the runner reported it. */
   work: TurnWorkSchema.optional(),
+  /** Who stopped the turn, for one that ended `stopped`. */
+  stoppedBy: NameSchema.optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
+
+/**
+ * A turn in flight as the interface sees it: its conversation, and whether its runner can deliver
+ * a post into it or stop it. `channel` is where a mention reaches a home conversation's turn.
+ */
+export const RunningTurnSchema = z.object({
+  turnId: UlidSchema,
+  agent: NameSchema,
+  scope: NameSchema,
+  thread: UlidSchema.optional(),
+  cli: CliKindSchema,
+  channel: ChannelRefSchema.optional(),
+  steerable: z.boolean(),
+  stoppable: z.boolean(),
+});
+export type RunningTurn = z.infer<typeof RunningTurnSchema>;
 
 /** Session ids per CLI for one conversation, and the runner where they began, which keeps them. */
 export const SessionsFileSchema = z.object({

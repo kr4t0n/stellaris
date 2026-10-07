@@ -4,9 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
-import { useMembers, useRoles, useSession } from "../lib/session.js";
+import { useMembers, useRoles, useScheduler, useSession } from "../lib/session.js";
 import { askTitle } from "./asks.js";
-import { completeMention, listed, mentionAt, wakesFor } from "./compose.js";
+import { completeMention, mentionAt, reachedTurns, wakeLine, wakesFor } from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -21,11 +21,13 @@ const MAX_CANDIDATES = 6;
 
 /**
  * Posts as the user into a channel or a thread. Enter sends and Shift+Enter breaks the line; an
- * `@` offers the citizens to mention; the line under the box names whom sending will wake.
+ * `@` offers the citizens to mention; the line under the box names whom sending will wake, and
+ * whom it reaches in a turn already under way in the conversation it goes to.
  */
 export function Composer({
   target,
   placeholder,
+  initialText = "",
   oneLine = false,
   className = "border-t border-line p-3",
   focusOnOpen = false,
@@ -34,6 +36,8 @@ export function Composer({
 }: {
   target: Target;
   placeholder: string;
+  /** What the box starts with, and returns to after a send, such as a mention. */
+  initialText?: string;
   /**
    * The box with Send beside it and no line under it of whom sending wakes, for the ask box, where
    * every post wakes the front desk.
@@ -50,7 +54,8 @@ export function Composer({
   const client = useQueryClient();
   const members = useMembers();
   const roles = useRoles();
-  const [text, setText] = useState("");
+  const scheduler = useScheduler();
+  const [text, setText] = useState(initialText);
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -71,7 +76,7 @@ export function Composer({
       return api.sendMessage({ thread_id: thread.id, body });
     },
     onSuccess: (message) => {
-      setText("");
+      setText(initialText);
       void client.invalidateQueries({
         queryKey:
           message.thread === undefined ? ["channel", message.channel] : ["thread", message.thread],
@@ -116,6 +121,19 @@ export function Composer({
           .filter((member) => member.name.startsWith(fragment.prefix))
           .slice(0, MAX_CANDIDATES);
   const wakes = wakesFor(text, members.data ?? [], roles.data ?? []);
+  const reached =
+    "ask" in target
+      ? []
+      : reachedTurns(
+          wakes,
+          members.data ?? [],
+          scheduler.data?.turns ?? [],
+          "channel" in target ? { channel: target.channel } : { thread: target.threadId },
+        );
+  const line = wakeLine(
+    reached,
+    wakes.filter((name) => !reached.includes(name)),
+  );
 
   const complete = (name: string): void => {
     if (fragment === null) {
@@ -127,7 +145,7 @@ export function Composer({
     setCaret(next.caret);
   };
   const submit = (): void => {
-    if (text.trim() !== "" && !send.isPending) {
+    if (text.trim() !== "" && text.trim() !== initialText.trim() && !send.isPending) {
       send.mutate(text.trim());
     }
   };
@@ -162,7 +180,11 @@ export function Composer({
   };
 
   const sendButton = (
-    <Button variant="primary" type="submit" disabled={text.trim() === "" || send.isPending}>
+    <Button
+      variant="primary"
+      type="submit"
+      disabled={text.trim() === "" || text.trim() === initialText.trim() || send.isPending}
+    >
       {send.isPending ? "Sending…" : "Send"}
     </Button>
   );
@@ -229,9 +251,7 @@ export function Composer({
         ) : (
           <div className="flex items-center gap-2 px-3 pb-2">
             <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-              {wakes.length > 0
-                ? `Sending wakes ${listed(wakes)}: a turn each.`
-                : "Enter to send · Shift+Enter for a new line"}
+              {line ?? "Enter to send · Shift+Enter for a new line"}
             </p>
             {sendButton}
           </div>

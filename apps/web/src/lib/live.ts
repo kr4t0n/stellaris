@@ -30,7 +30,22 @@ export type Step =
       /** What it returned, as the adapter cut it, or `null` until then or when it returned nothing. */
       readonly output: string | null;
     })
-  | (StepBase & { readonly kind: "error"; readonly message: string });
+  | (StepBase & { readonly kind: "error"; readonly message: string })
+  | (StepBase & {
+      readonly kind: "steer";
+      /** The posts delivered into the turn, as the citizen was handed them. */
+      readonly posts: readonly SteerPost[];
+      /** Who wrote them, each once. */
+      readonly from: readonly string[];
+    });
+
+/** A post a steer delivered: who wrote it, where, when, and what it said. */
+export interface SteerPost {
+  readonly author: string;
+  readonly where: string;
+  readonly at: string;
+  readonly body: string;
+}
 
 export interface TurnEnd {
   readonly at: string;
@@ -82,6 +97,34 @@ const MAX_STEPS = 400;
 // Rows cut summaries at their own width; this only bounds what is kept.
 const SUMMARY_LIMIT = 400;
 const DETAIL_LIMIT = 4_000;
+
+// A steer's text is the digest's rendering: a heading and a line for the citizen, then each post
+// under a heading of its time, place, and author, as `### [ts] where from @author (message id)`.
+const POST_HEADING =
+  /^\[([^\]]*)\] (.*?) from @([a-z0-9][a-z0-9-]*)(?:, who .*?)? \(message [0-9A-Z]+\)$/;
+
+/** The posts a steer delivered, read back from the text the citizen was handed. */
+export function describeSteer(text: string): { posts: SteerPost[]; from: string[] } {
+  const posts = text
+    .split(/^### /m)
+    .slice(1)
+    .flatMap((block) => {
+      const [heading = "", ...rest] = block.split("\n");
+      const match = POST_HEADING.exec(heading.trim());
+      if (match === null) {
+        return [];
+      }
+      return [
+        {
+          at: match[1] ?? "",
+          where: match[2] ?? "",
+          author: match[3] ?? "",
+          body: rest.join("\n").trim(),
+        },
+      ];
+    });
+  return { posts, from: [...new Set(posts.map((post) => post.author))] };
+}
 
 /** A tool's name as a reader knows it: board verbs bare, other MCP tools as `server:tool`. */
 export function toolLabel(name: string): string {
@@ -271,6 +314,16 @@ export function applyLive(
         ),
       );
       break;
+    case "steered":
+      next.set(
+        key,
+        withStep(
+          turn,
+          { kind: "steer", seq: item.seq, at: item.ts, ...describeSteer(event.text ?? "") },
+          maxSteps,
+        ),
+      );
+      break;
     case "turn_completed": {
       const summary = event.status?.summary ?? null;
       const last = turn.steps.at(-1);
@@ -338,7 +391,14 @@ export function lastLine(turn: LiveTurn): string | null {
   if (step.kind === "tool") {
     return `${toolLabel(step.name)} · ${step.summary}`;
   }
+  if (step.kind === "steer") {
+    return `took ${postCount(step.posts.length)}${step.from.length === 0 ? "" : ` from ${step.from.join(", ")}`}`;
+  }
   return clip(firstLine(step.kind === "say" ? step.text : step.message), SUMMARY_LIMIT);
+}
+
+export function postCount(posts: number): string {
+  return posts === 1 ? "1 post" : `${posts} posts`;
 }
 
 /** "42s", "4m", or "1h 12m" since a moment. */

@@ -45,6 +45,8 @@ export const BOARD_EVENT_TYPES = [
   "paused.changed",
   "wake.requested",
   "turn.started",
+  "turn.steered",
+  "turn.stopped",
   "turn.completed",
   "turn.failed",
   "merge.completed",
@@ -80,12 +82,17 @@ export const TurnStatusSchema = z.object({
 });
 export type TurnStatus = z.infer<typeof TurnStatusSchema>;
 
+/**
+ * How a turn ended. `stopped`: the user stopped it, which the board takes as a decision rather than
+ * a failure; `interrupted` is a CLI ending its turn unasked.
+ */
 export const TurnExitReasonSchema = z.enum([
   "completed",
   "timeout",
   "error",
   "interrupted",
   "blocked",
+  "stopped",
 ]);
 export type TurnExitReason = z.infer<typeof TurnExitReasonSchema>;
 
@@ -98,6 +105,16 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
     runner: NameSchema,
     /** The model the CLI reports running, when it reports one. */
     model: z.string().optional(),
+  }),
+  /**
+   * The CLI took a steer into the running turn. Adapters name the steer; the server adds the
+   * messages it delivered and the text the CLI was given.
+   */
+  z.object({
+    type: z.literal("steered"),
+    steer: z.string().min(1),
+    messages: z.array(UlidSchema).optional(),
+    text: z.string().optional(),
   }),
   z.object({ type: z.literal("text"), delta: z.string() }),
   z.object({ type: z.literal("tool_call"), name: z.string(), input: z.unknown() }),

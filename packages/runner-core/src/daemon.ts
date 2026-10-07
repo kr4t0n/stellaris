@@ -10,6 +10,7 @@ import {
   type TurnOutcome,
 } from "@stellaris/shared";
 import { RunnerClient, RunnerHttpError } from "./client.js";
+import { TurnControl } from "./control.js";
 import { runnerOs } from "./enroll.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
 import { HomeSync } from "./home.js";
@@ -100,6 +101,8 @@ export class RunnerDaemon {
   private readonly log: RunnerLog;
   private readonly retryMs: number;
   private readonly running = new Map<string, Promise<void>>();
+  /** Each turn in flight's handle, for the steers and stops the server sends it. */
+  private readonly controls = new Map<string, TurnControl>();
   private readonly homes: HomeSync;
   private readonly board: TreeCopy;
   private abort: AbortController | null = null;
@@ -188,13 +191,15 @@ export class RunnerDaemon {
     let everOpened = false;
     while (!this.stopped) {
       try {
-        const { all, resident } = this.executor.clis;
+        const { all, resident, steerable, stoppable } = this.executor.clis;
         const welcome = await this.client.hello({
           protocol: RUNNER_PROTOCOL,
           version: this.version,
           os: runnerOs(),
           clis: all,
           residentClis: resident,
+          steerableClis: steerable,
+          stoppableClis: stoppable,
           capabilities: [...this.capabilities],
           slots: this.slots,
           turns: this.turns,
@@ -238,8 +243,11 @@ export class RunnerDaemon {
       if (this.stopped || this.running.has(message.job.turnId)) {
         return;
       }
-      const run = this.runJob(message.job).finally(() => {
+      const control = new TurnControl();
+      this.controls.set(message.job.turnId, control);
+      const run = this.runJob(message.job, control).finally(() => {
         this.running.delete(message.job.turnId);
+        this.controls.delete(message.job.turnId);
       });
       this.running.set(message.job.turnId, run);
       return;
@@ -255,20 +263,34 @@ export class RunnerDaemon {
           this.log.warn({ error: String(error) }, "could not answer a request");
         });
     };
-    if (message.type === "land") {
-      answer(this.executor.land(message.land));
-    } else {
-      answer(this.executor.models(message.cli));
+    switch (message.type) {
+      case "land":
+        answer(this.executor.land(message.land));
+        return;
+      case "models":
+        answer(this.executor.models(message.cli));
+        return;
+      case "steer": {
+        const control = this.controls.get(message.turnId);
+        answer(control === undefined ? Promise.resolve(false) : control.steer(message.steer));
+        return;
+      }
+      case "stop": {
+        const control = this.controls.get(message.turnId);
+        control?.stop();
+        answer(Promise.resolve(control !== undefined));
+        return;
+      }
     }
   }
 
-  private async runJob(job: TurnJob): Promise<void> {
+  private async runJob(job: TurnJob, control: TurnControl): Promise<void> {
     const sender = new EventSender((entries) => this.client.events(job.turnId, entries), this.log);
     let outcome: TurnOutcome;
     try {
       await this.board.pull(this.client.boardTree());
       await this.homes.prepare(job.agent);
-      outcome = await this.executor.run(job, (event) => sender.push(event));
+      outcome = await this.executor.run(job, (event) => sender.push(event), control);
     } catch (error) {
       outcome = {
         exitReason: "error",

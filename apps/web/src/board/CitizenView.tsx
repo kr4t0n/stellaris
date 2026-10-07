@@ -1,4 +1,4 @@
-import { currentStage, SOCIETY_SCOPE } from "@stellaris/shared";
+import { currentStage, SOCIETY_SCOPE, type RunningTurn } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -30,6 +30,7 @@ import { ModelForm } from "./ModelForm.js";
 import { RunnerForm } from "./RunnerForm.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
+import { TurnControls } from "./TurnControls.js";
 import { useStickyScroll } from "./useStickyScroll.js";
 import { useStoredTurn } from "./useStoredTurn.js";
 import { WakeForm } from "./WakeForm.js";
@@ -222,6 +223,7 @@ function CitizenPage({
           state={state}
           runningScopes={runningScopes}
           runningKeys={runningKeys}
+          runningTurns={(scheduler.data?.turns ?? []).filter((each) => each.agent === name)}
           queuedScope={queued?.scope ?? null}
         />
       )}
@@ -242,6 +244,7 @@ function NowTab({
   state,
   runningScopes,
   runningKeys,
+  runningTurns,
   queuedScope,
 }: {
   name: string;
@@ -252,6 +255,8 @@ function NowTab({
   runningScopes: readonly string[];
   /** The citizen's sessions with a turn in flight, as the scheduler keys them. */
   runningKeys: readonly string[];
+  /** Those turns as the runners see them: whether each takes posts and can be stopped. */
+  runningTurns: readonly RunningTurn[];
   queuedScope: string | null;
 }) {
   const live = useLiveTurns();
@@ -287,6 +292,14 @@ function NowTab({
       : `${scopeName(candidate.scope)} · ${entities.get(candidate.thread)?.title ?? "a thread"}`;
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
+  // The controls are for the turn shown, else for the citizen's first turn in flight, which may
+  // not have reported a step yet.
+  const control =
+    (turn === undefined
+      ? undefined
+      : runningTurns.find(
+          (candidate) => candidate.scope === turn.scope && candidate.thread === turn.thread,
+        )) ?? (turnRunning ? undefined : runningTurns[0]);
 
   return (
     <>
@@ -360,6 +373,7 @@ function NowTab({
           </>
         )}
       </div>
+      {control === undefined ? null : <TurnControls name={name} turn={control} />}
     </>
   );
 }

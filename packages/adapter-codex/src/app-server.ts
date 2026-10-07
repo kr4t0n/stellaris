@@ -11,6 +11,7 @@ import {
   type ResidentSession,
   type ResidentStart,
   type SessionId,
+  type TurnControl,
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
@@ -401,7 +402,13 @@ interface TurnCollector {
   readonly started: Set<string>;
   readonly emit: (event: AgentEvent) => void;
   readonly settle: () => void;
+  /** Steers the app server accepted and has not yet delivered as a user message. */
+  readonly outstanding: Set<string>;
+  stopped: boolean;
 }
+
+/** How long a turn asked to stop may take to say so before it is ended without its report. */
+const STOP_GRACE_MS = 15_000;
 
 export class CodexAppServerSession implements ResidentSession {
   session: SessionId;
@@ -581,6 +588,14 @@ export class CodexAppServerSession implements ResidentSession {
           return;
         }
         const id = str(item["id"]) ?? "";
+        // A steer arrives as a user message carrying the id it was sent with.
+        if (item["type"] === "userMessage") {
+          const steer = str(item["clientId"]);
+          if (steer !== undefined && turn.outstanding.delete(steer)) {
+            turn.emit({ type: "steered", steer });
+          }
+          return;
+        }
         if (item["type"] === "agentMessage") {
           const text = str(item["text"]) ?? "";
           if (method === "item/completed" && text.length > 0) {
@@ -650,7 +665,11 @@ export class CodexAppServerSession implements ResidentSession {
     }
   }
 
-  async runTurn(prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> {
+  async runTurn(
+    prompt: string,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
     if (this.closed) {
       throw new Error("the resident session has ended");
     }
@@ -676,6 +695,8 @@ export class CodexAppServerSession implements ResidentSession {
       started: new Set(),
       emit,
       settle,
+      outstanding: new Set(),
+      stopped: false,
     };
     this.active = turn;
     emit({
@@ -699,6 +720,7 @@ export class CodexAppServerSession implements ResidentSession {
             setTimeout(() => turn.settle(), 15_000).unref?.();
           }, limit);
 
+    let detach: (() => void) | undefined;
     try {
       const started = await this.client.request("turn/start", {
         threadId: this.session,
@@ -710,17 +732,25 @@ export class CodexAppServerSession implements ResidentSession {
       });
       const startedTurn = isDict(started) ? started["turn"] : undefined;
       turn.turnId = isDict(startedTurn) ? (str(startedTurn["id"]) ?? null) : null;
+      detach = control?.attach({
+        steer: (steer) => this.steer(turn, steer.id, steer.text),
+        stop: () => this.stop(turn),
+      });
       await done;
     } catch (error) {
       turn.error ??= error instanceof Error ? error.message : String(error);
       turn.settle();
     } finally {
+      detach?.();
       clearTimeout(timer);
     }
     await this.flushRecording();
 
     let exitReason: TurnExitReason;
-    if (timedOut) {
+    if (turn.stopped) {
+      exitReason = "stopped";
+      turn.error = undefined;
+    } else if (timedOut) {
       exitReason = "timeout";
       turn.error = `turn exceeded ${limit} ms`;
     } else if (turn.status === "completed" && turn.error === undefined) {
@@ -751,6 +781,41 @@ export class CodexAppServerSession implements ResidentSession {
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
     };
+  }
+
+  /**
+   * Input into the running turn. The app server refuses it once that turn is over, or while it is
+   * a review or a compaction; one it accepts arrives in the turn as a user message with the id.
+   */
+  private async steer(turn: TurnCollector, id: string, text: string): Promise<boolean> {
+    if (this.active !== turn || turn.stopped || turn.turnId === null) {
+      return false;
+    }
+    turn.outstanding.add(id);
+    try {
+      await this.client.request("turn/steer", {
+        threadId: this.session,
+        input: [{ type: "text", text, text_elements: [] }],
+        expectedTurnId: turn.turnId,
+        clientUserMessageId: id,
+      });
+      return true;
+    } catch {
+      turn.outstanding.delete(id);
+      return false;
+    }
+  }
+
+  /** Interrupts the running turn, which the app server ends as interrupted; the turn is `stopped`. */
+  private stop(turn: TurnCollector): void {
+    if (this.active !== turn || turn.stopped) {
+      return;
+    }
+    turn.stopped = true;
+    void this.client
+      .request("turn/interrupt", { threadId: this.session, turnId: turn.turnId })
+      .catch(() => undefined);
+    setTimeout(() => turn.settle(), STOP_GRACE_MS).unref?.();
   }
 
   async close(): Promise<void> {

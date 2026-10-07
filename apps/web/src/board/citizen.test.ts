@@ -50,14 +50,20 @@ describe("citizen", () => {
     expect(turnLength(entry({ startedAt: "2026-09-29T10:00:00.000Z" }))).toBe("3m");
     expect(endingOf(entry({ exitReason: "timeout" }))).toBe("timed out");
     expect(endingOf(entry({ exitReason: null, outcome: "failed" }))).toBe("failed");
+    expect(endingOf(entry({ exitReason: "stopped" }))).toBe("stopped by you");
     expect(costLabel(entry(), "claude")).toBe("$0.42");
     expect(costLabel(entry({ costUsd: 0 }), "codex")).toBe("unmetered");
   });
 
   it("totals a history", () => {
     expect(
-      historyTotals([entry(), entry({ exitReason: "error", outcome: "failed", costUsd: 0.1 })]),
-    ).toEqual({ turns: 2, failed: 1, costUsd: 0.52 });
+      historyTotals([
+        entry(),
+        entry({ exitReason: "error", outcome: "failed", costUsd: 0.1 }),
+        // A stop is the user's decision, not a failure.
+        entry({ exitReason: "stopped", costUsd: 0 }),
+      ]),
+    ).toEqual({ turns: 3, failed: 1, costUsd: 0.52 });
   });
 
   it("drops a leading heading that repeats the section's title", () => {

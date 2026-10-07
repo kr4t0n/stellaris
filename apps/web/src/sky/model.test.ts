@@ -64,7 +64,14 @@ function task(id: string, extra: Record<string, unknown> = {}): Task {
   };
 }
 
-const idle: SchedulerView = { paused: false, running: [], pending: [], resident: [], signals: [] };
+const idle: SchedulerView = {
+  paused: false,
+  running: [],
+  pending: [],
+  resident: [],
+  signals: [],
+  turns: [],
+};
 
 function snapshot(extra: Partial<SkySnapshot>): SkySnapshot {
   return { members: [], projects: [], scheduler: idle, ...extra };

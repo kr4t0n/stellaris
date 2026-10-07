@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import type { TurnRequest } from "@stellaris/runner-core";
-import { turnStatusJsonSchema } from "@stellaris/shared";
-import { describe, expect, it } from "vitest";
+import { TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
+import { describe, expect, it, vi } from "vitest";
 import type { SpawnAppServer } from "./app-server.js";
 import { CodexBackend } from "./backend.js";
 
@@ -102,5 +102,44 @@ describe("recorded Codex app-server turns", () => {
     expect(result.session).toBe("01a0edff-8584-7ee1-91f8-6e8d4549a794");
     expect(result.status?.summary).toBe("stellaris-fixture");
     expect(result.events.map((e) => e.type)).toEqual(["turn_started", "text", "turn_completed"]);
+  });
+
+  /**
+   * A turn recorded from `codex app-server` 0.156 on 2026-10-07: it ran a 30-second command, the
+   * user's post arrived meanwhile as `turn/steer`, and it came back as a user message carrying the
+   * steer's id once the command finished, before the turn acted on it.
+   */
+  it("replays a steered turn: the post arrives as a user message with the steer's id", async () => {
+    const { spawn, methods } = await replay("app-server-steered-recorded.jsonl");
+    const steerId = "ca202c2d-eb92-4f42-8eb3-78bd25d482bb";
+    const control = new TurnControl();
+    const events: AgentEvent[] = [];
+    const running = new CodexBackend({ spawn }).runTurn(
+      request({}),
+      (event) => events.push(event),
+      control,
+    );
+    await vi.waitFor(async () =>
+      expect(await control.steer({ id: steerId, text: "end your post with PINEAPPLE" })).toBe(true),
+    );
+    const result = await running;
+
+    expect(methods).toEqual([
+      "initialize",
+      "initialized",
+      "thread/start",
+      "turn/start",
+      "turn/steer",
+    ]);
+    expect(result.exitReason).toBe("completed");
+    const steps = events.map((event) =>
+      event.type === "tool_call" || event.type === "tool_result"
+        ? `${event.type}:${event.name}`
+        : event.type,
+    );
+    const steered = steps.indexOf("steered");
+    expect(events[steered]).toEqual({ type: "steered", steer: steerId });
+    expect(steps.slice(steered)).toContain("tool_call:mcp__board__post_message");
+    expect(result.finalText).toContain("PINEAPPLE");
   });
 });

@@ -1,8 +1,8 @@
 import { useContext, useMemo, type ReactNode } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { entityOfHref, remarkEntities } from "../lib/entities.js";
-import { linkTarget, type FileBase } from "../lib/files.js";
+import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib/files.js";
 import { remarkMentions } from "../lib/mentions.js";
 import { EntityLink, useEntities } from "./Entities.js";
 import { FileBaseContext, TaskFileLink, TaskImage } from "./TaskFile.js";
@@ -34,7 +34,7 @@ function BoardLink({ href, children }: { href?: string | undefined; children?: R
   const target = linkTarget(href, base);
   if (target?.kind === "task-file") {
     return (
-      <TaskFileLink taskId={target.taskId} path={target.path}>
+      <TaskFileLink taskId={target.taskId} path={target.path} line={target.line}>
         {children}
       </TaskFileLink>
     );
@@ -71,13 +71,26 @@ function BoardImage({ src, alt }: { src?: string | Blob | undefined; alt?: strin
 
 const COMPONENTS: Components = { a: BoardLink, img: BoardImage };
 
+/** The default refusal of unsafe URLs, which would also refuse `report.md:67` as a scheme. */
+function urlTransform(url: string): string {
+  return isCitedPath(url) ? url : defaultUrlTransform(url);
+}
+
 /**
  * A message body as markdown. Raw HTML is never rendered and unsafe URLs are dropped, so a message
  * cannot run script in the page that holds the board token. Ids of known tasks, proposals, and
  * threads read as links named by their titles. `base` is where a task's file sits on its branch,
- * for relative links and images inside it.
+ * for relative links and images inside it, and `line` a source line to mark as `line-target`.
  */
-export function Markdown({ text, base }: { text: string; base?: FileBase | undefined }) {
+export function Markdown({
+  text,
+  base,
+  line,
+}: {
+  text: string;
+  base?: FileBase | undefined;
+  line?: number | undefined;
+}) {
   const index = useEntities();
   // Entities run before mentions, so a title that holds an @name is not marked as a mention.
   const plugins = useMemo(
@@ -87,6 +100,11 @@ export function Markdown({ text, base }: { text: string; base?: FileBase | undef
       remarkMentions,
     ],
     [index],
+  );
+  const rehypePlugins = useMemo(
+    (): NonNullable<Options["rehypePlugins"]> =>
+      line === undefined ? [] : [[rehypeLineTarget, { line }]],
+    [line],
   );
   // Kept by value, so a caller's fresh object does not re-render every link and image.
   const taskId = base?.taskId;
@@ -98,7 +116,12 @@ export function Markdown({ text, base }: { text: string; base?: FileBase | undef
   return (
     <div className="board-markdown">
       <FileBaseContext value={at}>
-        <ReactMarkdown remarkPlugins={plugins} components={COMPONENTS}>
+        <ReactMarkdown
+          remarkPlugins={plugins}
+          rehypePlugins={rehypePlugins}
+          components={COMPONENTS}
+          urlTransform={urlTransform}
+        >
           {text}
         </ReactMarkdown>
       </FileBaseContext>

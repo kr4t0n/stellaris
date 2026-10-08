@@ -73,3 +73,23 @@ test("a task's view lists the files its branch changed, each opening in its file
   await expect(page).toHaveURL(`/task/${STAGE_TASK}/files`);
   await expect(view.getByRole("link", { name: "docs/" })).toBeVisible();
 });
+
+test("a link that cites a line opens the file at that line, marked", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = page.getByRole("region", { name: "Board content" });
+  const thread = view.getByRole("region", { name: "Thread" });
+  await thread.getByRole("link", { name: "table's citation" }).click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/docs/report.md?line=7`);
+  await expect(view).toContainText("line 7");
+  await expect(view.locator(".line-target")).toHaveText("The raw numbers are in the table.");
+
+  // An address from before cited lines were split off opens the same way.
+  await page.goto(`/task/${STAGE_TASK}/files/docs/report.md%3A3`);
+  await expect(view.locator(".line-target")).toHaveText("Dijkstra wins on sparse graphs.");
+
+  // Text gets its lines numbered, and the cited one marked.
+  await page.goto(`/task/${STAGE_TASK}/files/docs/run.log?line=2`);
+  await expect(view.locator(".line-target")).toHaveText("2second line");
+});

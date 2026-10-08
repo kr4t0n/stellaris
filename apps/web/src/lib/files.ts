@@ -9,7 +9,13 @@ export interface FileBase {
  * place on a machine that nothing on the board can open, or, as null, an address the browser opens.
  */
 export type LinkTarget =
-  | { readonly kind: "task-file"; readonly taskId: string; readonly path: string }
+  | {
+      readonly kind: "task-file";
+      readonly taskId: string;
+      readonly path: string;
+      /** The line the link cites, as `report.md:67` or `#L67` name it. */
+      readonly line?: number;
+    }
   | { readonly kind: "local" };
 
 const LOCAL: LinkTarget = { kind: "local" };
@@ -21,6 +27,28 @@ const LOCAL: LinkTarget = { kind: "local" };
  */
 const TASK_WORKTREE = /(?:^|\/)worktrees\/[^/]+\/\.tasks\/([0-9A-HJKMNP-TV-Z]{26})(?:\/(.*))?$/;
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/** A line cited after a path, as both CLIs write one: `report.md:67`, or with its column. */
+const LINE_SUFFIX = /:(\d+)(?::\d+)?$/;
+/** A line cited the way GitHub links one: `#L67`, or a range from it. */
+const LINE_FRAGMENT = /#L(\d+)/;
+/** A relative path citing a line, `report.md:67`, which a URL parser takes for a scheme. */
+const CITED_RELATIVE = /^[^/?#:]*\.[^/?#:]*:\d+(?::\d+)?(?:[?#].*)?$/;
+
+/**
+ * Whether an address is a relative file with a cited line rather than a URL with a scheme: a
+ * "scheme" with a dot in it and nothing but a line after the colon. Such an address only ever
+ * becomes a board link or text, never a raw `href`.
+ */
+export function isCitedPath(href: string): boolean {
+  return CITED_RELATIVE.test(href);
+}
+
+/** A path with the line a citation names after it split off. */
+export function citedLine(path: string): { path: string; line?: number } {
+  const match = LINE_SUFFIX.exec(path);
+  const line = Number(match?.[1]);
+  return match === null || !(line > 0) ? { path } : { path: path.slice(0, match.index), line };
+}
 
 /** A path's segments with `.` and `..` resolved, or null when `..` climbs out of the root. */
 export function normalizePath(path: string): string | null {
@@ -65,18 +93,26 @@ export function linkTarget(href: string | undefined, base?: FileBase): LinkTarge
   if (href === undefined || href === "") {
     return LOCAL;
   }
-  if (href.startsWith("#") || href.startsWith("//") || SCHEME.test(href)) {
+  if (href.startsWith("#") || href.startsWith("//") || (SCHEME.test(href) && !isCitedPath(href))) {
     return null;
   }
-  const path = decoded(href.replace(/[?#].*$/, ""));
+  const cited = citedLine(decoded(href.replace(/[?#].*$/, "")));
+  const path = cited.path;
+  const fragment = Number(LINE_FRAGMENT.exec(href)?.[1]);
+  const line = cited.line ?? (fragment > 0 ? fragment : undefined);
+  const at = line === undefined ? {} : { line };
   const worktree = TASK_WORKTREE.exec(path);
   if (worktree?.[1] !== undefined) {
     const inside = normalizePath(worktree[2] ?? "");
-    return inside === null ? LOCAL : { kind: "task-file", taskId: worktree[1], path: inside };
+    return inside === null
+      ? LOCAL
+      : { kind: "task-file", taskId: worktree[1], path: inside, ...at };
   }
   if (base !== undefined && !path.startsWith("/")) {
     const inside = normalizePath(`${base.dir}/${path}`);
-    return inside === null ? LOCAL : { kind: "task-file", taskId: base.taskId, path: inside };
+    return inside === null
+      ? LOCAL
+      : { kind: "task-file", taskId: base.taskId, path: inside, ...at };
   }
   return LOCAL;
 }
@@ -193,6 +229,62 @@ export function viewOf(path: string, bytes: Uint8Array): FileView {
     return { kind: "table", rows: parseDelimited(text, extension === "csv" ? "," : "\t") };
   }
   return { kind: "text", text };
+}
+
+/** The part of a hast node the line plugin reads and writes. */
+interface HastNode {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  position?: { start: { line: number }; end: { line: number } };
+  children?: HastNode[];
+}
+
+/** The blocks a cited line can land on; an inline element shares its line with its block. */
+const LINE_BLOCKS = new Set([
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "li",
+  "pre",
+  "blockquote",
+  "table",
+  "tr",
+  "hr",
+]);
+
+/**
+ * A rehype plugin that marks the block holding a markdown file's source line with `line-target`:
+ * the innermost one whose lines include it, else, for a blank line between blocks, the next.
+ */
+export function rehypeLineTarget(options: { line: number }) {
+  return (tree: HastNode): void => {
+    const blocks: Array<{ node: HastNode; start: number; end: number }> = [];
+    const collect = (node: HastNode): void => {
+      if (node.tagName !== undefined && LINE_BLOCKS.has(node.tagName) && node.position) {
+        blocks.push({ node, start: node.position.start.line, end: node.position.end.line });
+      }
+      for (const child of node.children ?? []) {
+        collect(child);
+      }
+    };
+    collect(tree);
+    const { line } = options;
+    const target =
+      blocks.filter((block) => block.start <= line && line <= block.end).at(-1) ??
+      blocks.find((block) => block.start > line);
+    if (target !== undefined) {
+      const classes = target.node.properties?.["className"];
+      target.node.properties = {
+        ...target.node.properties,
+        className: [...(Array.isArray(classes) ? classes : []), "line-target"],
+      };
+    }
+  };
 }
 
 /** What a branch did to a file, in a word and its line counts: "new · +40", "+3 −1", "deleted". */

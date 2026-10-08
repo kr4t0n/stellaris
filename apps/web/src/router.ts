@@ -56,8 +56,12 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({
     getParentRoute: () => rootRoute,
-    // A file or folder on the task's branch, by its path there.
+    // A file or folder on the task's branch, by its path there; `line` is the line a link cited.
     path: "/task/$taskId/files/$",
+    validateSearch: (search: Record<string, unknown>): { line?: number } => {
+      const line = Number(search["line"]);
+      return Number.isInteger(line) && line > 0 ? { line } : {};
+    },
     component: lazyRouteComponent(() => import("./board/TaskFileView.js"), "TaskFileView"),
   }),
   createRoute({

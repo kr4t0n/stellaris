@@ -21,15 +21,17 @@ export function useFileUrl(content: string | null | undefined, type: string): st
   );
 }
 
-/** A link to a file or a folder on a task's branch, with its path on hover. */
+/** A link to a file or a folder on a task's branch, at a line when one is cited, with its path on hover. */
 export function TaskFileLink({
   taskId,
   path,
+  line,
   className = LINK,
   children,
 }: {
   taskId: string;
   path: string;
+  line?: number | undefined;
   className?: string | undefined;
   children: ReactNode;
 }) {
@@ -37,7 +39,8 @@ export function TaskFileLink({
     <Link
       to="/task/$taskId/files/$"
       params={{ taskId, _splat: path }}
-      title={`${path === "" ? "The files" : path} on task/${taskId}`}
+      search={line === undefined ? {} : { line }}
+      title={`${path === "" ? "The files" : path}${line === undefined ? "" : `:${line}`} on task/${taskId}`}
       className={className}
     >
       {children}

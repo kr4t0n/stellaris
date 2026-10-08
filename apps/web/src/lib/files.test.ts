@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   bytesOf,
   changeLabel,
+  citedLine,
   linkTarget,
   normalizePath,
   parseDelimited,
+  rehypeLineTarget,
   sizeLabel,
   textOf,
   viewOf,
@@ -40,6 +42,28 @@ describe("linkTarget", () => {
     });
   });
 
+  it("splits off the line a link cites, as both CLIs and GitHub write one", () => {
+    const at = `/home/tiger/runner-data/worktrees/sage/.tasks/${TASK}`;
+    for (const [href, path, line] of [
+      [`${at}/report.md:67`, "report.md", 67],
+      [`${at}/src/run.py:12:5`, "src/run.py", 12],
+      [`${at}/report.md%3A67`, "report.md", 67],
+      [`${at}/report.md#L40-L52`, "report.md", 40],
+    ] as const) {
+      expect(linkTarget(href)).toEqual({ kind: "task-file", taskId: TASK, path, line });
+    }
+    expect(linkTarget("plot.png:3", { taskId: TASK, dir: "docs" })).toEqual({
+      kind: "task-file",
+      taskId: TASK,
+      path: "docs/plot.png",
+      line: 3,
+    });
+    expect(linkTarget("report.md:67")).toEqual({ kind: "local" });
+    expect(linkTarget("javascript:1")).toBeNull();
+    expect(citedLine("report.md:0")).toEqual({ path: "report.md:0" });
+    expect(citedLine("notes/v2:draft.md")).toEqual({ path: "notes/v2:draft.md" });
+  });
+
   it("resolves a relative link against the file it is written in", () => {
     const base = { taskId: TASK, dir: "docs" };
     expect(linkTarget("evidence/plot.png", base)).toEqual({
@@ -70,6 +94,60 @@ describe("linkTarget", () => {
     for (const href of ["https://arxiv.org/abs/2402.03300", "mailto:a@b.c", "//cdn.x/y", "#top"]) {
       expect(linkTarget(href)).toBeNull();
     }
+  });
+});
+
+/** A hast node as the line plugin sees one. */
+interface Node {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  position?: { start: { line: number }; end: { line: number } };
+  children?: Node[];
+}
+
+function block(tagName: string, start: number, end: number, children: Node[] = []): Node {
+  return {
+    type: "element",
+    tagName,
+    properties: {},
+    position: { start: { line: start }, end: { line: end } },
+    children,
+  };
+}
+
+/** The blocks the plugin marks for a line, as `tag@start`. */
+function marked(line: number): string[] {
+  const root: Node = {
+    type: "root",
+    children: [
+      block("h1", 1, 1),
+      block("p", 3, 4, [{ type: "element", tagName: "strong", properties: {}, children: [] }]),
+      block("ul", 6, 8, [block("li", 6, 6), block("li", 7, 8)]),
+    ],
+  };
+  rehypeLineTarget({ line })(root);
+  const found: string[] = [];
+  const walk = (node: Node): void => {
+    const classes = node.properties?.["className"];
+    if (Array.isArray(classes) && classes.includes("line-target")) {
+      found.push(`${node.tagName}@${node.position?.start.line}`);
+    }
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+describe("rehypeLineTarget", () => {
+  it("marks the innermost block holding a source line, or the next one after a blank line", () => {
+    expect(marked(4)).toEqual(["p@3"]);
+    expect(marked(8)).toEqual(["li@7"]);
+    // Lists are not blocks of their own: the next block after a blank line is the first item.
+    expect(marked(5)).toEqual(["li@6"]);
+    expect(marked(99)).toEqual([]);
   });
 });
 

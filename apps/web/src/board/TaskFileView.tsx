@@ -1,10 +1,18 @@
 import { BRANCH_FILE_LIMIT_BYTES, type BranchFile } from "@stellaris/shared";
-import { Link, useParams } from "@tanstack/react-router";
-import { Fragment, useMemo } from "react";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { Fragment, useEffect, useMemo, useRef } from "react";
 import { Markdown } from "../components/Markdown.js";
 import { TaskFileLink, useFileUrl } from "../components/TaskFile.js";
 import { ApiError } from "../lib/api.js";
-import { bytesOf, imageType, normalizePath, parentOf, sizeLabel, viewOf } from "../lib/files.js";
+import {
+  bytesOf,
+  citedLine,
+  imageType,
+  normalizePath,
+  parentOf,
+  sizeLabel,
+  viewOf,
+} from "../lib/files.js";
 import { ago } from "../lib/format.js";
 import { useNow, useProjects, useTask, useTaskFile } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
@@ -15,6 +23,8 @@ const DOWNLOAD =
   "inline-flex h-7 shrink-0 items-center rounded-md px-3 text-xs text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary";
 /** Rows of a table shown at once; a longer one says how many more it has. */
 const TABLE_ROWS = 1000;
+/** Lines of text numbered one by one; a longer file shows as plain text. */
+const NUMBERED_LINES = 20_000;
 
 /** Where the path sits: the branch's root, then each folder, each a link but the last. */
 function Trail({ taskId, path }: { taskId: string; path: string }) {
@@ -111,14 +121,41 @@ function Table({ rows }: { rows: string[][] }) {
   );
 }
 
+/** Text with its lines numbered and the cited one marked. */
+function TextLines({ text, line }: { text: string; line: number | undefined }) {
+  const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+  const frame =
+    "mt-3 overflow-x-auto rounded-lg bg-surface-0/80 p-3 font-mono text-[12px] leading-relaxed text-fg-secondary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]";
+  if (lines.length > NUMBERED_LINES) {
+    return <pre className={frame}>{text}</pre>;
+  }
+  return (
+    <pre className={frame}>
+      {lines.map((each, at) => (
+        <span key={at} className={`flex ${at + 1 === line ? "line-target" : ""}`}>
+          <span
+            aria-hidden="true"
+            className="w-10 shrink-0 pr-3 text-right text-fg-muted select-none"
+          >
+            {at + 1}
+          </span>
+          <span className="whitespace-pre">{each === "" ? " " : each}</span>
+        </span>
+      ))}
+    </pre>
+  );
+}
+
 function Content({
   taskId,
   file,
   url,
+  line,
 }: {
   taskId: string;
   file: Extract<BranchFile, { kind: "file" }>;
   url: string | null;
+  line: number | undefined;
 }) {
   const view = useMemo(
     () => (file.content === null ? null : viewOf(file.path, bytesOf(file.content))),
@@ -136,7 +173,7 @@ function Content({
   if (view.kind === "markdown") {
     return (
       <div className="mt-3">
-        <Markdown text={view.text} base={{ taskId, dir: parentOf(file.path) }} />
+        <Markdown text={view.text} base={{ taskId, dir: parentOf(file.path) }} line={line} />
       </div>
     );
   }
@@ -149,11 +186,7 @@ function Content({
     return <Table rows={view.rows} />;
   }
   if (view.kind === "text") {
-    return (
-      <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-0/80 p-3 font-mono text-[12px] leading-relaxed text-fg-secondary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]">
-        {view.text}
-      </pre>
-    );
+    return <TextLines text={view.text} line={line} />;
   }
   return (
     <p className="mt-3 text-sm text-fg-secondary">
@@ -162,10 +195,14 @@ function Content({
   );
 }
 
-/** A file or a folder on a task's branch, as the branch's newest commit has it. */
+/** A file or a folder on a task's branch, as the branch's newest commit has it, at a cited line. */
 export function TaskFileView() {
   const { taskId, _splat } = useParams({ from: "/task/$taskId/files/$" });
-  const path = normalizePath(_splat ?? "") ?? "";
+  const search = useSearch({ from: "/task/$taskId/files/$" });
+  // An address made before cited lines were split off still names the line after the path.
+  const cited = citedLine(normalizePath(_splat ?? "") ?? "");
+  const path = cited.path;
+  const line = search.line ?? cited.line;
   const task = useTask(taskId);
   const projects = useProjects();
   const file = useTaskFile(taskId, path);
@@ -176,6 +213,13 @@ export function TaskFileView() {
   const url = useFileUrl(content, imageType(path) ?? "application/octet-stream");
   const name = path === "" ? "Files" : (path.split("/").at(-1) ?? path);
   const title = task.data?.title ?? taskId;
+  const scroller = useRef<HTMLDivElement>(null);
+  // Once the file is shown, bring the cited line into view.
+  useEffect(() => {
+    if (line !== undefined && data !== undefined) {
+      scroller.current?.querySelector(".line-target")?.scrollIntoView({ block: "center" });
+    }
+  }, [line, data]);
 
   let body;
   if (data !== undefined) {
@@ -183,7 +227,7 @@ export function TaskFileView() {
       data.kind === "dir" ? (
         <Folder taskId={taskId} file={data} />
       ) : (
-        <Content taskId={taskId} file={data} url={url} />
+        <Content taskId={taskId} file={data} url={url} line={line} />
       );
   } else if (file.error instanceof ApiError && file.error.status === 404) {
     body = (
@@ -224,7 +268,7 @@ export function TaskFileView() {
         subtitle={
           data === undefined
             ? title
-            : `${title} · committed by ${data.commit.author} ${ago(data.commit.at, now)} · ${data.commit.id.slice(0, 7)}`
+            : `${title}${line === undefined ? "" : ` · line ${line}`} · committed by ${data.commit.author} ${ago(data.commit.at, now)} · ${data.commit.id.slice(0, 7)}`
         }
         trailing={
           url === null ? null : (
@@ -234,7 +278,7 @@ export function TaskFileView() {
           )
         }
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-4">
         <Trail taskId={taskId} path={path} />
         {body}
       </div>

@@ -28,6 +28,14 @@ describe("Markdown", () => {
     expect(html).toContain('href="https://x.y"');
   });
 
+  it("marks the block a cited source line falls in", () => {
+    const html = renderToStaticMarkup(
+      <Markdown text={"# Report\n\nFirst finding.\n\n- one\n- two, line six\n"} line={6} />,
+    );
+    expect(html).toContain('<li class="line-target">two, line six</li>');
+    expect(html.match(/line-target/g)).toHaveLength(1);
+  });
+
   it("never renders raw HTML or script URLs from a message", () => {
     const html = renderToStaticMarkup(
       <Markdown text={'<script>alert(1)</script> <img src=x onerror="alert(1)">'} />,
@@ -35,6 +43,8 @@ describe("Markdown", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;script&gt;");
+    const cited = renderToStaticMarkup(<Markdown text="[a](report.md:67) [b](javascript:1)" />);
+    expect(cited).not.toContain("href");
     const link = renderToStaticMarkup(<Markdown text="[x](javascript:alert(1))" />);
     expect(link).not.toContain('href="javascript:');
   });

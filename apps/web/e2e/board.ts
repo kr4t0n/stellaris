@@ -191,7 +191,7 @@ const HANDOVER = {
   step: { action: "advanced", stage: "s1", to: "s2" },
   ts: CREATED,
   mentions: [],
-  body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md).`,
+  body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md). The [table's citation](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md:7) points at the numbers.`,
 };
 
 /** The branch's newest commit, as the task's runner reports it with every read. */
@@ -266,6 +266,7 @@ const TASK_FILES: Readonly<Record<string, unknown>> = {
     "# Shortest paths\n\nDijkstra wins on sparse graphs.\n\n![Runtime by graph size](plot.png)\n\nThe raw numbers are in [the table](../results.csv).\n",
   ),
   "docs/plot.png": taskFile("docs/plot.png", PLOT_PNG),
+  "docs/run.log": taskFile("docs/run.log", "first line\nsecond line\nthird line\n"),
   "results.csv": taskFile("results.csv", 'method,runtime\nDijkstra,1.2\n"A*, tuned",0.9\n'),
 };
 

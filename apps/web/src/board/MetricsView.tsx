@@ -5,7 +5,7 @@ import { EntityLink } from "../components/Entities.js";
 import { ApiError } from "../lib/api.js";
 import { ago, span } from "../lib/format.js";
 import { useMetrics, useNow } from "../lib/session.js";
-import { displayName } from "./Avatar.js";
+import { useDisplayName } from "./Avatar.js";
 import { Section } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
@@ -115,6 +115,7 @@ function Table({
 }
 
 function Citizen({ name }: { name: string }) {
+  const displayName = useDisplayName();
   return name === "user" ? (
     <span>{displayName(name)}</span>
   ) : (

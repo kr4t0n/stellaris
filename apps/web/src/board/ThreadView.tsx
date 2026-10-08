@@ -8,7 +8,7 @@ import { ago } from "../lib/format.js";
 import { ApiError } from "../lib/api.js";
 import { markSeen } from "../lib/seen.js";
 import { useMembers, useNow, useSession, useTask } from "../lib/session.js";
-import { displayName } from "./Avatar.js";
+import { useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
@@ -27,6 +27,7 @@ function ThreadStream({ id }: { id: string }) {
   const detail = useQuery({ queryKey: ["thread", id], queryFn: () => api.thread(id) });
   const members = useMembers();
   const now = useNow(30_000);
+  const displayName = useDisplayName();
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);

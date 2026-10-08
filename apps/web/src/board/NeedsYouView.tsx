@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { LinkedText } from "../components/Entities.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import { useNow, useProjects } from "../lib/session.js";
-import { displayName } from "./Avatar.js";
+import { useDisplayName } from "./Avatar.js";
 import { proposalTitle, type Attention } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { useNeedsYou } from "./useNeedsYou.js";
@@ -30,6 +30,7 @@ export function NeedsYouView() {
   const items = useNeedsYou();
   const projects = useProjects();
   const now = useNow(30_000);
+  const displayName = useDisplayName();
   const projectName = (slug: string): string =>
     projects.data?.find((project) => project.slug === slug)?.name ?? slug;
 

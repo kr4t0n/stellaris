@@ -1,5 +1,17 @@
 import { USER_NAME, type Member } from "@stellaris/shared";
+import { createContext, useContext } from "react";
 import { CliIcon } from "../components/CliIcon.js";
+import type { SignIn } from "../lib/api.js";
+
+/** The GitHub account this browser signed in with, which the user's posts and names show. */
+export const SignInContext = createContext<SignIn | undefined>(undefined);
+
+/** A GitHub avatar's address at `px` pixels, so the browser fetches the size it shows. */
+function avatarAt(url: string, px: number): string {
+  const sized = new URL(url);
+  sized.searchParams.set(sized.hostname === "github.com" ? "size" : "s", String(px));
+  return sized.href;
+}
 
 /** Who wrote something: a citizen's CLI mark, the user, or the board itself. */
 export function Avatar({
@@ -9,12 +21,25 @@ export function Avatar({
   name: string;
   members: readonly Member[] | undefined;
 }) {
+  const signIn = useContext(SignInContext);
   const cli = members?.find((member) => member.name === name)?.cli ?? null;
   if (cli !== null) {
     return (
       <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-surface-2/80">
         <CliIcon cli={cli} size={16} />
       </span>
+    );
+  }
+  if (name === USER_NAME && signIn !== undefined) {
+    return (
+      <img
+        src={avatarAt(signIn.avatarUrl, 56)}
+        alt=""
+        width={28}
+        height={28}
+        referrerPolicy="no-referrer"
+        className="size-7 shrink-0 rounded-lg bg-surface-2/80 object-cover"
+      />
     );
   }
   if (name === USER_NAME) {
@@ -51,6 +76,13 @@ export function Citizen({
   );
 }
 
-export function displayName(name: string): string {
-  return name === USER_NAME ? "you" : name;
+/** How the board names an author: the user by the GitHub account signed in, else as "you". */
+export function displayName(name: string, signIn?: SignIn): string {
+  return name === USER_NAME ? (signIn?.login ?? "you") : name;
+}
+
+/** `displayName` for this browser's sign-in. */
+export function useDisplayName(): (name: string) => string {
+  const signIn = useContext(SignInContext);
+  return (name) => displayName(name, signIn);
 }

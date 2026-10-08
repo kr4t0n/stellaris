@@ -15,7 +15,7 @@ import {
   useTask,
   useThreads,
 } from "../lib/session.js";
-import { Citizen, displayName } from "./Avatar.js";
+import { Citizen, useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { SubjectThread } from "./SubjectThread.js";
@@ -130,6 +130,7 @@ export function TaskView() {
   const projects = useProjects();
   const members = useMembers();
   const now = useNow(30_000);
+  const displayName = useDisplayName();
 
   if (task.data === undefined) {
     return (

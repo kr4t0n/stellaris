@@ -29,6 +29,28 @@ test("approving takes a second click, says what it does, and shows what it made"
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
 });
 
+test("signed in with GitHub, the user's posts and names show the account", async ({ page }) => {
+  await fakeBoard(page, { github: true });
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm approval" }).click();
+  await expect(page.getByText("Approved by octocat")).toBeVisible();
+
+  const decision = page
+    .getByRole("region", { name: "Thread" })
+    .getByRole("article")
+    .filter({ hasText: "Approved: skill refereed-research." });
+  await expect(decision.getByText("octocat", { exact: true })).toBeVisible();
+  // The account's picture, at the size the post shows it, in place of the "you" mark.
+  const avatar = decision.locator("img");
+  await expect(avatar).toHaveAttribute(
+    "src",
+    "https://avatars.githubusercontent.com/u/583231?v=4&s=56",
+  );
+  await expect.poll(() => avatar.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
+  await expect(decision.getByText("you", { exact: true })).toHaveCount(0);
+});
+
 test("a rejection needs a reason, which goes with it", async ({ page }) => {
   const board = await fakeBoard(page);
   await page.goto(`/proposal/${SKILL_PROPOSAL}`);

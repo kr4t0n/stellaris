@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ago } from "../lib/format.js";
 import { useNow, useProposals } from "../lib/session.js";
-import { displayName } from "./Avatar.js";
+import { useDisplayName } from "./Avatar.js";
 import { groupProposals, PROPOSAL_GROUPS, proposalTitle } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
@@ -30,6 +30,7 @@ export function StatusChip({ status }: { status: ProposalStatus }) {
 }
 
 function ProposalRow({ proposal, now }: { proposal: Proposal; now: number }) {
+  const displayName = useDisplayName();
   const decided =
     proposal.decidedBy === undefined || proposal.decidedAt === undefined
       ? ""

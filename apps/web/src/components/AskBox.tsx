@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { askState, asksOf, hasUnseenReply, type AskState } from "../board/asks.js";
-import { displayName } from "../board/Avatar.js";
+import { useDisplayName } from "../board/Avatar.js";
 import { Composer } from "../board/Composer.js";
 import { listed } from "../board/compose.js";
 import { pairsOf, type ThreadSummary } from "../lib/api.js";
@@ -12,7 +12,11 @@ import { ISLAND_SURFACE } from "./Island.js";
 
 const SHOWN = 5;
 
-function describe(state: AskState, ask: ThreadSummary): { text: string; tone: string } {
+function describe(
+  state: AskState,
+  ask: ThreadSummary,
+  displayName: (name: string) => string,
+): { text: string; tone: string } {
   switch (state.kind) {
     case "answering":
       return {
@@ -51,6 +55,7 @@ export function AskBox({
   const scheduler = useScheduler();
   const seen = useSeen();
   const now = useNow(30_000);
+  const displayName = useDisplayName();
   const panel = useRef<HTMLElement>(null);
   const asks = asksOf(threads.data ?? []).slice(0, SHOWN);
   const running = pairsOf(scheduler.data?.running ?? []);
@@ -90,7 +95,7 @@ export function AskBox({
           className={`${ISLAND_SURFACE} max-h-[40vh] overflow-y-auto py-1`}
         >
           {asks.map((ask) => {
-            const state = describe(askState(ask, running, pending), ask);
+            const state = describe(askState(ask, running, pending), ask, displayName);
             const fresh = hasUnseenReply(ask, seen);
             return (
               <li key={ask.id}>
@@ -139,6 +144,7 @@ export function AskHint({
   unread: readonly ThreadSummary[];
   onOpen: () => void;
 }) {
+  const displayName = useDisplayName();
   const [first] = unread;
   const news =
     first === undefined

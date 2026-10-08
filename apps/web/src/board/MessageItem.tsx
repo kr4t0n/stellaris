@@ -2,7 +2,7 @@ import type { Member, Message, Task } from "@stellaris/shared";
 import { useState } from "react";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
-import { Avatar, displayName } from "./Avatar.js";
+import { Avatar, useDisplayName } from "./Avatar.js";
 import { stepLabel } from "./tasks.js";
 
 /** Longer bodies start folded, so one report does not push a whole channel off the island. */
@@ -22,6 +22,7 @@ export function MessageItem({
 }) {
   const long = message.body.length > FOLD_AT;
   const [open, setOpen] = useState(false);
+  const displayName = useDisplayName();
   const fromBoard = message.author === "board";
   const step = message.step === undefined ? null : stepLabel(message.step, task);
   return (

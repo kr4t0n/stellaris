@@ -7,6 +7,7 @@ import { Navigator, type GovernanceView } from "./board/Navigator.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
+import { SignInContext } from "./board/Avatar.js";
 import { EntityContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
@@ -307,130 +308,133 @@ export function Playground() {
   return (
     <LiveContext value={live}>
       <EntityContext value={entities}>
-        <main className="relative h-full overflow-hidden">
-          <Sky
-            model={model}
-            paused={scheduler.data?.paused ?? false}
-            hovered={hovered}
-            onHover={setHovered}
-            insets={insets}
-            focus={focus}
-            onSelectAnchor={openProject}
-            onSelectStar={openStar}
-            onSelectTask={openTask}
-            live={live}
-            card={
-              mark !== undefined ? (
-                <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
-              ) : star === undefined || member === undefined ? null : (
-                <CitizenCard member={member} star={star} place={place} now={now} />
-              )
-            }
-          />
-          <Hud
-            society={society.data?.name}
-            citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
-            citizensOpen={pathname === "/citizens"}
-            onToggleCitizens={() =>
-              void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
-            }
-            runnersOpen={pathname === "/runners"}
-            onToggleRunners={() =>
-              void navigate(pathname === "/runners" ? { to: "/" } : { to: "/runners" })
-            }
-            enrolling={enrolling}
-            attention={attention}
-            onOpenAttention={() => void navigate({ to: "/needs-you" })}
-            paused={scheduler.data?.paused ?? false}
-            onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
-            pauseBusy={pause.isPending}
-            boardOpen={boardOpen}
-            onToggleBoard={() =>
-              void navigate(boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } })
-            }
-            logsOpen={logsOpen}
-            metricsOpen={pathname === "/metrics"}
-            onToggleMetrics={() =>
-              void navigate(pathname === "/metrics" ? { to: "/" } : { to: "/metrics" })
-            }
-            onToggleLogs={() => setLogsOpen(!logsOpen)}
-            signIn={me.data?.signIn}
-            onSignOut={signOut}
-          />
-          {boardOpen ? (
-            <Navigator
-              activeChannel={activeChannel}
-              activeTasks={activeTasks}
-              activeCitizen={activeCitizen}
-              activeScope={activeScope}
-              activeGovernance={activeGovernance}
-              activeOverview={activeOverview}
+        <SignInContext value={me.data?.signIn}>
+          <main className="relative h-full overflow-hidden">
+            <Sky
+              model={model}
+              paused={scheduler.data?.paused ?? false}
+              hovered={hovered}
+              onHover={setHovered}
+              insets={insets}
+              focus={focus}
+              onSelectAnchor={openProject}
+              onSelectStar={openStar}
+              onSelectTask={openTask}
+              live={live}
+              card={
+                mark !== undefined ? (
+                  <TaskCard mark={mark} project={placeName(mark.project)} members={members.data} />
+                ) : star === undefined || member === undefined ? null : (
+                  <CitizenCard member={member} star={star} place={place} now={now} />
+                )
+              }
             />
-          ) : null}
-          {boardOpen ? (
-            <Island
-              label="Board content"
-              className="top-[72px] right-4 bottom-4"
-              style={{ width: contentWidth }}
-            >
-              <ResizeHandle
-                width={contentWidth}
-                min={CONTENT_MIN}
-                max={widestContentWidth(width)}
-                onResize={resizeContent}
-                onToggle={toggleContentWidth}
+            <Hud
+              society={society.data?.name}
+              citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
+              citizensOpen={pathname === "/citizens"}
+              onToggleCitizens={() =>
+                void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
+              }
+              runnersOpen={pathname === "/runners"}
+              onToggleRunners={() =>
+                void navigate(pathname === "/runners" ? { to: "/" } : { to: "/runners" })
+              }
+              enrolling={enrolling}
+              attention={attention}
+              onOpenAttention={() => void navigate({ to: "/needs-you" })}
+              paused={scheduler.data?.paused ?? false}
+              onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
+              pauseBusy={pause.isPending}
+              boardOpen={boardOpen}
+              onToggleBoard={() =>
+                void navigate(
+                  boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } },
+                )
+              }
+              logsOpen={logsOpen}
+              metricsOpen={pathname === "/metrics"}
+              onToggleMetrics={() =>
+                void navigate(pathname === "/metrics" ? { to: "/" } : { to: "/metrics" })
+              }
+              onToggleLogs={() => setLogsOpen(!logsOpen)}
+              onSignOut={signOut}
+            />
+            {boardOpen ? (
+              <Navigator
+                activeChannel={activeChannel}
+                activeTasks={activeTasks}
+                activeCitizen={activeCitizen}
+                activeScope={activeScope}
+                activeGovernance={activeGovernance}
+                activeOverview={activeOverview}
               />
-              <Outlet />
-            </Island>
-          ) : null}
-          {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
-          {askOpen ? (
-            <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
-          ) : (
-            <div
-              className="pointer-events-none absolute bottom-5 flex justify-center px-16"
-              style={{ left: insets.left, right: insets.right }}
-            >
-              <AskHint unread={unread} onOpen={() => setAskAt(pathname)} />
-            </div>
-          )}
-          {model.stars.length === 0 && !boardOpen ? (
-            <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
-              No citizens yet. Ask the concierge for one, or add one with{" "}
-              <code className="font-mono text-fg-secondary">stellaris agent add</code>.
-            </p>
-          ) : null}
-          {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}
-          <ul className="sr-only" aria-label="Tasks in play">
-            {model.tasks.map((candidate) => (
-              <li key={candidate.id}>
-                <button
-                  type="button"
-                  onFocus={() => setHovered(`task:${candidate.id}`)}
-                  onBlur={() => setHovered(null)}
-                  onClick={() => openTask(candidate.id)}
-                >
-                  {markLabel(candidate, placeName(candidate.project))}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <ul className="sr-only" aria-label="Citizens">
-            {model.stars.map((candidate) => (
-              <li key={candidate.id}>
-                <button
-                  type="button"
-                  onFocus={() => setHovered(candidate.id)}
-                  onBlur={() => setHovered(null)}
-                  onClick={() => openStar(candidate.id)}
-                >
-                  {candidate.name}, {candidate.state}
-                  {candidate.state === "working" ? ` at ${placeName(candidate.anchor)}` : ""}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </main>
+            ) : null}
+            {boardOpen ? (
+              <Island
+                label="Board content"
+                className="top-[72px] right-4 bottom-4"
+                style={{ width: contentWidth }}
+              >
+                <ResizeHandle
+                  width={contentWidth}
+                  min={CONTENT_MIN}
+                  max={widestContentWidth(width)}
+                  onResize={resizeContent}
+                  onToggle={toggleContentWidth}
+                />
+                <Outlet />
+              </Island>
+            ) : null}
+            {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
+            {askOpen ? (
+              <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
+            ) : (
+              <div
+                className="pointer-events-none absolute bottom-5 flex justify-center px-16"
+                style={{ left: insets.left, right: insets.right }}
+              >
+                <AskHint unread={unread} onOpen={() => setAskAt(pathname)} />
+              </div>
+            )}
+            {model.stars.length === 0 && !boardOpen ? (
+              <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
+                No citizens yet. Ask the concierge for one, or add one with{" "}
+                <code className="font-mono text-fg-secondary">stellaris agent add</code>.
+              </p>
+            ) : null}
+            {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}
+            <ul className="sr-only" aria-label="Tasks in play">
+              {model.tasks.map((candidate) => (
+                <li key={candidate.id}>
+                  <button
+                    type="button"
+                    onFocus={() => setHovered(`task:${candidate.id}`)}
+                    onBlur={() => setHovered(null)}
+                    onClick={() => openTask(candidate.id)}
+                  >
+                    {markLabel(candidate, placeName(candidate.project))}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <ul className="sr-only" aria-label="Citizens">
+              {model.stars.map((candidate) => (
+                <li key={candidate.id}>
+                  <button
+                    type="button"
+                    onFocus={() => setHovered(candidate.id)}
+                    onBlur={() => setHovered(null)}
+                    onClick={() => openStar(candidate.id)}
+                  >
+                    {candidate.name}, {candidate.state}
+                    {candidate.state === "working" ? ` at ${placeName(candidate.anchor)}` : ""}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </main>
+        </SignInContext>
       </EntityContext>
     </LiveContext>
   );

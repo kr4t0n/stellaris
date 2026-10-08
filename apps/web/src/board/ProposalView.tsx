@@ -13,7 +13,7 @@ import {
   useSkills,
   useThreads,
 } from "../lib/session.js";
-import { displayName } from "./Avatar.js";
+import { useDisplayName } from "./Avatar.js";
 import { DecisionBar } from "./DecisionBar.js";
 import { consequenceOf, decidersOf, proposalTitle, waitingOnYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
@@ -111,6 +111,7 @@ export function ProposalView() {
   const skills = useSkills();
   const threads = useThreads();
   const now = useNow(30_000);
+  const displayName = useDisplayName();
 
   if (proposal.data === undefined) {
     return (

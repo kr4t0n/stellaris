@@ -11,10 +11,22 @@ import { EntityContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
 import { Island } from "./components/Island.js";
 import { LogsIsland } from "./components/LogsIsland.js";
+import { ResizeHandle } from "./components/ResizeHandle.js";
 import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
 import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
+import {
+  CONTENT_MIN,
+  ISLAND_MARGIN,
+  NAVIGATOR_WIDTH,
+  contentWidth as widthFor,
+  readChosenWidth,
+  saveChosenWidth,
+  toggledWidth,
+  widestContentWidth,
+  type ChosenWidth,
+} from "./lib/layout.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
 import { useSeen } from "./lib/seen.js";
 import {
@@ -34,8 +46,6 @@ import { markLabel, skyModel } from "./sky/model.js";
 import { Sky, type Insets } from "./sky/Sky.js";
 
 const NO_INSETS: Insets = { left: 0, right: 0 };
-const ISLAND_MARGIN = 16;
-const NAVIGATOR_WIDTH = 256;
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth);
@@ -105,7 +115,22 @@ export function Playground() {
   const width = useWindowWidth();
 
   const boardOpen = pathname !== "/";
-  const contentWidth = Math.round(Math.min(680, Math.max(420, width * 0.4)));
+  // The content island's width is the user's to drag, kept per browser; the sky centers in the rest.
+  const [chosenWidth, setChosenWidth] = useState<ChosenWidth>(readChosenWidth);
+  const contentWidth = widthFor(width, chosenWidth);
+  const resizeContent = (next: number, done: boolean): void => {
+    const held = widthFor(width, next);
+    const chosen = held >= widestContentWidth(width) ? "widest" : held;
+    setChosenWidth(chosen);
+    if (done) {
+      saveChosenWidth(chosen);
+    }
+  };
+  const toggleContentWidth = (): void => {
+    const chosen = toggledWidth(width, chosenWidth);
+    setChosenWidth(chosen);
+    saveChosenWidth(chosen);
+  };
   const insets = useMemo<Insets>(
     () =>
       boardOpen
@@ -340,6 +365,13 @@ export function Playground() {
               className="top-[72px] right-4 bottom-4"
               style={{ width: contentWidth }}
             >
+              <ResizeHandle
+                width={contentWidth}
+                min={CONTENT_MIN}
+                max={widestContentWidth(width)}
+                onResize={resizeContent}
+                onToggle={toggleContentWidth}
+              />
               <Outlet />
             </Island>
           ) : null}

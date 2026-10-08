@@ -1,14 +1,22 @@
-import type { PendingEnrollment, Project, Runner } from "@stellaris/shared";
+import type { PendingEnrollment, Runner } from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
+import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
 import { useEnrollments, useNow, useProjects, useRunners, useSession } from "../lib/session.js";
-import { Section } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { sameCode, suggestRunnerName } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
+
+/** Connected runners first, each group by name. */
+function byStatus(a: Runner, b: Runner): number {
+  return (
+    Number(a.status !== "connected") - Number(b.status !== "connected") ||
+    a.name.localeCompare(b.name)
+  );
+}
 
 function offers(clis: readonly string[], capabilities: readonly string[]): string {
   return [clis.length === 0 ? "no CLI" : clis.join(", "), ...capabilities].join(" · ");
@@ -88,46 +96,11 @@ function WaitingRunner({
   );
 }
 
-function RunnerRow({
-  runner,
-  projects,
-  now,
-}: {
-  runner: Runner;
-  projects: Project[];
-  now: number;
-}) {
-  const living = projects
-    .filter((project) => project.runner === runner.name && project.archived === undefined)
-    .map((project) => project.slug);
-  return (
-    <li className="py-1.5">
-      <p className="flex items-baseline gap-2 text-sm">
-        <span
-          aria-hidden="true"
-          className={runner.status === "connected" ? "text-emerald-400" : "text-fg-muted"}
-        >
-          ●
-        </span>
-        <span className="text-fg-primary">{runner.name}</span>
-        <span className="min-w-0 flex-1 truncate text-meta">
-          {runner.status === "connected"
-            ? "connected"
-            : `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`}{" "}
-          · {runner.os} · {offers(runner.clis, runner.capabilities)}
-        </span>
-      </p>
-      {living.length === 0 ? null : (
-        <p className="ml-5 truncate text-meta">projects: {living.join(", ")}</p>
-      )}
-    </li>
-  );
-}
-
 /**
- * The society's runners and those asking to join. A runner started without a token asks the board
- * to enroll it and prints a link here with its code; approving it under a name registers it, and
- * the runner picks up its token on its next poll.
+ * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS,
+ * capabilities, the projects living on it, and whether it is connected; above them, those asking to
+ * join. A runner started without a token asks the board to enroll it and prints a link here with its
+ * code; approving it under a name registers it, and the runner picks up its token on its next poll.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
@@ -137,65 +110,105 @@ export function RunnersView() {
   const now = useNow(30_000);
   const waiting = enrollments.data ?? [];
   const taken = (runners.data ?? []).map((runner) => runner.name);
-  const connected = (runners.data ?? []).filter((runner) => runner.status === "connected").length;
+  const registered = (runners.data ?? []).toSorted(byStatus);
+  const connected = registered.filter((runner) => runner.status === "connected").length;
+  const away = registered.length - connected;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
     followed === undefined ? waiting : [followed, ...waiting.filter((each) => each !== followed)];
+  const living = (runner: Runner): string[] =>
+    (projects.data ?? [])
+      .filter((project) => project.runner === runner.name && project.archived === undefined)
+      .map((project) => project.slug);
 
   return (
     <>
       <PaneHeader
         title="Runners"
-        subtitle={`${connected} connected · ${waiting.length === 0 ? "none" : waiting.length} waiting for approval`}
+        subtitle={[
+          `${connected} connected`,
+          ...(away === 0 ? [] : [`${away} away`]),
+          ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
+        ].join(" · ")}
       />
-      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
-        <Section title="Waiting for approval">
-          {code !== undefined && enrollments.data !== undefined && followed === undefined ? (
-            <output className="mb-2 block text-meta">
-              No runner waits with the code {code}. It may have been approved, denied, or expired; a
-              runner whose code expired asks again with a new one.
-            </output>
-          ) : null}
-          {enrollments.data === undefined ? (
-            <p className="text-meta">Reading the runners that wait…</p>
-          ) : waiting.length === 0 ? (
-            <p className="text-meta">
-              None. A runner started with STELLARIS_SERVER_URL set to this board and no token prints
-              a code to approve here.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {ordered.map((enrollment) => (
-                <WaitingRunner
-                  key={enrollment.userCode}
-                  enrollment={enrollment}
-                  taken={taken}
-                  followed={enrollment === followed}
-                  now={now}
-                />
-              ))}
-            </ul>
-          )}
-        </Section>
-        <Section title="Registered">
-          {runners.data === undefined ? (
-            <PaneNote>Reading the runners…</PaneNote>
-          ) : runners.data.length === 0 ? (
-            <p className="text-meta">No runners yet.</p>
-          ) : (
-            <ul>
-              {runners.data.map((runner) => (
-                <RunnerRow
-                  key={runner.name}
-                  runner={runner}
-                  projects={projects.data ?? []}
-                  now={now}
-                />
-              ))}
-            </ul>
-          )}
-        </Section>
+      <div className="flex-1 overflow-y-auto px-2 py-2">
+        {code !== undefined && enrollments.data !== undefined && followed === undefined ? (
+          <output className="block px-2 pb-2 text-meta">
+            No runner waits with the code {code}. It may have been approved, denied, or expired; a
+            runner whose code expired asks again with a new one.
+          </output>
+        ) : null}
+        {ordered.length === 0 ? null : (
+          <ul aria-label="Waiting for approval" className="space-y-2 px-2 pb-3">
+            {ordered.map((enrollment) => (
+              <WaitingRunner
+                key={enrollment.userCode}
+                enrollment={enrollment}
+                taken={taken}
+                followed={enrollment === followed}
+                now={now}
+              />
+            ))}
+          </ul>
+        )}
+        {runners.data === undefined ? (
+          <PaneNote>Reading the runners…</PaneNote>
+        ) : registered.length === 0 ? (
+          <p className="px-2 py-2 text-meta">No runners yet.</p>
+        ) : null}
+        {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
+        <ul
+          aria-label="Registered"
+          className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
+        >
+          {registered.map((runner) => {
+            const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
+            const places = living(runner);
+            const lives = places.length === 0 ? "no projects" : places.join(", ");
+            const state =
+              runner.status === "connected"
+                ? { label: "connected", detail: "connected", tone: "text-fg-muted" }
+                : {
+                    label: "away",
+                    detail: `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`,
+                    tone: "text-amber-300",
+                  };
+            return (
+              <li
+                key={runner.name}
+                className="col-span-full grid grid-cols-subgrid items-center rounded-lg px-2 py-1.5 text-sm"
+              >
+                <span className="flex items-center gap-1" title={clis}>
+                  {runner.clis.map((cli) => (
+                    <CliIcon key={cli} cli={cli} size={13} />
+                  ))}
+                  <span className="sr-only">{clis}</span>
+                </span>
+                <span className="text-fg-primary">{runner.name}</span>
+                <span className="text-fg-secondary">{runner.os}</span>
+                <span
+                  className="truncate text-xs text-fg-muted"
+                  title={runner.capabilities.join(", ")}
+                >
+                  {runner.capabilities.join(", ")}
+                </span>
+                <span className="truncate text-xs text-fg-muted" title={lives}>
+                  {lives}
+                </span>
+                <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
+                  {state.label}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {enrollments.data === undefined || waiting.length > 0 ? null : (
+          <p className="mt-2 border-t border-line px-2 pt-2 text-meta">
+            A runner started with STELLARIS_SERVER_URL set to this board and no token asks to join
+            here, with a code to approve.
+          </p>
+        )}
       </div>
     </>
   );

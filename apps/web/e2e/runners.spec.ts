@@ -33,7 +33,7 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await form.getByLabel("Runner name").fill("studio-mac");
   await form.getByRole("button", { name: "Approve" }).click();
 
-  await expect(page.getByText("None. A runner started")).toBeVisible();
+  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
   expect(board.writes).toEqual([
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
@@ -48,6 +48,14 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   await runners.click();
   await expect(page).toHaveURL("/runners");
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
+  // One row each, in columns, connected first; a runner away says so in words, not a dot.
+  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  await expect(rows).toHaveText([
+    /^claude, codex\s*pod\s*linux\s*no projects\s*connected$/,
+    /^claude\s*laptop\s*darwin\s*gpu\s*lab\s*away$/,
+  ]);
+  await expect(rows.nth(1).getByText("away")).toHaveClass(/text-amber-300/);
+  await expect(page.getByText("●")).toHaveCount(0);
   await expect(runners).toHaveAttribute("aria-pressed", "true");
   await runners.click();
   await expect(page).toHaveURL("/");
@@ -62,7 +70,7 @@ test("a code nobody waits with says so, and a denial sends no name", async ({ pa
     .getByRole("form", { name: "Approve Studio.local" })
     .getByRole("button", { name: "Deny" })
     .click();
-  await expect(page.getByText("None. A runner started")).toBeVisible();
+  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
   expect(board.writes).toEqual([{ path: `/api/enrollments/${ENROLLING_CODE}/deny`, body: {} }]);
 });
 

@@ -334,7 +334,7 @@ describe("Scheduler", () => {
     });
   });
 
-  it("drops a stage wake gone stale during the agent's own turn, unless another wake merged into it", async () => {
+  it("drops a stage wake gone stale during the agent's own turn as soon as it does, unless another wake merged into it", async () => {
     const { board, runner, scheduler } = await setup();
     const task = await board.createTask(USER, {
       project: "demo",
@@ -356,10 +356,8 @@ describe("Scheduler", () => {
     await board.claimTask(ENG, { task_id: task.id });
     await board.advanceTask(ENG, { task_id: task.id });
     await scheduler.tick();
-    expect(scheduler.pendingPairs).toEqual([
-      sessionKey("eng-1", "demo", task.id),
-      sessionKey("rev-1", "demo", task.id),
-    ]);
+    // Taken and finished in the same turn: the wake for "polish" leaves the queue at once.
+    expect(scheduler.pendingPairs).toEqual([sessionKey("rev-1", "demo", task.id)]);
     runner.hold = false;
     runner.releaseHeld();
     await scheduler.drain();
@@ -397,6 +395,103 @@ describe("Scheduler", () => {
       ["eng-1", "mention"],
       ["eng-1", "stage"],
     ]);
+  });
+
+  it("drops a queued stage wake the moment its stage is taken in the turn it waits behind", async () => {
+    const { board, runner, scheduler } = await setup();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    // eng-1 is already in a turn in the task's conversation when its stage comes up, as when a
+    // replan makes a new stage current during the turn a mention started.
+    runner.hold = true;
+    await board.postMessage(USER, { thread_id: task.id, body: "@eng-1 go" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual([sessionKey("eng-1", "demo", task.id)]);
+    await board.planTask(USER, {
+      task_id: task.id,
+      stages: [
+        { name: "survey", agent: "eng-1" },
+        { id: "s1", name: "build", agent: "eng-1" },
+      ],
+    });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", task.id)]);
+
+    // It claims the new stage there, so the wake behind its turn would never run.
+    await board.claimTask({ ...ENG, scope: "demo", thread: task.id }, { task_id: task.id });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).toEqual(["mention"]);
+  });
+
+  it("drops the queued wakes of everyone else a stage was open to once one takes it, and keeps the holder's", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    runner.dispatches.length = 0;
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([
+      sessionKey("eng-1", "demo", task.id),
+      sessionKey("eng-2", "demo", task.id),
+    ]);
+    // eng-2 takes it from outside the task's conversation: its wake there is now a holder's.
+    await board.claimTask({ name: "eng-2", role: "engineer" }, { task_id: task.id });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-2", "demo", task.id)]);
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-2", "stage"]]);
+  });
+
+  it("drops a queued stage wake when the plan hands the stage to someone else or the task ends", async () => {
+    const { board, scheduler } = await setup();
+    const first = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const second = await board.createTask(USER, {
+      project: "demo",
+      title: "u",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([
+      sessionKey("eng-1", "demo", first.id),
+      sessionKey("eng-1", "demo", second.id),
+    ]);
+    await board.planTask(USER, {
+      task_id: first.id,
+      stages: [{ id: "s1", name: "build", agent: "rev-1" }],
+    });
+    await board.updateTask(USER, { task_id: second.id, status: "abandoned" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).not.toContain(sessionKey("eng-1", "demo", first.id));
+    expect(scheduler.pendingPairs).not.toContain(sessionKey("eng-1", "demo", second.id));
   });
 
   it("steers a mention into the turn running in its conversation, and drops it once read there", async () => {

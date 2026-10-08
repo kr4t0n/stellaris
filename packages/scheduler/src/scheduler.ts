@@ -450,13 +450,21 @@ export class Scheduler {
         if (taskId !== null && !settled) {
           await this.wakeStage(taskId, event.actor, now);
         }
+        if (taskId !== null) {
+          await this.pruneStageWakes(taskId);
+        }
         return;
       }
       case "task.claimed": {
         const taskId = stringOf(payload["taskId"]);
-        if (taskId !== null && stringOf(payload["thread"]) !== taskId) {
+        if (taskId === null) {
+          return;
+        }
+        // A holder's wake is marked first, so the pruning keeps it while the holder holds the stage.
+        if (stringOf(payload["thread"]) !== taskId) {
           await this.wakeHolder(taskId, event.actor, now);
         }
+        await this.pruneStageWakes(taskId);
         return;
       }
       case "task.completing": {
@@ -464,6 +472,7 @@ export class Scheduler {
         const project = stringOf(payload["project"]);
         if (taskId !== null && project !== null) {
           this.completions.set(taskId, { project, actor: event.actor });
+          await this.pruneStageWakes(taskId);
         }
         return;
       }
@@ -475,6 +484,7 @@ export class Scheduler {
           return;
         }
         delete this.state.releaseCounts[taskId];
+        await this.pruneStageWakes(taskId);
         if (creator !== null && creator !== event.actor) {
           await this.wakeCreator(taskId, project, creator, event.actor, now);
         }
@@ -484,6 +494,9 @@ export class Scheduler {
         const taskId = stringOf(payload["taskId"]);
         if (taskId !== null && payload["to"] === "abandoned") {
           delete this.state.releaseCounts[taskId];
+        }
+        if (taskId !== null) {
+          await this.pruneStageWakes(taskId);
         }
         return;
       }
@@ -757,6 +770,29 @@ export class Scheduler {
       { id: task.id, task: scope === task.project },
     );
     return sessionKey(agent.name, scope, task.id);
+  }
+
+  /**
+   * Drops each queued turn made only of stage wakes, one of them for this task, once none of its
+   * stages waits for its citizen any more: as soon as an event about the task could have changed
+   * that, the stage taken by anyone, the plan moved on or reshaped, the task ended, rather than
+   * only at dispatch, so a wake that will not run leaves the queue at once.
+   */
+  private async pruneStageWakes(taskId: Ulid): Promise<void> {
+    for (const [key, item] of this.pending) {
+      const wakes = item.stageWakes;
+      if (wakes === undefined || !wakes.some((wake) => wake.taskId === taskId)) {
+        continue;
+      }
+      const due = await this.stillWaiting(item.dispatch.agent, wakes, item.holder === true);
+      if (due === undefined && this.pending.get(key) === item) {
+        this.pending.delete(key);
+        this.log.info(
+          { agent: item.dispatch.agent, project: item.dispatch.project, taskId },
+          "dropping stage wake, the stage no longer waits for this agent",
+        );
+      }
+    }
   }
 
   /**

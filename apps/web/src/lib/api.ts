@@ -361,6 +361,15 @@ export function createApi(token: string) {
         { model },
         AgentRecordSchema,
       ),
+    /** Sets the reasoning effort a citizen's turns run with from its next turn, or null for the model's default. */
+    setEffort: (name: string, effort: string | null) =>
+      write(
+        "PUT",
+        `/api/agents/${encodeURIComponent(name)}/effort`,
+        token,
+        { effort },
+        AgentRecordSchema,
+      ),
   };
 }
 export type Api = ReturnType<typeof createApi>;

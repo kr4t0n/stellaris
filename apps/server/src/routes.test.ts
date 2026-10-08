@@ -390,7 +390,7 @@ describe("board server routes", () => {
         list: (cli) =>
           Promise.resolve(
             cli === "claude"
-              ? [{ id: "sonnet", name: "Sonnet 5", description: "", isDefault: false }]
+              ? [{ id: "sonnet", name: "Sonnet 5", description: "", isDefault: false, efforts: [] }]
               : [],
           ),
       },
@@ -429,6 +429,20 @@ describe("board server routes", () => {
         })
       ).status,
     ).toBe(400);
+
+    const effort = (body: unknown) =>
+      app.request("/api/agents/eng-1/effort", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(body),
+      });
+    const high = await effort({ effort: "high" });
+    expect(high.status).toBe(200);
+    expect(z.object({ effort: z.string() }).parse(await high.json()).effort).toBe("high");
+    expect((await board.readAgent("eng-1")).effort).toBe("high");
+    expect((await effort({ effort: null })).status).toBe(200);
+    expect((await board.readAgent("eng-1")).effort).toBeUndefined();
+    expect((await effort({ effort: "Very High" })).status).toBe(400);
   });
 
   it("serves a citizen's turn history and memory core", async () => {

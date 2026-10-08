@@ -114,7 +114,7 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
   const form = page.getByRole("form", { name: "Model of desk" });
   const picker = form.getByRole("button", { name: /^Model: / });
   await expect(picker).toHaveAccessibleName("Model: CLI default · Opus 5.5");
-  await expect(form.getByRole("button", { name: "Use this model" })).toBeDisabled();
+  await expect(form.getByRole("button", { name: "Save" })).toBeDisabled();
 
   await picker.click();
   await expect(form).toContainText("Efficient for routine tasks.");
@@ -126,11 +126,44 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
   await picker.click();
   await form.getByRole("button", { name: /^Sonnet 5/ }).click();
   await expect(picker).toHaveAccessibleName("Model: Sonnet 5 · sonnet");
-  await form.getByRole("button", { name: "Use this model" }).click();
+  await form.getByRole("button", { name: "Save" }).click();
 
   await expect(form).toHaveCount(0);
   await expect(view).toContainText("concierge · claude-opus-5-5 · set to sonnet");
   expect(board.writes).toEqual([{ path: "/api/agents/desk/model", body: { model: "sonnet" } }]);
+});
+
+test("a citizen's reasoning effort is chosen from its model's levels, and a model without it drops it", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "Model…" }).click();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  const effort = form.getByRole("button", { name: /^Effort: / });
+  // The CLI's default model is Opus, whose default effort is high.
+  await expect(effort).toHaveAccessibleName("Effort: Default · high");
+
+  await effort.click();
+  await expect(form).toContainText("Maximum effort");
+  await form.getByRole("button", { name: /^max/ }).click();
+  await expect(effort).toHaveAccessibleName("Effort: max");
+  // Sonnet has no max, so choosing it goes back to the model's default.
+  const picker = form.getByRole("button", { name: /^Model: / });
+  await picker.click();
+  await form.getByRole("button", { name: /^Sonnet 5/ }).click();
+  await expect(effort).toHaveAccessibleName("Effort: Default · high");
+  await picker.click();
+  await form.getByRole("button", { name: /^CLI default/ }).click();
+  await effort.click();
+  await form.getByRole("button", { name: /^max/ }).click();
+  await form.getByRole("button", { name: "Save" }).click();
+
+  await expect(form).toHaveCount(0);
+  await expect(view).toContainText("concierge · claude-opus-5-5 · max effort");
+  // Only what changed is written: the model stayed the CLI's default.
+  expect(board.writes).toEqual([{ path: "/api/agents/desk/effort", body: { effort: "max" } }]);
 });
 
 test("a citizen's work outside projects is moved to another runner, or left to be pinned again", async ({

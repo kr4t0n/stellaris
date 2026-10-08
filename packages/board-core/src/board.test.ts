@@ -565,6 +565,35 @@ describe("Board", () => {
     });
   });
 
+  it("lets the user set a citizen's reasoning effort and clear it back to the model's default", async () => {
+    const { board } = await society();
+    const set = await board.setAgentEffort(USER, "eng-1", "xhigh");
+    expect(set.effort).toBe("xhigh");
+    expect((await board.listMembers()).find((m) => m.name === "eng-1")?.effort).toBe("xhigh");
+    // The model stays as it was; each setting is its own.
+    expect(set.model).toBeUndefined();
+    const cleared = await board.setAgentEffort(USER, "eng-1", null);
+    expect(cleared.effort).toBeUndefined();
+    expect((await board.readAgent("eng-1")).effort).toBeUndefined();
+
+    const events = (await board.readEvents(null)).filter((e) => e.type === "agent.configured");
+    expect(events.map((e) => e.payload)).toEqual([
+      { agent: "eng-1", effort: "xhigh", previous: null },
+      { agent: "eng-1", effort: null, previous: "xhigh" },
+    ]);
+
+    await expect(
+      board.setAgentEffort({ name: "stew", role: "steward" }, "eng-1", "high"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.setAgentEffort(USER, "eng-1", "very high")).rejects.toThrow(
+      /one lowercase word/,
+    );
+    await expect(board.setAgentEffort(USER, "eng-1", "High")).rejects.toThrow(/one lowercase word/);
+    await expect(board.setAgentEffort(USER, "user", "high")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+  });
+
   it("treats claims as leases: expired ones can be taken over and are released by the sweep", async () => {
     const { board } = await society();
     const task = await board.createTask(USER, { project: "demo", title: "t" });

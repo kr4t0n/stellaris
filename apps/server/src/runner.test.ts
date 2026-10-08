@@ -44,6 +44,7 @@ class ResidentBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly starts: string[] = [];
   readonly models: Array<string | undefined> = [];
+  readonly efforts: Array<string | undefined> = [];
   readonly closes: string[] = [];
   readonly prompts: string[] = [];
   readonly coldTurns: string[] = [];
@@ -59,11 +60,12 @@ class ResidentBackend implements AgentBackend {
   }
 
   startResident(
-    spec: { agent: string; model?: string | undefined },
+    spec: { agent: string; model?: string | undefined; effort?: string | undefined },
     start: { session: string },
   ): Promise<ResidentSession> {
     this.starts.push(`${spec.agent}:${start.session}`);
     this.models.push(spec.model);
+    this.efforts.push(spec.effort);
     const session: ResidentSession = {
       session: start.session,
       runTurn: (prompt: string, onEvent?: (event: AgentEvent) => void): Promise<TurnResult> => {
@@ -456,7 +458,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
   });
 
-  it("starts a warm session afresh when the citizen's model changes", async () => {
+  it("starts a warm session afresh when the citizen's model or effort changes", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     const backend = new ResidentBackend();
@@ -471,6 +473,13 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.models).toEqual([undefined, "sonnet"]);
     await run(deskPost);
     expect(backend.models).toHaveLength(2);
+
+    // So does a new reasoning effort, which the session was started with too.
+    await board.setAgentEffort(USER, "desk", "low");
+    await run(deskPost);
+    expect(backend.closes).toEqual(["desk:session-1", "desk:session-1"]);
+    expect(backend.efforts).toEqual([undefined, undefined, "low"]);
+    expect(backend.models.at(-1)).toBe("sonnet");
   });
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {
@@ -1001,7 +1010,9 @@ describe("turns on a runner over the runner protocol", () => {
       newSession: () => Promise.resolve("session-1"),
       runTurn: () => Promise.resolve(completed("done")),
       listModels: () =>
-        Promise.resolve([{ id: "opus", name: "Opus", description: "", isDefault: true }]),
+        Promise.resolve([
+          { id: "opus", name: "Opus", description: "", isDefault: true, efforts: [] },
+        ]),
     };
     const { app } = await start(board, backend);
     const { token } = await board.addRunner(USER, "laptop");
@@ -1032,7 +1043,7 @@ describe("turns on a runner over the runner protocol", () => {
       headers: { authorization: `Bearer ${board.issueTurnToken("user", "user", 60_000)}` },
     });
     expect(await models.json()).toEqual([
-      { id: "opus", name: "Opus", description: "", isDefault: true },
+      { id: "opus", name: "Opus", description: "", isDefault: true, efforts: [] },
     ]);
   });
 

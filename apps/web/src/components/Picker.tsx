@@ -19,12 +19,15 @@ export function Picker({
   choices,
   value,
   onChange,
+  listClassName = "inset-x-0",
 }: {
   /** What is being chosen, for the trigger's accessible name. */
   label: string;
   choices: readonly Choice[];
   value: string;
   onChange: (value: string) => void;
+  /** Where the list sits and how wide it is; as wide as the trigger unless a narrow one needs more. */
+  listClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -89,7 +92,9 @@ export function Picker({
         </span>
       </button>
       {open ? (
-        <div className="absolute inset-x-0 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-xl bg-surface-1/95 p-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_16px_32px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+        <div
+          className={`absolute ${listClassName} top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-xl bg-surface-1/95 p-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_16px_32px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl`}
+        >
           {choices.map((choice, index) => {
             const chosen = choice.value === value;
             return (

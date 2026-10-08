@@ -3,6 +3,7 @@ import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
   BranchPathSchema,
   CliKindSchema,
+  EffortSchema,
   MetricsWindowSchema,
   ModelNameSchema,
   NameSchema,
@@ -76,6 +77,7 @@ const EnrollmentApprovalSchema = z.object({ name: NameSchema });
 const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
+const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
 /** How many commits of a home's history one request reads. */
 const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
 const ChannelBodySchema = z.object({
@@ -242,6 +244,15 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       c.get("actor"),
       c.req.param("name"),
       body.model,
+    );
+    return c.json(agent);
+  });
+  api.put("/agents/:name/effort", async (c) => {
+    const body = EffortBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.setAgentEffort(
+      c.get("actor"),
+      c.req.param("name"),
+      body.effort,
     );
     return c.json(agent);
   });

@@ -17,8 +17,10 @@ import {
 import {
   AGENT_TOKEN_ENV,
   capOutput,
+  EffortOptionSchema,
   ModelOptionSchema,
   type AgentEvent,
+  type EffortOption,
   type ModelOption,
   type TurnExitReason,
   type Usage,
@@ -324,15 +326,30 @@ function toolOutputOf(item: Dict): string {
   }
 }
 
+/** A model's reasoning efforts from `supportedReasoningEfforts`, skipping any the board cannot name. */
+function effortsOf(raw: unknown): EffortOption[] {
+  return (Array.isArray(raw) ? raw : []).flatMap((option) => {
+    const parsed = EffortOptionSchema.safeParse({
+      id: isDict(option) ? str(option["reasoningEffort"]) : undefined,
+      description: (isDict(option) ? str(option["description"]) : undefined) ?? "",
+    });
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
 function modelOf(raw: unknown): ModelOption | null {
   if (!isDict(raw)) {
     return null;
   }
+  const efforts = effortsOf(raw["supportedReasoningEfforts"]);
+  const fallback = str(raw["defaultReasoningEffort"]);
   const parsed = ModelOptionSchema.safeParse({
     id: str(raw["model"]) ?? str(raw["id"]),
     name: str(raw["displayName"]) ?? str(raw["model"]) ?? "",
     description: str(raw["description"]) ?? "",
     isDefault: raw["isDefault"] === true,
+    efforts,
+    ...(efforts.some((effort) => effort.id === fallback) ? { defaultEffort: fallback } : {}),
   });
   return parsed.success ? parsed.data : null;
 }
@@ -729,6 +746,7 @@ export class CodexAppServerSession implements ResidentSession {
         approvalPolicy: "never",
         sandboxPolicy: this.sandboxPolicy(),
         outputSchema: this.start.statusSchema,
+        ...(this.spec.effort === undefined ? {} : { effort: this.spec.effort }),
       });
       const startedTurn = isDict(started) ? started["turn"] : undefined;
       turn.turnId = isDict(startedTurn) ? (str(startedTurn["id"]) ?? null) : null;

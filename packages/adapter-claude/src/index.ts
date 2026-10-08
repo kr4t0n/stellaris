@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   getSessionInfo,
   query,
+  type EffortLevel,
   type ModelInfo,
   type Options,
   type PermissionMode,
@@ -50,9 +51,24 @@ function silentInput(): AsyncIterable<SDKUserMessage> {
   };
 }
 
+/** The SDK's words for each effort level, from its `EffortLevel` documentation. */
+const EFFORT_LEVELS: Readonly<Record<EffortLevel, string>> = {
+  low: "Minimal thinking, fastest responses",
+  medium: "Moderate thinking",
+  high: "Deep reasoning",
+  xhigh: "Deeper than high",
+  max: "Maximum effort",
+};
+
+/** An effort Claude Code takes, or undefined for one it does not, which then runs the default. */
+export function claudeEffort(effort: string | undefined): EffortLevel | undefined {
+  return Object.keys(EFFORT_LEVELS).find((level): level is EffortLevel => level === effort);
+}
+
 /**
  * The SDK's model list as choices. Its `default` entry is the CLI's own default rather than a model
- * to pin, so it only marks the first model it resolves to.
+ * to pin, so it only marks the first model it resolves to. A model's effort levels are those it
+ * lists, and `high` is the one it runs unset, as the SDK documents.
  */
 export function modelOptions(models: readonly ModelInfo[]): ModelOption[] {
   const fallback = models.find((model) => model.value === "default");
@@ -63,11 +79,14 @@ export function modelOptions(models: readonly ModelInfo[]): ModelOption[] {
     .map((model) => {
       const isDefault = !marked && (model.resolvedModel ?? model.value) === target;
       marked ||= isDefault;
+      const levels = model.supportsEffort === false ? [] : (model.supportedEffortLevels ?? []);
       return {
         id: model.value,
         name: model.displayName,
         description: model.description,
         isDefault,
+        efforts: levels.map((level) => ({ id: level, description: EFFORT_LEVELS[level] })),
+        ...(levels.includes("high") ? { defaultEffort: "high" } : {}),
       };
     });
 }
@@ -842,6 +861,7 @@ export class ClaudeAgentBackend implements AgentBackend {
 
   private buildOptions(request: TurnRequest, abort: AbortController, resumable: boolean): Options {
     const model = request.spec.model ?? this.options.model;
+    const effort = claudeEffort(request.spec.effort) ?? this.options.effort;
     const permissionMode = this.options.permissionMode ?? "bypassPermissions";
     return {
       cwd: request.spec.cwd,
@@ -885,7 +905,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       abortController: abort,
       env: subprocessEnv(process.env, { ...this.options.env, ...request.env }, request.mcp.token),
       ...(model === undefined ? {} : { model }),
-      ...(this.options.effort === undefined ? {} : { effort: this.options.effort }),
+      ...(effort === undefined ? {} : { effort }),
       ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),
       ...(this.options.pathToClaudeCodeExecutable === undefined
         ? {}

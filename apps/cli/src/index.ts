@@ -315,6 +315,21 @@ agent
   });
 
 agent
+  .command("effort <name> [effort]")
+  .description(
+    "Set the reasoning effort a member's turns run with, from its next turn, such as high; no effort means the model's default",
+  )
+  .action(async (name: string, effort: string | undefined) => {
+    const board = await open();
+    const updated = await board.setAgentEffort(board.userActor(), name, effort ?? null);
+    print(
+      updated,
+      () =>
+        `${updated.name} runs with ${updated.effort === undefined ? "its model's default effort" : `${updated.effort} effort`} from its next turn`,
+    );
+  });
+
+agent
   .command("retire <name>")
   .description("Retire a member: no more wakes, claims released, token revoked, sessions archived")
   .requiredOption("--reason <text>", "why")

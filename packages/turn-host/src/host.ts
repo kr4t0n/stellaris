@@ -379,6 +379,7 @@ export class TurnHost {
       role: agent.role,
       cli: agent.cli,
       ...(agent.model === undefined ? {} : { model: agent.model }),
+      ...(agent.effort === undefined ? {} : { effort: agent.effort }),
       scope: dispatch.project,
       ...(thread === undefined ? {} : { thread: thread.id }),
       session: recorded ?? null,

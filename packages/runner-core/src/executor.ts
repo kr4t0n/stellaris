@@ -67,6 +67,8 @@ interface Resident {
   readonly token: string;
   /** The model the session started with; a citizen given another model gets a fresh session. */
   readonly model: string | undefined;
+  /** The effort the session started with, which it keeps for good, as it does its model. */
+  readonly effort: string | undefined;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -151,6 +153,7 @@ export class TurnExecutor {
       configHome: home,
       boardDir: this.layout.board,
       ...(job.model === undefined ? {} : { model: job.model }),
+      ...(job.effort === undefined ? {} : { effort: job.effort }),
     };
     const fill = (text: string): string =>
       text
@@ -417,8 +420,11 @@ export class TurnExecutor {
       throw new Error("backend cannot host resident sessions");
     }
     const warm = this.residents.get(resident.key);
-    if (warm !== undefined && (warm.model !== spec.model || warm.token !== job.mcp.token)) {
-      await this.closeResident(resident.key, "model or token changed");
+    if (
+      warm !== undefined &&
+      (warm.model !== spec.model || warm.effort !== spec.effort || warm.token !== job.mcp.token)
+    ) {
+      await this.closeResident(resident.key, "model, effort, or token changed");
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
@@ -432,7 +438,13 @@ export class TurnExecutor {
         env: input.env,
         costSoFarUsd: job.costSoFarUsd,
       });
-      current = { session, token: job.mcp.token, model: spec.model, timer: null };
+      current = {
+        session,
+        token: job.mcp.token,
+        model: spec.model,
+        effort: spec.effort,
+        timer: null,
+      };
       this.residents.set(resident.key, current);
       this.log.info({ pair: resident.key, session: session.session }, "resident session started");
       this.onWarmChanged?.(this.warmKeys);

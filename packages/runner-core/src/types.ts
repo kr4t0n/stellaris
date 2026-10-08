@@ -26,6 +26,8 @@ export interface AgentSpec {
   /** The board's read-only markdown projection on this runner. */
   readonly boardDir: string;
   readonly model?: string | undefined;
+  /** The reasoning effort set on the agent; the model's own default applies when unset. */
+  readonly effort?: string | undefined;
 }
 
 export interface TurnLimits {

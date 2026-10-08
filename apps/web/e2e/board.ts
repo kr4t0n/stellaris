@@ -12,12 +12,14 @@ function member(
   memberships: string[] = [],
   model: string | null = null,
   runner: string | null = "pod",
+  effort: string | null = null,
 ) {
   return {
     name,
     role: charter,
     cli: "claude",
     ...(model === null ? {} : { model }),
+    ...(effort === null ? {} : { effort }),
     lastModel: "claude-opus-5-5",
     ...(runner === null ? {} : { homeRunner: runner }),
     status: "active",
@@ -606,6 +608,7 @@ export async function fakeBoard(
   let paused = false;
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
+  let deskEffort: string | null = null;
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
   const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
@@ -709,10 +712,22 @@ export async function fakeBoard(
           return decide(route, "rejected", body);
         case "/api/agents/desk/model":
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
-          return json(route, member("desk", "concierge", ["lab"], deskModel, deskRunner));
+          return json(
+            route,
+            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+          );
+        case "/api/agents/desk/effort":
+          deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
+          return json(
+            route,
+            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+          );
         case "/api/agents/desk/runner":
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
-          return json(route, member("desk", "concierge", ["lab"], deskModel, deskRunner));
+          return json(
+            route,
+            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+          );
         case "/api/wake":
           return json(route, {
             id: "01M3Q2EEEEEEEEEEEEEEEEEEE1",
@@ -832,7 +847,7 @@ export async function fakeBoard(
         });
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", ["lab"], deskModel, deskRunner),
+          member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           member("stew", "steward", [], null, null),
         ]);
       case "/api/runners":
@@ -854,8 +869,24 @@ export async function fakeBoard(
         ]);
       case "/api/models/claude":
         return json(route, [
-          { id: "opus", name: "Opus 5.5", description: "For complex work.", isDefault: true },
-          { id: "sonnet", name: "Sonnet 5", description: "Efficient for routine tasks." },
+          {
+            id: "opus",
+            name: "Opus 5.5",
+            description: "For complex work.",
+            isDefault: true,
+            efforts: [
+              { id: "high", description: "Deep reasoning" },
+              { id: "max", description: "Maximum effort" },
+            ],
+            defaultEffort: "high",
+          },
+          {
+            id: "sonnet",
+            name: "Sonnet 5",
+            description: "Efficient for routine tasks.",
+            efforts: [{ id: "high", description: "Deep reasoning" }],
+            defaultEffort: "high",
+          },
         ]);
       case "/api/agents/desk/turns":
         return json(route, [DESK_TURN]);

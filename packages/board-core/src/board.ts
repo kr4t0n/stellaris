@@ -13,6 +13,7 @@ import {
   conflictCopyOf,
   DecisionSchema,
   describeCharter,
+  EffortSchema,
   IsoDateTimeSchema,
   KnowledgeSchema,
   mayHoldStage,
@@ -3937,6 +3938,7 @@ export class Board {
       resident: charter.resident,
       ...(agent.model === undefined ? {} : { model: agent.model }),
       ...(lastModel === undefined ? {} : { lastModel }),
+      ...(agent.effort === undefined ? {} : { effort: agent.effort }),
       skills: (await this.listAgentSkills(name)).map((skill) => skill.name),
       memberships: agent.memberships,
       subscriptions: agent.subscriptions,
@@ -3988,6 +3990,32 @@ export class Board {
       await this.events.append("agent.configured", actor.name, {
         agent: name,
         model: chosen,
+        previous: previous ?? null,
+      });
+      return next;
+    });
+  }
+
+  /**
+   * Sets the reasoning effort a citizen's turns run with, or clears it for the model's own default.
+   * It applies from the citizen's next turn; the runner starts a warm session afresh when it changes.
+   */
+  async setAgentEffort(actor: Actor, name: Name, effort: string | null): Promise<Agent> {
+    this.assertUser(actor, "only the user may change a citizen's reasoning effort");
+    const chosen = effort === null ? null : EffortSchema.parse(effort);
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.status !== "active" || current.cli === null) {
+        throw new BoardError("INVALID_STATE", `${name} takes no turns, so it has no effort to set`);
+      }
+      const { effort: previous, ...rest } = current;
+      const next = await this.updateAgent(name, () =>
+        chosen === null ? rest : { ...rest, effort: chosen },
+      );
+      await this.refreshMember(name);
+      await this.events.append("agent.configured", actor.name, {
+        agent: name,
+        effort: chosen,
         previous: previous ?? null,
       });
       return next;

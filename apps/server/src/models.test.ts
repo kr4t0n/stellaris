@@ -2,7 +2,13 @@ import type { CliKind, ModelOption } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { ModelCatalog } from "./models.js";
 
-const OPUS: ModelOption = { id: "opus", name: "Opus", description: "", isDefault: true };
+const OPUS: ModelOption = {
+  id: "opus",
+  name: "Opus",
+  description: "",
+  isDefault: true,
+  efforts: [],
+};
 
 describe("ModelCatalog", () => {
   it("asks each CLI once per hour, shares a request in flight, and retries after a failure", async () => {

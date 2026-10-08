@@ -276,12 +276,36 @@ export const ModelNameSchema = z
   .max(120)
   .regex(/^[\w.:/[\]-]+$/, "a model name is one word of letters, digits, and . _ : / - [ ]");
 
-/** A model a CLI offers, as its own listing describes it; `isDefault` marks the one it runs unset. */
+/**
+ * A reasoning effort as a CLI takes it, one lowercase word: Claude Code's `low` to `max`, or
+ * whatever levels Codex lists for a model. The board names no level of its own.
+ */
+export const EffortSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(32)
+  .regex(/^[a-z][a-z0-9_-]*$/, "an effort is one lowercase word, such as high");
+
+/** An effort level a model supports, as the CLI's own listing describes it. */
+export const EffortOptionSchema = z.object({
+  id: EffortSchema,
+  description: z.string().default(""),
+});
+export type EffortOption = z.infer<typeof EffortOptionSchema>;
+
+/**
+ * A model a CLI offers, as its own listing describes it; `isDefault` marks the one it runs unset.
+ * `efforts` lists the reasoning efforts it supports, empty when it takes none or the CLI did not
+ * say, and `defaultEffort` the one it runs when none is set.
+ */
 export const ModelOptionSchema = z.object({
   id: ModelNameSchema,
   name: z.string(),
   description: z.string().default(""),
   isDefault: z.boolean().default(false),
+  efforts: z.array(EffortOptionSchema).default([]),
+  defaultEffort: EffortSchema.optional(),
 });
 export type ModelOption = z.infer<typeof ModelOptionSchema>;
 
@@ -293,6 +317,8 @@ export const AgentSchema = z.object({
   role: NameSchema,
   cli: CliKindSchema.nullable(),
   model: z.string().optional(),
+  /** The reasoning effort set for the agent's turns; the model's own default applies otherwise. */
+  effort: z.string().optional(),
   /** The runner preferred for the agent's turns where nothing else decides; any runner with its CLI otherwise. */
   homeRunner: NameSchema.optional(),
   memberships: z.array(NameSchema),
@@ -321,6 +347,8 @@ export const MemberSchema = z.object({
   model: z.string().optional(),
   /** The model the CLI reported on the citizen's last turn. */
   lastModel: z.string().optional(),
+  /** The reasoning effort configured on the record, if any; the model's own default applies otherwise. */
+  effort: z.string().optional(),
   /** The citizen's own skills, by name. */
   skills: z.array(NameSchema).default([]),
   memberships: z.array(NameSchema),

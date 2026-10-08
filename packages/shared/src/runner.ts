@@ -155,6 +155,8 @@ export const TurnJobSchema = z.object({
   role: NameSchema,
   cli: CliKindSchema,
   model: z.string().optional(),
+  /** The reasoning effort set on the agent; absent for the model's own default. */
+  effort: z.string().optional(),
   /** A project slug, or the society scope. */
   scope: NameSchema,
   /** The thread whose conversation the turn is in; absent for the home conversation. */

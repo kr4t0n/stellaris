@@ -138,6 +138,26 @@ describe("ClaudeAgentBackend replay", () => {
     expect((await created.runTurn({ ...request, costSoFarUsd: 0.1 })).costUsd).toBeCloseTo(0.1922);
   });
 
+  it("runs with the citizen's effort over the runner's, and the CLI's default without either", async () => {
+    const messages = await recorded("sdk-synthetic.jsonl");
+    const set = replaying(messages);
+    await new ClaudeAgentBackend({ queryFn: set.queryFn, effort: "low" }).runTurn({
+      ...request,
+      spec: { ...request.spec, effort: "max" },
+    });
+    expect(set.calls[0]?.options?.effort).toBe("max");
+    // A level Claude Code does not have, as one set for a Codex model, falls back.
+    const foreign = replaying(messages);
+    await new ClaudeAgentBackend({ queryFn: foreign.queryFn, effort: "low" }).runTurn({
+      ...request,
+      spec: { ...request.spec, effort: "minimal" },
+    });
+    expect(foreign.calls[0]?.options?.effort).toBe("low");
+    const unset = replaying(messages);
+    await new ClaudeAgentBackend({ queryFn: unset.queryFn }).runTurn(request);
+    expect(unset.calls[0]?.options).not.toHaveProperty("effort");
+  });
+
   it("sets no round limit when the runner asks for none", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const limited = replaying(messages);

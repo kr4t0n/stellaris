@@ -184,6 +184,12 @@ function fakeAppServer(
                         displayName: "GPT-6-Astra",
                         description: "Frontier intelligence.",
                         isDefault: true,
+                        supportedReasoningEfforts: [
+                          { reasoningEffort: "low", description: "Fast." },
+                          { reasoningEffort: "xhigh", description: "Thorough." },
+                          { reasoningEffort: "Not One", description: "Skipped." },
+                        ],
+                        defaultReasoningEffort: "xhigh",
                       },
                       { id: "broken", model: "has space", displayName: "Broken" },
                     ],
@@ -334,6 +340,17 @@ describe("CodexBackend cold turns", () => {
     expect(turnStart?.["input"]).toEqual([
       { type: "text", text: "Do the thing.", text_elements: [] },
     ]);
+  });
+
+  it("runs each turn at the citizen's effort, and at the model's own without one", async () => {
+    const set = fakeAppServer();
+    await new CodexBackend({ spawn: set.spawn }).runTurn(
+      request({ spec: { ...spec, effort: "xhigh" } }),
+    );
+    expect(paramsOf(set.received, "turn/start")?.["effort"]).toBe("xhigh");
+    const unset = fakeAppServer();
+    await new CodexBackend({ spawn: unset.spawn }).runTurn(request());
+    expect(paramsOf(unset.received, "turn/start")).not.toHaveProperty("effort");
   });
 
   it("hands the server the board endpoint, the token, and the git identity", async () => {
@@ -540,8 +557,14 @@ describe("CodexBackend models", () => {
         name: "GPT-6-Astra",
         description: "Frontier intelligence.",
         isDefault: true,
+        // An effort the board could not name is left out, and the default is one of those listed.
+        efforts: [
+          { id: "low", description: "Fast." },
+          { id: "xhigh", description: "Thorough." },
+        ],
+        defaultEffort: "xhigh",
       },
-      { id: "gpt-6-luna", name: "GPT-6-Luna", description: "", isDefault: false },
+      { id: "gpt-6-luna", name: "GPT-6-Luna", description: "", isDefault: false, efforts: [] },
     ]);
     expect(fake.received.map((m) => m.method)).toEqual([
       "initialize",

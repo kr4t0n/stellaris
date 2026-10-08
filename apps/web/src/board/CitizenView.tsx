@@ -152,6 +152,7 @@ function CitizenPage({
           <>
             {member.role} · {model}
             {setTo === null ? "" : ` · set to ${setTo}`}
+            {member.effort === undefined ? "" : ` · ${member.effort} effort`}
             {member.homeRunner === undefined ? "" : ` · on ${member.homeRunner}`}
             {member.status === "retired" ? " · retired" : ""}
           </>

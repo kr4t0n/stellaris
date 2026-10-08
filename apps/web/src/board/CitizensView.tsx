@@ -6,12 +6,17 @@ import { useMembers, useProjects, useScheduler } from "../lib/session.js";
 import { runnersOf, scopeName } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
-/** The model a citizen runs: what its CLI last reported, else what it is set to, else the CLI's own. */
+/**
+ * The model a citizen runs: what its CLI last reported, else what it is set to, else the CLI's own,
+ * with the reasoning effort when one is set.
+ */
 function modelOf(member: Member): string {
   const observed = member.lastModel ?? member.model ?? "CLI default";
-  return member.model !== undefined && member.model !== observed
-    ? `${observed} · set to ${member.model}`
-    : observed;
+  const model =
+    member.model !== undefined && member.model !== observed
+      ? `${observed} · set to ${member.model}`
+      : observed;
+  return member.effort === undefined ? model : `${model} · ${member.effort}`;
 }
 
 function byName(a: Member, b: Member): number {

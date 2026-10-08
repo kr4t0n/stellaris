@@ -141,6 +141,19 @@ export function useTaskFile(taskId: string, path: string) {
   });
 }
 
+/** What a task's branch changed, refreshed like its files when a turn ends. */
+export function useTaskChanges(taskId: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["task-changes", taskId],
+    queryFn: () => api.taskChanges(taskId),
+    staleTime: 30_000,
+    retry: (failures, error) =>
+      failures < 1 &&
+      !(error instanceof ApiError && (error.status === 404 || error.status === 503)),
+  });
+}
+
 export function useProposals() {
   const { api } = useSession();
   return useQuery({ queryKey: ["proposals"], queryFn: api.proposals, refetchInterval: 60_000 });

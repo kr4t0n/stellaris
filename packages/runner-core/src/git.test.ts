@@ -7,6 +7,10 @@ import { ExecaGit, taskBranch } from "./git.js";
 
 const project = { slug: "demo", origin: null, defaultBranch: "main" };
 
+function committer(name: string): string[] {
+  return ["-c", `user.name=${name}`, "-c", `user.email=${name}@x`];
+}
+
 describe("ExecaGit", () => {
   let dir: string;
   const git = new ExecaGit();
@@ -157,6 +161,69 @@ describe("ExecaGit", () => {
     ]);
     expect(await git.readBranch(repoDir, branch, "draft.md", 1024)).toBeNull();
     expect(await git.readBranch(repoDir, "task/none", "report.md", 1024)).toBeNull();
+  });
+
+  it("lists what a task's branch changed since it left main, before and after the board lands it", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    const commit = async (cwd: string, name: string, message: string) => {
+      await execa("git", [...committer(name), "add", "-A"], { cwd });
+      await execa("git", [...committer(name), "commit", "--quiet", "-m", message], { cwd });
+    };
+    await writeFile(path.join(repoDir, "README.md"), "demo\n");
+    await writeFile(path.join(repoDir, "old.txt"), "gone soon\n");
+    await commit(repoDir, "user", "docs: readme");
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(repoDir, branch, "main");
+    const worktree = await git.ensureTaskWorktree(repoDir, path.join(dir, "wt", "task"), branch);
+    expect(await git.branchChanges(repoDir, branch, "main", 10)).toMatchObject({
+      files: [],
+      total: 0,
+    });
+
+    await writeFile(path.join(worktree, "report.md"), "# Report\n\nfirst\n");
+    await writeFile(path.join(worktree, "plot.png"), Buffer.from([0, 1, 2]));
+    await commit(worktree, "sage", "feat: report");
+    await writeFile(path.join(worktree, "report.md"), "# Report\n\nsecond\n");
+    await writeFile(path.join(worktree, "README.md"), "demo, reviewed\n");
+    await rm(path.join(worktree, "old.txt"));
+    await commit(worktree, "ref", "fix: review");
+    // Work that reached main meanwhile, merged into the task's branch, is not the task's change.
+    await writeFile(path.join(repoDir, "elsewhere.md"), "another task\n");
+    await commit(repoDir, "ada", "feat: elsewhere");
+    await execa("git", [...committer("ref"), "merge", "--quiet", "--no-edit", "main"], {
+      cwd: worktree,
+    });
+
+    const before = await git.branchChanges(repoDir, branch, "main", 10);
+    expect(before?.head.id).toBe(await git.head(repoDir, branch));
+    expect(before?.total).toBe(4);
+    expect(
+      before?.files.map((file) => [
+        file.path,
+        file.status,
+        file.added,
+        file.removed,
+        file.lastChange?.author,
+      ]),
+    ).toEqual([
+      ["README.md", "modified", 1, 1, "ref"],
+      ["old.txt", "deleted", 0, 1, "ref"],
+      ["plot.png", "added", null, null, "sage"],
+      ["report.md", "added", 3, 0, "ref"],
+    ]);
+    // A short list says how many files there were.
+    expect(await git.branchChanges(repoDir, branch, "main", 2)).toMatchObject({ total: 4 });
+    expect((await git.branchChanges(repoDir, branch, "main", 2))?.files).toHaveLength(2);
+
+    // Landed, the branch is all on main, and the list still counts from where it left.
+    await git.handBack(worktree, null, { name: "ref", email: "ref@x" });
+    await writeFile(path.join(repoDir, "later.md"), "after the task\n");
+    await commit(repoDir, "ada", "feat: later");
+    expect((await git.merge(repoDir, "main", branch)).ok).toBe(true);
+    await writeFile(path.join(repoDir, "after.md"), "after landing\n");
+    await commit(repoDir, "ada", "feat: after");
+    expect(await git.branchChanges(repoDir, branch, "main", 10)).toEqual(before);
+    expect(await git.branchChanges(repoDir, "task/none", "main", 10)).toBeNull();
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

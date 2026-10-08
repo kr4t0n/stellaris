@@ -211,6 +211,36 @@ function taskFile(path: string, content: string) {
   };
 }
 
+/** What the survey's branch changed since it left main, as the task's runner lists it. */
+const TASK_CHANGES = {
+  head: TASK_COMMIT,
+  total: 4,
+  files: [
+    { path: "docs/plot.png", status: "added", added: null, removed: null },
+    {
+      path: "docs/report.md",
+      status: "added",
+      added: 7,
+      removed: 0,
+      lastChange: { author: "ada", at: CREATED },
+    },
+    {
+      path: "draft.md",
+      status: "deleted",
+      added: 0,
+      removed: 4,
+      lastChange: { author: "ref", at: CREATED },
+    },
+    {
+      path: "results.csv",
+      status: "modified",
+      added: 2,
+      removed: 1,
+      lastChange: { author: "ada", at: CREATED },
+    },
+  ],
+};
+
 /** What the survey's turns left on its branch: a report with a figure, and the table it cites. */
 const TASK_FILES: Readonly<Record<string, unknown>> = {
   "": {
@@ -855,6 +885,8 @@ export async function fakeBoard(
         return json(route, [TASK]);
       case `/api/tasks/${STAGE_TASK}`:
         return json(route, TASK);
+      case `/api/tasks/${STAGE_TASK}/changes`:
+        return json(route, TASK_CHANGES);
       case "/api/projects/iphone/tasks":
       case "/api/projects/iphone/knowledge":
       case "/api/channels/lab/general":

@@ -18,6 +18,7 @@ import { Citizen, displayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { SubjectThread } from "./SubjectThread.js";
+import { TaskFiles } from "./TaskFiles.js";
 import {
   assigneeOf,
   inPlay,
@@ -208,6 +209,7 @@ export function TaskView() {
             </div>
           </section>
         )}
+        <TaskFiles task={current} now={now} />
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-section">Thread</h3>
           {threads.data === undefined ? null : thread === undefined ? (

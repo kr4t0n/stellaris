@@ -59,6 +59,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["conflicts", actor],
       ["history", actor],
       ["task-file"],
+      ["task-changes"],
       ["metrics"],
     ];
   }

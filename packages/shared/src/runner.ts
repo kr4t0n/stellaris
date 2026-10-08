@@ -55,6 +55,8 @@ export const RunnerHelloSchema = z.object({
   stoppableClis: z.array(CliKindSchema).default([]),
   /** Whether the runner answers file reads on its projects' branches; one from before never does. */
   branchReads: z.boolean().default(false),
+  /** Whether the runner lists what a branch changed; one from before never does. */
+  branchChanges: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
@@ -285,6 +287,39 @@ export const BranchFileSchema = z.discriminatedUnion("kind", [
 ]);
 export type BranchFile = z.infer<typeof BranchFileSchema>;
 
+/** A request to list what a branch changed since it left the project's default branch. */
+export const BranchChangesReadSchema = z.object({
+  repo: ProjectRepoSchema,
+  branch: BranchNameSchema,
+});
+export type BranchChangesRead = z.infer<typeof BranchChangesReadSchema>;
+
+/** The most files a change list carries; `total` says how many there were. */
+export const BRANCH_CHANGES_LIMIT = 500;
+
+/** One file a branch changed, with the newest commit on the branch that touched it. */
+export const BranchFileChangeSchema = z.object({
+  path: z.string().min(1),
+  status: z.enum(["added", "modified", "deleted"]),
+  /** Lines added and removed, or null for a binary file. */
+  added: z.number().int().nonnegative().nullable(),
+  removed: z.number().int().nonnegative().nullable(),
+  /** Absent when the file changed only through a merge of another branch. */
+  lastChange: z.object({ author: z.string(), at: IsoDateTimeSchema }).optional(),
+});
+export type BranchFileChange = z.infer<typeof BranchFileChangeSchema>;
+
+/**
+ * What a branch changed since it left the default branch, by path, as of its newest commit: the
+ * first `BRANCH_CHANGES_LIMIT` files, and how many there were in all.
+ */
+export const BranchChangesSchema = z.object({
+  head: BranchCommitSchema,
+  files: z.array(BranchFileChangeSchema),
+  total: z.number().int().nonnegative(),
+});
+export type BranchChanges = z.infer<typeof BranchChangesSchema>;
+
 /** Input for a running turn: what arrived in its conversation since it was last shown anything. */
 export const TurnSteerSchema = z.object({ id: z.uuid(), text: z.string().min(1) });
 export type TurnSteer = z.infer<typeof TurnSteerSchema>;
@@ -296,6 +331,12 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("models"), request: z.string().min(1), cli: CliKindSchema }),
   /** Answered with a `BranchFile`, or null when the branch or the path does not exist. */
   z.object({ type: z.literal("file"), request: z.string().min(1), read: BranchReadSchema }),
+  /** Answered with `BranchChanges`, or null when the repository or the branch does not exist. */
+  z.object({
+    type: z.literal("changes"),
+    request: z.string().min(1),
+    read: BranchChangesReadSchema,
+  }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

@@ -1,5 +1,6 @@
 import {
   BoardEventSchema,
+  BranchChangesSchema,
   BranchFileSchema,
   ChannelRefSchema,
   DecisionSchema,
@@ -239,6 +240,9 @@ export function createApi(token: string) {
         token,
         BranchFileSchema,
       ),
+    /** What a task's branch changed since it left the default branch, file by file. */
+    taskChanges: (id: string) =>
+      get(`/api/tasks/${encodeURIComponent(id)}/changes`, token, BranchChangesSchema),
     proposals: () => get("/api/proposals", token, ProposalSchema.array()),
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),

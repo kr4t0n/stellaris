@@ -280,6 +280,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     );
   };
   api.get("/tasks/:id/files", (c) => taskFile(c, ""));
+  // What a task's branch changed since it left the default branch, file by file.
+  api.get("/tasks/:id/changes", async (c) => {
+    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    if (deps.runners === undefined) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
+    }
+    return c.json(await deps.runners.branchChanges(task.project, `task/${task.id}`));
+  });
   api.get("/tasks/:id/files/:path{.+}", (c) => taskFile(c, c.req.param("path")));
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));

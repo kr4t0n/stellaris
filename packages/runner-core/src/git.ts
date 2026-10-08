@@ -1,6 +1,12 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { BranchFile, MergeOutcome, ProjectRepo } from "@stellaris/shared";
+import type {
+  BranchChanges,
+  BranchFile,
+  BranchFileChange,
+  MergeOutcome,
+  ProjectRepo,
+} from "@stellaris/shared";
 import { execa } from "execa";
 
 /** The git operations a runner needs. */
@@ -49,6 +55,17 @@ export interface GitOps {
     file: string,
     limit: number,
   ): Promise<BranchFile | null>;
+  /**
+   * The files a branch changed since it left `defaultBranch`, the first `limit` of them, or null
+   * when the branch does not exist. A branch the board landed counts from the default branch as
+   * it stood before the landing merge, so landing does not empty the list.
+   */
+  branchChanges(
+    repoDir: string,
+    branch: string,
+    defaultBranch: string,
+    limit: number,
+  ): Promise<BranchChanges | null>;
 }
 
 type BranchEntry = Extract<BranchFile, { kind: "dir" }>["entries"][number];
@@ -296,4 +313,114 @@ export class ExecaGit implements GitOps {
       content: Buffer.from(blob.stdout).toString("base64"),
     };
   }
+
+  async branchChanges(
+    repoDir: string,
+    branch: string,
+    defaultBranch: string,
+    limit: number,
+  ): Promise<BranchChanges | null> {
+    const log = await git(
+      ["log", "-1", "--format=%H%x00%ct%x00%an", `refs/heads/${branch}`, "--"],
+      repoDir,
+    );
+    const [tip, seconds, author] = log.stdout.trim().split("\0");
+    if (log.exitCode !== 0 || tip === undefined || tip === "") {
+      return null;
+    }
+    const head = {
+      id: tip,
+      at: new Date(Number(seconds) * 1000).toISOString(),
+      author: author ?? "",
+    };
+    const base = await this.forkPoint(repoDir, defaultBranch, tip);
+    // Without a common commit, everything on the branch is its change.
+    const from = base ?? (await must(["hash-object", "-t", "tree", "/dev/null"], repoDir)).trim();
+    const diff = ["diff", "--no-renames", "-z", from, tip];
+    const listed = (await must([...diff, "--name-status"], repoDir)).split("\0");
+    const counts = new Map<string, { added: number | null; removed: number | null }>();
+    for (const line of (await must([...diff, "--numstat"], repoDir)).split("\0")) {
+      const counted = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+      if (counted?.[3] !== undefined) {
+        counts.set(counted[3], { added: lineCount(counted[1]), removed: lineCount(counted[2]) });
+      }
+    }
+    const touched = await this.lastChanges(repoDir, base === null ? tip : `${base}..${tip}`);
+    const files: BranchFileChange[] = [];
+    let total = 0;
+    for (let index = 0; index + 1 < listed.length; index += 2) {
+      total += 1;
+      if (files.length >= limit) {
+        continue;
+      }
+      const changed = listed[index + 1] ?? "";
+      const letter = listed[index] ?? "";
+      const last = touched.get(changed);
+      files.push({
+        path: changed,
+        status: letter === "A" ? "added" : letter === "D" ? "deleted" : "modified",
+        ...(counts.get(changed) ?? { added: null, removed: null }),
+        ...(last === undefined ? {} : { lastChange: last }),
+      });
+    }
+    return { head, files, total };
+  }
+
+  /**
+   * Where a branch left the default branch. Once the board has landed it, the default branch
+   * holds the whole branch, so the fork point is taken against the default branch as it stood
+   * before the landing merge: the merge on its first-parent line whose second parent is the tip.
+   * Null when the two share no commit.
+   */
+  private async forkPoint(
+    repoDir: string,
+    defaultBranch: string,
+    tip: string,
+  ): Promise<string | null> {
+    const merges = await git(
+      ["rev-list", "--first-parent", "--merges", "--parents", `refs/heads/${defaultBranch}`, "--"],
+      repoDir,
+    );
+    const landing = merges.stdout
+      .split("\n")
+      .map((line) => line.split(" "))
+      .find((parents) => parents[2] === tip);
+    const base = await git(
+      ["merge-base", landing?.[1] ?? `refs/heads/${defaultBranch}`, tip],
+      repoDir,
+    );
+    return base.exitCode === 0 ? base.stdout.trim() : null;
+  }
+
+  /** The newest commit in a range that touched each path, by its author and time. */
+  private async lastChanges(
+    repoDir: string,
+    range: string,
+  ): Promise<Map<string, { author: string; at: string }>> {
+    const log = await must(
+      ["log", "--no-renames", "--format=%x01%an%x00%ct", "--name-only", "-z", range, "--"],
+      repoDir,
+    );
+    const touched = new Map<string, { author: string; at: string }>();
+    for (const record of log.split("\x01")) {
+      const [author, seconds, ...paths] = record.split("\0");
+      if (author === undefined || seconds === undefined) {
+        continue;
+      }
+      const at = new Date(Number(seconds) * 1000).toISOString();
+      for (const each of paths) {
+        // The first path follows the header on a line of its own.
+        const changed = each.replace(/^\n/, "");
+        if (changed !== "" && !touched.has(changed)) {
+          touched.set(changed, { author, at });
+        }
+      }
+    }
+    return touched;
+  }
+}
+
+/** A `--numstat` count, null where git counts a binary file as `-`. */
+function lineCount(value: string | undefined): number | null {
+  return value === undefined || value === "-" ? null : Number.parseInt(value, 10);
 }

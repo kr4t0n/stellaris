@@ -15,6 +15,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  BranchChangesSchema,
   BranchFileSchema,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
@@ -857,6 +858,7 @@ describe("turns on a runner over the runner protocol", () => {
       steerableClis: [],
       stoppableClis: [],
       branchReads: true,
+      branchChanges: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -937,6 +939,27 @@ describe("turns on a runner over the runner protocol", () => {
       BranchFileSchema.parse(await (await read(`${task.id}/files/evidence/plot.png`)).json()),
     ).toMatchObject({ kind: "file", size: 3, content: Buffer.from([0, 1, 2]).toString("base64") });
 
+    // The task's view lists what its branch changed, each file with the citizen whose turn wrote it.
+    const changes = BranchChangesSchema.parse(await (await read(`${task.id}/changes`)).json());
+    expect(changes).toMatchObject({ total: 2, head: { author: "sage" } });
+    expect(changes.files).toEqual([
+      {
+        path: "evidence/plot.png",
+        status: "added",
+        added: null,
+        removed: null,
+        lastChange: { author: "sage", at: changes.head.at },
+      },
+      {
+        path: "report.md",
+        status: "added",
+        added: 1,
+        removed: 0,
+        lastChange: { author: "sage", at: changes.head.at },
+      },
+    ]);
+    expect((await read(`${waiting.id}/changes`)).status).toBe(404);
+
     expect((await read(`${task.id}/files/draft.md`)).status).toBe(404);
     // A URL's own `..` is resolved before any route sees it; one hidden behind encoded slashes is refused.
     expect((await read(`${task.id}/files/evidence%2F..%2Freport.md`)).status).toBe(400);
@@ -953,6 +976,7 @@ describe("turns on a runner over the runner protocol", () => {
       steerableClis: [],
       stoppableClis: [],
       branchReads: false,
+      branchChanges: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -960,6 +984,7 @@ describe("turns on a runner over the runner protocol", () => {
     const old = await read(`${task.id}/files/report.md`);
     expect(old.status).toBe(409);
     expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });
+    expect((await read(`${task.id}/changes`)).status).toBe(409);
 
     await runner.stop();
     await vi.waitFor(() => expect(hub.connected).toEqual([]));

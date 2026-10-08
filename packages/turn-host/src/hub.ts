@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 import { BoardError, SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
 import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/scheduler";
 import {
+  BranchChangesSchema,
   BranchFileSchema,
   MergeOutcomeSchema,
   ModelListSchema,
   RUNNER_PROTOCOL,
   SOCIETY_SCOPE,
+  type BranchChanges,
   type BranchFile,
   type CliKind,
   type ModelOption,
   type Name,
+  type ProjectRepo,
   type RunnerAnswer,
   type RunnerHello,
   type RunnerMessage,
@@ -76,8 +79,8 @@ const FILE_TIMEOUT_MS = 60_000;
  * The runners connected to the board server, and the scheduler's way to them. It places each
  * queued turn on a runner, the one its project lives on or, in the society scope, the one its
  * session lives on, sends it the job, and resolves when the outcome is recorded. It also lands
- * tasks on their project's runner, reads files from their branches there, and asks a runner for a
- * CLI's models.
+ * tasks on their project's runner, reads files from their branches there and lists what the
+ * branches changed, and asks a runner for a CLI's models.
  */
 export class RunnerHub implements TurnRunner {
   private readonly board: Board;
@@ -467,38 +470,11 @@ export class RunnerHub implements TurnRunner {
    * `RunnerAwayError` while its runner is away.
    */
   async readBranch(project: Name, branch: string, path: string): Promise<BranchFile> {
-    const record = await this.board.readProject(project);
-    if (record.runner === undefined) {
-      throw new BoardError(
-        "NOT_FOUND",
-        `${project} has no repository yet, since no turn has run there`,
-      );
-    }
-    const seat = this.seats.get(record.runner);
-    if (seat === undefined || seat.send === null) {
-      throw new RunnerAwayError(
-        `runner ${record.runner}, where ${project} lives, is not connected`,
-      );
-    }
-    // A runner from before file reads would skip the request and leave the reader waiting.
-    if (!seat.hello.branchReads) {
-      throw new BoardError(
-        "INVALID_STATE",
-        `runner ${seat.name}, where ${project} lives, cannot read files yet; upgrade it`,
-      );
-    }
+    const { seat, repo } = await this.projectSeat(project, "branchReads", "read files");
     const file = BranchFileSchema.nullable().parse(
       await this.request(
         seat,
-        (request) => ({
-          type: "file",
-          request,
-          read: {
-            repo: { slug: record.slug, origin: record.repo, defaultBranch: record.defaultBranch },
-            branch,
-            path,
-          },
-        }),
+        (request) => ({ type: "file", request, read: { repo, branch, path } }),
         FILE_TIMEOUT_MS,
       ),
     );
@@ -506,6 +482,25 @@ export class RunnerHub implements TurnRunner {
       throw new BoardError("NOT_FOUND", `${branch} has no ${path === "" ? "commit" : path}`);
     }
     return file;
+  }
+
+  /**
+   * What a branch of a project's repository changed since it left the default branch, listed on
+   * the runner the project lives on, with the same refusals as `readBranch`.
+   */
+  async branchChanges(project: Name, branch: string): Promise<BranchChanges> {
+    const { seat, repo } = await this.projectSeat(project, "branchChanges", "list changes");
+    const changes = BranchChangesSchema.nullable().parse(
+      await this.request(
+        seat,
+        (request) => ({ type: "changes", request, read: { repo, branch } }),
+        FILE_TIMEOUT_MS,
+      ),
+    );
+    if (changes === null) {
+      throw new BoardError("NOT_FOUND", `${project} has no ${branch} yet`);
+    }
+    return changes;
   }
 
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */
@@ -614,6 +609,40 @@ export class RunnerHub implements TurnRunner {
       steerableClis: seat.hello.steerableClis,
       stoppableClis: seat.hello.stoppableClis,
       isWarm: (key) => seat.warm.has(key),
+    };
+  }
+
+  /**
+   * The connected runner a project lives on and where its code is, for a request only runners that
+   * said so at registration answer: one from before would skip it and leave the reader waiting.
+   */
+  private async projectSeat(
+    project: Name,
+    able: "branchReads" | "branchChanges",
+    what: string,
+  ): Promise<{ seat: Seat; repo: ProjectRepo }> {
+    const record = await this.board.readProject(project);
+    if (record.runner === undefined) {
+      throw new BoardError(
+        "NOT_FOUND",
+        `${project} has no repository yet, since no turn has run there`,
+      );
+    }
+    const seat = this.seats.get(record.runner);
+    if (seat === undefined || seat.send === null) {
+      throw new RunnerAwayError(
+        `runner ${record.runner}, where ${project} lives, is not connected`,
+      );
+    }
+    if (!seat.hello[able]) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name}, where ${project} lives, cannot ${what} yet; upgrade it`,
+      );
+    }
+    return {
+      seat,
+      repo: { slug: record.slug, origin: record.repo, defaultBranch: record.defaultBranch },
     };
   }
 

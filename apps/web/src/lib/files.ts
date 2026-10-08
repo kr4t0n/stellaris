@@ -195,6 +195,24 @@ export function viewOf(path: string, bytes: Uint8Array): FileView {
   return { kind: "text", text };
 }
 
+/** What a branch did to a file, in a word and its line counts: "new · +40", "+3 −1", "deleted". */
+export function changeLabel(change: {
+  readonly status: "added" | "modified" | "deleted";
+  readonly added: number | null;
+  readonly removed: number | null;
+}): string {
+  if (change.status === "deleted") {
+    return "deleted";
+  }
+  const lines =
+    change.added === null || change.removed === null
+      ? "binary"
+      : change.status === "added"
+        ? `+${change.added}`
+        : `+${change.added} −${change.removed}`;
+  return change.status === "added" ? `new · ${lines}` : lines;
+}
+
 /** A size as "812 B", "4.2 KB", or "3.1 MB". */
 export function sizeLabel(bytes: number): string {
   if (bytes < 1024) {

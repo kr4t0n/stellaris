@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bytesOf,
+  changeLabel,
   linkTarget,
   normalizePath,
   parseDelimited,
@@ -110,6 +111,10 @@ describe("files", () => {
     expect(viewOf("model.bin", new Uint8Array([0, 1, 2]))).toEqual({ kind: "binary" });
     expect(textOf(new Uint8Array([0xff, 0xfe]))).toBeNull();
     expect(bytesOf(btoa("\x00\xff"))).toEqual(new Uint8Array([0, 255]));
+    expect(changeLabel({ status: "added", added: 40, removed: 0 })).toBe("new · +40");
+    expect(changeLabel({ status: "added", added: null, removed: null })).toBe("new · binary");
+    expect(changeLabel({ status: "modified", added: 3, removed: 1 })).toBe("+3 −1");
+    expect(changeLabel({ status: "deleted", added: 0, removed: 9 })).toBe("deleted");
     expect(sizeLabel(812)).toBe("812 B");
     expect(sizeLabel(4300)).toBe("4.2 KB");
     expect(sizeLabel(8 * 1024 * 1024)).toBe("8.0 MB");

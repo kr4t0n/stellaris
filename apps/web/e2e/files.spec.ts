@@ -44,3 +44,32 @@ test("a path a citizen wrote through a task's worktree opens the file from the t
   await view.getByRole("link", { name: /Back to the task/ }).click();
   await expect(page).toHaveURL(`/task/${STAGE_TASK}`);
 });
+
+test("a task's view lists the files its branch changed, each opening in its file's view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view.getByRole("region", { name: "Files" });
+  await expect(files).toContainText("4 files changed · newest commit by ada");
+  await expect(files).toContainText("new · +7");
+  await expect(files).toContainText("+2 −1");
+  await expect(files).toContainText("new · binary");
+  // A deleted file is listed, but it is not on the branch to open.
+  await expect(files).toContainText("draft.md");
+  await expect(files.getByRole("link", { name: "draft.md" })).toHaveCount(0);
+
+  await files.getByRole("link", { name: "results.csv" }).click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/results.csv`);
+  await expect(view.getByRole("cell", { name: "A*, tuned" })).toBeVisible();
+
+  await view.getByRole("link", { name: /Back to the task/ }).click();
+  await view
+    .getByRole("region", { name: "Files" })
+    .getByRole("link", { name: "Browse the branch" })
+    .click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files`);
+  await expect(view.getByRole("link", { name: "docs/" })).toBeVisible();
+});

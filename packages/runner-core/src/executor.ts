@@ -1,6 +1,7 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  BRANCH_CHANGES_LIMIT,
   BRANCH_FILE_LIMIT_BYTES,
   CliKindSchema,
   HOME_SCRATCH,
@@ -8,6 +9,8 @@ import {
   SERVER_TOKEN,
   turnStatusJsonSchema,
   type AgentEvent,
+  type BranchChanges,
+  type BranchChangesRead,
   type BranchFile,
   type BranchRead,
   type CliKind,
@@ -283,13 +286,28 @@ export class TurnExecutor {
    * above the runner's data directory.
    */
   async readBranch(read: BranchRead): Promise<BranchFile | null> {
-    const repoDir = this.layout.repo(read.repo.slug);
+    const repoDir = await this.repoHere(read.repo.slug);
+    return repoDir === null
+      ? null
+      : this.git.readBranch(repoDir, read.branch, read.path, BRANCH_FILE_LIMIT_BYTES);
+  }
+
+  /** What a branch of a project's repository here changed, or null when there is none. */
+  async branchChanges(read: BranchChangesRead): Promise<BranchChanges | null> {
+    const repoDir = await this.repoHere(read.repo.slug);
+    return repoDir === null
+      ? null
+      : this.git.branchChanges(repoDir, read.branch, read.repo.defaultBranch, BRANCH_CHANGES_LIMIT);
+  }
+
+  /** A project's repository on this runner, or null when it has none. */
+  private async repoHere(slug: Name): Promise<string | null> {
     try {
-      await access(path.join(repoDir, ".git"));
+      await access(path.join(this.layout.repo(slug), ".git"));
+      return this.layout.repo(slug);
     } catch {
       return null;
     }
-    return this.git.readBranch(repoDir, read.branch, read.path, BRANCH_FILE_LIMIT_BYTES);
   }
 
   async models(cli: CliKind): Promise<ModelOption[]> {

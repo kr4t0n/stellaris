@@ -57,6 +57,8 @@ interface TurnContext {
   readonly turnId: string;
   readonly turns: number;
   item(method: "item/started" | "item/completed", item: Record<string, unknown>): void;
+  /** One model request finished, which the server reports with the thread's new totals. */
+  request(): void;
   complete(status: string, error?: string): void;
   error(message: string, willRetry: boolean): void;
   exit(stderr: string): void;
@@ -72,6 +74,7 @@ function ordinaryTurn(turn: TurnContext): void {
     exitCode: 0,
     aggregatedOutput: "README.md\nsrc\n",
   });
+  turn.request();
   turn.item("item/completed", {
     type: "mcpToolCall",
     id: "m1",
@@ -124,19 +127,26 @@ function fakeAppServer(
     let turns = 0;
     let running: string | null = null;
     let context: TurnContext | null = null;
-    const complete = (turnId: string, status: string, error?: string): void => {
-      running = null;
+    // The thread's totals, where the input includes the cached input as the server counts it.
+    let total = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+    const usage = (turnId: string, last: typeof total): void => {
       send({
         method: "thread/tokenUsage/updated",
-        params: {
-          threadId,
-          turnId,
-          tokenUsage: {
-            total: { inputTokens: 900, outputTokens: 90 },
-            last: { inputTokens: 400, outputTokens: 40, cachedInputTokens: 100 },
-          },
-        },
+        params: { threadId, turnId, tokenUsage: { total, last } },
       });
+    };
+    const modelRequest = (turnId: string): void => {
+      const last = { inputTokens: 400, cachedInputTokens: 100, outputTokens: 40 };
+      total = {
+        inputTokens: total.inputTokens + last.inputTokens,
+        cachedInputTokens: total.cachedInputTokens + last.cachedInputTokens,
+        outputTokens: total.outputTokens + last.outputTokens,
+      };
+      usage(turnId, last);
+    };
+    const complete = (turnId: string, status: string, error?: string): void => {
+      running = null;
+      modelRequest(turnId);
       send({
         method: "turn/completed",
         params: {
@@ -160,11 +170,17 @@ function fakeAppServer(
           return;
         case "thread/resume": {
           const id = String(message.params?.["threadId"]);
-          send(
-            (script.known ?? []).includes(id)
-              ? { id: message.id, result: { thread: { id }, model: "gpt-5" } }
-              : { id: message.id, error: { code: -32600, message: `no rollout found for ${id}` } },
-          );
+          if (!(script.known ?? []).includes(id)) {
+            send({
+              id: message.id,
+              error: { code: -32600, message: `no rollout found for ${id}` },
+            });
+            return;
+          }
+          send({ id: message.id, result: { thread: { id }, model: "gpt-5" } });
+          // A resumed thread reports where it stood, about the turn it last ran.
+          total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
+          usage("turn-0", { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
           return;
         }
         case "model/list":
@@ -226,10 +242,15 @@ function fakeAppServer(
             id: message.id,
             result: { turn: { id: turnId, items: [], status: "inProgress" } },
           });
+          send({
+            method: "turn/started",
+            params: { threadId, turn: { id: turnId, items: [], status: "inProgress" } },
+          });
           context = {
             turnId,
             turns,
             item: (method, item) => send({ method, params: { threadId, turnId, item } }),
+            request: () => modelRequest(turnId),
             complete: (status, error) => complete(turnId, status, error),
             error: (said, willRetry) =>
               send({
@@ -297,10 +318,11 @@ describe("CodexBackend cold turns", () => {
     expect(result.session).toBe("thread-7");
     expect(result.model).toBe("gpt-5");
     expect(result.status?.summary).toBe("answered turn 1");
+    // Two requests, each 400 input tokens of which 100 cached, counted apart as Claude Code does.
     expect(result.usage).toEqual({
-      inputTokens: 400,
-      outputTokens: 40,
-      cacheReadTokens: 100,
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
       cacheWriteTokens: 0,
     });
     expect(result.events.map((e) => e.type)).toEqual([
@@ -373,6 +395,13 @@ describe("CodexBackend cold turns", () => {
     const backend = new CodexBackend({ spawn: fake.spawn });
     const resumed = await backend.runTurn(request({ session: "thread-3", newSession: false }));
     expect(resumed.session).toBe("thread-3");
+    // The thread's earlier turns, which it reports on resuming, are not this turn's.
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
     expect(paramsOf(fake.received, "thread/resume")).toMatchObject({
       threadId: "thread-3",
       excludeTurns: true,
@@ -586,6 +615,9 @@ describe("CodexBackend resident sessions", () => {
     const second = await session.runTurn("again");
     expect(first.status?.summary).toBe("answered turn 1");
     expect(second.status?.summary).toBe("answered turn 2");
+    // The thread's totals keep growing; each turn counts only its own requests.
+    expect(second.usage).toEqual(first.usage);
+    expect(second.usage.outputTokens).toBe(80);
     expect(fake.received.filter((m) => m.method === "thread/start")).toHaveLength(1);
     expect(fake.killed()).toBe(0);
 

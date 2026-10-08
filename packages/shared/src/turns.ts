@@ -167,6 +167,8 @@ export const TurnHistoryEntrySchema = z.object({
   trigger: z.string(),
   exitReason: z.string().nullable(),
   costUsd: z.number(),
+  /** The tokens the turn used; absent for turns logged before turns recorded them. */
+  usage: UsageSchema.optional(),
   model: z.string().nullable(),
   summary: z.string().nullable(),
   error: z.string().nullable(),

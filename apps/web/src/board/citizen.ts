@@ -1,4 +1,11 @@
-import { SOCIETY_SCOPE, type CliKind, type Member, type TurnHistoryEntry } from "@stellaris/shared";
+import {
+  addUsage,
+  SOCIETY_SCOPE,
+  type CliKind,
+  type Member,
+  type TurnHistoryEntry,
+  type Usage,
+} from "@stellaris/shared";
 import { elapsed } from "../lib/live.js";
 
 /** The citizen view's tabs; the transcript of what it is doing now is the default. */
@@ -49,16 +56,46 @@ export function costLabel(entry: TurnHistoryEntry, cli: CliKind | null): string 
   return cli === "codex" && entry.costUsd === 0 ? "unmetered" : `$${entry.costUsd.toFixed(2)}`;
 }
 
-/** How many turns a history holds, how many did not complete, and the dollars they were metered. */
+const compact = new Intl.NumberFormat("en", { notation: "compact" });
+const whole = new Intl.NumberFormat("en");
+
+/** A turn's whole input: what it read from the cache, wrote to it, and neither. */
+export function inputTokens(usage: Usage): number {
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+}
+
+/** "152K in · 1.5K out". */
+export function tokensLabel(usage: Usage): string {
+  return `${compact.format(inputTokens(usage))} in · ${compact.format(usage.outputTokens)} out`;
+}
+
+/** The counts behind `tokensLabel`, in full. */
+export function tokensDetail(usage: Usage): string {
+  return [
+    `${whole.format(inputTokens(usage))} input tokens: ${whole.format(usage.cacheReadTokens)} read from the cache,`,
+    `${whole.format(usage.cacheWriteTokens)} written to it, ${whole.format(usage.inputTokens)} neither;`,
+    `${whole.format(usage.outputTokens)} output tokens`,
+  ].join(" ");
+}
+
+/**
+ * How many turns a history holds, how many did not complete, the dollars they were metered, and
+ * the tokens of those that recorded them, which turns logged before tokens were recorded did not.
+ */
 export function historyTotals(entries: readonly TurnHistoryEntry[]): {
   turns: number;
   failed: number;
   costUsd: number;
+  usage: Usage | null;
+  withUsage: number;
 } {
+  const counted = entries.flatMap((entry) => (entry.usage === undefined ? [] : [entry.usage]));
   return {
     turns: entries.length,
     failed: entries.filter(failed).length,
     costUsd: entries.reduce((sum, entry) => sum + entry.costUsd, 0),
+    usage: counted.length === 0 ? null : counted.reduce(addUsage),
+    withUsage: counted.length,
   };
 }
 

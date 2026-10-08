@@ -3,7 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { LinkedText, useEntities } from "../components/Entities.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
-import { costLabel, endingOf, historyTotals, scopeName, turnLength } from "./citizen.js";
+import {
+  costLabel,
+  endingOf,
+  historyTotals,
+  scopeName,
+  tokensDetail,
+  tokensLabel,
+  turnLength,
+} from "./citizen.js";
 import { PaneNote } from "./Pane.js";
 import { time, TranscriptSteps } from "./Transcript.js";
 import { useStoredTurn } from "./useStoredTurn.js";
@@ -54,10 +62,14 @@ function TurnRow({
             <span className="min-w-0 flex-1 truncate text-fg-muted">
               {endingOf(entry)} {ago(entry.ts, now)}
             </span>
-            <span className="shrink-0 font-mono text-[11px] text-fg-tertiary">
+            <span
+              className="shrink-0 font-mono text-[11px] text-fg-tertiary"
+              title={entry.usage === undefined ? undefined : tokensDetail(entry.usage)}
+            >
               {[
                 length,
                 entry.toolCalls === undefined ? null : `${entry.toolCalls} tools`,
+                entry.usage === undefined ? null : tokensLabel(entry.usage),
                 costLabel(entry, cli),
               ]
                 .filter((part) => part !== null)
@@ -149,11 +161,20 @@ export function CitizenTurns({
   }
   const totals = historyTotals(entries);
   const metered = cli === "codex" ? "unmetered" : `$${totals.costUsd.toFixed(2)}`;
+  // Turns logged before tokens were recorded have none to add.
+  const tokens =
+    totals.usage === null
+      ? ""
+      : ` · ${tokensLabel(totals.usage)}${totals.withUsage < totals.turns ? ` over ${totals.withUsage} of them` : ""}`;
   return (
     <div className="flex-1 overflow-y-auto">
-      <p className="px-4 pt-3 pb-1 text-meta">
+      <p
+        className="px-4 pt-3 pb-1 text-meta"
+        title={totals.usage === null ? undefined : tokensDetail(totals.usage)}
+      >
         {totals.turns === 1 ? "1 turn" : `${totals.turns} turns`}
-        {totals.failed === 0 ? "" : `, ${totals.failed} not completed`} · {metered}
+        {totals.failed === 0 ? "" : `, ${totals.failed} not completed`}
+        {tokens} · {metered}
       </p>
       {opened !== null && !entries.some((entry) => entry.turnId === opened) ? (
         <p className="px-4 pb-1 text-meta">

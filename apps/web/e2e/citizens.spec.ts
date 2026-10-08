@@ -6,9 +6,12 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await page.goto("/citizen/desk?tab=turns");
 
   const view = page.getByRole("region", { name: "Board content" });
-  await expect(view).toContainText("1 turn · $0.25");
+  await expect(view).toContainText("1 turn · 151K in · 1.5K out · $0.25");
   await expect(view).toContainText("Routed the survey request to ada and filed the task.");
-  await expect(view).toContainText("3m · 4 tools · $0.25");
+  await expect(view).toContainText("3m · 4 tools · 151K in · 1.5K out · $0.25");
+  await expect(view.getByTitle(/^151,361 input tokens: 146,048 read from the cache/)).toHaveCount(
+    2,
+  );
 
   await view.getByRole("link", { name: "Memory" }).click();
   await expect(page).toHaveURL(/\/citizen\/desk\?tab=memory$/);

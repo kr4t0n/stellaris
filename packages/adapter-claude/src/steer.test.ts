@@ -252,6 +252,13 @@ describe("steering and stopping a Claude turn", () => {
     expect(done.status?.summary).toBe("run 2");
     expect(done.exitReason).toBe("completed");
     expect(done.costUsd).toBeCloseTo(0.2);
+    // Each result counts its own run's tokens, so the turn's are both runs'.
+    expect(done.usage).toEqual({
+      inputTokens: 20,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
     expect(events.filter((event) => event.type === "turn_started")).toHaveLength(1);
     expect(events.filter((event) => event.type === "steered")).toEqual([
       { type: "steered", steer: post.id },

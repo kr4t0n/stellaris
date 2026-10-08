@@ -6,7 +6,6 @@ import type { Readable, Writable } from "node:stream";
 import { execa } from "execa";
 import {
   parseTurnStatus,
-  ZERO_USAGE,
   type AgentSpec,
   type ResidentSession,
   type ResidentStart,
@@ -400,20 +399,47 @@ export async function listAppServerModels(
   }
 }
 
-function usageOfBreakdown(raw: unknown): Usage {
+/** A thread's token totals as the app server counts them, where the input includes the cached input. */
+interface ThreadTokens {
+  readonly input: number;
+  readonly cached: number;
+  readonly cacheWrite: number;
+  readonly output: number;
+}
+
+const NO_TOKENS: ThreadTokens = { input: 0, cached: 0, cacheWrite: 0, output: 0 };
+
+function threadTokensOf(raw: unknown): ThreadTokens {
   const u = isDict(raw) ? raw : {};
   return {
-    inputTokens: num(u["inputTokens"]),
-    outputTokens: num(u["outputTokens"]),
-    cacheReadTokens: num(u["cachedInputTokens"]),
-    cacheWriteTokens: num(u["cacheWriteInputTokens"]),
+    input: num(u["inputTokens"]),
+    cached: num(u["cachedInputTokens"]),
+    cacheWrite: num(u["cacheWriteInputTokens"]),
+    output: num(u["outputTokens"]),
+  };
+}
+
+/**
+ * What a turn used, from the thread's totals before and after it. The board counts input outside
+ * the cache apart from the input read from or written to it, as Claude Code does.
+ */
+export function turnUsage(before: ThreadTokens, after: ThreadTokens): Usage {
+  const grew = (key: keyof ThreadTokens): number => Math.max(0, after[key] - before[key]);
+  const cached = grew("cached");
+  const cacheWrite = grew("cacheWrite");
+  return {
+    inputTokens: Math.max(0, grew("input") - cached - cacheWrite),
+    outputTokens: grew("output"),
+    cacheReadTokens: cached,
+    cacheWriteTokens: cacheWrite,
   };
 }
 
 interface TurnCollector {
   turnId: string | null;
   finalText: string;
-  usage: Usage;
+  /** The thread's totals before the turn's first request. */
+  baseline: ThreadTokens;
   status: string | null;
   error: string | undefined;
   readonly started: Set<string>;
@@ -433,6 +459,8 @@ export class CodexAppServerSession implements ResidentSession {
   model: string | undefined;
   private readonly client: JsonRpcClient;
   private active: TurnCollector | null = null;
+  /** The thread's totals as last reported, which a resumed thread reports before its first turn. */
+  private threadTotal: ThreadTokens = NO_TOKENS;
   private closed = false;
   private readonly stderrTail: string[] = [];
   private readonly recorded: string[] = [];
@@ -594,10 +622,35 @@ export class CodexAppServerSession implements ResidentSession {
 
   private onNotification(method: string, params: unknown): void {
     const turn = this.active;
-    if (turn === null || !isDict(params)) {
+    if (!isDict(params)) {
+      return;
+    }
+    if (method === "thread/tokenUsage/updated") {
+      const usage = params["tokenUsage"];
+      if (!isDict(usage)) {
+        return;
+      }
+      this.threadTotal = threadTokensOf(usage["total"]);
+      // `last` is only the latest request. An update about another turn, such as the one a resumed
+      // thread sends about its previous turn, says where the thread stood before this one.
+      const owner = str(params["turnId"]);
+      if (
+        turn !== null &&
+        (turn.turnId === null || (owner !== undefined && owner !== turn.turnId))
+      ) {
+        turn.baseline = this.threadTotal;
+      }
+      return;
+    }
+    if (turn === null) {
       return;
     }
     switch (method) {
+      case "turn/started": {
+        const started = params["turn"];
+        turn.turnId ??= isDict(started) ? (str(started["id"]) ?? null) : null;
+        return;
+      }
       case "item/started":
       case "item/completed": {
         const item = params["item"];
@@ -639,13 +692,6 @@ export class CodexAppServerSession implements ResidentSession {
             ok: toolOk(item),
             ...(output === "" ? {} : { output: capOutput(output) }),
           });
-        }
-        return;
-      }
-      case "thread/tokenUsage/updated": {
-        const usage = params["tokenUsage"];
-        if (isDict(usage)) {
-          turn.usage = usageOfBreakdown(usage["last"]);
         }
         return;
       }
@@ -706,7 +752,7 @@ export class CodexAppServerSession implements ResidentSession {
     const turn: TurnCollector = {
       turnId: null,
       finalText: "",
-      usage: ZERO_USAGE,
+      baseline: this.threadTotal,
       status: null,
       error: undefined,
       started: new Set(),
@@ -787,11 +833,12 @@ export class CodexAppServerSession implements ResidentSession {
     if (turn.error !== undefined) {
       emit({ type: "error", message: turn.error });
     }
-    emit({ type: "turn_completed", usage: turn.usage, costUsd: 0, status, exitReason });
+    const usage = turnUsage(turn.baseline, this.threadTotal);
+    emit({ type: "turn_completed", usage, costUsd: 0, status, exitReason });
     return {
       events,
       finalText: turn.finalText,
-      usage: turn.usage,
+      usage,
       costUsd: 0,
       status,
       exitReason,

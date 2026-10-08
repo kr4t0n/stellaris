@@ -25,6 +25,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  addUsage,
   AGENT_TOKEN_ENV,
   capOutput,
   type AgentEvent,
@@ -283,7 +284,8 @@ function handleMessage(
     }
     case "result": {
       state.sawResult = true;
-      state.usage = usageOf(message.usage);
+      // Each result counts only its own run, and a turn can run more than once in one process.
+      state.usage = addUsage(state.usage, usageOf(message.usage));
       state.totalCostUsd = message.total_cost_usd;
       if (message.subtype === "success") {
         state.finalText = message.result;

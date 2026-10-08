@@ -5,6 +5,8 @@ import {
   endingOf,
   historyTotals,
   runnersOf,
+  tokensDetail,
+  tokensLabel,
   turnLength,
   wakeScopes,
   withoutTitle,
@@ -55,15 +57,50 @@ describe("citizen", () => {
     expect(costLabel(entry({ costUsd: 0 }), "codex")).toBe("unmetered");
   });
 
-  it("totals a history", () => {
+  it("totals a history, with the tokens of the turns that recorded them", () => {
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 400,
+      cacheReadTokens: 50_000,
+      cacheWriteTokens: 2_000,
+    };
     expect(
       historyTotals([
-        entry(),
-        entry({ exitReason: "error", outcome: "failed", costUsd: 0.1 }),
-        // A stop is the user's decision, not a failure.
+        entry({ usage }),
+        entry({ exitReason: "error", outcome: "failed", costUsd: 0.1, usage }),
+        // A stop is the user's decision, not a failure; and a turn from before tokens has none.
         entry({ exitReason: "stopped", costUsd: 0 }),
       ]),
-    ).toEqual({ turns: 3, failed: 1, costUsd: 0.52 });
+    ).toEqual({
+      turns: 3,
+      failed: 1,
+      costUsd: 0.52,
+      usage: {
+        inputTokens: 20,
+        outputTokens: 800,
+        cacheReadTokens: 100_000,
+        cacheWriteTokens: 4_000,
+      },
+      withUsage: 2,
+    });
+    expect(historyTotals([entry()])).toMatchObject({ usage: null, withUsage: 0 });
+  });
+
+  it("counts a turn's whole input, cached or not, and says how it splits", () => {
+    const usage = {
+      inputTokens: 5_313,
+      outputTokens: 1_540,
+      cacheReadTokens: 146_048,
+      cacheWriteTokens: 0,
+    };
+    expect(tokensLabel(usage)).toBe("151K in · 1.5K out");
+    expect(tokensLabel({ ...usage, inputTokens: 12, cacheReadTokens: 0, outputTokens: 940 })).toBe(
+      "12 in · 940 out",
+    );
+    expect(tokensLabel({ ...usage, cacheReadTokens: 1_234_567 })).toBe("1.2M in · 1.5K out");
+    expect(tokensDetail(usage)).toBe(
+      "151,361 input tokens: 146,048 read from the cache, 0 written to it, 5,313 neither; 1,540 output tokens",
+    );
   });
 
   it("drops a leading heading that repeats the section's title", () => {

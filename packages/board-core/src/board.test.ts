@@ -489,10 +489,17 @@ describe("Board", () => {
     const home = await board.beginTurn(turnIn(undefined, clock.toISOString()));
     clock = new Date("2026-09-28T10:02:00.000Z");
     const inThread = await board.beginTurn(turnIn(task.id, clock.toISOString()));
+    const usage = {
+      inputTokens: 12,
+      outputTokens: 340,
+      cacheReadTokens: 56_000,
+      cacheWriteTokens: 780,
+    };
     await board.finishTurn({
       ...inThread,
       endedAt: "2026-09-28T10:04:00.000Z",
       exitReason: "completed",
+      usage,
     });
     await board.finishTurn({
       ...home,
@@ -502,11 +509,12 @@ describe("Board", () => {
     expect((await board.readLastTurn("eng-1", "demo"))?.session).toBe("home-session");
     expect((await board.readLastTurn("eng-1", "demo", task.id))?.session).toBe("task-session");
     expect((await board.readLatestTurn("eng-1", "demo"))?.thread).toBe(task.id);
+    // The history carries the tokens a turn reported, and none for a turn that reported none.
     expect(
-      (await board.listTurns("eng-1")).map((entry) => [entry.thread, entry.startedAt]),
+      (await board.listTurns("eng-1")).map((entry) => [entry.thread, entry.startedAt, entry.usage]),
     ).toEqual([
-      [task.id, "2026-09-28T10:02:00.000Z"],
-      [undefined, "2026-09-28T10:01:00.000Z"],
+      [task.id, "2026-09-28T10:02:00.000Z", usage],
+      [undefined, "2026-09-28T10:01:00.000Z", undefined],
     ]);
   });
 

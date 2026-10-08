@@ -284,6 +284,12 @@ const DESK_TURN = {
   trigger: "user_post",
   exitReason: "completed",
   costUsd: 0.25,
+  usage: {
+    inputTokens: 18,
+    outputTokens: 1_540,
+    cacheReadTokens: 146_048,
+    cacheWriteTokens: 5_295,
+  },
   model: "claude-opus-5-5",
   summary: "Routed the survey request to ada and filed the task.",
   error: null,

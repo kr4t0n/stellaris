@@ -89,7 +89,13 @@ describe("recorded Codex app-server turns", () => {
         input: { command: "/bin/bash -lc 'echo stellaris-fixture'" },
       },
     ]);
-    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    // Two requests: the thread's totals, with the cached input counted apart.
+    expect(result.usage).toEqual({
+      inputTokens: 18_712,
+      outputTokens: 78,
+      cacheReadTokens: 18_176,
+      cacheWriteTokens: 0,
+    });
   });
 
   it("replays a turn on a resumed thread", async () => {
@@ -102,6 +108,13 @@ describe("recorded Codex app-server turns", () => {
     expect(result.session).toBe("01a0edff-8584-7ee1-91f8-6e8d4549a794");
     expect(result.status?.summary).toBe("stellaris-fixture");
     expect(result.events.map((e) => e.type)).toEqual(["turn_started", "text", "turn_completed"]);
+    // The thread reports its totals on resuming; only what grew after counts for this turn.
+    expect(result.usage).toEqual({
+      inputTokens: 252,
+      outputTokens: 85,
+      cacheReadTokens: 18_304,
+      cacheWriteTokens: 0,
+    });
   });
 
   /**
@@ -141,5 +154,12 @@ describe("recorded Codex app-server turns", () => {
     expect(events[steered]).toEqual({ type: "steered", steer: steerId });
     expect(steps.slice(steered)).toContain("tool_call:mcp__board__post_message");
     expect(result.finalText).toContain("PINEAPPLE");
+    // Five requests, where the last alone holds 30,630 input tokens.
+    expect(result.usage).toEqual({
+      inputTokens: 5_313,
+      outputTokens: 307,
+      cacheReadTokens: 146_048,
+      cacheWriteTokens: 0,
+    });
   });
 });

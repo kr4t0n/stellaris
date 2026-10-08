@@ -64,6 +64,10 @@ export const BoardEventSchema = z.object({
 });
 export type BoardEvent = z.infer<typeof BoardEventSchema>;
 
+/**
+ * The tokens a turn used. `inputTokens` is the input neither read from the cache nor written to
+ * it, so the turn's whole input is the sum of the three input counts, on either CLI.
+ */
 export const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
@@ -71,6 +75,15 @@ export const UsageSchema = z.object({
   cacheWriteTokens: z.number().int().nonnegative().default(0),
 });
 export type Usage = z.infer<typeof UsageSchema>;
+
+export function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+  };
+}
 
 /** The structured object every turn ends with. The scheduler reads this, never prose. */
 export const TurnStatusSchema = z.object({

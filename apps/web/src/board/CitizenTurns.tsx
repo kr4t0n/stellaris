@@ -1,10 +1,9 @@
-import type { CliKind, TurnHistoryEntry } from "@stellaris/shared";
+import type { TurnHistoryEntry } from "@stellaris/shared";
 import { useEffect, useRef, useState } from "react";
 import { LinkedText, useEntities } from "../components/Entities.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import {
-  costLabel,
   endingOf,
   historyTotals,
   scopeName,
@@ -21,13 +20,11 @@ const PAGE = 50;
 function TurnRow({
   name,
   entry,
-  cli,
   now,
   opened,
 }: {
   name: string;
   entry: TurnHistoryEntry;
-  cli: CliKind | null;
   now: number;
   /** The turn the address names: it starts open and in view. */
   opened: boolean;
@@ -70,7 +67,6 @@ function TurnRow({
                 length,
                 entry.toolCalls === undefined ? null : `${entry.toolCalls} tools`,
                 entry.usage === undefined ? null : tokensLabel(entry.usage),
-                costLabel(entry, cli),
               ]
                 .filter((part) => part !== null)
                 .join(" · ")}
@@ -137,18 +133,10 @@ function TurnBody({
 }
 
 /**
- * Every turn the citizen finished, newest first, with how each ended, what it cost, and its report;
+ * Every turn the citizen finished, newest first, with how each ended, the tokens it used, and its report;
  * a turn opens to every step it took, and the one the address names starts open.
  */
-export function CitizenTurns({
-  name,
-  cli,
-  opened,
-}: {
-  name: string;
-  cli: CliKind | null;
-  opened: string | null;
-}) {
+export function CitizenTurns({ name, opened }: { name: string; opened: string | null }) {
   const [limit, setLimit] = useState(PAGE);
   const history = useTurnHistory(name, limit);
   const now = useNow(30_000);
@@ -160,7 +148,6 @@ export function CitizenTurns({
     return <PaneNote>{name} has not finished a turn yet.</PaneNote>;
   }
   const totals = historyTotals(entries);
-  const metered = cli === "codex" ? "unmetered" : `$${totals.costUsd.toFixed(2)}`;
   // Turns logged before tokens were recorded have none to add.
   const tokens =
     totals.usage === null
@@ -174,7 +161,7 @@ export function CitizenTurns({
       >
         {totals.turns === 1 ? "1 turn" : `${totals.turns} turns`}
         {totals.failed === 0 ? "" : `, ${totals.failed} not completed`}
-        {tokens} · {metered}
+        {tokens}
       </p>
       {opened !== null && !entries.some((entry) => entry.turnId === opened) ? (
         <p className="px-4 pb-1 text-meta">
@@ -189,7 +176,6 @@ export function CitizenTurns({
             key={entry.id}
             name={name}
             entry={entry}
-            cli={cli}
             now={now}
             opened={opened !== null && entry.turnId === opened}
           />

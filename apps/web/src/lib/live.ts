@@ -50,7 +50,6 @@ export interface SteerPost {
 export interface TurnEnd {
   readonly at: string;
   readonly exitReason: TurnExitReason;
-  readonly costUsd: number;
   readonly summary: string | null;
 }
 
@@ -335,7 +334,6 @@ export function applyLive(
         end: {
           at: item.ts,
           exitReason: event.exitReason,
-          costUsd: event.costUsd,
           summary,
         },
       });

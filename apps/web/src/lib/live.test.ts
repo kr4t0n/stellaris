@@ -72,7 +72,7 @@ describe("live turns", () => {
         exitReason: "completed",
       }),
     );
-    expect(ended.get("ada/lab")?.end).toMatchObject({ exitReason: "completed", costUsd: 0.42 });
+    expect(ended.get("ada/lab")?.end).toMatchObject({ exitReason: "completed" });
     expect(ended.get("ada/lab")?.end?.summary).toBe("Checked 44 citations.");
     expect(turns.get("ada/lab")?.end).toBeNull();
   });

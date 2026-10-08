@@ -211,7 +211,7 @@ function CitizenPage({
         ))}
       </nav>
       {tab === "turns" ? (
-        <CitizenTurns key={turn} name={name} cli={member.cli} opened={turn} />
+        <CitizenTurns key={turn} name={name} opened={turn} />
       ) : tab === "memory" ? (
         <CitizenMemory member={member} charter={charter} />
       ) : tab === "history" ? (

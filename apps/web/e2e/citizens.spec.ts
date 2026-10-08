@@ -6,9 +6,11 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await page.goto("/citizen/desk?tab=turns");
 
   const view = page.getByRole("region", { name: "Board content" });
-  await expect(view).toContainText("1 turn · 151K in · 1.5K out · $0.25");
+  await expect(view.getByText("1 turn · 151K in · 1.5K out", { exact: true })).toBeVisible();
   await expect(view).toContainText("Routed the survey request to ada and filed the task.");
-  await expect(view).toContainText("3m · 4 tools · 151K in · 1.5K out · $0.25");
+  await expect(view.getByText("3m · 4 tools · 151K in · 1.5K out", { exact: true })).toBeVisible();
+  // Turns read the same on either CLI: tokens, never dollars, which Codex does not report.
+  await expect(view).not.toContainText("$");
   await expect(view.getByTitle(/^151,361 input tokens: 146,048 read from the cache/)).toHaveCount(
     2,
   );

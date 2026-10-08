@@ -1,7 +1,6 @@
 import {
   addUsage,
   SOCIETY_SCOPE,
-  type CliKind,
   type Member,
   type TurnHistoryEntry,
   type Usage,
@@ -51,11 +50,6 @@ export function failed(entry: TurnHistoryEntry): boolean {
   );
 }
 
-/** Codex reports tokens but no price, so its turns are not metered in dollars. */
-export function costLabel(entry: TurnHistoryEntry, cli: CliKind | null): string {
-  return cli === "codex" && entry.costUsd === 0 ? "unmetered" : `$${entry.costUsd.toFixed(2)}`;
-}
-
 const compact = new Intl.NumberFormat("en", { notation: "compact" });
 const whole = new Intl.NumberFormat("en");
 
@@ -79,13 +73,12 @@ export function tokensDetail(usage: Usage): string {
 }
 
 /**
- * How many turns a history holds, how many did not complete, the dollars they were metered, and
- * the tokens of those that recorded them, which turns logged before tokens were recorded did not.
+ * How many turns a history holds, how many did not complete, and the tokens of those that recorded
+ * them, which turns logged before tokens were recorded did not.
  */
 export function historyTotals(entries: readonly TurnHistoryEntry[]): {
   turns: number;
   failed: number;
-  costUsd: number;
   usage: Usage | null;
   withUsage: number;
 } {
@@ -93,7 +86,6 @@ export function historyTotals(entries: readonly TurnHistoryEntry[]): {
   return {
     turns: entries.length,
     failed: entries.filter(failed).length,
-    costUsd: entries.reduce((sum, entry) => sum + entry.costUsd, 0),
     usage: counted.length === 0 ? null : counted.reduce(addUsage),
     withUsage: counted.length,
   };

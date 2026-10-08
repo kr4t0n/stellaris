@@ -173,12 +173,10 @@ export function TurnFooter({
   now: number;
 }) {
   if (turn.end !== null) {
-    const cost = turn.end.costUsd > 0 ? ` · $${turn.end.costUsd.toFixed(2)}` : "";
     return (
       <section className="mt-3 rounded-xl bg-surface-2/40 px-3.5 py-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
         <p className="text-caps">
           The turn {OUTCOME[turn.end.exitReason]} {ago(turn.end.at, now)}
-          {cost}
           {turn.fromStart ? ` · ${elapsed(turn.startedAt, Date.parse(turn.end.at))}` : ""}
         </p>
         {turn.end.summary === null ? null : (

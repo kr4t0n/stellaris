@@ -1,7 +1,6 @@
 import { MemberSchema, type TurnHistoryEntry } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
-  costLabel,
   endingOf,
   historyTotals,
   runnersOf,
@@ -47,14 +46,12 @@ describe("citizen", () => {
     expect(wakeScopes({ ...member, memberships: [] })).toEqual(["society"]);
   });
 
-  it("reads a finished turn's length, ending, and cost", () => {
+  it("reads a finished turn's length and ending", () => {
     expect(turnLength(entry())).toBeNull();
     expect(turnLength(entry({ startedAt: "2026-09-29T10:00:00.000Z" }))).toBe("3m");
     expect(endingOf(entry({ exitReason: "timeout" }))).toBe("timed out");
     expect(endingOf(entry({ exitReason: null, outcome: "failed" }))).toBe("failed");
     expect(endingOf(entry({ exitReason: "stopped" }))).toBe("stopped by you");
-    expect(costLabel(entry(), "claude")).toBe("$0.42");
-    expect(costLabel(entry({ costUsd: 0 }), "codex")).toBe("unmetered");
   });
 
   it("totals a history, with the tokens of the turns that recorded them", () => {
@@ -67,14 +64,13 @@ describe("citizen", () => {
     expect(
       historyTotals([
         entry({ usage }),
-        entry({ exitReason: "error", outcome: "failed", costUsd: 0.1, usage }),
+        entry({ exitReason: "error", outcome: "failed", usage }),
         // A stop is the user's decision, not a failure; and a turn from before tokens has none.
-        entry({ exitReason: "stopped", costUsd: 0 }),
+        entry({ exitReason: "stopped" }),
       ]),
     ).toEqual({
       turns: 3,
       failed: 1,
-      costUsd: 0.52,
       usage: {
         inputTokens: 20,
         outputTokens: 800,

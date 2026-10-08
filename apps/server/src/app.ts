@@ -1,6 +1,7 @@
 import { BoardError, isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
+  BranchPathSchema,
   CliKindSchema,
   MetricsWindowSchema,
   ModelNameSchema,
@@ -12,7 +13,7 @@ import {
   WakeRequestSchema,
   type LiveTurnEvent,
 } from "@stellaris/shared";
-import { RunnerProtocolError, type RunnerHub } from "@stellaris/turn-host";
+import { RunnerAwayError, RunnerProtocolError, type RunnerHub } from "@stellaris/turn-host";
 import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
@@ -108,6 +109,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     if (error instanceof RunnerProtocolError) {
       return c.json({ error: "RUNNER_PROTOCOL", message: error.message }, 409);
+    }
+    if (error instanceof RunnerAwayError) {
+      return c.json({ error: "RUNNER_AWAY", message: error.message }, 503);
     }
     return c.json({ error: "INTERNAL", message: error.message }, 500);
   });
@@ -265,6 +269,18 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   );
   api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
   api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));
+  // What a task's work left: one path on its branch, read on the runner its project lives on.
+  const taskFile = async (c: Context<Env>, file: string) => {
+    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    if (deps.runners === undefined) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to read a task's files from");
+    }
+    return c.json(
+      await deps.runners.readBranch(task.project, `task/${task.id}`, BranchPathSchema.parse(file)),
+    );
+  };
+  api.get("/tasks/:id/files", (c) => taskFile(c, ""));
+  api.get("/tasks/:id/files/:path{.+}", (c) => taskFile(c, c.req.param("path")));
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));
   api.get("/threads/:id", async (c) => {

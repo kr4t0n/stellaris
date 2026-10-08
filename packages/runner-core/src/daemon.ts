@@ -200,6 +200,7 @@ export class RunnerDaemon {
           residentClis: resident,
           steerableClis: steerable,
           stoppableClis: stoppable,
+          branchReads: true,
           capabilities: [...this.capabilities],
           slots: this.slots,
           turns: this.turns,
@@ -269,6 +270,9 @@ export class RunnerDaemon {
         return;
       case "models":
         answer(this.executor.models(message.cli));
+        return;
+      case "file":
+        answer(this.executor.readBranch(message.read));
         return;
       case "steer": {
         const control = this.controls.get(message.turnId);

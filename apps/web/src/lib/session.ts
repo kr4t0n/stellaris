@@ -2,7 +2,7 @@ import type { Task } from "@stellaris/shared";
 import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { CliKind, MetricsWindow } from "@stellaris/shared";
-import type { Api } from "./api.js";
+import { ApiError, type Api } from "./api.js";
 
 export interface Session {
   readonly api: Api;
@@ -122,6 +122,22 @@ export function useTask(id: string | null) {
     queryKey: ["task", id],
     queryFn: () => api.task(id ?? ""),
     enabled: id !== null,
+  });
+}
+
+/**
+ * One path on a task's branch. A path not on the branch, or a runner that is away, is not asked
+ * again at once; a finished turn refreshes it, since the hand-back is what commits a turn's files.
+ */
+export function useTaskFile(taskId: string, path: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["task-file", taskId, path],
+    queryFn: () => api.taskFile(taskId, path),
+    staleTime: 30_000,
+    retry: (failures, error) =>
+      failures < 1 &&
+      !(error instanceof ApiError && (error.status === 404 || error.status === 503)),
   });
 }
 

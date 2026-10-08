@@ -1,6 +1,6 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { MergeOutcome, ProjectRepo } from "@stellaris/shared";
+import type { BranchFile, MergeOutcome, ProjectRepo } from "@stellaris/shared";
 import { execa } from "execa";
 
 /** The git operations a runner needs. */
@@ -38,7 +38,20 @@ export interface GitOps {
     home: string | null,
     author: GitAuthor,
   ): Promise<{ branch: string; committed: boolean } | null>;
+  /**
+   * One path on a branch as its newest commit has it, read from git's objects rather than a
+   * worktree: a file's bytes when it is no larger than `limit`, or a folder's entries. Null when
+   * the branch or the path does not exist.
+   */
+  readBranch(
+    repoDir: string,
+    branch: string,
+    file: string,
+    limit: number,
+  ): Promise<BranchFile | null>;
 }
+
+type BranchEntry = Extract<BranchFile, { kind: "dir" }>["entries"][number];
 
 export interface GitAuthor {
   readonly name: string;
@@ -218,5 +231,69 @@ export class ExecaGit implements GitOps {
     }
     await git(["merge", "--abort"], repoDir);
     return { ok: false, detail: merge.stderr.trim() || merge.stdout.trim() || "merge failed" };
+  }
+
+  async readBranch(
+    repoDir: string,
+    branch: string,
+    file: string,
+    limit: number,
+  ): Promise<BranchFile | null> {
+    const log = await git(
+      ["log", "-1", "--format=%H%x00%ct%x00%an", `refs/heads/${branch}`, "--"],
+      repoDir,
+    );
+    const [id, seconds, author] = log.stdout.trim().split("\0");
+    if (log.exitCode !== 0 || id === undefined || id === "") {
+      return null;
+    }
+    const commit = {
+      id,
+      at: new Date(Number(seconds) * 1000).toISOString(),
+      author: author ?? "",
+    };
+    // The commit's id leads the object name, so the path can never be read as an option.
+    const object = `${id}:${file}`;
+    const type = await git(["cat-file", "-t", object], repoDir);
+    if (type.exitCode !== 0) {
+      return null;
+    }
+    if (type.stdout.trim() === "tree") {
+      const listing = await must(["ls-tree", "-l", "-z", object], repoDir);
+      const entries = listing.split("\0").flatMap((line): BranchEntry[] => {
+        const tab = line.indexOf("\t");
+        const [, kind, , size] = line.slice(0, tab).split(/\s+/);
+        const name = line.slice(tab + 1);
+        if (tab === -1 || name === "") {
+          return [];
+        }
+        if (kind === "blob") {
+          return [{ name, kind: "file", size: Number(size) }];
+        }
+        // A submodule's entry is a commit, whose files this repository does not hold.
+        return kind === "tree" ? [{ name, kind: "dir", size: null }] : [];
+      });
+      return { kind: "dir", path: file, commit, entries };
+    }
+    if (type.stdout.trim() !== "blob") {
+      return null;
+    }
+    const size = Number((await must(["cat-file", "-s", object], repoDir)).trim());
+    if (size > limit) {
+      return { kind: "file", path: file, commit, size, content: null };
+    }
+    const blob = await execa("git", ["cat-file", "blob", object], {
+      cwd: repoDir,
+      encoding: "buffer",
+      stripFinalNewline: false,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    return {
+      kind: "file",
+      path: file,
+      commit,
+      size,
+      content: Buffer.from(blob.stdout).toString("base64"),
+    };
   }
 }

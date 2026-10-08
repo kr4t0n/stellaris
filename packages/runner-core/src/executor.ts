@@ -1,12 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  BRANCH_FILE_LIMIT_BYTES,
   CliKindSchema,
   HOME_SCRATCH,
   PATH_TOKENS,
   SERVER_TOKEN,
   turnStatusJsonSchema,
   type AgentEvent,
+  type BranchFile,
+  type BranchRead,
   type CliKind,
   type LandRequest,
   type MergeOutcome,
@@ -71,7 +74,7 @@ const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
  * fills the job's path tokens with this runner's paths and its server token with this runner's
  * address for the server, renders the CLI config files, runs the turn through the CLI's adapter,
  * cold or on a warm session, and hands the worktree back. It also lands tasks in the repositories
- * that live here and lists a CLI's models.
+ * that live here, reads files from their branches, and lists a CLI's models.
  */
 export class TurnExecutor {
   private readonly layout: RunnerLayout;
@@ -272,6 +275,21 @@ export class TurnExecutor {
       }
       return this.git.merge(repoDir, request.repo.defaultBranch, request.branch);
     });
+  }
+
+  /**
+   * One path on a branch of a project's repository here. Null when the project's repository is not
+   * here, or the branch or the path does not exist; git would otherwise look for a repository
+   * above the runner's data directory.
+   */
+  async readBranch(read: BranchRead): Promise<BranchFile | null> {
+    const repoDir = this.layout.repo(read.repo.slug);
+    try {
+      await access(path.join(repoDir, ".git"));
+    } catch {
+      return null;
+    }
+    return this.git.readBranch(repoDir, read.branch, read.path, BRANCH_FILE_LIMIT_BYTES);
   }
 
   async models(cli: CliKind): Promise<ModelOption[]> {

@@ -1,5 +1,6 @@
 import {
   BoardEventSchema,
+  BranchFileSchema,
   ChannelRefSchema,
   DecisionSchema,
   HomeConflictSchema,
@@ -136,6 +137,9 @@ function channelPath(ref: string): string {
   return ref.split("/").map(encodeURIComponent).join("/");
 }
 
+/** Why the board refused a request, when it said. */
+const ErrorBodySchema = z.object({ message: z.string() });
+
 async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promise<T> {
   let response: Response;
   try {
@@ -144,12 +148,14 @@ async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promis
     throw new ApiError(0, "The board server is not reachable.");
   }
   if (!response.ok) {
-    throw new ApiError(response.status, `${path} answered ${response.status}`);
+    const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
+    throw new ApiError(
+      response.status,
+      detail.success ? detail.data.message : `${path} answered ${response.status}`,
+    );
   }
   return schema.parse(await response.json());
 }
-
-const ErrorBodySchema = z.object({ message: z.string() });
 
 /** A write as the signed-in actor; the board's refusal comes back as an ApiError with its reason. */
 async function write<T>(
@@ -222,6 +228,17 @@ export function createApi(token: string) {
     tasks: (slug: string) =>
       get(`/api/projects/${encodeURIComponent(slug)}/tasks`, token, TaskSchema.array()),
     task: (id: string) => get(`/api/tasks/${encodeURIComponent(id)}`, token, TaskSchema),
+    /** One path on a task's branch, read from its project's runner: a file, base64, or a folder. */
+    taskFile: (id: string, path: string) =>
+      get(
+        `/api/tasks/${encodeURIComponent(id)}/files${path
+          .split("/")
+          .filter((segment) => segment !== "")
+          .map((segment) => `/${encodeURIComponent(segment)}`)
+          .join("")}`,
+        token,
+        BranchFileSchema,
+      ),
     proposals: () => get("/api/proposals", token, ProposalSchema.array()),
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),

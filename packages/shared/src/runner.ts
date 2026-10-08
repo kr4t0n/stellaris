@@ -53,6 +53,8 @@ export const RunnerHelloSchema = z.object({
   steerableClis: z.array(CliKindSchema).default([]),
   /** The CLIs whose adapter can stop a running turn; the server stops only these. */
   stoppableClis: z.array(CliKindSchema).default([]),
+  /** Whether the runner answers file reads on its projects' branches; one from before never does. */
+  branchReads: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
@@ -215,6 +217,74 @@ export type MergeOutcome = z.infer<typeof MergeOutcomeSchema>;
 
 export const ModelListSchema = z.array(ModelOptionSchema);
 
+/** The largest file a branch read carries; a larger one comes back with its size alone. */
+export const BRANCH_FILE_LIMIT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A path inside a branch's tree, with forward slashes, or empty for its root. Every segment is a
+ * name: nothing absolute, empty, `.`, or `..`, so a read cannot leave the tree.
+ */
+export const BranchPathSchema = z
+  .string()
+  .max(4096)
+  .refine(
+    (value) =>
+      value === "" ||
+      value
+        .split("/")
+        .every(
+          (segment) =>
+            segment !== "" && segment !== "." && segment !== ".." && !segment.includes("\0"),
+        ),
+    { message: "a path inside the branch, with no empty, `.`, or `..` segment" },
+  );
+
+/** A branch name a runner looks up under `refs/heads/`; it never starts with a dash. */
+export const BranchNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/);
+
+/** A request to read one path on a branch of a project's repository. */
+export const BranchReadSchema = z.object({
+  repo: ProjectRepoSchema,
+  branch: BranchNameSchema,
+  path: BranchPathSchema,
+});
+export type BranchRead = z.infer<typeof BranchReadSchema>;
+
+/** The branch's newest commit, which a read shows the tree at. */
+export const BranchCommitSchema = z.object({
+  id: z.string().min(1),
+  at: IsoDateTimeSchema,
+  author: z.string(),
+});
+export type BranchCommit = z.infer<typeof BranchCommitSchema>;
+
+/**
+ * What a path on a branch holds: a file, base64, or null with its size when it is over
+ * `BRANCH_FILE_LIMIT_BYTES`; or a folder's entries, a folder's size null.
+ */
+export const BranchFileSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("file"),
+    path: BranchPathSchema,
+    commit: BranchCommitSchema,
+    size: z.number().int().nonnegative(),
+    content: z.string().nullable(),
+  }),
+  z.object({
+    kind: z.literal("dir"),
+    path: BranchPathSchema,
+    commit: BranchCommitSchema,
+    entries: z.array(
+      z.object({
+        name: z.string().min(1),
+        kind: z.enum(["file", "dir"]),
+        size: z.number().int().nonnegative().nullable(),
+      }),
+    ),
+  }),
+]);
+export type BranchFile = z.infer<typeof BranchFileSchema>;
+
 /** Input for a running turn: what arrived in its conversation since it was last shown anything. */
 export const TurnSteerSchema = z.object({ id: z.uuid(), text: z.string().min(1) });
 export type TurnSteer = z.infer<typeof TurnSteerSchema>;
@@ -224,6 +294,8 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn"), job: TurnJobSchema }),
   z.object({ type: z.literal("land"), request: z.string().min(1), land: LandRequestSchema }),
   z.object({ type: z.literal("models"), request: z.string().min(1), cli: CliKindSchema }),
+  /** Answered with a `BranchFile`, or null when the branch or the path does not exist. */
+  z.object({ type: z.literal("file"), request: z.string().min(1), read: BranchReadSchema }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

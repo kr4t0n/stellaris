@@ -48,7 +48,8 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   }
   if (type === "turn.completed" || type === "turn.failed") {
     // A turn may have rewritten the citizen's memory and skills, or reconciled or left a conflict
-    // copy, each a change in its home's history, as well as its turns.
+    // copy, each a change in its home's history, as well as its turns; and its hand-back committed
+    // what it left on a task's branch, which a home turn may have worked on too.
     return [
       ["scheduler"],
       ["members"],
@@ -57,6 +58,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["agent-skills", actor],
       ["conflicts", actor],
       ["history", actor],
+      ["task-file"],
       ["metrics"],
     ];
   }

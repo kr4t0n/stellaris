@@ -191,7 +191,52 @@ const HANDOVER = {
   step: { action: "advanced", stage: "s1", to: "s2" },
   ts: CREATED,
   mentions: [],
-  body: "Survey done: twelve methods in SURVEY.md, with sources.",
+  body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md).`,
+};
+
+/** The branch's newest commit, as the task's runner reports it with every read. */
+const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATED, author: "ada" };
+
+const PLOT_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+function taskFile(path: string, content: string) {
+  const bytes = Buffer.from(content, path.endsWith(".png") ? "base64" : "utf8");
+  return {
+    kind: "file",
+    path,
+    commit: TASK_COMMIT,
+    size: bytes.length,
+    content: bytes.toString("base64"),
+  };
+}
+
+/** What the survey's turns left on its branch: a report with a figure, and the table it cites. */
+const TASK_FILES: Readonly<Record<string, unknown>> = {
+  "": {
+    kind: "dir",
+    path: "",
+    commit: TASK_COMMIT,
+    entries: [
+      { name: "results.csv", kind: "file", size: 44 },
+      { name: "docs", kind: "dir", size: null },
+    ],
+  },
+  docs: {
+    kind: "dir",
+    path: "docs",
+    commit: TASK_COMMIT,
+    entries: [
+      { name: "report.md", kind: "file", size: 140 },
+      { name: "plot.png", kind: "file", size: 70 },
+    ],
+  },
+  "docs/report.md": taskFile(
+    "docs/report.md",
+    "# Shortest paths\n\nDijkstra wins on sparse graphs.\n\n![Runtime by graph size](plot.png)\n\nThe raw numbers are in [the table](../results.csv).\n",
+  ),
+  "docs/plot.png": taskFile("docs/plot.png", PLOT_PNG),
+  "results.csv": taskFile("results.csv", 'method,runtime\nDijkstra,1.2\n"A*, tuned",0.9\n'),
 };
 
 /** desk's one finished turn, as the event log pairs its start and end. */
@@ -713,6 +758,13 @@ export async function fakeBoard(
     }
     if (pathname === "/api/metrics") {
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
+    }
+    const files = `/api/tasks/${STAGE_TASK}/files`;
+    if (pathname === files || pathname.startsWith(`${files}/`)) {
+      const file = TASK_FILES[decodeURIComponent(pathname.slice(files.length + 1))];
+      return file === undefined
+        ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
+        : json(route, file);
     }
     const ask = asks.get(pathname.slice("/api/threads/".length));
     if (pathname.startsWith("/api/threads/") && ask !== undefined) {

@@ -16,6 +16,18 @@ describe("Markdown", () => {
     expect(html).not.toContain('<span class="mention">@b</span>');
   });
 
+  it("reads a path on a runner's machine as text, never as a link to the board's own address", () => {
+    const html = renderToStaticMarkup(
+      <Markdown text="[notes](/tmp/notes.md), ![the plot](/tmp/plot.png), [web](https://x.y)" />,
+    );
+    expect(html).not.toContain('href="/tmp/notes.md"');
+    expect(html).toContain('title="/tmp/notes.md, on a runner');
+    expect(html).toContain(">notes</span>");
+    expect(html).not.toContain("<img");
+    expect(html).toContain(">the plot</span>");
+    expect(html).toContain('href="https://x.y"');
+  });
+
   it("never renders raw HTML or script URLs from a message", () => {
     const html = renderToStaticMarkup(
       <Markdown text={'<script>alert(1)</script> <img src=x onerror="alert(1)">'} />,

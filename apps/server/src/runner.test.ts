@@ -15,6 +15,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  BranchFileSchema,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
@@ -855,6 +856,7 @@ describe("turns on a runner over the runner protocol", () => {
       residentClis: [],
       steerableClis: [],
       stoppableClis: [],
+      branchReads: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -873,6 +875,97 @@ describe("turns on a runner over the runner protocol", () => {
     await runner.stop();
     await vi.waitFor(() => expect(hub.connected).toEqual([]));
     expect(await hub.assign({ ...dispatch, onboarding: false })).toBeNull();
+  });
+
+  it("reads what a task's turns left from its branch on the project's runner", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "files" });
+    for (const slug of ["demo", "idle"]) {
+      await board.addProject(USER, { slug });
+    }
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "sage",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const task = await board.createTask(USER, { project: "demo", title: "report" });
+    const waiting = await board.createTask(USER, { project: "idle", title: "not started" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        await mkdir(path.join(request.spec.cwd, "evidence"), { recursive: true });
+        await writeFile(path.join(request.spec.cwd, "report.md"), "# Report\n");
+        await writeFile(
+          path.join(request.spec.cwd, "evidence", "plot.png"),
+          Buffer.from([0, 1, 2]),
+        );
+        return completed("wrote the report");
+      },
+    };
+    const { app, run, runner, hub } = await start(board, backend);
+    await run({
+      agent: "sage",
+      project: "demo",
+      thread: { id: task.id, task: true },
+      trigger: { kind: "manual", fromUser: true, reason: "test" },
+      priority: 2,
+    });
+    const read = (route: string) =>
+      app.request(`/api/tasks/${route}`, { headers: { authorization: `Bearer ${userToken}` } });
+
+    const report = await read(`${task.id}/files/report.md`);
+    expect(report.status).toBe(200);
+    const file = BranchFileSchema.parse(await report.json());
+    expect(file).toMatchObject({ kind: "file", path: "report.md", size: 9 });
+    expect(Buffer.from(file.kind === "file" ? (file.content ?? "") : "", "base64").toString()).toBe(
+      "# Report\n",
+    );
+    expect(file.commit.author).toBe("sage");
+    const root = BranchFileSchema.parse(await (await read(`${task.id}/files`)).json());
+    expect(root.kind === "dir" ? root.entries.map((entry) => entry.name) : null).toEqual([
+      "evidence",
+      "report.md",
+    ]);
+    expect(
+      BranchFileSchema.parse(await (await read(`${task.id}/files/evidence/plot.png`)).json()),
+    ).toMatchObject({ kind: "file", size: 3, content: Buffer.from([0, 1, 2]).toString("base64") });
+
+    expect((await read(`${task.id}/files/draft.md`)).status).toBe(404);
+    // A URL's own `..` is resolved before any route sees it; one hidden behind encoded slashes is refused.
+    expect((await read(`${task.id}/files/evidence%2F..%2Freport.md`)).status).toBe(400);
+    // A project no turn has run in has no repository on any runner yet.
+    expect((await read(`${waiting.id}/files/report.md`)).status).toBe(404);
+
+    // A runner from before file reads is refused at once rather than left to time out.
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.1",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    const old = await read(`${task.id}/files/report.md`);
+    expect(old.status).toBe(409);
+    expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });
+
+    await runner.stop();
+    await vi.waitFor(() => expect(hub.connected).toEqual([]));
+    const away = await read(`${task.id}/files/report.md`);
+    expect(away.status).toBe(503);
+    expect(await away.json()).toMatchObject({ error: "RUNNER_AWAY" });
   });
 
   it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {

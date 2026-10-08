@@ -40,6 +40,7 @@ describe("board events", () => {
       ["agent-skills", "ada"],
       ["conflicts", "ada"],
       ["history", "ada"],
+      ["task-file"],
       ["metrics"],
     ]);
     expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([

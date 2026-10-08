@@ -56,6 +56,12 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({
     getParentRoute: () => rootRoute,
+    // A file or folder on the task's branch, by its path there.
+    path: "/task/$taskId/files/$",
+    component: lazyRouteComponent(() => import("./board/TaskFileView.js"), "TaskFileView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
     path: "/metrics",
     // `window` picks how far back the metrics look; a week when none is named.
     validateSearch: (search: Record<string, unknown>): { window?: MetricsWindow } => {

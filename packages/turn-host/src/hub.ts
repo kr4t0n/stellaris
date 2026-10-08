@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
+import { BoardError, SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
 import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/scheduler";
 import {
+  BranchFileSchema,
   MergeOutcomeSchema,
   ModelListSchema,
   RUNNER_PROTOCOL,
   SOCIETY_SCOPE,
+  type BranchFile,
   type CliKind,
   type ModelOption,
   type Name,
@@ -59,17 +61,23 @@ interface Pending {
 
 export class RunnerProtocolError extends Error {}
 
+/** A request a runner could not take: it is not connected, went away, or did not answer in time. */
+export class RunnerAwayError extends Error {}
+
 const SILENT: HostLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_GRACE_MS = 2 * 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** A steer or a stop is answered at once by a runner that has the turn; waiting longer is pointless. */
 const CONTROL_TIMEOUT_MS = 15_000;
+/** A file read is a few git calls and up to 8 MB on the way back, which someone is waiting for. */
+const FILE_TIMEOUT_MS = 60_000;
 
 /**
  * The runners connected to the board server, and the scheduler's way to them. It places each
  * queued turn on a runner, the one its project lives on or, in the society scope, the one its
  * session lives on, sends it the job, and resolves when the outcome is recorded. It also lands
- * tasks on their project's runner and asks a runner for a CLI's models.
+ * tasks on their project's runner, reads files from their branches there, and asks a runner for a
+ * CLI's models.
  */
 export class RunnerHub implements TurnRunner {
   private readonly board: Board;
@@ -453,6 +461,53 @@ export class RunnerHub implements TurnRunner {
     return "done";
   }
 
+  /**
+   * One path on a branch of a project's repository, read on the runner the project lives on.
+   * NOT_FOUND when the project has no runner yet or the branch or the path does not exist, and
+   * `RunnerAwayError` while its runner is away.
+   */
+  async readBranch(project: Name, branch: string, path: string): Promise<BranchFile> {
+    const record = await this.board.readProject(project);
+    if (record.runner === undefined) {
+      throw new BoardError(
+        "NOT_FOUND",
+        `${project} has no repository yet, since no turn has run there`,
+      );
+    }
+    const seat = this.seats.get(record.runner);
+    if (seat === undefined || seat.send === null) {
+      throw new RunnerAwayError(
+        `runner ${record.runner}, where ${project} lives, is not connected`,
+      );
+    }
+    // A runner from before file reads would skip the request and leave the reader waiting.
+    if (!seat.hello.branchReads) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name}, where ${project} lives, cannot read files yet; upgrade it`,
+      );
+    }
+    const file = BranchFileSchema.nullable().parse(
+      await this.request(
+        seat,
+        (request) => ({
+          type: "file",
+          request,
+          read: {
+            repo: { slug: record.slug, origin: record.repo, defaultBranch: record.defaultBranch },
+            branch,
+            path,
+          },
+        }),
+        FILE_TIMEOUT_MS,
+      ),
+    );
+    if (file === null) {
+      throw new BoardError("NOT_FOUND", `${branch} has no ${path === "" ? "commit" : path}`);
+    }
+    return file;
+  }
+
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */
   async models(cli: CliKind): Promise<ModelOption[]> {
     const seat = this.byLoad().find((each) => each.send !== null && each.hello.clis.includes(cli));
@@ -473,7 +528,7 @@ export class RunnerHub implements TurnRunner {
       if (pending.runner === seat.name) {
         this.pending.delete(id);
         clearTimeout(pending.timer);
-        pending.reject(new Error(`runner ${seat.name} disconnected`));
+        pending.reject(new RunnerAwayError(`runner ${seat.name} disconnected`));
       }
     }
     await this.board.markRunner(seat.name, { status: "disconnected" }).catch((error: unknown) => {
@@ -578,14 +633,14 @@ export class RunnerHub implements TurnRunner {
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(request);
-        reject(new Error(`runner ${seat.name} did not answer in time`));
+        reject(new RunnerAwayError(`runner ${seat.name} did not answer in time`));
       }, timeoutMs);
       timer.unref?.();
       this.pending.set(request, { runner: seat.name, resolve, reject, timer });
       if (seat.send === null || !seat.send(message(request))) {
         this.pending.delete(request);
         clearTimeout(timer);
-        reject(new Error(`runner ${seat.name} is not connected`));
+        reject(new RunnerAwayError(`runner ${seat.name} is not connected`));
       }
     });
   }

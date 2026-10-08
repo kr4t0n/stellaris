@@ -21,7 +21,11 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   expect(await page.evaluate(() => localStorage.getItem("stellaris.token"))).toBe(TOKEN);
-  await expect(page.getByRole("region", { name: "Governance" })).toContainText("runners1");
+  // The top bar's Runners button is where the view opens from, with the runners waiting counted.
+  const runners = page.getByRole("button", { name: "Runners, 1 waiting for approval" });
+  await expect(runners).toHaveAttribute("aria-pressed", "true");
+  await expect(runners).toContainText("1");
+  await expect(page.getByRole("region", { name: "Governance" })).not.toContainText("runners");
 
   const form = page.getByRole("form", { name: "Approve Studio.local" });
   await expect(page.getByText(ENROLLING_CODE)).toBeVisible();
@@ -33,6 +37,20 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   expect(board.writes).toEqual([
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
+  await expect(page.getByRole("button", { name: "Runners", exact: true })).toBeVisible();
+});
+
+test("Runners in the top bar opens the runners view and closes it again", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto("/");
+  const runners = page.getByRole("button", { name: "Runners", exact: true });
+  await expect(runners).toHaveAttribute("aria-pressed", "false");
+  await runners.click();
+  await expect(page).toHaveURL("/runners");
+  await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
+  await expect(runners).toHaveAttribute("aria-pressed", "true");
+  await runners.click();
+  await expect(page).toHaveURL("/");
 });
 
 test("a code nobody waits with says so, and a denial sends no name", async ({ page }) => {

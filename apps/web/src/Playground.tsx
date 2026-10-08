@@ -19,6 +19,7 @@ import { LiveContext, LiveStore } from "./lib/live.js";
 import { useSeen } from "./lib/seen.js";
 import {
   useAllTasks,
+  useEnrollments,
   useMembers,
   useNow,
   useProjects,
@@ -132,10 +133,9 @@ export function Playground() {
       ? "needs-you"
       : pathname === "/proposals" || pathname.startsWith("/proposal/")
         ? "proposals"
-        : pathname === "/runners"
-          ? "runners"
-          : null;
+        : null;
   const attention = useNeedsYou().length;
+  const enrolling = useEnrollments().data?.length ?? 0;
   const activeOverview =
     pathname === "/society"
       ? SOCIETY_SCOPE
@@ -219,9 +219,11 @@ export function Playground() {
     );
   }
 
-  // Governance and the metrics belong to the society as a whole.
+  // Governance, the runners, and the metrics belong to the society as a whole.
+  const societyWide =
+    activeGovernance !== null || pathname === "/metrics" || pathname === "/runners";
   const focus =
-    (activeGovernance === null && pathname !== "/metrics" ? null : SOCIETY_SCOPE) ??
+    (societyWide ? SOCIETY_SCOPE : null) ??
     activeOverview ??
     activeTasks ??
     (activeChannel === null
@@ -300,6 +302,11 @@ export function Playground() {
             onToggleCitizens={() =>
               void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
             }
+            runnersOpen={pathname === "/runners"}
+            onToggleRunners={() =>
+              void navigate(pathname === "/runners" ? { to: "/" } : { to: "/runners" })
+            }
+            enrolling={enrolling}
             attention={attention}
             onOpenAttention={() => void navigate({ to: "/needs-you" })}
             paused={scheduler.data?.paused ?? false}

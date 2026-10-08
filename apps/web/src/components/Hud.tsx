@@ -4,6 +4,11 @@ interface HudProps {
   /** Whether the citizens view is open; the count opens and closes it. */
   readonly citizensOpen: boolean;
   readonly onToggleCitizens: () => void;
+  /** Whether the runners view is open; the button opens and closes it. */
+  readonly runnersOpen: boolean;
+  readonly onToggleRunners: () => void;
+  /** Runners waiting for the user to approve their enrollment, counted on the button. */
+  readonly enrolling: number;
   /** How many things wait on the user; the chip opens them. */
   readonly attention: number;
   readonly onOpenAttention: () => void;
@@ -28,6 +33,9 @@ export function Hud({
   citizens,
   citizensOpen,
   onToggleCitizens,
+  runnersOpen,
+  onToggleRunners,
+  enrolling,
   attention,
   onOpenAttention,
   paused,
@@ -85,6 +93,22 @@ export function Hud({
           }`}
         >
           {citizens === 1 ? "1 citizen" : `${citizens} citizens`}
+        </button>
+        <button
+          type="button"
+          aria-pressed={runnersOpen}
+          aria-label={enrolling === 0 ? "Runners" : `Runners, ${enrolling} waiting for approval`}
+          onClick={onToggleRunners}
+          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+            runnersOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
+          }`}
+        >
+          Runners
+          {enrolling === 0 ? null : (
+            <span className="rounded bg-amber-500/15 px-1 text-[11px] text-amber-300">
+              {enrolling}
+            </span>
+          )}
         </button>
         <button
           type="button"

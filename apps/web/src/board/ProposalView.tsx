@@ -1,6 +1,7 @@
 import type { Proposal } from "@stellaris/shared";
 import { Link, useParams } from "@tanstack/react-router";
 import { z } from "zod";
+import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
 import { ApiError } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -135,13 +136,17 @@ export function ProposalView() {
     <>
       <PaneHeader
         leading={
-          <Link
-            to="/proposals"
-            aria-label="Back to the proposals"
-            className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-          >
-            ←
-          </Link>
+          <BackLink
+            fallback={
+              <Link
+                to="/proposals"
+                aria-label="Back to the proposals"
+                className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+              >
+                ←
+              </Link>
+            }
+          />
         }
         title={proposalTitle(current)}
         subtitle={`${current.kind} proposal by ${displayName(current.proposedBy)} ${ago(

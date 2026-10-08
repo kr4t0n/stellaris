@@ -1,5 +1,6 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { Link, useParams } from "@tanstack/react-router";
+import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import { useKnowledge, useNow, useProjects } from "../lib/session.js";
@@ -39,7 +40,7 @@ export function KnowledgeView() {
   return (
     <>
       <PaneHeader
-        leading={back}
+        leading={<BackLink fallback={back} />}
         title={entry.topic}
         subtitle={`Knowledge of ${owner} · written by ${entry.updatedBy} ${ago(entry.updatedAt, now)}`}
       />

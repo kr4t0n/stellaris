@@ -79,7 +79,7 @@ test("a task's view lists the files its branch changed, each opening in its file
   await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/results.csv`);
   await expect(view.getByRole("cell", { name: "A*, tuned" })).toBeVisible();
 
-  await view.getByRole("link", { name: /Back to the task/ }).click();
+  await view.getByRole("button", { name: "Back to Compare shortest-path algorithms" }).click();
   await view
     .getByRole("region", { name: "Files" })
     .getByRole("link", { name: "Browse the branch" })
@@ -106,4 +106,43 @@ test("a link that cites a line opens the file at that line, marked", async ({ pa
   // Text gets its lines numbered, and the cited one marked.
   await page.goto(`/task/${STAGE_TASK}/files/docs/run.log?line=2`);
   await expect(view.locator(".line-target")).toHaveText("2second line");
+});
+
+test("the back arrow returns to the view it came from, named, and to the parent only when there is none", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const view = page.getByRole("region", { name: "Board content" });
+
+  // The thread's link to the report, then the report's figure.
+  await view
+    .getByRole("region", { name: "Thread" })
+    .getByRole("link", { name: "report.md" })
+    .click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/docs/report.md`);
+  await view
+    .getByRole("link")
+    .filter({ has: page.getByRole("img", { name: "Runtime by graph size" }) })
+    .click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/docs/plot.png`);
+
+  await view.getByRole("button", { name: "Back to report.md" }).click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/docs/report.md`);
+  await view.getByRole("button", { name: "Back to Compare shortest-path algorithms" }).click();
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}`);
+
+  // The first view of the tab has nowhere to return to, so its arrow goes up to its parent.
+  await view.getByRole("link", { name: "Back to the tasks of Lab" }).click();
+  await expect(page).toHaveURL("/p/lab/tasks");
+
+  // So does a view opened from a link, in a tab of its own.
+  const fresh = await page.context().newPage();
+  await fakeBoard(fresh);
+  await fresh.goto(`/task/${STAGE_TASK}/files/docs/plot.png`);
+  await fresh
+    .getByRole("region", { name: "Board content" })
+    .getByRole("link", { name: "Back to the task Compare shortest-path algorithms" })
+    .click();
+  await expect(fresh).toHaveURL(`/task/${STAGE_TASK}`);
 });

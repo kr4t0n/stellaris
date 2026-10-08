@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
@@ -48,14 +49,18 @@ function ThreadStream({ id }: { id: string }) {
     <>
       <PaneHeader
         leading={
-          <Link
-            to="/c/$"
-            params={{ _splat: thread.channel }}
-            aria-label={`Back to #${thread.channel}`}
-            className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-          >
-            ←
-          </Link>
+          <BackLink
+            fallback={
+              <Link
+                to="/c/$"
+                params={{ _splat: thread.channel }}
+                aria-label={`Back to #${thread.channel}`}
+                className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+              >
+                ←
+              </Link>
+            }
+          />
         }
         title={thread.title}
         subtitle={`${subjectLabel(thread.subject)} thread in #${thread.channel} · opened by ${displayName(

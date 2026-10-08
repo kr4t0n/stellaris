@@ -29,6 +29,7 @@ import {
 } from "./lib/layout.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
 import { useSeen } from "./lib/seen.js";
+import { recordVisit } from "./lib/trail.js";
 import {
   useAllTasks,
   useEnrollments,
@@ -98,6 +99,10 @@ export function Playground() {
     onSuccess: () => void client.invalidateQueries({ queryKey: ["scheduler"] }),
   });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const href = useRouterState({ select: (state) => state.location.href });
+  const step = useRouterState({ select: (state) => state.location.state.__TSR_index });
+  // Where each step of this tab's history went, for the views' back arrows.
+  useEffect(() => recordVisit(step, href), [step, href]);
   const [logsOpen, setLogsOpen] = useState(false);
   // The ask box shows only on the route it was opened on: its asks lead into the board.
   const [askAt, setAskAt] = useState<string | null>(null);

@@ -1,6 +1,7 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
@@ -147,14 +148,18 @@ export function TaskView() {
     <>
       <PaneHeader
         leading={
-          <Link
-            to="/p/$slug/tasks"
-            params={{ slug: current.project }}
-            aria-label={`Back to the tasks of ${project?.name ?? current.project}`}
-            className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-          >
-            ←
-          </Link>
+          <BackLink
+            fallback={
+              <Link
+                to="/p/$slug/tasks"
+                params={{ slug: current.project }}
+                aria-label={`Back to the tasks of ${project?.name ?? current.project}`}
+                className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+              >
+                ←
+              </Link>
+            }
+          />
         }
         title={current.title}
         subtitle={`${project?.name ?? current.project} · ${progressOf(current)} · created by ${displayName(

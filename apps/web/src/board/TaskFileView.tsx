@@ -1,6 +1,7 @@
 import { BRANCH_FILE_LIMIT_BYTES, type BranchFile } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef } from "react";
+import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
 import { TaskFileLink, useFileUrl } from "../components/TaskFile.js";
 import { ApiError } from "../lib/api.js";
@@ -255,14 +256,18 @@ export function TaskFileView() {
     <>
       <PaneHeader
         leading={
-          <Link
-            to="/task/$taskId"
-            params={{ taskId }}
-            aria-label={`Back to the task ${title}`}
-            className={BACK}
-          >
-            ←
-          </Link>
+          <BackLink
+            fallback={
+              <Link
+                to="/task/$taskId"
+                params={{ taskId }}
+                aria-label={`Back to the task ${title}`}
+                className={BACK}
+              >
+                ←
+              </Link>
+            }
+          />
         }
         title={name}
         subtitle={

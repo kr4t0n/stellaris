@@ -1,3 +1,5 @@
+import type { BranchFileChange } from "@stellaris/shared";
+
 /** Where relative links in a task's file resolve: the file's folder on the task's branch. */
 export interface FileBase {
   readonly taskId: string;
@@ -303,6 +305,110 @@ export function changeLabel(change: {
         ? `+${change.added}`
         : `+${change.added} −${change.removed}`;
   return change.status === "added" ? `new · ${lines}` : lines;
+}
+
+export interface TreeFile {
+  readonly kind: "file";
+  readonly name: string;
+  readonly change: BranchFileChange;
+}
+
+/**
+ * A folder of a branch's changes: `name` may span several folders, `a/b`, where each held nothing
+ * but the next. `files` counts every file under it, and `lastChange` is the newest among them.
+ */
+export interface TreeFolder {
+  readonly kind: "dir";
+  readonly name: string;
+  readonly path: string;
+  readonly children: readonly TreeNode[];
+  readonly files: number;
+  readonly lastChange?: { readonly author: string; readonly at: string };
+}
+
+export type TreeNode = TreeFolder | TreeFile;
+
+interface Building {
+  name: string;
+  path: string;
+  folders: Map<string, Building>;
+  files: TreeFile[];
+}
+
+function finish(folder: Building): TreeFolder {
+  let children: TreeNode[] = [
+    ...[...folder.folders.values()].map(finish).toSorted((a, b) => a.name.localeCompare(b.name)),
+    ...folder.files.toSorted((a, b) => a.name.localeCompare(b.name)),
+  ];
+  let { name, path } = folder;
+  // A folder that holds only one folder reads as one row, as a code host's file tree shows it.
+  const [only] = children;
+  if (folder.path !== "" && children.length === 1 && only?.kind === "dir") {
+    name = `${name}/${only.name}`;
+    path = only.path;
+    children = [...only.children];
+  }
+  let files = 0;
+  let lastChange: { author: string; at: string } | undefined;
+  for (const child of children) {
+    files += child.kind === "dir" ? child.files : 1;
+    const last = child.kind === "dir" ? child.lastChange : child.change.lastChange;
+    if (last !== undefined && (lastChange === undefined || last.at > lastChange.at)) {
+      lastChange = last;
+    }
+  }
+  return {
+    kind: "dir",
+    name,
+    path,
+    children,
+    files,
+    ...(lastChange === undefined ? {} : { lastChange }),
+  };
+}
+
+/** A branch's changed files as a tree of folders, folders before files and each by name. */
+export function fileTree(changes: readonly BranchFileChange[]): TreeFolder {
+  const root: Building = { name: "", path: "", folders: new Map(), files: [] };
+  for (const change of changes) {
+    const parts = change.path.split("/");
+    let folder = root;
+    for (const part of parts.slice(0, -1)) {
+      let next = folder.folders.get(part);
+      if (next === undefined) {
+        next = {
+          name: part,
+          path: folder.path === "" ? part : `${folder.path}/${part}`,
+          folders: new Map(),
+          files: [],
+        };
+        folder.folders.set(part, next);
+      }
+      folder = next;
+    }
+    folder.files.push({ kind: "file", name: parts.at(-1) ?? change.path, change });
+  }
+  return finish(root);
+}
+
+/**
+ * The folders a tree opens with: shallowest first, each opened while the rows it adds keep the
+ * view within `rows`, so a small change shows whole and a large one shows its shape, with its
+ * biggest folders closed.
+ */
+export function openFolders(root: TreeFolder, rows = 24): Set<string> {
+  const open = new Set<string>();
+  let shown = root.children.length;
+  const queue = root.children.filter((child): child is TreeFolder => child.kind === "dir");
+  for (let folder = queue.shift(); folder !== undefined; folder = queue.shift()) {
+    if (shown + folder.children.length > rows) {
+      continue;
+    }
+    open.add(folder.path);
+    shown += folder.children.length;
+    queue.push(...folder.children.filter((child): child is TreeFolder => child.kind === "dir"));
+  }
+  return open;
 }
 
 /** A size as "812 B", "4.2 KB", or "3.1 MB". */

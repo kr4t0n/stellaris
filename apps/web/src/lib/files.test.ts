@@ -3,6 +3,8 @@ import {
   bytesOf,
   changeLabel,
   citedLine,
+  fileTree,
+  openFolders,
   linkTarget,
   normalizePath,
   parseDelimited,
@@ -148,6 +150,58 @@ describe("rehypeLineTarget", () => {
     // Lists are not blocks of their own: the next block after a blank line is the first item.
     expect(marked(5)).toEqual(["li@6"]);
     expect(marked(99)).toEqual([]);
+  });
+});
+
+/** A file a branch added, last touched by `author` at `at`. */
+function change(path: string, author = "sage", at = "2026-10-08T09:00:00.000Z") {
+  return { path, status: "added" as const, added: 1, removed: 0, lastChange: { author, at } };
+}
+
+/** A tree's shape: each folder as `name/ count` over its children, each file by name. */
+function shape(nodes: ReturnType<typeof fileTree>["children"]): unknown {
+  return nodes.map((node) =>
+    node.kind === "dir" ? { [`${node.name}/ ${node.files}`]: shape(node.children) } : node.name,
+  );
+}
+
+describe("fileTree", () => {
+  it("nests files under their folders, folders first, and merges a folder that holds one folder", () => {
+    const tree = fileTree([
+      change("report.md"),
+      change("evidence/analysis/b.json"),
+      change("evidence/README.md"),
+      change("evidence/analysis/a.json", "ref", "2026-10-08T10:00:00.000Z"),
+      change("docs/api/v1/spec.md"),
+      change(".gitignore"),
+    ]);
+    expect(shape(tree.children)).toEqual([
+      { "docs/api/v1/ 1": ["spec.md"] },
+      { "evidence/ 3": [{ "analysis/ 2": ["a.json", "b.json"] }, "README.md"] },
+      ".gitignore",
+      "report.md",
+    ]);
+    const evidence = tree.children[1];
+    expect(evidence?.kind === "dir" ? evidence.lastChange : null).toEqual({
+      author: "ref",
+      at: "2026-10-08T10:00:00.000Z",
+    });
+    const docs = tree.children[0];
+    expect(docs?.kind === "dir" ? docs.path : null).toBe("docs/api/v1");
+  });
+
+  it("opens folders from the top while the rows fit, leaving the biggest closed", () => {
+    const tree = fileTree([
+      change(".gitignore"),
+      change("case-studies.md"),
+      change("evidence/README.md"),
+      ...Array.from({ length: 17 }, (_, at) => change(`evidence/analysis/file-${at}.json`)),
+      ...Array.from({ length: 100 }, (_, at) =>
+        change(`evidence/analysis/scalar-groups/${at}.json`),
+      ),
+    ]);
+    expect([...openFolders(tree)]).toEqual(["evidence", "evidence/analysis"]);
+    expect(openFolders(fileTree([change("a/b.md"), change("c/d.md")])).size).toBe(2);
   });
 });
 

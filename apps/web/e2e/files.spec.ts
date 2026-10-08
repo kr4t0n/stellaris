@@ -61,6 +61,20 @@ test("a task's view lists the files its branch changed, each opening in its file
   await expect(files).toContainText("draft.md");
   await expect(files.getByRole("link", { name: "draft.md" })).toHaveCount(0);
 
+  // Files sit under their folders, which open and close; a small change opens whole.
+  const docs = files.getByRole("button", { name: /^docs\// });
+  await expect(docs).toHaveAttribute("aria-expanded", "true");
+  await expect(docs).toContainText("2 files");
+  await expect(files.getByRole("link", { name: "report.md" })).toBeVisible();
+  await docs.click();
+  await expect(docs).toHaveAttribute("aria-expanded", "false");
+  await expect(files.getByRole("link", { name: "report.md" })).toHaveCount(0);
+  await docs.click();
+  await expect(files.getByRole("link", { name: "report.md" })).toHaveAttribute(
+    "href",
+    `/task/${STAGE_TASK}/files/docs/report.md`,
+  );
+
   await files.getByRole("link", { name: "results.csv" }).click();
   await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/results.csv`);
   await expect(view.getByRole("cell", { name: "A*, tuned" })).toBeVisible();

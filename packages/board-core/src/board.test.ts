@@ -100,8 +100,11 @@ describe("Board", () => {
   it("signs the user in for a while, across a restart, until signed out or expired", async () => {
     const { board, userToken } = await society();
     const first = await board.signIn("kr4t0n", 60_000);
-    const second = await board.signIn("kr4t0n", 120_000);
+    const avatar = "https://avatars.githubusercontent.com/u/1001?v=4";
+    const second = await board.signIn("kr4t0n", 120_000, avatar);
     expect(board.resolveToken(first)).toEqual(USER);
+    expect(board.signInOf(first)).toEqual({ login: "kr4t0n", avatarUrl: undefined });
+    expect(board.signInOf(userToken)).toBeNull();
     // The board keeps only hashes of sign-ins, as of every other token.
     const stored = await readFile(path.join(board.paths.state(), "sign-ins.json"), "utf8");
     expect(stored).not.toContain(first);
@@ -114,8 +117,10 @@ describe("Board", () => {
 
     const reopened = await Board.open(dir, { now });
     expect(reopened.resolveToken(second)).toEqual(USER);
+    expect(reopened.signInOf(second)).toEqual({ login: "kr4t0n", avatarUrl: avatar });
     clock = new Date(clock.getTime() + 120_000);
     expect(reopened.resolveToken(second)).toBeNull();
+    expect(reopened.signInOf(second)).toBeNull();
     const types = (await reopened.readEvents(null)).map((event) => event.type);
     expect(types.filter((type) => type.startsWith("user.signed"))).toEqual([
       "user.signed_in",

@@ -15,7 +15,23 @@ const STATE_TTL_MS = 10 * 60_000;
 const MAX_STATES = 1_000;
 
 const TokenAnswerSchema = z.object({ access_token: z.string().min(1) });
-const GithubUserSchema = z.object({ login: z.string().min(1), id: z.number().int() });
+const GithubUserSchema = z.object({
+  login: z.string().min(1),
+  id: z.number().int(),
+  avatar_url: z.string().optional(),
+});
+
+/** The account's picture, kept only as an address on GitHub's own avatar host. */
+function githubAvatar(url: string | undefined): string | undefined {
+  try {
+    const parsed = new URL(url ?? "");
+    return parsed.protocol === "https:" && parsed.hostname === "avatars.githubusercontent.com"
+      ? parsed.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface GithubAuthOptions {
   readonly board: Board;
@@ -84,6 +100,7 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
     }
     let login: string;
     let id: number;
+    let avatar: string | undefined;
     try {
       const tokenAnswer = await fetchImpl("https://github.com/login/oauth/access_token", {
         method: "POST",
@@ -106,7 +123,9 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
       if (!userAnswer.ok) {
         throw new Error(`GitHub answered ${userAnswer.status} for the user`);
       }
-      ({ login, id } = GithubUserSchema.parse(await userAnswer.json()));
+      const user = GithubUserSchema.parse(await userAnswer.json());
+      ({ login, id } = user);
+      avatar = githubAvatar(user.avatar_url);
     } catch (error) {
       options.log?.warn({ error: String(error) }, "GitHub sign-in failed");
       return land(c, pending.next, "signin-error=github");
@@ -116,7 +135,7 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
       options.log?.warn({ login }, "GitHub sign-in refused a login that is not on the list");
       return land(c, pending.next, "signin-error=not-allowed");
     }
-    const token = await board.signIn(login, SIGN_IN_TTL_MS);
+    const token = await board.signIn(login, SIGN_IN_TTL_MS, avatar);
     return land(c, pending.next, `session=${encodeURIComponent(token)}`);
   });
 

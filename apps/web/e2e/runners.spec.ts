@@ -21,6 +21,16 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   expect(await page.evaluate(() => localStorage.getItem("stellaris.token"))).toBe(TOKEN);
+  // The top bar says who signed in, with the account's picture at the size it shows.
+  const account = page.getByTitle("Signed in with GitHub as octocat");
+  await expect(account).toHaveText("octocat");
+  await expect(account.locator("img")).toHaveAttribute(
+    "src",
+    "https://avatars.githubusercontent.com/u/583231?v=4&s=40",
+  );
+  await expect
+    .poll(() => account.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBe(1);
   // The top bar's Runners button is where the view opens from, with the runners waiting counted.
   const runners = page.getByRole("button", { name: "Runners, 1 waiting for approval" });
   await expect(runners).toHaveAttribute("aria-pressed", "true");
@@ -43,6 +53,9 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
 test("Runners in the top bar opens the runners view and closes it again", async ({ page }) => {
   await fakeBoard(page);
   await page.goto("/");
+  // The user's own token is no GitHub account.
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.getByTitle(/^Signed in with GitHub/)).toHaveCount(0);
   const runners = page.getByRole("button", { name: "Runners", exact: true });
   await expect(runners).toHaveAttribute("aria-pressed", "false");
   await runners.click();

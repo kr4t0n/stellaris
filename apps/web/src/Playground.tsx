@@ -33,6 +33,7 @@ import { recordVisit } from "./lib/trail.js";
 import {
   useAllTasks,
   useEnrollments,
+  useMe,
   useMembers,
   useNow,
   useProjects,
@@ -83,6 +84,7 @@ export function Playground() {
   const [live] = useState(() => new LiveStore());
   useEffect(() => live.follow(token), [live, token]);
   const society = useSociety();
+  const me = useMe();
   const members = useMembers();
   const projects = useProjects();
   const scheduler = useScheduler();
@@ -352,6 +354,7 @@ export function Playground() {
               void navigate(pathname === "/metrics" ? { to: "/" } : { to: "/metrics" })
             }
             onToggleLogs={() => setLogsOpen(!logsOpen)}
+            signIn={me.data?.signIn}
             onSignOut={signOut}
           />
           {boardOpen ? (

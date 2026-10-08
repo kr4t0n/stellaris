@@ -132,8 +132,23 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   const api = new Hono<Env>();
   api.use("*", authenticate);
 
-  // Identity and society
-  api.get("/me", (c) => c.json(c.get("actor")));
+  // Identity and society. A GitHub sign-in also says who signed in, with the account's picture,
+  // which a sign-in from before the board kept it takes from the login.
+  api.get("/me", (c) => {
+    const signIn = board.signInOf(bearer(c) ?? "");
+    return c.json(
+      signIn === null
+        ? c.get("actor")
+        : {
+            ...c.get("actor"),
+            signIn: {
+              login: signIn.login,
+              avatarUrl:
+                signIn.avatarUrl ?? `https://github.com/${encodeURIComponent(signIn.login)}.png`,
+            },
+          },
+    );
+  });
   // Signing out ends the sign-in the bearer token belongs to; the user's own token is not one.
   api.delete("/sign-in", async (c) => c.json({ signedOut: await board.signOut(bearer(c) ?? "") }));
   api.get("/society", async (c) => c.json(await board.society()));

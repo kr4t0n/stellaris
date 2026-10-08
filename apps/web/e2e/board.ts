@@ -581,7 +581,8 @@ export const DESK_TURN_IN_FLIGHT = "01M3Q2TTTTTTTTTTTTTTTTTTT1";
  * an archived project sits beside lab and desk asks to archive lab too. With `asks`, the user has
  * asked twice before; a new ask opens a thread in asks, and desk is in a turn on it once posted.
  * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
- * offers GitHub sign-in, and with `signedOut` the browser starts with no token. With `inFlight`,
+ * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
+ * starts with no token. With `inFlight`,
  * desk is in a turn at the society until the user stops it.
  */
 export async function fakeBoard(
@@ -692,6 +693,9 @@ export async function fakeBoard(
     await page.addInitScript((token) => localStorage.setItem("stellaris.token", token), TOKEN);
   }
   await page.route("**/auth/config", (route) => json(route, { github: options.github === true }));
+  await page.route("https://avatars.githubusercontent.com/**", (route) =>
+    route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") }),
+  );
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -807,7 +811,18 @@ export async function fakeBoard(
       case "/api/turns/stream":
         return undefined;
       case "/api/me":
-        return json(route, { name: "user", role: "user" });
+        return json(route, {
+          name: "user",
+          role: "user",
+          ...(options.github === true
+            ? {
+                signIn: {
+                  login: "octocat",
+                  avatarUrl: "https://avatars.githubusercontent.com/u/583231?v=4",
+                },
+              }
+            : {}),
+        });
       case "/api/society":
         return json(route, {
           name: "fixture",

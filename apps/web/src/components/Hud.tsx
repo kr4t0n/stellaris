@@ -1,3 +1,5 @@
+import type { SignIn } from "../lib/api.js";
+
 interface HudProps {
   readonly society: string | undefined;
   readonly citizens: number;
@@ -24,7 +26,16 @@ interface HudProps {
   /** Whether the operations log floats open; it is the server's, not the board's. */
   readonly logsOpen: boolean;
   readonly onToggleLogs: () => void;
+  /** The GitHub account signed in, shown beside the way out; none for the user's own token. */
+  readonly signIn: SignIn | undefined;
   readonly onSignOut: () => void;
+}
+
+/** A GitHub avatar's address at `px` pixels, so the browser fetches the size it shows. */
+function avatarAt(url: string, px: number): string {
+  const sized = new URL(url);
+  sized.searchParams.set(sized.hostname === "github.com" ? "size" : "s", String(px));
+  return sized.href;
 }
 
 /** The frame around the sky: the wordmark, what the society is doing, and the way out. */
@@ -47,6 +58,7 @@ export function Hud({
   onToggleMetrics,
   logsOpen,
   onToggleLogs,
+  signIn,
   onSignOut,
 }: HudProps) {
   return (
@@ -140,6 +152,22 @@ export function Hud({
         >
           Logs
         </button>
+        {signIn === undefined ? null : (
+          <span
+            title={`Signed in with GitHub as ${signIn.login}`}
+            className="ml-1 inline-flex h-7 items-center gap-1.5 text-xs text-fg-secondary"
+          >
+            <img
+              src={avatarAt(signIn.avatarUrl, 40)}
+              alt=""
+              width={20}
+              height={20}
+              referrerPolicy="no-referrer"
+              className="size-5 rounded-full bg-surface-2 ring-1 ring-line"
+            />
+            <span className="max-md:sr-only">{signIn.login}</span>
+          </span>
+        )}
         <button
           type="button"
           onClick={onSignOut}

@@ -74,7 +74,13 @@ export class ApiError extends Error {
   }
 }
 
-const ActorSchema = z.object({ name: NameSchema, role: NameSchema });
+const ActorSchema = z.object({
+  name: NameSchema,
+  role: NameSchema,
+  /** The GitHub account a sign-in token belongs to; absent for the user's own token. */
+  signIn: z.object({ login: z.string().min(1), avatarUrl: z.url() }).optional(),
+});
+export type SignIn = NonNullable<z.infer<typeof ActorSchema>["signIn"]>;
 const RosterSchema = MemberSchema.extend({ profile: z.string() }).array();
 /** Pairs are `agent/scope`, where the scope is a project slug or `society`. */
 const SchedulerViewSchema = z.object({

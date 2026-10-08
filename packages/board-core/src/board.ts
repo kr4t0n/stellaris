@@ -211,6 +211,8 @@ const SignInsSchema = z.object({
       z.object({
         tokenHash: z.string().min(1),
         login: z.string().min(1),
+        /** The account's picture at the identity provider; sign-ins from before it have none. */
+        avatarUrl: z.url().optional(),
         createdAt: IsoDateTimeSchema,
         expiresAt: IsoDateTimeSchema,
       }),
@@ -556,7 +558,10 @@ export class Board {
   /** Runner token hashes to runner names. */
   private readonly runnerTokens = new Map<string, Name>();
   /** Sign-ins by token hash, each acting as the user until it expires. */
-  private readonly signIns = new Map<string, { login: string; expiresAt: number }>();
+  private readonly signIns = new Map<
+    string,
+    { login: string; avatarUrl?: string | undefined; expiresAt: number }
+  >();
   private readonly files = new FileTree();
   private readonly homes: HomeRepos;
 
@@ -1023,22 +1028,36 @@ export class Board {
    * token, shown once. Only its hash is kept, in `state/sign-ins.json`, so a sign-in outlives a
    * restart; it acts as the user, like the user's own token, until it expires or is signed out.
    */
-  async signIn(login: string, ttlMs: number): Promise<string> {
+  async signIn(login: string, ttlMs: number, avatarUrl?: string): Promise<string> {
     return this.mutex.run(async () => {
       const token = mintToken();
       const now = this.now().getTime();
       const record: SignInRecord = {
         tokenHash: hashToken(token),
         login,
+        ...(avatarUrl === undefined ? {} : { avatarUrl }),
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + ttlMs).toISOString(),
       };
       const live = (await this.readSignIns()).filter((each) => Date.parse(each.expiresAt) > now);
       await writeJson(this.signInsFile(), { signIns: [...live, record] });
-      this.signIns.set(record.tokenHash, { login, expiresAt: Date.parse(record.expiresAt) });
+      this.signIns.set(record.tokenHash, {
+        login,
+        avatarUrl,
+        expiresAt: Date.parse(record.expiresAt),
+      });
       await this.events.append("user.signed_in", USER_NAME, { login });
       return token;
     });
+  }
+
+  /** Who a token signed in as, while its sign-in lasts; null for any other token. */
+  signInOf(token: string): { login: string; avatarUrl?: string | undefined } | null {
+    const signIn = this.signIns.get(hashToken(token));
+    if (signIn === undefined || signIn.expiresAt <= this.now().getTime()) {
+      return null;
+    }
+    return { login: signIn.login, avatarUrl: signIn.avatarUrl };
   }
 
   /** Ends the sign-in a token belongs to; false for a token that is no sign-in's. */
@@ -1090,7 +1109,11 @@ export class Board {
     for (const signIn of await this.readSignIns()) {
       const expiresAt = Date.parse(signIn.expiresAt);
       if (expiresAt > now) {
-        this.signIns.set(signIn.tokenHash, { login: signIn.login, expiresAt });
+        this.signIns.set(signIn.tokenHash, {
+          login: signIn.login,
+          avatarUrl: signIn.avatarUrl,
+          expiresAt,
+        });
       }
     }
   }

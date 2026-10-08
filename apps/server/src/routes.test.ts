@@ -81,8 +81,14 @@ describe("board server routes", () => {
           code === "good" ? { access_token: "gho_test" } : { error: "bad_verification_code" },
         );
       }
+      const id = login === "kr4t0n" ? 1001 : 666;
+      // A picture anywhere but GitHub's avatar host is not kept.
+      const avatar =
+        login === "mallory"
+          ? "https://evil.example/mallory.png"
+          : `https://avatars.githubusercontent.com/u/${id}?v=4`;
       return url === "https://api.github.com/user"
-        ? Response.json({ login, id: login === "kr4t0n" ? 1001 : 666 })
+        ? Response.json({ login, id, avatar_url: avatar })
         : new Response("unexpected", { status: 500 });
     };
     const app = createApp({
@@ -118,7 +124,10 @@ describe("board server routes", () => {
     expect(landing).toMatch(/^\/runners\?code=BCDF-GHJK#session=/);
     const token = decodeURIComponent(landing.split("#session=")[1] ?? "");
     const me = await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } });
-    expect(await me.json()).toEqual(USER);
+    expect(await me.json()).toEqual({
+      ...USER,
+      signIn: { login: "Kr4t0n", avatarUrl: "https://avatars.githubusercontent.com/u/666?v=4" },
+    });
     // A state is good for one return.
     expect(await back(state)).toBe("/#signin-error=expired");
 
@@ -139,6 +148,14 @@ describe("board server routes", () => {
     ).searchParams.get("state");
     const idLanding = await byId.request(`/auth/github/callback?code=good&state=${idState}`);
     expect(idLanding.headers.get("location")).toMatch(/^\/#session=/);
+    const idToken = decodeURIComponent(
+      idLanding.headers.get("location")?.split("#session=")[1] ?? "",
+    );
+    const idMe = await byId.request("/api/me", { headers: { authorization: `Bearer ${idToken}` } });
+    expect(await idMe.json()).toEqual({
+      ...USER,
+      signIn: { login: "mallory", avatarUrl: "https://github.com/mallory.png" },
+    });
     // Only a path on the board is somewhere to land.
     login = "kr4t0n";
     expect(await back(await leave("//evil.example/"))).toMatch(/^\/#session=/);
@@ -156,7 +173,7 @@ describe("board server routes", () => {
     expect(await (await app.request("/api/sign-in", { method: "DELETE", headers })).json()).toEqual(
       { signedOut: false },
     );
-    expect((await app.request("/api/me", { headers })).status).toBe(200);
+    expect(await (await app.request("/api/me", { headers })).json()).toEqual(USER);
   });
 
   it("limits how many sign-ins one address may start", async () => {

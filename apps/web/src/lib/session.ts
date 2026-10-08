@@ -30,6 +30,12 @@ export function useSociety() {
   return useQuery({ queryKey: ["society"], queryFn: api.society, staleTime: 60_000 });
 }
 
+/** Who the token acts as, which never changes while it lasts. */
+export function useMe() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
+}
+
 export function useMembers() {
   const { api } = useSession();
   return useQuery({ queryKey: ["members"], queryFn: api.members, refetchInterval: 30_000 });

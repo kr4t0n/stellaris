@@ -49,6 +49,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: {{ $runner.terminationGracePeriodSeconds }}
+      {{- with $runner.extraInitContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: runner
           image: {{ include "stellaris.runner.image" . }}
@@ -101,6 +105,13 @@ spec:
           volumeMounts:
             - name: home
               mountPath: /home/stellaris
+            {{- with $runner.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      {{- with $runner.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with $runner.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -298,8 +298,16 @@ export class RunnerHub implements TurnRunner {
    * Delivers what arrived in a conversation into its turn in flight, when that turn's runner can
    * steer its CLI. `refused` leaves the wake to a turn of its own once this one ends.
    */
-  async steer(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome> {
-    const turn = this.host.turnIn(conversation.agent, conversation.project, conversation.thread);
+  async steer(conversation: {
+    agent: Name;
+    project: Name;
+    thread?: Ulid;
+    channel?: Name;
+  }): Promise<SteerOutcome> {
+    const turn = this.host.turnIn(conversation.agent, conversation.project, {
+      thread: conversation.thread,
+      channel: conversation.channel,
+    });
     const seat = turn === null ? undefined : this.seats.get(turn.runner);
     if (turn === null || seat === undefined || seat.send === null) {
       return "refused";

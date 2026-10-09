@@ -136,16 +136,22 @@ export type ProjectRepo = z.infer<typeof ProjectRepoSchema>;
  * Where a turn works: the agent's home for a society-scope turn; the agent's own worktree of a
  * project, on `agent/<name>`, with the task branches to make sure of first; or the worktree of one
  * task's conversation, on `task/<id>`. With `thread`, a proposal's or a topic's conversation works
- * in a place of its own instead, so it runs beside the citizen's other conversations: a folder
- * under the home's scratch folder, or a worktree detached at the tip of `agent/<name>`.
+ * in a place of its own instead, and with `channel` a channel's conversation other than general,
+ * so it runs beside the citizen's other conversations: a folder under the home's scratch folder,
+ * or a worktree detached at the tip of `agent/<name>`.
  */
 export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("home"), thread: UlidSchema.optional() }),
+  z.object({
+    kind: z.literal("home"),
+    thread: UlidSchema.optional(),
+    channel: NameSchema.optional(),
+  }),
   z.object({
     kind: z.literal("project"),
     repo: ProjectRepoSchema,
     branches: z.array(z.string().min(1)),
     thread: UlidSchema.optional(),
+    channel: NameSchema.optional(),
   }),
   z.object({ kind: z.literal("task"), repo: ProjectRepoSchema, taskId: UlidSchema }),
 ]);
@@ -164,6 +170,8 @@ export const TurnJobSchema = z.object({
   scope: NameSchema,
   /** The thread whose conversation the turn is in; absent for the home conversation. */
   thread: UlidSchema.optional(),
+  /** The channel, never general, whose conversation the turn is in. */
+  channel: NameSchema.optional(),
   /**
    * The session to resume, or null to start one: the CLI's adapter picks a fresh session's id, and
    * the outcome reports it.

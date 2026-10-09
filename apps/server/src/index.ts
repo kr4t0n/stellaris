@@ -44,9 +44,9 @@ const host = new TurnHost({
   maxTurns: config.toolRounds,
   residentIdleMs: config.residentIdleMs,
   log,
-  onEvent: (agent, scope, event, thread) => {
-    turns.push(agent, scope, event, thread);
-    log.debug({ agent, scope, thread, event }, "agent event");
+  onEvent: (agent, scope, event, conversation) => {
+    turns.push(agent, scope, event, conversation);
+    log.debug({ agent, scope, ...conversation, event }, "agent event");
   },
 });
 const runners = new RunnerHub({ board, host, version: VERSION, log });

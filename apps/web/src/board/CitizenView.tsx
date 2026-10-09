@@ -124,7 +124,7 @@ function CitizenPage({
   }
   const running = pairsOf(scheduler.data?.running ?? []).filter((pair) => pair.agent === name);
   const runningScopes = [...new Set(running.map((pair) => pair.scope))];
-  const runningKeys = running.map((pair) => pairKey(pair.agent, pair.scope, pair.thread));
+  const runningKeys = running.map((pair) => pairKey(pair.agent, pair.scope, pair));
   const queued = pairsOf(scheduler.data?.pending ?? []).find((pair) => pair.agent === name);
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
@@ -270,7 +270,7 @@ function NowTab({
   const entities = useEntities();
   const isRunning = (candidate: LiveTurn): boolean =>
     candidate.end === null &&
-    runningKeys.includes(pairKey(candidate.agent, candidate.scope, candidate.thread));
+    runningKeys.includes(pairKey(candidate.agent, candidate.scope, candidate));
   const chosenScope = chosen?.split("/")[0] ?? null;
   // The turn shown: the conversation chosen, else a running one in the scope chosen, else the
   // running one that started first, else the latest. Not the most active one, or two busy turns
@@ -286,11 +286,13 @@ function NowTab({
     earliest(turns.filter(isRunning)) ??
     turns[0] ??
     stored.turn;
-  // Where a turn was: its scope, and the thread's title for a thread's conversation.
+  // Where a turn was: its scope, and the thread's title or the channel for a conversation of its own.
   const placeOf = (candidate: LiveTurn): string =>
-    candidate.thread === undefined
-      ? scopeName(candidate.scope)
-      : `${scopeName(candidate.scope)} · ${entities.get(candidate.thread)?.title ?? "a thread"}`;
+    candidate.thread !== undefined
+      ? `${scopeName(candidate.scope)} · ${entities.get(candidate.thread)?.title ?? "a thread"}`
+      : candidate.channel === undefined
+        ? scopeName(candidate.scope)
+        : `${scopeName(candidate.scope)} · #${candidate.channel}`;
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
   // The controls are for the turn shown, else for the citizen's first turn in flight, which may
@@ -299,7 +301,10 @@ function NowTab({
     (turn === undefined
       ? undefined
       : runningTurns.find(
-          (candidate) => candidate.scope === turn.scope && candidate.thread === turn.thread,
+          (candidate) =>
+            candidate.scope === turn.scope &&
+            candidate.thread === turn.thread &&
+            candidate.channel === turn.channel,
         )) ?? (turnRunning ? undefined : runningTurns[0]);
 
   return (

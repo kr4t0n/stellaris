@@ -1,4 +1,5 @@
 import {
+  channelConversation,
   parseChannelRef,
   wakeScope,
   type Member,
@@ -52,7 +53,7 @@ export function wakesFor(
 /**
  * Which of the citizens a post wakes are in a turn of the very conversation it goes to, whose
  * runner delivers it into that turn rather than waking another: the thread's, or for a channel
- * post the home of the scope the wake rule gives.
+ * post, in the scope the wake rule gives, that channel's conversation, or the home for general.
  */
 export function reachedTurns(
   names: readonly string[],
@@ -69,11 +70,11 @@ export function reachedTurns(
         return turn.thread === place.thread;
       }
       const member = members.find((each) => each.name === name);
-      return (
-        member !== undefined &&
-        turn.thread === undefined &&
-        turn.scope === wakeScope(member, parseChannelRef(place.channel).project)
-      );
+      if (member === undefined || turn.thread !== undefined) {
+        return false;
+      }
+      const scope = wakeScope(member, parseChannelRef(place.channel).project);
+      return turn.scope === scope && turn.channel === channelConversation(scope, place.channel);
     }),
   );
 }

@@ -1,5 +1,6 @@
 import {
   METRICS_WINDOW_MS,
+  channelConversation,
   parseChannelRef,
   USER_NAME,
   wakeScope,
@@ -31,11 +32,12 @@ export interface MetricsInput {
   readonly now: Date;
 }
 
-// A turn's events carry its thread as the thread's id, absent for a home turn.
+// A turn's events carry its thread as the thread's id and its channel by name, both absent for a home turn.
 const TurnPayload = z.object({
   turnId: z.string().optional(),
   project: z.string(),
   thread: z.string().optional(),
+  channel: z.string().optional(),
   trigger: z.string(),
 });
 const TaskPayload = z.object({
@@ -83,8 +85,10 @@ interface Mention {
   readonly at: number;
   /** The post that made it, which a turn already running may have been handed. */
   readonly message: string | null;
-  /** The thread it was made in, or null for a channel, whose wake goes to the scope's home. */
+  /** The thread it was made in, or null for a top-level post. */
   readonly thread: string | null;
+  /** The channel it was posted in. */
+  readonly channel: string;
   /**
    * Scopes the mention may have woken its citizen in: the channel's project, and the scope the
    * wake rule gives with today's memberships, which an archive since may have changed.
@@ -93,13 +97,21 @@ interface Mention {
 }
 
 /**
- * Whether a turn is the one a mention woke: in the mention's thread, or for a channel mention the
- * home of the scope it wakes. Before threads had conversations of their own, a mention in a thread
- * woke the home of the scope too, so a home turn woken by a mention answers one.
+ * Whether a turn is the one a mention woke: in the mention's thread, or for a top-level mention
+ * the conversation of its channel in the scope it wakes, the home for general. Before threads and
+ * channels had conversations of their own, a mention in one woke the home of the scope, so a home
+ * turn woken by a mention answers one.
  */
 function answers(
   mention: Mention,
-  turn: { agent: string; at: number; thread: string | null; project: string; trigger: string },
+  turn: {
+    agent: string;
+    at: number;
+    thread: string | null;
+    channel: string | null;
+    project: string;
+    trigger: string;
+  },
 ): boolean {
   if (mention.agent !== turn.agent || mention.at > turn.at) {
     return false;
@@ -107,9 +119,15 @@ function answers(
   if (turn.thread !== null) {
     return mention.thread === turn.thread;
   }
-  return (
-    mention.scopes.includes(turn.project) && (mention.thread === null || turn.trigger === "mention")
-  );
+  if (!mention.scopes.includes(turn.project)) {
+    return false;
+  }
+  const own =
+    mention.thread === null ? channelConversation(turn.project, mention.channel) : undefined;
+  if (turn.channel !== null) {
+    return mention.thread === null && own === turn.channel;
+  }
+  return (mention.thread === null && own === undefined) || turn.trigger === "mention";
 }
 
 /**
@@ -190,6 +208,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
           agent: event.actor,
           at,
           thread: turn.data.thread ?? null,
+          channel: turn.data.channel ?? null,
           project: turn.data.project,
           trigger: turn.data.trigger,
         };
@@ -296,6 +315,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
             at: Date.parse(event.ts),
             message: message.data.id ?? null,
             thread,
+            channel: message.data.channel,
             scopes: [project, wakeScope(citizen, project)].filter(
               (scope): scope is string => scope !== null,
             ),

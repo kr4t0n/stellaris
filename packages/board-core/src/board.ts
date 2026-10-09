@@ -100,6 +100,8 @@ import {
   type TurnHistoryEntry,
   type TurnRecord,
   type WakeRequestInput,
+  channelConversation,
+  conversationPart,
   isBoardAction,
   METRICS_WINDOW_MS,
   type Metrics,
@@ -135,6 +137,8 @@ export interface Actor {
   readonly scope?: Name | undefined;
   /** The thread whose conversation that turn is in; without one, the scope's home conversation. */
   readonly thread?: Ulid | undefined;
+  /** The channel, never general, whose conversation that turn is in. */
+  readonly channel?: Name | undefined;
 }
 
 /** The board itself, for posts and events produced by infrastructure rather than a member. */
@@ -231,6 +235,7 @@ type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 const TurnHistoryPayloadSchema = z.object({
   project: NameSchema,
   thread: UlidSchema.optional(),
+  channel: NameSchema.optional(),
   trigger: z.string().default("manual"),
   exitReason: z.string().nullable().default(null),
   costUsd: z.number().default(0),
@@ -293,33 +298,63 @@ export type TaskWithThread = Task & { readonly messages: readonly Message[] };
 
 /**
  * A member's digest cursors, one per conversation a turn has read in: a scope's home conversation
- * under the scope's name, a thread's under `scope/thread`. `digest` is the single cursor from before
- * digests were filed by scope, where every home conversation starts; `threadsFrom` is each scope's
- * cursor when conversations came to threads, where every thread of it starts, so what the member
- * had read before is not unread again.
+ * under the scope's name, a thread's under `scope/thread`, and a channel's under `scope/#channel`.
+ * `digest` is the single cursor from before digests were filed by scope, where every home
+ * conversation starts; `threadsFrom` and `channelsFrom` are each scope's cursor when conversations
+ * came to threads and to channels, where every thread and every channel of it starts, so what the
+ * member had read before is not unread again.
  */
 const CursorsSchema = z.object({
   digest: z.string().nullable(),
   scopes: z.record(z.string(), z.string()).default({}),
   threadsFrom: z.record(z.string(), z.string().nullable()).default({}),
+  channelsFrom: z.record(z.string(), z.string().nullable()).default({}),
   /** How far a work role has read news, which goes to whichever of its general conversations reads first. */
   news: z.string().optional(),
 });
 type Cursors = z.infer<typeof CursorsSchema>;
 
-const NO_CURSORS: Cursors = { digest: null, scopes: {}, threadsFrom: {} };
+const NO_CURSORS: Cursors = { digest: null, scopes: {}, threadsFrom: {}, channelsFrom: {} };
 
-/** A message of a digest, with the conversation it is filed in; news is read by any general one. */
-interface DigestEntry {
+/** A conversation with unread digest messages: a scope's home, one of its channels, or a thread. */
+export interface UnreadConversation {
   scope: Name;
   thread: Ulid | null;
+  channel: Name | null;
+  count: number;
+}
+
+/**
+ * A message of a digest, with the conversation it is filed in: its scope and, but for the home,
+ * its part, a thread's id or `#channel` as `conversationPart` gives. News is read by any general
+ * conversation.
+ */
+interface DigestEntry {
+  scope: Name;
+  part: string | null;
   message: Message;
   news?: true;
 }
 
 /** Where a conversation's cursor is kept. */
-function conversationKey(scope: string, thread: Ulid | null): string {
-  return thread === null ? scope : `${scope}/${thread}`;
+function conversationKey(scope: string, part: string | null): string {
+  return part === null ? scope : `${scope}/${part}`;
+}
+
+/** A conversation part's channel, for `#channel`, else undefined. */
+function channelOfPart(part: string | null | undefined): Name | undefined {
+  return part?.startsWith("#") === true ? part.slice(1) : undefined;
+}
+
+/** A conversation part's thread, for anything but a channel's, else undefined. */
+function threadOfPart(part: string | null | undefined): Ulid | undefined {
+  return part === null || part === undefined || part.startsWith("#") ? undefined : part;
+}
+
+/** Where a channel of a scope starts when it has no cursor of its own. */
+function channelStart(cursors: Cursors, scope: string): Ulid | null {
+  const from = cursors.channelsFrom[scope];
+  return from === undefined ? cursors.digest : from;
 }
 
 /** Where a thread of a scope starts when it has no cursor of its own. */
@@ -343,12 +378,15 @@ function newsStart(cursors: Cursors): Ulid | null {
   return homes.at(-1) ?? cursors.digest;
 }
 
-/** Where a conversation's digest resumes: a scope's home, or one of its threads. */
-function cursorOf(cursors: Cursors, scope: string, thread: Ulid | null = null): Ulid | null {
-  if (thread === null) {
+/** Where a conversation's digest resumes: a scope's home, one of its channels, or one of its threads. */
+function cursorOf(cursors: Cursors, scope: string, part: string | null = null): Ulid | null {
+  if (part === null) {
     return cursors.scopes[scope] ?? cursors.digest;
   }
-  return cursors.scopes[conversationKey(scope, thread)] ?? threadStart(cursors, scope);
+  return (
+    cursors.scopes[conversationKey(scope, part)] ??
+    (part.startsWith("#") ? channelStart(cursors, scope) : threadStart(cursors, scope))
+  );
 }
 
 /** Oldest message first. */
@@ -399,6 +437,7 @@ const DECISIONS_CHANNEL_RETIRED = "decisions-channel-retired";
 const THREAD_CONVERSATIONS = "thread-conversations";
 const ASKS_CHANNEL_OPENED = "asks-channel-opened";
 const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
+const CHANNEL_CONVERSATIONS = "channel-conversations";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -640,6 +679,7 @@ export class Board {
       THREAD_CONVERSATIONS,
       ASKS_CHANNEL_OPENED,
       KNOWLEDGE_REMOVAL,
+      CHANNEL_CONVERSATIONS,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -670,6 +710,9 @@ export class Board {
     }
     if (pending.includes(KNOWLEDGE_REMOVAL)) {
       await this.grantKnowledgeRemoval();
+    }
+    if (pending.includes(CHANNEL_CONVERSATIONS)) {
+      await this.startChannelCursors();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -885,6 +928,30 @@ export class Board {
   }
 
   /**
+   * Every channel of a scope was once read in its home conversation, so a member had read each up
+   * to its scope's cursor. Each channel beside general starts from that cursor now, as each takes a
+   * conversation of its own.
+   */
+  private async startChannelCursors(): Promise<void> {
+    for (const agent of await this.listAgents()) {
+      const file = this.paths.agentCursors(agent.name);
+      if (!(await exists(file))) {
+        continue;
+      }
+      const cursors = await readJson(file, CursorsSchema);
+      const scopes = new Set([
+        ...Object.keys(cursors.scopes).filter((key) => !key.includes("/")),
+        ...agent.memberships,
+        SOCIETY_SCOPE,
+      ]);
+      const channelsFrom = Object.fromEntries(
+        [...scopes].map((scope) => [scope, cursorOf(cursors, scope)] as const),
+      );
+      await writeJson(file, { ...cursors, channelsFrom });
+    }
+  }
+
+  /**
    * Threads were once read in the scope's single conversation, so a member had read every thread
    * up to its scope's cursor. Each scope's threads start from that cursor now, as each thread's
    * conversation takes a cursor of its own.
@@ -1030,17 +1097,20 @@ export class Board {
   /**
    * A short-lived token for one turn, handed to the CLI by the runner. Only its hash is kept,
    * in memory, until it expires, so no raw agent token ever needs to exist at rest. The turn's
-   * scope and thread ride on the actor it resolves to, so `read_inbox` reads that conversation's
-   * digest.
+   * scope and conversation part, a thread's id or `#channel`, ride on the actor it resolves to, so
+   * `read_inbox` reads that conversation's digest.
    */
-  issueTurnToken(agent: Name, role: Name, ttlMs: number, scope?: Name, thread?: Ulid): string {
+  issueTurnToken(agent: Name, role: Name, ttlMs: number, scope?: Name, part?: string): string {
     const token = mintToken();
+    const thread = threadOfPart(part);
+    const channel = channelOfPart(part);
     this.turnTokens.set(hashToken(token), {
       actor: {
         name: agent,
         role,
         ...(scope === undefined ? {} : { scope }),
         ...(thread === undefined ? {} : { thread }),
+        ...(channel === undefined ? {} : { channel }),
       },
       expiresAt: this.now().getTime() + ttlMs,
     });
@@ -1855,7 +1925,7 @@ export class Board {
       const conversation =
         actor.scope === undefined
           ? undefined
-          : { scope: actor.scope, thread: actor.thread ?? null };
+          : { scope: actor.scope, part: conversationPart(actor) ?? null };
       const filed = (await this.digestSince(actor, from, conversation)).slice(0, args.limit);
       if (args.advance) {
         await this.advanceCursors(actor.name, filed);
@@ -1865,27 +1935,25 @@ export class Board {
         last ??
         (conversation === undefined
           ? from.digest
-          : cursorOf(from, conversation.scope, conversation.thread));
+          : cursorOf(from, conversation.scope, conversation.part));
       return { messages: filed.map((entry) => entry.message), cursor };
     });
   }
 
   /**
    * How many unread digest messages a member has in each conversation: a scope's home, for its
-   * channels, or one of its threads. The heartbeat asks, so that it wakes a member where its unread
+   * general channel, one of its other channels, or one of its threads. The heartbeat asks, so that it wakes a member where its unread
    * messages are and nowhere else. Society channels count only for a member woken in the society
    * scope; a project member reads them at its next turn. Two kinds of post are in the digest but not
    * counted, and are read when the member wakes for something else: a task step's, which wakes
    * whoever it hands work to, and the board's own, operations signals and landing announcements,
    * whose signals that call for action wake their readers directly.
    */
-  async unreadByConversation(
-    actor: Actor,
-  ): Promise<{ scope: Name; thread: Ulid | null; count: number }[]> {
+  async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
     return this.mutex.run(async () => {
-      const counts = new Map<string, { scope: Name; thread: Ulid | null; count: number }>();
+      const counts = new Map<string, UnreadConversation>();
       const unscoped = { name: actor.name, role: actor.role };
-      for (const { scope, thread, message, news } of await this.digestSince(
+      for (const { scope, part, message, news } of await this.digestSince(
         unscoped,
         await this.readCursors(actor.name),
       )) {
@@ -1897,8 +1965,13 @@ export class Board {
         if (posted !== scope && scope !== SOCIETY_SCOPE) {
           continue;
         }
-        const key = conversationKey(scope, thread);
-        const entry = counts.get(key) ?? { scope, thread, count: 0 };
+        const key = conversationKey(scope, part);
+        const entry = counts.get(key) ?? {
+          scope,
+          thread: threadOfPart(part) ?? null,
+          channel: channelOfPart(part) ?? null,
+          count: 0,
+        };
         counts.set(key, { ...entry, count: entry.count + 1 });
       }
       return [...counts.values()];
@@ -1916,7 +1989,7 @@ export class Board {
     const scopes = { ...cursors.scopes };
     let news = newsStart(cursors);
     let moved = false;
-    for (const { scope, thread, message, news: isNews } of filed) {
+    for (const { scope, part, message, news: isNews } of filed) {
       if (isNews === true) {
         if (news === null || message.id > news) {
           news = message.id;
@@ -1924,8 +1997,8 @@ export class Board {
         }
         continue;
       }
-      const key = conversationKey(scope, thread);
-      const current = scopes[key] ?? cursorOf(cursors, scope, thread);
+      const key = conversationKey(scope, part);
+      const current = scopes[key] ?? cursorOf(cursors, scope, part);
       if (current === null || message.id > current) {
         scopes[key] = message.id;
         moved = true;
@@ -1945,27 +2018,29 @@ export class Board {
    * message is filed in: what mentions the member, sits in a channel it follows, or belongs to a
    * thread it takes part in, and for the front desk, which every post by the user wakes, every post
    * by the user wherever it is. With a conversation, only what is filed there: for a thread, every
-   * message of the thread, since the conversation is about it; for a scope's home, its channel
-   * messages, since each thread is a conversation of its own.
+   * message of the thread, since the conversation is about it; for a channel's, that channel's
+   * top-level messages; for a scope's home, general's and those of a project the member is not in,
+   * since each thread and each other channel is a conversation of its own.
    */
   private async digestSince(
     actor: Actor,
     cursors: Cursors,
-    conversation?: { scope: Name; thread: Ulid | null },
+    conversation?: { scope: Name; part: string | null },
   ): Promise<DigestEntry[]> {
-    if (conversation !== undefined && conversation.thread !== null) {
-      const { scope, thread } = conversation;
-      const found = await this.tryFindThread(thread);
+    const conversationThread = threadOfPart(conversation?.part);
+    if (conversation !== undefined && conversationThread !== undefined) {
+      const { scope, part } = conversation;
+      const found = await this.tryFindThread(conversationThread);
       if (found === null) {
         return [];
       }
       const messages = await this.readMessagesIn(
-        this.paths.threadMessages(found.threads, thread),
-        cursorOf(cursors, scope, thread),
+        this.paths.threadMessages(found.threads, conversationThread),
+        cursorOf(cursors, scope, part),
       );
       return messages
         .filter((message) => message.author !== actor.name)
-        .map((message) => ({ scope, thread, message }))
+        .map((message) => ({ scope, part, message }))
         .toSorted(byId);
     }
     const agent = await this.readAgent(actor.name);
@@ -1973,6 +2048,7 @@ export class Board {
     const subscribed = new Set(agent.subscriptions);
     const frontDesk = charter.wakeTriggers.includes(FRONT_DESK_TRIGGER);
     const threadParticipation = new Map<Ulid, boolean>();
+    const openChannels = new Map<ChannelRef, boolean>();
     const collected: DigestEntry[] = [];
     // A society role reads the society's news in its own scope; a work role reads it in whichever
     // of its general conversations comes first.
@@ -1983,8 +2059,8 @@ export class Board {
     const starts = [
       ...scopes.flatMap((each) =>
         conversation === undefined
-          ? [cursorOf(cursors, each), threadStart(cursors, each)]
-          : [cursorOf(cursors, each)],
+          ? [cursorOf(cursors, each), threadStart(cursors, each), channelStart(cursors, each)]
+          : [cursorOf(cursors, each, conversation.part)],
       ),
       ...(newsFrom === undefined ? [] : [newsFrom]),
     ];
@@ -2008,20 +2084,29 @@ export class Board {
         ) {
           collected.push({
             scope: conversation?.scope ?? SOCIETY_SCOPE,
-            thread: null,
+            part: null,
             message,
             news: true,
           });
         }
         continue;
       }
-      if (conversation !== undefined && filedIn !== conversation.scope) {
+      // A top-level post in a channel of the place other than general is that channel's business
+      // while the channel is open; an archived channel's conversation has ended, so home reads it.
+      const named = thread === null ? channelConversation(filedIn, message.channel) : undefined;
+      let open = named === undefined ? undefined : openChannels.get(message.channel);
+      if (named !== undefined && open === undefined) {
+        open = await this.channelOpen(message.channel);
+        openChannels.set(message.channel, open);
+      }
+      const part = thread ?? (open === true ? `#${named}` : null);
+      if (
+        conversation !== undefined &&
+        (filedIn !== conversation.scope || part !== conversation.part)
+      ) {
         continue;
       }
-      if (conversation !== undefined && thread !== null) {
-        continue;
-      }
-      const cursor = cursorOf(cursors, filedIn, thread);
+      const cursor = cursorOf(cursors, filedIn, part);
       if (cursor !== null && message.id <= cursor) {
         continue;
       }
@@ -2040,7 +2125,7 @@ export class Board {
         include = participates;
       }
       if (include && message.author !== actor.name) {
-        collected.push({ scope: filedIn, thread, message });
+        collected.push({ scope: filedIn, part, message });
       }
     }
     return collected.toSorted(byId);
@@ -3421,22 +3506,23 @@ export class Board {
   /**
    * Moves a conversation's cursor forward to `cursor` once a turn there has delivered up to it. It
    * never moves back, so a turn that ends after a later one in the same conversation cannot rewind it.
+   * `part` names the conversation beside the scope's home: a thread's id or `#channel`.
    */
   async setDigestCursor(
     agent: Name,
     scope: Name,
     cursor: Ulid | null,
-    thread?: Ulid,
+    part?: string,
   ): Promise<void> {
     await this.mutex.run(async () => {
       if (cursor === null) {
         return;
       }
       const cursors = await this.readCursors(agent);
-      const current = cursorOf(cursors, scope, thread ?? null);
+      const current = cursorOf(cursors, scope, part ?? null);
       const news = newsStart(cursors);
       // A general conversation's turn read the news up to where it read everything else.
-      const readNews = thread === undefined && (news === null || cursor > news);
+      const readNews = part === undefined && (news === null || cursor > news);
       if (current !== null && cursor <= current && !readNews) {
         return;
       }
@@ -3445,17 +3531,15 @@ export class Board {
         scopes:
           current !== null && cursor <= current
             ? cursors.scopes
-            : { ...cursors.scopes, [conversationKey(scope, thread ?? null)]: cursor },
+            : { ...cursors.scopes, [conversationKey(scope, part ?? null)]: cursor },
         ...(readNews ? { news: cursor } : {}),
       });
     });
   }
 
   /** Where a conversation's digest resumes: the newest message a turn there was shown. */
-  async digestCursor(agent: Name, scope: Name, thread?: Ulid): Promise<Ulid | null> {
-    return this.mutex.run(async () =>
-      cursorOf(await this.readCursors(agent), scope, thread ?? null),
-    );
+  async digestCursor(agent: Name, scope: Name, part?: string): Promise<Ulid | null> {
+    return this.mutex.run(async () => cursorOf(await this.readCursors(agent), scope, part ?? null));
   }
 
   /** Records that a running turn took posts delivered into it, which wake latency counts to. */
@@ -3464,6 +3548,7 @@ export class Board {
     agent: Name;
     project: Name;
     thread?: Ulid | undefined;
+    channel?: Name | undefined;
     messages: readonly Ulid[];
   }): Promise<void> {
     await this.mutex.run(async () => {
@@ -3471,20 +3556,24 @@ export class Board {
         turnId: input.turnId,
         project: input.project,
         ...(input.thread === undefined ? {} : { thread: input.thread }),
+        ...(input.channel === undefined ? {} : { channel: input.channel }),
         messages: [...input.messages],
       });
     });
   }
 
-  /** Where a conversation's session ids and last turn are kept: the scope's home, or a thread's. */
-  private sessionDir(agent: Name, scope: Name, thread?: Ulid): string {
-    return thread === undefined
+  /**
+   * Where a conversation's session ids and last turn are kept: the scope's home, or beside it a
+   * thread's or a channel's, named by `part` as `conversationPart` gives it.
+   */
+  private sessionDir(agent: Name, scope: Name, part?: string): string {
+    return part === undefined
       ? this.paths.agentProject(agent, scope)
-      : this.paths.agentThread(agent, scope, thread);
+      : this.paths.agentConversation(agent, scope, part);
   }
 
-  async readSessions(agent: Name, project: Name, thread?: Ulid): Promise<SessionsFile> {
-    const file = path.join(this.sessionDir(agent, project, thread), "sessions.json");
+  async readSessions(agent: Name, project: Name, part?: string): Promise<SessionsFile> {
+    const file = path.join(this.sessionDir(agent, project, part), "sessions.json");
     return (await exists(file)) ? readJson(file, SessionsFileSchema) : {};
   }
 
@@ -3498,10 +3587,10 @@ export class Board {
     cli: CliKind,
     sessionId: string,
     runner: Name,
-    thread?: Ulid,
+    part?: string,
   ): Promise<void> {
     await this.mutex.run(async () => {
-      const dir = this.sessionDir(agent, project, thread);
+      const dir = this.sessionDir(agent, project, part);
       await ensureDir(dir);
       const file = path.join(dir, "sessions.json");
       const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
@@ -3510,18 +3599,22 @@ export class Board {
     });
   }
 
-  /** The last turn of one conversation: the scope's home, or a thread's. */
-  async readLastTurn(agent: Name, project: Name, thread?: Ulid): Promise<TurnRecord | null> {
-    const file = path.join(this.sessionDir(agent, project, thread), "last-turn.json");
+  /** The last turn of one conversation: the scope's home, a channel's, or a thread's. */
+  async readLastTurn(agent: Name, project: Name, part?: string): Promise<TurnRecord | null> {
+    const file = path.join(this.sessionDir(agent, project, part), "last-turn.json");
     return (await exists(file)) ? readJson(file, TurnRecordSchema) : null;
   }
 
   /** The latest turn a citizen took in a scope, in any of its conversations there. */
   async readLatestTurn(agent: Name, project: Name): Promise<TurnRecord | null> {
     let latest = await this.readLastTurn(agent, project);
-    const threads = path.join(this.paths.agentProject(agent, project), "threads");
-    for (const thread of await listDirs(threads)) {
-      const turn = await this.readLastTurn(agent, project, thread);
+    const place = this.paths.agentProject(agent, project);
+    const parts = [
+      ...(await listDirs(path.join(place, "threads"))),
+      ...(await listDirs(path.join(place, "channels"))).map((name) => `#${name}`),
+    ];
+    for (const part of parts) {
+      const turn = await this.readLastTurn(agent, project, part);
       if (turn !== null && (latest === null || turnTime(turn) > turnTime(latest))) {
         latest = turn;
       }
@@ -3539,6 +3632,7 @@ export class Board {
         turnId: parsed.id,
         project: parsed.project,
         ...(parsed.thread === undefined ? {} : { thread: parsed.thread }),
+        ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         trigger: parsed.trigger.kind,
         session: parsed.session,
         runner: parsed.runner,
@@ -3568,12 +3662,14 @@ export class Board {
           agent: parsed.agent,
           project: parsed.project,
           ...(parsed.thread === undefined ? {} : { thread: parsed.thread }),
+          ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         });
       }
       await this.events.append(failed ? "turn.failed" : "turn.completed", parsed.agent, {
         ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
         project: parsed.project,
         ...(parsed.thread === undefined ? {} : { thread: parsed.thread }),
+        ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         trigger: parsed.trigger.kind,
         session: parsed.session,
         exitReason: parsed.exitReason,
@@ -3926,7 +4022,7 @@ export class Board {
   }
 
   private async writeTurnRecord(record: TurnRecord): Promise<void> {
-    const dir = this.sessionDir(record.agent, record.project, record.thread);
+    const dir = this.sessionDir(record.agent, record.project, conversationPart(record));
     await ensureDir(dir);
     await writeJson(path.join(dir, "last-turn.json"), record);
   }
@@ -4877,6 +4973,15 @@ export class Board {
       );
     }
     return archived;
+  }
+
+  /** Whether a channel exists and is not archived, its conversations still going. */
+  async channelOpen(ref: ChannelRef): Promise<boolean> {
+    try {
+      return (await this.assertChannelExists(ref)) === undefined;
+    } catch {
+      return false;
+    }
   }
 
   /**

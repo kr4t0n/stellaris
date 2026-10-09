@@ -45,6 +45,10 @@ function start(
   });
 }
 
+function inChannel(ts: string, agent: string, channel: string, trigger: string): BoardEvent {
+  return event(ts, "turn.started", agent, { project: "lab", channel, trigger });
+}
+
 function task(id: string, title: string): Task {
   return {
     ...TaskFrontmatterSchema.parse({
@@ -193,6 +197,26 @@ describe("metrics", () => {
         { agent: "eng-1", mentions: 2, medianMs: 37_500, slowestMs: 45_000 },
       ],
     });
+  });
+
+  it("times a mention in a channel beside general to that channel's turn, not the home's", () => {
+    const metrics = computeMetrics(
+      input([
+        mention("10-01T10:00:00", "eng-1", "lab/release"),
+        start("10-01T10:00:05", "eng-1", "lab", undefined, "heartbeat"),
+        inChannel("10-01T10:00:10", "eng-1", "dev", "heartbeat"),
+        inChannel("10-01T10:00:30", "eng-1", "release", "mention"),
+        // A general mention is the home's, which another channel's turn does not answer.
+        mention("10-01T11:00:00", "rev-1", "lab/general"),
+        inChannel("10-01T11:00:05", "rev-1", "release", "mention"),
+        start("10-01T11:00:20", "rev-1", "lab", undefined, "mention"),
+      ]),
+    );
+    expect(metrics.latency).toMatchObject({ mentions: 2, unanswered: 0, slowestMs: 30_000 });
+    expect(metrics.latency.byAgent).toEqual([
+      { agent: "eng-1", mentions: 1, medianMs: 30_000, slowestMs: 30_000 },
+      { agent: "rev-1", mentions: 1, medianMs: 20_000, slowestMs: 20_000 },
+    ]);
   });
 
   it("answers a mention in a project its citizen has since left, as an archive leaves it", () => {

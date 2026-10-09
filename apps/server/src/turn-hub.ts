@@ -19,15 +19,21 @@ export class TurnHub {
     return this.seq;
   }
 
-  /** Records one event of a turn, in its scope and, for a thread's conversation, its thread. */
-  push(agent: Name, project: Name, event: AgentEvent, thread?: Ulid): LiveTurnEvent {
+  /** Records one event of a turn, in its scope and its conversation there: a thread's, a channel's, or home. */
+  push(
+    agent: Name,
+    project: Name,
+    event: AgentEvent,
+    conversation: { thread?: Ulid | undefined; channel?: Name | undefined } = {},
+  ): LiveTurnEvent {
     this.seq += 1;
     const item: LiveTurnEvent = {
       seq: this.seq,
       ts: this.now().toISOString(),
       agent,
       project,
-      ...(thread === undefined ? {} : { thread }),
+      ...(conversation.thread === undefined ? {} : { thread: conversation.thread }),
+      ...(conversation.channel === undefined ? {} : { channel: conversation.channel }),
       event,
     };
     this.buffer.push(item);

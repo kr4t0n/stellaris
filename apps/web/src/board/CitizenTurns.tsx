@@ -39,7 +39,11 @@ function TurnRow({
   const entities = useEntities();
   const length = turnLength(entry);
   const about =
-    entry.thread === undefined ? null : (entities.get(entry.thread)?.title ?? "a thread");
+    entry.thread !== undefined
+      ? (entities.get(entry.thread)?.title ?? "a thread")
+      : entry.channel === undefined
+        ? null
+        : `#${entry.channel}`;
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (

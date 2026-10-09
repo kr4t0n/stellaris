@@ -84,12 +84,17 @@ describe("composing", () => {
     const turns = [
       turn({}),
       turn({ agent: "ref", thread: "01M3Q2HHHHHHHHHHHHHHHHHHH1" }),
+      turn({ agent: "ref", channel: "release" }),
       turn({ agent: "desk", scope: "society", steerable: false }),
     ];
-    // ada's home turn in lab takes a post in lab's channels; ref's turn is a thread's.
+    // ada's home turn in lab takes a post in lab's general; ref's turns are a thread's and a channel's.
     expect(
       reachedTurns(["ada", "ref", "desk"], members, turns, { channel: "lab/general" }),
     ).toEqual(["ada"]);
+    // Another channel of lab is a conversation of its own: ref's turn there takes its posts.
+    expect(reachedTurns(["ada", "ref"], members, turns, { channel: "lab/release" })).toEqual([
+      "ref",
+    ]);
     // A society channel wakes ada in the society scope, where she has no turn.
     expect(reachedTurns(["ada"], members, turns, { channel: "general" })).toEqual([]);
     expect(

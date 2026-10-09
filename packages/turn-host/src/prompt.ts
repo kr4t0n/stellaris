@@ -1,4 +1,5 @@
 import {
+  channelRef,
   parseChannelRef,
   SOCIETY_SCOPE,
   stageIndex,
@@ -296,9 +297,17 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
 
   const conversation = input.conversation ?? null;
   lines.push("", "## This conversation", "");
-  if (conversation === null) {
+  if (conversation === null && dispatch.channel !== undefined) {
+    const ref = channelRef(
+      dispatch.project === SOCIETY_SCOPE ? null : dispatch.project,
+      dispatch.channel,
+    );
     lines.push(
-      `This turn is in your home conversation for ${dispatch.project}: its channels, and work tied to no thread. Each thread you take part in, a task's, a proposal's, or a topic's, is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn.`,
+      `This turn is in your conversation of ${ref}, a workstream with turns of its own: its posts, and the work it asks for. Your home conversation for ${dispatch.project} carries its general channel, and each other channel and each thread you take part in is a conversation of its own; read one when you need it, and leave its work to its turn. Post here with post_message and channel ${ref}.`,
+    );
+  } else if (conversation === null) {
+    lines.push(
+      `This turn is in your home conversation for ${dispatch.project}: its general channel, and work tied to no other channel and no thread. Each other channel, a workstream, and each thread you take part in, a task's, a proposal's, or a topic's, is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn.`,
     );
   } else {
     const { thread, task } = conversation;

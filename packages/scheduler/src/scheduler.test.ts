@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { Board, SYSTEM_ACTOR, type Actor } from "@stellaris/board-core";
 import {
   MEMBER_VERBS,
+  conversationPart,
   sessionKey,
   type Name,
   type TurnDispatch,
@@ -41,8 +42,15 @@ class FakeRunner implements TurnRunner {
   readonly steered: string[] = [];
   steerOutcome: SteerOutcome = "sent";
 
-  async steer(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome> {
-    this.steered.push(sessionKey(conversation.agent, conversation.project, conversation.thread));
+  async steer(conversation: {
+    agent: Name;
+    project: Name;
+    thread?: Ulid;
+    channel?: Name;
+  }): Promise<SteerOutcome> {
+    this.steered.push(
+      sessionKey(conversation.agent, conversation.project, conversationPart(conversation)),
+    );
     return this.steerOutcome;
   }
 
@@ -861,8 +869,9 @@ describe("Scheduler", () => {
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
-      ["eng-1", "demo", "heartbeat"],
+    // In dev's own conversation, since general alone is the home's.
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.channel])).toEqual([
+      ["eng-1", "demo", "heartbeat", "dev"],
     ]);
   });
 
@@ -915,6 +924,42 @@ describe("Scheduler", () => {
     await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 and the license?" });
     await settle();
     expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", topic.id)]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+  });
+
+  it("wakes a channel beside general in a conversation of its own, until it is archived", async () => {
+    const { board, runner, scheduler } = await setup({ concurrency: 4 });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+    };
+    runner.hold = true;
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 the release date?" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 hello" });
+    await settle();
+    // A mention in dev wakes dev's conversation, beside the home that general's wakes.
+    expect(scheduler.runningPairs).toEqual([
+      sessionKey("eng-1", "demo"),
+      sessionKey("eng-1", "demo", "#dev"),
+    ]);
+    expect(runner.dispatches.map((d) => [d.trigger.kind, d.channel ?? "home"])).toEqual([
+      ["mention", "dev"],
+      ["mention", "home"],
+    ]);
+
+    // A post there while its turn runs is delivered into that turn.
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 and the scope?" });
+    await settle();
+    expect(runner.steered).toEqual([sessionKey("eng-1", "demo", "#dev")]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", "#dev")]);
+
+    // Archiving the channel ends its conversation: the wake still queued there goes.
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([]);
     runner.hold = false;
     runner.releaseHeld();
     await scheduler.drain();

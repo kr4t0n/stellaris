@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Actor, Board } from "@stellaris/board-core";
 import {
   channelRef,
+  conversationPart,
   mayHoldStage,
   PATH_TOKENS,
   ROLE_KIND_APPROVERS,
@@ -69,10 +70,16 @@ export interface TurnHostOptions {
   readonly residentIdleMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: HostLog | undefined;
-  /** Every event of a turn as it arrives, with the turn's scope and, in a thread, its thread. */
+  /** Every event of a turn as it arrives, with the turn's scope and conversation there. */
   readonly onEvent?:
-    | ((agent: Name, scope: Name, event: AgentEvent, thread?: Ulid) => void)
+    | ((agent: Name, scope: Name, event: AgentEvent, conversation: TurnConversation) => void)
     | undefined;
+}
+
+/** A turn's conversation beside its scope's home: a thread's, or a channel's; neither for home. */
+export interface TurnConversation {
+  readonly thread?: Ulid | undefined;
+  readonly channel?: Name | undefined;
 }
 
 /** A steer sent into a turn: the newest message it delivers, and what it delivers. */
@@ -183,11 +190,14 @@ export class TurnHost {
     const agent = await this.board.readAgent(dispatch.agent);
     const actor: Actor = { name: agent.name, role: agent.role };
     const thread = dispatch.thread;
+    const channel = thread === undefined ? dispatch.channel : undefined;
+    const part = conversationPart({ thread: thread?.id, channel });
     const startedAt = this.now().toISOString();
     const base: TurnRecord = {
       agent: agent.name,
       project: dispatch.project,
       ...(thread === undefined ? {} : { thread: thread.id }),
+      ...(channel === undefined ? {} : { channel }),
       runner: runner.name,
       cli: agent.cli,
       session: null,
@@ -213,12 +223,12 @@ export class TurnHost {
 
     const taskId = thread?.task === true ? thread.id : undefined;
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
-    const workspace = await this.workspaceOf(project, thread);
-    const sessions = await this.board.readSessions(agent.name, dispatch.project, thread?.id);
+    const workspace = await this.workspaceOf(project, thread, channel);
+    const sessions = await this.board.readSessions(agent.name, dispatch.project, part);
     // A session lives on the runner it began on; anywhere else the conversation starts afresh.
     const recorded = sessions.runner === runner.name ? sessions[agent.cli] : undefined;
     const newSession = recorded === undefined;
-    const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project, thread?.id);
+    const lastTurn = await this.board.readLastTurn(agent.name, dispatch.project, part);
     // A resumed session reports a running total that includes its earlier turns. Records from
     // before `sessionCostUsd` held that total as the turn's cost.
     const costSoFarUsd =
@@ -230,7 +240,12 @@ export class TurnHost {
     // may run at the same time, and each reads and acts on its own. A new thread conversation
     // is shown the whole thread, since nothing of it is in the session yet.
     const digest = await this.board.readDigest(
-      { ...actor, scope: dispatch.project, ...(thread === undefined ? {} : { thread: thread.id }) },
+      {
+        ...actor,
+        scope: dispatch.project,
+        ...(thread === undefined ? {} : { thread: thread.id }),
+        ...(channel === undefined ? {} : { channel }),
+      },
       { advance: false, limit: thread === undefined ? 50 : 100 },
     );
     const threadSoFar =
@@ -252,7 +267,7 @@ export class TurnHost {
         ? []
         : (await this.board.heldClaims(agent.name)).filter((each) => each.id === task.id);
     const onboarding: OnboardingContext | null =
-      dispatch.onboarding || (newSession && thread === undefined)
+      dispatch.onboarding || (newSession && part === undefined)
         ? {
             agentName: agent.name,
             roleSummary: charter.purpose,
@@ -310,7 +325,7 @@ export class TurnHost {
         };
     // Readers of operations signals get those logged for this scope since their last home turn here.
     const signals =
-      thread === undefined && charter.wakeTriggers.includes(OPS_TRIGGER)
+      part === undefined && charter.wakeTriggers.includes(OPS_TRIGGER)
         ? (await this.board.listSignals(500))
             .filter(
               (record) =>
@@ -356,9 +371,9 @@ export class TurnHost {
       conflicts: await this.board.listHomeConflicts(agent.name),
     });
 
-    // Residency keeps a role's home conversation warm; its thread conversations run cold.
+    // Residency keeps a role's home conversation warm; its channel and thread conversations run cold.
     const resident =
-      charter.resident && thread === undefined && runner.residentClis.includes(agent.cli);
+      charter.resident && part === undefined && runner.residentClis.includes(agent.cli);
     const residentKey = resident ? sessionKey(agent.name, dispatch.project) : null;
     const token =
       residentKey === null
@@ -367,7 +382,7 @@ export class TurnHost {
             agent.role,
             this.tokenLifetime(5 * 60_000),
             dispatch.project,
-            thread?.id,
+            part,
           )
         : this.residentToken(runner, residentKey, actor, dispatch.project);
 
@@ -388,6 +403,7 @@ export class TurnHost {
       ...(agent.effort === undefined ? {} : { effort: agent.effort }),
       scope: dispatch.project,
       ...(thread === undefined ? {} : { thread: thread.id }),
+      ...(channel === undefined ? {} : { channel }),
       session: recorded ?? null,
       costSoFarUsd,
       instructions,
@@ -438,6 +454,7 @@ export class TurnHost {
         agent: agent.name,
         project: dispatch.project,
         thread: thread?.id,
+        channel,
         runner: runner.name,
         session: recorded,
         newSession,
@@ -479,6 +496,7 @@ export class TurnHost {
               agent: turn.job.agent,
               project: turn.job.scope,
               thread: turn.job.thread,
+              channel: turn.job.channel,
               messages: sent.messages,
             })
             .catch((error: unknown) => {
@@ -487,7 +505,10 @@ export class TurnHost {
         }
       }
       turn.transcript.push(entry);
-      this.onEvent?.(turn.job.agent, turn.job.scope, entry.event, turn.job.thread);
+      this.onEvent?.(turn.job.agent, turn.job.scope, entry.event, {
+        thread: turn.job.thread,
+        channel: turn.job.channel,
+      });
     }
   }
 
@@ -495,11 +516,16 @@ export class TurnHost {
   turnIn(
     agent: Name,
     scope: Name,
-    thread?: Ulid,
+    conversation: TurnConversation = {},
   ): { turnId: Ulid; runner: Name; cli: CliKind } | null {
     for (const turn of this.open.values()) {
       const { job } = turn;
-      if (job.agent === agent && job.scope === scope && job.thread === thread) {
+      if (
+        job.agent === agent &&
+        job.scope === scope &&
+        job.thread === conversation.thread &&
+        job.channel === conversation.channel
+      ) {
         return { turnId: job.turnId, runner: turn.runner, cli: job.cli };
       }
     }
@@ -513,10 +539,11 @@ export class TurnHost {
       agent: turn.job.agent,
       scope: turn.job.scope,
       ...(turn.job.thread === undefined ? {} : { thread: turn.job.thread }),
+      ...(turn.job.channel === undefined ? {} : { channel: turn.job.channel }),
       cli: turn.job.cli,
       ...(turn.record.trigger.channel === undefined
         ? {}
-        : { channel: turn.record.trigger.channel }),
+        : { askedIn: turn.record.trigger.channel }),
       runner: turn.runner,
     }));
   }
@@ -540,6 +567,7 @@ export class TurnHost {
         ...turn.actor,
         scope: job.scope,
         ...(job.thread === undefined ? {} : { thread: job.thread }),
+        ...(job.channel === undefined ? {} : { channel: job.channel }),
       },
       {
         ...(turn.delivered === null ? {} : { since_cursor: turn.delivered }),
@@ -605,6 +633,7 @@ export class TurnHost {
       this.board.revokeTurnToken(turn.coldToken);
     }
     const { job } = turn;
+    const part = conversationPart(job);
     const finished: TurnRecord = {
       ...turn.record,
       session: outcome.session,
@@ -629,7 +658,7 @@ export class TurnHost {
           job.cli,
           outcome.session,
           turn.runner,
-          job.thread,
+          part,
         );
       }
       // A stop is the user's decision on work it watched, not a failure: what the turn was shown
@@ -641,16 +670,10 @@ export class TurnHost {
       ) {
         // The digest was delivered, at the start and by the steers the turn took; only now does the
         // cursor move past it.
-        await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, job.thread);
+        await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, part);
         await this.renewLeases(turn.actor, turn.held);
         if (outcome.status?.needsUserDecision === true) {
-          await this.askUser(
-            turn.actor,
-            job.scope,
-            job.thread,
-            turn.record.startedAt,
-            outcome.status.summary,
-          );
+          await this.askUser(turn.actor, job, turn.record.startedAt, outcome.status.summary);
         }
       }
       await this.board.finishTurn(finished, turn.transcript);
@@ -661,6 +684,7 @@ export class TurnHost {
           agent: job.agent,
           project: job.scope,
           thread: job.thread,
+          channel: job.channel,
           exitReason: finished.exitReason,
         },
         "turn finished",
@@ -722,6 +746,9 @@ export class TurnHost {
         agent: dispatch.agent,
         project: dispatch.project,
         ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
+        ...(dispatch.thread !== undefined || dispatch.channel === undefined
+          ? {}
+          : { channel: dispatch.channel }),
         runner,
         cli: agent?.cli ?? null,
         session: null,
@@ -771,12 +798,23 @@ export class TurnHost {
     return token;
   }
 
-  /** Where a conversation works: a task's on its branch, any other thread's in a place of its own. */
+  /**
+   * Where a conversation works: a task's on its branch, any other thread's and a channel's in a
+   * place of its own, and the home in the citizen's own.
+   */
   private async workspaceOf(
     project: Project | null,
     thread: TurnDispatch["thread"],
+    channel: Name | undefined,
   ): Promise<TurnWorkspace> {
-    const own = thread === undefined || thread.task ? {} : { thread: thread.id };
+    const own =
+      thread !== undefined
+        ? thread.task
+          ? {}
+          : { thread: thread.id }
+        : channel === undefined
+          ? {}
+          : { channel };
     if (project === null) {
       return { kind: "home", ...own };
     }
@@ -795,8 +833,15 @@ export class TurnHost {
     return { kind: "project", repo, branches, ...own };
   }
 
-  /** Whether a thread conversation's task or thread has ended, which frees its workspace. */
+  /**
+   * Whether a thread conversation's task or thread has ended, or a channel conversation's channel
+   * was archived, which frees its workspace.
+   */
   private async conversationEnded(job: TurnJob): Promise<boolean> {
+    if (job.channel !== undefined) {
+      const place = job.scope === SOCIETY_SCOPE ? null : job.scope;
+      return !(await this.board.channelOpen(channelRef(place, job.channel)));
+    }
     if (job.thread === undefined) {
       return false;
     }
@@ -815,18 +860,14 @@ export class TurnHost {
    * A turn that reported the user must decide asks where the question belongs, with a mention of
    * the user, which is what puts it before them. One that mentioned the user nowhere asks in its
    * own thread when it was in one that is still open, so the answer comes back to the same
-   * conversation, and otherwise in a thread of its own on its scope's general channel, opened as the
-   * citizen with its summary. One that proposed something the user decides has put its decision
-   * before the user already, where deciding it clears it; a mention would stay until the user
-   * posted beside it.
+   * conversation, and otherwise in a thread of its own on its conversation's channel, or its scope's
+   * general for the home, opened as the citizen with its summary. One that proposed something the
+   * user decides has put its decision before the user already, where deciding it clears it; a
+   * mention would stay until the user posted beside it.
    */
-  private async askUser(
-    actor: Actor,
-    scope: Name,
-    threadId: Ulid | undefined,
-    since: string,
-    summary: string,
-  ): Promise<void> {
+  private async askUser(actor: Actor, job: TurnJob, since: string, summary: string): Promise<void> {
+    const threadId = job.thread;
+    const place = job.scope === SOCIETY_SCOPE ? null : job.scope;
     try {
       if (await this.board.hasMentioned(actor.name, USER_NAME, since)) {
         return;
@@ -850,7 +891,7 @@ export class TurnHost {
         return;
       }
       const thread = await this.board.openThread(actor, {
-        channel: scope === SOCIETY_SCOPE ? "general" : `${scope}/general`,
+        channel: channelRef(place, job.channel ?? "general"),
         title: `${actor.name} asks for a decision: ${summary}`.slice(0, 200),
       });
       await this.board.postMessage(actor, {

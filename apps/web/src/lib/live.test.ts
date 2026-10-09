@@ -2,6 +2,7 @@ import type { AgentEvent, LiveTurnEvent } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
   applyLive,
+  conversationOf,
   describeCall,
   describeSteer,
   elapsed,
@@ -125,23 +126,36 @@ describe("live turns", () => {
     expect(turnsOf(turns, "ref")).toEqual([]);
   });
 
-  it("keeps a citizen's conversations in one scope apart, a thread's from its home", () => {
+  it("keeps a citizen's conversations in one scope apart: a thread's, a channel's, and its home", () => {
     const thread = "01M3S1EF764MW5N61H5J41VGR2";
     const inThread = (event: AgentEvent): LiveTurnEvent => ({
       ...item("ada", "pi", event),
       thread,
     });
+    const inChannel = (event: AgentEvent): LiveTurnEvent => ({
+      ...item("ada", "pi", event),
+      channel: "release",
+    });
     const turns = replay([
       item("ada", "pi", STARTED),
+      inChannel(STARTED),
       inThread(STARTED),
       inThread({ type: "text", delta: "On the task." }),
+      inChannel({ type: "text", delta: "On the release." }),
     ]);
     expect(
-      turnsOf(turns, "ada").map((turn) => [turn.scope, turn.thread, turn.steps.length]),
+      turnsOf(turns, "ada").map((turn) => [
+        conversationOf(turn),
+        turn.thread,
+        turn.channel,
+        turn.steps.length,
+      ]),
     ).toEqual([
-      ["pi", thread, 1],
-      ["pi", undefined, 0],
+      ["pi/#release", undefined, "release", 1],
+      [`pi/${thread}`, thread, undefined, 1],
+      ["pi", undefined, undefined, 0],
     ]);
+    expect([...turns.keys()].toSorted()).toEqual(["ada/pi", "ada/pi/#release", `ada/pi/${thread}`]);
   });
 
   it("says what a call was about on one line, line breaks and all", () => {

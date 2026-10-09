@@ -718,6 +718,83 @@ describe("turns on a runner over the runner protocol", () => {
     expect(worktrees.stdout).not.toContain(topic.id);
   });
 
+  it("gives each channel's conversation beside general a workspace of its own, until the channel is archived", async () => {
+    const { board } = await Board.init(dir, { name: "channels" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
+    await board.addChannel(USER, { project: null, name: "lounge", purpose: "Chatter." });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await board.subscribe({ name: "eng-1", role: "engineer" }, { channel: "demo/release" });
+    const posted = await board.postMessage(USER, { channel: "demo/release", body: "ship it" });
+
+    // Each turn waits until all three are in flight, so they can only finish by running together.
+    const cwds = new Set<string>();
+    const prompts = new Map<string, string>();
+    const { promise: together, resolve: allStarted } = Promise.withResolvers<void>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        cwds.add(cwd);
+        prompts.set(cwd, request.prompt);
+        if (cwds.size === 3) {
+          allStarted();
+        }
+        await together;
+        if (cwd.endsWith(path.join("demo", "release"))) {
+          await board.archiveChannel(USER, { channel: "demo/release", reason: "Shipped." });
+        }
+        if (cwd.endsWith("lounge")) {
+          await board.archiveChannel(USER, { channel: "lounge", reason: "Quiet." });
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = (project: string, channel?: string) =>
+      run({
+        agent: "eng-1",
+        project,
+        ...(channel === undefined ? {} : { channel }),
+        trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+        priority: 1,
+      });
+    const ended = await Promise.all([
+      turn("demo"),
+      turn("demo", "release"),
+      turn("society", "lounge"),
+    ]);
+    expect(ended.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
+    expect(ended.map((each) => each.channel)).toEqual([undefined, "release", "lounge"]);
+
+    const home = runner.paths.worktree("eng-1", "demo");
+    const release = runner.paths.channelWorktree("eng-1", "demo", "release");
+    const lounge = path.join(runner.paths.agent("eng-1"), "scratch", ".channels", "lounge");
+    expect([...cwds].toSorted()).toEqual([home, release, lounge].toSorted());
+    // The channel's turn read the channel's post; the home's did not.
+    expect(prompts.get(release)).toContain("conversation of demo/release");
+    expect(prompts.get(release)).toContain("ship it");
+    expect(prompts.get(home)).not.toContain("ship it");
+    expect(await board.digestCursor("eng-1", "demo", "#release")).toBe(posted.id);
+    // An archived channel's workspace goes, once the runner has the answer to the turn's outcome.
+    await vi.waitFor(async () => {
+      await expect(stat(release)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    await expect(stat(home)).resolves.toBeDefined();
+  });
+
   it("lists a citizen's models from its own runner, and asks again once that runner reconnects", async () => {
     const { board, userToken } = await Board.init(dir, { name: "models" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

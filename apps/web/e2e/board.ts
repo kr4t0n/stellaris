@@ -1066,7 +1066,7 @@ export async function fakeBoard(
                   agent: "desk",
                   scope: "society",
                   cli: "claude",
-                  channel: "general",
+                  askedIn: "general",
                   steerable: true,
                   stoppable: true,
                 },

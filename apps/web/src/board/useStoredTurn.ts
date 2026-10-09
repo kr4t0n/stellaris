@@ -13,7 +13,7 @@ export function useStoredTurn(
     () =>
       entry === undefined || transcript.data === undefined
         ? undefined
-        : transcriptTurn(transcript.data, name, entry.project, entry.thread),
+        : transcriptTurn(transcript.data, name, entry.project, entry),
     [entry, transcript.data, name],
   );
   return {

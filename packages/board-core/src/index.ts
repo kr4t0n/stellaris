@@ -17,6 +17,7 @@ export type {
   SearchHit,
   SignalRecord,
   TaskLocation,
+  UnreadConversation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";
 export { computeMetrics } from "./metrics.js";

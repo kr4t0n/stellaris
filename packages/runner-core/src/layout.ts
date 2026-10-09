@@ -42,6 +42,11 @@ export class RunnerLayout {
     return path.join(this.root, "worktrees", agent, ".threads", threadId);
   }
 
+  /** A channel's conversation's own worktree, by project, since every place names its own channels. */
+  channelWorktree(agent: Name, slug: Name, channel: Name): string {
+    return path.join(this.root, "worktrees", agent, ".channels", slug, channel);
+  }
+
   /** The name and token an enrollment returned, with the server they belong to. */
   get credentials(): string {
     return path.join(this.root, "credentials.json");

@@ -89,7 +89,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     turnTimeoutMs: options.turnTimeoutMs,
     maxTurns: options.maxTurns,
     residentIdleMs: options.residentIdleMs ?? 60_000,
-    onEvent: (agent, scope, event, thread) => turns.push(agent, scope, event, thread),
+    onEvent: (agent, scope, event, conversation) => turns.push(agent, scope, event, conversation),
   });
   const hub = new RunnerHub({ board, host, version: "test", graceMs: options.graceMs ?? 5_000 });
   const app = createApp({

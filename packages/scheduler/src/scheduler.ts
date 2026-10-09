@@ -1,5 +1,7 @@
-import { SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
+import { SYSTEM_ACTOR, type Board, type UnreadConversation } from "@stellaris/board-core";
 import {
+  channelConversation,
+  conversationPart,
   currentStage,
   mayHoldStage,
   OpsSignalSchema,
@@ -30,6 +32,27 @@ import {
 import { z } from "zod";
 import { decideWake } from "./wake.js";
 
+/** A conversation beside a scope's home: a thread's, or a channel's other than general. */
+type Beside = { readonly thread: TurnThread } | { readonly channel: Name };
+
+/** A dispatch's fields naming the conversation beside its scope's home. */
+function besideFields(beside: Beside | undefined): { thread?: TurnThread; channel?: Name } {
+  if (beside === undefined) {
+    return {};
+  }
+  return "thread" in beside ? { thread: beside.thread } : { channel: beside.channel };
+}
+
+/** The queue's key for a conversation: `agent/scope`, `agent/scope/thread`, or `agent/scope/#channel`. */
+function conversationKey(agent: Name, scope: Name, beside: Beside | undefined): string {
+  const fields = besideFields(beside);
+  return sessionKey(
+    agent,
+    scope,
+    conversationPart({ thread: fields.thread?.id, channel: fields.channel }),
+  );
+}
+
 /** Where a queued turn runs: on a runner, or nowhere, with the reason it never can. */
 export type TurnAssignment = { readonly runner: Name } | { readonly refused: string };
 
@@ -45,7 +68,12 @@ export interface TurnRunner {
   /** Where a queued turn may start now, holding a slot there, or null to keep it queued. */
   assign(dispatch: TurnDispatch): Promise<TurnAssignment | null>;
   /** Delivers what arrived in a conversation into the turn running there; absent, nothing steers. */
-  steer?(conversation: { agent: Name; project: Name; thread?: Ulid }): Promise<SteerOutcome>;
+  steer?(conversation: {
+    agent: Name;
+    project: Name;
+    thread?: Ulid;
+    channel?: Name;
+  }): Promise<SteerOutcome>;
   runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord>;
   /**
    * Runs a completing task's completion effect and records the outcome on the board, or reports
@@ -431,7 +459,7 @@ export class Scheduler {
               ...(channel === null ? {} : { channel }),
             },
             now,
-            threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
+            await this.postedIn(scope, channel, threadId),
           );
         }
         // A step's note from the user is the task's business, not a request for the front desk.
@@ -580,6 +608,27 @@ export class Scheduler {
         await this.wakeNewcomer(name, project, now);
         return;
       }
+      case "channel.archived": {
+        // The channel's conversations have ended; what woke them is read at home from now on.
+        const channel = stringOf(payload["channel"]);
+        if (channel === null) {
+          return;
+        }
+        for (const [key, item] of this.pending) {
+          const { dispatch } = item;
+          if (
+            dispatch.channel !== undefined &&
+            channelConversation(dispatch.project, channel) === dispatch.channel
+          ) {
+            this.pending.delete(key);
+            this.log.info(
+              { agent: dispatch.agent, project: dispatch.project, channel },
+              "dropping channel wake, the channel is archived",
+            );
+          }
+        }
+        return;
+      }
       case "agent.left": {
         const name = stringOf(payload["name"]);
         const project = stringOf(payload["project"]);
@@ -667,7 +716,7 @@ export class Scheduler {
           ...(channel === null ? {} : { channel }),
         },
         now,
-        threadId === undefined ? undefined : await this.conversationOf(threadId, scope),
+        await this.postedIn(scope, channel, threadId),
       );
     }
   }
@@ -770,7 +819,7 @@ export class Scheduler {
         taskId: task.id,
       },
       now,
-      { id: task.id, task: scope === task.project },
+      { thread: { id: task.id, task: scope === task.project } },
     );
     return sessionKey(agent.name, scope, task.id);
   }
@@ -896,6 +945,22 @@ export class Scheduler {
     }
   }
 
+  /**
+   * The conversation a post wakes a citizen in, for a turn in `scope`: its thread's, else its
+   * channel's when that is a channel of the scope other than general, else the scope's home.
+   */
+  private async postedIn(
+    scope: Name,
+    channel: string | null,
+    threadId: Ulid | undefined,
+  ): Promise<Beside | undefined> {
+    if (threadId !== undefined) {
+      return { thread: await this.conversationOf(threadId, scope) };
+    }
+    const name = channel === null ? undefined : channelConversation(scope, channel);
+    return name === undefined ? undefined : { channel: name };
+  }
+
   private async tryReadAgent(name: Name): Promise<Agent | null> {
     try {
       const agent = await this.board.readAgent(name);
@@ -914,13 +979,13 @@ export class Scheduler {
     return wakeScope(agent, project);
   }
 
-  /** Queues a wake in one conversation: a thread's, or without one, the scope's home. */
+  /** Queues a wake in one conversation: a thread's, a channel's, or without either, the scope's home. */
   private enqueue(
     agent: Name,
     project: Name,
     input: TriggerInput,
     now: number,
-    thread?: TurnThread,
+    beside?: Beside,
   ): void {
     const trigger = TriggerSchema.parse(input);
     const decision = decideWake({
@@ -934,7 +999,7 @@ export class Scheduler {
       return;
     }
     const debounce = this.debounceFor(trigger);
-    const key = sessionKey(agent, project, thread?.id);
+    const key = conversationKey(agent, project, beside);
     const readyAt = now + debounce;
     const existing = this.pending.get(key);
     const message = messageOf(trigger);
@@ -943,7 +1008,7 @@ export class Scheduler {
         dispatch: {
           agent,
           project,
-          ...(thread === undefined ? {} : { thread }),
+          ...besideFields(beside),
           trigger,
           priority: decision.priority,
           onboarding: trigger.kind === "onboarding",
@@ -997,7 +1062,8 @@ export class Scheduler {
 
   /**
    * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
-   * scope: the unread messages of its home and of each thread, a stage the member holds, and a stage
+   * scope: the unread messages of its home, of each other channel, and of each thread, a stage the
+   * member holds, and a stage
    * waiting that it may take, each in its task's thread. Each conversation with something wakes on
    * its own, so a heartbeat never brings one task's business into another's turn.
    */
@@ -1013,7 +1079,7 @@ export class Scheduler {
       // Unasked news outside projects wakes only a role that keeps watch over the society.
       const scopes = [...agent.memberships, ...(charter.societyScope ? [SOCIETY_SCOPE] : [])];
       const actor = { name: agent.name, role: agent.role };
-      let unread: { scope: Name; thread: Ulid | null; count: number }[] | undefined;
+      let unread: UnreadConversation[] | undefined;
       let held: readonly Task[] | undefined;
       for (const project of scopes) {
         const cadence = sessionKey(agent.name, project);
@@ -1031,38 +1097,42 @@ export class Scheduler {
         const reasons = new Map<
           string,
           {
-            thread: TurnThread | undefined;
+            beside: Beside | undefined;
             digestSize: number;
             claimsHeld: number;
             waiting: number;
           }
         >();
-        const reasonsIn = (thread: TurnThread | undefined) => {
-          const key = sessionKey(agent.name, project, thread?.id);
+        const reasonsIn = (beside: Beside | undefined) => {
+          const key = conversationKey(agent.name, project, beside);
           const existing = reasons.get(key);
           if (existing !== undefined) {
             return existing;
           }
-          const fresh = { thread, digestSize: 0, claimsHeld: 0, waiting: 0 };
+          const fresh = { beside, digestSize: 0, claimsHeld: 0, waiting: 0 };
           reasons.set(key, fresh);
           return fresh;
         };
         for (const entry of unread) {
           if (entry.scope === project) {
-            const thread =
-              entry.thread === null ? undefined : await this.conversationOf(entry.thread, project);
-            reasonsIn(thread).digestSize += entry.count;
+            const beside: Beside | undefined =
+              entry.thread !== null
+                ? { thread: await this.conversationOf(entry.thread, project) }
+                : entry.channel !== null
+                  ? { channel: entry.channel }
+                  : undefined;
+            reasonsIn(beside).digestSize += entry.count;
           }
         }
         for (const task of held) {
           if (task.project === project) {
-            reasonsIn({ id: task.id, task: true }).claimsHeld += 1;
+            reasonsIn({ thread: { id: task.id, task: true } }).claimsHeld += 1;
           }
         }
         if (project !== SOCIETY_SCOPE) {
           for (const task of await this.board.openTasks(project)) {
             if (mayHoldStage(agent, task)) {
-              reasonsIn({ id: task.id, task: true }).waiting += 1;
+              reasonsIn({ thread: { id: task.id, task: true } }).waiting += 1;
             }
           }
         }
@@ -1083,7 +1153,7 @@ export class Scheduler {
               dispatch: {
                 agent: agent.name,
                 project,
-                ...(reason.thread === undefined ? {} : { thread: reason.thread }),
+                ...besideFields(reason.beside),
                 trigger,
                 priority: decision.priority,
                 onboarding: false,
@@ -1498,6 +1568,7 @@ export class Scheduler {
         agent: dispatch.agent,
         project: dispatch.project,
         ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
+        ...(dispatch.channel === undefined ? {} : { channel: dispatch.channel }),
       })
         .then((outcome) => {
           // A busy turn has a steer it has not taken yet; the next pass tries again.
@@ -1526,7 +1597,7 @@ export class Scheduler {
     const cursor = await this.board.digestCursor(
       dispatch.agent,
       dispatch.project,
-      dispatch.thread?.id,
+      conversationPart({ thread: dispatch.thread?.id, channel: dispatch.channel }),
     );
     return cursor !== null && cursor >= item.newestMessage;
   }
@@ -1580,6 +1651,7 @@ export class Scheduler {
           agent: dispatch.agent,
           project: dispatch.project,
           thread: dispatch.thread?.id,
+          channel: dispatch.channel,
           trigger: dispatch.trigger.kind,
         },
         "dispatching turn",

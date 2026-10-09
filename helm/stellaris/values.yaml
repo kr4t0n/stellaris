@@ -228,16 +228,21 @@ runner:
 
   # More volumes for the runner container, and init containers that run before it, such as one
   # copying an SSH key from a Secret into the home. The home is the claim template's `home`,
-  # which an init container mounts by that name; fsGroup has made it writable by uid 1000 in
-  # gid 100 before any container starts, and gives a Secret volume's files that group too, so
-  # with `defaultMode: 0440` the copy needs no root:
+  # which an init container mounts by that name and no extra volume may take; fsGroup has made
+  # it writable by uid 1000 in gid 100 before any container starts, and gives a Secret volume's
+  # files that group too, so with `defaultMode: 0440` the copy needs no root:
   #   extraVolumes:
   #     - name: ssh-key
   #       secret: {secretName: ssh-key, defaultMode: 0440}
   #   extraInitContainers:
   #     - name: install-ssh-key
   #       image: busybox:1.37
-  #       securityContext: {runAsUser: 1000, runAsGroup: 100}
+  #       securityContext:
+  #         runAsNonRoot: true
+  #         runAsUser: 1000
+  #         runAsGroup: 100
+  #         allowPrivilegeEscalation: false
+  #         capabilities: {drop: ["ALL"]}
   #       command: [sh, -c, "install -D -m 600 /mnt/ssh-key/id_ed25519 /home/stellaris/.ssh/id_ed25519"]
   #       volumeMounts:
   #         - {name: home, mountPath: /home/stellaris}

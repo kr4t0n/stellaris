@@ -148,6 +148,11 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- fail (printf "runner.config.clis: %q is not claude or codex" (toString .)) -}}
 {{- end -}}
 {{- end -}}
+{{- range $runner.extraVolumes -}}
+{{- if eq (toString .name) "home" -}}
+{{- fail "runner.extraVolumes: home is the runner's claim, which Kubernetes would put in its place; name the volume otherwise" -}}
+{{- end -}}
+{{- end -}}
 {{- range $runner.config.capabilities -}}
 {{- if not (regexMatch "^[^,]{1,64}$" (toString .)) -}}
 {{- fail (printf "runner.config.capabilities: %q must be 1 to 64 characters with no comma" (toString .)) -}}

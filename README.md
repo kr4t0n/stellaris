@@ -303,7 +303,7 @@ Run the CLI's setup commands before the server starts, or act through the API wh
 
 ### The runner's image
 
-The same workflow pushes `kr4t0n/stellaris-runner`, with the same tags. It is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, pinned by `CLIMAGE_VERSION` in `apps/runner/Dockerfile`, which brings Claude Code, Codex, Node, Python with uv, Go, Rust, and the command-line tools agents shell out to. It renames climage's account to `stellaris` (uid 1000, group `users`, gid 100) and keeps everything in its home: the runner's data directory at `/home/stellaris/stellaris-runner` (its saved credentials, agents' homes, and its projects' repositories and worktrees), the CLIs' logins in `~/.claude` and `~/.codex`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
+The same workflow pushes `kr4t0n/stellaris-runner`, with the same tags. It is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, pinned by `CLIMAGE_VERSION` in `apps/runner/Dockerfile`, which brings Claude Code, Codex, Node with pnpm, Python with uv, Go, Rust, and the command-line tools agents shell out to. It renames climage's account to `stellaris` (uid 1000, group `users`, gid 100) and keeps everything in its home: the runner's data directory at `/home/stellaris/stellaris-runner` (its saved credentials, agents' homes, and its projects' repositories and worktrees), the CLIs' logins in `~/.claude` and `~/.codex`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
 
 ```bash
 IMAGE=kr4t0n/stellaris-runner

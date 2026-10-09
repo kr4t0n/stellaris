@@ -5,7 +5,7 @@
 #   docker build -f apps/runner/Dockerfile -t stellaris-runner .
 
 ARG NODE_VERSION=24
-ARG CLIMAGE_VERSION=0.3.0
+ARG CLIMAGE_VERSION=0.4.0
 
 # Built on the target platform, not the builder's: the Claude Agent SDK runs Claude Code from a
 # binary in a per-platform optional package, and pnpm installs only the one for the platform it
@@ -32,13 +32,14 @@ USER root
 # with PATH in climage's order, and so is the login shells' copy of PATH.
 RUN usermod --login stellaris --home /home/stellaris --move-home climage \
  && sed -i 's#/home/climage#/home/stellaris#g' /etc/profile.d/10-climage-path.sh
-ENV PATH=/home/stellaris/.npm-global/bin:/home/stellaris/.uv/bin:/home/stellaris/.go/bin:/home/stellaris/.cargo/bin:/opt/uv/bin:/opt/rust/cargo/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+ENV PATH=/home/stellaris/.npm-global/bin:/home/stellaris/.local/share/pnpm/bin:/home/stellaris/.uv/bin:/home/stellaris/.go/bin:/home/stellaris/.cargo/bin:/opt/uv/bin:/opt/rust/cargo/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GOPATH=/home/stellaris/.go \
     GOBIN=/home/stellaris/.go/bin \
     GOCACHE=/home/stellaris/.go/cache \
     GOENV=/home/stellaris/.go/env \
     CARGO_INSTALL_ROOT=/home/stellaris/.cargo \
     NPM_CONFIG_PREFIX=/home/stellaris/.npm-global \
+    PNPM_HOME=/home/stellaris/.local/share/pnpm \
     UV_TOOL_DIR=/home/stellaris/.uv/tools \
     UV_TOOL_BIN_DIR=/home/stellaris/.uv/bin \
     UV_CACHE_DIR=/home/stellaris/.cache/uv

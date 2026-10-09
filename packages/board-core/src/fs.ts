@@ -38,18 +38,49 @@ export interface MarkdownDocument<T> {
   readonly body: string;
 }
 
+/**
+ * gray-matter without its cache, which an options object turns off: it caches a file's text before
+ * parsing it, so frontmatter that does not parse throws once and then reads as empty, and the cache
+ * keeps every text it ever saw.
+ */
+function parseMatter(raw: string): matter.GrayMatterFile<string> {
+  return matter(raw, {});
+}
+
 export async function readMarkdown<T>(
   file: string,
   schema: z.ZodType<T>,
 ): Promise<MarkdownDocument<T>> {
   const raw = await readFile(file, "utf8");
-  const parsed = matter(raw);
+  const parsed = parseMatter(raw);
   return { data: schema.parse(parsed.data), body: parsed.content.replace(/^\n/, "") };
+}
+
+export interface LooseMarkdownDocument extends MarkdownDocument<Record<string, unknown>> {
+  /** Why the frontmatter did not parse, or null when it did. */
+  readonly error: string | null;
+}
+
+/**
+ * Markdown a citizen writes, such as its profile, memory, and skills, which the board reads but
+ * never validates: frontmatter that does not parse leaves the data empty and the body the whole text.
+ */
+export async function readLooseMarkdown(file: string): Promise<LooseMarkdownDocument> {
+  const raw = await readFile(file, "utf8");
+  try {
+    const parsed = parseMatter(raw);
+    return { data: parsed.data, body: parsed.content.replace(/^\n/, ""), error: null };
+  } catch (error) {
+    const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
+    return { data: {}, body: raw, error: reason.replace(/:$/, "") };
+  }
 }
 
 export async function writeMarkdown(file: string, data: object, body: string): Promise<void> {
   const normalized = body.endsWith("\n") || body.length === 0 ? body : `${body}\n`;
-  await writeFileAtomic(file, matter.stringify(normalized, data));
+  // Given a string, gray-matter parses it as a document first, so a body opening with a `---`
+  // block would lose that block to the frontmatter, or throw when it is not YAML.
+  await writeFileAtomic(file, matter.stringify({ content: normalized }, data, {}));
 }
 
 function isMissing(error: unknown): boolean {

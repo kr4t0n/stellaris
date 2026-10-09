@@ -115,6 +115,7 @@ import {
   listDirs,
   listFiles,
   readJson,
+  readLooseMarkdown,
   readMarkdown,
   writeFileAtomic,
   writeJson,
@@ -1297,9 +1298,7 @@ export class Board {
 
   async readProfile(name: Name): Promise<string> {
     const file = this.paths.agentProfile(name);
-    return (await exists(file))
-      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
-      : "";
+    return (await exists(file)) ? (await readLooseMarkdown(file)).body : "";
   }
 
   /** The society's norms, the one knowledge topic every turn loads. Empty until the steward writes it. */
@@ -1357,10 +1356,14 @@ export class Board {
       if (!name.success) {
         continue;
       }
-      const doc = await readMarkdown(file, z.record(z.string(), z.unknown()));
+      const doc = await readLooseMarkdown(file);
       skills.push({
         name: name.data,
-        summary: skillSummary(doc.data, doc.body),
+        // The index is where its writer sees that the file needs fixing.
+        summary:
+          doc.error === null
+            ? skillSummary(doc.data, doc.body)
+            : `its frontmatter does not parse (${doc.error}), so fix the file`,
         scope,
         path: file,
       });
@@ -3349,9 +3352,7 @@ export class Board {
 
   async readMemoryCore(agent: Name): Promise<string> {
     const file = this.paths.agentMemoryCore(agent);
-    return (await exists(file))
-      ? (await readMarkdown(file, z.record(z.string(), z.unknown()))).body
-      : "";
+    return (await exists(file)) ? (await readLooseMarkdown(file)).body : "";
   }
 
   /**
@@ -3630,7 +3631,8 @@ export class Board {
     if (!(await exists(file))) {
       return { data: { project: slug }, body: "" };
     }
-    return readMarkdown(file, z.record(z.string(), z.unknown()));
+    const { data, body } = await readLooseMarkdown(file);
+    return { data, body };
   }
 
   async listRunners(): Promise<Runner[]> {

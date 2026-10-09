@@ -879,6 +879,27 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).toContain(`- ${conflict?.path}, beside memory/core.md, since`);
   });
 
+  it("ends a turn whose end the board could not record, rather than holding its conversation for good", async () => {
+    const { board } = await Board.init(dir, { name: "unrecorded" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { run } = await start(board, backend);
+    const dispatch = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+    };
+    const finish = vi.spyOn(board, "finishTurn").mockRejectedValueOnce(new Error("disk full"));
+    await expect(run(dispatch)).rejects.toThrow("disk full");
+    finish.mockRestore();
+    await expect(run(dispatch)).resolves.toMatchObject({ exitReason: "completed" });
+  });
+
   it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {
     const { board } = await Board.init(dir, { name: "away" });
     await board.addProject(USER, { slug: "demo" });

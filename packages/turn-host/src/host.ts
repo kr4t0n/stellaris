@@ -104,6 +104,8 @@ interface OpenTurn {
   readonly residentKey: string | null;
   readonly keepLeases: ReturnType<typeof setInterval>;
   readonly done: (record: TurnRecord) => void;
+  /** Ends the turn for the scheduler when its end could not be recorded. */
+  readonly fail: (error: unknown) => void;
 }
 
 /** A prepared turn: the job to send and the record its end resolves to, or a turn that could not start. */
@@ -405,7 +407,9 @@ export class TurnHost {
         .catch(() => undefined);
     }, LEASE_RENEW_MS);
     keepLeases.unref?.();
-    const { promise: ended, resolve: done } = Promise.withResolvers<TurnRecord>();
+    const { promise: ended, resolve: done, reject: fail } = Promise.withResolvers<TurnRecord>();
+    // A turn may fail before anyone awaits its end; whoever awaits it later still sees the error.
+    ended.catch(() => undefined);
     this.open.set(record.id, {
       job,
       runner: runner.name,
@@ -424,6 +428,7 @@ export class TurnHost {
       residentKey: residentKey === null ? null : `${runner.name}|${residentKey}`,
       keepLeases,
       done,
+      fail,
     });
     this.log.info(
       {
@@ -597,17 +602,6 @@ export class TurnHost {
       this.board.revokeTurnToken(turn.coldToken);
     }
     const { job } = turn;
-    if (outcome.session !== job.session) {
-      // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
-      await this.board.writeSession(
-        job.agent,
-        job.scope,
-        job.cli,
-        outcome.session,
-        turn.runner,
-        job.thread,
-      );
-    }
     const finished: TurnRecord = {
       ...turn.record,
       session: outcome.session,
@@ -623,33 +617,53 @@ export class TurnHost {
       ...(outcome.work === null ? {} : { work: outcome.work }),
       ...(outcome.exitReason === "stopped" ? { stoppedBy: turn.stopRequestedBy ?? USER_NAME } : {}),
     };
-    // A stop is the user's decision on work it watched, not a failure: what the turn was shown
-    // counts as read, so nothing restarts the work, and its stages stay held.
-    if (
-      outcome.exitReason === "completed" ||
-      outcome.exitReason === "blocked" ||
-      outcome.exitReason === "stopped"
-    ) {
-      // The digest was delivered, at the start and by the steers the turn took; only now does the
-      // cursor move past it.
-      await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, job.thread);
-      await this.renewLeases(turn.actor, turn.held);
-      if (outcome.status?.needsUserDecision === true) {
-        await this.askUser(
-          turn.actor,
+    const recorded = await this.recorded(turn, async () => {
+      if (outcome.session !== job.session) {
+        // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
+        await this.board.writeSession(
+          job.agent,
           job.scope,
+          job.cli,
+          outcome.session,
+          turn.runner,
           job.thread,
-          turn.record.startedAt,
-          outcome.status.summary,
         );
       }
+      // A stop is the user's decision on work it watched, not a failure: what the turn was shown
+      // counts as read, so nothing restarts the work, and its stages stay held.
+      if (
+        outcome.exitReason === "completed" ||
+        outcome.exitReason === "blocked" ||
+        outcome.exitReason === "stopped"
+      ) {
+        // The digest was delivered, at the start and by the steers the turn took; only now does the
+        // cursor move past it.
+        await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, job.thread);
+        await this.renewLeases(turn.actor, turn.held);
+        if (outcome.status?.needsUserDecision === true) {
+          await this.askUser(
+            turn.actor,
+            job.scope,
+            job.thread,
+            turn.record.startedAt,
+            outcome.status.summary,
+          );
+        }
+      }
+      await this.board.finishTurn(finished, turn.transcript);
+    });
+    if (recorded) {
+      this.log.info(
+        {
+          agent: job.agent,
+          project: job.scope,
+          thread: job.thread,
+          exitReason: finished.exitReason,
+        },
+        "turn finished",
+      );
+      turn.done(finished);
     }
-    await this.board.finishTurn(finished, turn.transcript);
-    this.log.info(
-      { agent: job.agent, project: job.scope, thread: job.thread, exitReason: finished.exitReason },
-      "turn finished",
-    );
-    turn.done(finished);
     return { dropWorktree: await this.taskEnded(turn.taskId) };
   }
 
@@ -671,9 +685,30 @@ export class TurnHost {
       error: reason,
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
     };
-    await this.board.finishTurn(finished, turn.transcript);
-    this.log.warn({ agent: turn.job.agent, project: turn.job.scope, reason }, "turn aborted");
-    turn.done(finished);
+    if (await this.recorded(turn, () => this.board.finishTurn(finished, turn.transcript))) {
+      this.log.warn({ agent: turn.job.agent, project: turn.job.scope, reason }, "turn aborted");
+      turn.done(finished);
+    }
+  }
+
+  /**
+   * Records the end of a turn already taken out of `open`, and says whether it could. The scheduler
+   * holds the turn's conversation until the turn ends, and nothing would end it once it has left
+   * `open`, so a turn whose end could not be recorded ends with the error rather than holding its
+   * conversation for good.
+   */
+  private async recorded(turn: OpenTurn, record: () => Promise<void>): Promise<boolean> {
+    try {
+      await record();
+      return true;
+    } catch (error) {
+      this.log.error(
+        { agent: turn.job.agent, project: turn.job.scope, error: String(error) },
+        "could not record the end of a turn",
+      );
+      turn.fail(error);
+      return false;
+    }
   }
 
   /** Records a turn that could never start, as when no runner could take its agent's CLI. */

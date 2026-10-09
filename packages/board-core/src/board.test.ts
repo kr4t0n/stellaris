@@ -1947,6 +1947,56 @@ describe("Board", () => {
     expect(wake.payload["kind"]).toBe("reflection");
   });
 
+  it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {
+    const { board } = await society();
+    // A colon in an unquoted value, as a live front desk wrote it in a reflection.
+    const broken =
+      "---\nname: staff-new-area\ndescription: Staff a new project: check roles first\n---\n";
+    await mkdir(board.paths.agentSkill("eng-1", "staff-new-area"), { recursive: true });
+    await writeFile(
+      board.paths.agentSkillFile("eng-1", "staff-new-area"),
+      `${broken}\n# Staffing\n\nPropose the role, then the member.\n`,
+      "utf8",
+    );
+    await writeFile(
+      board.paths.agentProfile("eng-1"),
+      `${broken}\n# Profile\n\nI build.\n`,
+      "utf8",
+    );
+    await writeFile(
+      board.paths.agentMemoryCore("eng-1"),
+      `${broken}\n# Core\n\nKeep it short.\n`,
+      "utf8",
+    );
+
+    // Every read says so, not only the first: gray-matter's cache once turned the second into empty frontmatter.
+    for (let read = 0; read < 2; read += 1) {
+      expect(await board.listAgentSkills("eng-1")).toMatchObject([
+        {
+          name: "staff-new-area",
+          summary: expect.stringMatching(
+            /^its frontmatter does not parse \(.+\), so fix the file$/,
+          ),
+        },
+      ]);
+    }
+    expect(await board.readMemoryCore("eng-1")).toContain("description: Staff a new project");
+    expect(await board.readMemoryCore("eng-1")).toContain("Keep it short.");
+
+    // The roster is rebuilt at a turn's end, which an unreadable skill once failed halfway.
+    const turn = turnIn(undefined, "2026-09-28T10:05:00.000Z");
+    await board.beginTurn(turn);
+    await board.finishTurn({
+      ...turn,
+      endedAt: "2026-09-28T10:06:00.000Z",
+      exitReason: "completed",
+    });
+    const member = (await board.listMembers()).find((m) => m.name === "eng-1");
+    expect(member?.skills).toEqual(["staff-new-area"]);
+    expect(member?.profile).toContain("I build.");
+    expect((await board.readEvents(null)).at(-1)?.type).toBe("turn.completed");
+  });
+
   it("resolves a relative data directory, so worktree and home paths never depend on a cwd", async () => {
     const relative = path.relative(process.cwd(), dir);
     expect(path.isAbsolute(relative)).toBe(false);

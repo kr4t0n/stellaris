@@ -18,6 +18,7 @@ export const OPS_SIGNAL_KINDS = [
   "scaled",
   "runner",
   "home_conflict",
+  "stuck_workspace",
 ] as const;
 export const OpsSignalKindSchema = z.enum(OPS_SIGNAL_KINDS);
 export type OpsSignalKind = z.infer<typeof OpsSignalKindSchema>;

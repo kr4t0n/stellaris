@@ -5,7 +5,7 @@ import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Board, SYSTEM_ACTOR, type Actor } from "./index.js";
+import { Board, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -36,6 +36,14 @@ const turnIn = (thread: Ulid | undefined, at: string) => ({
   toolCalls: 0,
   model: null,
 });
+
+/** The refusal of ending a conversation under `who`'s turn there. */
+function cut(who: string): object {
+  return {
+    code: "INVALID_STATE",
+    message: expect.stringContaining(`while ${who} is in a turn there`),
+  };
+}
 
 describe("Board", () => {
   let dir: string;
@@ -580,6 +588,110 @@ describe("Board", () => {
     expect(await ids()).toContain(asked.id);
     expect(await board.channelOpen("demo/dev")).toBe(false);
     expect(await board.channelOpen("demo/general")).toBe(true);
+  });
+
+  it("refuses to end a conversation under another citizen's turn, but not under the caller's own", async () => {
+    const { board } = await society();
+    let inFlight: TurnInFlight[] = [];
+    board.watchTurns(() => inFlight);
+
+    // A topic thread closes from inside its closer's own turn there, never under another's.
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "zod" });
+    inFlight = [{ agent: "rev-1", scope: "demo", thread: topic.id }];
+    await expect(
+      board.closeThread(ENG, { thread_id: topic.id, summary: "Zod." }),
+    ).rejects.toMatchObject(cut("rev-1"));
+    await board.closeThread(
+      { ...REV, scope: "demo", thread: topic.id },
+      {
+        thread_id: topic.id,
+        summary: "Zod.",
+      },
+    );
+
+    // A channel's archive waits for turns in its conversation and in the threads it closes.
+    const open = await board.openThread(ENG, { channel: "demo/dev", title: "release date?" });
+    inFlight = [{ agent: "eng-1", scope: "demo", channel: "dev" }];
+    await expect(
+      board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" }),
+    ).rejects.toMatchObject(cut("eng-1"));
+    inFlight = [{ agent: "rev-1", scope: "demo", thread: open.id }];
+    await expect(
+      board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" }),
+    ).rejects.toMatchObject(cut("rev-1"));
+    inFlight = [{ agent: "rev-1", scope: "demo" }];
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+
+    // A task ends by its holder's last advance from its own turn, and is abandoned under no turn.
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    await board.claimTask(ENG, { task_id: task.id });
+    inFlight = [{ agent: "rev-1", scope: "demo", thread: task.id }];
+    await expect(board.advanceTask(ENG, { task_id: task.id })).rejects.toMatchObject(cut("rev-1"));
+    inFlight = [{ agent: "eng-1", scope: "demo", thread: task.id }];
+    await board.advanceTask({ ...ENG, scope: "demo", thread: task.id }, { task_id: task.id });
+    expect((await board.findTask(task.id)).task.status).toBe("done");
+    const dropped = await board.createTask(USER, { project: "demo", title: "drop" });
+    inFlight = [{ agent: "eng-1", scope: "demo", thread: dropped.id }];
+    await expect(
+      board.updateTask(USER, { task_id: dropped.id, status: "abandoned" }),
+    ).rejects.toMatchObject(cut("eng-1"));
+    inFlight = [];
+    await board.updateTask(USER, { task_id: dropped.id, status: "abandoned" });
+
+    // A proposal is decided under no turn in its thread, and a project archived under none in it.
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const archive = await board.propose(
+      { name: "stew", role: "steward" },
+      {
+        kind: "archive",
+        charter: { project: "demo", reason: "Its work is done." },
+        rationale: "Nothing is left in play.",
+      },
+    );
+    inFlight = [{ agent: "stew", scope: "society", thread: archive.id }];
+    await expect(board.approve(USER, { proposal_id: archive.id })).rejects.toMatchObject(
+      cut("stew"),
+    );
+    inFlight = [{ agent: "eng-1", scope: "demo" }];
+    await expect(board.approve(USER, { proposal_id: archive.id })).rejects.toMatchObject(
+      cut("eng-1"),
+    );
+    await expect(
+      board.archiveProject(USER, { project: "demo", reason: "done" }),
+    ).rejects.toMatchObject(cut("eng-1"));
+    inFlight = [];
+    await board.approve(USER, { proposal_id: archive.id });
+    expect((await board.readProject("demo")).archived).toMatchObject({ by: "user" });
+  });
+
+  it("gives a workspace left with work on no branch a closing turn at most three times", async () => {
+    const { board } = await society();
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    const record = (): Promise<boolean> =>
+      board.recordLeftovers({
+        agent: "eng-1",
+        scope: "demo",
+        conversation: { kind: "thread", id: topic.id },
+      });
+    expect([await record(), await record(), await record(), await record()]).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+    // Another citizen's workspace in the same conversation counts on its own.
+    expect(
+      await board.recordLeftovers({
+        agent: "rev-1",
+        scope: "demo",
+        conversation: { kind: "thread", id: topic.id },
+      }),
+    ).toBe(true);
   });
 
   it("lists what citizens asked the user and the user has not answered, wherever they asked", async () => {

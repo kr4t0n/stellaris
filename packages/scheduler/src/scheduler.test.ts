@@ -973,6 +973,45 @@ describe("Scheduler", () => {
     await scheduler.drain();
   });
 
+  it("lands a task once no turn runs in its thread, holding new turns there until it has", async () => {
+    const { board, runner, scheduler } = await setup({ concurrency: 4 });
+    await board.configureProject(USER, { project: "demo", on_done: "merge" });
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+
+    // rev-1 is in a turn in the task's thread when eng-1 finishes the task from outside it.
+    runner.hold = true;
+    await board.postMessage(USER, { thread_id: task.id, body: "@rev-1 a look?" });
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual([sessionKey("rev-1", "demo", task.id)]);
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id });
+    await board.postMessage(USER, { thread_id: task.id, body: "@eng-1 thanks" });
+    await scheduler.tick();
+    expect(runner.completions).toEqual([]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", task.id)]);
+
+    // Once rev-1's turn ends the task lands, and only then does eng-1's turn there start.
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.completions).toEqual([{ project: "demo", taskId: task.id }]);
+    expect(runner.dispatches.map((d) => d.agent)).toEqual(["rev-1"]);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.agent)).toEqual(["rev-1", "eng-1"]);
+  });
+
   it("sweeps an ended conversation's workspaces, and gives work left on no branch a closing turn there", async () => {
     const { board, runner, scheduler } = await setup();
     const topic = await board.openThread(REV, { channel: "demo/dev", title: "which library?" });

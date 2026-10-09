@@ -1,4 +1,4 @@
-export { Board, SYSTEM_ACTOR } from "./board.js";
+export { Board, CLOSING_ATTEMPTS, SYSTEM_ACTOR } from "./board.js";
 export type {
   UserRequest,
   Actor,
@@ -17,6 +17,7 @@ export type {
   SearchHit,
   SignalRecord,
   TaskLocation,
+  TurnInFlight,
   UnreadConversation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";

@@ -92,6 +92,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     onEvent: (agent, scope, event, conversation) => turns.push(agent, scope, event, conversation),
   });
   const hub = new RunnerHub({ board, host, version: "test", graceMs: options.graceMs ?? 5_000 });
+  board.watchTurns(() => host.inFlight());
   const app = createApp({
     board,
     version: "test",

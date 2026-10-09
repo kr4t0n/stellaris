@@ -16,6 +16,7 @@ export const SIGNAL_LABEL: Readonly<Record<OpsSignalKind, string>> = {
   scaled: "replica added",
   runner: "runner",
   home_conflict: "edits to reconcile",
+  stuck_workspace: "work left on no branch",
 };
 
 /** Whether a signal of this kind wakes the roles that read signals, the steward among them. */

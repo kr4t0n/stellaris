@@ -3,6 +3,7 @@ import {
   channelConversation,
   conversationPart,
   currentStage,
+  parseSessionKey,
   mayHoldStage,
   OpsSignalSchema,
   sessionKey,
@@ -293,6 +294,8 @@ export class Scheduler {
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
   private readonly completing = new Set<Promise<void>>();
+  /** Tasks being landed now; a turn in a task's thread waits until its landing is done. */
+  private readonly landing = new Set<Ulid>();
   /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
   private readonly sweeping = new Set<Promise<void>>();
   private state: State = StateSchema.parse({
@@ -936,6 +939,15 @@ export class Scheduler {
       { kind: "task_done", from, reason: `task ${taskId} you created is done`, taskId },
       now,
     );
+  }
+
+  /**
+   * Whether a dispatch is in the thread of a task whose landing is queued or under way: it waits,
+   * so a stream of turns there cannot hold the landing off, nor commit to the branch during it.
+   */
+  private landingIn(dispatch: TurnDispatch): boolean {
+    const thread = dispatch.thread?.id;
+    return thread !== undefined && (this.completions.has(thread) || this.landing.has(thread));
   }
 
   /** Asks the runners to remove an ended conversation's workspaces, without holding up the pass. */
@@ -1691,7 +1703,10 @@ export class Scheduler {
   private async dispatchReady(now: number): Promise<void> {
     this.steerRunning(now);
     const ready = [...this.pending.entries()]
-      .filter(([key, item]) => item.readyAt <= now && !this.running.has(key))
+      .filter(
+        ([key, item]) =>
+          item.readyAt <= now && !this.running.has(key) && !this.landingIn(item.dispatch),
+      )
       .toSorted(
         ([, a], [, b]) => b.dispatch.priority - a.dispatch.priority || a.readyAt - b.readyAt,
       );
@@ -1771,10 +1786,17 @@ export class Scheduler {
   private runCompletions(): void {
     for (const [taskId, item] of this.completions) {
       const home = sessionKey(item.actor, item.project);
-      if ([...this.running.keys()].some((key) => key === home || key.startsWith(`${home}/`))) {
+      // A landing waits for the finishing citizen's turns in the project, and for every turn in
+      // the task's thread, which could still commit to its branch or post where it is closing.
+      const busy = [...this.running.keys()].some(
+        (key) =>
+          key === home || key.startsWith(`${home}/`) || parseSessionKey(key)?.thread === taskId,
+      );
+      if (busy) {
         continue;
       }
       this.completions.delete(taskId);
+      this.landing.add(taskId);
       const promise: Promise<void> = this.runner
         .completeTask(item.project, taskId)
         .then((outcome) => {
@@ -1792,6 +1814,7 @@ export class Scheduler {
         })
         .finally(() => {
           this.completing.delete(promise);
+          this.landing.delete(taskId);
         });
       this.completing.add(promise);
     }

@@ -50,6 +50,8 @@ const host = new TurnHost({
   },
 });
 const runners = new RunnerHub({ board, host, version: VERSION, log });
+// The board refuses to end a conversation under someone else's turn in flight.
+board.watchTurns(() => host.inFlight());
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.

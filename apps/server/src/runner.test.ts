@@ -680,10 +680,15 @@ describe("turns on a runner over the runner protocol", () => {
             execa("git", ["rev-parse", "agent/eng-1"], { cwd }),
           ]);
           detachedAtOwnBranch = head.stdout === "HEAD" && at.stdout === own.stdout;
-          await board.closeThread(USER, { thread_id: topic.id, summary: "Settled." });
+          // A thread closes from inside its closer's own turn there, never under another's.
+          const inside = { name: "eng-1", role: "engineer", scope: "demo", thread: topic.id };
+          await board.postMessage(inside, { thread_id: topic.id, body: "Zod." });
+          await board.closeThread(inside, { thread_id: topic.id, summary: "Settled." });
         }
         if (cwd.includes(ask.id)) {
-          await board.closeThread(USER, { thread_id: ask.id, summary: "Answered." });
+          const inside = { name: "eng-1", role: "engineer", scope: "society", thread: ask.id };
+          await board.postMessage(inside, { thread_id: ask.id, body: "Yes." });
+          await board.closeThread(inside, { thread_id: ask.id, summary: "Answered." });
         }
         return completed("done");
       },
@@ -744,6 +749,7 @@ describe("turns on a runner over the runner protocol", () => {
     // Each turn waits until all three are in flight, so they can only finish by running together.
     const cwds = new Set<string>();
     const prompts = new Map<string, string>();
+    let refusal: unknown = null;
     const { promise: together, resolve: allStarted } = Promise.withResolvers<void>();
     const backend: AgentBackend = {
       kind: "claude",
@@ -757,15 +763,18 @@ describe("turns on a runner over the runner protocol", () => {
         }
         await together;
         if (cwd.endsWith(path.join("demo", "release"))) {
-          await board.archiveChannel(USER, { channel: "demo/release", reason: "Shipped." });
-        }
-        if (cwd.endsWith("lounge")) {
-          await board.archiveChannel(USER, { channel: "lounge", reason: "Quiet." });
+          // Archiving under eng-1's turn in the channel is refused until that turn ends.
+          refusal = await board
+            .archiveChannel(USER, { channel: "demo/release", reason: "Shipped." })
+            .then(
+              () => null,
+              (error: unknown) => error,
+            );
         }
         return completed("done");
       },
     };
-    const { run, runner } = await start(board, backend);
+    const { run, runner, hub } = await start(board, backend);
     const turn = (project: string, channel?: string) =>
       run({
         agent: "eng-1",
@@ -791,11 +800,15 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.get(release)).toContain("ship it");
     expect(prompts.get(home)).not.toContain("ship it");
     expect(await board.digestCursor("eng-1", "demo", "#release")).toBe(posted.id);
-    // An archived channel's workspace goes, once the runner has the answer to the turn's outcome.
-    await vi.waitFor(async () => {
-      await expect(stat(release)).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
-    });
+    expect(refusal).toMatchObject({ code: "INVALID_STATE" });
+    // Archived once the turns have ended, each channel's workspace goes with the sweep the
+    // scheduler asks for on the archive.
+    await board.archiveChannel(USER, { channel: "demo/release", reason: "Shipped." });
+    await board.archiveChannel(USER, { channel: "lounge", reason: "Quiet." });
+    await hub.sweep({ kind: "channel", scope: "demo", name: "release" });
+    await hub.sweep({ kind: "channel", scope: "society", name: "lounge" });
+    await expect(stat(release)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(home)).resolves.toBeDefined();
   });
 
@@ -943,7 +956,10 @@ describe("turns on a runner over the runner protocol", () => {
         prompts.set(request.spec.agent, request.prompt);
         if (request.spec.agent === "eng-1" && !request.prompt.includes("has ended")) {
           await writeFile(path.join(request.spec.cwd, "draft.md"), "a draft\n", "utf8");
-          await board.closeThread(USER, { thread_id: topic.id, summary: "Settled." });
+          // Closed from inside eng-1's own turn there, which the guard lets through.
+          const inside = { name: "eng-1", role: "engineer", scope: "demo", thread: topic.id };
+          await board.postMessage(inside, { thread_id: topic.id, body: "Zod." });
+          await board.closeThread(inside, { thread_id: topic.id, summary: "Settled." });
           // What the scheduler does on the thread's close: eng-1's turn still uses its workspace.
           await society?.hub.sweep({ kind: "thread", id: topic.id });
         }
@@ -979,13 +995,87 @@ describe("turns on a runner over the runner protocol", () => {
     await inTopic("eng-1", "closing");
     const closing = prompts.get("eng-1") ?? "";
     expect(closing).toContain(
-      `## This conversation has ended\n\nThe thread "which library?" on demo/general was closed by user.`,
+      `## This conversation has ended\n\nThe thread "which library?" on demo/general was closed by eng-1.`,
     );
     expect(closing).toContain("ask them in demo/general with a mention");
     expect(closing).toContain("- Uncommitted here: `?? draft.md`.");
     await vi.waitFor(async () => {
       await expect(stat(kept)).rejects.toMatchObject({ code: "ENOENT" });
     });
+  });
+
+  it("gives a failed closing turn another try, twice, then leaves the workspace and says so", async () => {
+    const { board } = await Board.init(dir, { name: "stuck" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const topic = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "which library?",
+    });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        if (request.prompt.includes("has ended")) {
+          return {
+            ...completed("broke"),
+            status: null,
+            exitReason: "error",
+            error: "the CLI broke",
+          };
+        }
+        await writeFile(path.join(request.spec.cwd, "draft.md"), "a draft\n", "utf8");
+        const inside = { name: "eng-1", role: "engineer", scope: "demo", thread: topic.id };
+        await board.postMessage(inside, { thread_id: topic.id, body: "Zod." });
+        await board.closeThread(inside, { thread_id: topic.id, summary: "Settled." });
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const inTopic = (kind: "manual" | "closing"): Promise<unknown> =>
+      run({
+        agent: "eng-1",
+        project: "demo",
+        thread: { id: topic.id, task: false },
+        trigger: { kind, fromUser: kind === "manual", reason: "test" },
+        priority: 1,
+      });
+    const recorded = async (type: string): Promise<number> =>
+      (await board.readEvents(null, 1_000)).filter((event) => event.type === type).length;
+
+    await inTopic("manual");
+    expect(await recorded("workspace.leftovers")).toBe(1);
+    await inTopic("closing");
+    await inTopic("closing");
+    expect(await recorded("workspace.leftovers")).toBe(3);
+    await inTopic("closing");
+    expect(await recorded("workspace.leftovers")).toBe(3);
+    expect(
+      (await board.listSignals())
+        .map((record) => record.signal)
+        .filter((signal) => signal.kind === "stuck_workspace"),
+    ).toMatchObject([
+      {
+        kind: "stuck_workspace",
+        agent: "eng-1",
+        project: "demo",
+        summary: `eng-1's workspace in thread ${topic.id} still holds work on no branch after 3 closing turns failed, so it stays on runner pod`,
+      },
+    ]);
+    await expect(
+      readFile(path.join(runner.paths.threadWorktree("eng-1", topic.id), "draft.md"), "utf8"),
+    ).resolves.toBe("a draft\n");
   });
 
   it("lists a citizen's models from its own runner, and asks again once that runner reconnects", async () => {

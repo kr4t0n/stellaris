@@ -145,6 +145,33 @@ export interface Actor {
 /** The board itself, for posts and events produced by infrastructure rather than a member. */
 export const SYSTEM_ACTOR: Actor = { name: "board", role: USER_ROLE };
 
+/** A turn in flight, as the server knows it: its citizen and the conversation it is in. */
+export interface TurnInFlight {
+  readonly agent: Name;
+  readonly scope: Name;
+  readonly thread?: Ulid | undefined;
+  readonly channel?: Name | undefined;
+}
+
+/** How many closing turns a workspace left with work on no branch gets before it is left alone. */
+export const CLOSING_ATTEMPTS = 3;
+
+/** Whether a turn in flight is the one the actor acts from, which may end its own conversation. */
+function ownTurn(actor: Actor, turn: TurnInFlight): boolean {
+  return (
+    turn.agent === actor.name &&
+    turn.scope === actor.scope &&
+    turn.thread === actor.thread &&
+    turn.channel === actor.channel
+  );
+}
+
+function namesList(names: readonly string[]): string {
+  return names.length <= 1
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`;
+}
+
 export interface BoardOptions {
   /** Lease duration for claims. Renewed by every turn that touches the task. */
   readonly leaseMs?: number | undefined;
@@ -606,6 +633,8 @@ function snippetAround(text: string, query: string, radius = 80): string {
 export class Board {
   readonly paths: BoardPaths;
   private readonly mutex = new Mutex();
+  /** The turns in flight, which the server hosting them supplies; none until it does. */
+  private turnsInFlight: () => readonly TurnInFlight[] = () => [];
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
@@ -1694,7 +1723,7 @@ export class Board {
   ): Promise<ArchivedChannel> {
     const args = VerbInputs.archive_channel.parse(input);
     await this.authorize(actor, "archive_channel");
-    return this.mutex.run(() => this.archiveChannelUnlocked(actor.name, args.channel, args.reason));
+    return this.mutex.run(() => this.archiveChannelUnlocked(actor, args.channel, args.reason));
   }
 
   /** Adds a channel to a project or to the society. Also what an approved channel proposal executes. */
@@ -2532,6 +2561,59 @@ export class Board {
     return { id: this.newId(), channel: args.channel, title: args.title };
   }
 
+  /**
+   * Where the board learns which turns are in flight, from the server that hosts them, so it
+   * refuses to end a conversation under someone else's turn.
+   */
+  watchTurns(source: () => readonly TurnInFlight[]): void {
+    this.turnsInFlight = source;
+  }
+
+  /**
+   * Refuses to end conversations while another citizen's turn is in one of them: `cut` picks the
+   * turns that would lose theirs. The caller's own turn is exempt, since ending a conversation
+   * from inside it is how a citizen finishes there.
+   */
+  private assertNoTurnCut(actor: Actor, what: string, cut: (turn: TurnInFlight) => boolean): void {
+    const busy = [
+      ...new Set(
+        this.turnsInFlight()
+          .filter((turn) => cut(turn) && !ownTurn(actor, turn))
+          .map((turn) => turn.agent),
+      ),
+    ].toSorted((a, b) => a.localeCompare(b));
+    if (busy.length === 0) {
+      return;
+    }
+    const one = busy.length === 1;
+    throw new BoardError(
+      "INVALID_STATE",
+      `${what} while ${namesList(busy)} ${one ? "is in a turn" : "are in turns"} there; try again once ${one ? "it ends" : "they end"}, or stop ${one ? "it" : "them"}`,
+    );
+  }
+
+  /** The open threads in a folder of threads that `keep` picks. */
+  private async openThreadIds(dir: string, keep: (thread: Thread) => boolean): Promise<Set<Ulid>> {
+    const ids = new Set<Ulid>();
+    for (const file of await listFiles(dir)) {
+      const doc = await readMarkdown(path.join(dir, file), ThreadFrontmatterSchema);
+      if (doc.data.state === "open" && keep({ ...doc.data, body: doc.body })) {
+        ids.add(doc.data.id);
+      }
+    }
+    return ids;
+  }
+
+  /** Refuses to archive a project while a turn runs in it or in a thread its archive closes. */
+  private async assertProjectQuiet(actor: Actor, slug: Name): Promise<void> {
+    const threads = await this.openThreadIds(this.paths.threads(slug), () => true);
+    this.assertNoTurnCut(
+      actor,
+      `project ${slug} cannot be archived`,
+      (turn) => turn.scope === slug || (turn.thread !== undefined && threads.has(turn.thread)),
+    );
+  }
+
   async closeThread(actor: Actor, input: VerbInput<"close_thread">): Promise<Message> {
     const args = VerbInputs.close_thread.parse(input);
     await this.authorize(actor, "close_thread");
@@ -2557,6 +2639,11 @@ export class Board {
           "only the thread's participants, the user, the steward, or the concierge may close it",
         );
       }
+      this.assertNoTurnCut(
+        actor,
+        `thread ${thread.id} cannot close`,
+        (turn) => turn.thread === thread.id,
+      );
       const summary = await this.writeMessage(
         this.paths.channelDir(thread.channel),
         { author: actor.name, channel: thread.channel, closes: thread.id },
@@ -2762,6 +2849,13 @@ export class Board {
         completedAt: ts,
       };
       const next = current.stages[index + 1];
+      if (next === undefined && current.onDone === "none") {
+        this.assertNoTurnCut(
+          actor,
+          `task ${current.id} cannot end`,
+          (turn) => turn.thread === current.id,
+        );
+      }
       // The rework after a send-back lasts until the task is back at the stage that returned it.
       const reworkDone =
         current.returned === undefined ||
@@ -2948,6 +3042,11 @@ export class Board {
             "only the holder, the creator, the user, the steward, or the concierge may abandon a task",
           );
         }
+        this.assertNoTurnCut(
+          actor,
+          `task ${current.id} cannot be abandoned`,
+          (turn) => turn.thread === current.id,
+        );
         next = {
           ...next,
           status: "abandoned",
@@ -3199,6 +3298,7 @@ export class Board {
     await this.authorize(actor, "archive_project");
     return this.mutex.run(async () => {
       await this.validateArchive(args.project);
+      await this.assertProjectQuiet(actor, args.project);
       return (await this.archiveUnlocked(actor.name, args.project, args.reason, {})).project;
     });
   }
@@ -3701,22 +3801,34 @@ export class Board {
 
   /**
    * Records that a citizen's workspace in a conversation that has ended holds work on no branch, so
-   * the scheduler gives the citizen a closing turn there to decide about it.
+   * the scheduler gives the citizen a closing turn there to decide about it. False, recording
+   * nothing, once `CLOSING_ATTEMPTS` closing turns have been given for it.
    */
   async recordLeftovers(input: {
     agent: Name;
     scope: Name;
     conversation: WorkspaceConversation;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { conversation } = input;
-    await this.mutex.run(async () => {
-      await this.events.append("workspace.leftovers", SYSTEM_ACTOR.name, {
-        agent: input.agent,
-        project: input.scope,
-        ...(conversation.kind === "thread"
-          ? { thread: conversation.id }
-          : { channel: conversation.name }),
-      });
+    const payload = {
+      agent: input.agent,
+      project: input.scope,
+      ...(conversation.kind === "thread"
+        ? { thread: conversation.id }
+        : { channel: conversation.name }),
+    };
+    return this.mutex.run(async () => {
+      // Each record gives one closing turn; a workspace whose closing turns kept failing is left.
+      const earlier = (await this.events.readSince(null, Number.MAX_SAFE_INTEGER)).filter(
+        (event) =>
+          event.type === "workspace.leftovers" &&
+          Object.entries(payload).every(([key, value]) => event.payload[key] === value),
+      ).length;
+      if (earlier >= CLOSING_ATTEMPTS) {
+        return false;
+      }
+      await this.events.append("workspace.leftovers", SYSTEM_ACTOR.name, payload);
+      return true;
     });
   }
 
@@ -4635,10 +4747,11 @@ export class Board {
    * board's and leaves the reason out, since a board-authored mention would wake whoever it names.
    */
   private async archiveChannelUnlocked(
-    by: Name,
+    actor: Actor,
     ref: ChannelRef,
     reason: string,
   ): Promise<ArchivedChannel> {
+    const by = actor.name;
     const { project, channel } = parseChannelRef(ref);
     if (isBoardChannel(project, channel)) {
       throw new BoardError("FORBIDDEN", `the board itself uses ${ref}, so it is never archived`);
@@ -4657,6 +4770,15 @@ export class Board {
     }
     const ts = this.now().toISOString();
     const threads = project === null ? this.paths.societyThreads() : this.paths.threads(project);
+    const closing = await this.openThreadIds(threads, (thread) => thread.channel === ref);
+    const scope = project ?? SOCIETY_SCOPE;
+    this.assertNoTurnCut(
+      actor,
+      `${ref} cannot be archived`,
+      (turn) =>
+        (turn.channel === channel && turn.scope === scope) ||
+        (turn.thread !== undefined && closing.has(turn.thread)),
+    );
     const threadsClosed: Ulid[] = [];
     for (const file of await listFiles(threads)) {
       const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
@@ -5181,6 +5303,14 @@ export class Board {
       }
       if (outcome === "approved") {
         await this.validateProvision(proposal.kind, proposal.charter);
+      }
+      this.assertNoTurnCut(
+        actor,
+        `proposal ${proposalId} cannot be decided`,
+        (turn) => turn.thread === proposalId,
+      );
+      if (outcome === "approved" && proposal.kind === "archive") {
+        await this.assertProjectQuiet(actor, ArchiveProposalSchema.parse(proposal.charter).project);
       }
       const ts = this.now().toISOString();
       const decision: Decision = DecisionSchema.parse({

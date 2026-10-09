@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Actor, Board } from "@stellaris/board-core";
+import { CLOSING_ATTEMPTS, type Actor, type Board, type TurnInFlight } from "@stellaris/board-core";
 import {
   channelRef,
   conversationPart,
@@ -540,6 +540,16 @@ export class TurnHost {
     return null;
   }
 
+  /** The turns in flight and their conversations, which the board checks before ending one. */
+  inFlight(): TurnInFlight[] {
+    return [...this.open.values()].map(({ job }) => ({
+      agent: job.agent,
+      scope: job.scope,
+      ...(job.thread === undefined ? {} : { thread: job.thread }),
+      ...(job.channel === undefined ? {} : { channel: job.channel }),
+    }));
+  }
+
   /** The turns in flight, for the interface: their conversations and where a mention reaches them. */
   runningTurns(): Array<Omit<RunningTurn, "steerable" | "stoppable"> & { runner: Name }> {
     return [...this.open.values()].map((turn) => ({
@@ -659,6 +669,8 @@ export class TurnHost {
     };
     const ended = await this.conversationEnded(job);
     const closing = turn.record.trigger.kind === "closing";
+    // A closing turn decided about what its workspace held, unless it failed before deciding.
+    const decided = closing && outcome.exitReason !== "error" && outcome.exitReason !== "timeout";
     const recorded = await this.recorded(turn, async () => {
       if (outcome.session !== job.session) {
         // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
@@ -687,11 +699,29 @@ export class TurnHost {
         }
       }
       await this.board.finishTurn(finished, turn.transcript);
-      // Work on no branch in an ended conversation's workspace is its citizen's to decide about.
-      const conversation =
-        ended && !closing && outcome.leftovers ? workspaceConversationOf(job) : null;
-      if (conversation !== null) {
-        await this.board.recordLeftovers({ agent: job.agent, scope: job.scope, conversation });
+      // Work on no branch in an ended conversation's workspace is its citizen's to decide about,
+      // in a closing turn, given again when one fails, up to `CLOSING_ATTEMPTS` in all.
+      const conversation = ended ? workspaceConversationOf(job) : null;
+      if (conversation !== null && (closing ? !decided : outcome.leftovers)) {
+        const again = await this.board.recordLeftovers({
+          agent: job.agent,
+          scope: job.scope,
+          conversation,
+        });
+        if (!again) {
+          const where =
+            conversation.kind === "thread"
+              ? `thread ${conversation.id}`
+              : `channel ${conversation.name}`;
+          await this.board.publishSignal({
+            kind: "stuck_workspace",
+            key: `stuck_workspace:${job.agent}:${job.scope}:${conversationPart(job) ?? ""}`,
+            summary: `${job.agent}'s workspace in ${where} still holds work on no branch after ${CLOSING_ATTEMPTS} closing turns failed, so it stays on runner ${turn.runner}`,
+            value: CLOSING_ATTEMPTS,
+            agent: job.agent,
+            ...(job.scope === SOCIETY_SCOPE ? {} : { project: job.scope }),
+          });
+        }
       }
     });
     if (recorded) {
@@ -707,8 +737,6 @@ export class TurnHost {
       );
       turn.done(finished);
     }
-    // A closing turn decided about what its workspace held, unless it failed before deciding.
-    const decided = closing && outcome.exitReason !== "error" && outcome.exitReason !== "timeout";
     return { dropWorkspace: ended && (closing ? decided : !outcome.leftovers) };
   }
 

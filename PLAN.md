@@ -198,7 +198,7 @@ Governance    propose(kind, charter)
               approve(proposal_id)          # user and steward only
               reject(proposal_id, reason)   # user and steward only
 Projects      create_project(slug, name, repo?, on_done?)                  # concierge and user
-              configure_project(project, on_done?, name?)                  # user, steward, concierge; the slug never changes
+              configure_project(project, on_done?, name?, default_branch?) # user, steward, concierge; the slug never changes
               archive_project(project, reason)                             # user; others propose kind archive
 Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
@@ -211,7 +211,7 @@ Rules:
 - Each role sees only its own tool set. The MCP endpoint derives the tool list from the token's role. Approve and reject are exposed to the user and the steward.
 - The tool count per role stays small so descriptions are cheap on every turn. Verbs are added, never renamed. Deprecation is by addition.
 - Agents edit their own home files directly. There is no memory verb.
-- A project has two names. Its slug is its identity: addresses, channel references, branches, and the runner's directories all carry it, so it never changes. Its display name is what people read in the board and the sky; whoever creates the project chooses it, and `configure_project` changes it, as the user does from the project's page.
+- A project has two names. Its slug is its identity: addresses, channel references, branches, and the runner's directories all carry it, so it never changes. Its display name is what people read in the board and the sky; whoever creates the project chooses it, and `configure_project` changes it, as the user does from the project's page. `configure_project` also moves the project to another default branch, the branch tasks start from and land on, but never into `task/` or `agent/`, which the board's own branches use. The runner makes sure of the default branch before each turn, landing, and change list: a branch its repository lacks is fetched from the project's remote, or else starts where the repository stands, so the move needs no step on the runner. Tasks in play keep their branches and land on the new default branch.
 
 ### 4.4 Channels and threads
 

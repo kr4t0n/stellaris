@@ -163,7 +163,9 @@ export function TaskView() {
           />
         }
         title={current.title}
-        subtitle={`${project?.name ?? current.project} · ${progressOf(current)} · created by ${displayName(
+        subtitle={`${project?.name ?? current.project}${
+          current.channel === "general" ? "" : ` #${current.channel}`
+        } · ${progressOf(current)} · created by ${displayName(
           current.createdBy,
         )} ${ago(current.createdAt, now)}`}
         trailing={

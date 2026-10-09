@@ -1,4 +1,5 @@
 import {
+  ArchivedChannelSchema,
   BoardEventSchema,
   BranchChangesSchema,
   BranchFileSchema,
@@ -115,6 +116,8 @@ const ChannelSummarySchema = z.object({
   messages: z.number().int(),
   lastMessageId: UlidSchema.nullable(),
   lastAt: z.string().nullable(),
+  /** Set for an archived channel, listed for its history. */
+  archived: ArchivedChannelSchema.optional(),
 });
 export type ChannelSummary = z.infer<typeof ChannelSummarySchema>;
 const ThreadRecordSchema = ThreadFrontmatterSchema.extend({ body: z.string() });
@@ -314,6 +317,12 @@ export function createApi(token: string) {
     /** Changes a project's display name, default branch, or both; its slug stays. */
     configureProject: (project: string, changes: { name?: string; default_branch?: string }) =>
       invoke("configure_project", token, { project, ...changes }, ProjectSchema),
+    /** Opens a channel in a project, or the society with project null, which the project's members follow. */
+    createChannel: (input: { project: string | null; name: string; purpose: string }) =>
+      invoke("create_channel", token, input, ChannelRefSchema),
+    /** Ends a channel whose workstream is done; its history stays readable. */
+    archiveChannel: (input: { channel: string; reason: string }) =>
+      invoke("archive_channel", token, input, ArchivedChannelSchema),
     /** Takes a topic off the board; the server keeps its text aside. */
     removeKnowledge: (input: { project: string | null; topic: string }) =>
       invoke("remove_knowledge", token, input, RemovedKnowledgeSchema),

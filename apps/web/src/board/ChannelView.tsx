@@ -1,11 +1,20 @@
-import type { Message } from "@stellaris/shared";
+import { isBoardChannel, type Message } from "@stellaris/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/Button.js";
 import { ApiError, type ThreadSummary } from "../lib/api.js";
+import { ago } from "../lib/format.js";
 import { markSeen } from "../lib/seen.js";
-import { useMembers, useNow, useProjects, useSession, useThreads } from "../lib/session.js";
+import {
+  useChannels,
+  useMembers,
+  useNow,
+  useProjects,
+  useSession,
+  useThreads,
+} from "../lib/session.js";
+import { ArchiveChannelForm } from "./ChannelForms.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
@@ -17,7 +26,10 @@ type Item =
   | { kind: "message"; at: string; id: string; message: Message }
   | { kind: "thread"; at: string; id: string; thread: ThreadSummary };
 
-/** A channel's messages in time order, with each thread that hangs off it where it was opened. */
+/**
+ * A channel's messages in time order, with each thread that hangs off it where it was opened. A
+ * channel the board does not use itself can be archived here once its workstream is done.
+ */
 export function ChannelView() {
   const { _splat: ref = "general" } = useParams({ from: "/c/$" });
   return <ChannelStream key={ref} channel={ref} />;
@@ -32,8 +44,10 @@ function ChannelStream({ channel }: { channel: string }) {
   const threads = useThreads();
   const members = useMembers();
   const projects = useProjects();
+  const channels = useChannels();
   const now = useNow(30_000);
   const [starting, setStarting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const items = useMemo<Item[]>(() => {
     const posts: Item[] = (messages.data ?? []).map((message) => ({
@@ -59,8 +73,12 @@ function ChannelStream({ channel }: { channel: string }) {
   const project =
     second === undefined ? undefined : projects.data?.find((each) => each.slug === first);
   const place = second === undefined ? "society" : (project?.name ?? first);
-  // An archived project's channels are read-only: the board refuses posts and threads there.
-  const archived = project?.archived !== undefined;
+  const ended = channels.data?.find((each) => each.ref === channel)?.archived;
+  // An archived channel, or any channel of an archived project, is read-only: the board refuses
+  // posts and threads there.
+  const archived = project?.archived !== undefined || ended !== undefined;
+  const mayArchive =
+    !archived && !isBoardChannel(second === undefined ? null : (first ?? null), name);
   const open = items.filter((item) => item.kind === "thread" && item.thread.state === "open");
 
   return (
@@ -71,12 +89,18 @@ function ChannelStream({ channel }: { channel: string }) {
           open.length > 0 ? ` · ${open.length} open threads` : ""
         }`}
         trailing={
-          starting || archived ? null : (
-            <Button onClick={() => setStarting(true)}>New thread</Button>
+          starting || archiving || archived ? null : (
+            <>
+              {mayArchive ? <Button onClick={() => setArchiving(true)}>Archive…</Button> : null}
+              <Button onClick={() => setStarting(true)}>New thread</Button>
+            </>
           )
         }
       />
       {starting ? <NewThreadForm channel={channel} onDone={() => setStarting(false)} /> : null}
+      {archiving ? (
+        <ArchiveChannelForm channel={channel} onDone={() => setArchiving(false)} />
+      ) : null}
       <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.error instanceof ApiError && messages.error.status === 404 ? (
           <PaneNote>There is no channel {channel}.</PaneNote>
@@ -94,7 +118,12 @@ function ChannelStream({ channel }: { channel: string }) {
           )
         )}
       </div>
-      {messages.data === undefined ? null : archived ? (
+      {messages.data === undefined ? null : ended !== undefined ? (
+        <p className="border-t border-line px-4 py-3 text-meta">
+          Archived {ago(ended.at, now)} by {ended.by}: {ended.reason}. Its posts, threads, and tasks
+          stay readable; nothing more is posted or filed here.
+        </p>
+      ) : archived ? (
         <p className="border-t border-line px-4 py-3 text-meta">
           {place} is archived, so its channels are read-only.
         </p>

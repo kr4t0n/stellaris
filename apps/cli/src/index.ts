@@ -508,6 +508,20 @@ channelCommand
     print({ channel: added }, () => `Channel ${added} opened`);
   });
 
+channelCommand
+  .command("archive <ref>")
+  .description("Archive a channel whose workstream is done, once no task filed there is in play")
+  .requiredOption("--reason <text>", "why its work is done")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (ref: string, opts: { reason: string; as?: string }) => {
+    const board = await open();
+    const archived = await board.archiveChannel(await actorFor(board, opts.as), {
+      channel: ref,
+      reason: opts.reason,
+    });
+    print(archived, () => `Channel ${ref} archived: ${archived.reason}`);
+  });
+
 program
   .command("signals")
   .description("Recent operations signals, oldest first")
@@ -559,12 +573,13 @@ task
   .option("--body <text>", "task body", "")
   .option("--parent <id>", "parent task id")
   .option("--plan <json>", 'stages, for example \'[{"name":"analysis","role":"analyst"}]\'')
+  .option("--channel <name>", "the project's channel to file it in, such as a release's", "general")
   .option("--as <agent>", "act as this agent instead of the user")
   .action(
     async (
       projectSlug: string,
       title: string,
-      opts: { body: string; parent?: string; plan?: string; as?: string },
+      opts: { body: string; parent?: string; plan?: string; channel: string; as?: string },
     ) => {
       const board = await open();
       const who = await actorFor(board, opts.as);
@@ -572,12 +587,13 @@ task
         project: projectSlug,
         title,
         body: opts.body,
+        channel: opts.channel,
         ...(opts.parent === undefined ? {} : { parent_id: opts.parent }),
         ...(opts.plan === undefined ? {} : { stages: parsePlan(opts.plan) }),
       });
       print(created, () =>
         [
-          `Task ${created.id} created in ${created.project}: ${created.title}`,
+          `Task ${created.id} created in ${created.project}/${created.channel}: ${created.title}`,
           describePlan(created),
         ].join("\n"),
       );

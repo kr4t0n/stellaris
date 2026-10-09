@@ -75,7 +75,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type.startsWith("agent.") || type === "subscription.changed") {
     return [["members"]];
   }
-  if (type.startsWith("project.") || type === "channel.added") {
+  if (type.startsWith("project.") || type === "channel.added" || type === "channel.archived") {
     return [["projects"], ["channels"], ["society"]];
   }
   if (type === "role.added") {

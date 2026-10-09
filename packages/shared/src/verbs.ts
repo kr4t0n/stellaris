@@ -48,6 +48,8 @@ export const VerbInputs = {
     required_capabilities: z.array(z.string()).default([]),
     /** The plan; without it the task gets one stage, work, that anyone in the project may take. */
     stages: z.array(PlanStageSchema).min(1).optional(),
+    /** A channel of the project the task belongs to, such as a release's; its thread opens there. */
+    channel: NameSchema.default("general"),
   }),
   claim_task: z.object({ task_id: UlidSchema }),
   release_task: z.object({ task_id: UlidSchema }),
@@ -106,6 +108,13 @@ export const VerbInputs = {
     default_branch: DefaultBranchSchema.optional(),
   }),
   archive_project: z.object({ project: NameSchema, reason: z.string().min(1) }),
+  create_channel: z.object({
+    /** A project, or null for a channel of the society. */
+    project: NameSchema.nullable().default(null),
+    name: NameSchema,
+    purpose: z.string().min(1),
+  }),
+  archive_channel: z.object({ channel: ChannelRefSchema, reason: z.string().min(1) }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -123,7 +132,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   close_thread:
     "Close a thread with a summary that is posted to the thread's channel. A task's thread closes with its task, a proposal's with its decision.",
   create_task:
-    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets one stage, work, that anyone in the project may take. Its thread opens with it, under the task's id, for everything said about the work.",
+    "Create a task in a project with its plan: stages of {name, role or agent, gate}. Without stages it gets one stage, work, that anyone in the project may take. File it in a channel of the project, such as a release's, or general by default; its thread opens there with it, under the task's id, for everything said about the work.",
   claim_task:
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
@@ -141,7 +150,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   create_project:
     "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a completion effect (none or merge).",
   join_project:
-    "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn.",
+    "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn, and follows the project's general; the result lists its other open channels, to subscribe to when the work needs them.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
   write_knowledge:
     "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those.",
@@ -155,4 +164,8 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Set a project's completion effect (none, or merge to land each finished task's branch on the default branch), its display name, or its default branch, any of them at once. The slug never changes.",
   archive_project:
     "Archive a project whose work is finished or has moved: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay. Refused while a task there is in play.",
+  create_channel:
+    "Open a channel in a project, or with project null in the society, for a workstream such as a release, whose tasks are filed there. You follow it; a notice in the place's general announces it, and members subscribe when it concerns them. User, steward, concierge.",
+  archive_channel:
+    "Archive a channel whose workstream is done: its open threads close, its followers stop following it, and nothing more is posted or filed there, while its history stays readable. Refused while a task filed there is in play, and for the channels the board itself uses. User, steward, concierge.",
 };

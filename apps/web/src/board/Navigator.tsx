@@ -151,7 +151,8 @@ export function Navigator({
   const archived = ordered.filter((project) => project.archived !== undefined);
 
   const groups = useMemo<Group[]>(() => {
-    const all = channels.data ?? [];
+    // An archived channel is reached from its place's overview, with the place's history.
+    const all = (channels.data ?? []).filter((channel) => channel.archived === undefined);
     return [
       {
         key: "society",

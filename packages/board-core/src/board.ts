@@ -15,6 +15,7 @@ import {
   describeCharter,
   EffortSchema,
   IsoDateTimeSchema,
+  isBoardChannel,
   KnowledgeSchema,
   RemovedKnowledgeSchema,
   mayHoldStage,
@@ -46,6 +47,7 @@ import {
   VerbInputs,
   wakeScope,
   type Agent,
+  type ArchivedChannel,
   type BoardEvent,
   type ChannelRef,
   type CompletionEffect,
@@ -267,7 +269,12 @@ export interface ChannelSummary {
   readonly messages: number;
   readonly lastMessageId: Ulid | null;
   readonly lastAt: string | null;
+  /** Set for an archived channel, which is listed for its history and takes nothing new. */
+  readonly archived?: ArchivedChannel;
 }
+
+/** What joining a project returns: the member, and the project's open channels it does not follow. */
+export type JoinedProject = Agent & { readonly otherChannels: readonly ChannelRef[] };
 
 export interface SearchHit {
   readonly kind: "message" | "task" | "knowledge" | "skill" | "memory";
@@ -357,6 +364,11 @@ const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
+
+/** Free text quoted in a board notice, its mentions written as plain names so they wake nobody. */
+function withoutMentions(text: string): string {
+  return text.replaceAll(MENTION_PATTERN, "$1$2");
+}
 
 /** Roles that may write society knowledge. */
 const CURATING_ROLES: readonly Name[] = [USER_ROLE, "steward"];
@@ -1379,35 +1391,49 @@ export class Board {
     return (await readJson(file, PausedSchema)).paused;
   }
 
-  /** Every message in a channel, oldest first. Thread messages are listed with `listThread`. */
-  /** Every channel, the society's first, with how many messages it holds and its newest one. */
+  /**
+   * Every channel, the society's first, with how many messages it holds and its newest one; each
+   * place's archived channels follow its open ones.
+   */
   async listChannels(): Promise<ChannelSummary[]> {
     const summaries: ChannelSummary[] = [];
-    const scopes: Array<{ project: Name | null; names: readonly Name[] }> = [
-      { project: null, names: (await this.society()).channels },
+    const society = await this.society();
+    const places: Array<{
+      project: Name | null;
+      names: readonly Name[];
+      archived: readonly ArchivedChannel[];
+    }> = [
+      { project: null, names: society.channels, archived: society.archivedChannels },
       ...(await this.listProjects()).map((project) => ({
         project: project.slug,
         names: project.channels,
+        archived: project.archivedChannels,
       })),
     ];
-    for (const { project, names } of scopes) {
-      for (const name of names) {
-        const ref = channelRef(project, name);
+    for (const { project, names, archived } of places) {
+      const entries = [
+        ...names.map((name) => ({ name, archived: undefined })),
+        ...archived.map((each) => ({ name: each.name, archived: each })),
+      ];
+      for (const entry of entries) {
+        const ref = channelRef(project, entry.name);
         const files = await listFiles(this.paths.channelDir(ref));
         const last = files.at(-1)?.slice(0, 26) ?? null;
         summaries.push({
           ref,
           project,
-          name,
+          name: entry.name,
           messages: files.length,
           lastMessageId: last,
           lastAt: last === null ? null : new Date(decodeTime(last)).toISOString(),
+          ...(entry.archived === undefined ? {} : { archived: entry.archived }),
         });
       }
     }
     return summaries;
   }
 
+  /** Every message in a channel, oldest first. Thread messages are listed with `listThread`. */
   async listChannel(ref: ChannelRef, limit = 200): Promise<Message[]> {
     await this.assertChannelExists(ref);
     const messages = await this.readMessagesIn(this.paths.channelDir(ref), null);
@@ -1580,12 +1606,32 @@ export class Board {
     });
   }
 
+  /** Opens a channel in a project or the society for a workstream, such as a release's tasks. */
+  async createChannel(actor: Actor, input: VerbInput<"create_channel">): Promise<ChannelRef> {
+    const args = VerbInputs.create_channel.parse(input);
+    await this.authorize(actor, "create_channel");
+    return this.mutex.run(async () => {
+      await this.validateAddChannel(args);
+      return this.addChannelUnlocked(actor.name, args, {}, actor.name);
+    });
+  }
+
+  /** Archives a channel whose workstream is done; refused while a task filed there is in play. */
+  async archiveChannel(
+    actor: Actor,
+    input: VerbInput<"archive_channel">,
+  ): Promise<ArchivedChannel> {
+    const args = VerbInputs.archive_channel.parse(input);
+    await this.authorize(actor, "archive_channel");
+    return this.mutex.run(() => this.archiveChannelUnlocked(actor.name, args.channel, args.reason));
+  }
+
   /** Adds a channel to a project or to the society. Also what an approved channel proposal executes. */
   async addChannel(actor: Actor, input: AddChannelInput): Promise<ChannelRef> {
     this.assertAdmin(actor);
     return this.mutex.run(async () => {
       await this.validateAddChannel(input);
-      return this.addChannelUnlocked(actor.name, input, {});
+      return this.addChannelUnlocked(actor.name, input, {}, actor.name);
     });
   }
 
@@ -2298,7 +2344,7 @@ export class Board {
   } {
     return {
       id: task.id,
-      channel: channelRef(task.project, "general"),
+      channel: channelRef(task.project, task.channel),
       title: task.title,
       subject: { kind: "task", id: task.id },
     };
@@ -2357,7 +2403,7 @@ export class Board {
       if (task.status === "done" || task.status === "abandoned") {
         throw new BoardError("INVALID_STATE", `task ${task.id} is ${task.status}`);
       }
-      const channel = args.channel ?? channelRef(project, "general");
+      const channel = args.channel ?? channelRef(project, task.channel);
       if (parseChannelRef(channel).project !== project) {
         throw new BoardError(
           "VALIDATION",
@@ -2466,10 +2512,12 @@ export class Board {
       if (first === undefined) {
         throw new BoardError("VALIDATION", "a plan needs at least one stage");
       }
+      await this.assertChannelOpen(channelRef(args.project, args.channel));
       const ts = this.now().toISOString();
       const frontmatter: TaskFrontmatter = TaskFrontmatterSchema.parse({
         id: this.newId(),
         project: args.project,
+        channel: args.channel,
         title: args.title,
         status: "open",
         createdBy: actor.name,
@@ -2485,11 +2533,11 @@ export class Board {
         onDone: project.onDone,
         completing: false,
       });
-      await this.assertChannelExists(channelRef(args.project, "general"));
       const task = await this.writeTask(args.project, { ...frontmatter, body: args.body });
       await this.events.append("task.created", actor.name, {
         taskId: task.id,
         project: task.project,
+        channel: task.channel,
         title: task.title,
         parentId: task.parentId ?? null,
         stage: task.stage,
@@ -3073,7 +3121,11 @@ export class Board {
    * A citizen joins a project itself, or a reallocating role adds it. The pair gets its project
    * directory now and, through the `agent.joined` event, an onboarding turn.
    */
-  async joinProject(actor: Actor, input: VerbInput<"join_project">): Promise<Agent> {
+  /**
+   * A member follows the project's general from the start; the result names the project's other
+   * open channels, which it subscribes to when its work there needs them.
+   */
+  async joinProject(actor: Actor, input: VerbInput<"join_project">): Promise<JoinedProject> {
     const args = VerbInputs.join_project.parse(input);
     await this.authorize(actor, "join_project");
     const target = args.agent ?? actor.name;
@@ -3085,7 +3137,7 @@ export class Board {
         throw new BoardError("INVALID_STATE", `${target} is retired`);
       }
       if (current.memberships.includes(args.project)) {
-        return current;
+        return { ...current, otherChannels: await this.otherChannels(args.project, current) };
       }
       await this.assertMayJoinProjects(target, current.role);
       const agent = await this.updateAgent(target, (a) => ({
@@ -3104,8 +3156,15 @@ export class Board {
         project: args.project,
         cli: agent.cli,
       });
-      return agent;
+      return { ...agent, otherChannels: await this.otherChannels(args.project, agent) };
     });
+  }
+
+  /** The open channels of a project a citizen does not follow. */
+  private async otherChannels(project: Name, agent: Agent): Promise<ChannelRef[]> {
+    return (await this.readProject(project)).channels
+      .map((name) => channelRef(project, name))
+      .filter((ref) => !agent.subscriptions.includes(ref));
   }
 
   async leaveProject(actor: Actor, input: VerbInput<"leave_project">): Promise<Agent> {
@@ -3216,6 +3275,10 @@ export class Board {
         return this.configureProject(actor, VerbInputs.configure_project.parse(input));
       case "archive_project":
         return this.archiveProject(actor, VerbInputs.archive_project.parse(input));
+      case "create_channel":
+        return this.createChannel(actor, VerbInputs.create_channel.parse(input));
+      case "archive_channel":
+        return this.archiveChannel(actor, VerbInputs.archive_channel.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -3588,7 +3651,7 @@ export class Board {
         if (merged) {
           await this.appendMessage(
             actor.name,
-            channelRef(location.project, "general"),
+            channelRef(location.project, task.channel),
             `Task ${task.id} "${task.title}" is done: ${sentence(input.detail)}.`,
           );
         }
@@ -4212,10 +4275,12 @@ export class Board {
         };
       }
       case "channel": {
+        // The proposer wanted the channel, so it follows it, as one who opens a channel does.
         const channel = await this.addChannelUnlocked(
           by,
           ChannelProposalSchema.parse(proposal.charter),
           meta,
+          proposal.proposedBy,
         );
         return { channel };
       }
@@ -4353,25 +4418,30 @@ export class Board {
   }
 
   private async validateAddChannel(input: AddChannelInput): Promise<void> {
-    if (input.project === null) {
-      if ((await this.society()).channels.includes(input.name)) {
-        throw new BoardError("ALREADY_EXISTS", `society channel ${input.name} already exists`);
-      }
-      return;
+    const place =
+      input.project === null ? await this.society() : await this.readActiveProject(input.project);
+    const ref = channelRef(input.project, input.name);
+    if (place.channels.includes(input.name)) {
+      throw new BoardError("ALREADY_EXISTS", `channel ${ref} already exists`);
     }
-    const project = await this.readActiveProject(input.project);
-    if (project.channels.includes(input.name)) {
+    // Its folder still holds the archived channel's history, which a new one would take over.
+    if (place.archivedChannels.some((each) => each.name === input.name)) {
       throw new BoardError(
         "ALREADY_EXISTS",
-        `channel ${channelRef(input.project, input.name)} already exists`,
+        `channel ${ref} was archived; open the new one under another name`,
       );
     }
   }
 
+  /**
+   * Opens a channel, which `opener` follows from the start: the citizen who opened it or proposed
+   * it. Nobody else is subscribed, and the user, who reads channels directly, follows nothing.
+   */
   private async addChannelUnlocked(
     by: Name,
     input: AddChannelInput,
     meta: Record<string, unknown>,
+    opener: Name,
   ): Promise<ChannelRef> {
     const ref = channelRef(input.project, input.name);
     if (input.project === null) {
@@ -4390,15 +4460,126 @@ export class Board {
       }));
       await ensureDir(this.paths.projectChannel(project, input.name));
     }
+    const follower = await this.readAgent(opener).catch(() => null);
+    const follows =
+      follower !== null && follower.status === "active" && follower.role !== USER_ROLE;
+    if (follows) {
+      await this.updateAgent(opener, (agent) => ({
+        ...agent,
+        subscriptions: [...new Set([...agent.subscriptions, ref])],
+      }));
+      await this.refreshMember(opener);
+    }
     await this.events.append("channel.added", by, {
       channel: ref,
       purpose: input.purpose,
+      ...(follows ? { followedBy: opener } : {}),
       ...meta,
     });
-    // A notice of what the board did, like a landed merge's: posted as the decider, it read as a
-    // post by the user and woke the front desk for nothing.
-    await this.appendMessage(SYSTEM_ACTOR.name, ref, `Channel ${ref} opened: ${input.purpose}`);
+    // Notices of what the board did, like a landed merge's: posted as whoever opened it, one read
+    // as a post by the user and woke the front desk for nothing. The purpose is free text, whose
+    // mentions a board-authored post would wake. The place's general is where its members learn
+    // of the channel and choose to follow it.
+    const purpose = withoutMentions(input.purpose);
+    await this.appendMessage(SYSTEM_ACTOR.name, ref, `Channel ${ref} opened: ${purpose}`);
+    await this.appendMessage(
+      SYSTEM_ACTOR.name,
+      channelRef(input.project, "general"),
+      `Channel ${ref} opened by ${by}: ${purpose}. Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.`,
+    );
     return ref;
+  }
+
+  /**
+   * Ends a channel: its open threads close, its followers stop following it, and it leaves the
+   * place's channels for its archived ones, where its history stays readable. The notice is the
+   * board's and leaves the reason out, since a board-authored mention would wake whoever it names.
+   */
+  private async archiveChannelUnlocked(
+    by: Name,
+    ref: ChannelRef,
+    reason: string,
+  ): Promise<ArchivedChannel> {
+    const { project, channel } = parseChannelRef(ref);
+    if (isBoardChannel(project, channel)) {
+      throw new BoardError("FORBIDDEN", `the board itself uses ${ref}, so it is never archived`);
+    }
+    await this.assertChannelOpen(ref);
+    if (project !== null) {
+      const inPlay = (await this.listTasks(project)).filter(
+        (task) => task.channel === channel && task.status !== "done" && task.status !== "abandoned",
+      );
+      if (inPlay.length > 0) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `${inPlay.length} task(s) filed in ${ref} are still in play: ${inPlay.map((task) => task.id).join(", ")}`,
+        );
+      }
+    }
+    const ts = this.now().toISOString();
+    const threads = project === null ? this.paths.societyThreads() : this.paths.threads(project);
+    const threadsClosed: Ulid[] = [];
+    for (const file of await listFiles(threads)) {
+      const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+      if (doc.data.channel !== ref || doc.data.state !== "open") {
+        continue;
+      }
+      await this.writeThread(threads, {
+        ...doc.data,
+        body: doc.body,
+        state: "closed",
+        closedBy: by,
+        closedAt: ts,
+      });
+      await this.events.append("thread.closed", by, {
+        threadId: doc.data.id,
+        channel: ref,
+        ended: "archived",
+      });
+      threadsClosed.push(doc.data.id);
+    }
+    const unsubscribed: Name[] = [];
+    for (const agent of await this.listAgents()) {
+      if (agent.subscriptions.includes(ref)) {
+        await this.updateAgent(agent.name, (a) => ({
+          ...a,
+          subscriptions: a.subscriptions.filter((each) => each !== ref),
+        }));
+        await this.refreshMember(agent.name);
+        unsubscribed.push(agent.name);
+      }
+    }
+    const archived: ArchivedChannel = { name: channel, at: ts, by, reason };
+    if (project === null) {
+      const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
+      await writeMarkdown(
+        this.paths.societyFile(),
+        {
+          ...doc.data,
+          channels: doc.data.channels.filter((name) => name !== channel),
+          archivedChannels: [...doc.data.archivedChannels, archived],
+        },
+        doc.body,
+      );
+    } else {
+      await this.updateProject(project, (current) => ({
+        ...current,
+        channels: current.channels.filter((name) => name !== channel),
+        archivedChannels: [...current.archivedChannels, archived],
+      }));
+    }
+    await this.events.append("channel.archived", by, {
+      channel: ref,
+      reason,
+      threadsClosed,
+      unsubscribed,
+    });
+    await this.appendMessage(
+      SYSTEM_ACTOR.name,
+      channelRef(project, "general"),
+      `Channel ${ref} is archived by ${by}. Its posts, threads, and tasks stay readable; nothing more is posted or filed there.`,
+    );
+    return archived;
   }
 
   /** A role becomes a society role only while none of its members is in a project. */
@@ -4680,24 +4861,32 @@ export class Board {
     return this.events.append("ops.signal", SYSTEM_ACTOR.name, OpsSignalSchema.parse(signal));
   }
 
-  private async assertChannelExists(ref: ChannelRef): Promise<void> {
+  /** A channel that exists, open or archived, and the record of its archive when it has one. */
+  private async assertChannelExists(ref: ChannelRef): Promise<ArchivedChannel | undefined> {
     const parsed = parseChannelRef(ref);
-    if (parsed.project === null) {
-      const society = await this.society();
-      if (!society.channels.includes(parsed.channel)) {
-        throw new BoardError("NOT_FOUND", `society channel ${ref} not found`);
-      }
-      return;
+    const place =
+      parsed.project === null ? await this.society() : await this.readProject(parsed.project);
+    if (place.channels.includes(parsed.channel)) {
+      return undefined;
     }
-    const project = await this.readProject(parsed.project);
-    if (!project.channels.includes(parsed.channel)) {
-      throw new BoardError("NOT_FOUND", `channel ${ref} not found`);
+    const archived = place.archivedChannels.find((each) => each.name === parsed.channel);
+    if (archived === undefined) {
+      throw new BoardError(
+        "NOT_FOUND",
+        parsed.project === null ? `society channel ${ref} not found` : `channel ${ref} not found`,
+      );
     }
+    return archived;
   }
 
-  /** A channel that takes new posts, threads, and followers: it exists, and its project is not archived. */
+  /**
+   * A channel that takes new posts, threads, tasks, and followers: it exists, it is not archived,
+   * and its project is not archived.
+   */
   private async assertChannelOpen(ref: ChannelRef): Promise<void> {
-    await this.assertChannelExists(ref);
+    if ((await this.assertChannelExists(ref)) !== undefined) {
+      throw new BoardError("INVALID_STATE", `channel ${ref} is archived`);
+    }
     const { project } = parseChannelRef(ref);
     if (project !== null) {
       await this.readActiveProject(project);

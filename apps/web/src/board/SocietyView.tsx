@@ -1,5 +1,8 @@
 import { SOCIETY_SCOPE, USER_ROLE } from "@stellaris/shared";
+import { useState } from "react";
+import { Button } from "../components/Button.js";
 import {
+  useChannels,
   useKnowledge,
   useMembers,
   useNow,
@@ -8,10 +11,14 @@ import {
   useSkills,
   useSociety,
 } from "../lib/session.js";
+import { ChannelList, NewChannelForm } from "./ChannelForms.js";
 import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
-/** The society at a glance: its citizens, the roles they fill, and what it knows and can do. */
+/**
+ * The society at a glance: its citizens, its channels, the roles they fill, and what it knows and
+ * can do; a channel of the society is opened here.
+ */
 export function SocietyView() {
   const society = useSociety();
   const members = useMembers();
@@ -19,7 +26,9 @@ export function SocietyView() {
   const roles = useRoles();
   const skills = useSkills();
   const knowledge = useKnowledge(SOCIETY_SCOPE);
+  const channels = useChannels();
   const now = useNow(30_000);
+  const [opening, setOpening] = useState(false);
 
   if (society.data === undefined || members.data === undefined) {
     return <PaneNote>Reading the society…</PaneNote>;
@@ -35,6 +44,7 @@ export function SocietyView() {
         title={society.data.name}
         subtitle={`${active.length} citizens · ${projects.data?.length ?? 0} projects · ${charters.length} roles`}
       />
+      {opening ? <NewChannelForm project={null} onDone={() => setOpening(false)} /> : null}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         <Section title="Citizens">
           <CrewList members={active} scope={SOCIETY_SCOPE} />
@@ -43,6 +53,15 @@ export function SocietyView() {
               Retired: {retired.map((member) => member.name).join(", ")}
             </p>
           )}
+        </Section>
+        <Section
+          title="Channels"
+          aside={opening ? null : <Button onClick={() => setOpening(true)}>New channel…</Button>}
+        >
+          <ChannelList
+            channels={(channels.data ?? []).filter((channel) => channel.project === null)}
+            now={now}
+          />
         </Section>
         <Section title="Roles">
           <ul className="space-y-2.5">

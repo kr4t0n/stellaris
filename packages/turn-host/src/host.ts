@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Actor, Board } from "@stellaris/board-core";
 import {
+  channelRef,
   mayHoldStage,
   PATH_TOKENS,
   ROLE_KIND_APPROVERS,
@@ -257,6 +258,9 @@ export class TurnHost {
             roleSummary: charter.purpose,
             project: dispatch.project,
             worktree: PATH_TOKENS.worktree,
+            otherChannels: (project?.channels ?? [])
+              .map((name) => channelRef(dispatch.project, name))
+              .filter((ref) => !agent.subscriptions.includes(ref)),
           }
         : null;
     const instructions = renderInstructions({

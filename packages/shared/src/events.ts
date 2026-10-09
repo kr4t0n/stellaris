@@ -30,6 +30,7 @@ export const BOARD_EVENT_TYPES = [
   "proposal.decided",
   "proposal.provisioned",
   "channel.added",
+  "channel.archived",
   "role.added",
   "agent.retired",
   "agent.joined",

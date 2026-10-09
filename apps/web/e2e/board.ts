@@ -649,6 +649,11 @@ export async function fakeBoard(
   let societyTopics = [SOCIETY_TOPIC];
   // Renaming changes the name the board shows, never the slug.
   let lab = PROJECT;
+  // Channels opened in lab beside its general, and their archives, as the board keeps them.
+  const labChannels: Array<{
+    name: string;
+    archived?: { name: string; at: string; by: string; reason: string };
+  }> = [];
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
   const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
@@ -765,6 +770,30 @@ export async function fakeBoard(
               : {}),
           };
           return json(route, lab);
+        case "/api/verbs/create_channel": {
+          if (refusal !== null) {
+            const message = refusal;
+            refusal = null;
+            return json(route, { message }, 409);
+          }
+          labChannels.push({ name: String(body["name"]) });
+          return json(route, `lab/${String(body["name"])}`);
+        }
+        case "/api/verbs/archive_channel": {
+          const name = String(body["channel"]).slice("lab/".length);
+          const ended = {
+            name,
+            at: "2026-10-09T10:00:00.000Z",
+            by: "user",
+            reason: String(body["reason"]),
+          };
+          labChannels.splice(
+            labChannels.findIndex((each) => each.name === name),
+            1,
+            { name, archived: ended },
+          );
+          return json(route, ended);
+        }
         case "/api/verbs/remove_knowledge":
           societyTopics = societyTopics.filter((topic) => topic.topic !== body["topic"]);
           return json(route, {
@@ -872,6 +901,9 @@ export async function fakeBoard(
       return file === undefined
         ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
         : json(route, file);
+    }
+    if (labChannels.some((each) => pathname === `/api/channels/lab/${each.name}`)) {
+      return json(route, []);
     }
     const ask = asks.get(pathname.slice("/api/threads/".length));
     if (pathname.startsWith("/api/threads/") && ask !== undefined) {
@@ -1051,6 +1083,12 @@ export async function fakeBoard(
           channel("governance"),
           channel("asks"),
           { ...channel("general"), ref: "lab/general", project: "lab" },
+          ...labChannels.map((each) => ({
+            ...channel(each.name),
+            ref: `lab/${each.name}`,
+            project: "lab",
+            ...(each.archived === undefined ? {} : { archived: each.archived }),
+          })),
           ...(archived
             ? [{ ...channel("general"), ref: "iphone/general", project: "iphone", messages: 1 }]
             : []),

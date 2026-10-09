@@ -33,6 +33,25 @@ describe("config-home rendering", () => {
     });
     expect(first).toContain("## First turn");
     expect(first).toContain("small pull requests");
+    expect(first).not.toContain("You follow its general channel");
+
+    // A newcomer is told of the project's channels it does not follow yet.
+    const joined = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+      onboarding: {
+        agentName: "eng-1",
+        roleSummary: "Builds things.",
+        project: "demo",
+        worktree: "/tmp/wt",
+        otherChannels: ["demo/release-1"],
+      },
+    });
+    expect(joined).toContain(
+      "You follow its general channel. It also has #demo/release-1, each a workstream such as a release",
+    );
   });
 
   it("loads the norms in full and the skills as an index of summaries and paths", () => {

@@ -31,6 +31,7 @@ function project(slug: string, createdAt: string): Project {
     repo: null,
     defaultBranch: "main",
     channels: ["general"],
+    archivedChannels: [],
     members: [],
     approvers: ["user"],
     requiredCapabilities: [],

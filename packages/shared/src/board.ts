@@ -18,6 +18,15 @@ export const SOCIETY_CHANNELS = ["general", "governance", ASK_CHANNEL] as const;
 export const PROJECT_DEFAULT_CHANNELS = ["general"] as const;
 
 /**
+ * Whether the board itself uses a channel, so it is never archived: a place's general takes the
+ * board's notices and a project's tasks by default, governance holds proposals, asks the user's asks.
+ */
+export function isBoardChannel(project: string | null, name: string): boolean {
+  const used: readonly string[] = project === null ? SOCIETY_CHANNELS : PROJECT_DEFAULT_CHANNELS;
+  return used.includes(name);
+}
+
+/**
  * The scope of a turn that belongs to no project. Dispatches, sessions, and turn records use it in
  * place of a project slug, and the runner uses the agent's home as the working directory. No
  * project may take the name.
@@ -41,11 +50,22 @@ export function wakeScope(
 export const CliKindSchema = z.enum(["claude", "codex"]);
 export type CliKind = z.infer<typeof CliKindSchema>;
 
+/** A channel whose workstream is done: its history stays readable, and nothing more is posted there. */
+export const ArchivedChannelSchema = z.object({
+  name: NameSchema,
+  at: IsoDateTimeSchema,
+  by: NameSchema,
+  reason: z.string().min(1),
+});
+export type ArchivedChannel = z.infer<typeof ArchivedChannelSchema>;
+
 export const SocietySchema = z.object({
   name: z.string().min(1),
   version: z.literal(1),
   createdAt: IsoDateTimeSchema,
+  /** The channels that take posts; an archived one moves to `archivedChannels`. */
   channels: z.array(NameSchema),
+  archivedChannels: z.array(ArchivedChannelSchema).default([]),
 });
 export type Society = z.infer<typeof SocietySchema>;
 
@@ -112,7 +132,9 @@ export const ProjectSchema = z.object({
   name: z.string().min(1),
   repo: z.string().nullable(),
   defaultBranch: z.string().min(1),
+  /** The channels that take posts; an archived one moves to `archivedChannels`. */
   channels: z.array(NameSchema),
+  archivedChannels: z.array(ArchivedChannelSchema).default([]),
   members: z.array(NameSchema),
   approvers: z.array(NameSchema),
   requiredCapabilities: z.array(z.string()),
@@ -233,6 +255,8 @@ export type TaskReturn = z.infer<typeof TaskReturnSchema>;
 export const TaskFrontmatterSchema = z.object({
   id: UlidSchema,
   project: NameSchema,
+  /** The channel of the project the task is filed in, where its thread hangs. */
+  channel: NameSchema.default("general"),
   title: z.string().min(1),
   status: TaskStatusSchema,
   createdBy: NameSchema,

@@ -8,6 +8,7 @@ function task(id: string, extra: Partial<Task> = {}): Task {
   return {
     id,
     project: "lab",
+    channel: "general",
     title: id,
     status: "open",
     createdBy: "user",

@@ -11,6 +11,7 @@ export type {
   ThreadSummary,
   DigestResult,
   InitInput,
+  JoinedProject,
   RetireAgentInput,
   RunnerPatch,
   SearchHit,

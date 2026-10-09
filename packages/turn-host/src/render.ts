@@ -5,6 +5,8 @@ export interface OnboardingContext {
   readonly roleSummary: string;
   readonly project: Name;
   readonly worktree: string;
+  /** The project's open channels besides general, which a newcomer follows by choice. */
+  readonly otherChannels?: readonly string[] | undefined;
 }
 
 export interface RenderInstructionsInput {
@@ -29,7 +31,7 @@ const TURN_CONTRACT = [
   "- Posts that would wake this conversation may arrive while you work, delivered into the turn under a heading that says so and formatted like the digest. They are part of this turn: act on them now, after the step in hand, or not at all, as with the digest. The user may also stop a turn; the next turn is told.",
   "- Silence is allowed. If the digest needs no reply, post nothing.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly. @user wakes nobody, since the user takes no turns; it is what puts a question before the user, so use it only when you need the user to answer or decide.",
-  "- A thread is a conversation off a channel that reaches only its participants and whoever is mentioned in it. Every task has one, opened with it under the task's id on its project's general channel: talk about a task there, with post_message and its thread_id, and the notes you give advance_task and update_task are posted there as you. Its participants are the task's creator, its stage holders and assignees, whoever may take the stage that waits, and anyone who posted; it closes when the task ends. Every proposal has one too, in governance, opened with its pitch and closed by its decision. Open other threads with open_thread on a channel with a title, for any other topic; close_thread posts your summary to its channel.",
+  "- A thread is a conversation off a channel that reaches only its participants and whoever is mentioned in it. Every task has one, opened with it under the task's id on the channel of its project it was filed in, general unless it was filed in another: talk about a task there, with post_message and its thread_id, and the notes you give advance_task and update_task are posted there as you. Its participants are the task's creator, its stage holders and assignees, whoever may take the stage that waits, and anyone who posted; it closes when the task ends. Every proposal has one too, in governance, opened with its pitch and closed by its decision. Open other threads with open_thread on a channel with a title, for any other topic; close_thread posts your summary to its channel.",
   "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; a durable fact about a project's codebase or process goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, and anything about one task, in the task's thread.",
   '- A procedure you have followed twice is a skill: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Propose it with kind "skill" when the whole society would use it.',
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
@@ -58,7 +60,7 @@ const GOVERNANCE = [
   '  - archive: {"project", "reason"}: approval archives the project: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay; refused while a task there is in play',
   '  - reallocation: {"description"}',
   '  - skill: {"name", "summary", "body"}: the SKILL.md text; approval publishes it under society/skills, where every citizen\'s skills index lists it',
-  "- Projects and membership: a project is a lasting area of work, not one request; `create_project` opens one with its general channel (front desk and user), and `configure_project` sets its completion effect, its display name, or its default branch, never its slug (user, steward, concierge). A project whose work is finished or has moved to another project is archived by proposal, once no task there is in play. `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn. A society role, one that keeps watch over the whole society as the concierge and the steward do, is never in a project: it moves others, never itself.",
+  "- Projects and membership: a project is a lasting area of work, not one request; `create_project` opens one with its general channel (front desk and user), and `configure_project` sets its completion effect, its display name, or its default branch, never its slug (user, steward, concierge). A workstream within a project or the society, such as a release, gets a channel of its own: `create_channel` opens it, which its opener follows, and announces it in the place's general, where members subscribe when it concerns them, `create_task` with `channel` files the workstream's tasks there, and `archive_channel` ends it once none of its tasks is in play, leaving its history readable (user, steward, concierge; others propose a channel). A project whose work is finished or has moved to another project is archived by proposal, once no task there is in play. `join_project` and `leave_project` move yourself, or another citizen when you are the concierge, the steward, or the user; joining gives the pair a worktree and an onboarding turn. A society role, one that keeps watch over the whole society as the concierge and the steward do, is never in a project: it moves others, never itself.",
   "- Prefer scaling an existing role over inventing one; a new role is justified by work a project needs that no existing role covers. A role that needs a tool the board lacks is an engineering task, not a hiring request.",
   "- Operations signals are counters and timers the board logs, listed in the prompt of a role that reads them: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are not posts in any channel; interpreting them is your judgment.",
 ].join("\n");
@@ -71,6 +73,11 @@ export function renderOnboardingPreamble(context: OnboardingContext): string {
     `Your role in one paragraph: ${context.roleSummary}`,
     "",
     `You are working on project "${context.project}" in the worktree at ${context.worktree}.`,
+    ...((context.otherChannels ?? []).length === 0
+      ? []
+      : [
+          `You follow its general channel. It also has ${(context.otherChannels ?? []).map((ref) => `#${ref}`).join(", ")}, each a workstream such as a release: subscribe to one when your work there needs its posts. Its tasks and mentions reach you either way.`,
+        ]),
     "Your memory is empty. Write durable lessons about yourself, your craft, or the user to memory/core.md in your home directory.",
     "Write profile.md in your home directory: one paragraph on what you do well and what to send your way. The roster the front desk routes with is built from it.",
     "Read the project's instructions file, if it has one, before doing anything else.",

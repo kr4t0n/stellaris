@@ -1997,6 +1997,134 @@ describe("Board", () => {
     expect((await board.readEvents(null)).at(-1)?.type).toBe("turn.completed");
   });
 
+  it("opens a channel for a workstream, files its tasks there, and archives it once they are done", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+
+    // The planners open channels; a work role proposes one instead.
+    await expect(
+      board.createChannel(ENG, { project: "demo", name: "release-1", purpose: "x" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const ref = await board.createChannel(STEW, {
+      project: "demo",
+      name: "release-1",
+      purpose: "Release 0.1.0, which @eng-1 cuts",
+    });
+    expect(ref).toBe("demo/release-1");
+    await expect(
+      board.createChannel(USER, { project: "demo", name: "release-1", purpose: "again" }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    // Its opener follows it, and nobody else until they choose to: the board announces it in the
+    // project's general, writing the purpose's mentions as plain names, so the notice wakes nobody.
+    expect((await board.readAgent("stew")).subscriptions).toContain(ref);
+    for (const name of ["eng-1", "rev-1"]) {
+      expect((await board.readAgent(name)).subscriptions).not.toContain(ref);
+    }
+    expect((await board.listChannel("demo/general")).at(-1)).toMatchObject({
+      author: "board",
+      body: "Channel demo/release-1 opened by stew: Release 0.1.0, which eng-1 cuts. Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.\n",
+      mentions: [],
+    });
+    expect((await board.listChannel(ref)).at(0)).toMatchObject({ mentions: [] });
+    await board.subscribe(ENG, { channel: ref });
+    await board.subscribe(REV, { channel: ref });
+
+    // A task filed there hangs its thread there; a channel that does not exist takes none.
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "cut the release",
+      channel: "release-1",
+    });
+    expect(task.channel).toBe("release-1");
+    expect((await board.readThread(task.id)).channel).toBe(ref);
+    expect((await board.createTask(USER, { project: "demo", title: "elsewhere" })).channel).toBe(
+      "general",
+    );
+    await expect(
+      board.createTask(USER, { project: "demo", title: "lost", channel: "release-9" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const topic = await board.openThread(REV, { channel: ref, title: "changelog wording" });
+
+    // Archiving waits for its tasks, and never takes a channel the board itself uses.
+    await expect(
+      board.archiveChannel(USER, { channel: ref, reason: "shipped" }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await expect(
+      board.archiveChannel(USER, { channel: "demo/general", reason: "x" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      board.archiveChannel(USER, { channel: "governance", reason: "x" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    const archived = await board.archiveChannel(STEW, { channel: ref, reason: "0.1.0 shipped" });
+    expect(archived).toMatchObject({ name: "release-1", by: "stew", reason: "0.1.0 shipped" });
+
+    // Its threads close, nobody follows it, and it takes nothing new, while its history reads.
+    expect((await board.readThread(topic.id)).state).toBe("closed");
+    for (const name of ["eng-1", "rev-1"]) {
+      expect((await board.readAgent(name)).subscriptions).not.toContain(ref);
+    }
+    expect((await board.listChannels()).find((each) => each.ref === ref)).toMatchObject({
+      archived: { reason: "0.1.0 shipped" },
+    });
+    expect((await board.listChannel(ref)).at(0)?.body).toContain("Channel demo/release-1 opened");
+    await expect(board.postMessage(ENG, { channel: ref, body: "late" })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(
+      board.createTask(USER, { project: "demo", title: "late", channel: "release-1" }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await expect(board.subscribe(ENG, { channel: ref })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(
+      board.createChannel(USER, { project: "demo", name: "release-1", purpose: "reuse" }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect((await board.listChannel("demo/general")).at(-1)).toMatchObject({
+      author: "board",
+      body: expect.stringContaining("Channel demo/release-1 is archived by stew"),
+    });
+    const events = await board.readEvents(null);
+    expect(events.find((event) => event.type === "channel.archived")?.payload).toMatchObject({
+      channel: ref,
+      threadsClosed: [topic.id],
+      unsubscribed: ["eng-1", "rev-1", "stew"],
+    });
+
+    // A newcomer follows general, and joining names the project's other open channels, never the
+    // archived one; a society channel is announced in the society's general.
+    await board.createChannel(USER, { project: "demo", name: "release-2", purpose: "0.2.0" });
+    await board.addProject(USER, { slug: "other" });
+    const { agent } = await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["other"],
+    });
+    expect(agent.subscriptions).not.toContain("demo/dev");
+    expect((await board.readAgent("user")).subscriptions).not.toContain("demo/release-2");
+    const joined = await board.joinProject(USER, { project: "demo", agent: "eng-2" });
+    expect(joined.subscriptions).toContain("demo/general");
+    expect(joined.otherChannels).toEqual(["demo/dev", "demo/release-2"]);
+
+    // A channel a proposal asked for is followed by its proposer once approved.
+    const proposal = await board.propose(ENG, {
+      kind: "channel",
+      charter: { project: "demo", name: "perf", purpose: "Performance work" },
+      rationale: "Benchmarks need a place.",
+    });
+    await board.approve(STEW, { proposal_id: proposal.id });
+    expect((await board.readAgent("eng-1")).subscriptions).toContain("demo/perf");
+    expect((await board.readAgent("stew")).subscriptions).not.toContain("demo/perf");
+    expect(await board.createChannel(USER, { name: "releases", purpose: "All releases" })).toBe(
+      "releases",
+    );
+    expect((await board.listChannel("general")).at(-1)?.body).toContain(
+      "Channel releases opened by user: All releases.",
+    );
+  });
+
   it("resolves a relative data directory, so worktree and home paths never depend on a cwd", async () => {
     const relative = path.relative(process.cwd(), dir);
     expect(path.isAbsolute(relative)).toBe(false);

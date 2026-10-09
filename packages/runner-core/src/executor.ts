@@ -276,6 +276,7 @@ export class TurnExecutor {
   async land(request: LandRequest): Promise<MergeOutcome> {
     return this.withProjectLock(request.repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(request.repo, this.layout.repo(request.repo.slug));
+      await this.git.ensureDefaultBranch(repoDir, request.repo);
       if (!(await this.git.branchExists(repoDir, request.branch))) {
         return { ok: true, detail: "nothing to land, since the task left no branch" };
       }
@@ -298,9 +299,19 @@ export class TurnExecutor {
   /** What a branch of a project's repository here changed, or null when there is none. */
   async branchChanges(read: BranchChangesRead): Promise<BranchChanges | null> {
     const repoDir = await this.repoHere(read.repo.slug);
-    return repoDir === null
-      ? null
-      : this.git.branchChanges(repoDir, read.branch, read.repo.defaultBranch, BRANCH_CHANGES_LIMIT);
+    if (repoDir === null) {
+      return null;
+    }
+    // Counted from the default branch, which a project moved to another may not have here yet.
+    await this.withProjectLock(read.repo.slug, () =>
+      this.git.ensureDefaultBranch(repoDir, read.repo),
+    );
+    return this.git.branchChanges(
+      repoDir,
+      read.branch,
+      read.repo.defaultBranch,
+      BRANCH_CHANGES_LIMIT,
+    );
   }
 
   /** A project's repository on this runner, or null when it has none. */
@@ -340,6 +351,7 @@ export class TurnExecutor {
     const { repo } = workspace;
     return this.withProjectLock(repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(repo, this.layout.repo(repo.slug));
+      await this.git.ensureDefaultBranch(repoDir, repo);
       if (workspace.kind === "task") {
         const branch = taskBranch(workspace.taskId);
         await this.git.ensureBranch(repoDir, branch, repo.defaultBranch);

@@ -3016,16 +3016,23 @@ export class Board {
     );
   }
 
-  /** Sets a project's completion effect. */
   /**
-   * Sets a project's completion effect, its display name, or both. The slug stays: addresses,
-   * channel references, branches, and runners' directories all carry it.
+   * Sets a project's completion effect, display name, or default branch, any of them at once. The
+   * slug stays: addresses, channel references, branches, and runners' directories all carry it. A
+   * new default branch the project's repository lacks is made by its runner before the next turn.
    */
   async configureProject(actor: Actor, input: VerbInput<"configure_project">): Promise<Project> {
     const args = VerbInputs.configure_project.parse(input);
     await this.authorize(actor, "configure_project");
-    if (args.on_done === undefined && args.name === undefined) {
-      throw new BoardError("VALIDATION", "configure_project needs on_done, name, or both");
+    if (
+      args.on_done === undefined &&
+      args.name === undefined &&
+      args.default_branch === undefined
+    ) {
+      throw new BoardError(
+        "VALIDATION",
+        "configure_project needs on_done, name, or default_branch",
+      );
     }
     return this.mutex.run(async () => {
       const previous = await this.readActiveProject(args.project);
@@ -3033,12 +3040,17 @@ export class Board {
         ...current,
         ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
         ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.default_branch === undefined ? {} : { defaultBranch: args.default_branch }),
       }));
       await this.events.append("project.configured", actor.name, {
         slug: project.slug,
         onDone: project.onDone,
         name: project.name,
+        defaultBranch: project.defaultBranch,
         ...(project.name === previous.name ? {} : { previousName: previous.name }),
+        ...(project.defaultBranch === previous.defaultBranch
+          ? {}
+          : { previousDefaultBranch: previous.defaultBranch }),
       });
       return project;
     });

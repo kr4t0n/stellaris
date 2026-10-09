@@ -951,6 +951,59 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await hub.assign({ ...dispatch, onboarding: false })).toBeNull();
   });
 
+  it("moves a project to a new default branch: the next task starts from it and lands on it", async () => {
+    const { board } = await Board.init(dir, { name: "branches" });
+    await board.addProject(USER, { slug: "demo", onDone: "merge" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "sage",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const SAGE = { name: "sage", role: "engineer" };
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        await writeFile(path.join(request.spec.cwd, "notes.md"), `${request.prompt.length}\n`);
+        return completed("wrote notes");
+      },
+    };
+    const { run, runner, hub } = await start(board, backend);
+    const turnOn = (taskId: string) =>
+      run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: taskId, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+    const first = await board.createTask(USER, { project: "demo", title: "first" });
+    expect((await turnOn(first.id)).exitReason).toBe("completed");
+
+    // The repository has only main; the next turn makes trunk where the clone stands.
+    await board.configureProject(USER, { project: "demo", default_branch: "trunk" });
+    const second = await board.createTask(USER, { project: "demo", title: "second" });
+    expect((await turnOn(second.id)).exitReason).toBe("completed");
+    const repo = runner.paths.repo("demo");
+    const log = async (ref: string) =>
+      (await execa("git", ["log", "--oneline", ref], { cwd: repo })).stdout;
+    await board.claimTask(SAGE, { task_id: second.id });
+    expect(await board.advanceTask(SAGE, { task_id: second.id })).toMatchObject({
+      completing: true,
+    });
+    expect(await hub.completeTask("demo", second.id)).toBe("done");
+    expect(await log("trunk")).toContain(`merge: land task/${second.id} on trunk`);
+    expect(await log("main")).not.toContain(`merge: land task/${second.id}`);
+    expect((await board.getTask(USER, { task_id: second.id })).status).toBe("done");
+  });
+
   it("reads what a task's turns left from its branch on the project's runner", async () => {
     const { board, userToken } = await Board.init(dir, { name: "files" });
     for (const slug of ["demo", "idle"]) {

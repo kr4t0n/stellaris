@@ -832,7 +832,13 @@ describe("Board", () => {
       (event) => event.type === "project.configured",
     );
     expect(configured.map((event) => event.payload)).toEqual([
-      { slug: "demo", onDone: before.onDone, name: "Demo work", previousName: before.name },
+      {
+        slug: "demo",
+        onDone: before.onDone,
+        name: "Demo work",
+        defaultBranch: before.defaultBranch,
+        previousName: before.name,
+      },
     ]);
 
     // Something must change, the name must say something, and the verb is the planners' alone.
@@ -845,6 +851,31 @@ describe("Board", () => {
     await expect(
       board.configureProject(ENG, { project: "demo", name: "Mine" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("moves a project to another default branch, never into the board's own namespaces", async () => {
+    const { board } = await society();
+    const moved = await board.configureProject(USER, { project: "demo", default_branch: "trunk" });
+    expect(moved).toMatchObject({ slug: "demo", defaultBranch: "trunk" });
+    const configured = (await board.readEvents(null)).filter(
+      (event) => event.type === "project.configured",
+    );
+    expect(configured.at(-1)?.payload).toMatchObject({
+      defaultBranch: "trunk",
+      previousDefaultBranch: "main",
+    });
+    for (const [refused, why] of [
+      ["task/01M4D03FTQRBZ6JCCS1QNWDZ4Q", /the board's own branches/],
+      ["agent/eng-1", /the board's own branches/],
+      ["a..b", /not a branch name git takes/],
+      ["x/", /not a branch name git takes/],
+      ["y.lock", /not a branch name git takes/],
+    ] as const) {
+      await expect(
+        board.configureProject(USER, { project: "demo", default_branch: refused }),
+      ).rejects.toThrow(why);
+    }
+    expect((await board.readProject("demo")).defaultBranch).toBe("trunk");
   });
 
   it("runs completion effects: a merge project completes through the board, and a failure reopens the last stage", async () => {

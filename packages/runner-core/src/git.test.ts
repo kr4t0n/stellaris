@@ -7,6 +7,10 @@ import { ExecaGit, taskBranch } from "./git.js";
 
 const project = { slug: "demo", origin: null, defaultBranch: "main" };
 
+async function rev(repo: string, ref: string): Promise<string> {
+  return (await execa("git", ["rev-parse", ref], { cwd: repo })).stdout.trim();
+}
+
 function committer(name: string): string[] {
   return ["-c", `user.name=${name}`, "-c", `user.email=${name}@x`];
 }
@@ -224,6 +228,37 @@ describe("ExecaGit", () => {
     await commit(repoDir, "ada", "feat: after");
     expect(await git.branchChanges(repoDir, branch, "main", 10)).toEqual(before);
     expect(await git.branchChanges(repoDir, "task/none", "main", 10)).toBeNull();
+  });
+
+  it("makes sure of a project's new default branch: from the remote, else where the clone stands", async () => {
+    // A local repository: the new branch starts where the clone stands, and is left alone after.
+    const local = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    await git.ensureDefaultBranch(local, { ...project, defaultBranch: "trunk" });
+    expect(await rev(local, "trunk")).toBe(await rev(local, "main"));
+    await execa("git", [...committer("eng-1"), "commit", "--allow-empty", "-m", "more"], {
+      cwd: local,
+    });
+    await git.ensureDefaultBranch(local, { ...project, defaultBranch: "trunk" });
+    expect(await rev(local, "trunk")).not.toBe(await rev(local, "main"));
+
+    // A clone of a remote that has the branch takes the remote's, with its own history.
+    const origin = path.join(dir, "origin");
+    await execa("git", ["init", "-b", "main", origin]);
+    await execa("git", [...committer("u"), "commit", "--allow-empty", "-m", "root"], {
+      cwd: origin,
+    });
+    await execa("git", ["switch", "-c", "release"], { cwd: origin });
+    await execa("git", [...committer("u"), "commit", "--allow-empty", "-m", "cut"], {
+      cwd: origin,
+    });
+    await execa("git", ["switch", "main"], { cwd: origin });
+    const remote = { slug: "remote", origin, defaultBranch: "main" };
+    const clone = await git.ensureRepo(remote, path.join(dir, "repos", "remote"));
+    await git.ensureDefaultBranch(clone, { ...remote, defaultBranch: "release" });
+    expect(await rev(clone, "release")).toBe(await rev(origin, "release"));
+    // One the remote lacks starts where the clone stands, as for a local repository.
+    await git.ensureDefaultBranch(clone, { ...remote, defaultBranch: "next" });
+    expect(await rev(clone, "next")).toBe(await rev(clone, "HEAD"));
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

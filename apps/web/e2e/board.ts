@@ -757,7 +757,13 @@ export async function fakeBoard(
             member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           );
         case "/api/verbs/configure_project":
-          lab = { ...lab, ...(typeof body["name"] === "string" ? { name: body["name"] } : {}) };
+          lab = {
+            ...lab,
+            ...(typeof body["name"] === "string" ? { name: body["name"] } : {}),
+            ...(typeof body["default_branch"] === "string"
+              ? { defaultBranch: body["default_branch"] }
+              : {}),
+          };
           return json(route, lab);
         case "/api/verbs/remove_knowledge":
           societyTopics = societyTopics.filter((topic) => topic.topic !== body["topic"]);

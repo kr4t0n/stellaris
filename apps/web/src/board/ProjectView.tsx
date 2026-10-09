@@ -20,26 +20,34 @@ import { PaneHeader, PaneNote } from "./Pane.js";
 import { groupTasks, PHASES } from "./tasks.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
-/** Changes the name the board shows for a project; its slug, which everything refers to it by, stays. */
-function RenameForm({ project, onDone }: { project: Project; onDone: () => void }) {
+/**
+ * Changes the name the board shows for a project, the branch its tasks start from and land on, or
+ * both; its slug, which everything refers to it by, stays.
+ */
+function EditForm({ project, onDone }: { project: Project; onDone: () => void }) {
   const { api } = useSession();
   const client = useQueryClient();
   const [name, setName] = useState(project.name);
-  const rename = useMutation({
-    mutationFn: () => api.renameProject(project.slug, name.trim()),
+  const [branch, setBranch] = useState(project.defaultBranch);
+  const changes = {
+    ...(name.trim() === project.name ? {} : { name: name.trim() }),
+    ...(branch.trim() === project.defaultBranch ? {} : { default_branch: branch.trim() }),
+  };
+  const save = useMutation({
+    mutationFn: () => api.configureProject(project.slug, changes),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["projects"] });
       onDone();
     },
   });
-  const unchanged = name.trim() === "" || name.trim() === project.name;
+  const unchanged = Object.keys(changes).length === 0 || name.trim() === "" || branch.trim() === "";
   return (
     <form
-      aria-label={`Rename ${project.slug}`}
+      aria-label={`Edit ${project.slug}`}
       className="space-y-2 border-b border-line bg-surface-2/20 p-3"
       onSubmit={(event) => {
         event.preventDefault();
-        rename.mutate();
+        save.mutate();
       }}
     >
       <div className="flex items-center gap-2">
@@ -50,15 +58,28 @@ function RenameForm({ project, onDone }: { project: Project; onDone: () => void 
           onChange={(event) => setName(event.target.value)}
           className={`${FIELD} min-w-0 flex-1`}
         />
+        {/* The field is as wide as its box, so the box sets the width. */}
+        <div className="w-36 shrink-0">
+          <input
+            value={branch}
+            maxLength={100}
+            spellCheck={false}
+            aria-label="Default branch"
+            onChange={(event) => setBranch(event.target.value)}
+            className={`${FIELD} font-mono`}
+          />
+        </div>
         <Button onClick={onDone}>Cancel</Button>
-        <Button variant="primary" type="submit" disabled={rename.isPending || unchanged}>
-          {rename.isPending ? "Saving…" : "Rename"}
+        <Button variant="primary" type="submit" disabled={save.isPending || unchanged}>
+          {save.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
       <p className="text-meta">
-        Only the name shown changes; {project.slug} stays in its addresses, channels, and branches.
+        {project.slug} stays in its addresses, channels, and branches. A new default branch is where
+        tasks start and land from now; its runner makes it from the project's remote, or from where
+        the repository stands, before the next turn.
       </p>
-      <Failure error={rename.error} />
+      <Failure error={save.error} />
     </form>
   );
 }
@@ -66,7 +87,7 @@ function RenameForm({ project, onDone }: { project: Project; onDone: () => void 
 /**
  * A project at a glance: who works in it, where its tasks stand, how they end, its dashboard, and
  * what it knows; an archived one also says when and why, and lists its channels, which the
- * navigator no longer does.
+ * navigator no longer does. Its name and default branch are edited here.
  */
 export function ProjectView() {
   const { slug } = useParams({ from: "/p/$slug" });
@@ -77,7 +98,7 @@ export function ProjectView() {
   const dashboard = useDashboard(slug);
   const knowledge = useKnowledge(slug);
   const now = useNow(30_000);
-  const [renaming, setRenaming] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const project = projects.data?.find((candidate) => candidate.slug === slug);
   if (project === undefined) {
@@ -100,8 +121,8 @@ export function ProjectView() {
         subtitle={`${slug} · ${project.repo ?? "a local repository"} · ${project.defaultBranch}`}
         trailing={
           <>
-            {renaming || project.archived !== undefined ? null : (
-              <Button onClick={() => setRenaming(true)}>Rename…</Button>
+            {editing || project.archived !== undefined ? null : (
+              <Button onClick={() => setEditing(true)}>Edit…</Button>
             )}
             <Link
               to="/p/$slug/tasks"
@@ -113,7 +134,7 @@ export function ProjectView() {
           </>
         }
       />
-      {renaming ? <RenameForm project={project} onDone={() => setRenaming(false)} /> : null}
+      {editing ? <EditForm project={project} onDone={() => setEditing(false)} /> : null}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {project.archived === undefined ? null : (
           <p className="rounded-lg bg-surface-2/40 px-3 py-2 text-sm text-fg-secondary">

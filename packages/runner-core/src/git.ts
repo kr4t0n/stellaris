@@ -28,6 +28,12 @@ export interface GitOps {
   /** Creates `branch` from `base` in the clone unless it exists. */
   ensureBranch(repoDir: string, branch: string, base: string): Promise<void>;
   /**
+   * Makes sure the project's default branch is in the clone, as after the board moved the project
+   * to another: fetched from the project's remote when it has one there, else started where the
+   * clone stands.
+   */
+  ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<void>;
+  /**
    * A task conversation's worktree, on the task's branch when no other worktree has it checked
    * out, else detached at the branch's tip, where the turn can read the work but not commit to it.
    */
@@ -171,6 +177,23 @@ export class ExecaGit implements GitOps {
     if (!(await this.branchExists(repoDir, branch))) {
       await must(["branch", branch, base], repoDir);
     }
+  }
+
+  async ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<void> {
+    const branch = project.defaultBranch;
+    if (await this.branchExists(repoDir, branch)) {
+      return;
+    }
+    if (project.origin !== null) {
+      const fetched = await git(
+        ["fetch", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+        repoDir,
+      );
+      if (fetched.exitCode === 0) {
+        return;
+      }
+    }
+    await must(["branch", branch, "HEAD"], repoDir);
   }
 
   async ensureTaskWorktree(repoDir: string, requestedDir: string, branch: string): Promise<string> {

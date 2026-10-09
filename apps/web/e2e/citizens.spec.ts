@@ -327,24 +327,34 @@ test("a society knowledge topic is removed from its page after a second click", 
   ]);
 });
 
-test("a project is renamed from its page, and only its shown name changes", async ({ page }) => {
+test("a project's name and default branch are edited from its page, and its slug stays", async ({
+  page,
+}) => {
   const board = await fakeBoard(page);
   await page.goto("/p/lab");
   const view = page.getByRole("region", { name: "Board content" });
-  await view.getByRole("button", { name: "Rename…" }).click();
-  const form = page.getByRole("form", { name: "Rename lab" });
+  await view.getByRole("button", { name: "Edit…" }).click();
+  const form = page.getByRole("form", { name: "Edit lab" });
   await expect(form).toContainText("lab stays in its addresses, channels, and branches");
-  const field = form.getByRole("textbox", { name: "Project name" });
-  await expect(field).toHaveValue("Lab");
-  await expect(form.getByRole("button", { name: "Rename" })).toBeDisabled();
-  await field.fill("Shortest paths lab");
-  await form.getByRole("button", { name: "Rename" }).click();
+  const name = form.getByRole("textbox", { name: "Project name" });
+  const branch = form.getByRole("textbox", { name: "Default branch" });
+  await expect(name).toHaveValue("Lab");
+  await expect(branch).toHaveValue("main");
+  await expect(form.getByRole("button", { name: "Save" })).toBeDisabled();
+  await name.fill("Shortest paths lab");
+  await branch.fill("trunk");
+  await form.getByRole("button", { name: "Save" }).click();
 
   await expect(form).toHaveCount(0);
   await expect(view.getByRole("heading", { name: "Shortest paths lab" })).toBeVisible();
+  await expect(view).toContainText("lab · a local repository · trunk");
   await expect(page).toHaveURL(/\/p\/lab$/);
   await expect(page.getByRole("link", { name: "Shortest paths lab", exact: true })).toBeVisible();
+  // Only what changed is sent, in one call.
   expect(board.writes).toEqual([
-    { path: "/api/verbs/configure_project", body: { project: "lab", name: "Shortest paths lab" } },
+    {
+      path: "/api/verbs/configure_project",
+      body: { project: "lab", name: "Shortest paths lab", default_branch: "trunk" },
+    },
   ]);
 });

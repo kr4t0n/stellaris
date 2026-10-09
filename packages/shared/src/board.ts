@@ -53,6 +53,30 @@ export type Society = z.infer<typeof SocietySchema>;
 export const CompletionEffectSchema = z.enum(["none", "merge"]);
 export type CompletionEffect = z.infer<typeof CompletionEffectSchema>;
 
+/**
+ * A project's default branch, the one its tasks start from and land on: a git branch name outside
+ * `task/` and `agent/`, where the board keeps its own branches.
+ */
+export const DefaultBranchSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a branch name is letters, digits, and . _ / -")
+  .refine(
+    (branch) =>
+      !branch.includes("..") &&
+      !branch.includes("//") &&
+      !branch.endsWith("/") &&
+      !branch.endsWith(".") &&
+      !branch.endsWith(".lock"),
+    "not a branch name git takes",
+  )
+  .refine(
+    (branch) => !branch.startsWith("task/") && !branch.startsWith("agent/"),
+    "task/ and agent/ hold the board's own branches",
+  );
+
 export const StageIdSchema = z.string().regex(/^s[1-9][0-9]*$/, "expected a stage id such as s1");
 export type StageId = z.infer<typeof StageIdSchema>;
 

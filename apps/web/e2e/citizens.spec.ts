@@ -119,6 +119,8 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
   const form = page.getByRole("form", { name: "Model of desk" });
   const picker = form.getByRole("button", { name: /^Model: / });
   await expect(picker).toHaveAccessibleName("Model: CLI default · Opus 5.5");
+  // The choices are the CLI's on the runner desk's turns run on, which the form names.
+  await expect(form).toContainText("As claude on pod lists them, where this citizen's turns run.");
   await expect(form.getByRole("button", { name: "Save" })).toBeDisabled();
 
   await picker.click();

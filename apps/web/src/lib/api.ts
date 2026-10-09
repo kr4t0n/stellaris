@@ -11,7 +11,7 @@ import {
   AgentSchema,
   MemberSchema,
   MetricsSchema,
-  ModelOptionSchema,
+  RunnerModelsSchema,
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
@@ -30,7 +30,6 @@ import {
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
   UlidSchema,
-  type CliKind,
   type MetricsWindow,
 } from "@stellaris/shared";
 import { z } from "zod";
@@ -324,7 +323,9 @@ export function createApi(token: string) {
     stopTurn: (turnId: string) =>
       write("POST", `/api/turns/${encodeURIComponent(turnId)}/stop`, token, {}, StoppedSchema),
     /** The models a CLI offers, from its own listing. */
-    models: (cli: CliKind) => get(`/api/models/${cli}`, token, ModelOptionSchema.array()),
+    /** A citizen's choices, from the runner its turns run on, which the answer names. */
+    agentModels: (name: string) =>
+      get(`/api/agents/${encodeURIComponent(name)}/models`, token, RunnerModelsSchema),
     /** The runners the society has, connected or not, with what each offers. */
     runners: () => get("/api/runners", token, RunnerSchema.array()),
     /** Runners that asked to join and wait for the user's approval, newest first. */

@@ -269,7 +269,33 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/models/:cli", async (c) => {
     const cli = CliKindSchema.parse(c.req.param("cli"));
     // No runner with the CLI connected, or the CLI failed to list: the interface offers its default.
-    return c.json(models === undefined ? [] : await models.list(cli).catch(() => []));
+    return c.json(
+      models === undefined
+        ? []
+        : await models.list(cli).then(
+            (listed) => listed.models,
+            () => [],
+          ),
+    );
+  });
+  // A citizen's choices come from the runner its turns run on, since that runner's install of the
+  // CLI decides which models and effort levels exist: its pinned runner, else where its projects
+  // live, else any runner with its CLI.
+  api.get("/agents/:name/models", async (c) => {
+    const agent = await board.readAgent(c.req.param("name"));
+    if (agent.cli === null) {
+      throw new BoardError("INVALID_STATE", `${agent.name} takes no turns, so it has no models`);
+    }
+    if (models === undefined) {
+      throw new RunnerAwayError("this server asks no runner for models");
+    }
+    const placed = new Map(
+      (await board.listProjects()).map((project) => [project.slug, project.runner]),
+    );
+    const prefer = [agent.homeRunner, ...agent.memberships.map((slug) => placed.get(slug))].filter(
+      (runner): runner is string => runner !== undefined,
+    );
+    return c.json(await models.list(agent.cli, prefer));
   });
   api.put("/roles/:name", async (c) => {
     const charter = RoleCharterSchema.parse({

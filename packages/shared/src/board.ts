@@ -309,6 +309,14 @@ export const ModelOptionSchema = z.object({
 });
 export type ModelOption = z.infer<typeof ModelOptionSchema>;
 
+/** A CLI's models as one runner's install of it lists them, and which runner that was. */
+export const RunnerModelsSchema = z.object({
+  runner: NameSchema,
+  cli: CliKindSchema,
+  models: z.array(ModelOptionSchema),
+});
+export type RunnerModels = z.infer<typeof RunnerModelsSchema>;
+
 export const AgentStatusSchema = z.enum(["active", "retired"]);
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 

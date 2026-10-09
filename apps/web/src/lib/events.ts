@@ -81,8 +81,9 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "role.added") {
     return [["roles"]];
   }
+  // A runner that comes or goes may list other models, and the server forgets what it listed.
   if (type.startsWith("runner.")) {
-    return [["runners"]];
+    return [["runners"], ["models"]];
   }
   if (type.startsWith("proposal.")) {
     return [["proposals"], ["proposal", text(payload["proposalId"])], ["metrics"]];

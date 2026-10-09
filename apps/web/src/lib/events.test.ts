@@ -44,6 +44,11 @@ describe("board events", () => {
       ["task-changes"],
       ["metrics"],
     ]);
+    // A runner that reconnects, as after an upgrade, may list other models.
+    expect(staleKeys(event("runner.changed", { runner: "merlin" }, id))).toEqual([
+      ["runners"],
+      ["models"],
+    ]);
     expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([
       ["knowledge", "society"],
     ]);

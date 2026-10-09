@@ -20,6 +20,7 @@ import {
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
+  RunnerModelsSchema,
   type AgentEvent,
 } from "@stellaris/shared";
 import { execa } from "execa";
@@ -630,6 +631,68 @@ describe("turns on a runner over the runner protocol", () => {
     expect(tracked).toContain("skills/chart/SKILL.md");
     expect(tracked.filter((file) => /scratch|node_modules|paper\.pdf/.test(file))).toEqual([]);
     await expect(readFile(path.join(cwd, "download.html"), "utf8")).resolves.toContain("html");
+  });
+
+  it("lists a citizen's models from its own runner, and asks again once that runner reconnects", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "models" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const listed: Record<string, number> = { a: 0, b: 0 };
+    const efforts: Record<string, string[]> = { a: ["high"], b: [] };
+    const backendOn = (runner: "a" | "b"): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${runner}`),
+      runTurn: () => Promise.resolve(completed("done")),
+      listModels: () => {
+        listed[runner] = (listed[runner] ?? 0) + 1;
+        return Promise.resolve([
+          {
+            id: `opus-${runner}`,
+            name: "Opus",
+            description: "",
+            isDefault: true,
+            efforts: (efforts[runner] ?? []).map((id) => ({ id, description: "" })),
+          },
+        ]);
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "a",
+      backends: () => ({ claude: backendOn("a") }),
+      extraRunners: [{ name: "b", backends: () => ({ claude: backendOn("b") }) }],
+    });
+    const { app, hub } = society;
+    const models = async () => {
+      const response = await app.request("/api/agents/stew/models", {
+        headers: { authorization: `Bearer ${userToken}` },
+      });
+      return RunnerModelsSchema.parse(await response.json());
+    };
+
+    // Pinned to b, its list is b's, even though a is first by name.
+    await board.setAgentRunner(USER, "stew", "b");
+    expect(await models()).toMatchObject({ runner: "b", models: [{ id: "opus-b", efforts: [] }] });
+    await models();
+    expect(listed).toEqual({ a: 0, b: 1 });
+
+    // An upgrade reconnects b, whose CLI now lists effort levels: the kept list is dropped.
+    efforts["b"] = ["low", "high"];
+    await hub.register("b", {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    expect((await models()).models[0]?.efforts.map((effort) => effort.id)).toEqual(["low", "high"]);
+    expect(listed).toEqual({ a: 0, b: 2 });
   });
 
   it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {

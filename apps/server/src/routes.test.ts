@@ -387,12 +387,23 @@ describe("board server routes", () => {
       board,
       version: "t",
       models: {
-        list: (cli) =>
-          Promise.resolve(
-            cli === "claude"
-              ? [{ id: "sonnet", name: "Sonnet 5", description: "", isDefault: false, efforts: [] }]
-              : [],
-          ),
+        list: (cli, prefer = []) =>
+          Promise.resolve({
+            runner: prefer[0] ?? "any",
+            cli,
+            models:
+              cli === "claude"
+                ? [
+                    {
+                      id: "sonnet",
+                      name: "Sonnet 5",
+                      description: "",
+                      isDefault: false,
+                      efforts: [],
+                    },
+                  ]
+                : [],
+          }),
       },
     });
     expect(
@@ -401,6 +412,23 @@ describe("board server routes", () => {
         .parse(await (await app.request("/api/models/claude", { headers })).json()),
     ).toEqual([expect.objectContaining({ id: "sonnet" })]);
     expect((await app.request("/api/models/gemini", { headers })).status).toBe(400);
+
+    // A citizen's list comes from the runner its turns run on, which the answer names.
+    const listed = async (name: string) => {
+      const response = await app.request(`/api/agents/${name}/models`, { headers });
+      return {
+        status: response.status,
+        body: z
+          .object({ runner: z.string(), cli: z.string(), models: z.array(z.unknown()) })
+          .partial()
+          .parse(await response.json()),
+      };
+    };
+    expect((await listed("eng-1")).body).toMatchObject({ runner: "any", cli: "claude" });
+    await board.addRunner(USER, "laptop");
+    await board.setAgentRunner(USER, "eng-1", "laptop");
+    expect((await listed("eng-1")).body.runner).toBe("laptop");
+    expect((await listed("user")).status).toBe(409);
 
     const set = await app.request("/api/agents/eng-1/model", {
       method: "PUT",

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { Picker, type Choice } from "../components/Picker.js";
 import { ApiError } from "../lib/api.js";
-import { useModels, useSession } from "../lib/session.js";
+import { useAgentModels, useSession } from "../lib/session.js";
 import { Failure } from "./ThreadForms.js";
 
 /** The CLI's default, as a choice: no model set on the citizen. */
@@ -62,7 +62,7 @@ function effortChoicesOf(model: ModelOption | undefined, unlisted: string | null
 export function ModelForm({ member, onDone }: { member: Member; onDone: () => void }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const models = useModels(member.cli);
+  const models = useAgentModels(member.name);
   const current = member.model ?? CLI_DEFAULT;
   const currentEffort = member.effort ?? MODEL_DEFAULT;
   const [choice, setChoice] = useState(current);
@@ -80,7 +80,7 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
     onSuccess: onDone,
   });
 
-  const listed = models.data ?? [];
+  const listed = models.data?.models ?? [];
   const unlisted =
     member.model !== undefined && !listed.some((model) => model.id === member.model)
       ? member.model
@@ -149,6 +149,11 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
+      {models.data === undefined ? null : (
+        <p className="text-meta">
+          As {models.data.cli} on {models.data.runner} lists them, where this citizen's turns run.
+        </p>
+      )}
       <Failure error={save.error} />
     </form>
   );

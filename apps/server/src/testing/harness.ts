@@ -10,6 +10,7 @@ import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import type { Hono } from "hono";
 import type { z } from "zod";
 import { createApp, type AppDependencies } from "../app.js";
+import { ModelCatalog } from "../models.js";
 import { EnrollmentDesk } from "../enrollment.js";
 import { TurnHub } from "../turn-hub.js";
 import { USER } from "./scripted-backend.js";
@@ -96,7 +97,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     version: "test",
     turns,
     runners: hub,
-    models: { list: (cli) => hub.models(cli) },
+    models: new ModelCatalog(hub),
     enrollments: new EnrollmentDesk(board, { pollIntervalMs: 50 }),
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),

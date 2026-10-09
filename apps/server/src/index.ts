@@ -84,7 +84,7 @@ const app = createApp({
   version: VERSION,
   turns,
   scheduler: view,
-  models: new ModelCatalog((cli) => runners.models(cli)),
+  models: new ModelCatalog(runners),
   runners,
   webDir,
   signIn: { github: config.github, log },

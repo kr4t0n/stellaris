@@ -96,6 +96,7 @@ export class RunnerHub implements TurnRunner {
   private readonly pending = new Map<string, Pending>();
   /** Disconnects being recorded, which `close` waits for. */
   private readonly detaching = new Set<Promise<void>>();
+  private readonly runnerListeners = new Set<(runner: Name) => void>();
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -164,6 +165,7 @@ export class RunnerHub implements TurnRunner {
       clis: hello.clis,
       capabilities: hello.capabilities,
     });
+    this.runnerChanged(name);
     this.log.info({ runner: name, clis: hello.clis, slots: hello.slots }, "runner registered");
     return { name, version: this.version };
   }
@@ -181,6 +183,7 @@ export class RunnerHub implements TurnRunner {
       seat.grace = null;
     }
     await this.board.markRunner(name, { status: "connected" });
+    this.runnerChanged(name);
     return async () => {
       if (seat.send !== send) {
         return;
@@ -504,20 +507,49 @@ export class RunnerHub implements TurnRunner {
   }
 
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */
-  async models(cli: CliKind): Promise<ModelOption[]> {
-    const seat = this.byLoad().find((each) => each.send !== null && each.hello.clis.includes(cli));
-    if (seat === undefined) {
-      throw new Error(`no connected runner has ${cli}`);
+  /**
+   * The connected runner a model list for `cli` comes from: the first of `prefer` that has the CLI,
+   * else the least busy that does; null when no connected runner has it.
+   */
+  modelRunner(cli: CliKind, prefer: readonly Name[] = []): Name | null {
+    const able = (seat: Seat | undefined): seat is Seat =>
+      seat !== undefined && seat.send !== null && seat.hello.clis.includes(cli);
+    const preferred = prefer.map((name) => this.seats.get(name)).find(able);
+    return (preferred ?? this.byLoad().find(able))?.name ?? null;
+  }
+
+  /** The models `cli` lists on a runner, `modelRunner`'s choice when none is named. */
+  async models(cli: CliKind, runner?: Name): Promise<ModelOption[]> {
+    const name = runner ?? this.modelRunner(cli);
+    const seat = name === null ? undefined : this.seats.get(name);
+    if (seat === undefined || seat.send === null || !seat.hello.clis.includes(cli)) {
+      throw new RunnerAwayError(
+        runner === undefined
+          ? `no connected runner has ${cli}`
+          : `runner ${runner} is not connected with ${cli}`,
+      );
     }
     return ModelListSchema.parse(
       await this.request(seat, (request) => ({ type: "models", request, cli })),
     );
   }
 
+  /** Calls `listener` whenever a runner registers, connects, or goes away. */
+  onRunnerChange(listener: (runner: Name) => void): void {
+    this.runnerListeners.add(listener);
+  }
+
+  private runnerChanged(runner: Name): void {
+    for (const listener of this.runnerListeners) {
+      listener(runner);
+    }
+  }
+
   // -------------------------------------------------------------------------------------------
 
   private async detach(seat: Seat): Promise<void> {
     seat.send = null;
+    this.runnerChanged(seat.name);
     seat.disconnectedAt = this.now().getTime();
     for (const [id, pending] of this.pending) {
       if (pending.runner === seat.name) {

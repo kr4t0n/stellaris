@@ -583,6 +583,28 @@ export const ENROLLING_CODE = "BCDF-GHJK";
 /** The turn desk is in at the society with `inFlight`, which its runner can steer and stop. */
 export const DESK_TURN_IN_FLIGHT = "01M3Q2TTTTTTTTTTTTTTTTTTT1";
 
+/** The models Claude Code lists on the pod runner, where desk's turns run. */
+const CLAUDE_MODELS = [
+  {
+    id: "opus",
+    name: "Opus 5.5",
+    description: "For complex work.",
+    isDefault: true,
+    efforts: [
+      { id: "high", description: "Deep reasoning" },
+      { id: "max", description: "Maximum effort" },
+    ],
+    defaultEffort: "high",
+  },
+  {
+    id: "sonnet",
+    name: "Sonnet 5",
+    description: "Efficient for routine tasks.",
+    efforts: [{ id: "high", description: "Deep reasoning" }],
+    defaultEffort: "high",
+  },
+];
+
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
@@ -873,27 +895,8 @@ export async function fakeBoard(
             status: "disconnected",
           },
         ]);
-      case "/api/models/claude":
-        return json(route, [
-          {
-            id: "opus",
-            name: "Opus 5.5",
-            description: "For complex work.",
-            isDefault: true,
-            efforts: [
-              { id: "high", description: "Deep reasoning" },
-              { id: "max", description: "Maximum effort" },
-            ],
-            defaultEffort: "high",
-          },
-          {
-            id: "sonnet",
-            name: "Sonnet 5",
-            description: "Efficient for routine tasks.",
-            efforts: [{ id: "high", description: "Deep reasoning" }],
-            defaultEffort: "high",
-          },
-        ]);
+      case "/api/agents/desk/models":
+        return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
       case "/api/agents/desk/turns":
         return json(route, [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:

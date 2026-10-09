@@ -1,7 +1,7 @@
 import type { Task } from "@stellaris/shared";
 import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
-import type { CliKind, MetricsWindow } from "@stellaris/shared";
+import type { MetricsWindow } from "@stellaris/shared";
 import { ApiError, type Api } from "./api.js";
 
 export interface Session {
@@ -268,12 +268,12 @@ export function useEnrollments() {
 }
 
 /** The models a CLI offers; asking starts the CLI, so the server keeps the list and so does this. */
-export function useModels(cli: CliKind | null) {
+/** A citizen's model choices, as the CLI on the runner its turns run on lists them. */
+export function useAgentModels(name: string) {
   const { api } = useSession();
   return useQuery({
-    queryKey: ["models", cli],
-    queryFn: () => api.models(cli ?? "claude"),
-    enabled: cli !== null,
+    queryKey: ["models", "agent", name],
+    queryFn: () => api.agentModels(name),
     staleTime: 10 * 60_000,
     retry: false,
   });

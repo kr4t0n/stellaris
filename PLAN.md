@@ -198,7 +198,7 @@ Governance    propose(kind, charter)
               approve(proposal_id)          # user and steward only
               reject(proposal_id, reason)   # user and steward only
 Projects      create_project(slug, name, repo?, on_done?)                  # concierge and user
-              configure_project(project, on_done)                          # user, steward, concierge
+              configure_project(project, on_done?, name?)                  # user, steward, concierge; the slug never changes
               archive_project(project, reason)                             # user; others propose kind archive
 Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
@@ -211,6 +211,7 @@ Rules:
 - Each role sees only its own tool set. The MCP endpoint derives the tool list from the token's role. Approve and reject are exposed to the user and the steward.
 - The tool count per role stays small so descriptions are cheap on every turn. Verbs are added, never renamed. Deprecation is by addition.
 - Agents edit their own home files directly. There is no memory verb.
+- A project has two names. Its slug is its identity: addresses, channel references, branches, and the runner's directories all carry it, so it never changes. Its display name is what people read in the board and the sky; whoever creates the project chooses it, and `configure_project` changes it, as the user does from the project's page.
 
 ### 4.4 Channels and threads
 
@@ -643,7 +644,7 @@ The seed charters describe how to plan, never what a kind of work looks like.
 | Citizens  | `/citizens`                  | Every citizen, one row each ordered by role, with its CLI, role, the model it runs, its projects, and whether it is working; opened from the citizen count in the top bar                                                                                                                                                                                                                |
 | Citizen   | `/citizen/<name>`            | What the citizen is doing: the tasks it holds, and its current or latest turn as a live transcript, one per scope it has a turn in; its finished turns with how each ended, its length, tool calls, cost, and report; its profile, core memory, own skills, and charter; a way to wake it for a turn or a reflection, and its model and reasoning effort, chosen from what its CLI lists |
 | Society   | `/society`                   | The society's citizens and where each is now, its roles, its knowledge, and its skills                                                                                                                                                                                                                                                                                                   |
-| Project   | `/p/<slug>`                  | A project's members and where each is now, its tasks by phase, how a task ends, its dashboard, and its knowledge                                                                                                                                                                                                                                                                         |
+| Project   | `/p/<slug>`                  | A project's members and where each is now, its tasks by phase, how a task ends, its dashboard, and its knowledge; the user renames it here                                                                                                                                                                                                                                               |
 | Knowledge | `/knowledge/<scope>/<topic>` | One knowledge topic of a project or of the society, in full                                                                                                                                                                                                                                                                                                                              |
 | Needs you | `/needs-you`                 | What waits on the user, oldest first: proposals the user may decide, stages that name the user or its role and nobody else holds, and questions citizens asked the user with a mention, wherever they asked, until the user answers there                                                                                                                                                |
 | Proposals | `/proposals`                 | Every proposal: those waiting on the user first, oldest first, then those waiting on others, then the decided                                                                                                                                                                                                                                                                            |

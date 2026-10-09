@@ -406,6 +406,14 @@ const LAB_TOPIC = {
   body: `Every run fixes its seed at 42.\n\nThe harness lives in \`bench/\`.\n\nTask ${STAGE_TASK} settled the seed; its branch is task/${STAGE_TASK}.`,
 };
 
+const SOCIETY_TOPIC = {
+  topic: "code-comments",
+  project: null,
+  updatedBy: "stew",
+  updatedAt: CREATED,
+  body: "Comment only what the code cannot say.",
+};
+
 /** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
 const SIGNALS = [
   {
@@ -637,6 +645,8 @@ export async function fakeBoard(
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
+  // Removing a society topic takes it off the list, as the board does.
+  let societyTopics = [SOCIETY_TOPIC];
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
   const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
@@ -744,6 +754,14 @@ export async function fakeBoard(
             route,
             member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           );
+        case "/api/verbs/remove_knowledge":
+          societyTopics = societyTopics.filter((topic) => topic.topic !== body["topic"]);
+          return json(route, {
+            topic: body["topic"],
+            project: null,
+            removedBy: "user",
+            removedAt: "2026-10-09T10:00:00.000Z",
+          });
         case "/api/agents/desk/effort":
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
           return json(
@@ -929,7 +947,7 @@ export async function fakeBoard(
       case "/api/projects/lab/knowledge":
         return json(route, [LAB_TOPIC]);
       case "/api/society/knowledge":
-        return json(route, []);
+        return json(route, societyTopics);
       case "/api/roles":
         return json(route, [
           role("concierge", ["user_post"], true),

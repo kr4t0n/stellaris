@@ -84,6 +84,11 @@ export const VerbInputs = {
     topic: NameSchema,
     body: z.string().min(1),
   }),
+  remove_knowledge: z.object({
+    /** As for write_knowledge: a project you belong to, or null for society knowledge. */
+    project: NameSchema.nullable().default(null),
+    topic: NameSchema,
+  }),
   plan_task: z.object({
     task_id: UlidSchema,
     stages: z.array(PlanEditStageSchema),
@@ -135,6 +140,8 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
   write_knowledge:
     "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those.",
+  remove_knowledge:
+    "Remove a knowledge topic that is wrong, superseded, or folded into another, so no turn or search finds it again. Whoever may write the topic may remove it; the board keeps its text aside for the user to restore.",
   plan_task:
     "Reshape a task's plan from the current stage onward, or after it while someone holds it: keep a stage by passing its id, drop it by leaving it out, add one without an id. Gated stages and on_done: user, steward, concierge.",
   advance_task:

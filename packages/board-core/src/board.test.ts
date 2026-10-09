@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
@@ -1698,6 +1698,80 @@ describe("Board", () => {
     expect(board.resolveToken(token)).toEqual(DESK);
     board.revokeTurnToken(token);
     expect(board.resolveToken(token)).toBeNull();
+  });
+
+  it("removes a knowledge topic for whoever may write it, and sets its text aside", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    await board.writeKnowledge(STEW, {
+      project: null,
+      topic: "old-norm",
+      body: "A superseded rule.",
+    });
+    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run the tests." });
+
+    // Removing is curated as writing is; nothing removes a topic that is not there.
+    await expect(
+      board.removeKnowledge(ENG, { project: null, topic: "old-norm" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      board.removeKnowledge(STEW, { project: null, topic: "missing" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    const removed = await board.removeKnowledge(STEW, { project: null, topic: "old-norm" });
+    expect(removed).toMatchObject({ topic: "old-norm", project: null, removedBy: "stew" });
+    expect(await board.listKnowledge(null)).toEqual([]);
+    expect(await board.search(STEW, { query: "superseded" })).toEqual([]);
+    expect((await board.listChannel("general")).at(-1)?.body).toContain(
+      "Knowledge removed: old-norm",
+    );
+    // The text waits outside the projection for a restore by hand.
+    const aside = board.paths.removedKnowledge("society");
+    const [kept] = await readdir(aside);
+    expect(kept).toMatch(/^old-norm\..+\.md$/);
+    expect(await readFile(path.join(aside, kept ?? ""), "utf8")).toContain("A superseded rule.");
+
+    await board.removeKnowledge(ENG, { project: "demo", topic: "testing" });
+    expect(await board.listKnowledge("demo")).toEqual([]);
+    const events = (await board.readEvents(null)).filter((e) => e.type === "knowledge.removed");
+    expect(events.map((e) => [e.actor, e.payload])).toEqual([
+      ["stew", { topic: "old-norm", project: null }],
+      ["eng-1", { topic: "testing", project: "demo" }],
+    ]);
+  });
+
+  it("grants remove_knowledge once to every charter that grants write_knowledge", async () => {
+    const { board } = await society();
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: MEMBER_VERBS.filter((verb) => verb !== "remove_knowledge"),
+    });
+    await board.setRoleCharter(USER, {
+      name: "reviewer",
+      purpose: "Reviews.",
+      verbs: ["post_message", "read_inbox"],
+    });
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).toContain("remove_knowledge");
+    expect((await reopened.readRole("reviewer")).verbs).not.toContain("remove_knowledge");
+    const granted = (await reopened.readEvents(null)).filter(
+      (event) =>
+        event.type === "role.added" &&
+        JSON.stringify(event.payload["verbsAdded"]) === JSON.stringify(["remove_knowledge"]),
+    );
+    expect(granted.map((event) => event.payload["name"])).toEqual(["engineer"]);
+    // A member's own role file follows its charter.
+    expect(await reopened.readAgentRoleBody("eng-1")).toContain("# eng-1, engineer");
+    // Once applied, it is not applied again, so a charter that later drops the verb keeps that.
+    await reopened.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: MEMBER_VERBS.filter((verb) => verb !== "remove_knowledge"),
+    });
+    await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).not.toContain("remove_knowledge");
   });
 
   it("shares knowledge and skills: write_knowledge, skill promotion, and search over the archive", async () => {

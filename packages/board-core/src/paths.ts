@@ -203,4 +203,8 @@ export class BoardPaths {
   pausedFile(): string {
     return path.join(this.state(), "paused.json");
   }
+  /** Removed knowledge topics, set aside outside the projection, by scope. */
+  removedKnowledge(scope: Name): string {
+    return path.join(this.state(), "removed-knowledge", scope);
+  }
 }

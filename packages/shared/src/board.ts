@@ -601,6 +601,15 @@ export const KnowledgeSchema = z.object({
   updatedAt: IsoDateTimeSchema,
 });
 export type KnowledgeFrontmatter = z.infer<typeof KnowledgeSchema>;
+
+/** A topic taken out of a scope's knowledge, by whom and when. */
+export const RemovedKnowledgeSchema = z.object({
+  topic: NameSchema,
+  project: NameSchema.nullable(),
+  removedBy: NameSchema,
+  removedAt: IsoDateTimeSchema,
+});
+export type RemovedKnowledge = z.infer<typeof RemovedKnowledgeSchema>;
 export interface Knowledge extends KnowledgeFrontmatter {
   readonly body: string;
 }

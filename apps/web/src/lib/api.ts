@@ -11,6 +11,7 @@ import {
   AgentSchema,
   MemberSchema,
   MetricsSchema,
+  RemovedKnowledgeSchema,
   RunnerModelsSchema,
   MessageFrontmatterSchema,
   NameSchema,
@@ -310,6 +311,9 @@ export function createApi(token: string) {
       invoke("approve", token, input, DecisionSchema),
     reject: (input: { proposal_id: string; reason: string }) =>
       invoke("reject", token, input, DecisionSchema),
+    /** Takes a topic off the board; the server keeps its text aside. */
+    removeKnowledge: (input: { project: string | null; topic: string }) =>
+      invoke("remove_knowledge", token, input, RemovedKnowledgeSchema),
     /** A manual or reflection turn for a citizen in one of its scopes, queued by the scheduler. */
     wake: (input: {
       agent: string;

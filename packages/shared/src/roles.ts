@@ -26,6 +26,7 @@ export const VERB_NAMES = [
   "advance_task",
   "configure_project",
   "archive_project",
+  "remove_knowledge",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -86,6 +87,7 @@ export const MEMBER_VERBS: readonly VerbName[] = [
   "join_project",
   "leave_project",
   "write_knowledge",
+  "remove_knowledge",
   "plan_task",
   "advance_task",
 ];

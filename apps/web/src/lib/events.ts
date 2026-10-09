@@ -69,7 +69,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type.startsWith("turn.") || type === "wake.requested" || type === "paused.changed") {
     return [["scheduler"], ["members"]];
   }
-  if (type === "knowledge.written") {
+  if (type === "knowledge.written" || type === "knowledge.removed") {
     return [["knowledge", text(payload["project"]) ?? SOCIETY_SCOPE]];
   }
   if (type.startsWith("agent.") || type === "subscription.changed") {

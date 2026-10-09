@@ -300,3 +300,29 @@ test("the citizen count opens every citizen with its role and model, and each op
   await count.click();
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("a society knowledge topic is removed from its page after a second click", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/society");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("link", { name: /code-comments/ }).click();
+  await expect(page).toHaveURL(/\/knowledge\/society\/code-comments$/);
+  await expect(view).toContainText("Comment only what the code cannot say.");
+
+  // The first click says what removing does; only the second removes.
+  await view.getByRole("button", { name: "Remove…" }).click();
+  const form = page.getByRole("form", { name: "Remove the topic" });
+  await expect(form).toContainText("No turn or search finds code-comments again");
+  await expect(form).toContainText("The server keeps its text aside.");
+  expect(board.writes).toEqual([]);
+  await form.getByRole("button", { name: "Remove topic" }).click();
+
+  await expect(page).toHaveURL(/\/society$/);
+  await expect(view.getByRole("link", { name: /code-comments/ })).toHaveCount(0);
+  await expect(view).toContainText("No knowledge yet.");
+  expect(board.writes).toEqual([
+    { path: "/api/verbs/remove_knowledge", body: { project: null, topic: "code-comments" } },
+  ]);
+});

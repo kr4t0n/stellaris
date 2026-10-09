@@ -1,4 +1,4 @@
-import { readdir, readFile, rename, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import {
   EffortSchema,
   IsoDateTimeSchema,
   KnowledgeSchema,
+  RemovedKnowledgeSchema,
   mayHoldStage,
   MemberProposalSchema,
   MemberSchema,
@@ -54,6 +55,7 @@ import {
   type HomeFileDiff,
   type HomeHistory,
   type Knowledge,
+  type RemovedKnowledge,
   type Member,
   type MemberProposal,
   type Message,
@@ -383,6 +385,7 @@ const OPS_CHANNEL_RETIRED = "ops-channel-retired";
 const DECISIONS_CHANNEL_RETIRED = "decisions-channel-retired";
 const THREAD_CONVERSATIONS = "thread-conversations";
 const ASKS_CHANNEL_OPENED = "asks-channel-opened";
+const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -623,6 +626,7 @@ export class Board {
       DECISIONS_CHANNEL_RETIRED,
       THREAD_CONVERSATIONS,
       ASKS_CHANNEL_OPENED,
+      KNOWLEDGE_REMOVAL,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -651,7 +655,29 @@ export class Board {
     if (pending.includes(ASKS_CHANNEL_OPENED)) {
       await this.openAsksChannel();
     }
+    if (pending.includes(KNOWLEDGE_REMOVAL)) {
+      await this.grantKnowledgeRemoval();
+    }
     await writeJson(file, { applied: [...applied, ...pending] });
+  }
+
+  /**
+   * Whoever may write a scope's knowledge may remove it, so every charter granting
+   * `write_knowledge` is granted `remove_knowledge` once; seed roles have it from their seed.
+   */
+  private async grantKnowledgeRemoval(): Promise<void> {
+    for (const charter of await this.listRoles()) {
+      if (
+        charter.verbs.includes("write_knowledge") &&
+        !charter.verbs.includes("remove_knowledge")
+      ) {
+        await this.writeRoleUnlocked(
+          USER_NAME,
+          { ...charter, verbs: [...charter.verbs, "remove_knowledge"] },
+          { verbsAdded: ["remove_knowledge"] },
+        );
+      }
+    }
   }
 
   /**
@@ -2079,19 +2105,7 @@ export class Board {
     const args = VerbInputs.write_knowledge.parse(input);
     await this.authorize(actor, "write_knowledge");
     return this.mutex.run(async () => {
-      if (args.project === null) {
-        if (!CURATING_ROLES.includes(actor.role)) {
-          throw new BoardError(
-            "FORBIDDEN",
-            "society knowledge is curated by the steward and the user",
-          );
-        }
-      } else {
-        const project = await this.readActiveProject(args.project);
-        if (!CURATING_ROLES.includes(actor.role) && !project.members.includes(actor.name)) {
-          throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${args.project}`);
-        }
-      }
+      await this.assertMayCurate(actor, args.project);
       const data = KnowledgeSchema.parse({
         topic: args.topic,
         project: args.project,
@@ -2119,6 +2133,76 @@ export class Board {
       );
       return { ...data, body: args.body };
     });
+  }
+
+  /**
+   * Retires a topic, by whoever may write it. Its file leaves the knowledge directory, so no turn,
+   * search, or digest finds it again, and is set aside under `state/removed-knowledge`, outside
+   * the projection, for the user to restore by hand. The note in the matching general channel
+   * carries no mention, as a write's does.
+   */
+  async removeKnowledge(
+    actor: Actor,
+    input: VerbInput<"remove_knowledge">,
+  ): Promise<RemovedKnowledge> {
+    const args = VerbInputs.remove_knowledge.parse(input);
+    await this.authorize(actor, "remove_knowledge");
+    return this.mutex.run(async () => {
+      await this.assertMayCurate(actor, args.project);
+      const file =
+        args.project === null
+          ? this.paths.societyKnowledgeFile(args.topic)
+          : this.paths.projectKnowledgeFile(args.project, args.topic);
+      if (!(await exists(file))) {
+        throw new BoardError(
+          "NOT_FOUND",
+          `${args.project ?? "the society"} has no knowledge topic ${args.topic}`,
+        );
+      }
+      const removed = RemovedKnowledgeSchema.parse({
+        topic: args.topic,
+        project: args.project,
+        removedBy: actor.name,
+        removedAt: this.now().toISOString(),
+      });
+      const aside = this.paths.removedKnowledge(args.project ?? SOCIETY_SCOPE);
+      await mkdir(aside, { recursive: true });
+      // The time keeps every removal of a topic written again and removed again.
+      await rename(
+        file,
+        path.join(aside, `${args.topic}.${removed.removedAt.replaceAll(":", "-")}.md`),
+      );
+      await this.events.append("knowledge.removed", actor.name, {
+        topic: args.topic,
+        project: args.project,
+      });
+      const where = args.project === null ? "general" : channelRef(args.project, "general");
+      await this.appendMessage(
+        actor.name,
+        where,
+        `Knowledge removed: ${args.topic}. It is no longer under knowledge/${args.topic}.md${
+          args.project === null ? " of the society" : ""
+        }.`,
+      );
+      return removed;
+    });
+  }
+
+  /** Society knowledge is the steward's and the user's; a project's, its members' too. */
+  private async assertMayCurate(actor: Actor, project: Name | null): Promise<void> {
+    if (project === null) {
+      if (!CURATING_ROLES.includes(actor.role)) {
+        throw new BoardError(
+          "FORBIDDEN",
+          "society knowledge is curated by the steward and the user",
+        );
+      }
+      return;
+    }
+    const active = await this.readActiveProject(project);
+    if (!CURATING_ROLES.includes(actor.role) && !active.members.includes(actor.name)) {
+      throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${project}`);
+    }
   }
 
   async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Thread> {
@@ -3097,6 +3181,8 @@ export class Board {
         return this.leaveProject(actor, VerbInputs.leave_project.parse(input));
       case "write_knowledge":
         return this.writeKnowledge(actor, VerbInputs.write_knowledge.parse(input));
+      case "remove_knowledge":
+        return this.removeKnowledge(actor, VerbInputs.remove_knowledge.parse(input));
       case "plan_task":
         return this.planTask(actor, VerbInputs.plan_task.parse(input));
       case "advance_task":

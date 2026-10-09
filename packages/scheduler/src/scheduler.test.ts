@@ -12,6 +12,7 @@ import {
   type TurnDispatch,
   type TurnRecord,
   type Ulid,
+  type WorkspaceConversation,
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -37,6 +38,13 @@ class FakeRunner implements TurnRunner {
 
   /** Runners that are away: a turn waits until one is back. */
   away = false;
+
+  /** Conversations whose workspaces the scheduler asked to sweep. */
+  readonly sweeps: WorkspaceConversation[] = [];
+
+  async sweep(conversation: WorkspaceConversation): Promise<void> {
+    this.sweeps.push(conversation);
+  }
 
   /** Conversations a steer was asked for, as session keys, and what each ask answers. */
   readonly steered: string[] = [];
@@ -963,6 +971,36 @@ describe("Scheduler", () => {
     runner.hold = false;
     runner.releaseHeld();
     await scheduler.drain();
+  });
+
+  it("sweeps an ended conversation's workspaces, and gives work left on no branch a closing turn there", async () => {
+    const { board, runner, scheduler } = await setup();
+    const topic = await board.openThread(REV, { channel: "demo/dev", title: "which library?" });
+    await board.closeThread(USER, { thread_id: topic.id, summary: "Settled." });
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.sweeps).toEqual([
+      { kind: "thread", id: topic.id },
+      { kind: "channel", scope: "demo", name: "dev" },
+    ]);
+
+    // A runner kept eng-1's workspace in each, for holding work on no branch.
+    const conversations = [
+      { kind: "thread", id: topic.id },
+      { kind: "channel", scope: "demo", name: "dev" },
+    ] as const;
+    for (const conversation of conversations) {
+      await board.recordLeftovers({ agent: "eng-1", scope: "demo", conversation });
+    }
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(
+      runner.dispatches.map((d) => [d.trigger.kind, d.thread?.id ?? null, d.channel ?? null]),
+    ).toEqual([
+      ["closing", topic.id, null],
+      ["closing", null, "dev"],
+    ]);
   });
 
   it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {

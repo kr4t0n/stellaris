@@ -1,30 +1,38 @@
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   BRANCH_CHANGES_LIMIT,
   BRANCH_FILE_LIMIT_BYTES,
   CliKindSchema,
+  HeldWorkspaceSchema,
   HOME_SCRATCH,
   PATH_TOKENS,
   SERVER_TOKEN,
+  SOCIETY_SCOPE,
+  sameConversation,
   turnStatusJsonSchema,
+  WORKSPACE_TOKEN,
   type AgentEvent,
   type BranchChanges,
   type BranchChangesRead,
   type BranchFile,
   type BranchRead,
   type CliKind,
+  type HeldWorkspace,
   type LandRequest,
   type MergeOutcome,
   type ModelOption,
   type Name,
+  type ProjectRepo,
+  type SweepResult,
   type TurnJob,
   type TurnOutcome,
   type TurnWork,
+  type WorkspaceConversation,
 } from "@stellaris/shared";
 import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
-import { ExecaGit, taskBranch, type GitOps } from "./git.js";
+import { ExecaGit, taskBranch, type GitOps, type RemoteSync } from "./git.js";
 import type { RunnerLayout } from "./layout.js";
 import {
   ZERO_USAGE,
@@ -33,6 +41,7 @@ import {
   type ResidentSession,
   type TurnResult,
 } from "./types.js";
+import { holdsLeftovers, renderWorkspaceReport, type WorkspaceReport } from "./workspace-report.js";
 
 export interface RunnerLog {
   info(context: object, message: string): void;
@@ -51,7 +60,13 @@ export interface TurnExecutorOptions {
   readonly onWarmChanged?: ((keys: string[]) => void) | undefined;
   /** Where this runner reaches the board server, which a job's `SERVER_TOKEN` stands for. */
   readonly serverUrl: string;
+  /** How often a project's remote is fetched at most; a minute unless set. */
+  readonly fetchIntervalMs?: number | undefined;
 }
+
+/** The most entries a list in a workspace report shows. */
+const LISTED = 10;
+const FETCH_INTERVAL_MS = 60_000;
 
 /** Where a turn runs: the working directory, the repository, and what to hand the worktree back to. */
 interface Workspace {
@@ -60,6 +75,27 @@ interface Workspace {
   /** For the pair's worktree, the agent's own branch; for a task's or a thread's, null to detach; for a home, none. */
   readonly handBack: { readonly to: string | null } | null;
   readonly taskBranch: string | null;
+  /** What the prompt says of the workspace, or null outside projects. */
+  readonly report: WorkspaceReport | null;
+  /** Whether the workspace is its conversation's own, a task's, a thread's, or a channel's. */
+  readonly own: boolean;
+}
+
+/** A conversation's workspace on this runner, and the project whose repository it belongs to. */
+interface Found {
+  readonly held: HeldWorkspace;
+  readonly dir: string;
+  readonly repo: Name | null;
+}
+
+async function dirs(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
 }
 
 interface Resident {
@@ -91,6 +127,9 @@ export class TurnExecutor {
   private readonly serverUrl: string;
   private readonly projectLocks = new Map<Name, Promise<void>>();
   private readonly residents = new Map<string, Resident>();
+  private readonly fetchIntervalMs: number;
+  /** When each project's remote was last fetched, and why the last fetch failed, if it did. */
+  private readonly fetched = new Map<Name, { at: number; error?: string | undefined }>();
 
   constructor(options: TurnExecutorOptions) {
     this.layout = options.layout;
@@ -100,6 +139,7 @@ export class TurnExecutor {
     this.log = options.log ?? SILENT;
     this.onWarmChanged = options.onWarmChanged;
     this.serverUrl = options.serverUrl;
+    this.fetchIntervalMs = options.fetchIntervalMs ?? FETCH_INTERVAL_MS;
   }
 
   /**
@@ -143,6 +183,7 @@ export class TurnExecutor {
     } catch (error) {
       return failed(fallbackSession, `could not prepare the workspace: ${String(error)}`);
     }
+    const report = workspace.report === null ? "" : renderWorkspaceReport(workspace.report);
     const spec: AgentSpec = {
       agent: job.agent,
       project: job.scope,
@@ -159,7 +200,8 @@ export class TurnExecutor {
       text
         .replaceAll(PATH_TOKENS.home, home)
         .replaceAll(PATH_TOKENS.board, this.layout.board)
-        .replaceAll(PATH_TOKENS.worktree, workspace.cwd);
+        .replaceAll(PATH_TOKENS.worktree, workspace.cwd)
+        .replaceAll(WORKSPACE_TOKEN, report);
     const instructions = fill(job.instructions);
     const prompt = fill(job.prompt);
     await this.renderConfigHome(home, instructions, job.mcp.url);
@@ -241,6 +283,7 @@ export class TurnExecutor {
       result = { ...result, exitReason: "stopped" };
     }
     const work = await this.handBack(job.agent, workspace);
+    const leftovers = workspace.own && (await this.leftoversIn(workspace.cwd));
     this.log.info(
       {
         agent: job.agent,
@@ -261,7 +304,158 @@ export class TurnExecutor {
       session: result.session ?? session,
       model: result.model ?? null,
       work,
+      leftovers,
     };
+  }
+
+  /** Whether a worktree holds work no branch does; unreadable counts as nothing. */
+  private async leftoversIn(worktree: string): Promise<boolean> {
+    try {
+      return holdsLeftovers(await this.git.worktreeState(worktree));
+    } catch {
+      return false;
+    }
+  }
+
+  /** The conversations' workspaces this runner holds, which it reports when its stream opens. */
+  async held(): Promise<HeldWorkspace[]> {
+    return (await this.findHeld()).map((found) => found.held);
+  }
+
+  /**
+   * Removes every citizen's workspace for a conversation that ended, but those a turn still uses,
+   * which its end removes, and those holding work on no branch, which are kept for a closing turn.
+   */
+  async sweep(
+    conversation: WorkspaceConversation,
+    busy: (held: HeldWorkspace) => boolean,
+  ): Promise<SweepResult> {
+    const kept: HeldWorkspace[] = [];
+    for (const found of await this.findHeld()) {
+      if (!sameConversation(found.held.conversation, conversation) || busy(found.held)) {
+        continue;
+      }
+      const { repo } = found;
+      if (repo === null) {
+        // A scratch folder is never kept, as the turn contract says.
+        await rm(found.dir, { recursive: true, force: true });
+        continue;
+      }
+      const keep = await this.withProjectLock(repo, async () => {
+        if (holdsLeftovers(await this.git.worktreeState(found.dir))) {
+          return true;
+        }
+        await this.git.removeWorktree(this.layout.repo(repo), found.dir);
+        return false;
+      });
+      if (keep) {
+        kept.push(found.held);
+      }
+    }
+    if (kept.length > 0) {
+      this.log.info({ conversation, kept: kept.map((each) => each.agent) }, "kept workspaces");
+    }
+    return { kept };
+  }
+
+  /**
+   * Every conversation's own workspace here: tasks', threads', and channels' worktrees, and the
+   * folders of threads and channels outside projects in the homes' scratch folders.
+   */
+  private async findHeld(): Promise<Found[]> {
+    const found: Found[] = [];
+    const add = (held: HeldWorkspace, dir: string, repo: Name | null): void => {
+      const parsed = HeldWorkspaceSchema.safeParse(held);
+      if (parsed.success) {
+        found.push({ held: parsed.data, dir, repo });
+      }
+    };
+    const worktrees = path.join(this.layout.root, "worktrees");
+    for (const agent of await dirs(worktrees)) {
+      const mine = path.join(worktrees, agent);
+      for (const kind of [".tasks", ".threads"]) {
+        for (const id of await dirs(path.join(mine, kind))) {
+          const dir = path.join(mine, kind, id);
+          const repo = await this.repoOf(dir);
+          if (repo !== null) {
+            add({ agent, scope: repo, conversation: { kind: "thread", id } }, dir, repo);
+          }
+        }
+      }
+      for (const slug of await dirs(path.join(mine, ".channels"))) {
+        for (const name of await dirs(path.join(mine, ".channels", slug))) {
+          const dir = path.join(mine, ".channels", slug, name);
+          add(
+            { agent, scope: slug, conversation: { kind: "channel", scope: slug, name } },
+            dir,
+            slug,
+          );
+        }
+      }
+    }
+    const agents = path.join(this.layout.root, "agents");
+    for (const agent of await dirs(agents)) {
+      const scratch = path.join(agents, agent, HOME_SCRATCH);
+      for (const id of await dirs(path.join(scratch, ".threads"))) {
+        add(
+          { agent, scope: SOCIETY_SCOPE, conversation: { kind: "thread", id } },
+          path.join(scratch, ".threads", id),
+          null,
+        );
+      }
+      for (const name of await dirs(path.join(scratch, ".channels"))) {
+        add(
+          {
+            agent,
+            scope: SOCIETY_SCOPE,
+            conversation: { kind: "channel", scope: SOCIETY_SCOPE, name },
+          },
+          path.join(scratch, ".channels", name),
+          null,
+        );
+      }
+    }
+    return found;
+  }
+
+  /** The project a worktree belongs to, from the repository its `.git` file points into. */
+  private async repoOf(worktree: string): Promise<Name | null> {
+    try {
+      const pointer = (await readFile(path.join(worktree, ".git"), "utf8")).trim();
+      const gitdir = pointer.startsWith("gitdir: ") ? pointer.slice("gitdir: ".length) : null;
+      if (gitdir === null) {
+        return null;
+      }
+      const repos = path.dirname(this.layout.repo("x"));
+      const [slug] = path.relative(repos, path.resolve(worktree, gitdir)).split(path.sep);
+      return slug === undefined || slug === ".." || slug === "" ? null : slug;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetches the project's remote, at most once per interval, and fast-forwards the local branches
+   * that follow it. A failed fetch is reported until a later one succeeds; nothing here fails a turn.
+   */
+  private async syncRemote(repoDir: string, repo: ProjectRepo): Promise<RemoteSync> {
+    if (repo.origin === null) {
+      return {};
+    }
+    const now = Date.now();
+    const last = this.fetched.get(repo.slug);
+    const fetch = last === undefined || now - last.at >= this.fetchIntervalMs;
+    try {
+      const sync = await this.git.syncRemote(repoDir, repo.defaultBranch, fetch);
+      if (fetch) {
+        this.fetched.set(repo.slug, { at: now, error: sync.fetchError });
+      }
+      const error = this.fetched.get(repo.slug)?.error;
+      return { ...sync, ...(error === undefined ? {} : { fetchError: error }) };
+    } catch (error) {
+      this.log.warn({ project: repo.slug, error: String(error) }, "could not follow the remote");
+      return {};
+    }
   }
 
   /**
@@ -331,6 +525,7 @@ export class TurnExecutor {
     return this.withProjectLock(request.repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(request.repo, this.layout.repo(request.repo.slug));
       await this.git.ensureDefaultBranch(repoDir, request.repo);
+      await this.syncRemote(repoDir, request.repo);
       if (!(await this.git.branchExists(repoDir, request.branch))) {
         return { ok: true, detail: "nothing to land, since the task left no branch" };
       }
@@ -402,39 +597,94 @@ export class TurnExecutor {
       // so what its tools leave behind stays on this machine; memory and skills sit beside it.
       const cwd = this.ownScratch(job.agent, workspace) ?? path.join(home, HOME_SCRATCH);
       await mkdir(cwd, { recursive: true });
-      return { cwd, repoDir: home, handBack: null, taskBranch: null };
+      return {
+        cwd,
+        repoDir: home,
+        handBack: null,
+        taskBranch: null,
+        report: null,
+        own: false,
+      };
     }
     const { repo } = workspace;
+    const base = repo.defaultBranch;
     return this.withProjectLock(repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(repo, this.layout.repo(repo.slug));
       await this.git.ensureDefaultBranch(repoDir, repo);
+      const remote = await this.syncRemote(repoDir, repo);
       if (workspace.kind === "task") {
         const branch = taskBranch(workspace.taskId);
-        await this.git.ensureBranch(repoDir, branch, repo.defaultBranch);
+        await this.git.ensureBranch(repoDir, branch, base);
+        await this.git.followBase(repoDir, branch, base);
         const cwd = await this.git.ensureTaskWorktree(
           repoDir,
           this.layout.taskWorktree(job.agent, workspace.taskId),
           branch,
         );
-        return { cwd, repoDir, handBack: { to: null }, taskBranch: branch };
+        const report: WorkspaceReport = {
+          defaultBranch: base,
+          remote,
+          worktree: {
+            kind: "task",
+            branch,
+            state: await this.git.worktreeState(cwd),
+            behind: await this.git.ahead(repoDir, branch, base, LISTED),
+          },
+        };
+        return { cwd, repoDir, handBack: { to: null }, taskBranch: branch, report, own: true };
       }
       const own = `agent/${job.agent}`;
       const pairWorktree = await this.git.ensureWorktree(
         repoDir,
         this.layout.worktree(job.agent, repo.slug),
         own,
-        repo.defaultBranch,
+        base,
       );
-      // Every task in play gets its branch before the turn, so a holder only has to switch to it.
+      // Every task in play gets its branch before the turn, so a holder only has to switch to it,
+      // and one nobody has worked on yet starts from the default branch as it is now.
       for (const branch of workspace.branches) {
-        await this.git.ensureBranch(repoDir, branch, repo.defaultBranch);
+        await this.git.ensureBranch(repoDir, branch, base);
+        await this.git.followBase(repoDir, branch, base);
       }
       const ownWorktree = this.ownWorktree(job.agent, workspace);
       if (ownWorktree === null) {
-        return { cwd: pairWorktree, repoDir, handBack: { to: own }, taskBranch: null };
+        const before = await this.git.worktreeState(pairWorktree);
+        const moved =
+          before.branch === own && (await this.git.fastForwardWorktree(pairWorktree, base));
+        const report: WorkspaceReport = {
+          defaultBranch: base,
+          remote,
+          worktree: {
+            kind: "home",
+            branch: own,
+            state: moved ? await this.git.worktreeState(pairWorktree) : before,
+            ownCommits: (await this.git.ahead(repoDir, base, own, LISTED)).commits,
+            moved,
+            behind: await this.git.ahead(pairWorktree, "HEAD", base, LISTED),
+          },
+        };
+        return {
+          cwd: pairWorktree,
+          repoDir,
+          handBack: { to: own },
+          taskBranch: null,
+          report,
+          own: false,
+        };
       }
-      const cwd = await this.git.ensureThreadWorktree(repoDir, ownWorktree, own);
-      return { cwd, repoDir, handBack: { to: null }, taskBranch: null };
+      const cwd = await this.git.ensureThreadWorktree(repoDir, ownWorktree, base);
+      const moved = await this.git.refreshDetached(cwd, base);
+      const report: WorkspaceReport = {
+        defaultBranch: base,
+        remote,
+        worktree: {
+          kind: "own",
+          state: await this.git.worktreeState(cwd),
+          moved,
+          behind: await this.git.ahead(cwd, "HEAD", base, LISTED),
+        },
+      };
+      return { cwd, repoDir, handBack: { to: null }, taskBranch: null, report, own: true };
     });
   }
 
@@ -621,5 +871,6 @@ function failed(session: string, error: string): TurnOutcome {
     session,
     model: null,
     work: null,
+    leftovers: false,
   };
 }

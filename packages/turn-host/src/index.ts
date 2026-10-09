@@ -5,6 +5,7 @@ export type { RunnerHubOptions, RunnerSend } from "./hub.js";
 export { buildSteerText, buildTurnPrompt } from "./prompt.js";
 export type {
   Conversation,
+  Ending,
   KnowledgeView,
   RunnersView,
   SocietyView,

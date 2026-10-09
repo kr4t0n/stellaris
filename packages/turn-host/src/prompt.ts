@@ -3,6 +3,8 @@ import {
   parseChannelRef,
   SOCIETY_SCOPE,
   stageIndex,
+  WORKSPACE_TOKEN,
+  type ChannelRef,
   type HomeConflict,
   type Knowledge,
   type Member,
@@ -66,6 +68,8 @@ export interface TurnPromptInput {
    * for a turn in the home conversation.
    */
   readonly conversation?: Conversation | null | undefined;
+  /** For a closing turn, how its conversation ended and where to ask someone else to take over. */
+  readonly ending?: Ending | null | undefined;
   /**
    * For roles that read operations signals, those logged for this scope since the reader's last
    * turn here, oldest first; absent for everyone else.
@@ -79,6 +83,12 @@ export interface TurnPromptInput {
    * kept copies, each beside the file whose version won.
    */
   readonly conflicts?: readonly HomeConflict[] | undefined;
+}
+
+/** How a closing turn's conversation ended, and where its citizen asks someone else to take over. */
+export interface Ending {
+  readonly how: string;
+  readonly askIn: ChannelRef;
 }
 
 /** A thread's conversation as its turn's prompt describes it. */
@@ -324,6 +334,22 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     }
   }
 
+  const ending = input.ending ?? null;
+  if (ending !== null) {
+    lines.push(
+      "",
+      "## This conversation has ended",
+      "",
+      `${capitalized(ending.how)}. You are woken once more because your workspace here still holds work on no branch, listed under Your workspace, and it is removed when this turn ends, whatever it still holds. You may not be the one who ended the conversation, and the work may not be yours to finish, so decide for each piece:`,
+      "- It is yours and it matters: land it through a task. File one, or use one you hold, switch this worktree to its branch task/<id> (git switch -c task/<id> for a task filed in this turn), and commit there.",
+      `- It matters but is someone else's to finish: put it on a task's branch the same way, then hand that task to whoever should own it and ask them in ${ending.askIn} with a mention, since this conversation takes no more posts.`,
+      "- It is disposable: leave it, and it goes with the workspace.",
+    );
+  }
+
+  // The runner reports here how far the workspace's code is behind and what it holds on no branch.
+  lines.push("", WORKSPACE_TOKEN);
+
   const conflicts = input.conflicts ?? [];
   if (dispatch.trigger.kind === "reflection") {
     lines.push(
@@ -500,4 +526,8 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     "Act on the unread messages and your stages through the board tools: claim_task to hold a stage, advance_task when your part is done, plan_task to reshape what comes next, post_message to talk, and propose for what the society lacks. Silence is allowed when nothing needs a reply. End with the status object.",
   );
   return `${lines.join("\n")}\n`;
+}
+
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

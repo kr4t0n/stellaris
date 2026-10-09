@@ -88,6 +88,7 @@ import {
   type VerbArgs,
   type VerbInput,
   type VerbName,
+  type WorkspaceConversation,
   SessionsFileSchema,
   TurnRecordSchema,
   WakeRequestSchema,
@@ -3696,6 +3697,48 @@ export class Board {
         detail: input.detail,
       });
     });
+  }
+
+  /**
+   * Records that a citizen's workspace in a conversation that has ended holds work on no branch, so
+   * the scheduler gives the citizen a closing turn there to decide about it.
+   */
+  async recordLeftovers(input: {
+    agent: Name;
+    scope: Name;
+    conversation: WorkspaceConversation;
+  }): Promise<void> {
+    const { conversation } = input;
+    await this.mutex.run(async () => {
+      await this.events.append("workspace.leftovers", SYSTEM_ACTOR.name, {
+        agent: input.agent,
+        project: input.scope,
+        ...(conversation.kind === "thread"
+          ? { thread: conversation.id }
+          : { channel: conversation.name }),
+      });
+    });
+  }
+
+  /**
+   * Whether a conversation with a workspace of its own has ended: a thread closed, a task ended
+   * (for one from before tasks had threads), or a channel archived.
+   */
+  async conversationEnded(conversation: WorkspaceConversation): Promise<boolean> {
+    if (conversation.kind === "channel") {
+      const place = conversation.scope === SOCIETY_SCOPE ? null : conversation.scope;
+      return !(await this.channelOpen(channelRef(place, conversation.name)));
+    }
+    const found = await this.tryFindThread(conversation.id);
+    if (found !== null) {
+      return found.thread.state === "closed";
+    }
+    try {
+      const { task } = await this.findTask(conversation.id);
+      return task.status === "done" || task.status === "abandoned";
+    } catch {
+      return false;
+    }
   }
 
   /**

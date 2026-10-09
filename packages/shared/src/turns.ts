@@ -20,6 +20,7 @@ export const TriggerKindSchema = z.enum([
   "manual",
   "ops_event",
   "user_post",
+  "closing",
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 

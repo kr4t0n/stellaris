@@ -4,6 +4,7 @@ import {
   channelRef,
   conversationPart,
   mayHoldStage,
+  parseChannelRef,
   PATH_TOKENS,
   ROLE_KIND_APPROVERS,
   sessionKey,
@@ -29,11 +30,13 @@ import {
   type TurnSteer,
   type TurnWorkspace,
   type Ulid,
+  workspaceConversationOf,
 } from "@stellaris/shared";
 import {
   buildSteerText,
   buildTurnPrompt,
   type Conversation,
+  type Ending,
   type KnowledgeView,
   type RunnersView,
   type SocietyView,
@@ -354,11 +357,16 @@ export class TurnHost {
       threadRecord === undefined
         ? null
         : { thread: threadRecord, task, fresh: threadSoFar !== null };
+    const ending =
+      dispatch.trigger.kind === "closing"
+        ? await this.endingOf(dispatch.project, threadRecord, task, channel)
+        : null;
     const prompt = buildTurnPrompt({
       dispatch,
       messages,
       threads,
       conversation,
+      ending,
       heldClaims: held,
       waitingStages: waiting,
       project,
@@ -649,6 +657,8 @@ export class TurnHost {
       ...(outcome.work === null ? {} : { work: outcome.work }),
       ...(outcome.exitReason === "stopped" ? { stoppedBy: turn.stopRequestedBy ?? USER_NAME } : {}),
     };
+    const ended = await this.conversationEnded(job);
+    const closing = turn.record.trigger.kind === "closing";
     const recorded = await this.recorded(turn, async () => {
       if (outcome.session !== job.session) {
         // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
@@ -677,6 +687,12 @@ export class TurnHost {
         }
       }
       await this.board.finishTurn(finished, turn.transcript);
+      // Work on no branch in an ended conversation's workspace is its citizen's to decide about.
+      const conversation =
+        ended && !closing && outcome.leftovers ? workspaceConversationOf(job) : null;
+      if (conversation !== null) {
+        await this.board.recordLeftovers({ agent: job.agent, scope: job.scope, conversation });
+      }
     });
     if (recorded) {
       this.log.info(
@@ -691,7 +707,9 @@ export class TurnHost {
       );
       turn.done(finished);
     }
-    return { dropWorkspace: await this.conversationEnded(job) };
+    // A closing turn decided about what its workspace held, unless it failed before deciding.
+    const decided = closing && outcome.exitReason !== "error" && outcome.exitReason !== "timeout";
+    return { dropWorkspace: ended && (closing ? decided : !outcome.leftovers) };
   }
 
   /** Ends a turn whose outcome will never come, as when its runner went away, as failed. */
@@ -838,22 +856,45 @@ export class TurnHost {
    * was archived, which frees its workspace.
    */
   private async conversationEnded(job: TurnJob): Promise<boolean> {
-    if (job.channel !== undefined) {
-      const place = job.scope === SOCIETY_SCOPE ? null : job.scope;
-      return !(await this.board.channelOpen(channelRef(place, job.channel)));
+    const conversation = workspaceConversationOf(job);
+    return conversation !== null && (await this.board.conversationEnded(conversation));
+  }
+
+  /**
+   * How a closing turn's conversation ended, and where its citizen asks someone else to take over
+   * work that is not its own: the thread's channel while it is open, else the place's general.
+   */
+  private async endingOf(
+    scope: Name,
+    thread: Thread | undefined,
+    task: Task | null,
+    channel: Name | undefined,
+  ): Promise<Ending | null> {
+    const place = scope === SOCIETY_SCOPE ? null : scope;
+    if (thread !== undefined) {
+      const closed = `the thread "${thread.title}" on ${thread.channel} was closed${
+        thread.closedBy === undefined ? "" : ` by ${thread.closedBy}`
+      }${task === null ? "" : `, its task ${task.status}`}`;
+      const open = await this.board.channelOpen(thread.channel);
+      return {
+        how: closed,
+        askIn: open
+          ? thread.channel
+          : channelRef(parseChannelRef(thread.channel).project, "general"),
+      };
     }
-    if (job.thread === undefined) {
-      return false;
+    if (channel === undefined) {
+      return null;
     }
-    try {
-      if (job.workspace.kind === "task") {
-        const { task } = await this.board.findTask(job.thread);
-        return task.status === "done" || task.status === "abandoned";
-      }
-      return (await this.board.readThread(job.thread)).state === "closed";
-    } catch {
-      return false;
-    }
+    const ref = channelRef(place, channel);
+    const archived = (await this.board.listChannels()).find((each) => each.ref === ref)?.archived;
+    return {
+      how:
+        archived === undefined
+          ? `${ref} was archived`
+          : `${ref} was archived by ${archived.by}: ${archived.reason}`,
+      askIn: channelRef(place, "general"),
+    };
   }
 
   /**

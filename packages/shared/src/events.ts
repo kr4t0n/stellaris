@@ -53,6 +53,7 @@ export const BOARD_EVENT_TYPES = [
   "turn.failed",
   "merge.completed",
   "merge.failed",
+  "workspace.leftovers",
 ] as const;
 export const BoardEventTypeSchema = z.enum(BOARD_EVENT_TYPES);
 export type BoardEventType = z.infer<typeof BoardEventTypeSchema>;

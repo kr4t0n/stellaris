@@ -668,7 +668,11 @@ describe("turns on a runner over the runner protocol", () => {
           allStarted();
         }
         await together;
-        await writeFile(path.join(cwd, "notes.txt"), "left behind\n", "utf8");
+        // A worktree that holds nothing on no branch goes when its thread closes; a scratch
+        // folder goes whatever it holds.
+        if (!cwd.includes(topic.id)) {
+          await writeFile(path.join(cwd, "notes.txt"), "left behind\n", "utf8");
+        }
         if (cwd.includes(topic.id)) {
           const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
           const [at, own] = await Promise.all([
@@ -705,8 +709,8 @@ describe("turns on a runner over the runner protocol", () => {
     const askFolder = path.join(runner.paths.agent("eng-1"), "scratch", ".threads", ask.id);
     expect([...cwds].toSorted()).toEqual([home, topicWorktree, askFolder].toSorted());
     expect(detachedAtOwnBranch).toBe(true);
-    // A closed thread's workspace goes with whatever was left in it, once the runner has the
-    // server's answer to the turn's outcome; the home worktree stays.
+    // A closed thread's workspace goes once the runner has the server's answer to the turn's
+    // outcome; the home worktree stays.
     await vi.waitFor(async () => {
       await expect(stat(topicWorktree)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(stat(askFolder)).rejects.toMatchObject({ code: "ENOENT" });
@@ -793,6 +797,195 @@ describe("turns on a runner over the runner protocol", () => {
       await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
     });
     await expect(stat(home)).resolves.toBeDefined();
+  });
+
+  it("keeps a project's code current with its remote: the clone, the home, and branches nobody has worked on", async () => {
+    // A remote standing in for GitHub, where work lands by pull request.
+    const remote = await mkdtemp(path.join(os.tmpdir(), "stellaris-remote-"));
+    try {
+      const origin = path.join(remote, "origin.git");
+      const author = path.join(remote, "author");
+      await execa("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
+      await execa("git", ["clone", "--quiet", origin, author]);
+      const land = async (file: string): Promise<void> => {
+        await writeFile(path.join(author, file), `${file}\n`, "utf8");
+        await execa("git", ["add", file], { cwd: author });
+        await execa("git", ["-c", "user.name=u", "-c", "user.email=u@x", "commit", "-qm", file], {
+          cwd: author,
+        });
+        await execa("git", ["push", "--quiet", "origin", "HEAD:main"], { cwd: author });
+      };
+      await land("first.txt");
+
+      const { board } = await Board.init(dir, { name: "remote" });
+      await board.addProject(USER, { slug: "demo", repo: origin, onDone: "none" });
+      await board.setRoleCharter(USER, {
+        name: "engineer",
+        purpose: "Builds.",
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+      });
+      await board.addAgent(USER, {
+        name: "eng-1",
+        role: "engineer",
+        cli: "claude",
+        memberships: ["demo"],
+      });
+      const prompts: string[] = [];
+      let script: ((cwd: string) => Promise<void>) | null = null;
+      const backend: AgentBackend = {
+        kind: "claude",
+        newSession: () => Promise.resolve("session-1"),
+        runTurn: async (request) => {
+          prompts.push(request.prompt);
+          await script?.(request.spec.cwd);
+          script = null;
+          return completed("done");
+        },
+      };
+      const { run, runner } = await start(board, backend);
+      const home = (): Promise<unknown> =>
+        run({
+          agent: "eng-1",
+          project: "demo",
+          trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+          priority: 1,
+        });
+      const repo = runner.paths.repo("demo");
+      const worktree = runner.paths.worktree("eng-1", "demo");
+      const rev = async (ref: string, cwd = repo): Promise<string> =>
+        (await execa("git", ["rev-parse", ref], { cwd })).stdout;
+
+      await home();
+      const task = await board.createTask(USER, { project: "demo", title: "build" });
+      const branch = `task/${task.id}`;
+      await home();
+      const forkedAt = await rev(branch);
+
+      // A pull request lands on the remote: the next turn fetches it, the clone's main and the
+      // citizen's own branch follow, and the task branch nobody has worked on starts from it.
+      await land("second.txt");
+      await home();
+      const landed = await rev("origin/main");
+      expect(landed).not.toBe(forkedAt);
+      expect(await rev("main")).toBe(landed);
+      expect(await rev("agent/eng-1")).toBe(landed);
+      await expect(readFile(path.join(worktree, "second.txt"), "utf8")).resolves.toBe(
+        "second.txt\n",
+      );
+      expect(await rev(branch)).toBe(landed);
+      expect(prompts.at(-1)).not.toContain("## Your workspace");
+
+      // The citizen's own commit keeps its branch where it is, and the prompt says so.
+      script = async (cwd) => {
+        await writeFile(path.join(cwd, "mine.txt"), "mine\n", "utf8");
+        await execa("git", ["add", "mine.txt"], { cwd });
+        await execa("git", ["commit", "-qm", "my own notes"], { cwd });
+      };
+      await home();
+      await land("third.txt");
+      await home();
+      expect(await rev("main")).toBe(await rev("origin/main"));
+      expect(await rev("agent/eng-1")).not.toBe(await rev("main"));
+      expect(prompts.at(-1)).toContain(
+        "Your branch agent/eng-1 holds 1 commit that is not on main: `",
+      );
+      expect(prompts.at(-1)).toContain(
+        "It was not brought up to main, which has 1 commit it lacks",
+      );
+
+      // Work on the task's branch stays where it forked; the prompt says what landed since.
+      const inTask = (): Promise<unknown> =>
+        run({
+          agent: "eng-1",
+          project: "demo",
+          thread: { id: task.id, task: true },
+          trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+          priority: 1,
+        });
+      script = async (cwd) => {
+        await writeFile(path.join(cwd, "work.txt"), "work\n", "utf8");
+      };
+      await inTask();
+      const worked = await rev(branch);
+      await land("fourth.txt");
+      await inTask();
+      expect(await rev(branch)).toBe(worked);
+      expect(prompts.at(-1)).toContain(
+        `1 commit landed on main since your branch ${branch} left it, changing \`fourth.txt\`. Merging main into it is your decision.`,
+      );
+    } finally {
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an ended conversation's workspace that holds work on no branch for a closing turn, then lets it go", async () => {
+    const { board } = await Board.init(dir, { name: "leftovers" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const topic = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "which library?",
+    });
+    const prompts = new Map<string, string>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        prompts.set(request.spec.agent, request.prompt);
+        if (request.spec.agent === "eng-1" && !request.prompt.includes("has ended")) {
+          await writeFile(path.join(request.spec.cwd, "draft.md"), "a draft\n", "utf8");
+          await board.closeThread(USER, { thread_id: topic.id, summary: "Settled." });
+          // What the scheduler does on the thread's close: eng-1's turn still uses its workspace.
+          await society?.hub.sweep({ kind: "thread", id: topic.id });
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const inTopic = (agent: string, kind: "manual" | "closing" = "manual"): Promise<unknown> =>
+      run({
+        agent,
+        project: "demo",
+        thread: { id: topic.id, task: false },
+        trigger: { kind, fromUser: kind === "manual", reason: "test" },
+        priority: 1,
+      });
+    await inTopic("eng-2");
+    await inTopic("eng-1");
+
+    // eng-2's clean worktree went with the sweep; eng-1's holds a draft on no branch and stays.
+    await expect(stat(runner.paths.threadWorktree("eng-2", topic.id))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    const kept = runner.paths.threadWorktree("eng-1", topic.id);
+    await expect(readFile(path.join(kept, "draft.md"), "utf8")).resolves.toBe("a draft\n");
+    const leftovers = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "workspace.leftovers",
+    );
+    expect(leftovers.map((event) => event.payload)).toEqual([
+      { agent: "eng-1", project: "demo", thread: topic.id },
+    ]);
+
+    // The closing turn is told how the thread ended and what it holds, and the workspace goes after.
+    await inTopic("eng-1", "closing");
+    const closing = prompts.get("eng-1") ?? "";
+    expect(closing).toContain(
+      `## This conversation has ended\n\nThe thread "which library?" on demo/general was closed by user.`,
+    );
+    expect(closing).toContain("ask them in demo/general with a mention");
+    expect(closing).toContain("- Uncommitted here: `?? draft.md`.");
+    await vi.waitFor(async () => {
+      await expect(stat(kept)).rejects.toMatchObject({ code: "ENOENT" });
+    });
   });
 
   it("lists a citizen's models from its own runner, and asks again once that runner reconnects", async () => {

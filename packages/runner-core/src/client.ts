@@ -1,4 +1,5 @@
 import {
+  type HeldWorkspace,
   FileContentsSchema,
   FileManifestSchema,
   RunnerMessageSchema,
@@ -115,6 +116,11 @@ export class RunnerClient {
 
   async warm(keys: readonly string[]): Promise<void> {
     await this.call("POST", "/runner/warm", { warm: keys });
+  }
+
+  /** The conversations' workspaces this runner holds, so those that ended while it was away go. */
+  async workspaces(workspaces: readonly HeldWorkspace[]): Promise<void> {
+    await this.call("POST", "/runner/workspaces", { workspaces });
   }
 
   /** The board's projection, read only. */

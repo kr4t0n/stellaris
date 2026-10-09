@@ -33,6 +33,13 @@ export const PATH_TOKENS = {
 export const SERVER_TOKEN = "{{stellaris:server}}";
 
 /**
+ * Where a turn's prompt reports the state of its workspace, which only the runner knows once it has
+ * prepared it: how far its code is behind, and work it holds on no branch. The runner fills it with
+ * that section, or with nothing when there is nothing to report.
+ */
+export const WORKSPACE_TOKEN = "{{stellaris:workspace}}";
+
+/**
  * The folder inside an agent's home where its turns outside any project work, the working
  * directory of those turns: never committed, never shared, so downloads, environments, and other
  * working files stay on the machine that made them.
@@ -138,7 +145,7 @@ export type ProjectRepo = z.infer<typeof ProjectRepoSchema>;
  * task's conversation, on `task/<id>`. With `thread`, a proposal's or a topic's conversation works
  * in a place of its own instead, and with `channel` a channel's conversation other than general,
  * so it runs beside the citizen's other conversations: a folder under the home's scratch folder,
- * or a worktree detached at the tip of `agent/<name>`.
+ * or a worktree detached at the tip of the project's default branch.
  */
 export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -213,12 +220,19 @@ export const TurnOutcomeSchema = z.object({
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),
+  /**
+   * Whether the turn's own workspace, a thread's, a channel's, or a task's, holds work on no
+   * branch after the hand-back: uncommitted changes, or commits no branch contains.
+   */
+  leftovers: z.boolean().default(false),
 });
 export type TurnOutcome = z.infer<typeof TurnOutcomeSchema>;
+export type TurnOutcomeInput = z.input<typeof TurnOutcomeSchema>;
 
 /**
- * The server's answer to an outcome: whether the turn's task or thread has ended, so the workspace
- * of its own, a task's or a thread's worktree or a thread's scratch folder, may go.
+ * The server's answer to an outcome: whether the workspace of the turn's own conversation, a
+ * task's, a thread's, or a channel's, may go, because the conversation has ended and the workspace
+ * holds nothing on no branch, or a closing turn has decided about what it held.
  */
 export const TurnAckSchema = z.object({ dropWorkspace: z.boolean() });
 export type TurnAck = z.infer<typeof TurnAckSchema>;
@@ -336,6 +350,51 @@ export const BranchChangesSchema = z.object({
 });
 export type BranchChanges = z.infer<typeof BranchChangesSchema>;
 
+/**
+ * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
+ * task's thread takes its id, or a channel's beside general in a scope.
+ */
+export const WorkspaceConversationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("thread"), id: UlidSchema }),
+  z.object({ kind: z.literal("channel"), scope: NameSchema, name: NameSchema }),
+]);
+export type WorkspaceConversation = z.infer<typeof WorkspaceConversationSchema>;
+
+/** The conversation with a workspace of its own a turn is in, or null for a home turn. */
+export function workspaceConversationOf(turn: {
+  readonly scope: string;
+  readonly thread?: string | undefined;
+  readonly channel?: string | undefined;
+}): WorkspaceConversation | null {
+  if (turn.thread !== undefined) {
+    return { kind: "thread", id: turn.thread };
+  }
+  return turn.channel === undefined
+    ? null
+    : { kind: "channel", scope: turn.scope, name: turn.channel };
+}
+
+export function sameConversation(a: WorkspaceConversation, b: WorkspaceConversation): boolean {
+  return a.kind === "thread"
+    ? b.kind === "thread" && a.id === b.id
+    : b.kind === "channel" && a.scope === b.scope && a.name === b.name;
+}
+
+/** One citizen's workspace for a conversation on a runner, in the scope its turns ran in. */
+export const HeldWorkspaceSchema = z.object({
+  agent: NameSchema,
+  scope: NameSchema,
+  conversation: WorkspaceConversationSchema,
+});
+export type HeldWorkspace = z.infer<typeof HeldWorkspaceSchema>;
+
+/** The workspaces a runner holds, which it reports when its stream opens so ended ones go. */
+export const HeldWorkspacesSchema = z.object({ workspaces: z.array(HeldWorkspaceSchema) });
+
+/** A sweep's answer: the workspaces kept because they hold work on no branch. */
+export const SweepResultSchema = z.object({ kept: z.array(HeldWorkspaceSchema) });
+export type SweepResult = z.infer<typeof SweepResultSchema>;
+
 /** Input for a running turn: what arrived in its conversation since it was last shown anything. */
 export const TurnSteerSchema = z.object({ id: z.uuid(), text: z.string().min(1) });
 export type TurnSteer = z.infer<typeof TurnSteerSchema>;
@@ -362,6 +421,15 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   }),
   /** Answered with whether the turn was there to stop; it ends `stopped`. */
   z.object({ type: z.literal("stop"), request: z.string().min(1), turnId: UlidSchema }),
+  /**
+   * A conversation ended: the runner removes every citizen's workspace for it but those a turn
+   * still uses, and answers with a `SweepResult` naming those it kept for holding work on no branch.
+   */
+  z.object({
+    type: z.literal("sweep"),
+    request: z.string().min(1),
+    conversation: WorkspaceConversationSchema,
+  }),
 ]);
 export type RunnerMessage = z.infer<typeof RunnerMessageSchema>;
 

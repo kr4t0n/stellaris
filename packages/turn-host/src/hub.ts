@@ -8,6 +8,7 @@ import {
   ModelListSchema,
   RUNNER_PROTOCOL,
   SOCIETY_SCOPE,
+  SweepResultSchema,
   type BranchChanges,
   type BranchFile,
   type CliKind,
@@ -25,6 +26,8 @@ import {
   type TurnOutcome,
   type TurnRecord,
   type Ulid,
+  type HeldWorkspace,
+  type WorkspaceConversation,
 } from "@stellaris/shared";
 import type { HostLog, RunnerSeat, TurnHost } from "./host.js";
 
@@ -74,6 +77,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const CONTROL_TIMEOUT_MS = 15_000;
 /** A file read is a few git calls and up to 8 MB on the way back, which someone is waiting for. */
 const FILE_TIMEOUT_MS = 60_000;
+/** A sweep is a few git calls and a removal per citizen who took part in the conversation. */
+const SWEEP_TIMEOUT_MS = 2 * 60_000;
 
 /**
  * The runners connected to the board server, and the scheduler's way to them. It places each
@@ -236,6 +241,29 @@ export class RunnerHub implements TurnRunner {
     }
   }
 
+  /**
+   * The workspaces a runner holds, reported when its stream opens: those of conversations that
+   * ended while it was away are swept there now, as a sweep at their end would have.
+   */
+  heldWorkspaces(runner: Name, workspaces: readonly HeldWorkspace[]): void {
+    const seat = this.seats.get(runner);
+    if (seat === undefined) {
+      return;
+    }
+    const conversations = new Map<string, WorkspaceConversation>();
+    for (const { conversation } of workspaces) {
+      conversations.set(JSON.stringify(conversation), conversation);
+    }
+    for (const conversation of conversations.values()) {
+      void this.board
+        .conversationEnded(conversation)
+        .then((ended) => (ended ? this.sweepOn(seat, conversation) : undefined))
+        .catch((error: unknown) => {
+          this.log.warn({ runner, conversation, error: String(error) }, "could not sweep");
+        });
+    }
+  }
+
   warmChanged(runner: Name, warm: readonly string[]): void {
     const seat = this.seats.get(runner);
     if (seat !== undefined) {
@@ -293,6 +321,26 @@ export class RunnerHub implements TurnRunner {
   // -------------------------------------------------------------------------------------------
   // The scheduler's runner
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * A conversation ended: every connected runner removes its citizens' workspaces for it, and
+   * those kept for holding work on no branch are recorded, which gives their citizens a closing
+   * turn. A runner away now sweeps when it reports its workspaces on reconnecting.
+   */
+  async sweep(conversation: WorkspaceConversation): Promise<void> {
+    await Promise.all(
+      [...this.seats.values()]
+        .filter((seat) => seat.send !== null)
+        .map((seat) =>
+          this.sweepOn(seat, conversation).catch((error: unknown) => {
+            this.log.warn(
+              { runner: seat.name, conversation, error: String(error) },
+              "could not sweep",
+            );
+          }),
+        ),
+    );
+  }
 
   /**
    * Delivers what arrived in a conversation into its turn in flight, when that turn's runner can
@@ -690,6 +738,19 @@ export class RunnerHub implements TurnRunner {
     const owner = this.host.runnerOf(turnId);
     if (owner !== undefined && owner !== runner) {
       throw new RunnerProtocolError(`turn ${turnId} is not ${runner}'s`);
+    }
+  }
+
+  private async sweepOn(seat: Seat, conversation: WorkspaceConversation): Promise<void> {
+    const { kept } = SweepResultSchema.parse(
+      await this.request(
+        seat,
+        (request) => ({ type: "sweep", request, conversation }),
+        SWEEP_TIMEOUT_MS,
+      ),
+    );
+    for (const workspace of kept) {
+      await this.board.recordLeftovers(workspace);
     }
   }
 

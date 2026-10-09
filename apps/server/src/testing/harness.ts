@@ -127,6 +127,8 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       slots: options.slots ?? null,
       capabilities: each.capabilities,
       retryMs: 50,
+      // Tests move a project's remote between turns a moment apart.
+      fetchIntervalMs: 0,
     });
     await daemon.start();
     runners.set(each.name, daemon);

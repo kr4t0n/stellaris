@@ -39,10 +39,33 @@ export interface GitOps {
    */
   ensureTaskWorktree(repoDir: string, worktreeDir: string, branch: string): Promise<string>;
   /**
-   * A proposal's or a topic's conversation's worktree, made detached at the tip of `from` and
-   * kept as its turns left it, since the branch is checked out in the agent's own worktree.
+   * A proposal's, a topic's, or a channel's conversation's worktree, made detached at the tip of
+   * `from` and kept as its turns left it.
    */
   ensureThreadWorktree(repoDir: string, worktreeDir: string, from: string): Promise<string>;
+  /**
+   * Fetches the project's remote when `fetch` is set, dropping remote branches it no longer has,
+   * then fast-forwards every local branch that has a namesake there, but task and agent branches,
+   * which are their holders'. Never merges: reports a fetch that failed, and a default branch
+   * that has diverged from the remote's.
+   */
+  syncRemote(repoDir: string, defaultBranch: string, fetch: boolean): Promise<RemoteSync>;
+  /**
+   * Moves a branch with no commits of its own up to `base`, unless a worktree has it checked out,
+   * since then a turn is using it. True when it moved.
+   */
+  followBase(repoDir: string, branch: string, base: string): Promise<boolean>;
+  /**
+   * Fast-forwards the branch checked out in `worktree` to `to` when the worktree is clean and the
+   * branch has nothing `to` lacks. True when it moved.
+   */
+  fastForwardWorktree(worktree: string, to: string): Promise<boolean>;
+  /** Detaches a clean worktree whose work is all on some branch at `to`. True when it moved. */
+  refreshDetached(worktree: string, to: string): Promise<boolean>;
+  /** What a worktree holds that no branch does, and the branch it is on, if any. */
+  worktreeState(worktree: string): Promise<WorktreeState>;
+  /** The commits `to` has that `from` lacks, counted, and the files they changed since they forked. */
+  ahead(repoDir: string, from: string, to: string, limit: number): Promise<Ahead>;
   /** Removes a worktree and its checkout, once its task or thread has ended. */
   removeWorktree(repoDir: string, worktreeDir: string): Promise<void>;
   /**
@@ -81,6 +104,40 @@ export interface GitOps {
 
 type BranchEntry = Extract<BranchFile, { kind: "dir" }>["entries"][number];
 
+/** What fetching the remote and following it found. */
+export interface RemoteSync {
+  /** Why the fetch failed, when it did. */
+  readonly fetchError?: string;
+  /** Commits only on this runner's default branch and only on the remote's, when they diverged. */
+  readonly diverged?: { readonly here: number; readonly there: number };
+}
+
+/** Some of a list, and how long the whole list is. */
+export interface Listed {
+  readonly items: readonly string[];
+  readonly total: number;
+}
+
+/** A worktree's branch, or null when detached, and what it holds that no branch does. */
+export interface WorktreeState {
+  readonly branch: string | null;
+  /** `git status --porcelain` lines: changes and untracked files, but not ignored ones. */
+  readonly uncommitted: Listed;
+  /** Commits reachable from the worktree's HEAD and from no local or remote branch. */
+  readonly onNoBranch: Listed;
+}
+
+/** Commits one side has that the other lacks, and the files they changed. */
+export interface Ahead {
+  readonly commits: Listed;
+  readonly files: Listed;
+}
+
+/** How long a fetch of a project's remote may take before the turn goes ahead without it. */
+const FETCH_TIMEOUT_MS = 60_000;
+/** The most entries a list in a workspace report shows. */
+const LISTED = 10;
+
 export interface GitAuthor {
   readonly name: string;
   readonly email: string;
@@ -110,13 +167,59 @@ async function exists(file: string): Promise<boolean> {
 async function git(
   args: readonly string[],
   cwd?: string,
+  timeoutMs?: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await execa("git", [...BOARD_IDENTITY, ...args], {
     ...(cwd === undefined ? {} : { cwd }),
+    ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
     reject: false,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
-  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode ?? 1 };
+  return {
+    stdout: result.stdout,
+    stderr: result.timedOut ? `timed out after ${timeoutMs}ms` : result.stderr,
+    exitCode: result.exitCode ?? 1,
+  };
+}
+
+/** Non-empty lines of a command's output. */
+function lines(text: string): string[] {
+  return text.split("\n").filter((line) => line.trim() !== "");
+}
+
+/** Branches by name under a ref prefix, with the commit each points at. */
+async function refsUnder(repoDir: string, prefix: string): Promise<Map<string, string>> {
+  const refs = new Map<string, string>();
+  const out = await must(["for-each-ref", "--format=%(refname)%00%(objectname)", prefix], repoDir);
+  for (const line of lines(out)) {
+    const [ref, id] = line.split("\0");
+    if (ref !== undefined && id !== undefined) {
+      refs.set(ref.slice(prefix.length + 1), id);
+    }
+  }
+  return refs;
+}
+
+async function isAncestor(repoDir: string, ancestor: string, of: string): Promise<boolean> {
+  return (await git(["merge-base", "--is-ancestor", ancestor, of], repoDir)).exitCode === 0;
+}
+
+async function count(repoDir: string, args: readonly string[]): Promise<number> {
+  return Number((await must(["rev-list", "--count", ...args], repoDir)).trim()) || 0;
+}
+
+/** Local branches by name and the worktree each is checked out in. */
+async function checkedOut(repoDir: string): Promise<Map<string, string>> {
+  const where = new Map<string, string>();
+  let worktree: string | null = null;
+  for (const line of lines(await must(["worktree", "list", "--porcelain"], repoDir))) {
+    if (line.startsWith("worktree ")) {
+      worktree = line.slice("worktree ".length);
+    } else if (line.startsWith("branch refs/heads/") && worktree !== null) {
+      where.set(line.slice("branch refs/heads/".length), path.resolve(worktree));
+    }
+  }
+  return where;
 }
 
 async function must(args: readonly string[], cwd?: string): Promise<string> {
@@ -206,6 +309,9 @@ export class ExecaGit implements GitOps {
     if (!(await exists(path.join(worktreeDir, ".git")))) {
       await mkdir(path.dirname(worktreeDir), { recursive: true });
       await must(["worktree", "add", "--detach", worktreeDir, branch], repoDir);
+    } else if ((await this.worktreeState(worktreeDir)).onNoBranch.total > 0) {
+      // Switching away would lose commits no branch holds; the turn is told of them instead.
+      return worktreeDir;
     }
     // A branch is checked out in one worktree at a time: another holder's turn may have it.
     const switched = await git(["switch", "--quiet", branch], worktreeDir);
@@ -222,6 +328,122 @@ export class ExecaGit implements GitOps {
       await must(["worktree", "add", "--detach", worktreeDir, from], repoDir);
     }
     return worktreeDir;
+  }
+
+  async syncRemote(repoDir: string, defaultBranch: string, fetch: boolean): Promise<RemoteSync> {
+    let fetchError: string | undefined;
+    if (fetch) {
+      const fetched = await git(
+        ["fetch", "--prune", "--quiet", "origin"],
+        repoDir,
+        FETCH_TIMEOUT_MS,
+      );
+      if (fetched.exitCode !== 0) {
+        fetchError = lines(fetched.stderr).at(-1) ?? "git fetch failed";
+      }
+    }
+    const remote = await refsUnder(repoDir, "refs/remotes/origin");
+    const local = await refsUnder(repoDir, "refs/heads");
+    const where = await checkedOut(repoDir);
+    const clone = path.resolve(repoDir);
+    let diverged: RemoteSync["diverged"];
+    for (const [branch, there] of remote) {
+      const here = local.get(branch);
+      if (
+        branch === "HEAD" ||
+        branch.startsWith("task/") ||
+        branch.startsWith("agent/") ||
+        here === undefined ||
+        here === there
+      ) {
+        continue;
+      }
+      if (await isAncestor(repoDir, here, there)) {
+        const worktree = where.get(branch);
+        if (worktree === undefined) {
+          await must(["update-ref", `refs/heads/${branch}`, there, here], repoDir);
+        } else if (worktree === clone) {
+          // Only the clone's own tree, which the runner alone works in, moves while checked out.
+          await this.fastForwardWorktree(clone, there);
+        }
+      } else if (branch === defaultBranch && !(await isAncestor(repoDir, there, here))) {
+        diverged = {
+          here: await count(repoDir, [here, "--not", there]),
+          there: await count(repoDir, [there, "--not", here]),
+        };
+      }
+    }
+    return {
+      ...(fetchError === undefined ? {} : { fetchError }),
+      ...(diverged === undefined ? {} : { diverged }),
+    };
+  }
+
+  async followBase(repoDir: string, branch: string, base: string): Promise<boolean> {
+    const here = await this.head(repoDir, branch);
+    const there = await this.head(repoDir, base);
+    if (here === null || there === null || here === there) {
+      return false;
+    }
+    if ((await checkedOut(repoDir)).has(branch) || !(await isAncestor(repoDir, here, there))) {
+      return false;
+    }
+    await must(["update-ref", `refs/heads/${branch}`, there, here], repoDir);
+    return true;
+  }
+
+  async fastForwardWorktree(worktree: string, to: string): Promise<boolean> {
+    const status = await must(["status", "--porcelain"], worktree);
+    if (status.trim() !== "" || !(await isAncestor(worktree, "HEAD", to))) {
+      return false;
+    }
+    const before = (await must(["rev-parse", "HEAD"], worktree)).trim();
+    await must(["merge", "--ff-only", "--quiet", to], worktree);
+    return (await must(["rev-parse", "HEAD"], worktree)).trim() !== before;
+  }
+
+  async refreshDetached(worktree: string, to: string): Promise<boolean> {
+    const state = await this.worktreeState(worktree);
+    if (state.uncommitted.total > 0 || state.onNoBranch.total > 0) {
+      return false;
+    }
+    const [at, target] = await Promise.all([
+      must(["rev-parse", "HEAD"], worktree),
+      must(["rev-parse", `${to}^{commit}`], worktree),
+    ]);
+    if (at.trim() === target.trim() && state.branch === null) {
+      return false;
+    }
+    await must(["switch", "--quiet", "--detach", to], worktree);
+    return true;
+  }
+
+  async worktreeState(worktree: string): Promise<WorktreeState> {
+    const branch = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], worktree);
+    const uncommitted = lines(await must(["status", "--porcelain"], worktree));
+    const stray = ["HEAD", "--not", "--branches", "--remotes"];
+    const onNoBranch = lines(
+      await must(["log", `--max-count=${LISTED}`, "--format=%h %s", ...stray], worktree),
+    );
+    return {
+      branch: branch.exitCode === 0 ? branch.stdout.trim() : null,
+      uncommitted: { items: uncommitted.slice(0, LISTED), total: uncommitted.length },
+      onNoBranch: {
+        items: onNoBranch,
+        total: onNoBranch.length < LISTED ? onNoBranch.length : await count(worktree, stray),
+      },
+    };
+  }
+
+  async ahead(repoDir: string, from: string, to: string, limit: number): Promise<Ahead> {
+    const commits = lines(
+      await must(["log", `--max-count=${limit}`, "--format=%h %s", `${from}..${to}`], repoDir),
+    );
+    const files = lines(await must(["diff", "--name-only", `${from}...${to}`], repoDir));
+    return {
+      commits: { items: commits, total: await count(repoDir, [`${from}..${to}`]) },
+      files: { items: files.slice(0, limit), total: files.length },
+    };
   }
 
   async removeWorktree(repoDir: string, requestedDir: string): Promise<void> {

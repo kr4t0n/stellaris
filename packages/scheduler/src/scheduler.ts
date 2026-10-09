@@ -28,6 +28,7 @@ import {
   type TurnRecord,
   type TurnThread,
   type Ulid,
+  type WorkspaceConversation,
 } from "@stellaris/shared";
 import { z } from "zod";
 import { decideWake } from "./wake.js";
@@ -75,6 +76,11 @@ export interface TurnRunner {
     channel?: Name;
   }): Promise<SteerOutcome>;
   runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord>;
+  /**
+   * A conversation with workspaces of their own ended: the runners remove them, and report those
+   * holding work on no branch to the board, which leads to a closing turn. Absent, nothing sweeps.
+   */
+  sweep?(conversation: WorkspaceConversation): Promise<void>;
   /**
    * Runs a completing task's completion effect and records the outcome on the board, or reports
    * `deferred` when the runner it needs is away, to be tried again.
@@ -287,6 +293,8 @@ export class Scheduler {
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
   private readonly completing = new Set<Promise<void>>();
+  /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
+  private readonly sweeping = new Set<Promise<void>>();
   private state: State = StateSchema.parse({
     cursor: null,
     lastHeartbeat: {},
@@ -348,6 +356,7 @@ export class Scheduler {
       ...this.running.values(),
       ...this.completing,
       ...this.steering.values(),
+      ...this.sweeping,
     ]);
   }
 
@@ -403,6 +412,7 @@ export class Scheduler {
       ...this.steering.values(),
       ...this.running.values(),
       ...this.completing,
+      ...this.sweeping,
     ]);
   }
 
@@ -519,6 +529,25 @@ export class Scheduler {
         if (creator !== null && creator !== event.actor) {
           await this.wakeCreator(taskId, project, creator, event.actor, now);
         }
+        // A task's thread closes with it and is swept then; one from before threads has none.
+        const threaded = await this.board.readThread(taskId).then(
+          () => true,
+          () => false,
+        );
+        if (!threaded) {
+          this.sweep({ kind: "thread", id: taskId });
+        }
+        return;
+      }
+      case "thread.closed": {
+        const threadId = stringOf(payload["threadId"]);
+        if (threadId !== null) {
+          this.sweep({ kind: "thread", id: threadId });
+        }
+        return;
+      }
+      case "workspace.leftovers": {
+        await this.wakeClosing(payload, now);
         return;
       }
       case "task.updated": {
@@ -614,6 +643,12 @@ export class Scheduler {
         if (channel === null) {
           return;
         }
+        const archived = parseChannelRef(channel);
+        this.sweep({
+          kind: "channel",
+          scope: archived.project ?? SOCIETY_SCOPE,
+          name: archived.channel,
+        });
         for (const [key, item] of this.pending) {
           const { dispatch } = item;
           if (
@@ -900,6 +935,57 @@ export class Scheduler {
       scope,
       { kind: "task_done", from, reason: `task ${taskId} you created is done`, taskId },
       now,
+    );
+  }
+
+  /** Asks the runners to remove an ended conversation's workspaces, without holding up the pass. */
+  private sweep(conversation: WorkspaceConversation): void {
+    const sweep = this.runner.sweep?.bind(this.runner);
+    if (sweep === undefined) {
+      return;
+    }
+    const promise: Promise<void> = sweep(conversation)
+      .catch((error: unknown) => {
+        this.log.warn({ conversation, error: String(error) }, "sweeping workspaces failed");
+      })
+      .finally(() => {
+        this.sweeping.delete(promise);
+      });
+    this.sweeping.add(promise);
+  }
+
+  /**
+   * A citizen's workspace in a conversation that has ended holds work on no branch: one closing turn
+   * there, in the same session and workspace, decides whether it matters and whose it is.
+   */
+  private async wakeClosing(payload: Record<string, unknown>, now: number): Promise<void> {
+    const name = stringOf(payload["agent"]);
+    const scope = stringOf(payload["project"]);
+    const thread = stringOf(payload["thread"]);
+    const channel = stringOf(payload["channel"]);
+    const agent = name === null ? null : await this.tryReadAgent(name);
+    if (agent === null || scope === null) {
+      return;
+    }
+    const beside: Beside | null =
+      thread !== null
+        ? { thread: await this.conversationOf(thread, scope) }
+        : channel !== null
+          ? { channel }
+          : null;
+    if (beside === null) {
+      return;
+    }
+    this.enqueue(
+      agent.name,
+      scope,
+      {
+        kind: "closing",
+        reason:
+          "a conversation you took part in has ended, and its workspace holds work on no branch",
+      },
+      now,
+      beside,
     );
   }
 

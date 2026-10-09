@@ -1,8 +1,11 @@
 import { setTimeout as wait } from "node:timers/promises";
 import {
   RUNNER_PROTOCOL,
+  sameConversation,
+  workspaceConversationOf,
   type AgentEvent,
   type CliKind,
+  type HeldWorkspace,
   type Name,
   type RunnerMessage,
   type TranscriptEntry,
@@ -102,6 +105,8 @@ export class RunnerDaemon {
   private readonly log: RunnerLog;
   private readonly retryMs: number;
   private readonly running = new Map<string, Promise<void>>();
+  /** The jobs running, whose workspaces a sweep leaves to the end of their turn. */
+  private readonly jobs = new Map<string, TurnJob>();
   /** Each turn in flight's handle, for the steers and stops the server sends it. */
   private readonly controls = new Map<string, TurnControl>();
   private readonly homes: HomeSync;
@@ -216,6 +221,7 @@ export class RunnerDaemon {
             delay = this.retryMs;
             everOpened = true;
             opened();
+            void this.reportHeld();
           },
           onMessage: (message) => this.handle(message),
           onMalformed: (problem) =>
@@ -248,9 +254,11 @@ export class RunnerDaemon {
       }
       const control = new TurnControl();
       this.controls.set(message.job.turnId, control);
+      this.jobs.set(message.job.turnId, message.job);
       const run = this.runJob(message.job, control).finally(() => {
         this.running.delete(message.job.turnId);
         this.controls.delete(message.job.turnId);
+        this.jobs.delete(message.job.turnId);
       });
       this.running.set(message.job.turnId, run);
       return;
@@ -290,6 +298,30 @@ export class RunnerDaemon {
         answer(Promise.resolve(control !== undefined));
         return;
       }
+      case "sweep":
+        answer(this.executor.sweep(message.conversation, (held) => this.inUse(held)));
+        return;
+    }
+  }
+
+  /** Whether a turn running here is in that citizen's conversation, whose end removes the workspace. */
+  private inUse(held: HeldWorkspace): boolean {
+    return [...this.jobs.values()].some((job) => {
+      const conversation = workspaceConversationOf(job);
+      return (
+        job.agent === held.agent &&
+        conversation !== null &&
+        sameConversation(conversation, held.conversation)
+      );
+    });
+  }
+
+  /** Reports the workspaces held here, so the server sweeps those whose conversations ended meanwhile. */
+  private async reportHeld(): Promise<void> {
+    try {
+      await this.client.workspaces(await this.executor.held());
+    } catch (error) {
+      this.log.warn({ error: String(error) }, "could not report the workspaces held here");
     }
   }
 
@@ -310,6 +342,7 @@ export class RunnerDaemon {
         session: job.session ?? "unstarted",
         model: null,
         work: null,
+        leftovers: false,
       };
     }
     try {
@@ -354,6 +387,8 @@ export interface CreateRunnerOptions {
   readonly git?: GitOps | undefined;
   readonly retryMs?: number | undefined;
   readonly fetch?: typeof fetch | undefined;
+  /** How often a project's remote is fetched at most; a minute unless set. */
+  readonly fetchIntervalMs?: number | undefined;
 }
 
 /** A runner with its client, layout, and executor wired together; call `start` to connect it. */
@@ -369,6 +404,7 @@ export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
     log: options.log,
     onWarmChanged: (keys) => daemon?.reportWarm(keys),
     serverUrl: options.serverUrl,
+    fetchIntervalMs: options.fetchIntervalMs,
   });
   daemon = new RunnerDaemon({
     client,

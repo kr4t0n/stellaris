@@ -1,6 +1,7 @@
 import type { Board } from "@stellaris/board-core";
 import path from "node:path";
 import {
+  HeldWorkspacesSchema,
   FileReadSchema,
   NameSchema,
   RunnerAnswerSchema,
@@ -131,6 +132,11 @@ export function runnerRoutes(
 
   routes.post("/requests/:id", async (c) => {
     hub.answer(c.get("runner"), c.req.param("id"), RunnerAnswerSchema.parse(await c.req.json()));
+    return c.json({ ok: true });
+  });
+
+  routes.post("/workspaces", async (c) => {
+    hub.heldWorkspaces(c.get("runner"), HeldWorkspacesSchema.parse(await c.req.json()).workspaces);
     return c.json({ ok: true });
   });
 

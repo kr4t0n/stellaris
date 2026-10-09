@@ -49,6 +49,8 @@ export function decideWake(input: WakeInput): WakeDecision {
       return { wake: true, reason: "operations signal", priority: 0 };
     case "user_post":
       return { wake: true, reason: "user post", priority: 2 };
+    case "closing":
+      return { wake: true, reason: "an ended conversation left work on no branch", priority: 1 };
     case "heartbeat":
       break;
   }

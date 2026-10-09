@@ -3017,18 +3017,28 @@ export class Board {
   }
 
   /** Sets a project's completion effect. */
+  /**
+   * Sets a project's completion effect, its display name, or both. The slug stays: addresses,
+   * channel references, branches, and runners' directories all carry it.
+   */
   async configureProject(actor: Actor, input: VerbInput<"configure_project">): Promise<Project> {
     const args = VerbInputs.configure_project.parse(input);
     await this.authorize(actor, "configure_project");
+    if (args.on_done === undefined && args.name === undefined) {
+      throw new BoardError("VALIDATION", "configure_project needs on_done, name, or both");
+    }
     return this.mutex.run(async () => {
-      await this.readActiveProject(args.project);
+      const previous = await this.readActiveProject(args.project);
       const project = await this.updateProject(args.project, (current) => ({
         ...current,
-        onDone: args.on_done,
+        ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
+        ...(args.name === undefined ? {} : { name: args.name }),
       }));
       await this.events.append("project.configured", actor.name, {
         slug: project.slug,
         onDone: project.onDone,
+        name: project.name,
+        ...(project.name === previous.name ? {} : { previousName: previous.name }),
       });
       return project;
     });

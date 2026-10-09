@@ -98,7 +98,9 @@ export const VerbInputs = {
   advance_task: z.object({ task_id: UlidSchema, note: z.string().min(1).optional() }),
   configure_project: z.object({
     project: NameSchema,
-    on_done: CompletionEffectSchema,
+    on_done: CompletionEffectSchema.optional(),
+    /** A new display name; the slug, which everything refers to the project by, never changes. */
+    name: z.string().trim().min(1).max(120).optional(),
   }),
   archive_project: z.object({ project: NameSchema, reason: z.string().min(1) }),
 } as const satisfies Record<VerbName, z.ZodType>;
@@ -147,7 +149,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   advance_task:
     "Finish the stage you hold, with a note for the task's thread on what you did. The next stage becomes current; past the last one the task is done.",
   configure_project:
-    "Set a project's completion effect: none, or merge to land each finished task's branch on the default branch.",
+    "Set a project's completion effect (none, or merge to land each finished task's branch on the default branch), its display name, or both. The slug never changes.",
   archive_project:
     "Archive a project whose work is finished or has moved: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay. Refused while a task there is in play.",
 };

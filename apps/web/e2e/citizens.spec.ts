@@ -326,3 +326,25 @@ test("a society knowledge topic is removed from its page after a second click", 
     { path: "/api/verbs/remove_knowledge", body: { project: null, topic: "code-comments" } },
   ]);
 });
+
+test("a project is renamed from its page, and only its shown name changes", async ({ page }) => {
+  const board = await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "Rename…" }).click();
+  const form = page.getByRole("form", { name: "Rename lab" });
+  await expect(form).toContainText("lab stays in its addresses, channels, and branches");
+  const field = form.getByRole("textbox", { name: "Project name" });
+  await expect(field).toHaveValue("Lab");
+  await expect(form.getByRole("button", { name: "Rename" })).toBeDisabled();
+  await field.fill("Shortest paths lab");
+  await form.getByRole("button", { name: "Rename" }).click();
+
+  await expect(form).toHaveCount(0);
+  await expect(view.getByRole("heading", { name: "Shortest paths lab" })).toBeVisible();
+  await expect(page).toHaveURL(/\/p\/lab$/);
+  await expect(page.getByRole("link", { name: "Shortest paths lab", exact: true })).toBeVisible();
+  expect(board.writes).toEqual([
+    { path: "/api/verbs/configure_project", body: { project: "lab", name: "Shortest paths lab" } },
+  ]);
+});

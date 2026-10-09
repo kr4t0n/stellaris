@@ -311,6 +311,9 @@ export function createApi(token: string) {
       invoke("approve", token, input, DecisionSchema),
     reject: (input: { proposal_id: string; reason: string }) =>
       invoke("reject", token, input, DecisionSchema),
+    /** Changes a project's display name; its slug stays. */
+    renameProject: (project: string, name: string) =>
+      invoke("configure_project", token, { project, name }, ProjectSchema),
     /** Takes a topic off the board; the server keeps its text aside. */
     removeKnowledge: (input: { project: string | null; topic: string }) =>
       invoke("remove_knowledge", token, input, RemovedKnowledgeSchema),

@@ -822,6 +822,31 @@ describe("Board", () => {
     expect(abandoned.returned).toBeUndefined();
   });
 
+  it("renames a project's display name and leaves its slug and completion effect alone", async () => {
+    const { board } = await society();
+    const before = await board.readProject("demo");
+    const renamed = await board.configureProject(USER, { project: "demo", name: "  Demo work  " });
+    expect(renamed).toMatchObject({ slug: "demo", name: "Demo work", onDone: before.onDone });
+    expect((await board.readProject("demo")).name).toBe("Demo work");
+    const configured = (await board.readEvents(null)).filter(
+      (event) => event.type === "project.configured",
+    );
+    expect(configured.map((event) => event.payload)).toEqual([
+      { slug: "demo", onDone: before.onDone, name: "Demo work", previousName: before.name },
+    ]);
+
+    // Something must change, the name must say something, and the verb is the planners' alone.
+    await expect(board.configureProject(USER, { project: "demo" })).rejects.toMatchObject({
+      code: "VALIDATION",
+    });
+    await expect(board.configureProject(USER, { project: "demo", name: "   " })).rejects.toThrow(
+      /expected string to have >=1 characters/,
+    );
+    await expect(
+      board.configureProject(ENG, { project: "demo", name: "Mine" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("runs completion effects: a merge project completes through the board, and a failure reopens the last stage", async () => {
     const { board } = await society();
     await expect(

@@ -647,6 +647,8 @@ export async function fakeBoard(
   let deskEffort: string | null = null;
   // Removing a society topic takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
+  // Renaming changes the name the board shows, never the slug.
+  let lab = PROJECT;
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
   const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
@@ -754,6 +756,9 @@ export async function fakeBoard(
             route,
             member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           );
+        case "/api/verbs/configure_project":
+          lab = { ...lab, ...(typeof body["name"] === "string" ? { name: body["name"] } : {}) };
+          return json(route, lab);
         case "/api/verbs/remove_knowledge":
           societyTopics = societyTopics.filter((topic) => topic.topic !== body["topic"]);
           return json(route, {
@@ -954,7 +959,7 @@ export async function fakeBoard(
           role("steward", ["ops_event"]),
         ]);
       case "/api/projects":
-        return json(route, archived ? [PROJECT, ARCHIVED_PROJECT] : [PROJECT]);
+        return json(route, archived ? [lab, ARCHIVED_PROJECT] : [lab]);
       case "/api/projects/lab/tasks":
         return json(route, [TASK]);
       case `/api/tasks/${STAGE_TASK}`:

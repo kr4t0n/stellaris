@@ -1,4 +1,8 @@
+import type { Project } from "@stellaris/shared";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { useState } from "react";
+import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import {
@@ -8,11 +12,56 @@ import {
   useMembers,
   useNow,
   useProjects,
+  useSession,
   useTasks,
 } from "../lib/session.js";
 import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { groupTasks, PHASES } from "./tasks.js";
+import { Failure, FIELD } from "./ThreadForms.js";
+
+/** Changes the name the board shows for a project; its slug, which everything refers to it by, stays. */
+function RenameForm({ project, onDone }: { project: Project; onDone: () => void }) {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const [name, setName] = useState(project.name);
+  const rename = useMutation({
+    mutationFn: () => api.renameProject(project.slug, name.trim()),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["projects"] });
+      onDone();
+    },
+  });
+  const unchanged = name.trim() === "" || name.trim() === project.name;
+  return (
+    <form
+      aria-label={`Rename ${project.slug}`}
+      className="space-y-2 border-b border-line bg-surface-2/20 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        rename.mutate();
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <input
+          value={name}
+          maxLength={120}
+          aria-label="Project name"
+          onChange={(event) => setName(event.target.value)}
+          className={`${FIELD} min-w-0 flex-1`}
+        />
+        <Button onClick={onDone}>Cancel</Button>
+        <Button variant="primary" type="submit" disabled={rename.isPending || unchanged}>
+          {rename.isPending ? "Saving…" : "Rename"}
+        </Button>
+      </div>
+      <p className="text-meta">
+        Only the name shown changes; {project.slug} stays in its addresses, channels, and branches.
+      </p>
+      <Failure error={rename.error} />
+    </form>
+  );
+}
 
 /**
  * A project at a glance: who works in it, where its tasks stand, how they end, its dashboard, and
@@ -28,6 +77,7 @@ export function ProjectView() {
   const dashboard = useDashboard(slug);
   const knowledge = useKnowledge(slug);
   const now = useNow(30_000);
+  const [renaming, setRenaming] = useState(false);
 
   const project = projects.data?.find((candidate) => candidate.slug === slug);
   if (project === undefined) {
@@ -49,15 +99,21 @@ export function ProjectView() {
         title={project.name}
         subtitle={`${slug} · ${project.repo ?? "a local repository"} · ${project.defaultBranch}`}
         trailing={
-          <Link
-            to="/p/$slug/tasks"
-            params={{ slug }}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-          >
-            Tasks →
-          </Link>
+          <>
+            {renaming || project.archived !== undefined ? null : (
+              <Button onClick={() => setRenaming(true)}>Rename…</Button>
+            )}
+            <Link
+              to="/p/$slug/tasks"
+              params={{ slug }}
+              className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+            >
+              Tasks →
+            </Link>
+          </>
         }
       />
+      {renaming ? <RenameForm project={project} onDone={() => setRenaming(false)} /> : null}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {project.archived === undefined ? null : (
           <p className="rounded-lg bg-surface-2/40 px-3 py-2 text-sm text-fg-secondary">

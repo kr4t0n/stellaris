@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   BRANCH_CHANGES_LIMIT,
@@ -57,7 +57,7 @@ export interface TurnExecutorOptions {
 interface Workspace {
   readonly cwd: string;
   readonly repoDir: string;
-  /** For a project worktree, the agent's own branch; for a task's, null to detach; for a home, none. */
+  /** For the pair's worktree, the agent's own branch; for a task's or a thread's, null to detach; for a home, none. */
   readonly handBack: { readonly to: string | null } | null;
   readonly taskBranch: string | null;
 }
@@ -251,25 +251,44 @@ export class TurnExecutor {
     };
   }
 
-  /** A task's own worktree goes once its task has ended; its work is on the task's branch. */
-  async dropTaskWorktree(job: TurnJob): Promise<void> {
+  /**
+   * A conversation's own workspace goes once its task or thread has ended: a task's work is on its
+   * branch, and a thread's was told to go somewhere that lasts.
+   */
+  async dropWorkspace(job: TurnJob): Promise<void> {
     const { workspace } = job;
-    if (workspace.kind !== "task") {
-      return;
-    }
     try {
-      await this.withProjectLock(workspace.repo.slug, () =>
-        this.git.removeWorktree(
-          this.layout.repo(workspace.repo.slug),
-          this.layout.taskWorktree(job.agent, workspace.taskId),
-        ),
-      );
+      if (workspace.kind === "home") {
+        if (workspace.thread !== undefined) {
+          await rm(this.threadScratch(job.agent, workspace.thread), {
+            recursive: true,
+            force: true,
+          });
+        }
+        return;
+      }
+      const worktree =
+        workspace.kind === "task"
+          ? this.layout.taskWorktree(job.agent, workspace.taskId)
+          : workspace.thread === undefined
+            ? null
+            : this.layout.threadWorktree(job.agent, workspace.thread);
+      if (worktree !== null) {
+        await this.withProjectLock(workspace.repo.slug, () =>
+          this.git.removeWorktree(this.layout.repo(workspace.repo.slug), worktree),
+        );
+      }
     } catch (error) {
       this.log.warn(
-        { taskId: workspace.taskId, error: String(error) },
-        "could not remove an ended task's worktree",
+        { agent: job.agent, thread: job.thread, error: String(error) },
+        "could not remove an ended conversation's workspace",
       );
     }
+  }
+
+  /** The folder of a thread's conversation outside projects, under the home's scratch folder. */
+  private threadScratch(agent: Name, threadId: string): string {
+    return path.join(this.layout.agent(agent), HOME_SCRATCH, ".threads", threadId);
   }
 
   /** Lands a task: merges its branch into the default branch of the project's repository here. */
@@ -336,15 +355,19 @@ export class TurnExecutor {
 
   /**
    * Makes sure of the project's repository and the worktree a turn runs in: the pair's own for its
-   * home conversation and its proposal and topic threads, or, for a task's conversation, one of its
-   * own on the task's branch. A society-scope turn runs in the scratch folder of the agent's home.
+   * home conversation; for a task's conversation, one of its own on the task's branch; for a
+   * proposal's or a topic's, one of its own detached at the pair's branch. A society-scope turn
+   * runs in the scratch folder of the agent's home, a thread's in a folder of its own there.
    */
   private async prepare(job: TurnJob, home: string): Promise<Workspace> {
     const { workspace } = job;
     if (workspace.kind === "home") {
       // Outside any project a turn works in its home's scratch folder, which is never committed,
       // so what its tools leave behind stays on this machine; memory and skills sit beside it.
-      const cwd = path.join(home, HOME_SCRATCH);
+      const cwd =
+        workspace.thread === undefined
+          ? path.join(home, HOME_SCRATCH)
+          : this.threadScratch(job.agent, workspace.thread);
       await mkdir(cwd, { recursive: true });
       return { cwd, repoDir: home, handBack: null, taskBranch: null };
     }
@@ -363,7 +386,7 @@ export class TurnExecutor {
         return { cwd, repoDir, handBack: { to: null }, taskBranch: branch };
       }
       const own = `agent/${job.agent}`;
-      const cwd = await this.git.ensureWorktree(
+      const pairWorktree = await this.git.ensureWorktree(
         repoDir,
         this.layout.worktree(job.agent, repo.slug),
         own,
@@ -373,7 +396,15 @@ export class TurnExecutor {
       for (const branch of workspace.branches) {
         await this.git.ensureBranch(repoDir, branch, repo.defaultBranch);
       }
-      return { cwd, repoDir, handBack: { to: own }, taskBranch: null };
+      if (workspace.thread === undefined) {
+        return { cwd: pairWorktree, repoDir, handBack: { to: own }, taskBranch: null };
+      }
+      const cwd = await this.git.ensureThreadWorktree(
+        repoDir,
+        this.layout.threadWorktree(job.agent, workspace.thread),
+        own,
+      );
+      return { cwd, repoDir, handBack: { to: null }, taskBranch: null };
     });
   }
 

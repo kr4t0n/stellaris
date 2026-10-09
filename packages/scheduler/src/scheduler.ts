@@ -249,8 +249,11 @@ export class Scheduler {
   private readonly now: () => Date;
   private readonly log: SchedulerLog;
   private readonly pending = new Map<string, PendingTurn>();
-  /** Turns in flight by session key, each with the lane it holds (see `laneOf`). */
-  private readonly running = new Map<string, { lane: string; promise: Promise<void> }>();
+  /**
+   * Turns in flight by session key. A conversation runs one turn at a time, and different
+   * conversations side by side, since each thread's works in a place of its own.
+   */
+  private readonly running = new Map<string, Promise<void>>();
   /** Steers under way, by session key; a pass does not wait for a runner to answer one. */
   private readonly steering = new Map<string, Promise<void>>();
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
@@ -314,7 +317,7 @@ export class Scheduler {
     }
     await this.passing?.catch(() => undefined);
     await Promise.allSettled([
-      ...[...this.running.values()].map((turn) => turn.promise),
+      ...this.running.values(),
       ...this.completing,
       ...this.steering.values(),
     ]);
@@ -370,7 +373,7 @@ export class Scheduler {
   async drain(): Promise<void> {
     await Promise.allSettled([
       ...this.steering.values(),
-      ...[...this.running.values()].map((turn) => turn.promise),
+      ...this.running.values(),
       ...this.completing,
     ]);
   }
@@ -1120,7 +1123,7 @@ export class Scheduler {
         continue;
       }
       const key = sessionKey(agent.name, latest.scope);
-      if (this.pending.has(key) || this.laneBusy(key)) {
+      if (this.pending.has(key) || this.running.has(key)) {
         // Busy: try again next tick rather than merge the reflection into a working turn.
         continue;
       }
@@ -1470,26 +1473,6 @@ export class Scheduler {
   }
 
   /**
-   * The lane a turn runs in: a task's conversation has its own, with a worktree of its own; a
-   * member's home conversation and its proposal and topic threads in a scope share the scope's
-   * worktree, and so one lane, one turn at a time.
-   */
-  private laneOf(dispatch: TurnDispatch): string {
-    return dispatch.thread?.task === true
-      ? sessionKey(dispatch.agent, dispatch.project, dispatch.thread.id)
-      : sessionKey(dispatch.agent, dispatch.project);
-  }
-
-  private laneBusy(lane: string): boolean {
-    for (const turn of this.running.values()) {
-      if (turn.lane === lane) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Delivers ready message wakes into the turn already running in their conversation, rather than
    * keeping them for a turn of their own. Each stays queued until that turn ends and is checked
    * again then, so a steer refused, or left untaken, loses nothing. A pass never waits on a runner.
@@ -1559,10 +1542,6 @@ export class Scheduler {
       if (this.running.size >= this.concurrency) {
         break;
       }
-      const lane = this.laneOf(item.dispatch);
-      if (this.laneBusy(lane)) {
-        continue;
-      }
       this.pending.delete(key);
       if (await this.alreadyRead(item)) {
         // Steered into the turn that ran here, or in the digest it opened with.
@@ -1626,7 +1605,7 @@ export class Scheduler {
           this.running.delete(key);
         }
       })();
-      this.running.set(key, { lane, promise });
+      this.running.set(key, promise);
     }
   }
 

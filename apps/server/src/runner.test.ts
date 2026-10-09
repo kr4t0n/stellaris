@@ -633,6 +633,91 @@ describe("turns on a runner over the runner protocol", () => {
     await expect(readFile(path.join(cwd, "download.html"), "utf8")).resolves.toContain("html");
   });
 
+  it("gives each thread's conversation a workspace of its own beside the citizen's others, until the thread closes", async () => {
+    const { board } = await Board.init(dir, { name: "threads" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const topic = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "which library?",
+    });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+
+    // Each turn waits until all three are in flight, so they can only finish by running together.
+    const cwds = new Set<string>();
+    const { promise: together, resolve: allStarted } = Promise.withResolvers<void>();
+    let detachedAtOwnBranch = false;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        cwds.add(cwd);
+        if (cwds.size === 3) {
+          allStarted();
+        }
+        await together;
+        await writeFile(path.join(cwd, "notes.txt"), "left behind\n", "utf8");
+        if (cwd.includes(topic.id)) {
+          const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+          const [at, own] = await Promise.all([
+            execa("git", ["rev-parse", "HEAD"], { cwd }),
+            execa("git", ["rev-parse", "agent/eng-1"], { cwd }),
+          ]);
+          detachedAtOwnBranch = head.stdout === "HEAD" && at.stdout === own.stdout;
+          await board.closeThread(USER, { thread_id: topic.id, summary: "Settled." });
+        }
+        if (cwd.includes(ask.id)) {
+          await board.closeThread(USER, { thread_id: ask.id, summary: "Answered." });
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = (project: string, thread?: string) =>
+      run({
+        agent: "eng-1",
+        project,
+        ...(thread === undefined ? {} : { thread: { id: thread, task: false } }),
+        trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+        priority: 1,
+      });
+    const ended = await Promise.all([
+      turn("demo"),
+      turn("demo", topic.id),
+      turn("society", ask.id),
+    ]);
+    expect(ended.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
+
+    const home = runner.paths.worktree("eng-1", "demo");
+    const topicWorktree = runner.paths.threadWorktree("eng-1", topic.id);
+    const askFolder = path.join(runner.paths.agent("eng-1"), "scratch", ".threads", ask.id);
+    expect([...cwds].toSorted()).toEqual([home, topicWorktree, askFolder].toSorted());
+    expect(detachedAtOwnBranch).toBe(true);
+    // A closed thread's workspace goes with whatever was left in it, once the runner has the
+    // server's answer to the turn's outcome; the home worktree stays.
+    await vi.waitFor(async () => {
+      await expect(stat(topicWorktree)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(askFolder)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    await expect(readFile(path.join(home, "notes.txt"), "utf8")).resolves.toBe("left behind\n");
+    const worktrees = await execa("git", ["worktree", "list", "--porcelain"], {
+      cwd: runner.paths.repo("demo"),
+    });
+    expect(worktrees.stdout).not.toContain(topic.id);
+  });
+
   it("lists a citizen's models from its own runner, and asks again once that runner reconnects", async () => {
     const { board, userToken } = await Board.init(dir, { name: "models" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

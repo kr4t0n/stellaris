@@ -866,7 +866,7 @@ describe("Scheduler", () => {
     ]);
   });
 
-  it("gives each thread a session: task threads run side by side, other conversations share a lane", async () => {
+  it("runs a citizen's conversations side by side: each task, each other thread, and its home", async () => {
     const { board, runner, scheduler } = await setup({ concurrency: 4 });
     const settle = async (): Promise<void> => {
       await scheduler.tick();
@@ -892,23 +892,32 @@ describe("Scheduler", () => {
       { id: second.id, task: true },
     ]);
 
-    // A topic thread and the channels share the scope's worktree, so they take turns.
+    // A topic thread works in a place of its own, so it runs beside the channels' home conversation.
     const topic = await board.openThread(REV, { channel: "demo/dev", title: "which library?" });
     await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 thoughts?" });
     await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 hello" });
     await settle();
-    expect(scheduler.runningPairs).toContain(sessionKey("eng-1", "demo", topic.id));
-    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo")]);
+    expect(scheduler.runningPairs).toEqual([
+      sessionKey("eng-1", "demo"),
+      sessionKey("eng-1", "demo", first.id),
+      sessionKey("eng-1", "demo", second.id),
+      sessionKey("eng-1", "demo", topic.id),
+    ]);
+    expect(scheduler.pendingPairs).toEqual([]);
+    expect(
+      runner.dispatches
+        .slice(2)
+        .map((d) => `${d.trigger.kind} ${d.thread?.id ?? "home"}`)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual([`mention ${topic.id}`, "mention home"].toSorted((a, b) => a.localeCompare(b)));
+
+    // A conversation still runs one turn at a time: a second wake there waits for the first.
+    await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 and the license?" });
+    await settle();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", topic.id)]);
     runner.hold = false;
     runner.releaseHeld();
     await scheduler.drain();
-    advance(1_000);
-    await scheduler.tick();
-    await scheduler.drain();
-    expect(runner.dispatches.slice(2).map((d) => [d.trigger.kind, d.thread])).toEqual([
-      ["mention", { id: topic.id, task: false }],
-      ["mention", undefined],
-    ]);
   });
 
   it("schedules a reflection turn per cadence, only after new work, in the scope of that work", async () => {

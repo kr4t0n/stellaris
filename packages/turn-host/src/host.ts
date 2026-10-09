@@ -19,6 +19,7 @@ import {
   type Task,
   type Thread,
   type TranscriptEntry,
+  type TurnAck,
   type TurnDispatch,
   type TurnJob,
   type TurnOutcome,
@@ -95,7 +96,6 @@ interface OpenTurn {
   /** Who asked the turn to stop. */
   stopRequestedBy: Name | null;
   readonly held: readonly Ulid[];
-  readonly taskId: Ulid | undefined;
   readonly costSoFarUsd: number;
   readonly configuredModel: string | null;
   readonly transcript: TranscriptEntry[];
@@ -212,7 +212,7 @@ export class TurnHost {
 
     const taskId = thread?.task === true ? thread.id : undefined;
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
-    const workspace = await this.workspaceOf(project, taskId);
+    const workspace = await this.workspaceOf(project, thread);
     const sessions = await this.board.readSessions(agent.name, dispatch.project, thread?.id);
     // A session lives on the runner it began on; anywhere else the conversation starts afresh.
     const recorded = sessions.runner === runner.name ? sessions[agent.cli] : undefined;
@@ -420,7 +420,6 @@ export class TurnHost {
       outstanding: null,
       stopRequestedBy: null,
       held: held.map((each) => each.id),
-      taskId,
       costSoFarUsd,
       configuredModel: agent.model ?? null,
       transcript: [],
@@ -589,9 +588,9 @@ export class TurnHost {
 
   /**
    * Records a turn's end from its outcome. Returns null for a turn the host does not know, else
-   * whether the task the turn worked on has ended, so the runner may drop its worktree.
+   * whether the task or thread the turn worked in has ended, so the runner may drop its workspace.
    */
-  async closeTurn(turnId: Ulid, outcome: TurnOutcome): Promise<{ dropWorktree: boolean } | null> {
+  async closeTurn(turnId: Ulid, outcome: TurnOutcome): Promise<TurnAck | null> {
     const turn = this.open.get(turnId);
     if (turn === undefined) {
       return null;
@@ -664,7 +663,7 @@ export class TurnHost {
       );
       turn.done(finished);
     }
-    return { dropWorktree: await this.taskEnded(turn.taskId) };
+    return { dropWorkspace: await this.conversationEnded(job) };
   }
 
   /** Ends a turn whose outcome will never come, as when its runner went away, as failed. */
@@ -768,36 +767,41 @@ export class TurnHost {
     return token;
   }
 
+  /** Where a conversation works: a task's on its branch, any other thread's in a place of its own. */
   private async workspaceOf(
     project: Project | null,
-    taskId: Ulid | undefined,
+    thread: TurnDispatch["thread"],
   ): Promise<TurnWorkspace> {
+    const own = thread === undefined || thread.task ? {} : { thread: thread.id };
     if (project === null) {
-      return { kind: "home" };
+      return { kind: "home", ...own };
     }
     const repo: ProjectRepo = {
       slug: project.slug,
       origin: project.repo,
       defaultBranch: project.defaultBranch,
     };
-    if (taskId !== undefined) {
-      return { kind: "task", repo, taskId };
+    if (thread?.task === true) {
+      return { kind: "task", repo, taskId: thread.id };
     }
     // Every task in play gets its branch before a home turn, so a holder only has to switch to it.
     const branches = (await this.board.listTasks(project.slug))
       .filter((task) => task.status === "open" || task.status === "claimed")
       .map((task) => `task/${task.id}`);
-    return { kind: "project", repo, branches };
+    return { kind: "project", repo, branches, ...own };
   }
 
-  /** Whether a task conversation's task has ended, which frees its worktree. */
-  private async taskEnded(taskId: Ulid | undefined): Promise<boolean> {
-    if (taskId === undefined) {
+  /** Whether a thread conversation's task or thread has ended, which frees its workspace. */
+  private async conversationEnded(job: TurnJob): Promise<boolean> {
+    if (job.thread === undefined) {
       return false;
     }
     try {
-      const { task } = await this.board.findTask(taskId);
-      return task.status === "done" || task.status === "abandoned";
+      if (job.workspace.kind === "task") {
+        const { task } = await this.board.findTask(job.thread);
+        return task.status === "done" || task.status === "abandoned";
+      }
+      return (await this.board.readThread(job.thread)).state === "closed";
     } catch {
       return false;
     }

@@ -38,7 +38,12 @@ export interface GitOps {
    * out, else detached at the branch's tip, where the turn can read the work but not commit to it.
    */
   ensureTaskWorktree(repoDir: string, worktreeDir: string, branch: string): Promise<string>;
-  /** Removes a worktree and its checkout, once its task has ended. */
+  /**
+   * A proposal's or a topic's conversation's worktree, made detached at the tip of `from` and
+   * kept as its turns left it, since the branch is checked out in the agent's own worktree.
+   */
+  ensureThreadWorktree(repoDir: string, worktreeDir: string, from: string): Promise<string>;
+  /** Removes a worktree and its checkout, once its task or thread has ended. */
   removeWorktree(repoDir: string, worktreeDir: string): Promise<void>;
   /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
@@ -206,6 +211,15 @@ export class ExecaGit implements GitOps {
     const switched = await git(["switch", "--quiet", branch], worktreeDir);
     if (switched.exitCode !== 0) {
       await must(["switch", "--quiet", "--detach", branch], worktreeDir);
+    }
+    return worktreeDir;
+  }
+
+  async ensureThreadWorktree(repoDir: string, requestedDir: string, from: string): Promise<string> {
+    const worktreeDir = path.resolve(requestedDir);
+    if (!(await exists(path.join(worktreeDir, ".git")))) {
+      await mkdir(path.dirname(worktreeDir), { recursive: true });
+      await must(["worktree", "add", "--detach", worktreeDir, from], repoDir);
     }
     return worktreeDir;
   }

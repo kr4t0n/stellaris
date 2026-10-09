@@ -219,7 +219,7 @@ export class RunnerHub implements TurnRunner {
   async turnOutcome(runner: Name, turnId: Ulid, outcome: TurnOutcome): Promise<TurnAck> {
     this.assertOwns(runner, turnId);
     const ack = await this.host.closeTurn(turnId, outcome);
-    return ack ?? { dropWorktree: false };
+    return ack ?? { dropWorkspace: false };
   }
 
   answer(runner: Name, request: string, answer: RunnerAnswer): void {

@@ -135,14 +135,17 @@ export type ProjectRepo = z.infer<typeof ProjectRepoSchema>;
 /**
  * Where a turn works: the agent's home for a society-scope turn; the agent's own worktree of a
  * project, on `agent/<name>`, with the task branches to make sure of first; or the worktree of one
- * task's conversation, on `task/<id>`.
+ * task's conversation, on `task/<id>`. With `thread`, a proposal's or a topic's conversation works
+ * in a place of its own instead, so it runs beside the citizen's other conversations: a folder
+ * under the home's scratch folder, or a worktree detached at the tip of `agent/<name>`.
  */
 export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("home") }),
+  z.object({ kind: z.literal("home"), thread: UlidSchema.optional() }),
   z.object({
     kind: z.literal("project"),
     repo: ProjectRepoSchema,
     branches: z.array(z.string().min(1)),
+    thread: UlidSchema.optional(),
   }),
   z.object({ kind: z.literal("task"), repo: ProjectRepoSchema, taskId: UlidSchema }),
 ]);
@@ -205,8 +208,11 @@ export const TurnOutcomeSchema = z.object({
 });
 export type TurnOutcome = z.infer<typeof TurnOutcomeSchema>;
 
-/** The server's answer to an outcome: whether the task the turn worked on has ended, so its worktree may go. */
-export const TurnAckSchema = z.object({ dropWorktree: z.boolean() });
+/**
+ * The server's answer to an outcome: whether the turn's task or thread has ended, so the workspace
+ * of its own, a task's or a thread's worktree or a thread's scratch folder, may go.
+ */
+export const TurnAckSchema = z.object({ dropWorkspace: z.boolean() });
 export type TurnAck = z.infer<typeof TurnAckSchema>;
 
 /** A request to land a task: merge its branch into the project's default branch. */

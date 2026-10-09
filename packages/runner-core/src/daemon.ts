@@ -6,6 +6,7 @@ import {
   type Name,
   type RunnerMessage,
   type TranscriptEntry,
+  type TurnAck,
   type TurnJob,
   type TurnOutcome,
 } from "@stellaris/shared";
@@ -319,16 +320,13 @@ export class RunnerDaemon {
     await sender.flush();
     await this.warmChain;
     const ack = await this.report(job.turnId, outcome);
-    if (ack?.dropWorktree === true) {
-      await this.executor.dropTaskWorktree(job);
+    if (ack?.dropWorkspace === true) {
+      await this.executor.dropWorkspace(job);
     }
   }
 
   /** Posts a turn's outcome, trying again while the server is unreachable, as across its restart. */
-  private async report(
-    turnId: string,
-    outcome: TurnOutcome,
-  ): Promise<{ dropWorktree: boolean } | null> {
+  private async report(turnId: string, outcome: TurnOutcome): Promise<TurnAck | null> {
     let delay = this.retryMs;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       try {

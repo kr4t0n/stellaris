@@ -120,6 +120,41 @@ describe("ExecaGit", () => {
     expect((await git.merge(repoDir, "main", branch)).ok).toBe(true);
   });
 
+  it("keeps a thread's worktree detached and as its turns left it, and hands a task branch back from it", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    await git.ensureWorktree(repoDir, path.join(dir, "wt", "eng-1", "demo"), "agent/eng-1", "main");
+    const worktree = await git.ensureThreadWorktree(
+      repoDir,
+      path.join(dir, "wt", "eng-1", ".threads", "t1"),
+      "agent/eng-1",
+    );
+    const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktree });
+    expect(head.stdout).toBe("HEAD");
+    expect(await rev(worktree, "HEAD")).toBe(await rev(repoDir, "agent/eng-1"));
+
+    // The next turn of the thread finds what the last one left, even after its branch moved on.
+    await writeFile(path.join(worktree, "draft.md"), "draft\n", "utf8");
+    await execa("git", [...committer("eng-1"), "commit", "--allow-empty", "-m", "moved"], {
+      cwd: path.join(dir, "wt", "eng-1", "demo"),
+    });
+    expect(await git.ensureThreadWorktree(repoDir, worktree, "agent/eng-1")).toBe(worktree);
+    expect(await readFile(path.join(worktree, "draft.md"), "utf8")).toBe("draft\n");
+    expect(await rev(worktree, "HEAD")).not.toBe(await rev(repoDir, "agent/eng-1"));
+
+    // Work for a task goes on its branch, which the hand-back commits and lets go by detaching.
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(repoDir, branch, "main");
+    await execa("git", ["switch", branch], { cwd: worktree });
+    const author = { name: "eng-1", email: "eng-1@stellaris.local" };
+    expect(await git.handBack(worktree, null, author)).toEqual({ branch, committed: true });
+    const after = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: worktree });
+    expect(after.stdout).toBe("HEAD");
+
+    await git.removeWorktree(repoDir, worktree);
+    const list = await execa("git", ["worktree", "list", "--porcelain"], { cwd: repoDir });
+    expect(list.stdout).not.toContain(".threads");
+  });
+
   it("reads a file or a folder on a branch as its newest commit has it, byte for byte", async () => {
     const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
     const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");

@@ -831,6 +831,8 @@ Each is counted over a window of a day, a week, or the whole log, and shown in t
 
 Multiple humans with different approval authority, confidentiality inside one society, in-process tools for Claude-only agents, and budget caps. Resident sessions left this list with Phase 5, which needs them for the concierge and brings the Codex app-server client with them. Each has a seam in the design. None is built before the first society has run for a while. An `update_dashboard` verb is deferred as well: the dashboard is a projection file that agents on the server's machine edit directly today, which a remote runner cannot do, and whether agents edit dashboards at all is worth knowing before a verb exists for it.
 
+A task's base branch is deferred too. Every task branch starts from its project's default branch, which the board also lands it on and counts its changes from, and the runner makes the branch before any agent runs, so a hotfix in a project whose default branch is `dev` starts on top of unreleased work and cannot be given `main` as its base without a rebase. An optional `base` on a task, chosen by its planner, would fork its branch from that branch, keep a branch with no work yet following it, count its changes from it, and land it there, with a task naming none behaving as today; a release channel's tasks could then all start from that release's branch. No society has a project with a second long-lived branch yet.
+
 ## 14. Open items to settle during the build
 
 - Content of the steward's and the concierge's charters, including how they plan tasks and when they set gates; the steward's first draft from Phase 4 is tuned against the signals it acts on

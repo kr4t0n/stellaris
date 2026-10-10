@@ -916,7 +916,12 @@ describe("turns on a runner over the runner protocol", () => {
       script = async (cwd) => {
         await writeFile(path.join(cwd, "mine.txt"), "mine\n", "utf8");
         await execa("git", ["add", "mine.txt"], { cwd });
-        await execa("git", ["commit", "-qm", "my own notes"], { cwd });
+        // A real turn commits as its citizen through the runner's environment; this script has none.
+        await execa(
+          "git",
+          ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-qm", "my own notes"],
+          { cwd },
+        );
       };
       await home();
       await land("third.txt");

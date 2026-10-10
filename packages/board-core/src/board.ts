@@ -3964,6 +3964,37 @@ export class Board {
   }
 
   /**
+   * Records how closing an abandoned `ghpr` task's pull request on GitHub went, once: the task's
+   * link keeps it, so a restart does not try again.
+   */
+  async recordPullRequestClosed(
+    actor: Actor,
+    input: { taskId: Ulid; ok: boolean; detail: string },
+  ): Promise<Task> {
+    return this.mutex.run(async () => {
+      const location = await this.findTask(input.taskId);
+      const current = location.task;
+      const pull = current.pullRequest;
+      if (pull === undefined || pull.closed !== undefined) {
+        return current;
+      }
+      const task = await this.writeTask(location.project, {
+        ...current,
+        pullRequest: {
+          ...pull,
+          closed: { at: this.now().toISOString(), ok: input.ok, detail: input.detail },
+        },
+      });
+      await this.events.append(
+        input.ok ? "pull_request.closed" : "pull_request.close_failed",
+        actor.name,
+        { project: location.project, taskId: task.id, url: pull.url, detail: input.detail },
+      );
+      return task;
+    });
+  }
+
+  /**
    * Records that a citizen's workspace in a conversation that has ended holds work on no branch, so
    * the scheduler gives the citizen a closing turn there to decide about it. False, recording
    * nothing, once `CLOSING_ATTEMPTS` closing turns have been given for it.

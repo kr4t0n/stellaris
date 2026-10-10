@@ -18,6 +18,7 @@ import {
   type BranchFile,
   type BranchRead,
   type CliKind,
+  type CloseRequest,
   type HeldWorkspace,
   type LandRequest,
   type MergeOutcome,
@@ -666,9 +667,39 @@ export class TurnExecutor {
   }
 
   /**
-   * Deletes a merged pull request's branch on GitHub, unless it is a fork's or the default branch
-   * itself; a branch already gone, as when GitHub deletes merged branches by itself, is only
-   * logged, since the landing has happened either way.
+   * Closes an abandoned task's pull request on GitHub with the board's comment and deletes its
+   * branch, which GitHub can restore from the pull request's page. One closed already loses only
+   * its branch, and one merged already is left as it is.
+   */
+  async closePullRequest(request: CloseRequest): Promise<MergeOutcome> {
+    let pr: PullRequestState;
+    try {
+      pr = await this.pulls.view(request.url);
+    } catch (error) {
+      return { ok: false, detail: `GitHub did not show ${request.url}: ${describeError(error)}` };
+    }
+    const named = `pull request #${pr.number} (${request.url})`;
+    if (pr.state === "MERGED") {
+      return { ok: true, detail: `${named} was merged already, so it stays as it is` };
+    }
+    if (pr.state === "OPEN") {
+      try {
+        await this.pulls.close(request.url, request.comment);
+      } catch (error) {
+        return { ok: false, detail: `GitHub did not close ${named}: ${describeError(error)}` };
+      }
+    }
+    await this.dropHeadBranch(request.url, pr, request.repo.defaultBranch);
+    return {
+      ok: true,
+      detail: pr.state === "OPEN" ? `closed ${named}` : `${named} was closed already`,
+    };
+  }
+
+  /**
+   * Deletes a merged or closed pull request's branch on GitHub, unless it is a fork's or the
+   * default branch itself; a branch already gone, as when GitHub deletes merged branches by
+   * itself, is only logged, since the pull request has ended either way.
    */
   private async dropHeadBranch(url: string, pr: PullRequestState, base: string): Promise<void> {
     if (pr.isCrossRepository || pr.headRefName === base) {
@@ -677,7 +708,7 @@ export class TurnExecutor {
     await this.pulls.deleteBranch(url, pr.headRefName).catch((error: unknown) => {
       this.log.warn(
         { url, branch: pr.headRefName, error: describeError(error) },
-        "could not delete a merged pull request's branch",
+        "could not delete a pull request's branch",
       );
     });
   }

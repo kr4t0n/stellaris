@@ -270,6 +270,18 @@ export const LandRequestSchema = z.object({
 });
 export type LandRequest = z.infer<typeof LandRequestSchema>;
 
+/**
+ * A request to close an abandoned `ghpr` task's pull request on GitHub with a comment, and to
+ * delete its head branch.
+ */
+export const CloseRequestSchema = z.object({
+  repo: ProjectRepoSchema,
+  url: z.string().min(1),
+  comment: z.string().min(1),
+});
+export type CloseRequest = z.infer<typeof CloseRequestSchema>;
+
+/** How a landing or a closing went; `detail` says what happened, or why it did not. */
 export const MergeOutcomeSchema = z.object({ ok: z.boolean(), detail: z.string() });
 export type MergeOutcome = z.infer<typeof MergeOutcomeSchema>;
 
@@ -429,6 +441,8 @@ export type TurnSteer = z.infer<typeof TurnSteerSchema>;
 export const RunnerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn"), job: TurnJobSchema }),
   z.object({ type: z.literal("land"), request: z.string().min(1), land: LandRequestSchema }),
+  /** Answered with a `MergeOutcome`. */
+  z.object({ type: z.literal("close"), request: z.string().min(1), close: CloseRequestSchema }),
   z.object({ type: z.literal("models"), request: z.string().min(1), cli: CliKindSchema }),
   /** Answered with a `BranchFile`, or null when the branch or the path does not exist. */
   z.object({ type: z.literal("file"), request: z.string().min(1), read: BranchReadSchema }),

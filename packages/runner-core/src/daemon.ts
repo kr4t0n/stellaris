@@ -337,6 +337,9 @@ export class RunnerDaemon {
       case "land":
         answer(this.executor.land(message.land));
         return;
+      case "close":
+        answer(this.executor.closePullRequest(message.close));
+        return;
       case "models":
         answer(this.executor.models(message.cli));
         return;

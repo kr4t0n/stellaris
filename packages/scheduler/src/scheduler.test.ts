@@ -111,6 +111,16 @@ class FakeRunner implements TurnRunner {
     this.completions.push({ project, taskId });
     return "done";
   }
+
+  readonly closings: Array<{ project: Name; taskId: Ulid }> = [];
+
+  async closePullRequest(project: Name, taskId: Ulid): Promise<"done" | "deferred"> {
+    if (this.away) {
+      return "deferred";
+    }
+    this.closings.push({ project, taskId });
+    return "done";
+  }
 }
 
 /** Roles for the work itself are not seeded; the tests write them as a society would. */
@@ -272,6 +282,38 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.completions).toEqual([{ project: "demo", taskId: task.id }]);
+  });
+
+  it("closes an abandoned ghpr task's pull request once its runner is back, across a restart", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.addProject(USER, {
+      slug: "gh",
+      repo: "https://github.com/acme/gh",
+      onDone: "ghpr",
+    });
+    const linked = await board.createTask(USER, { project: "gh", title: "given up" });
+    await board.updateTask(USER, {
+      task_id: linked.id,
+      pull_request: { url: "https://github.com/acme/gh/pull/1" },
+    });
+    const unlinked = await board.createTask(USER, { project: "gh", title: "never opened" });
+    runner.away = true;
+    for (const task of [linked, unlinked]) {
+      await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    }
+    for (let i = 0; i < 2; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    expect(runner.closings).toEqual([]);
+    // The abandonment's event is behind the cursor now; the task itself says its pull request waits.
+    const restarted = new Scheduler({ board, runner, now });
+    runner.away = false;
+    for (let i = 0; i < 2; i += 1) {
+      await restarted.tick();
+      await restarted.drain();
+    }
+    expect(runner.closings).toEqual([{ project: "gh", taskId: linked.id }]);
   });
 
   it("respects the concurrency cap and never runs one pair twice at once", async () => {

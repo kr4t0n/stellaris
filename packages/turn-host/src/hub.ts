@@ -612,6 +612,57 @@ export class RunnerHub implements TurnRunner {
   }
 
   /**
+   * Closes the pull request of a `ghpr` task abandoned with one linked, on the runner its project
+   * lives on, whose `gh` login reaches GitHub, and records how it went on the task; `deferred`
+   * while that runner is away.
+   */
+  async closePullRequest(project: Name, taskId: Ulid): Promise<"done" | "deferred"> {
+    const { task } = await this.board.findTask(taskId);
+    const pull = task.pullRequest;
+    if (
+      task.status !== "abandoned" ||
+      task.onDone !== "ghpr" ||
+      pull === undefined ||
+      pull.closed !== undefined
+    ) {
+      return "done";
+    }
+    const record = await this.board.readProject(project);
+    let outcome = {
+      ok: false,
+      detail: `${project} lives on no runner yet, so none could close ${pull.url}`,
+    };
+    if (record.runner !== undefined) {
+      const seat = this.seats.get(record.runner);
+      if (seat === undefined || seat.send === null) {
+        return "deferred";
+      }
+      try {
+        outcome = MergeOutcomeSchema.parse(
+          await this.request(seat, (request) => ({
+            type: "close",
+            request,
+            close: {
+              repo: projectRepo(record),
+              url: pull.url,
+              comment: `Closed by Stellaris: the task this pull request was opened for, "${task.title}", was abandoned.`,
+            },
+          })),
+        );
+      } catch (error) {
+        this.log.warn({ project, taskId, error: String(error) }, "closing a pull request deferred");
+        return "deferred";
+      }
+    }
+    await this.board.recordPullRequestClosed(SYSTEM_ACTOR, {
+      taskId,
+      ok: outcome.ok,
+      detail: outcome.detail,
+    });
+    return "done";
+  }
+
+  /**
    * One path on a branch of a project's repository, read on the runner the project lives on.
    * NOT_FOUND when the project has no runner yet or the branch or the path does not exist, and
    * `RunnerAwayError` while its runner is away.

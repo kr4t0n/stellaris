@@ -89,6 +89,11 @@ export interface TurnRunner {
    * `deferred` when the runner it needs is away, to be tried again.
    */
   completeTask(project: Name, taskId: Ulid): Promise<"done" | "deferred">;
+  /**
+   * Closes the pull request of a `ghpr` task abandoned with one linked and records the outcome on
+   * the board, or reports `deferred` when the runner it needs is away. Absent, nothing closes.
+   */
+  closePullRequest?(project: Name, taskId: Ulid): Promise<"done" | "deferred">;
 }
 
 export interface SchedulerLog {
@@ -256,6 +261,16 @@ function stringOf(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** An abandoned `ghpr` task whose linked pull request the board has not closed yet. */
+function awaitsClosing(task: Task): boolean {
+  return (
+    task.status === "abandoned" &&
+    task.onDone === "ghpr" &&
+    task.pullRequest !== undefined &&
+    task.pullRequest.closed === undefined
+  );
+}
+
 /** A task still being worked: its current stage counts toward load, gaps, and waiting. */
 function inPlay(task: Task): boolean {
   return (task.status === "open" || task.status === "claimed") && !task.completing;
@@ -295,6 +310,9 @@ export class Scheduler {
   private readonly steering = new Map<string, Promise<void>>();
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
+  /** Abandoned `ghpr` tasks whose pull request waits to be closed, by task id, with its project. */
+  private readonly closings = new Map<Ulid, Name>();
+  /** Completions and closings under way. */
   private readonly completing = new Set<Promise<void>>();
   /** Running turns that must run alone among their citizen's, by session key: see `heldBack`. */
   private readonly exclusive = new Map<string, "onboarding" | "reflection">();
@@ -407,6 +425,7 @@ export class Scheduler {
       this.lastSweep = now;
     }
     this.runCompletions();
+    this.runClosings();
     if (!paused) {
       await this.dispatchReady(now);
     }
@@ -436,6 +455,9 @@ export class Scheduler {
       for (const task of await this.board.listTasks(project.slug)) {
         if (task.completing) {
           this.completions.set(task.id, { project: project.slug, actor: USER_NAME });
+        }
+        if (awaitsClosing(task)) {
+          this.closings.set(task.id, project.slug);
         }
       }
     }
@@ -561,6 +583,7 @@ export class Scheduler {
         const taskId = stringOf(payload["taskId"]);
         if (taskId !== null && payload["to"] === "abandoned") {
           delete this.state.releaseCounts[taskId];
+          await this.queueClosing(taskId);
         }
         if (taskId !== null) {
           await this.pruneStageWakes(taskId);
@@ -1856,6 +1879,49 @@ export class Scheduler {
       return others.length > 0;
     }
     return others.some((other) => this.exclusive.get(other) === "reflection");
+  }
+
+  /** Queues closing an abandoned task's pull request, when it is a `ghpr` task with one open. */
+  private async queueClosing(taskId: Ulid): Promise<void> {
+    if (this.runner.closePullRequest === undefined) {
+      return;
+    }
+    try {
+      const { task } = await this.board.findTask(taskId);
+      if (awaitsClosing(task)) {
+        this.closings.set(taskId, task.project);
+      }
+    } catch {
+      // A task that no longer exists has nothing to close.
+    }
+  }
+
+  /** Starts closing each queued pull request; one whose runner is away waits in the queue. */
+  private runClosings(): void {
+    const close = this.runner.closePullRequest?.bind(this.runner);
+    if (close === undefined) {
+      return;
+    }
+    for (const [taskId, project] of this.closings) {
+      this.closings.delete(taskId);
+      const promise: Promise<void> = close(project, taskId)
+        .then((outcome) => {
+          if (outcome === "deferred" && !this.closings.has(taskId)) {
+            this.closings.set(taskId, project);
+          }
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          this.log.error(
+            { project, taskId, error: String(error) },
+            "closing a pull request failed",
+          );
+        })
+        .finally(() => {
+          this.completing.delete(promise);
+        });
+      this.completing.add(promise);
+    }
   }
 
   /** Starts each queued completion once the turn that finished the task's last stage has ended. */

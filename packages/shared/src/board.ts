@@ -147,6 +147,11 @@ export const PullRequestLinkSchema = z.object({
   body: z.string().max(20_000).optional(),
   linkedBy: NameSchema,
   linkedAt: IsoDateTimeSchema,
+  /**
+   * Once its `ghpr` task was abandoned, how the board's closing of it on GitHub went: `ok` false
+   * leaves it open, for the reason `detail` gives.
+   */
+  closed: z.object({ at: IsoDateTimeSchema, ok: z.boolean(), detail: z.string() }).optional(),
 });
 export type PullRequestLink = z.infer<typeof PullRequestLinkSchema>;
 

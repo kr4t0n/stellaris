@@ -14,11 +14,13 @@ export interface PullRequestState {
   readonly mergeCommit: string | null;
 }
 
-/** What landing a pull request needs of GitHub. */
+/** What landing or closing a pull request needs of GitHub. */
 export interface PullRequestOps {
   view(url: string): Promise<PullRequestState>;
   /** Merges with a merge commit, and only while the pull request's head is still `head`. */
   merge(url: string, head: string, message: { subject: string; body: string }): Promise<void>;
+  /** Closes it unmerged, leaving `comment` on it. */
+  close(url: string, comment: string): Promise<void>;
   /** Deletes a branch of the pull request's repository on GitHub. */
   deleteBranch(url: string, branch: string): Promise<void>;
 }
@@ -70,6 +72,10 @@ export class GhPullRequests implements PullRequestOps {
       "--body",
       message.body,
     ]);
+  }
+
+  async close(url: string, comment: string): Promise<void> {
+    await this.gh(["pr", "close", url, "--comment", comment]);
   }
 
   async deleteBranch(url: string, branch: string): Promise<void> {

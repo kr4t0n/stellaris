@@ -1662,7 +1662,10 @@ describe("turns on a runner over the runner protocol", () => {
     Object.assign(process.env, rewrite);
     const rev = async (ref: string) =>
       (await execa("git", ["rev-parse", ref], { cwd: origin })).stdout.trim();
-    const pulls = new Map<number, { branch: string; head: string; merged: string | null }>();
+    const pulls = new Map<
+      number,
+      { branch: string; head: string; merged: string | null; closed?: string }
+    >();
     const merges: Array<{ subject: string; body: string }> = [];
     const deleted: string[] = [];
     const github: PullRequestOps = {
@@ -1673,7 +1676,7 @@ describe("turns on a runner over the runner protocol", () => {
         }
         return Promise.resolve({
           number: pullNumber(url),
-          state: pull.merged === null ? "OPEN" : "MERGED",
+          state: pull.merged !== null ? "MERGED" : pull.closed === undefined ? "OPEN" : "CLOSED",
           title: `pull request ${pullNumber(url)}`,
           baseRefName: "main",
           headRefName: pull.branch,
@@ -1696,6 +1699,14 @@ describe("turns on a runner over the runner protocol", () => {
         await execa("git", ["update-ref", "refs/heads/main", merged], { cwd: origin });
         pull.merged = merged;
         merges.push(message);
+      },
+      close: (url, comment) => {
+        const pull = pulls.get(pullNumber(url));
+        if (pull === undefined || pull.merged !== null || pull.closed !== undefined) {
+          return Promise.reject(new Error("Pull request is not open"));
+        }
+        pull.closed = comment;
+        return Promise.resolve();
       },
       deleteBranch: async (_url, branch) => {
         await execa("git", ["update-ref", "-d", `refs/heads/${branch}`], { cwd: origin });
@@ -1865,6 +1876,67 @@ describe("turns on a runner over the runner protocol", () => {
       expect((await execa("git", ["for-each-ref", "refs/stellaris"], { cwd: clone })).stdout).toBe(
         "",
       );
+
+      // Abandoned, the task's pull request is closed with a word on why, its branch goes, and the
+      // task keeps how it went, so it is closed once.
+      const fourth = await board.createTask(USER, { project: "demo", title: "given up" });
+      opened.push({ number: 4, branch: "feat/given-up", content: "4\n" });
+      await run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: fourth.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+      await board.updateTask(SAGE, {
+        task_id: fourth.id,
+        pull_request: { url: "https://github.com/acme/demo/pull/4" },
+      });
+      expect(await hub.closePullRequest("demo", fourth.id)).toBe("done");
+      expect(pulls.get(4)?.closed).toBeUndefined();
+      await board.updateTask(USER, { task_id: fourth.id, status: "abandoned" });
+      expect(await hub.closePullRequest("demo", fourth.id)).toBe("done");
+      expect(pulls.get(4)?.closed).toBe(
+        'Closed by Stellaris: the task this pull request was opened for, "given up", was abandoned.',
+      );
+      expect(deleted).toEqual(["feat/readable-1", "feat/by-hand", "feat/given-up"]);
+      expect((await board.getTask(USER, { task_id: fourth.id })).pullRequest?.closed).toMatchObject(
+        { ok: true, detail: "closed pull request #4 (https://github.com/acme/demo/pull/4)" },
+      );
+      expect(await hub.closePullRequest("demo", fourth.id)).toBe("done");
+      expect(deleted).toHaveLength(3);
+      expect(
+        (await board.readEvents(null, 10_000)).filter((event) =>
+          event.type.startsWith("pull_request."),
+        ),
+      ).toMatchObject([
+        {
+          type: "pull_request.closed",
+          payload: { taskId: fourth.id, url: "https://github.com/acme/demo/pull/4" },
+        },
+      ]);
+
+      // One closed by hand already loses only its branch.
+      const fifth = await board.createTask(USER, { project: "demo", title: "closed by hand" });
+      opened.push({ number: 5, branch: "feat/by-hand-closed", content: "5\n" });
+      await run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: fifth.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+      const closedByHand = "https://github.com/acme/demo/pull/5";
+      await board.updateTask(SAGE, { task_id: fifth.id, pull_request: { url: closedByHand } });
+      await github.close(closedByHand, "by hand");
+      await board.updateTask(USER, { task_id: fifth.id, status: "abandoned" });
+      expect(await hub.closePullRequest("demo", fifth.id)).toBe("done");
+      expect(pulls.get(5)?.closed).toBe("by hand");
+      expect(deleted.at(-1)).toBe("feat/by-hand-closed");
+      expect((await board.getTask(USER, { task_id: fifth.id })).pullRequest?.closed).toMatchObject({
+        ok: true,
+        detail: `pull request #5 (${closedByHand}) was closed already`,
+      });
     } finally {
       for (const key of Object.keys(rewrite)) {
         Reflect.deleteProperty(process.env, key);

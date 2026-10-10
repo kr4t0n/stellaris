@@ -192,10 +192,25 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
           · linked by {link.linkedBy} {ago(link.linkedAt, now)}
         </span>
       </p>
-      <p className="mt-3 text-caps text-fg-muted">Merges as</p>
-      <pre className="mt-1 rounded-lg bg-surface-2/40 p-3 font-mono text-xs whitespace-pre-wrap text-fg-secondary">
-        {message}
-      </pre>
+      {task.status === "abandoned" && task.onDone === "ghpr" ? (
+        <p className="mt-2 text-sm text-fg-secondary">
+          {link.closed === undefined
+            ? "The task was abandoned, so the board closes the pull request on GitHub."
+            : link.closed.ok
+              ? `The task was abandoned: ${link.closed.detail}.`
+              : `The task was abandoned, and the board could not close the pull request: ${link.closed.detail}.`}
+          {link.closed === undefined ? null : (
+            <span className="text-meta"> · {ago(link.closed.at, now)}</span>
+          )}
+        </p>
+      ) : (
+        <>
+          <p className="mt-3 text-caps text-fg-muted">Merges as</p>
+          <pre className="mt-1 rounded-lg bg-surface-2/40 p-3 font-mono text-xs whitespace-pre-wrap text-fg-secondary">
+            {message}
+          </pre>
+        </>
+      )}
     </section>
   );
 }

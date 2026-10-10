@@ -43,7 +43,12 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type.startsWith("thread.")) {
     return [["threads"], ["thread", text(payload["threadId"])], ["channel"], ["requests"]];
   }
-  if (type.startsWith("task.") || type.startsWith("merge.") || type === "lease.expired") {
+  if (
+    type.startsWith("task.") ||
+    type.startsWith("merge.") ||
+    type.startsWith("pull_request.") ||
+    type === "lease.expired"
+  ) {
     return [["tasks"], ["task", text(payload["taskId"])], ["members"], ["metrics"]];
   }
   if (type === "turn.completed" || type === "turn.failed") {

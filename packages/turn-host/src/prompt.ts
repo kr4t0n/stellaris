@@ -482,7 +482,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       `## Project ${project.slug}`,
       "",
-      `A finished task lands by the board merging its pull request on GitHub into ${base}. Open the pull request yourself, from a branch named for what it does that holds the same files as task/<id>, as \`git push origin task/<id>:<branch>\` gives, and link it to the task with update_task pull_request before its last stage completes, with the merge commit's merge_subject and merge_body, which you may change by linking again until it lands. Never merge the pull request or ${base} yourself, nor push other work to ${base}: the board merges once the task's stages are done, and the runner refuses the pushes.`,
+      `A finished task lands by the board merging its pull request on GitHub into ${base}. Open the pull request yourself, from a branch named for what it does that holds the same files as task/<id>, as \`git push origin task/<id>:<branch>\` gives, and link it to the task with update_task pull_request before its last stage completes, with the merge commit's merge_subject and merge_body, which you may change by linking again until it lands. Never merge the pull request or ${base} yourself, nor push other work to ${base}: the board merges once the task's stages are done, and the runner refuses the pushes. Abandoning the task closes its linked pull request and deletes its branch.`,
     );
   }
 

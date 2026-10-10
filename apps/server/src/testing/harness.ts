@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { serve } from "@hono/node-server";
 import type { Board } from "@stellaris/board-core";
-import { createRunner, type AgentBackend, type RunnerDaemon } from "@stellaris/runner-core";
+import {
+  createRunner,
+  type AgentBackend,
+  type PullRequestOps,
+  type RunnerDaemon,
+} from "@stellaris/runner-core";
 import { SERVER_TOKEN, TurnDispatchSchema, type CliKind, type TurnRecord } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import type { Hono } from "hono";
@@ -38,6 +43,8 @@ export interface TestSocietyOptions {
   readonly graceMs?: number | undefined;
   /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
   readonly ackTimeoutMs?: number | undefined;
+  /** GitHub as the runners see it, for landing `ghpr` tasks. */
+  readonly pullRequests?: PullRequestOps | undefined;
   /** More runners, each a machine of its own with a data directory of its own. */
   readonly extraRunners?:
     | ReadonlyArray<{
@@ -138,6 +145,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       retryMs: 50,
       // Tests move a project's remote between turns a moment apart.
       fetchIntervalMs: 0,
+      pullRequests: options.pullRequests,
     });
     await daemon.start();
     runners.set(each.name, daemon);

@@ -20,6 +20,7 @@ import { describeError } from "./errors.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
 import { HomeSync } from "./home.js";
 import type { GitOps } from "./git.js";
+import type { PullRequestOps } from "./pulls.js";
 import { RunnerLayout } from "./layout.js";
 import type { AgentBackend } from "./types.js";
 import { TreeCopy } from "./sync.js";
@@ -463,6 +464,8 @@ export interface CreateRunnerOptions {
   readonly fetch?: typeof fetch | undefined;
   /** How long the event stream may stay silent before the runner connects again. */
   readonly streamIdleMs?: number | undefined;
+  /** GitHub, for landing `ghpr` tasks; the `gh` CLI unless set. */
+  readonly pullRequests?: PullRequestOps | undefined;
   /** How often a project's remote is fetched at most; a minute unless set. */
   readonly fetchIntervalMs?: number | undefined;
 }
@@ -486,6 +489,7 @@ export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
     onWarmChanged: (keys) => daemon?.reportWarm(keys),
     serverUrl: options.serverUrl,
     fetchIntervalMs: options.fetchIntervalMs,
+    pullRequests: options.pullRequests,
   });
   daemon = new RunnerDaemon({
     client,

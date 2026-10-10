@@ -1,6 +1,7 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { LinkedText } from "../components/Entities.js";
@@ -17,9 +18,11 @@ import {
 } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
+import { stageForYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { SubjectThread } from "./SubjectThread.js";
 import { TaskFiles } from "./TaskFiles.js";
+import { Failure, FIELD } from "./ThreadForms.js";
 import {
   assigneeOf,
   inPlay,
@@ -98,6 +101,105 @@ function StageItem({
   );
 }
 
+/** What finishing a task's last stage sets off, said where the user approves it. */
+function landingOf(task: Task): string {
+  if (task.onDone === "ghpr") {
+    return task.pullRequest === undefined
+      ? "It lands through a pull request, and none is linked yet, so the board refuses to finish it."
+      : `Approving lands it: the board merges pull request #${task.pullRequest.number} on GitHub.`;
+  }
+  return task.onDone === "merge"
+    ? `Approving lands it: the board merges task/${task.id}.`
+    : "Approving finishes the task.";
+}
+
+/**
+ * Finishes the stage that names the user, as the user, with an optional note for the task's
+ * thread; on a task's last stage that is the approval its landing waits for.
+ */
+function ApproveStage({ task, stage }: { task: Task; stage: Stage }) {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const [note, setNote] = useState("");
+  const index = task.stages.findIndex((each) => each.id === stage.id);
+  const next = task.stages[index + 1];
+  const approve = useMutation({
+    mutationFn: () =>
+      api.advanceTask({
+        task_id: task.id,
+        ...(note.trim() === "" ? {} : { note: note.trim() }),
+      }),
+    onSuccess: async () => {
+      setNote("");
+      await client.invalidateQueries({ queryKey: ["task", task.id] });
+      await client.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+  return (
+    <form
+      aria-label={`Approve ${stage.name}`}
+      className="mt-1 mb-4 space-y-2 rounded-lg bg-surface-2/40 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        approve.mutate();
+      }}
+    >
+      <p className="text-sm text-fg-secondary">
+        {stage.name} waits on you.{" "}
+        {next === undefined ? landingOf(task) : `Approving moves the task on to ${next.name}.`}
+      </p>
+      <textarea
+        value={note}
+        rows={2}
+        aria-label="Note for the task's thread"
+        placeholder="A note for the thread, if any"
+        onChange={(event) => setNote(event.target.value)}
+        className={FIELD}
+      />
+      <div className="flex justify-end">
+        <Button variant="primary" type="submit" disabled={approve.isPending}>
+          {approve.isPending ? "Approving…" : "Approve"}
+        </Button>
+      </div>
+      <Failure error={approve.error} />
+    </form>
+  );
+}
+
+/** A ghpr task's pull request and the merge commit the board will make of it. */
+function PullRequest({ task, now }: { task: Task; now: number }) {
+  const link = task.pullRequest;
+  if (link === undefined) {
+    return null;
+  }
+  const message = [link.subject ?? "The pull request's title", link.body ?? ""]
+    .filter((part) => part !== "")
+    .join("\n\n");
+  return (
+    <section aria-label="Pull request" className="mt-5 border-t border-line pt-4">
+      <h3 className="text-section">Pull request</h3>
+      <p className="mt-2 text-sm">
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-fg-primary underline decoration-line underline-offset-2 hover:decoration-fg-tertiary"
+        >
+          #{link.number} on GitHub
+        </a>
+        <span className="text-meta">
+          {" "}
+          · linked by {link.linkedBy} {ago(link.linkedAt, now)}
+        </span>
+      </p>
+      <p className="mt-3 text-caps text-fg-muted">Merges as</p>
+      <pre className="mt-1 rounded-lg bg-surface-2/40 p-3 font-mono text-xs whitespace-pre-wrap text-fg-secondary">
+        {message}
+      </pre>
+    </section>
+  );
+}
+
 /** Opens a thread for a task from before tasks opened their own. */
 function OpenTaskThread({ taskId }: { taskId: string }) {
   const { api } = useSession();
@@ -143,6 +245,7 @@ export function TaskView() {
   }
   const current = task.data;
   const phase = phaseOf(current);
+  const yours = stageForYou(current);
   const project = projects.data?.find((candidate) => candidate.slug === current.project);
   const thread = threads.data?.find((candidate) => candidate.id === current.id);
   return (
@@ -197,11 +300,16 @@ export function TaskView() {
             />
           ))}
         </ol>
+        {yours === null ? null : <ApproveStage task={current} stage={yours} />}
         <p className="text-meta">
           When the last stage is done:{" "}
           {current.onDone === "merge"
             ? `task/${current.id} merges onto the default branch`
-            : "nothing more"}
+            : current.onDone === "ghpr"
+              ? current.pullRequest === undefined
+                ? "its pull request merges on GitHub, once one is linked"
+                : `pull request #${current.pullRequest.number} merges on GitHub`
+              : "nothing more"}
           {current.blockedBy.length > 0 ? (
             <>
               {" · blocked by "}
@@ -217,6 +325,7 @@ export function TaskView() {
             </div>
           </section>
         )}
+        <PullRequest task={current} now={now} />
         <TaskFiles task={current} now={now} />
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-section">Thread</h3>

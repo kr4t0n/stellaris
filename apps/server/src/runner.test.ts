@@ -11,6 +11,7 @@ import {
   saveCredentials,
   ZERO_USAGE,
   type AgentBackend,
+  type PullRequestOps,
   type ResidentSession,
   type TurnResult,
 } from "@stellaris/runner-core";
@@ -30,6 +31,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 
 const USER = { name: "user", role: "user" } as const;
+
+/** A pull request's number from its address. */
+function pullNumber(url: string): number {
+  return Number(url.split("/").at(-1));
+}
+
+/** A commit made in a bare repository, as GitHub makes one: the tree, its parents, its message. */
+async function commitTree(
+  repo: string,
+  tree: string,
+  parents: readonly string[],
+  message: readonly string[],
+): Promise<string> {
+  const args = ["-c", "user.name=u", "-c", "user.email=u@x", "commit-tree", tree];
+  for (const parent of parents) {
+    args.push("-p", parent);
+  }
+  for (const paragraph of message) {
+    args.push("-m", paragraph);
+  }
+  return (await execa("git", args, { cwd: repo })).stdout.trim();
+}
 
 function completed(summary: string, memoryUpdated = false): TurnResult {
   return {
@@ -1618,6 +1641,209 @@ describe("turns on a runner over the runner protocol", () => {
     expect((await board.getTask(USER, { task_id: second.id })).status).toBe("done");
     // The guard followed the default branch from main to trunk.
     expect(refused).toEqual(["main", "trunk"]);
+  });
+
+  it("lands a ghpr task by merging its pull request with the message its agent gave", async () => {
+    // GitHub, played by a bare repository that git reaches for the project's GitHub address.
+    const seed = path.join(dir, "seed");
+    await execa("git", ["init", "-b", "main", seed]);
+    await writeFile(path.join(seed, "README.md"), "demo\n");
+    await execa("git", ["add", "README.md"], { cwd: seed });
+    await execa("git", ["-c", "user.name=u", "-c", "user.email=u@x", "commit", "-m", "root"], {
+      cwd: seed,
+    });
+    const origin = path.join(dir, "origin.git");
+    await execa("git", ["clone", "--bare", seed, origin]);
+    const rewrite = {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: `url.${origin}.insteadOf`,
+      GIT_CONFIG_VALUE_0: "https://github.com/acme/demo",
+    };
+    Object.assign(process.env, rewrite);
+    const rev = async (ref: string) =>
+      (await execa("git", ["rev-parse", ref], { cwd: origin })).stdout.trim();
+    const pulls = new Map<number, { branch: string; head: string; merged: string | null }>();
+    const merges: Array<{ subject: string; body: string }> = [];
+    const deleted: string[] = [];
+    const github: PullRequestOps = {
+      view: (url) => {
+        const pull = pulls.get(pullNumber(url));
+        if (pull === undefined) {
+          return Promise.reject(new Error("no such pull request"));
+        }
+        return Promise.resolve({
+          number: pullNumber(url),
+          state: pull.merged === null ? "OPEN" : "MERGED",
+          title: `pull request ${pullNumber(url)}`,
+          baseRefName: "main",
+          headRefName: pull.branch,
+          headRefOid: pull.head,
+          isCrossRepository: false,
+          mergeCommit: pull.merged,
+        });
+      },
+      merge: async (url, head, message) => {
+        const pull = pulls.get(pullNumber(url));
+        if (pull === undefined || pull.head !== head) {
+          throw new Error("Head branch was modified");
+        }
+        const merged = await commitTree(
+          origin,
+          `${head}^{tree}`,
+          [await rev("main"), head],
+          [message.subject, message.body],
+        );
+        await execa("git", ["update-ref", "refs/heads/main", merged], { cwd: origin });
+        pull.merged = merged;
+        merges.push(message);
+      },
+      deleteBranch: async (_url, branch) => {
+        await execa("git", ["update-ref", "-d", `refs/heads/${branch}`], { cwd: origin });
+        deleted.push(branch);
+      },
+    };
+    try {
+      const { board } = await Board.init(dir, { name: "ghpr" });
+      await board.addProject(USER, {
+        slug: "demo",
+        repo: "https://github.com/acme/demo",
+        onDone: "ghpr",
+      });
+      await board.setRoleCharter(USER, {
+        name: "engineer",
+        purpose: "Builds.",
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+      });
+      await board.addAgent(USER, {
+        name: "sage",
+        role: "engineer",
+        cli: "claude",
+        memberships: ["demo"],
+      });
+      const SAGE = { name: "sage", role: "engineer" };
+      // The agent opens its pull request from a branch named for what it does, as gh would show it.
+      const opened: Array<{ number: number; branch: string; content: string }> = [];
+      const backend: AgentBackend = {
+        kind: "claude",
+        newSession: () => Promise.resolve("session-1"),
+        runTurn: async (request) => {
+          const { cwd } = request.spec;
+          const next = opened.shift();
+          if (next !== undefined) {
+            await writeFile(path.join(cwd, "feature.md"), next.content);
+            await execa("git", ["add", "feature.md"], { cwd });
+            await execa(
+              "git",
+              ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "feat: add"],
+              { cwd },
+            );
+            await execa("git", ["push", "origin", `HEAD:${next.branch}`], { cwd });
+            const head = await rev(next.branch);
+            await execa("git", ["update-ref", `refs/pull/${next.number}/head`, head], {
+              cwd: origin,
+            });
+            pulls.set(next.number, { branch: next.branch, head, merged: null });
+          }
+          return completed("opened the pull request");
+        },
+      };
+      society = await startTestSociety({
+        board,
+        backends: () => ({ claude: backend }),
+        pullRequests: github,
+      });
+      const { run, hub, runner } = society;
+      const finish = async (taskId: string, pull: number) => {
+        opened.push({ number: pull, branch: `feat/readable-${pull}`, content: `${pull}\n` });
+        expect(
+          (
+            await run({
+              agent: "sage",
+              project: "demo",
+              thread: { id: taskId, task: true },
+              trigger: { kind: "manual", fromUser: true, reason: "test" },
+              priority: 2,
+            })
+          ).exitReason,
+        ).toBe("completed");
+        await board.updateTask(SAGE, {
+          task_id: taskId,
+          pull_request: {
+            url: `https://github.com/acme/demo/pull/${pull}`,
+            merge_subject: "feat: add the readable feature",
+            merge_body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+          },
+        });
+        await board.claimTask(SAGE, { task_id: taskId });
+        await board.advanceTask(SAGE, { task_id: taskId });
+        return hub.completeTask("demo", taskId);
+      };
+
+      const first = await board.createTask(USER, { project: "demo", title: "readable" });
+      expect(await finish(first.id, 1)).toBe("done");
+      expect((await board.getTask(USER, { task_id: first.id })).status).toBe("done");
+      expect(merges).toEqual([
+        {
+          subject: "feat: add the readable feature",
+          body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+        },
+      ]);
+      const landed = await rev("main");
+      expect(
+        (
+          await execa("git", ["log", "-1", "--format=%B", landed], { cwd: origin })
+        ).stdout.trimEnd(),
+      ).toBe("feat: add the readable feature\n\nAdds it.\n\nCo-Authored-By: sage <sage@x>");
+      // The merged branch is gone, and the runner's clone follows the remote at once.
+      expect(deleted).toEqual(["feat/readable-1"]);
+      const clone = runner.paths.repo("demo");
+      expect((await execa("git", ["rev-parse", "main"], { cwd: clone })).stdout.trim()).toBe(
+        landed,
+      );
+      expect((await board.listThread(first.id)).at(-1)?.body).toContain(
+        "merged pull request #1 (https://github.com/acme/demo/pull/1) into main",
+      );
+
+      // Someone else pushed to the pull request after the agent: it no longer holds the task's
+      // work, so the board merges nothing and the task waits at its last stage.
+      const second = await board.createTask(USER, { project: "demo", title: "drifted" });
+      opened.push({ number: 2, branch: "feat/drifted", content: "2\n" });
+      await run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: second.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+      const drifted = await commitTree(
+        origin,
+        `${landed}^{tree}`,
+        [await rev("feat/drifted")],
+        ["someone else"],
+      );
+      await execa("git", ["update-ref", "refs/pull/2/head", drifted], { cwd: origin });
+      pulls.set(2, { branch: "feat/drifted", head: drifted, merged: null });
+      await board.updateTask(SAGE, {
+        task_id: second.id,
+        pull_request: { url: "https://github.com/acme/demo/pull/2" },
+      });
+      await board.claimTask(SAGE, { task_id: second.id });
+      await board.advanceTask(SAGE, { task_id: second.id });
+      expect(await hub.completeTask("demo", second.id)).toBe("done");
+      expect(await board.getTask(USER, { task_id: second.id })).toMatchObject({
+        status: "open",
+        completing: false,
+      });
+      expect((await board.listThread(second.id)).at(-1)?.body).toContain(
+        "does not hold the same files as task/",
+      );
+      expect(merges).toHaveLength(1);
+    } finally {
+      for (const key of Object.keys(rewrite)) {
+        Reflect.deleteProperty(process.env, key);
+      }
+    }
   });
 
   it("reads what a task's turns left from its branch on the project's runner", async () => {

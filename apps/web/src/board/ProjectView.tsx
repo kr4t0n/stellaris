@@ -185,7 +185,9 @@ export function ProjectView() {
           <p className="text-sm text-fg-secondary">
             {project.onDone === "merge"
               ? `When its last stage is done, the board merges task/<id> onto ${project.defaultBranch}.`
-              : "When its last stage is done, it is done; nothing is merged."}
+              : project.onDone === "ghpr"
+                ? `When its last stage is done, the board merges the pull request linked to it into ${project.defaultBranch} on GitHub.`
+                : "When its last stage is done, it is done; nothing is merged."}
           </p>
         </Section>
         <Section

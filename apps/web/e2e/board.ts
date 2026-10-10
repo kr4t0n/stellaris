@@ -142,7 +142,32 @@ const ARCHIVE_THREAD = {
   body: "",
 };
 
-/** A study whose gated sign-off stage names the user. */
+/** A stage as the fake board keeps it. */
+interface FakeStage {
+  readonly id: string;
+  readonly name: string;
+  readonly role?: string;
+  readonly agent?: string;
+  readonly gate: boolean;
+  readonly holders: readonly string[];
+  readonly completedBy?: string;
+  readonly completedAt?: string;
+}
+
+const TASK_STAGES: readonly FakeStage[] = [
+  {
+    id: "s1",
+    name: "Survey",
+    role: "researcher",
+    gate: false,
+    holders: ["ada"],
+    completedBy: "ada",
+    completedAt: CREATED,
+  },
+  { id: "s2", name: "Sign off", agent: "user", gate: true, holders: [] },
+];
+
+/** A study whose gated sign-off stage names the user, landing through its pull request. */
 const TASK = {
   id: STAGE_TASK,
   project: "lab",
@@ -153,22 +178,19 @@ const TASK = {
   updatedAt: CREATED,
   blockedBy: [],
   requiredCapabilities: [],
-  stages: [
-    {
-      id: "s1",
-      name: "Survey",
-      role: "researcher",
-      gate: false,
-      holders: ["ada"],
-      completedBy: "ada",
-      completedAt: CREATED,
-    },
-    { id: "s2", name: "Sign off", agent: "user", gate: true, holders: [] },
-  ],
+  stages: TASK_STAGES,
   stage: "s2",
   stageSince: CREATED,
   stageSeq: 2,
-  onDone: "none",
+  onDone: "ghpr",
+  pullRequest: {
+    url: "https://github.com/acme/lab/pull/7",
+    number: 7,
+    subject: "feat: compare shortest-path algorithms",
+    body: "Tabulates twelve methods.\n\nCo-Authored-By: ada <ada@x>",
+    linkedBy: "ada",
+    linkedAt: CREATED,
+  },
   completing: false,
   body: "Survey the field and tabulate the methods.",
 };
@@ -649,6 +671,8 @@ export async function fakeBoard(
   let societyTopics = [SOCIETY_TOPIC];
   // Renaming changes the name the board shows, never the slug.
   let lab = PROJECT;
+  // Approving its last stage sets the task landing, as the board does for a ghpr task.
+  let task: typeof TASK = TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
   const labChannels: Array<{
     name: string;
@@ -761,6 +785,17 @@ export async function fakeBoard(
             route,
             member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           );
+        case "/api/verbs/advance_task":
+          task = {
+            ...task,
+            stages: task.stages.map((stage) =>
+              stage.id === task.stage
+                ? { ...stage, holders: ["user"], completedBy: "user", completedAt: CREATED }
+                : stage,
+            ),
+            completing: true,
+          };
+          return json(route, task);
         case "/api/verbs/configure_project":
           lab = {
             ...lab,
@@ -1007,9 +1042,9 @@ export async function fakeBoard(
       case "/api/projects":
         return json(route, archived ? [lab, ARCHIVED_PROJECT] : [lab]);
       case "/api/projects/lab/tasks":
-        return json(route, [TASK]);
+        return json(route, [task]);
       case `/api/tasks/${STAGE_TASK}`:
-        return json(route, TASK);
+        return json(route, task);
       case `/api/tasks/${STAGE_TASK}/changes`:
         return json(route, TASK_CHANGES);
       case "/api/projects/iphone/tasks":

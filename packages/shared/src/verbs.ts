@@ -2,9 +2,11 @@ import { z } from "zod";
 import {
   CompletionEffectSchema,
   DefaultBranchSchema,
+  MergeSubjectSchema,
   PlanEditStageSchema,
   PlanStageSchema,
   ProposalKindSchema,
+  PullRequestUrlSchema,
   StageIdSchema,
 } from "./board.js";
 import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
@@ -61,6 +63,18 @@ export const VerbInputs = {
     /** Posted to the task's thread as the caller, marked with the step when the task moved. */
     note: z.string().min(1).optional(),
     blocked_by: z.array(UlidSchema).optional(),
+    /**
+     * The pull request a `ghpr` task lands through, on its project's repository, with the merge
+     * commit's subject and body; null unlinks it.
+     */
+    pull_request: z
+      .object({
+        url: PullRequestUrlSchema,
+        merge_subject: MergeSubjectSchema.optional(),
+        merge_body: z.string().max(20_000).optional(),
+      })
+      .nullable()
+      .optional(),
   }),
   get_task: z.object({ task_id: UlidSchema }),
   subscribe: z.object({ channel: ChannelRefSchema }),
@@ -144,7 +158,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
   update_task:
-    "Move a task back to an earlier stage, abandon it, or set what it is blocked by. A note is posted to the task's thread.",
+    "Move a task back to an earlier stage, abandon it, set what it is blocked by, or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
   get_task: "Read a task with its plan, its brief, and the messages of its thread.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
@@ -155,7 +169,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   reject:
     "Reject a proposal with a reason, posted in the proposal's thread, which closes. User and steward only, never on your own proposal.",
   create_project:
-    "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a completion effect (none or merge).",
+    "Create a project with its general channel: a slug, a display name, a git remote when one exists, and optionally a completion effect (none, merge, or ghpr for a GitHub remote).",
   join_project:
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn, and follows the project's general; the result lists its other open channels, to subscribe to when the work needs them.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
@@ -168,7 +182,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   advance_task:
     "Finish the stage you hold, with a note for the task's thread on what you did. The next stage becomes current; past the last one the task is done.",
   configure_project:
-    "Set a project's completion effect (none, or merge to land each finished task's branch on the default branch), its display name, or its default branch, any of them at once. The slug never changes.",
+    "Set a project's completion effect (none; merge to land each finished task's branch on the default branch; ghpr, for a project on GitHub, to merge each finished task's linked pull request), its display name, or its default branch, any of them at once. Tasks already filed keep theirs. The slug never changes.",
   archive_project:
     "Archive a project whose work is finished or has moved: its members leave, its open threads close, and nothing more is posted, filed, or joined there, while its files and history stay. Refused while a task there is in play.",
   create_channel:

@@ -23,6 +23,8 @@ export { HomeSync } from "./home.js";
 export type { HomeRemote } from "./home.js";
 export { RunnerClient, RunnerHttpError } from "./client.js";
 export { describeError } from "./errors.js";
+export { GhPullRequests } from "./pulls.js";
+export type { PullRequestOps, PullRequestState } from "./pulls.js";
 export { TurnExecutor } from "./executor.js";
 export type { RunnerLog, TurnExecutorOptions } from "./executor.js";
 export { createRunner, RunnerDaemon } from "./daemon.js";

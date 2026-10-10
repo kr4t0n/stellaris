@@ -136,7 +136,10 @@ export const ProjectRepoSchema = z.object({
   slug: NameSchema,
   origin: z.string().nullable(),
   defaultBranch: z.string().min(1),
-  /** The board lands finished tasks on the default branch, so the runner lets nothing else move it. */
+  /**
+   * The board lands finished tasks on the default branch, itself or through their pull requests,
+   * so the runner lets nothing else move it.
+   */
   boardLands: z.boolean(),
 });
 export type ProjectRepo = z.infer<typeof ProjectRepoSchema>;
@@ -146,7 +149,7 @@ export function projectRepo(project: Project): ProjectRepo {
     slug: project.slug,
     origin: project.repo,
     defaultBranch: project.defaultBranch,
-    boardLands: project.onDone === "merge",
+    boardLands: project.onDone !== "none",
   };
 }
 
@@ -252,6 +255,18 @@ export type TurnAck = z.infer<typeof TurnAckSchema>;
 export const LandRequestSchema = z.object({
   repo: ProjectRepoSchema,
   branch: z.string().min(1),
+  /**
+   * For a `ghpr` task, the pull request to merge in place of the branch, which must hold the
+   * branch's files, and the merge commit's subject and body, the pull request's title and an
+   * empty body when left out.
+   */
+  pullRequest: z
+    .object({
+      url: z.string().min(1),
+      subject: z.string().min(1).optional(),
+      body: z.string().optional(),
+    })
+    .optional(),
 });
 export type LandRequest = z.infer<typeof LandRequestSchema>;
 

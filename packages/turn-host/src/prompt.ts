@@ -161,7 +161,13 @@ function planLine(task: Task, whose: string): string {
     .map((next) => `${next.name} (${next.gate ? "gate, " : ""}${assignee(next)})`);
   const then =
     rest.length === 0
-      ? `then ${task.onDone === "merge" ? "the board merges it" : "done"}`
+      ? `then ${
+          task.onDone === "merge"
+            ? "the board merges it"
+            : task.onDone === "ghpr"
+              ? "the board merges its pull request"
+              : "done"
+        }`
       : `next: ${rest.join(", ")}`;
   const gated = stage?.gate === true ? ", gated" : "";
   return `- ${task.id} "${task.title}": ${stage?.name ?? task.stage} (${whose}, ${index + 1} of ${task.stages.length}${gated}); ${then}`;
@@ -460,12 +466,23 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
 
   const project = input.project;
-  if (project !== undefined && project !== null && project.onDone === "merge") {
+  // A task's conversation lands as its own task does, which a planner may have set apart.
+  const landing = conversation?.task?.onDone ?? project?.onDone;
+  if (project !== undefined && project !== null && landing === "merge") {
     lines.push(
       "",
       `## Project ${project.slug}`,
       "",
       `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself, or push other work to it on the remote; the runner refuses both.`,
+    );
+  }
+  if (project !== undefined && project !== null && landing === "ghpr") {
+    const base = project.defaultBranch;
+    lines.push(
+      "",
+      `## Project ${project.slug}`,
+      "",
+      `A finished task lands by the board merging its pull request on GitHub into ${base}. Open the pull request yourself, from a branch named for what it does that holds the same files as task/<id>, as \`git push origin task/<id>:<branch>\` gives, and link it to the task with update_task pull_request before its last stage completes, with the merge commit's merge_subject and merge_body, which you may change by linking again until it lands. Never merge the pull request or ${base} yourself, nor push other work to ${base}: the board merges once the task's stages are done, and the runner refuses the pushes.`,
     );
   }
 

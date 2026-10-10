@@ -2008,6 +2008,93 @@ describe("Board", () => {
     expect((await reopened.readRole("engineer")).verbs).not.toContain("remove_knowledge");
   });
 
+  it("lands a ghpr task through the pull request linked to it, on its project's GitHub repository", async () => {
+    const { board } = await society();
+    // Pull requests are merged on GitHub, so a project without a remote there cannot take ghpr.
+    await expect(board.addProject(USER, { slug: "nowhere", onDone: "ghpr" })).rejects.toMatchObject(
+      { code: "VALIDATION" },
+    );
+    await expect(
+      board.configureProject(USER, { project: "demo", on_done: "ghpr" }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    const local = await board.createTask(USER, { project: "demo", title: "Stays local" });
+    await expect(
+      board.planTask(USER, {
+        task_id: local.id,
+        stages: [{ id: "s1", name: "work" }],
+        on_done: "ghpr",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+
+    await board.addProject(USER, { slug: "hub", repo: "git@github.com:Acme/Demo.git" });
+    await board.joinProject(USER, { project: "hub", agent: "eng-1" });
+    // The desk's verb: tasks filed from now on land through their pull requests.
+    expect(await board.configureProject(USER, { project: "hub", on_done: "ghpr" })).toMatchObject({
+      onDone: "ghpr",
+    });
+    const task = await board.createTask(USER, {
+      project: "hub",
+      title: "Ship it",
+      stages: [{ name: "work", agent: "eng-1" }],
+    });
+    expect(task.onDone).toBe("ghpr");
+    await board.claimTask(ENG, { task_id: task.id });
+
+    // The last stage waits for a pull request, which must be on the project's own repository.
+    await expect(board.advanceTask(ENG, { task_id: task.id })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(
+      board.updateTask(ENG, {
+        task_id: task.id,
+        pull_request: { url: "https://github.com/acme/other/pull/3" },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(
+      board.updateTask(
+        { name: "rev-1", role: "reviewer" },
+        {
+          task_id: task.id,
+          pull_request: { url: "https://github.com/acme/demo/pull/17" },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const linked = await board.updateTask(ENG, {
+      task_id: task.id,
+      pull_request: {
+        url: "https://github.com/acme/demo/pull/17",
+        merge_subject: "feat: ship it",
+        merge_body: "Ships it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
+      },
+    });
+    expect(linked.pullRequest).toMatchObject({
+      number: 17,
+      subject: "feat: ship it",
+      body: "Ships it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
+      linkedBy: "eng-1",
+    });
+    expect((await board.readEvents(null)).at(-1)?.payload).toMatchObject({
+      pullRequest: "https://github.com/acme/demo/pull/17",
+    });
+
+    // Finished, it waits for the board to merge, and its pull request no longer changes.
+    expect(await board.advanceTask(ENG, { task_id: task.id })).toMatchObject({ completing: true });
+    await expect(
+      board.updateTask(ENG, { task_id: task.id, pull_request: null }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    const done = await board.finishCompletion(SYSTEM_ACTOR, {
+      taskId: task.id,
+      ok: true,
+      detail: "merged pull request #17 (https://github.com/acme/demo/pull/17) into main as abc1234",
+    });
+    expect(done.status).toBe("done");
+    const thread = await board.listThread(task.id);
+    expect(thread.at(-1)).toMatchObject({
+      step: { action: "landed" },
+      body: expect.stringContaining("merged pull request #17"),
+    });
+  });
+
   it("updates a project's dashboard for its members and the user, one revision at a time", async () => {
     const { board } = await society();
     const begun = await board.readDashboard("demo");

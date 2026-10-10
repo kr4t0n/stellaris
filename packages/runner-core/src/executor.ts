@@ -32,6 +32,7 @@ import {
 } from "@stellaris/shared";
 import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
+import { describeError } from "./errors.js";
 import { ExecaGit, taskBranch, type GitOps, type RemoteSync } from "./git.js";
 import type { RunnerLayout } from "./layout.js";
 import {
@@ -41,6 +42,7 @@ import {
   type ResidentSession,
   type TurnResult,
 } from "./types.js";
+import { GhPullRequests, type PullRequestOps, type PullRequestState } from "./pulls.js";
 import { holdsLeftovers, renderWorkspaceReport, type WorkspaceReport } from "./workspace-report.js";
 
 export interface RunnerLog {
@@ -62,6 +64,8 @@ export interface TurnExecutorOptions {
   readonly serverUrl: string;
   /** How often a project's remote is fetched at most; a minute unless set. */
   readonly fetchIntervalMs?: number | undefined;
+  /** GitHub, for landing `ghpr` tasks; the `gh` CLI unless set. */
+  readonly pullRequests?: PullRequestOps | undefined;
 }
 
 /** The most entries a list in a workspace report shows. */
@@ -124,6 +128,7 @@ export class TurnExecutor {
   private readonly backends: Partial<Record<CliKind, AgentBackend>>;
   private readonly runnerName: () => Name;
   private readonly git: GitOps;
+  private readonly pulls: PullRequestOps;
   private readonly log: RunnerLog;
   private readonly onWarmChanged: ((keys: string[]) => void) | undefined;
   private readonly serverUrl: string;
@@ -140,6 +145,7 @@ export class TurnExecutor {
     this.backends = options.backends;
     this.runnerName = options.runnerName;
     this.git = options.git ?? new ExecaGit();
+    this.pulls = options.pullRequests ?? new GhPullRequests();
     this.log = options.log ?? SILENT;
     this.onWarmChanged = options.onWarmChanged;
     this.serverUrl = options.serverUrl;
@@ -481,13 +487,13 @@ export class TurnExecutor {
    * Fetches the project's remote, at most once per interval, and fast-forwards the local branches
    * that follow it. A failed fetch is reported until a later one succeeds; nothing here fails a turn.
    */
-  private async syncRemote(repoDir: string, repo: ProjectRepo): Promise<RemoteSync> {
+  private async syncRemote(repoDir: string, repo: ProjectRepo, force = false): Promise<RemoteSync> {
     if (repo.origin === null) {
       return {};
     }
     const now = Date.now();
     const last = this.fetched.get(repo.slug);
-    const fetch = last === undefined || now - last.at >= this.fetchIntervalMs;
+    const fetch = force || last === undefined || now - last.at >= this.fetchIntervalMs;
     try {
       const sync = await this.git.syncRemote(repoDir, repo.defaultBranch, fetch);
       if (fetch) {
@@ -579,11 +585,89 @@ export class TurnExecutor {
       await this.git.ensureDefaultBranch(repoDir, request.repo);
       await this.guard(repoDir, request.repo);
       await this.syncRemote(repoDir, request.repo);
+      if (request.pullRequest !== undefined) {
+        return this.landPullRequest(repoDir, request, request.pullRequest);
+      }
       if (!(await this.git.branchExists(repoDir, request.branch))) {
         return { ok: true, detail: "nothing to land, since the task left no branch" };
       }
       return this.git.merge(repoDir, request.repo.defaultBranch, request.branch);
     });
+  }
+
+  /**
+   * Merges a `ghpr` task's pull request on GitHub with the merge commit's subject and body its
+   * agent gave, once it is open, into the default branch, and holds the task branch's files, so
+   * what lands is the task's work; GitHub refuses the merge if the pull request moved on since.
+   * The head branch goes once merged, unless it is a fork's, and the clone follows the remote.
+   */
+  private async landPullRequest(
+    repoDir: string,
+    request: LandRequest,
+    pull: NonNullable<LandRequest["pullRequest"]>,
+  ): Promise<MergeOutcome> {
+    const base = request.repo.defaultBranch;
+    let pr: PullRequestState;
+    try {
+      pr = await this.pulls.view(pull.url);
+    } catch (error) {
+      return { ok: false, detail: `GitHub did not show ${pull.url}: ${describeError(error)}` };
+    }
+    const named = `pull request #${pr.number} (${pull.url})`;
+    if (pr.state === "MERGED") {
+      await this.syncRemote(repoDir, request.repo, true);
+      return {
+        ok: true,
+        detail: `${named} was merged already${pr.mergeCommit === null ? "" : ` as ${pr.mergeCommit.slice(0, 7)}`}`,
+      };
+    }
+    if (pr.state === "CLOSED") {
+      return { ok: false, detail: `${named} is closed without being merged` };
+    }
+    if (pr.baseRefName !== base) {
+      return { ok: false, detail: `${named} merges into ${pr.baseRefName}, not ${base}` };
+    }
+    if (!(await this.git.branchExists(repoDir, request.branch))) {
+      return {
+        ok: false,
+        detail: `${request.branch} does not exist, so ${named} cannot be checked`,
+      };
+    }
+    let head: string;
+    try {
+      head = await this.git.fetchPullHead(repoDir, pr.number);
+    } catch (error) {
+      return { ok: false, detail: `could not fetch ${named}: ${describeError(error)}` };
+    }
+    if (!(await this.git.sameTree(repoDir, head, request.branch))) {
+      return {
+        ok: false,
+        detail: `${named} does not hold the same files as ${request.branch}; push the task's work to its branch, then finish the last stage again`,
+      };
+    }
+    try {
+      await this.pulls.merge(pull.url, head, {
+        subject: pull.subject ?? pr.title,
+        body: pull.body ?? "",
+      });
+    } catch (error) {
+      return { ok: false, detail: `GitHub did not merge ${named}: ${describeError(error)}` };
+    }
+    const merged = await this.pulls.view(pull.url).catch(() => null);
+    if (!pr.isCrossRepository && pr.headRefName !== base) {
+      await this.pulls.deleteBranch(pull.url, pr.headRefName).catch((error: unknown) => {
+        this.log.warn(
+          { url: pull.url, branch: pr.headRefName, error: describeError(error) },
+          "could not delete a merged pull request's branch",
+        );
+      });
+    }
+    await this.syncRemote(repoDir, request.repo, true);
+    const commit = merged?.mergeCommit ?? null;
+    return {
+      ok: true,
+      detail: `merged ${named} into ${base}${commit === null ? "" : ` as ${commit.slice(0, 7)}`}`,
+    };
   }
 
   /**

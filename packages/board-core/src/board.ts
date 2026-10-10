@@ -15,6 +15,7 @@ import {
   DecisionSchema,
   describeCharter,
   EffortSchema,
+  githubRepository,
   IsoDateTimeSchema,
   isBoardChannel,
   KnowledgeSchema,
@@ -26,6 +27,9 @@ import {
   MessageFrontmatterSchema,
   NameSchema,
   OpsSignalSchema,
+  parsePullRequestUrl,
+  PullRequestLinkSchema,
+  sameRepository,
   USER_NAME,
   USER_ROLE,
   parseChannelRef,
@@ -526,6 +530,20 @@ function memberToAgentInput(member: MemberProposal): AddAgentInput {
 }
 
 /** A stored stage from a planned one, built without undefined keys, which the YAML writer rejects. */
+/** A `ghpr` project's pull requests are merged on GitHub, so its remote must be there. */
+function assertLandsByPullRequest(
+  effect: CompletionEffect,
+  repo: string | null,
+  where: string,
+): void {
+  if (effect === "ghpr" && githubRepository(repo) === null) {
+    throw new BoardError(
+      "VALIDATION",
+      `${where} has ${repo === null ? "no remote" : `its remote at ${repo}, not on GitHub`}, so its tasks cannot land through pull requests (ghpr)`,
+    );
+  }
+}
+
 function stageFrom(planned: PlanStage, id: StageId): Stage {
   return {
     id,
@@ -1667,6 +1685,7 @@ export class Board {
     if (await exists(file)) {
       throw new BoardError("ALREADY_EXISTS", `project ${input.slug} already exists`);
     }
+    assertLandsByPullRequest(input.onDone ?? "none", input.repo ?? null, `project ${input.slug}`);
     const project: Project = ProjectSchema.parse({
       slug: input.slug,
       name: input.name ?? input.slug,
@@ -2916,6 +2935,12 @@ export class Board {
         completedAt: ts,
       };
       const next = current.stages[index + 1];
+      if (next === undefined && current.onDone === "ghpr" && current.pullRequest === undefined) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `task ${current.id} lands through its pull request: link it with update_task pull_request before the last stage completes, or have the user, the steward, or the concierge set the task's on_done to none`,
+        );
+      }
       if (next === undefined && current.onDone === "none") {
         this.assertNoTurnCut(
           actor,
@@ -3051,6 +3076,11 @@ export class Board {
       const guarded = gateChanges(ahead, replanned);
       if (onDone !== current.onDone) {
         guarded.push("change the completion effect");
+        assertLandsByPullRequest(
+          onDone,
+          (await this.readProject(current.project)).repo,
+          `project ${current.project}`,
+        );
       }
       if (guarded.length > 0) {
         this.assertMayGate(actor, guarded.join(", "));
@@ -3159,6 +3189,12 @@ export class Board {
         }
         next = { ...next, blockedBy: [...args.blocked_by] };
       }
+      if (args.pull_request !== undefined) {
+        next = {
+          ...next,
+          pullRequest: await this.pullRequestLink(actor, current, args.pull_request),
+        };
+      }
       // Posted before the task is written, since an abandoned task closes its thread.
       if (args.note !== undefined) {
         const step: TaskStep | undefined =
@@ -3195,9 +3231,56 @@ export class Board {
           from: current.status,
           to: task.status,
           note: args.note ?? null,
+          ...(args.pull_request === undefined
+            ? {}
+            : { pullRequest: task.pullRequest?.url ?? null }),
         });
       }
       return task;
+    });
+  }
+
+  /**
+   * The pull request a task is linked to, or none for `null`: one on the repository of its project,
+   * by a member of the project or a planner, while the task is in play and before it lands.
+   */
+  private async pullRequestLink(
+    actor: Actor,
+    task: Task,
+    link: NonNullable<VerbArgs<"update_task">["pull_request"]> | null,
+  ): Promise<Task["pullRequest"]> {
+    this.assertInPlay(task);
+    if (task.completing) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `task ${task.id} is landing, so its pull request no longer changes`,
+      );
+    }
+    if (!PLANNING_ROLES.includes(actor.role)) {
+      const agent = await this.readAgent(actor.name);
+      if (!agent.memberships.includes(task.project)) {
+        throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${task.project}`);
+      }
+    }
+    if (link === null) {
+      return undefined;
+    }
+    const project = await this.readProject(task.project);
+    const repository = githubRepository(project.repo);
+    const named = parsePullRequestUrl(link.url);
+    if (repository === null || named === null || !sameRepository(repository, named)) {
+      throw new BoardError(
+        "VALIDATION",
+        `${link.url} is not a pull request of ${project.slug}'s repository${project.repo === null ? ", since it has no remote" : ` at ${project.repo}`}`,
+      );
+    }
+    return PullRequestLinkSchema.parse({
+      url: link.url,
+      number: named.number,
+      ...(link.merge_subject === undefined ? {} : { subject: link.merge_subject }),
+      ...(link.merge_body === undefined ? {} : { body: link.merge_body }),
+      linkedBy: actor.name,
+      linkedAt: this.now().toISOString(),
     });
   }
 
@@ -3339,6 +3422,9 @@ export class Board {
     }
     return this.mutex.run(async () => {
       const previous = await this.readActiveProject(args.project);
+      if (args.on_done !== undefined) {
+        assertLandsByPullRequest(args.on_done, previous.repo, `project ${previous.slug}`);
+      }
       const project = await this.updateProject(args.project, (current) => ({
         ...current,
         ...(args.on_done === undefined ? {} : { onDone: args.on_done }),
@@ -3924,8 +4010,8 @@ export class Board {
 
   /**
    * Records the outcome of a completing task's effect: done, or waiting again at its last stage so
-   * its participants can reshape the plan. A merge's outcome is posted to the task's thread, and a
-   * landed one announced in the project's general channel.
+   * its participants can reshape the plan. A landing's outcome, a merge's or a pull request's, is
+   * posted to the task's thread, and a landed one announced in the task's channel.
    */
   async finishCompletion(
     actor: Actor,
@@ -3938,8 +4024,8 @@ export class Board {
         throw new BoardError("INVALID_STATE", `task ${current.id} is not completing`);
       }
       const ts = this.now().toISOString();
-      const merged = current.onDone === "merge";
-      if (merged) {
+      const landed = current.onDone !== "none";
+      if (landed) {
         await this.postTaskNote(
           actor.name,
           current,
@@ -3968,7 +4054,7 @@ export class Board {
         for (const name of new Set(task.stages.flatMap((stage) => stage.completedBy ?? []))) {
           await this.refreshMember(name);
         }
-        if (merged) {
+        if (landed) {
           await this.appendMessage(
             actor.name,
             channelRef(location.project, task.channel),

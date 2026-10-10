@@ -319,6 +319,9 @@ export function createApi(token: string) {
       invoke("approve", token, input, DecisionSchema),
     reject: (input: { proposal_id: string; reason: string }) =>
       invoke("reject", token, input, DecisionSchema),
+    /** Finishes the task's current stage as the user, with an optional note for its thread. */
+    advanceTask: (input: { task_id: string; note?: string }) =>
+      invoke("advance_task", token, input, TaskSchema),
     /** Changes a project's display name, default branch, or both; its slug stays. */
     configureProject: (project: string, changes: { name?: string; default_branch?: string }) =>
       invoke("configure_project", token, { project, ...changes }, ProjectSchema),

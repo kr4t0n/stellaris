@@ -69,9 +69,86 @@ export const SocietySchema = z.object({
 });
 export type Society = z.infer<typeof SocietySchema>;
 
-/** What the board does when a task's last stage completes: nothing, or land the task's branch. */
-export const CompletionEffectSchema = z.enum(["none", "merge"]);
+/**
+ * What the board does when a task's last stage completes: nothing, land the task's branch on the
+ * default branch itself, or merge the task's pull request on GitHub.
+ */
+export const CompletionEffectSchema = z.enum(["none", "merge", "ghpr"]);
 export type CompletionEffect = z.infer<typeof CompletionEffectSchema>;
+
+/** A repository on GitHub, as its owner and name. */
+export interface GitHubRepository {
+  readonly owner: string;
+  readonly name: string;
+}
+
+const GITHUB_REMOTE = [
+  /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
+  /^git@github\.com:([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?$/,
+  /^ssh:\/\/git@github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/,
+];
+
+/** The GitHub repository a project's remote names, or null for a remote elsewhere or none. */
+export function githubRepository(remote: string | null): GitHubRepository | null {
+  for (const pattern of GITHUB_REMOTE) {
+    const match = remote === null ? null : pattern.exec(remote);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      return { owner: match[1], name: match[2] };
+    }
+  }
+  return null;
+}
+
+const PULL_REQUEST_URL =
+  /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\/pull\/([1-9]\d*)\/?$/;
+
+/** A pull request's address on GitHub, `https://github.com/<owner>/<name>/pull/<number>`. */
+export const PullRequestUrlSchema = z
+  .string()
+  .trim()
+  .regex(
+    PULL_REQUEST_URL,
+    "a pull request's address, https://github.com/<owner>/<repo>/pull/<number>",
+  );
+
+/** The repository and number a pull request's address names, or null for anything else. */
+export function parsePullRequestUrl(
+  url: string,
+): (GitHubRepository & { readonly number: number }) | null {
+  const match = PULL_REQUEST_URL.exec(url.trim());
+  return match?.[1] === undefined || match[2] === undefined || match[3] === undefined
+    ? null
+    : { owner: match[1], name: match[2], number: Number(match[3]) };
+}
+
+/** Whether two names of one GitHub repository agree; GitHub compares them without case. */
+export function sameRepository(a: GitHubRepository, b: GitHubRepository): boolean {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase()
+  );
+}
+
+/** A merge commit's subject: one line. */
+export const MergeSubjectSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .regex(/^[^\n]+$/, "a merge commit's subject is one line");
+
+/**
+ * A `ghpr` task's pull request, linked by whoever opened it, and the merge commit's subject and
+ * body the board merges it with, the pull request's title and no body when left out.
+ */
+export const PullRequestLinkSchema = z.object({
+  url: PullRequestUrlSchema,
+  number: z.number().int().positive(),
+  subject: MergeSubjectSchema.optional(),
+  body: z.string().max(20_000).optional(),
+  linkedBy: NameSchema,
+  linkedAt: IsoDateTimeSchema,
+});
+export type PullRequestLink = z.infer<typeof PullRequestLinkSchema>;
 
 /**
  * A project's default branch, the one its tasks start from and land on: a git branch name outside
@@ -275,6 +352,8 @@ export const TaskFrontmatterSchema = z.object({
   /** The highest stage number issued, so a removed stage's id is never reused. */
   stageSeq: z.number().int().positive(),
   onDone: CompletionEffectSchema.default("none"),
+  /** The pull request a `ghpr` task lands through. */
+  pullRequest: PullRequestLinkSchema.optional(),
   /** The last stage is complete and the completion effect is running. */
   completing: z.boolean().default(false),
   /** The latest send-back while its rework lasts: cleared once the task reaches that stage again. */

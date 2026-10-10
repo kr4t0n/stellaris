@@ -546,7 +546,7 @@ export class RunnerHub implements TurnRunner {
     if (!task.completing) {
       return "done";
     }
-    if (task.onDone !== "merge") {
+    if (task.onDone === "none") {
       await this.board.finishCompletion(SYSTEM_ACTOR, {
         taskId,
         ok: true,
@@ -556,6 +556,15 @@ export class RunnerHub implements TurnRunner {
     }
     const record = await this.board.readProject(project);
     const branch = `task/${taskId}`;
+    const pull = task.onDone === "ghpr" ? task.pullRequest : undefined;
+    if (task.onDone === "ghpr" && pull === undefined) {
+      await this.board.finishCompletion(SYSTEM_ACTOR, {
+        taskId,
+        ok: false,
+        detail: "no pull request is linked to the task",
+      });
+      return "done";
+    }
     let outcome = { ok: true, detail: "nothing to land, since the task left no branch" };
     if (record.runner !== undefined) {
       const seat = this.seats.get(record.runner);
@@ -570,6 +579,15 @@ export class RunnerHub implements TurnRunner {
             land: {
               repo: projectRepo(record),
               branch,
+              ...(pull === undefined
+                ? {}
+                : {
+                    pullRequest: {
+                      url: pull.url,
+                      ...(pull.subject === undefined ? {} : { subject: pull.subject }),
+                      ...(pull.body === undefined ? {} : { body: pull.body }),
+                    },
+                  }),
             },
           })),
         );

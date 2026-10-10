@@ -81,6 +81,10 @@ export interface GitOps {
    * default branch leaves them when refused. True when there was anything.
    */
   tidyClone(repoDir: string): Promise<boolean>;
+  /** Fetches a pull request's head from the project's remote, GitHub's `refs/pull/<n>/head`. */
+  fetchPullHead(repoDir: string, number: number): Promise<string>;
+  /** Whether two commits hold the same files. */
+  sameTree(repoDir: string, a: string, b: string): Promise<boolean>;
   /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
    * then switches back to `home`, or with `home` null detaches, which frees the branch for the
@@ -539,6 +543,26 @@ export class ExecaGit implements GitOps {
     }
     await must(["config", GUARD_KEY, branch], repoDir);
     return true;
+  }
+
+  async fetchPullHead(repoDir: string, number: number): Promise<string> {
+    const ref = `refs/stellaris/pull/${number}`;
+    const fetched = await git(
+      ["fetch", "--quiet", "origin", `+refs/pull/${number}/head:${ref}`],
+      repoDir,
+      FETCH_TIMEOUT_MS,
+    );
+    if (fetched.exitCode !== 0) {
+      throw new Error(lines(fetched.stderr).at(-1) ?? `could not fetch pull request ${number}`);
+    }
+    return (await must(["rev-parse", ref], repoDir)).trim();
+  }
+
+  async sameTree(repoDir: string, a: string, b: string): Promise<boolean> {
+    const [one, two] = await Promise.all(
+      [a, b].map(async (rev) => (await must(["rev-parse", `${rev}^{tree}`], repoDir)).trim()),
+    );
+    return one === two;
   }
 
   async tidyClone(repoDir: string): Promise<boolean> {

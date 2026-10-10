@@ -297,6 +297,31 @@ describe("buildTurnPrompt", () => {
     // A new conversation is shown its thread so far, not only what is unread.
     expect(waiting).toContain("## The thread so far (0)");
 
+    // A task a planner set to land through its pull request is told so, whatever its project does.
+    const viaPull = { ...churn, onDone: "ghpr" as const };
+    const pulled = buildTurnPrompt({
+      dispatch: {
+        agent: "res-1",
+        project: "lab",
+        thread: { id: churn.id, task: true },
+        trigger: TriggerSchema.parse({ kind: "manual", fromUser: true, reason: "test" }),
+        priority: 1,
+        onboarding: false,
+      },
+      messages: [],
+      conversation: { thread: threadOf(churn.id, churn.title), task: viaPull, fresh: true },
+      heldClaims: [],
+      waitingStages: [viaPull],
+      project,
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(pulled).toContain(
+      "A finished task lands by the board merging its pull request on GitHub into main.",
+    );
+    expect(pulled).toContain("link it to the task with update_task pull_request");
+    expect(pulled).not.toContain("merging its branch task/<id>");
+
     const pricing = task("01ARZ3NDEKTSV4RRFFQ69G5FAW", "Pricing", "s2", "res-1");
     const held = buildTurnPrompt({
       dispatch: {

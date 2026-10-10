@@ -305,7 +305,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "proposal_decided") {
     lines.push(
-      "A proposal you made was decided; the decision is the last post in its thread. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows.",
+      "A proposal you made was decided; the decision is the last post in the proposal's thread. A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows.",
     );
   }
   if (dispatch.trigger.kind === "user_post") {

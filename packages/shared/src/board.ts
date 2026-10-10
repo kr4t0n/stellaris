@@ -757,12 +757,25 @@ export const DashboardSchema = z.object({
 });
 export type Dashboard = z.infer<typeof DashboardSchema>;
 
+/**
+ * The conversation a proposal was filed from, which its decision wakes the proposer in: a thread's,
+ * a channel's beside general, or neither, the scope's home.
+ */
+export const ProposalOriginSchema = z.object({
+  scope: NameSchema,
+  thread: UlidSchema.optional(),
+  channel: NameSchema.optional(),
+});
+export type ProposalOrigin = z.infer<typeof ProposalOriginSchema>;
+
 export const ProposalFrontmatterSchema = z.object({
   id: UlidSchema,
   kind: ProposalKindSchema,
   proposedBy: NameSchema,
   status: ProposalStatusSchema,
   createdAt: IsoDateTimeSchema,
+  /** Absent for a proposal filed outside a turn, or before proposals recorded it. */
+  filedFrom: ProposalOriginSchema.optional(),
   decidedBy: NameSchema.optional(),
   decidedAt: IsoDateTimeSchema.optional(),
   reason: z.string().optional(),

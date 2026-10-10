@@ -3347,6 +3347,15 @@ export class Board {
           proposedBy: actor.name,
           status: "proposed",
           createdAt: this.now().toISOString(),
+          ...(actor.scope === undefined
+            ? {}
+            : {
+                filedFrom: {
+                  scope: actor.scope,
+                  ...(actor.thread === undefined ? {} : { thread: actor.thread }),
+                  ...(actor.channel === undefined ? {} : { channel: actor.channel }),
+                },
+              }),
           charter: parsed.data,
         }),
         body: args.rationale,
@@ -5511,6 +5520,7 @@ export class Board {
         outcome,
         kind: proposal.kind,
         proposedBy: proposal.proposedBy,
+        ...(proposal.filedFrom === undefined ? {} : { filedFrom: proposal.filedFrom }),
       });
       if (provision !== undefined) {
         await this.events.append("proposal.provisioned", actor.name, {

@@ -1528,6 +1528,105 @@ describe("Scheduler", () => {
     );
   });
 
+  it("wakes a proposer in the task's conversation it filed the proposal from, behind the turn running there", async () => {
+    const { board, runner, scheduler } = await setup();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "refile",
+      stages: [
+        { name: "file", agent: "eng-1" },
+        { name: "verify after approval", agent: "eng-1" },
+      ],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const inTask: Actor = { ...ENG, scope: "demo", thread: task.id };
+    await board.claimTask(inTask, { task_id: task.id });
+    const proposal = await board.propose(inTask, {
+      kind: "channel",
+      charter: { project: "demo", name: "ideas", purpose: "Loose ideas." },
+    });
+    expect((await board.readProposal(proposal.id)).filedFrom).toEqual({
+      scope: "demo",
+      thread: task.id,
+    });
+    await board.advanceTask(inTask, { task_id: task.id, note: "Filed; verify once decided." });
+    runner.hold = true;
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    const inThread = sessionKey("eng-1", "demo", task.id);
+    expect(scheduler.runningPairs).toEqual([inThread]);
+
+    // The decision lands while the verifying turn still reads the proposal as waiting.
+    await board.approve(USER, { proposal_id: proposal.id });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([inThread]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(
+      runner.dispatches.map((d) => [d.agent, d.project, d.thread?.id, d.trigger.kind]),
+    ).toEqual([
+      ["eng-1", "demo", task.id, "stage"],
+      ["eng-1", "demo", task.id, "proposal_decided"],
+    ]);
+    expect(runner.dispatches[1]?.thread?.task).toBe(true);
+  });
+
+  it("wakes a proposer at its scope's home once the conversation has ended, and outside projects once it left", async () => {
+    const { board, runner, scheduler } = await setup();
+    const decided = async (
+      charter: Record<string, unknown>,
+      filer: Actor,
+      end?: () => Promise<unknown>,
+    ) => {
+      const proposal = await board.propose(filer, { kind: "channel", charter });
+      await end?.();
+      runner.dispatches.length = 0;
+      await board.approve(USER, { proposal_id: proposal.id });
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+      return runner.dispatches.map((d) => [
+        d.agent,
+        d.project,
+        d.thread?.id ?? d.channel ?? null,
+        d.trigger.kind,
+      ]);
+    };
+
+    expect(
+      await decided(
+        { project: "demo", name: "a", purpose: "A." },
+        { ...ENG, scope: "demo", channel: "dev" },
+      ),
+    ).toEqual([["eng-1", "demo", "dev", "proposal_decided"]]);
+
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "naming" });
+    expect(
+      await decided(
+        { project: "demo", name: "b", purpose: "B." },
+        { ...ENG, scope: "demo", thread: topic.id },
+        () => board.closeThread(ENG, { thread_id: topic.id, summary: "Settled." }),
+      ),
+    ).toEqual([["eng-1", "demo", null, "proposal_decided"]]);
+
+    expect(
+      await decided({ project: "demo", name: "c", purpose: "C." }, { ...ENG, scope: "demo" }, () =>
+        board.leaveProject(USER, { project: "demo", agent: "eng-1" }),
+      ),
+    ).toEqual([["eng-1", "society", null, "proposal_decided"]]);
+  });
+
   it("drops a retired member's queued turn and keeps the queue across a restart", async () => {
     const { board, runner, scheduler } = await setup();
     await board.setPaused(USER, true);

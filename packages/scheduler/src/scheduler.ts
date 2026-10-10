@@ -6,6 +6,7 @@ import {
   parseSessionKey,
   mayHoldStage,
   OpsSignalSchema,
+  ProposalOriginSchema,
   sessionKey,
   USER_NAME,
   USER_ROLE,
@@ -16,6 +17,7 @@ import {
   UlidSchema,
   WAKING_SIGNAL_KINDS,
   wakeScope,
+  workspaceConversationOf,
   type Agent,
   type BoardEvent,
   type Name,
@@ -1003,7 +1005,10 @@ export class Scheduler {
     );
   }
 
-  /** A decided proposal wakes the citizen that made it, to carry on with what it enables. */
+  /**
+   * A decided proposal wakes the citizen that made it, to carry on with what it enables, in the
+   * conversation it was filed from, where that work waits on the decision.
+   */
   private async wakeProposer(
     proposalId: Ulid,
     proposer: Name,
@@ -1014,7 +1019,7 @@ export class Scheduler {
     if (agent === null) {
       return;
     }
-    const scope = this.scopeForProject(agent, null);
+    const { scope, beside } = await this.filedFrom(agent, event.payload["filedFrom"]);
     const kind = stringOf(event.payload["kind"]) ?? "";
     const outcome = stringOf(event.payload["outcome"]) ?? "decided";
     this.enqueue(
@@ -1027,7 +1032,38 @@ export class Scheduler {
         reason: `your ${kind} proposal ${proposalId} was ${outcome} by ${event.actor}`,
       },
       now,
+      beside,
     );
+  }
+
+  /**
+   * The conversation a proposal was filed from while it is still open; its scope's home once it
+   * has ended; and the home outside projects when the citizen has left that scope, or the proposal
+   * names none, filed outside a turn or before proposals recorded it.
+   */
+  private async filedFrom(
+    agent: Agent,
+    recorded: unknown,
+  ): Promise<{ scope: Name; beside?: Beside | undefined }> {
+    const origin = ProposalOriginSchema.safeParse(recorded);
+    if (
+      !origin.success ||
+      (origin.data.scope !== SOCIETY_SCOPE && !agent.memberships.includes(origin.data.scope))
+    ) {
+      return { scope: this.scopeForProject(agent, null) };
+    }
+    const scope = origin.data.scope;
+    const conversation = workspaceConversationOf(origin.data);
+    if (conversation === null || (await this.board.conversationEnded(conversation))) {
+      return { scope };
+    }
+    return {
+      scope,
+      beside:
+        conversation.kind === "thread"
+          ? { thread: await this.conversationOf(conversation.id, scope) }
+          : { channel: conversation.name },
+    };
   }
 
   /**

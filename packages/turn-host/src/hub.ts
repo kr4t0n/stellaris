@@ -14,6 +14,7 @@ import {
   type CliKind,
   type ModelOption,
   type Name,
+  projectRepo,
   type ProjectRepo,
   type RunnerAnswer,
   type RunnerHello,
@@ -502,7 +503,7 @@ export class RunnerHub implements TurnRunner {
             type: "land",
             request,
             land: {
-              repo: { slug: record.slug, origin: record.repo, defaultBranch: record.defaultBranch },
+              repo: projectRepo(record),
               branch,
             },
           })),
@@ -734,7 +735,7 @@ export class RunnerHub implements TurnRunner {
     }
     return {
       seat,
-      repo: { slug: record.slug, origin: record.repo, defaultBranch: record.defaultBranch },
+      repo: projectRepo(record),
     };
   }
 

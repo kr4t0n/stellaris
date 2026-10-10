@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CliKindSchema, ModelOptionSchema, RunnerOsSchema } from "./board.js";
+import { CliKindSchema, ModelOptionSchema, RunnerOsSchema, type Project } from "./board.js";
 import {
   TranscriptEntrySchema,
   TurnExitReasonSchema,
@@ -136,8 +136,19 @@ export const ProjectRepoSchema = z.object({
   slug: NameSchema,
   origin: z.string().nullable(),
   defaultBranch: z.string().min(1),
+  /** The board lands finished tasks on the default branch, so the runner lets nothing else move it. */
+  boardLands: z.boolean(),
 });
 export type ProjectRepo = z.infer<typeof ProjectRepoSchema>;
+
+export function projectRepo(project: Project): ProjectRepo {
+  return {
+    slug: project.slug,
+    origin: project.repo,
+    defaultBranch: project.defaultBranch,
+    boardLands: project.onDone === "merge",
+  };
+}
 
 /**
  * Where a turn works: the agent's home for a society-scope turn; the agent's own worktree of a

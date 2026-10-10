@@ -5,7 +5,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ExecaGit, taskBranch } from "./git.js";
 
-const project = { slug: "demo", origin: null, defaultBranch: "main" };
+const project = { slug: "demo", origin: null, defaultBranch: "main", boardLands: false };
 
 async function rev(repo: string, ref: string): Promise<string> {
   return (await execa("git", ["rev-parse", ref], { cwd: repo })).stdout.trim();
@@ -287,13 +287,80 @@ describe("ExecaGit", () => {
       cwd: origin,
     });
     await execa("git", ["switch", "main"], { cwd: origin });
-    const remote = { slug: "remote", origin, defaultBranch: "main" };
+    const remote = { slug: "remote", origin, defaultBranch: "main", boardLands: false };
     const clone = await git.ensureRepo(remote, path.join(dir, "repos", "remote"));
     await git.ensureDefaultBranch(clone, { ...remote, defaultBranch: "release" });
     expect(await rev(clone, "release")).toBe(await rev(origin, "release"));
     // One the remote lacks starts where the clone stands, as for a local repository.
     await git.ensureDefaultBranch(clone, { ...remote, defaultBranch: "next" });
     expect(await rev(clone, "next")).toBe(await rev(clone, "HEAD"));
+  });
+
+  it("guards a merge project's default branch from everything but the runner", async () => {
+    const seed = path.join(dir, "seed");
+    await execa("git", ["init", "-b", "main", seed]);
+    await writeFile(path.join(seed, "a.txt"), "a\n", "utf8");
+    await execa("git", ["add", "a.txt"], { cwd: seed });
+    await execa("git", [...committer("u"), "commit", "-m", "root"], { cwd: seed });
+    const origin = path.join(dir, "origin.git");
+    await execa("git", ["clone", "--bare", seed, origin]);
+    const repo = { slug: "guarded", origin, defaultBranch: "main", boardLands: true };
+    const clone = await git.ensureRepo(repo, path.join(dir, "repos", "guarded"));
+    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    // Installing again rewrites nothing and keeps the guard.
+    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(clone, branch, "main");
+    const worktree = await git.ensureTaskWorktree(clone, path.join(dir, "wt", "t"), branch);
+    // An agent's own work on its task's branch passes.
+    await writeFile(path.join(worktree, "b.txt"), "b\n", "utf8");
+    await execa("git", ["add", "b.txt"], { cwd: worktree });
+    await execa("git", [...committer("eng-1"), "commit", "-m", "work"], { cwd: worktree });
+    const before = await rev(clone, "main");
+
+    // Every way an agent could move main, here or on the remote, is refused with the reason.
+    for (const [cwd, args] of [
+      [clone, ["merge", "--no-edit", branch]],
+      [clone, ["merge", "--no-ff", "--no-edit", branch]],
+      [worktree, ["update-ref", "refs/heads/main", branch]],
+      [worktree, ["push", "origin", `${branch}:main`]],
+    ] as const) {
+      const refused = await execa("git", [...committer("eng-1"), ...args], { cwd, reject: false });
+      expect(refused.exitCode).not.toBe(0);
+      expect(refused.stderr).toContain("only the runner moves it");
+      // A refused merge leaves its result in the clone's tree, which the runner puts away.
+      await git.tidyClone(clone);
+    }
+    expect(await rev(clone, "main")).toBe(before);
+    expect(await rev(origin, "main")).toBe(before);
+    const status = await execa("git", ["status", "--porcelain"], { cwd: clone });
+    expect(status.stdout).toBe("");
+    expect((await execa("git", ["stash", "list"], { cwd: clone })).stdout).toContain(
+      "left in the runner's clone",
+    );
+
+    // The board's landing passes, an agent may publish main as it stands, and git gc still packs.
+    expect((await git.merge(clone, "main", branch)).ok).toBe(true);
+    const landed = await rev(clone, "main");
+    expect(landed).not.toBe(before);
+    await execa("git", ["push", "origin", "main"], { cwd: worktree });
+    expect(await rev(origin, "main")).toBe(landed);
+    await execa("git", ["gc", "--quiet"], { cwd: clone });
+    expect(await git.tidyClone(clone)).toBe(false);
+
+    // Lifted, as for a project whose agents land their own work, main moves for anyone.
+    expect(await git.guardDefaultBranch(clone, null)).toBe(true);
+    await execa("git", ["update-ref", "refs/heads/main", before], { cwd: worktree });
+    expect(await rev(clone, "main")).toBe(before);
+  });
+
+  it("leaves a clone whose hooks are not the runner's unguarded", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    await execa("git", ["config", "core.hooksPath", ".husky"], { cwd: repoDir });
+    expect(await git.guardDefaultBranch(repoDir, "main")).toBe(false);
+    await execa("git", ["config", "--unset", "core.hooksPath"], { cwd: repoDir });
+    await writeFile(path.join(repoDir, ".git", "hooks", "pre-push"), "#!/bin/sh\nexit 0\n");
+    expect(await git.guardDefaultBranch(repoDir, "main")).toBe(false);
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

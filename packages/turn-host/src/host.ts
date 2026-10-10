@@ -17,7 +17,7 @@ import {
   type Message,
   type Name,
   type Project,
-  type ProjectRepo,
+  projectRepo,
   type RunningTurn,
   type Task,
   type Thread,
@@ -871,11 +871,7 @@ export class TurnHost {
     if (project === null) {
       return { kind: "home", ...own };
     }
-    const repo: ProjectRepo = {
-      slug: project.slug,
-      origin: project.repo,
-      defaultBranch: project.defaultBranch,
-    };
+    const repo = projectRepo(project);
     if (thread?.task === true) {
       return { kind: "task", repo, taskId: thread.id };
     }

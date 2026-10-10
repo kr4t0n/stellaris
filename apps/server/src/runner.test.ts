@@ -1461,11 +1461,32 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo"],
     });
     const SAGE = { name: "sage", role: "engineer" };
+    const refused: string[] = [];
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
-        await writeFile(path.join(request.spec.cwd, "notes.md"), `${request.prompt.length}\n`);
+        const { cwd } = request.spec;
+        await writeFile(path.join(cwd, "notes.md"), `${request.prompt.length}\n`);
+        await execa("git", ["add", "notes.md"], { cwd });
+        await execa(
+          "git",
+          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          {
+            cwd,
+          },
+        );
+        // Landing its own work on the default branch is the board's, and the runner refuses it.
+        const guarded = (
+          await execa("git", ["config", "--get", "stellaris.guardBranch"], { cwd })
+        ).stdout.trim();
+        const moved = await execa("git", ["update-ref", `refs/heads/${guarded}`, "HEAD"], {
+          cwd,
+          reject: false,
+        });
+        if (moved.exitCode !== 0) {
+          refused.push(guarded);
+        }
         return completed("wrote notes");
       },
     };
@@ -1496,6 +1517,8 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await log("trunk")).toContain(`merge: land task/${second.id} on trunk`);
     expect(await log("main")).not.toContain(`merge: land task/${second.id}`);
     expect((await board.getTask(USER, { task_id: second.id })).status).toBe("done");
+    // The guard followed the default branch from main to trunk.
+    expect(refused).toEqual(["main", "trunk"]);
   });
 
   it("reads what a task's turns left from its branch on the project's runner", async () => {

@@ -284,7 +284,9 @@ describe("buildTurnPrompt", () => {
       onboarding: null,
     });
     expect(waiting).toContain("A stage is waiting for you: claim it with claim_task");
-    expect(waiting).toContain("Never merge or fast-forward main yourself.");
+    expect(waiting).toContain(
+      "Never merge or fast-forward main yourself, or push other work to it on the remote; the runner refuses both.",
+    );
     expect(waiting).toContain(
       `This turn is in the thread "Churn model" on lab/general, about task ${churn.id}.`,
     );

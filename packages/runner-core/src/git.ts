@@ -1,4 +1,4 @@
-import { access, mkdir } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   BranchChanges,
@@ -68,6 +68,19 @@ export interface GitOps {
   ahead(repoDir: string, from: string, to: string, limit: number): Promise<Ahead>;
   /** Removes a worktree and its checkout, once its task or thread has ended. */
   removeWorktree(repoDir: string, worktreeDir: string): Promise<void>;
+  /**
+   * Makes the clone's hooks, which every worktree of it shares, refuse any move of `branch` but
+   * the runner's own, and any push of other work to it on the remote; null lifts the guard. False
+   * when the guard cannot be installed: the clone runs hooks from elsewhere (`core.hooksPath`), or
+   * a hook of the same name is not the runner's.
+   */
+  guardDefaultBranch(repoDir: string, branch: string | null): Promise<boolean>;
+  /**
+   * Puts away what the clone's own tree holds, which only the runner works in: a rebase left in
+   * progress is aborted, and changes are stashed, merge state included, as a guarded move of the
+   * default branch leaves them when refused. True when there was anything.
+   */
+  tidyClone(repoDir: string): Promise<boolean>;
   /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
    * then switches back to `home`, or with `home` null detaches, which frees the branch for the
@@ -155,6 +168,55 @@ const BOARD_IDENTITY = [
   "user.email=board@stellaris.local",
 ];
 
+/**
+ * Set on every git command the runner runs and on none an agent runs, since the CLIs inherit the
+ * runner's own environment and this lives only on each command's.
+ */
+const RUNNER_GIT = "STELLARIS_RUNNER_GIT";
+const GUARD_KEY = "stellaris.guardBranch";
+const GUARD_MARK = "# stellaris-guard";
+const GUARD_REFUSAL =
+  "stellaris: $guarded is where the board lands this project's finished tasks, so only the runner moves it. Commit to your task's branch and finish your stage with advance_task; the board merges the branch when the task completes.";
+
+/**
+ * The hooks guarding a merge project's default branch. Git 2.39 runs reference-transaction for
+ * packing refs too, as a creation at the value a ref already has and a deletion, so only a new
+ * value other than the branch's current one is refused, which leaves `git gc` working. A push may
+ * publish the branch as it stands here, which holds the board's landings, and nothing else.
+ */
+const GUARD_HOOKS: Readonly<Record<string, string>> = {
+  "reference-transaction": `#!/bin/sh
+${GUARD_MARK}: installed by the Stellaris runner, which rewrites this file.
+[ "$1" = prepared ] || exit 0
+[ -n "$${RUNNER_GIT}" ] && exit 0
+guarded=$(git config --get ${GUARD_KEY}) || exit 0
+current=$(git rev-parse --verify -q "refs/heads/$guarded")
+refused=
+while read -r old new ref; do
+  [ "$ref" = "refs/heads/$guarded" ] || continue
+  case $new in *[!0]*) ;; *) continue ;; esac
+  [ "$new" = "$current" ] || refused=1
+done
+[ -z "$refused" ] && exit 0
+echo "${GUARD_REFUSAL}" >&2
+exit 1
+`,
+  "pre-push": `#!/bin/sh
+${GUARD_MARK}: installed by the Stellaris runner, which rewrites this file.
+[ -n "$${RUNNER_GIT}" ] && exit 0
+guarded=$(git config --get ${GUARD_KEY}) || exit 0
+current=$(git rev-parse --verify -q "refs/heads/$guarded")
+refused=
+while read -r local_ref local_id remote_ref remote_id; do
+  [ "$remote_ref" = "refs/heads/$guarded" ] || continue
+  [ "$local_id" = "$current" ] || refused=1
+done
+[ -z "$refused" ] && exit 0
+echo "${GUARD_REFUSAL}" >&2
+exit 1
+`,
+};
+
 async function exists(file: string): Promise<boolean> {
   try {
     await access(file);
@@ -173,7 +235,7 @@ async function git(
     ...(cwd === undefined ? {} : { cwd }),
     ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
     reject: false,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", [RUNNER_GIT]: "1" },
   });
   return {
     stdout: result.stdout,
@@ -451,6 +513,63 @@ export class ExecaGit implements GitOps {
     if (await exists(worktreeDir)) {
       await must(["worktree", "remove", "--force", worktreeDir], repoDir);
     }
+  }
+
+  async guardDefaultBranch(repoDir: string, branch: string | null): Promise<boolean> {
+    if (branch === null) {
+      // Exits 5 when the key is not set, which is the state wanted.
+      await git(["config", "--unset", GUARD_KEY], repoDir);
+      return true;
+    }
+    if ((await git(["config", "--get", "core.hooksPath"], repoDir)).stdout.trim() !== "") {
+      return false;
+    }
+    const hooks = path.join(repoDir, ".git", "hooks");
+    await mkdir(hooks, { recursive: true });
+    for (const [name, script] of Object.entries(GUARD_HOOKS)) {
+      const file = path.join(hooks, name);
+      const existing = await readFile(file, "utf8").catch(() => null);
+      if (existing !== null && !existing.includes(GUARD_MARK)) {
+        return false;
+      }
+      if (existing !== script) {
+        await writeFile(file, script);
+      }
+      await chmod(file, 0o755);
+    }
+    await must(["config", GUARD_KEY, branch], repoDir);
+    return true;
+  }
+
+  async tidyClone(repoDir: string): Promise<boolean> {
+    let tidied = false;
+    for (const state of ["rebase-merge", "rebase-apply"]) {
+      if (await exists(path.join(repoDir, ".git", state))) {
+        await must(["rebase", "--abort"], repoDir);
+        tidied = true;
+      }
+    }
+    if ((await must(["status", "--porcelain", "--untracked-files=no"], repoDir)).trim() !== "") {
+      await must(
+        [
+          "stash",
+          "push",
+          "--quiet",
+          "-m",
+          "left in the runner's clone, which only the runner works in",
+        ],
+        repoDir,
+      );
+      tidied = true;
+    }
+    // A merge whose result matched the tree leaves its state and nothing to stash.
+    for (const state of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+      if (await exists(path.join(repoDir, ".git", state))) {
+        await must(["reset", "--quiet", "--hard"], repoDir);
+        tidied = true;
+      }
+    }
+    return tidied;
   }
 
   async handBack(

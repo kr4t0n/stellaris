@@ -132,6 +132,8 @@ export class TurnExecutor {
   private readonly fetchIntervalMs: number;
   /** When each project's remote was last fetched, and why the last fetch failed, if it did. */
   private readonly fetched = new Map<Name, { at: number; error?: string | undefined }>();
+  /** Projects whose default branch could not be guarded, said once each. */
+  private readonly unguarded = new Set<Name>();
 
   constructor(options: TurnExecutorOptions) {
     this.layout = options.layout;
@@ -449,6 +451,33 @@ export class TurnExecutor {
   }
 
   /**
+   * Guards the default branch of a project the board lands tasks on, and puts away what a refused
+   * move of it left in the clone; lifts the guard from one it does not, since there merging is the
+   * agents' own business, and so may be under way in the clone.
+   */
+  private async guard(repoDir: string, repo: ProjectRepo): Promise<void> {
+    if (repo.boardLands && (await this.git.tidyClone(repoDir))) {
+      this.log.warn(
+        { project: repo.slug },
+        "put away what was left in the clone, such as a refused merge into the default branch; git stash list has it",
+      );
+    }
+    const guarded = await this.git.guardDefaultBranch(
+      repoDir,
+      repo.boardLands ? repo.defaultBranch : null,
+    );
+    if (guarded) {
+      this.unguarded.delete(repo.slug);
+    } else if (!this.unguarded.has(repo.slug)) {
+      this.unguarded.add(repo.slug);
+      this.log.warn(
+        { project: repo.slug },
+        "cannot guard the default branch: the clone runs hooks from core.hooksPath, or has hooks of its own by those names",
+      );
+    }
+  }
+
+  /**
    * Fetches the project's remote, at most once per interval, and fast-forwards the local branches
    * that follow it. A failed fetch is reported until a later one succeeds; nothing here fails a turn.
    */
@@ -548,6 +577,7 @@ export class TurnExecutor {
     return this.withProjectLock(request.repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(request.repo, this.layout.repo(request.repo.slug));
       await this.git.ensureDefaultBranch(repoDir, request.repo);
+      await this.guard(repoDir, request.repo);
       await this.syncRemote(repoDir, request.repo);
       if (!(await this.git.branchExists(repoDir, request.branch))) {
         return { ok: true, detail: "nothing to land, since the task left no branch" };
@@ -634,6 +664,7 @@ export class TurnExecutor {
     return this.withProjectLock(repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(repo, this.layout.repo(repo.slug));
       await this.git.ensureDefaultBranch(repoDir, repo);
+      await this.guard(repoDir, repo);
       const remote = await this.syncRemote(repoDir, repo);
       if (workspace.kind === "task") {
         const branch = taskBranch(workspace.taskId);

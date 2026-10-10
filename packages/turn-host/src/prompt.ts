@@ -465,7 +465,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       `## Project ${project.slug}`,
       "",
-      `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself.`,
+      `A finished task lands by the board merging its branch task/<id> into ${project.defaultBranch}. Never merge or fast-forward ${project.defaultBranch} yourself, or push other work to it on the remote; the runner refuses both.`,
     );
   }
 

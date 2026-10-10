@@ -1600,6 +1600,7 @@ describe("turns on a runner over the runner protocol", () => {
       slots: null,
       turns: [],
     });
+    expect((await board.readRunner("pod")).version).toBe("0.3.1");
     const old = await read(`${task.id}/files/report.md`);
     expect(old.status).toBe(409);
     expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });

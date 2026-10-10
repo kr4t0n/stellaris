@@ -97,7 +97,7 @@ function WaitingRunner({
 }
 
 /**
- * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS,
+ * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
  * capabilities, the projects living on it, and whether it is connected; above them, those asking to
  * join. A runner started without a token asks the board to enroll it and prints a link here with its
  * code; approving it under a name registers it, and the runner picks up its token on its next poll.
@@ -160,7 +160,7 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
+          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -187,6 +187,9 @@ export function RunnersView() {
                 </span>
                 <span className="text-fg-primary">{runner.name}</span>
                 <span className="text-fg-secondary">{runner.os}</span>
+                <span className="text-xs text-fg-muted">
+                  {runner.version === undefined ? "" : `v${runner.version}`}
+                </span>
                 <span
                   className="truncate text-xs text-fg-muted"
                   title={runner.capabilities.join(", ")}

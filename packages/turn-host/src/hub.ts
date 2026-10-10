@@ -169,9 +169,13 @@ export class RunnerHub implements TurnRunner {
       os: hello.os,
       clis: hello.clis,
       capabilities: hello.capabilities,
+      version: hello.version,
     });
     this.runnerChanged(name);
-    this.log.info({ runner: name, clis: hello.clis, slots: hello.slots }, "runner registered");
+    this.log.info(
+      { runner: name, version: hello.version, clis: hello.clis, slots: hello.slots },
+      "runner registered",
+    );
     return { name, version: this.version };
   }
 

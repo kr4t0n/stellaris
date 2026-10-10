@@ -427,6 +427,8 @@ export const RunnerSchema = z.object({
   os: RunnerOsSchema,
   clis: z.array(CliKindSchema),
   capabilities: z.array(z.string()),
+  /** The release the runner reported when it last registered; absent until it has. */
+  version: z.string().optional(),
   status: z.enum(["connected", "disconnected"]),
   lastSeen: IsoDateTimeSchema.optional(),
 });

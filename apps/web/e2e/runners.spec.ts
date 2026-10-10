@@ -51,8 +51,8 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   // One row each, in columns, connected first; a runner away says so in words, not a dot.
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   await expect(rows).toHaveText([
-    /^claude, codex\s*pod\s*linux\s*no projects\s*connected$/,
-    /^claude\s*laptop\s*darwin\s*gpu\s*lab\s*away$/,
+    /^claude, codex\s*pod\s*linux\s*v0\.3\.11\s*no projects\s*connected$/,
+    /^claude\s*laptop\s*darwin\s*v0\.3\.10\s*gpu\s*lab\s*away$/,
   ]);
   await expect(rows.nth(1).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(page.getByText("●")).toHaveCount(0);

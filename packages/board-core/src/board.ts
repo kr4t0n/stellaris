@@ -227,6 +227,7 @@ export interface RunnerPatch {
   readonly os?: Runner["os"] | undefined;
   readonly clis?: readonly CliKind[] | undefined;
   readonly capabilities?: readonly string[] | undefined;
+  readonly version?: string | undefined;
 }
 
 export interface SignalRecord {
@@ -1790,6 +1791,7 @@ export class Board {
         ...(patch.os === undefined ? {} : { os: patch.os }),
         ...(patch.clis === undefined ? {} : { clis: [...patch.clis] }),
         ...(patch.capabilities === undefined ? {} : { capabilities: [...patch.capabilities] }),
+        ...(patch.version === undefined ? {} : { version: patch.version }),
         lastSeen: this.now().toISOString(),
       });
       await writeMarkdown(file, next, doc.body);

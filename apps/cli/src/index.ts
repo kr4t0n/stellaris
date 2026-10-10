@@ -214,7 +214,9 @@ runner
         : runners
             .map(
               (each) =>
-                `${each.name}  ${each.status}  ${each.os}  ${each.clis.join(",") || "no CLIs yet"}${
+                `${each.name}  ${each.status}  ${each.os}${
+                  each.version === undefined ? "" : `  v${each.version}`
+                }  ${each.clis.join(",") || "no CLIs yet"}${
                   each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
                 }`,
             )

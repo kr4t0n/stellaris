@@ -946,6 +946,7 @@ export async function fakeBoard(
             os: "linux",
             clis: ["claude", "codex"],
             capabilities: [],
+            version: "0.3.11",
             status: "connected",
           },
           {
@@ -953,6 +954,7 @@ export async function fakeBoard(
             os: "darwin",
             clis: ["claude"],
             capabilities: ["gpu"],
+            version: "0.3.10",
             status: "disconnected",
           },
         ]);

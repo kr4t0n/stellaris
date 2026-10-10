@@ -316,6 +316,37 @@ describe("buildTurnPrompt", () => {
       '- 01ARZ3NDEKTSV4RRFFQ69G5FAW "Pricing": write-up (yours, 2 of 3); next: referee review (gate, editor); lease until 2026-09-29T10:00:00.000Z',
     );
     expect(held).toContain("## Unread messages (0)");
+
+    // A wake queued before the thread closed still runs; its turn is told where to post instead.
+    const late = buildTurnPrompt({
+      dispatch: {
+        agent: "res-1",
+        project: "lab",
+        thread: { id: pricing.id, task: true },
+        trigger: TriggerSchema.parse({
+          kind: "mention",
+          from: "desk",
+          reason: "mentioned by desk",
+        }),
+        priority: 1,
+        onboarding: false,
+      },
+      messages: [],
+      conversation: {
+        thread: { ...threadOf(pricing.id, pricing.title), state: "closed" },
+        task: { ...pricing, status: "abandoned" },
+        fresh: false,
+        replyIn: "lab/general",
+      },
+      heldClaims: [],
+      project,
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(late).toContain(
+      "This thread is closed, so posts to it are refused: if something still needs saying, post it in lab/general.",
+    );
+    expect(late).not.toContain(`Talk here with post_message and thread_id ${pricing.id}.`);
   });
 
   it("frames a turn triggered by operations signals as a decision about proposing", () => {

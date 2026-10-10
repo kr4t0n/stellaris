@@ -97,6 +97,8 @@ export interface Conversation {
   readonly thread: Thread;
   readonly task: Task | null;
   readonly fresh: boolean;
+  /** For a closed thread, where to say what still needs saying: its channel, or the place's general. */
+  readonly replyIn?: ChannelRef | undefined;
 }
 
 /** What a reflection turn is for. It replaces new work, not the unread messages. */
@@ -324,8 +326,13 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     const { thread, task } = conversation;
     const about =
       thread.subject === undefined ? "a topic" : `${thread.subject.kind} ${thread.subject.id}`;
+    // A wake queued before its thread closed still runs, so its turn learns at once that it is closed.
+    const talk =
+      thread.state === "closed"
+        ? `This thread is closed, so posts to it are refused: if something still needs saying, post it in ${conversation.replyIn ?? thread.channel}.`
+        : `Talk here with post_message and thread_id ${thread.id}.`;
     lines.push(
-      `This turn is in the thread "${thread.title}" on ${thread.channel}, about ${about}. Only this conversation is below: read anything else you need with get_task, search, or the board's files, and leave other tasks and threads to their own turns. Talk here with post_message and thread_id ${thread.id}.`,
+      `This turn is in the thread "${thread.title}" on ${thread.channel}, about ${about}. Only this conversation is below: read anything else you need with get_task, search, or the board's files, and leave other tasks and threads to their own turns. ${talk}`,
     );
     if (task !== null) {
       lines.push("", `Task ${task.id} "${task.title}", ${task.status}:`, planLine(task, "now"));

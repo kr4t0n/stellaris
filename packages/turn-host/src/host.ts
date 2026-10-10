@@ -356,7 +356,14 @@ export class TurnHost {
     const conversation: Conversation | null =
       threadRecord === undefined
         ? null
-        : { thread: threadRecord, task, fresh: threadSoFar !== null };
+        : {
+            thread: threadRecord,
+            task,
+            fresh: threadSoFar !== null,
+            ...(threadRecord.state === "closed"
+              ? { replyIn: await this.replyIn(threadRecord) }
+              : {}),
+          };
     const ending =
       dispatch.trigger.kind === "closing"
         ? await this.endingOf(dispatch.project, threadRecord, task, channel)
@@ -888,6 +895,13 @@ export class TurnHost {
     return conversation !== null && (await this.board.conversationEnded(conversation));
   }
 
+  /** Where a closed thread's citizens say what still needs saying: its channel, else its place's general. */
+  private async replyIn(thread: Thread): Promise<string> {
+    return (await this.board.channelOpen(thread.channel))
+      ? thread.channel
+      : channelRef(parseChannelRef(thread.channel).project, "general");
+  }
+
   /**
    * How a closing turn's conversation ended, and where its citizen asks someone else to take over
    * work that is not its own: the thread's channel while it is open, else the place's general.
@@ -903,13 +917,7 @@ export class TurnHost {
       const closed = `the thread "${thread.title}" on ${thread.channel} was closed${
         thread.closedBy === undefined ? "" : ` by ${thread.closedBy}`
       }${task === null ? "" : `, its task ${task.status}`}`;
-      const open = await this.board.channelOpen(thread.channel);
-      return {
-        how: closed,
-        askIn: open
-          ? thread.channel
-          : channelRef(parseChannelRef(thread.channel).project, "general"),
-      };
+      return { how: closed, askIn: await this.replyIn(thread) };
     }
     if (channel === undefined) {
       return null;

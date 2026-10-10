@@ -350,6 +350,7 @@ export class TurnExecutor {
       if (repo === null) {
         // A scratch folder is never kept, as the turn contract says.
         await rm(found.dir, { recursive: true, force: true });
+        this.log.info({ ...found.held, by: "sweep" }, "removed workspace");
         continue;
       }
       const keep = await this.withProjectLock(repo, async () => {
@@ -361,6 +362,8 @@ export class TurnExecutor {
       });
       if (keep) {
         kept.push(found.held);
+      } else {
+        this.log.info({ ...found.held, by: "sweep" }, "removed workspace");
       }
     }
     if (kept.length > 0) {
@@ -477,10 +480,18 @@ export class TurnExecutor {
   async dropWorkspace(job: TurnJob): Promise<void> {
     const { workspace } = job;
     try {
+      const removed = {
+        agent: job.agent,
+        scope: job.scope,
+        thread: job.thread,
+        channel: job.channel,
+        by: "turn end",
+      };
       if (workspace.kind === "home") {
         const scratch = this.ownScratch(job.agent, workspace);
         if (scratch !== null) {
           await rm(scratch, { recursive: true, force: true });
+          this.log.info(removed, "removed workspace");
         }
         return;
       }
@@ -492,6 +503,7 @@ export class TurnExecutor {
         await this.withProjectLock(workspace.repo.slug, () =>
           this.git.removeWorktree(this.layout.repo(workspace.repo.slug), worktree),
         );
+        this.log.info(removed, "removed workspace");
       }
     } catch (error) {
       this.log.warn(

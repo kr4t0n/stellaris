@@ -37,6 +37,7 @@ export const BOARD_EVENT_TYPES = [
   "agent.left",
   "knowledge.written",
   "knowledge.removed",
+  "dashboard.updated",
   "skill.promoted",
   "runner.added",
   "user.signed_in",

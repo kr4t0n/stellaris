@@ -60,6 +60,9 @@ describe("board events", () => {
     expect(staleKeys(event("knowledge.removed", { topic: "x", project: null }, id))).toEqual([
       ["knowledge", "society"],
     ]);
+    expect(staleKeys(event("dashboard.updated", { project: "lab", revision: 2 }, id))).toEqual([
+      ["dashboard", "lab"],
+    ]);
     expect(staleKeys(event("proposal.decided", { proposalId: id }, id))).toEqual([
       ["proposals"],
       ["proposal", id],

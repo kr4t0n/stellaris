@@ -4,6 +4,7 @@ import {
   BranchChangesSchema,
   BranchFileSchema,
   ChannelRefSchema,
+  DashboardSchema,
   DecisionSchema,
   HomeConflictSchema,
   HomeFileDiffSchema,
@@ -142,7 +143,6 @@ const ProposalSchema = ProposalFrontmatterSchema.extend({ body: z.string() });
 const TopicSchema = KnowledgeSchema.extend({ body: z.string() });
 export type Topic = z.infer<typeof TopicSchema>;
 const BodySchema = z.object({ body: z.string() });
-const DashboardSchema = z.object({ data: z.record(z.string(), z.unknown()), body: z.string() });
 
 /** A channel ref as a path: `general`, or `lab/general` with each part encoded. */
 function channelPath(ref: string): string {

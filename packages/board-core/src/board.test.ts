@@ -2008,6 +2008,97 @@ describe("Board", () => {
     expect((await reopened.readRole("engineer")).verbs).not.toContain("remove_knowledge");
   });
 
+  it("updates a project's dashboard for its members and the user, one revision at a time", async () => {
+    const { board } = await society();
+    const begun = await board.readDashboard("demo");
+    expect(begun).toMatchObject({ project: "demo", revision: 0 });
+    expect(begun.updatedBy).toBeUndefined();
+    expect(begun.body).toContain("update_dashboard");
+
+    // Only the project's members and the user; the steward holds the verb but joins no project.
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "eng-9", role: "engineer", cli: "claude" });
+    for (const outsider of [
+      { name: "stew", role: "steward" },
+      { name: "eng-9", role: "engineer" },
+    ]) {
+      await expect(
+        board.updateDashboard(outsider, { project: "demo", body: "# Mine", revision: 0 }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    }
+
+    const first = await board.updateDashboard(ENG, {
+      project: "demo",
+      body: "# Demo\n\n| build | green |",
+      revision: 0,
+    });
+    expect(first).toMatchObject({
+      revision: 1,
+      updatedBy: "eng-1",
+      updatedAt: now().toISOString(),
+    });
+
+    // A writer that read revision 0 learns what changed since, text included, and writes nothing.
+    const stale = await board
+      .updateDashboard(
+        { name: "rev-1", role: "reviewer" },
+        {
+          project: "demo",
+          body: "# Demo\n\nReview pending.",
+          revision: 0,
+        },
+      )
+      .catch((error: unknown) => error);
+    expect(stale).toMatchObject({ code: "INVALID_STATE" });
+    expect(String(stale)).toContain("revision 1, updated by eng-1");
+    expect(String(stale)).toContain("| build | green |");
+
+    // The user is no member of demo, which it joined on its own record, and may still update it.
+    expect((await board.readProject("demo")).members).not.toContain("user");
+    await board.updateDashboard(USER, { project: "demo", body: "# Demo\n\nShipped.", revision: 1 });
+    expect(await board.readDashboard("demo")).toMatchObject({
+      revision: 2,
+      updatedBy: "user",
+      body: "# Demo\n\nShipped.\n",
+    });
+    expect(await readFile(board.paths.dashboard("demo"), "utf8")).toContain("revision: 2");
+    const events = (await board.readEvents(null)).filter((e) => e.type === "dashboard.updated");
+    expect(events.map((e) => [e.actor, e.payload])).toEqual([
+      ["eng-1", { project: "demo", revision: 1 }],
+      ["user", { project: "demo", revision: 2 }],
+    ]);
+
+    await board.archiveProject(USER, { project: "demo", reason: "done" });
+    await expect(
+      board.updateDashboard(USER, { project: "demo", body: "# Late", revision: 2 }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+  });
+
+  it("grants update_dashboard once to every charter that grants write_knowledge, and rewords old dashboards", async () => {
+    const { board } = await society();
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: MEMBER_VERBS.filter((verb) => verb !== "update_dashboard"),
+    });
+    await board.setRoleCharter(USER, {
+      name: "reviewer",
+      purpose: "Reviews.",
+      verbs: ["post_message", "read_inbox"],
+    });
+    await writeFile(
+      board.paths.dashboard("demo"),
+      "---\nproject: demo\nupdatedAt: '2026-09-30T05:19:26.611Z'\n---\n# Demo dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n",
+    );
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).toContain("update_dashboard");
+    expect((await reopened.readRole("reviewer")).verbs).not.toContain("update_dashboard");
+    const dashboard = await reopened.readDashboard("demo");
+    expect(dashboard).toMatchObject({ revision: 0, updatedAt: "2026-09-30T05:19:26.611Z" });
+    expect(dashboard.body).toContain("keep this page current with update_dashboard");
+    expect(dashboard.body).not.toContain("Agents may edit");
+  });
+
   it("shares knowledge and skills: write_knowledge, skill promotion, and search over the archive", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

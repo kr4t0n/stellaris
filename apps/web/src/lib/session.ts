@@ -241,13 +241,13 @@ export function useHomeConflicts(name: string) {
   return useQuery({ queryKey: ["conflicts", name], queryFn: () => api.conflicts(name) });
 }
 
-/** Agents edit the dashboard file directly and no event says so, so it polls. */
+/** A project's dashboard. */
 export function useDashboard(slug: string) {
   const { api } = useSession();
   return useQuery({
     queryKey: ["dashboard", slug],
     queryFn: () => api.dashboard(slug),
-    refetchInterval: 60_000,
+    refetchInterval: 120_000,
   });
 }
 

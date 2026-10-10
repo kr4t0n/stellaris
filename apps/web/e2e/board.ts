@@ -990,7 +990,11 @@ export async function fakeBoard(
           },
         ]);
       case "/api/projects/lab/dashboard":
-        return json(route, { data: {}, body: "# Lab dashboard\n\nThroughput is steady." });
+        return json(route, {
+          project: "lab",
+          revision: 3,
+          body: "# Lab dashboard\n\nThroughput is steady.",
+        });
       case "/api/projects/lab/knowledge":
         return json(route, [LAB_TOPIC]);
       case "/api/society/knowledge":
@@ -1013,7 +1017,7 @@ export async function fakeBoard(
       case "/api/channels/lab/general":
         return json(route, []);
       case "/api/projects/iphone/dashboard":
-        return json(route, { data: {}, body: "" });
+        return json(route, { project: "iphone", revision: 0, body: "" });
       case "/api/channels/iphone/general":
         return json(route, [ARCHIVED_POST]);
       case `/api/proposals/${ARCHIVE_PROPOSAL}`:

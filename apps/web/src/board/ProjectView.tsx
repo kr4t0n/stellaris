@@ -188,11 +188,25 @@ export function ProjectView() {
               : "When its last stage is done, it is done; nothing is merged."}
           </p>
         </Section>
-        <Section title="Dashboard">
+        <Section
+          title="Dashboard"
+          aside={
+            dashboard.data?.updatedBy === undefined ? undefined : (
+              <span className="text-meta">
+                by {dashboard.data.updatedBy}
+                {dashboard.data.updatedAt === undefined
+                  ? ""
+                  : ` ${ago(dashboard.data.updatedAt, now)}`}
+              </span>
+            )
+          }
+        >
           {dashboard.data === undefined ? (
             <p className="text-meta">Reading…</p>
           ) : body === "" ? (
-            <p className="text-meta">Empty. Agents on the server's machine may edit it.</p>
+            <p className="text-meta">
+              Empty. The project's members fill it in with update_dashboard.
+            </p>
           ) : (
             <Markdown text={body} />
           )}

@@ -11,6 +11,7 @@ import {
   ChannelProposalSchema,
   CommitIdSchema,
   conflictCopyOf,
+  DashboardSchema,
   DecisionSchema,
   describeCharter,
   EffortSchema,
@@ -52,6 +53,7 @@ import {
   type ChannelRef,
   type CompletionEffect,
   type CliKind,
+  type Dashboard,
   type Decision,
   type HomeConflict,
   type HomeFileDiff,
@@ -467,6 +469,11 @@ const THREAD_CONVERSATIONS = "thread-conversations";
 const ASKS_CHANNEL_OPENED = "asks-channel-opened";
 const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
 const CHANNEL_CONVERSATIONS = "channel-conversations";
+const DASHBOARD_UPDATES = "dashboard-updates-granted";
+
+/** The line a project's dashboard began with, and the one it begins with since dashboards have a verb. */
+const OLD_DASHBOARD_LINE = "Agents may edit this file. It is rendered by the board UI.";
+const DASHBOARD_LINE = "The project's members keep this page current with update_dashboard.";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
 const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
@@ -711,6 +718,7 @@ export class Board {
       ASKS_CHANNEL_OPENED,
       KNOWLEDGE_REMOVAL,
       CHANNEL_CONVERSATIONS,
+      DASHBOARD_UPDATES,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -740,29 +748,45 @@ export class Board {
       await this.openAsksChannel();
     }
     if (pending.includes(KNOWLEDGE_REMOVAL)) {
-      await this.grantKnowledgeRemoval();
+      // Whoever may write a scope's knowledge may remove it.
+      await this.grantBesideKnowledge("remove_knowledge");
     }
     if (pending.includes(CHANNEL_CONVERSATIONS)) {
       await this.startChannelCursors();
+    }
+    if (pending.includes(DASHBOARD_UPDATES)) {
+      await this.grantBesideKnowledge("update_dashboard");
+      await this.rewordDashboards();
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
 
   /**
-   * Whoever may write a scope's knowledge may remove it, so every charter granting
-   * `write_knowledge` is granted `remove_knowledge` once; seed roles have it from their seed.
+   * Grants `verb` once to every charter granting `write_knowledge`, the work roles' charters in
+   * practice; seed roles have it from their seed.
    */
-  private async grantKnowledgeRemoval(): Promise<void> {
+  private async grantBesideKnowledge(verb: VerbName): Promise<void> {
     for (const charter of await this.listRoles()) {
-      if (
-        charter.verbs.includes("write_knowledge") &&
-        !charter.verbs.includes("remove_knowledge")
-      ) {
+      if (charter.verbs.includes("write_knowledge") && !charter.verbs.includes(verb)) {
         await this.writeRoleUnlocked(
           USER_NAME,
-          { ...charter, verbs: [...charter.verbs, "remove_knowledge"] },
-          { verbsAdded: ["remove_knowledge"] },
+          { ...charter, verbs: [...charter.verbs, verb] },
+          { verbsAdded: [verb] },
         );
+      }
+    }
+  }
+
+  /** A dashboard still saying agents may edit its file says how it changes now. */
+  private async rewordDashboards(): Promise<void> {
+    for (const slug of await listDirs(this.paths.projects())) {
+      const file = this.paths.dashboard(slug);
+      if (!(await exists(file))) {
+        continue;
+      }
+      const { data, body } = await readLooseMarkdown(file);
+      if (body.includes(OLD_DASHBOARD_LINE)) {
+        await writeMarkdown(file, data, body.replace(OLD_DASHBOARD_LINE, DASHBOARD_LINE));
       }
     }
   }
@@ -1664,8 +1688,8 @@ export class Board {
     await ensureDir(this.paths.projectKnowledge(project.slug));
     await writeMarkdown(
       this.paths.dashboard(project.slug),
-      { project: project.slug, updatedAt: this.now().toISOString() },
-      `# ${project.name} dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n`,
+      { project: project.slug, revision: 0, updatedAt: this.now().toISOString() },
+      `# ${project.name} dashboard\n\n${DASHBOARD_LINE}\n`,
     );
     await this.updateAgent(USER_NAME, (user) => ({
       ...user,
@@ -2369,6 +2393,47 @@ export class Board {
     if (!CURATING_ROLES.includes(actor.role) && !active.members.includes(actor.name)) {
       throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${project}`);
     }
+  }
+
+  /**
+   * Replaces a project's dashboard, by a member or the user. A turn reads the dashboard from the
+   * copy of the projection pulled when it started, so a revision other than the current one means
+   * someone updated it since; the refusal carries the current text, which that copy lacks.
+   */
+  async updateDashboard(actor: Actor, input: VerbInput<"update_dashboard">): Promise<Dashboard> {
+    const args = VerbInputs.update_dashboard.parse(input);
+    await this.authorize(actor, "update_dashboard");
+    return this.mutex.run(async () => {
+      const project = await this.readActiveProject(args.project);
+      if (actor.role !== USER_ROLE && !project.members.includes(actor.name)) {
+        throw new BoardError("FORBIDDEN", `${actor.name} is not a member of ${args.project}`);
+      }
+      const current = await this.dashboardOf(args.project);
+      if (args.revision !== current.revision) {
+        const by =
+          current.updatedBy === undefined
+            ? ""
+            : `, updated by ${current.updatedBy} at ${current.updatedAt ?? "an unknown time"}`;
+        throw new BoardError(
+          "INVALID_STATE",
+          `the dashboard of ${args.project} is at revision ${current.revision}${by}, not ${args.revision}. Merge your changes into its current text, below, and update again with revision ${current.revision}.\n\n${current.body}`,
+        );
+      }
+      const updated = DashboardSchema.parse({
+        project: args.project,
+        revision: current.revision + 1,
+        updatedBy: actor.name,
+        updatedAt: this.now().toISOString(),
+        body: args.body,
+      });
+      const { body, ...frontmatter } = updated;
+      await writeMarkdown(this.paths.dashboard(args.project), frontmatter, body);
+      await this.events.append("dashboard.updated", actor.name, {
+        project: args.project,
+        revision: updated.revision,
+      });
+      return updated;
+    });
   }
 
   async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Thread> {
@@ -3467,6 +3532,8 @@ export class Board {
         return this.createChannel(actor, VerbInputs.create_channel.parse(input));
       case "archive_channel":
         return this.archiveChannel(actor, VerbInputs.archive_channel.parse(input));
+      case "update_dashboard":
+        return this.updateDashboard(actor, VerbInputs.update_dashboard.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -3940,15 +4007,32 @@ export class Board {
     await this.mutex.run(() => writeJson(path.join(this.paths.state(), `${name}.json`), value));
   }
 
-  /** The project's editable dashboard: frontmatter plus markdown body. Empty when none exists. */
-  async readDashboard(slug: Name): Promise<{ data: Record<string, unknown>; body: string }> {
+  /** The project's dashboard, empty at revision 0 when it has none. */
+  async readDashboard(slug: Name): Promise<Dashboard> {
     await this.readProject(slug);
+    return this.dashboardOf(slug);
+  }
+
+  /**
+   * Read loosely, since agents wrote dashboards by hand before they had a verb: a revision or an
+   * author that does not parse counts as none.
+   */
+  private async dashboardOf(slug: Name): Promise<Dashboard> {
     const file = this.paths.dashboard(slug);
     if (!(await exists(file))) {
-      return { data: { project: slug }, body: "" };
+      return { project: slug, revision: 0, body: "" };
     }
     const { data, body } = await readLooseMarkdown(file);
-    return { data, body };
+    const revision = z.number().int().min(0).safeParse(data["revision"]);
+    const updatedBy = NameSchema.safeParse(data["updatedBy"]);
+    const updatedAt = IsoDateTimeSchema.safeParse(data["updatedAt"]);
+    return {
+      project: slug,
+      revision: revision.success ? revision.data : 0,
+      ...(updatedBy.success ? { updatedBy: updatedBy.data } : {}),
+      ...(updatedAt.success ? { updatedAt: updatedAt.data } : {}),
+      body,
+    };
   }
 
   async listRunners(): Promise<Runner[]> {

@@ -115,6 +115,13 @@ export const VerbInputs = {
     purpose: z.string().min(1),
   }),
   archive_channel: z.object({ channel: ChannelRefSchema, reason: z.string().min(1) }),
+  update_dashboard: z.object({
+    project: NameSchema,
+    /** The whole dashboard as markdown; the board keeps its frontmatter. */
+    body: z.string().min(1),
+    /** The `revision` in the frontmatter of the dashboard you read, 0 when it names none. */
+    revision: z.number().int().min(0),
+  }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -168,4 +175,6 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Open a channel in a project, or with project null in the society, for a workstream such as a release, whose tasks are filed there. You follow it; a notice in the place's general announces it, and members subscribe when it concerns them. User, steward, concierge.",
   archive_channel:
     "Archive a channel whose workstream is done: its open threads close, its followers stop following it, and nothing more is posted or filed there, while its history stays readable. Refused while a task filed there is in play, and for the channels the board itself uses. User, steward, concierge.",
+  update_dashboard:
+    "Replace the dashboard of a project you are a member of, the status page the user reads on its view, with a whole markdown body. Pass the revision from the frontmatter of the dashboard you read; if it was updated since, the call is refused with the current text to merge yours into. dashboard.md in the board projection is a copy, so editing it changes nothing.",
 };

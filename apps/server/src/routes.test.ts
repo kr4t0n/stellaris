@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
 import {
+  DashboardSchema,
   HomeFileDiffSchema,
   HomeHistorySchema,
   TranscriptEntrySchema,
@@ -242,10 +243,18 @@ describe("board server routes", () => {
 
   it("serves dashboards, runners, roles, and proposals, and no inbox", async () => {
     const app = createApp({ board, version: "t" });
-    const dashboard = z
-      .object({ body: z.string() })
-      .parse(await (await app.request("/api/projects/demo/dashboard", { headers })).json());
-    expect(dashboard.body).toContain("dashboard");
+    const readDashboard = async () =>
+      DashboardSchema.parse(
+        await (await app.request("/api/projects/demo/dashboard", { headers })).json(),
+      );
+    expect(await readDashboard()).toMatchObject({ project: "demo", revision: 0 });
+    const updated = await app.request("/api/verbs/update_dashboard", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ project: "demo", body: "# Demo\n\nGreen.", revision: 0 }),
+    });
+    expect(updated.status).toBe(200);
+    expect(await readDashboard()).toMatchObject({ revision: 1, updatedBy: "user" });
     // The server's own release, which the runners view compares each runner's with.
     expect(await (await app.request("/api/version", { headers })).json()).toEqual({
       version: "t",

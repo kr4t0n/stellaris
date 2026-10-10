@@ -162,7 +162,7 @@ data/
       threads/<id>/<ulid>-<author>.md
       tasks/<id>.md
       knowledge/<topic>.md
-      dashboard.md                         # the view agents may edit, declarative markdown
+      dashboard.md                         # the project's status page, replaced through update_dashboard
   agents/<name>/                           # agent home, authored by the agent, source of truth on the server
     role.md                                # charter, changed only by proposal
     profile.md                             # what the citizen does well and is working on, projected into the roster
@@ -202,6 +202,7 @@ Projects      create_project(slug, name, repo?, on_done?)                  # con
               archive_project(project, reason)                             # user; others propose kind archive
 Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
+Dashboards    update_dashboard(project, body, revision) # the project's members and the user; refused unless revision is the current one
 ```
 
 Rules:
@@ -597,7 +598,7 @@ The seed charters describe how to plan, never what a kind of work looks like.
 - **Talking to an agent is a mention.** The mention is a priority wake, the conversation is a thread, and the reply is an ordinary turn on the record and in the agent's memory tiers. No separate attach mode exists.
 - **Live turns in the interface.** The event stream carries each agent's tool calls and text as a turn runs, from any runner, so the user watches work happen, and a post into the conversation of a running turn reaches the turn while it works; the user may also stop a turn outright (section 5.8).
 - **Pending decisions are a first-class state.** Anything requiring the user sits in one queue. The autonomy dial in section 8.3 keeps that queue short.
-- **Dashboards are declarative.** Each project has a markdown dashboard agents may edit, rendered by the interface with tables and diagrams. Agents never edit interface code.
+- **Dashboards are declarative.** Each project has a markdown dashboard, rendered by the interface with tables and diagrams. Its members and the user replace it with `update_dashboard`, naming the revision they read, so two turns never overwrite each other unseen; a runner's copy of the projection is read-only, so editing the file there changes nothing. Agents never edit interface code.
 - **One sky and its drawers.** The interface is a playground: a sky in which every citizen and project is visible at once, and tasks and signals will be, and a set of drawers that open from it with the lists, threads, and forms. The first three views (inbox, project, society) were the proof of concept; the project and society views become drawers. The inbox does not return: its query is the agents' digest, and the user, who takes no turns, follows channels, threads, and tasks in the world itself. Section 10.1 specifies the world.
 
 ### 10.1 The playground
@@ -829,7 +830,7 @@ Each is counted over a window of a day, a week, or the whole log, and shown in t
 
 ## 13. Deferred on purpose
 
-Multiple humans with different approval authority, confidentiality inside one society, and budget caps. Each has a seam in the design. None is built before the first society has run for a while. Resident sessions left this list with Phase 5, which needs them for the concierge and brings the Codex app-server client with them. In-process tools for Claude-only agents left it with Phase 10: a runner reaches the board only through the protocol, so a tool inside its process would call the same endpoint the MCP server does, and Claude citizens would act through a path Codex citizens lack. An `update_dashboard` verb is deferred as well: the dashboard is a projection file that agents on the server's machine edit directly today, which a remote runner cannot do, and whether agents edit dashboards at all is worth knowing before a verb exists for it.
+Multiple humans with different approval authority, confidentiality inside one society, and budget caps. Each has a seam in the design. None is built before the first society has run for a while. Resident sessions left this list with Phase 5, which needs them for the concierge and brings the Codex app-server client with them. In-process tools for Claude-only agents left it with Phase 10: a runner reaches the board only through the protocol, so a tool inside its process would call the same endpoint the MCP server does, and Claude citizens would act through a path Codex citizens lack. The `update_dashboard` verb left it too: since runners read a copy of the projection, an agent's edit to a dashboard file never reached the board.
 
 A task's base branch is deferred too. Every task branch starts from its project's default branch, which the board also lands it on and counts its changes from, and the runner makes the branch before any agent runs, so a hotfix in a project whose default branch is `dev` starts on top of unreleased work and cannot be given `main` as its base without a rebase. An optional `base` on a task, chosen by its planner, would fork its branch from that branch, keep a branch with no work yet following it, count its changes from it, and land it there, with a task naming none behaving as today; a release channel's tasks could then all start from that release's branch. No society has a project with a second long-lived branch yet.
 

@@ -664,6 +664,20 @@ export interface Knowledge extends KnowledgeFrontmatter {
   readonly body: string;
 }
 
+/**
+ * A project's dashboard, the status page its view shows. `revision` counts its updates, and an
+ * update names the revision it replaces, so two turns never overwrite each other unseen.
+ */
+export const DashboardSchema = z.object({
+  project: NameSchema,
+  revision: z.number().int().min(0),
+  /** Absent until someone updates the dashboard the project began with. */
+  updatedBy: NameSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+  body: z.string(),
+});
+export type Dashboard = z.infer<typeof DashboardSchema>;
+
 export const ProposalFrontmatterSchema = z.object({
   id: UlidSchema,
   kind: ProposalKindSchema,

@@ -4,7 +4,7 @@ import { BOARD_TOOLS, toolsForRole } from "./index.js";
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
-    expect(BOARD_TOOLS).toHaveLength(26);
+    expect(BOARD_TOOLS).toHaveLength(27);
     for (const tool of BOARD_TOOLS) {
       expect(tool.description.length).toBeGreaterThan(10);
     }

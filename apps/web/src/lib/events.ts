@@ -72,6 +72,9 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "knowledge.written" || type === "knowledge.removed") {
     return [["knowledge", text(payload["project"]) ?? SOCIETY_SCOPE]];
   }
+  if (type === "dashboard.updated") {
+    return [["dashboard", text(payload["project"])]];
+  }
   if (type.startsWith("agent.") || type === "subscription.changed") {
     return [["members"]];
   }

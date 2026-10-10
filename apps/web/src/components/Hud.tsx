@@ -9,6 +9,11 @@ interface HudProps {
   readonly onToggleRunners: () => void;
   /** Runners waiting for the user to approve their enrollment, counted on the button. */
   readonly enrolling: number;
+  /** Whether the crons view is open; the button opens and closes it. */
+  readonly cronsOpen: boolean;
+  readonly onToggleCrons: () => void;
+  /** Crons whose turns keep failing, counted on the button. */
+  readonly failingCrons: number;
   /** How many things wait on the user; the chip opens them. */
   readonly attention: number;
   readonly onOpenAttention: () => void;
@@ -36,6 +41,9 @@ export function Hud({
   runnersOpen,
   onToggleRunners,
   enrolling,
+  cronsOpen,
+  onToggleCrons,
+  failingCrons,
   attention,
   onOpenAttention,
   paused,
@@ -107,6 +115,22 @@ export function Hud({
           {enrolling === 0 ? null : (
             <span className="rounded bg-amber-500/15 px-1 text-[11px] text-amber-300">
               {enrolling}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          aria-pressed={cronsOpen}
+          aria-label={failingCrons === 0 ? "Crons" : `Crons, ${failingCrons} failing`}
+          onClick={onToggleCrons}
+          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+            cronsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
+          }`}
+        >
+          Crons
+          {failingCrons === 0 ? null : (
+            <span className="rounded bg-amber-500/15 px-1 text-[11px] text-amber-300">
+              {failingCrons}
             </span>
           )}
         </button>

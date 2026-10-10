@@ -15,6 +15,7 @@ import {
   type LiveTurn,
 } from "../lib/live.js";
 import {
+  useCrons,
   useMembers,
   useNow,
   useRoles,
@@ -112,6 +113,7 @@ function CitizenPage({
   const roles = useRoles();
   const scheduler = useScheduler();
   const live = useLiveTurns();
+  const crons = useCrons();
   const [open, setOpen] = useState<"wake" | "model" | "runner" | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
@@ -136,6 +138,9 @@ function CitizenPage({
   const charter = roles.data?.find((role) => role.name === member.role);
   const scopes = wakeScopes(member);
   const wakeable = member.status === "active" && member.cli !== null;
+  const ownCrons = (crons.data ?? []).filter(
+    (cron) => cron.agent === name && cron.ended === undefined,
+  ).length;
 
   return (
     <>
@@ -159,6 +164,15 @@ function CitizenPage({
         }
         trailing={
           <>
+            {ownCrons === 0 ? null : (
+              <Link
+                to="/crons"
+                search={{ agent: name }}
+                className="inline-flex h-7 shrink-0 items-center rounded-md px-3 text-xs text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+              >
+                {ownCrons === 1 ? "1 cron" : `${ownCrons} crons`}
+              </Link>
+            )}
             {wakeable && open === null ? (
               <>
                 <Button onClick={() => setOpen("model")}>Model…</Button>

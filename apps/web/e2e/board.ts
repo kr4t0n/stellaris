@@ -607,6 +607,56 @@ export interface FakeBoard {
   refuseNext(message: string): void;
 }
 
+/** desk's crons: a morning digest at home, a check in the task's thread whose turns keep failing, and stew's, ended. */
+export const DIGEST_CRON = "01M3Q2CRNAAAAAAAAAAAAAAAA1";
+export const FAILING_CRON = "01M3Q2CRNAAAAAAAAAAAAAAAA2";
+const ENDED_CRON = "01M3Q2CRNAAAAAAAAAAAAAAAA3";
+
+function cronFixtures(): Array<Record<string, unknown>> {
+  return [
+    {
+      id: DIGEST_CRON,
+      title: "Morning digest",
+      agent: "desk",
+      scope: "society",
+      schedule: { cron: "0 9 * * 1-5" },
+      createdBy: "user",
+      createdAt: CREATED,
+      since: CREATED,
+      lastFiredAt: "2026-10-09T09:00:00.000Z",
+      lastRun: { turnId: DESK_TURN_ID, at: "2026-10-09T09:01:00.000Z", outcome: "completed" },
+      failures: 0,
+      note: "Summarize what changed overnight in **general**.",
+    },
+    {
+      id: FAILING_CRON,
+      title: "Check the build",
+      agent: "desk",
+      scope: "lab",
+      thread: STAGE_TASK,
+      schedule: { cron: "0 * * * *", timezone: "Europe/Berlin" },
+      createdBy: "desk",
+      createdAt: CREATED,
+      since: CREATED,
+      failures: 3,
+      note: "Run the build and say what broke.",
+    },
+    {
+      id: ENDED_CRON,
+      title: "Watch the backlog",
+      agent: "stew",
+      scope: "society",
+      schedule: { at: "2026-10-01T09:00:00.000Z" },
+      createdBy: "stew",
+      createdAt: CREATED,
+      since: CREATED,
+      failures: 0,
+      ended: { at: "2026-10-01T09:00:00.000Z", by: "board", reason: "fired once, as set" },
+      note: "Look at the backlog once more.",
+    },
+  ];
+}
+
 /** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
 export const ENROLLING_CODE = "BCDF-GHJK";
 
@@ -669,6 +719,10 @@ export async function fakeBoard(
   let deskEffort: string | null = null;
   // Removing a society topic takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
+  // Crons pause, resume, end, and are set as the board would, and the society's zone is the user's.
+  const crons = cronFixtures();
+  let timezone = "UTC";
+  const cronById = (id: unknown) => crons.find((each) => each["id"] === id);
   // Renaming changes the name the board shows, never the slug.
   let lab = PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
@@ -829,6 +883,54 @@ export async function fakeBoard(
           );
           return json(route, ended);
         }
+        case "/api/verbs/create_cron": {
+          const { cron, timezone: zone, at, project, ...rest } = body;
+          const created = {
+            ...rest,
+            id: `01M3Q2CRNBBBBBBBBBBBBBBBB${crons.length}`,
+            scope: project ?? "society",
+            schedule:
+              typeof at === "string"
+                ? { at }
+                : { cron, ...(typeof zone === "string" ? { timezone: zone } : {}) },
+            createdBy: "user",
+            createdAt: "2026-10-10T10:00:00.000Z",
+            since: "2026-10-10T10:00:00.000Z",
+            failures: 0,
+          };
+          crons.push(created);
+          return json(route, created);
+        }
+        case "/api/verbs/update_cron": {
+          const cron = cronById(body["cron_id"]);
+          if (cron === undefined) {
+            return json(route, { message: "no such cron" }, 404);
+          }
+          if (body["paused"] === true) {
+            cron["paused"] = { at: "2026-10-10T10:00:00.000Z", by: "user" };
+          } else {
+            delete cron["paused"];
+            cron["since"] = "2026-10-10T10:00:00.000Z";
+          }
+          return json(route, cron);
+        }
+        case "/api/verbs/remove_cron": {
+          const cron = cronById(body["cron_id"]);
+          if (cron === undefined) {
+            return json(route, { message: "no such cron" }, 404);
+          }
+          cron["ended"] = { at: "2026-10-10T10:00:00.000Z", by: "user", reason: body["reason"] };
+          return json(route, cron);
+        }
+        case "/api/society/timezone":
+          timezone = String(body["timezone"]);
+          return json(route, {
+            name: "fixture",
+            version: 1,
+            createdAt: CREATED,
+            channels: ["general", "governance", "asks"],
+            timezone,
+          });
         case "/api/verbs/remove_knowledge":
           societyTopics = societyTopics.filter((topic) => topic.topic !== body["topic"]);
           return json(route, {
@@ -968,7 +1070,10 @@ export async function fakeBoard(
           version: 1,
           createdAt: CREATED,
           channels: ["general", "governance", "asks"],
+          timezone,
         });
+      case "/api/crons":
+        return json(route, crons);
       case "/api/members":
         return json(route, [
           member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),

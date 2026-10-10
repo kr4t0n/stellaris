@@ -4,6 +4,7 @@ import {
   BranchChangesSchema,
   BranchFileSchema,
   ChannelRefSchema,
+  CronFrontmatterSchema,
   DashboardSchema,
   DecisionSchema,
   HomeConflictSchema,
@@ -141,6 +142,8 @@ export type UserRequest = z.infer<typeof UserRequestSchema>;
 const TaskSchema = TaskFrontmatterSchema.extend({ body: z.string() });
 const ProposalSchema = ProposalFrontmatterSchema.extend({ body: z.string() });
 const TopicSchema = KnowledgeSchema.extend({ body: z.string() });
+const CronSchema = CronFrontmatterSchema.extend({ note: z.string() });
+export type CronRecord = z.infer<typeof CronSchema>;
 export type Topic = z.infer<typeof TopicSchema>;
 const BodySchema = z.object({ body: z.string() });
 
@@ -258,6 +261,28 @@ export function createApi(token: string) {
     taskChanges: (id: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/changes`, token, BranchChangesSchema),
     proposals: () => get("/api/proposals", token, ProposalSchema.array()),
+    /** Every cron, ended ones too. */
+    crons: () => get("/api/crons", token, CronSchema.array()),
+    /** Sets a cron that wakes a citizen; the user always names the citizen. */
+    createCron: (input: {
+      agent: string;
+      title: string;
+      note: string;
+      cron?: string;
+      timezone?: string;
+      at?: string;
+      project?: string;
+      channel?: string;
+    }) => invoke("create_cron", token, input, CronSchema),
+    /** Pauses or resumes a cron; resuming starts it again from its next time. */
+    pauseCron: (id: string, paused: boolean) =>
+      invoke("update_cron", token, { cron_id: id, paused }, CronSchema),
+    /** Ends a cron for good. */
+    removeCron: (id: string, reason: string) =>
+      invoke("remove_cron", token, { cron_id: id, reason }, CronSchema),
+    /** Sets the zone crons are read in when they name none. */
+    setTimezone: (timezone: string) =>
+      write("PUT", "/api/society/timezone", token, { timezone }, SocietySchema),
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),
     skills: () => get("/api/skills", token, SkillSchema.array()),

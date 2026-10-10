@@ -66,6 +66,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["task-file"],
       ["task-changes"],
       ["metrics"],
+      ["crons"],
     ];
   }
   if (type === "turn.started") {
@@ -80,11 +81,19 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "dashboard.updated") {
     return [["dashboard", text(payload["project"])]];
   }
-  if (type.startsWith("agent.") || type === "subscription.changed") {
-    return [["members"]];
+  if (type.startsWith("cron.")) {
+    return [["crons"]];
   }
+  // A cron that names no zone is read in the society's, so its next fire moves with it.
+  if (type === "society.configured") {
+    return [["society"], ["crons"]];
+  }
+  if (type.startsWith("agent.") || type === "subscription.changed") {
+    return [["members"], ["crons"]];
+  }
+  // An archive or a citizen leaving ends the crons that fired there.
   if (type.startsWith("project.") || type === "channel.added" || type === "channel.archived") {
-    return [["projects"], ["channels"], ["society"]];
+    return [["projects"], ["channels"], ["society"], ["crons"]];
   }
   if (type === "role.added") {
     return [["roles"]];

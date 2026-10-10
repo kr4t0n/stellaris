@@ -166,6 +166,12 @@ export function useTaskChanges(taskId: string) {
   });
 }
 
+/** Every cron, ended ones too, refreshed by the board's cron events. */
+export function useCrons() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["crons"], queryFn: api.crons, refetchInterval: 60_000 });
+}
+
 export function useProposals() {
   const { api } = useSession();
   return useQuery({ queryKey: ["proposals"], queryFn: api.proposals, refetchInterval: 60_000 });

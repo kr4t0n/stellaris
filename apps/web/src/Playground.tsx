@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
+import { failingCron } from "./board/crons.js";
 import { Navigator, type GovernanceView } from "./board/Navigator.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
@@ -33,6 +34,7 @@ import { useSeen } from "./lib/seen.js";
 import { recordVisit } from "./lib/trail.js";
 import {
   useAllTasks,
+  useCrons,
   useEnrollments,
   useMe,
   useMembers,
@@ -169,6 +171,7 @@ export function Playground() {
         : null;
   const attention = useNeedsYou().length;
   const enrolling = useEnrollments().data?.length ?? 0;
+  const failingCrons = useCrons().data?.filter(failingCron).length ?? 0;
   const activeOverview =
     pathname === "/society"
       ? SOCIETY_SCOPE
@@ -252,9 +255,12 @@ export function Playground() {
     );
   }
 
-  // Governance, the runners, and the metrics belong to the society as a whole.
+  // Governance, the runners, the crons, and the metrics belong to the society as a whole.
   const societyWide =
-    activeGovernance !== null || pathname === "/metrics" || pathname === "/runners";
+    activeGovernance !== null ||
+    pathname === "/metrics" ||
+    pathname === "/runners" ||
+    pathname === "/crons";
   const focus =
     (societyWide ? SOCIETY_SCOPE : null) ??
     activeOverview ??
@@ -341,6 +347,11 @@ export function Playground() {
                 void navigate(pathname === "/runners" ? { to: "/" } : { to: "/runners" })
               }
               enrolling={enrolling}
+              cronsOpen={pathname === "/crons"}
+              onToggleCrons={() =>
+                void navigate(pathname === "/crons" ? { to: "/" } : { to: "/crons" })
+              }
+              failingCrons={failingCrons}
               attention={attention}
               onOpenAttention={() => void navigate({ to: "/needs-you" })}
               paused={scheduler.data?.paused ?? false}

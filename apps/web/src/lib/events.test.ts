@@ -43,6 +43,13 @@ describe("board events", () => {
       ["task-file"],
       ["task-changes"],
       ["metrics"],
+      ["crons"],
+    ]);
+    // A cron's own events, and the society's zone, which a cron naming none is read in.
+    expect(staleKeys(event("cron.fired", { cronId: id }, id))).toEqual([["crons"]]);
+    expect(staleKeys(event("society.configured", { timezone: "UTC" }, id))).toEqual([
+      ["society"],
+      ["crons"],
     ]);
     // A runner that reconnects, as after an upgrade, may list other models, and the server that
     // restarted may be another release.

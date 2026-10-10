@@ -60,7 +60,10 @@ test("pauses, resumes, and removes a cron, and sets the society's time zone", as
 
   await page.getByRole("button", { name: "Time zone…" }).click();
   const zone = page.getByRole("form", { name: "Time zone" });
-  await zone.getByLabel("Society time zone").fill("Asia/Shanghai");
+  // Typing narrows the zones, each shown with its offset, and choosing one fills the box.
+  await zone.getByLabel("Society time zone").fill("shang");
+  await zone.getByRole("button", { name: "Asia/Shanghai UTC+08:00" }).click();
+  await expect(zone.getByLabel("Society time zone")).toHaveValue("Asia/Shanghai");
   await zone.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("1 running · times in Asia/Shanghai")).toBeVisible();
 
@@ -85,8 +88,10 @@ test("sets a cron for a citizen, saying when it would fire or why it cannot", as
 
   await page.getByRole("button", { name: "New cron…" }).click();
   const form = page.getByRole("form", { name: "New cron" });
-  await expect(form.getByLabel("Citizen")).toHaveValue("desk");
-  await expect(form.getByLabel("Where")).toHaveValue("lab");
+  // The board's own pickers, as the runner and model forms use, not the browser's.
+  await expect(form.getByRole("button", { name: "Citizen: desk · concierge" })).toBeVisible();
+  await expect(form.getByRole("button", { name: "Where: lab" })).toBeVisible();
+  await expect(form.locator("select, datalist")).toHaveCount(0);
   await form.getByLabel("Title").fill("Weekly review");
   await form.getByLabel("Note").fill("Look over the week's tasks and post what stalled.");
   await form.getByLabel("Cron expression").fill("*/5 * * * *");
@@ -94,7 +99,9 @@ test("sets a cron for a citizen, saying when it would fire or why it cannot", as
   await expect(form.getByRole("button", { name: "Set cron" })).toBeDisabled();
   await form.getByLabel("Cron expression").fill("0 9 * * 1");
   await expect(form.getByText(/^Fires next Monday/)).toBeVisible();
-  await form.getByLabel("Its time zone").fill("Europe/Berlin");
+  await form.getByLabel("Its time zone").fill("berl");
+  await form.getByLabel("Its time zone").press("Enter");
+  await expect(form.getByLabel("Its time zone")).toHaveValue("Europe/Berlin");
   await expect(form.getByText("(Europe/Berlin).")).toBeVisible();
   await form.getByRole("button", { name: "Set cron" }).click();
   await expect(page.getByRole("list", { name: "Running" })).toContainText("Weekly review");

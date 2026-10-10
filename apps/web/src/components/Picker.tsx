@@ -9,6 +9,17 @@ export interface Choice {
   readonly description: string;
 }
 
+/** The card a list of choices opens in, below the control it belongs to. */
+export const LIST_CARD =
+  "mt-1 overflow-y-auto rounded-xl bg-surface-1/95 p-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_16px_32px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl";
+
+/** One choice in that card, marked when it is the one chosen or the one the keys are on. */
+export function choiceClass(marked: boolean): string {
+  return `flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none ${
+    marked ? "bg-surface-2/80" : "hover:bg-surface-2/50 focus-visible:bg-surface-2/50"
+  }`;
+}
+
 function spoken(choice: Choice | undefined): string {
   return choice === undefined ? "" : `${choice.name}${choice.id === null ? "" : ` · ${choice.id}`}`;
 }
@@ -92,9 +103,7 @@ export function Picker({
         </span>
       </button>
       {open ? (
-        <div
-          className={`absolute ${listClassName} top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-xl bg-surface-1/95 p-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_16px_32px_-12px_rgba(0,0,0,0.8)] backdrop-blur-xl`}
-        >
+        <div className={`absolute top-full z-20 max-h-80 ${LIST_CARD} ${listClassName}`}>
           {choices.map((choice, index) => {
             const chosen = choice.value === value;
             return (
@@ -111,9 +120,7 @@ export function Picker({
                   setOpen(false);
                   trigger.current?.focus();
                 }}
-                className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none ${
-                  chosen ? "bg-surface-2/80" : "hover:bg-surface-2/50 focus-visible:bg-surface-2/50"
-                }`}
+                className={choiceClass(chosen)}
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs text-fg-secondary">

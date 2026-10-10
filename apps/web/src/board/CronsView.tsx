@@ -1,10 +1,11 @@
 import { localTime, SOCIETY_SCOPE, type Member } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
+import { Picker, type Choice } from "../components/Picker.js";
 import type { CronRecord } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
@@ -20,8 +21,17 @@ import { scopeName, wakeScopes } from "./citizen.js";
 import { cronGroups, cronPlace, failingCron, schedulePreview } from "./crons.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { Failure, FIELD } from "./ThreadForms.js";
+import { ZoneField } from "./ZoneField.js";
 
-const SELECT = "rounded-md bg-surface-2/60 px-2 py-1 text-xs text-fg-primary outline-none";
+/** A picker with what it picks named before it, as the form reads: wakes …, at …, in …. */
+function Labelled({ word, children }: { word: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <span className="shrink-0 text-xs text-fg-tertiary">{word}</span>
+      {children}
+    </div>
+  );
+}
 
 /** A moment in the society's zone, as a clock there reads it. */
 function clockIn(date: Date | string, zone: string): string {
@@ -209,7 +219,6 @@ function TimezoneForm({ zone, onDone }: { zone: string; onDone: () => void }) {
   const client = useQueryClient();
   const [value, setValue] = useState(zone);
   const browser = new Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const zones = useMemo(() => Intl.supportedValuesOf("timeZone"), []);
   const save = useMutation({
     mutationFn: () => api.setTimezone(value.trim()),
     onSuccess: () => {
@@ -227,22 +236,8 @@ function TimezoneForm({ zone, onDone }: { zone: string; onDone: () => void }) {
         save.mutate();
       }}
     >
-      <div className="flex items-center gap-2">
-        <input
-          value={value}
-          list="time-zones"
-          spellCheck={false}
-          aria-label="Society time zone"
-          onChange={(event) => setValue(event.target.value)}
-          className={`${FIELD} min-w-0 flex-1 font-mono`}
-        />
-        <datalist id="time-zones">
-          {["UTC", ...zones].map((each) => (
-            <option key={each} value={each}>
-              {each}
-            </option>
-          ))}
-        </datalist>
+      <div className="flex items-start gap-2">
+        <ZoneField value={value} onChange={setValue} label="Society time zone" />
         {browser === value ? null : (
           <Button onClick={() => setValue(browser)}>Use {browser}</Button>
         )}
@@ -346,61 +341,65 @@ function NewCronForm({
         create.mutate();
       }}
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs text-fg-tertiary">
-        <label className="flex items-center gap-1.5">
-          wakes
-          <select
+      <div className="flex flex-wrap items-center gap-2">
+        <Labelled word="wakes">
+          <Picker
+            label="Citizen"
+            choices={members.map((each): Choice => ({
+              value: each.name,
+              name: each.name,
+              id: each.role,
+              description:
+                each.memberships.length === 0
+                  ? "in no project"
+                  : `in ${each.memberships.join(", ")}`,
+            }))}
             value={agent}
-            aria-label="Citizen"
-            onChange={(event) => {
-              const next = members.find((each) => each.name === event.target.value);
-              setAgent(event.target.value);
+            onChange={(name) => {
+              const next = members.find((each) => each.name === name);
+              setAgent(name);
               setScope(next === undefined ? SOCIETY_SCOPE : (wakeScopes(next)[0] ?? SOCIETY_SCOPE));
               setChannel("");
             }}
-            className={SELECT}
-          >
-            {members.map((each) => (
-              <option key={each.name} value={each.name}>
-                {each.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5">
-          at
-          <select
+          />
+        </Labelled>
+        <Labelled word="at">
+          <Picker
+            label="Where"
+            choices={scopes.map((each): Choice => ({
+              value: each,
+              name: scopeName(each),
+              id: null,
+              description: each === SOCIETY_SCOPE ? "outside any project" : "a project",
+            }))}
             value={scope}
-            aria-label="Where"
-            onChange={(event) => {
-              setScope(event.target.value);
+            onChange={(next) => {
+              setScope(next);
               setChannel("");
             }}
-            className={SELECT}
-          >
-            {scopes.map((each) => (
-              <option key={each} value={each}>
-                {scopeName(each)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5">
-          in
-          <select
+          />
+        </Labelled>
+        <Labelled word="in">
+          <Picker
+            label="Conversation"
+            choices={[
+              {
+                value: "",
+                name: "its home",
+                id: null,
+                description: "general, and work tied to no other channel",
+              },
+              ...channels.map((each): Choice => ({
+                value: each,
+                name: `#${each}`,
+                id: null,
+                description: "a workstream's own conversation",
+              })),
+            ]}
             value={channel}
-            aria-label="Conversation"
-            onChange={(event) => setChannel(event.target.value)}
-            className={SELECT}
-          >
-            <option value="">its home</option>
-            {channels.map((each) => (
-              <option key={each} value={each}>
-                #{each}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setChannel}
+          />
+        </Labelled>
       </div>
       <input
         ref={field}
@@ -443,22 +442,22 @@ function NewCronForm({
         ))}
       </fieldset>
       {kind === "repeats" ? (
-        <div className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-2">
-          <input
-            value={expression}
-            spellCheck={false}
-            aria-label="Cron expression"
-            placeholder="minute hour day month weekday"
-            onChange={(event) => setExpression(event.target.value)}
-            className={`${FIELD} font-mono`}
-          />
-          <input
+        <div className="flex items-start gap-2">
+          <div className="w-44 shrink-0">
+            <input
+              value={expression}
+              spellCheck={false}
+              aria-label="Cron expression"
+              placeholder="minute hour day month weekday"
+              onChange={(event) => setExpression(event.target.value)}
+              className={FIELD}
+            />
+          </div>
+          <ZoneField
             value={timezone}
-            spellCheck={false}
-            aria-label="Its time zone"
+            onChange={setTimezone}
+            label="Its time zone"
             placeholder={`${zone}, the society's`}
-            onChange={(event) => setTimezone(event.target.value)}
-            className={`${FIELD} font-mono`}
           />
         </div>
       ) : (

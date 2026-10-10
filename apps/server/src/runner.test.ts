@@ -50,6 +50,7 @@ class ResidentBackend implements AgentBackend {
   readonly prompts: string[] = [];
   readonly coldTurns: string[] = [];
   memoryUpdatedNext = false;
+  coldMemoryUpdatedNext = false;
 
   newSession(): Promise<string> {
     return Promise.resolve("session-1");
@@ -57,7 +58,9 @@ class ResidentBackend implements AgentBackend {
 
   runTurn(): Promise<TurnResult> {
     this.coldTurns.push("cold");
-    return Promise.resolve(completed("cold turn"));
+    const result = completed("cold turn", this.coldMemoryUpdatedNext);
+    this.coldMemoryUpdatedNext = false;
+    return Promise.resolve(result);
   }
 
   startResident(
@@ -553,6 +556,26 @@ describe("turns on a runner over the runner protocol", () => {
     await runner.stop();
     expect(backend.closes).toHaveLength(3);
     expect(hub.residentPairs).toEqual([]);
+  });
+
+  it("starts a warm session afresh once another turn of its citizen changed the memory", async () => {
+    const { board } = await Board.init(dir, { name: "stale" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const backend = new ResidentBackend();
+    const { run, hub } = await start(board, backend, { residentIdleMs: 60_000 });
+    await run(deskPost);
+    expect(backend.starts).toEqual(["desk:session-1"]);
+
+    // A cold turn in an ask's thread changes the memory the warm session started with; the warm
+    // session is not cut short, and starts afresh at its next turn.
+    backend.coldMemoryUpdatedNext = true;
+    await run({ ...deskPost, thread: { id: ask.id, task: false } });
+    expect(backend.coldTurns).toEqual(["cold"]);
+    expect(hub.residentPairs).toEqual(["desk/society"]);
+    await run(deskPost);
+    expect(backend.closes).toEqual(["desk:session-1"]);
+    expect(backend.starts).toHaveLength(2);
   });
 
   it("brings an agent's own files back to the board after a turn, and never the board's records", async () => {

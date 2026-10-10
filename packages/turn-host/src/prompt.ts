@@ -1,6 +1,7 @@
 import {
   channelRef,
   parseChannelRef,
+  PATH_TOKENS,
   SOCIETY_SCOPE,
   stageIndex,
   WORKSPACE_TOKEN,
@@ -387,7 +388,15 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
 
   const society = input.societyView;
   if (society !== undefined && society !== null) {
-    lines.push("", "## The society", "", "### Projects", "");
+    lines.push(
+      "",
+      "## The society",
+      "",
+      `Each ask is a conversation of its own, and others may be in a turn at the same time. Before proposing a citizen, a role, or a project, look at the proposals still waiting under ${PATH_TOKENS.board}/society/proposals/: another ask may have proposed it already.`,
+      "",
+      "### Projects",
+      "",
+    );
     if (society.projects.length === 0) {
       lines.push("None yet.");
     }

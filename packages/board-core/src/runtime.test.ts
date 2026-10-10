@@ -125,6 +125,8 @@ describe("Board runtime support", () => {
       ["agent.json", "{}"],
       ["role.md", "# rewritten"],
       ["projects/demo/sessions.json", "{}"],
+      ["projects/demo/threads/01M3S000000000000000000AAA/last-turn.json", "{}"],
+      ["projects/demo/channels/release/sessions.json", "{}"],
       [".gitignore", "*.md\n"],
     ] as const) {
       await git(copy, "reset", "--quiet", "--hard", "origin/main");

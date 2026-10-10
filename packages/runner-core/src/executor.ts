@@ -106,6 +106,8 @@ interface Resident {
   /** The effort the session started with, which it keeps for good, as it does its model. */
   readonly effort: string | undefined;
   timer: ReturnType<typeof setTimeout> | null;
+  /** Set when another turn of the citizen changed its memory, which this session read at its start. */
+  stale: boolean;
 }
 
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
@@ -281,6 +283,15 @@ export class TurnExecutor {
     // A turn the user stopped ended because of it, however its CLI reported the end.
     if (control.stopped && result.exitReason !== "completed") {
       result = { ...result, exitReason: "stopped" };
+    }
+    if (result.status?.memoryUpdated === true) {
+      // The citizen's warm sessions started with the memory this turn changed; each restarts at
+      // its next turn, not mid-turn.
+      for (const [key, warm] of this.residents) {
+        if (key.startsWith(`${job.agent}/`)) {
+          warm.stale = true;
+        }
+      }
     }
     const work = await this.handBack(job.agent, workspace);
     const leftovers = workspace.own && (await this.leftoversIn(workspace.cwd));
@@ -745,9 +756,12 @@ export class TurnExecutor {
     const warm = this.residents.get(resident.key);
     if (
       warm !== undefined &&
-      (warm.model !== spec.model || warm.effort !== spec.effort || warm.token !== job.mcp.token)
+      (warm.model !== spec.model ||
+        warm.effort !== spec.effort ||
+        warm.token !== job.mcp.token ||
+        warm.stale)
     ) {
-      await this.closeResident(resident.key, "model, effort, or token changed");
+      await this.closeResident(resident.key, "model, effort, token, or memory changed");
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
@@ -767,6 +781,7 @@ export class TurnExecutor {
         model: spec.model,
         effort: spec.effort,
         timer: null,
+        stale: false,
       };
       this.residents.set(resident.key, current);
       this.log.info({ pair: resident.key, session: session.session }, "resident session started");

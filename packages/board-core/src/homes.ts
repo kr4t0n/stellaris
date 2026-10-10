@@ -28,6 +28,7 @@ export const HOME_GITIGNORE = [
   "/projects/*/sessions*.json",
   "/projects/*/last-turn.json",
   "/projects/*/threads/",
+  "/projects/*/channels/",
   `/${HOME_SCRATCH}/`,
   "*.tmp",
   "node_modules/",
@@ -56,7 +57,7 @@ const IGNORE_FILE = `${HOME_GITIGNORE.join("\n")}\n`;
  * a time, so nothing moves `main` between this check and the update.
  */
 const PRE_RECEIVE = `#!/bin/sh
-forbidden='^(agent\\.json|cursors\\.json|role\\.md|turns/|\\.claude/|\\.codex/|projects/[^/]+/(sessions[^/]*\\.json|last-turn\\.json|threads/))'
+forbidden='^(agent\\.json|cursors\\.json|role\\.md|turns/|\\.claude/|\\.codex/|projects/[^/]+/(sessions[^/]*\\.json|last-turn\\.json|threads/|channels/))'
 while read old new ref; do
   if [ "$ref" != "refs/heads/main" ]; then
     echo "a home takes pushes to main only" >&2

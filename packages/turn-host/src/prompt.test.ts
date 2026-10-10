@@ -200,6 +200,10 @@ describe("buildTurnPrompt", () => {
       "Route it: answer where it was posted, in its thread when it came in one",
     );
     expect(prompt).toContain("## The society");
+    // Asks run side by side, so the front desk looks for proposals another ask already made.
+    expect(prompt).toContain(
+      "look at the proposals still waiting under {{stellaris:board}}/society/proposals/",
+    );
     expect(prompt).toContain('- demo "Demo": channels general, dev; members eng-1; on done merge');
     expect(prompt).toContain(
       "- eng-1: engineer on codex (gpt-5-codex); active; projects demo; follows general, demo/general; skills uv-setup; 1 claim(s) held; 3 done; last turn 2026-09-28T11:00:00.000Z mention on demo: completed, shipped the endpoint. Profile: Backend work in Python; send me API tasks.",

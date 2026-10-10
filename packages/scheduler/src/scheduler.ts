@@ -294,6 +294,8 @@ export class Scheduler {
   /** Tasks whose completion effect waits for the turn that finished their last stage to end. */
   private readonly completions = new Map<Ulid, { project: Name; actor: Name }>();
   private readonly completing = new Set<Promise<void>>();
+  /** Running turns that must run alone among their citizen's, by session key: see `heldBack`. */
+  private readonly exclusive = new Map<string, "onboarding" | "reflection">();
   /** Tasks being landed now; a turn in a task's thread waits until its landing is done. */
   private readonly landing = new Set<Ulid>();
   /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
@@ -1290,9 +1292,12 @@ export class Scheduler {
         this.state.lastReflection[agent.name] = iso(now);
         continue;
       }
-      const key = sessionKey(agent.name, latest.scope);
-      if (this.pending.has(key) || this.running.has(key)) {
-        // Busy: try again next tick rather than merge the reflection into a working turn.
+      // Busy anywhere: try again next tick rather than merge the reflection into a working turn
+      // or run it beside turns writing the memory it consolidates.
+      const busy = [...this.pending.keys(), ...this.running.keys()].some(
+        (key) => parseSessionKey(key)?.agent === agent.name,
+      );
+      if (busy) {
         continue;
       }
       this.state.lastReflection[agent.name] = iso(now);
@@ -1714,6 +1719,10 @@ export class Scheduler {
       if (this.running.size >= this.concurrency) {
         break;
       }
+      // Checked here rather than in the filter, since a turn dispatched earlier in this pass counts.
+      if (this.heldBack(key, item.dispatch)) {
+        continue;
+      }
       this.pending.delete(key);
       if (await this.alreadyRead(item)) {
         // Steered into the turn that ran here, or in the digest it opened with.
@@ -1776,10 +1785,41 @@ export class Scheduler {
           );
         } finally {
           this.running.delete(key);
+          this.exclusive.delete(key);
         }
       })();
       this.running.set(key, promise);
+      if (dispatch.onboarding) {
+        this.exclusive.set(key, "onboarding");
+      } else if (dispatch.trigger.kind === "reflection") {
+        this.exclusive.set(key, "reflection");
+      }
     }
+  }
+
+  /**
+   * Whether a ready turn waits for another of its citizen's turns that must run alone: its
+   * onboarding in the project, queued or running, which comes before any other work of its there;
+   * and a reflection, which consolidates the memory the citizen's other turns would be writing, so
+   * it starts only once none of them runs and they wait while it does.
+   */
+  private heldBack(key: string, dispatch: TurnDispatch): boolean {
+    const { agent, project } = dispatch;
+    const home = sessionKey(agent, project);
+    if (
+      key !== home &&
+      (this.pending.get(home)?.dispatch.onboarding === true ||
+        this.exclusive.get(home) === "onboarding")
+    ) {
+      return true;
+    }
+    const others = [...this.running.keys()].filter(
+      (other) => other !== key && parseSessionKey(other)?.agent === agent,
+    );
+    if (dispatch.trigger.kind === "reflection") {
+      return others.length > 0;
+    }
+    return others.some((other) => this.exclusive.get(other) === "reflection");
   }
 
   /** Starts each queued completion once the turn that finished the task's last stage has ended. */

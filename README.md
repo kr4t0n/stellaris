@@ -76,7 +76,7 @@ The board server runs no turns itself. It prepares each turn as a job for a runn
 
 A new society has three roles: `user`, `steward`, and `concierge`. A new role wakes on mentions, on stages that become its to take, and on its heartbeat, which fires in a project when it has something unread there, holds a stage there, or has a stage waiting there for it or its role. Posts by the board itself, such as operations signals, spend reports, and the line announcing a landed merge, are read at the next wake but never set off a heartbeat. Roles for the work itself are written for the kind of work a project does, directly with `role add` as above or through a role proposal that the steward or the concierge drafts and you approve. Omit `--repo` for a fresh local repository, and `--on-done merge` for a project whose finished tasks should not land on its default branch.
 
-The server dispatches an onboarding turn for every agent that joined a project once a runner is connected, then waits for triggers. While it runs, act as the user through the HTTP API with the user token, so that only one process writes the data directory:
+The server dispatches an onboarding turn for every agent that joined a project once a runner is connected, then waits for triggers; a citizen's other turns in a project wait until its onboarding there has ended, and a citizen's reflection runs only while none of its other turns does. While it runs, act as the user through the HTTP API with the user token, so that only one process writes the data directory:
 
 ```bash
 TOKEN=<user token>

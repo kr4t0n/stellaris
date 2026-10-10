@@ -973,6 +973,89 @@ describe("Scheduler", () => {
     await scheduler.drain();
   });
 
+  it("holds a newcomer's other turns in a project until its onboarding there has ended", async () => {
+    const { board, runner, scheduler } = await setup({ concurrency: 4 });
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+
+    // A second engineer joins: its onboarding and a wake for the stage it could take queue at once.
+    runner.hold = true;
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual([sessionKey("eng-2", "demo")]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-2", "demo", task.id)]);
+
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
+      ["eng-2", "onboarding"],
+      ["eng-2", "stage"],
+    ]);
+  });
+
+  it("reflects only while its citizen has no other turn, and holds the others while it does", async () => {
+    const { board, runner, scheduler } = await setup({
+      concurrency: 4,
+      record: true,
+      timings: { reflectionMs: 60_000, heartbeatMs: 3_600_000, waitingStageMs: 3_600_000 },
+    });
+    const kinds = (): string[] =>
+      runner.dispatches.filter((d) => d.agent === "eng-1").map((d) => d.trigger.kind);
+    advance(1_000);
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 hi" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+
+    // A turn in a topic is running when the reflection falls due, so the reflection waits.
+    const topic = await board.openThread(REV, { channel: "demo/dev", title: "which library?" });
+    runner.hold = true;
+    await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 thoughts?" });
+    advance(60_000);
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(kinds()).toEqual(["mention"]);
+
+    // Once it is idle the citizen reflects, and a mention meanwhile waits for the reflection.
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    expect(kinds()).toEqual(["mention", "reflection"]);
+    await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 and the license?" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", topic.id)]);
+    expect(kinds()).toEqual(["mention", "reflection"]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(kinds()).toEqual(["mention", "reflection", "mention"]);
+  });
+
   it("lands a task once no turn runs in its thread, holding new turns there until it has", async () => {
     const { board, runner, scheduler } = await setup({ concurrency: 4 });
     await board.configureProject(USER, { project: "demo", on_done: "merge" });

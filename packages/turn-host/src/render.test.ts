@@ -98,6 +98,8 @@ describe("config-home rendering", () => {
       "- release (society): no summary. File: /data/board/society/skills/release/SKILL.md",
     );
     expect(full).toContain('skill: {"name", "summary", "body"}');
+    // Turns of one citizen may share its home at once, so memory is edited, never rewritten.
+    expect(full).toContain("never rewrite one whole from an earlier read");
     expect(full).toContain("write_knowledge");
   });
 });

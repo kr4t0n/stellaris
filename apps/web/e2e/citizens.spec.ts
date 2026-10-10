@@ -218,7 +218,10 @@ test("waking a citizen says what it does and sends the wake the scheduler takes"
   await page.getByRole("button", { name: "Wake…" }).click();
   const form = page.getByRole("form", { name: "Wake desk" });
   await form.getByText("A reflection").click();
-  await form.getByLabel("Where").selectOption("society");
+  // The board's own picker, not the browser's.
+  await form.getByRole("button", { name: "Where: lab" }).click();
+  await form.getByRole("button", { name: /^the society/ }).click();
+  await expect(form.locator("select")).toHaveCount(0);
   await expect(form).toContainText("Asks desk to reflect at the society");
   await form.getByLabel("Reason").fill("the routing lesson from today");
   await form.getByRole("button", { name: "Ask for a reflection" }).click();

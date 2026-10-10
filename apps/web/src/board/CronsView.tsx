@@ -17,7 +17,7 @@ import {
   useSociety,
   useThreads,
 } from "../lib/session.js";
-import { scopeName, wakeScopes } from "./citizen.js";
+import { scopeChoices, scopeName, wakeScopes } from "./citizen.js";
 import { cronGroups, cronPlace, failingCron, schedulePreview } from "./crons.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { Failure, FIELD } from "./ThreadForms.js";
@@ -125,7 +125,7 @@ function CronRow({
             </span>
           </div>
           <p className="mt-0.5 flex items-baseline gap-1.5 truncate text-meta">
-            <code className="font-mono">{schedule}</code>
+            <span>{schedule}</span>
             <span aria-hidden="true">·</span>
             <Place cron={cron} />
             {cron.lastRun === undefined ? null : (
@@ -366,12 +366,7 @@ function NewCronForm({
         <Labelled word="at">
           <Picker
             label="Where"
-            choices={scopes.map((each): Choice => ({
-              value: each,
-              name: scopeName(each),
-              id: null,
-              description: each === SOCIETY_SCOPE ? "outside any project" : "a project",
-            }))}
+            choices={scopeChoices(scopes)}
             value={scope}
             onChange={(next) => {
               setScope(next);

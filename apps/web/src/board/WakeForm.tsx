@@ -2,8 +2,9 @@ import type { Member } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
+import { Picker } from "../components/Picker.js";
 import { useSession } from "../lib/session.js";
-import { scopeName } from "./citizen.js";
+import { scopeChoices, scopeName } from "./citizen.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 type Kind = "manual" | "reflection";
@@ -96,21 +97,10 @@ export function WakeForm({
             </label>
           ))}
         </fieldset>
-        <label className="ml-auto flex items-center gap-2 text-xs text-fg-tertiary">
-          at
-          <select
-            value={scope}
-            onChange={(event) => setScope(event.target.value)}
-            aria-label="Where"
-            className="rounded-md bg-surface-2/60 px-2 py-1 text-xs text-fg-primary outline-none"
-          >
-            {scopes.map((each) => (
-              <option key={each} value={each}>
-                {scopeName(each)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="ml-auto flex w-52 items-center gap-2">
+          <span className="shrink-0 text-xs text-fg-tertiary">at</span>
+          <Picker label="Where" choices={scopeChoices(scopes)} value={scope} onChange={setScope} />
+        </div>
       </div>
       <textarea
         ref={field}

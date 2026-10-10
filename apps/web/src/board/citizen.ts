@@ -5,6 +5,7 @@ import {
   type TurnHistoryEntry,
   type Usage,
 } from "@stellaris/shared";
+import type { Choice } from "../components/Picker.js";
 import { elapsed } from "../lib/live.js";
 
 /** The citizen view's tabs; the transcript of what it is doing now is the default. */
@@ -17,6 +18,16 @@ export function scopeName(scope: string): string {
 /** Where a citizen may be woken: each of its projects, and the society, outside any project. */
 export function wakeScopes(member: Member): string[] {
   return [...member.memberships, SOCIETY_SCOPE];
+}
+
+/** Those places as a picker offers them. */
+export function scopeChoices(scopes: readonly string[]): Choice[] {
+  return scopes.map((scope) => ({
+    value: scope,
+    name: scopeName(scope),
+    id: null,
+    description: scope === SOCIETY_SCOPE ? "outside any project" : "a project",
+  }));
 }
 
 /** How long a finished turn ran, from the start the log recorded; null when that is missing. */

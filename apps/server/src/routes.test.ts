@@ -246,6 +246,10 @@ describe("board server routes", () => {
       .object({ body: z.string() })
       .parse(await (await app.request("/api/projects/demo/dashboard", { headers })).json());
     expect(dashboard.body).toContain("dashboard");
+    // The server's own release, which the runners view compares each runner's with.
+    expect(await (await app.request("/api/version", { headers })).json()).toEqual({
+      version: "t",
+    });
     // A society starts with no runner; the user adds one and is shown its token once.
     expect(await (await app.request("/api/runners", { headers })).json()).toEqual([]);
     const added = z.object({ runner: z.object({ name: z.string() }), token: z.string() }).parse(

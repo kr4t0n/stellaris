@@ -939,6 +939,8 @@ export async function fakeBoard(
           member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           member("stew", "steward", [], null, null),
         ]);
+      case "/api/version":
+        return json(route, { version: "0.3.11" });
       case "/api/runners":
         return json(route, [
           {

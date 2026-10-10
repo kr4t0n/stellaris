@@ -154,6 +154,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // Signing out ends the sign-in the bearer token belongs to; the user's own token is not one.
   api.delete("/sign-in", async (c) => c.json({ signedOut: await board.signOut(bearer(c) ?? "") }));
   api.get("/society", async (c) => c.json(await board.society()));
+  api.get("/version", (c) => c.json({ version }));
   api.get("/agents", async (c) =>
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );

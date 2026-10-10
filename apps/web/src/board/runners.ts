@@ -2,6 +2,15 @@ function normalized(code: string): string {
   return code.toUpperCase().replaceAll(/[^A-Z0-9]/g, "");
 }
 
+/**
+ * Whether a runner last registered with another release than the server runs. Unknown on either
+ * side is not a difference: a runner that has not registered since versions were kept, or a server
+ * that does not say.
+ */
+export function offVersion(runner: { version?: string | undefined }, server?: string): boolean {
+  return server !== undefined && runner.version !== undefined && runner.version !== server;
+}
+
 /** A code as the user may type it: case and separators do not matter, as on the board. */
 export function sameCode(a: string, b: string): boolean {
   return normalized(a) === normalized(b);

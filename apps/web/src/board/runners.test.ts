@@ -1,6 +1,6 @@
 import { NAME_PATTERN } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { sameCode, suggestRunnerName } from "./runners.js";
+import { offVersion, sameCode, suggestRunnerName } from "./runners.js";
 
 describe("suggestRunnerName", () => {
   it("takes the hostname's first label as a name", () => {
@@ -19,6 +19,16 @@ describe("suggestRunnerName", () => {
     }
     expect(suggestRunnerName("", [])).toBe("runner");
     expect(suggestRunnerName("x".repeat(80), ["x".repeat(32)])).toBe(`${"x".repeat(30)}-2`);
+  });
+});
+
+describe("offVersion", () => {
+  it("marks only a known version that differs from the server's", () => {
+    expect(offVersion({ version: "0.3.10" }, "0.3.11")).toBe(true);
+    expect(offVersion({ version: "0.3.12" }, "0.3.11")).toBe(true);
+    expect(offVersion({ version: "0.3.11" }, "0.3.11")).toBe(false);
+    expect(offVersion({}, "0.3.11")).toBe(false);
+    expect(offVersion({ version: "0.3.10" })).toBe(false);
   });
 });
 

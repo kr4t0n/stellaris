@@ -208,6 +208,7 @@ function invoke<T>(
 }
 
 const PausedSchema = z.object({ paused: z.boolean() });
+const VersionSchema = z.object({ version: z.string() });
 const SignalRecordSchema = z.object({ id: UlidSchema, ts: z.string(), signal: OpsSignalSchema });
 export type SignalRecord = z.infer<typeof SignalRecordSchema>;
 const AgentRecordSchema = AgentSchema.omit({ tokenHash: true });
@@ -222,6 +223,8 @@ export function createApi(token: string) {
     /** Ends a GitHub sign-in on the board; the user's own token is not one and stays valid. */
     signOut: () => write("DELETE", "/api/sign-in", token, {}, SignedOutSchema),
     society: () => get("/api/society", token, SocietySchema),
+    /** The board server's release. */
+    version: async () => (await get("/api/version", token, VersionSchema)).version,
     members: () => get("/api/members", token, RosterSchema),
     projects: () => get("/api/projects", token, ProjectSchema.array()),
     roles: () => get("/api/roles", token, RoleCharterSchema.array()),

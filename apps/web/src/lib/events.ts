@@ -81,9 +81,10 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "role.added") {
     return [["roles"]];
   }
-  // A runner that comes or goes may list other models, and the server forgets what it listed.
+  // A runner that comes or goes may list other models, and the server forgets what it listed;
+  // after the server's own upgrade, every runner registers again.
   if (type.startsWith("runner.")) {
-    return [["runners"], ["models"]];
+    return [["runners"], ["models"], ["server-version"]];
   }
   if (type.startsWith("proposal.")) {
     return [["proposals"], ["proposal", text(payload["proposalId"])], ["metrics"]];

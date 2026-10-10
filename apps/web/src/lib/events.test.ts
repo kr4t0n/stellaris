@@ -44,10 +44,12 @@ describe("board events", () => {
       ["task-changes"],
       ["metrics"],
     ]);
-    // A runner that reconnects, as after an upgrade, may list other models.
+    // A runner that reconnects, as after an upgrade, may list other models, and the server that
+    // restarted may be another release.
     expect(staleKeys(event("runner.changed", { runner: "merlin" }, id))).toEqual([
       ["runners"],
       ["models"],
+      ["server-version"],
     ]);
     expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([
       ["knowledge", "society"],

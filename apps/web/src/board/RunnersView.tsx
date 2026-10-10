@@ -5,9 +5,16 @@ import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
-import { useEnrollments, useNow, useProjects, useRunners, useSession } from "../lib/session.js";
+import {
+  useEnrollments,
+  useNow,
+  useProjects,
+  useRunners,
+  useServerVersion,
+  useSession,
+} from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { sameCode, suggestRunnerName } from "./runners.js";
+import { offVersion, sameCode, suggestRunnerName } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 /** Connected runners first, each group by name. */
@@ -98,21 +105,24 @@ function WaitingRunner({
 
 /**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
- * capabilities, the projects living on it, and whether it is connected; above them, those asking to
- * join. A runner started without a token asks the board to enroll it and prints a link here with its
- * code; approving it under a name registers it, and the runner picks up its token on its next poll.
+ * marked when it is not the server's, capabilities, the projects living on it, and whether it is
+ * connected; above them, those asking to join. A runner started without a token asks the board to
+ * enroll it and prints a link here with its code; approving it under a name registers it, and the
+ * runner picks up its token on its next poll.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
   const enrollments = useEnrollments();
   const runners = useRunners();
   const projects = useProjects();
+  const server = useServerVersion().data;
   const now = useNow(30_000);
   const waiting = enrollments.data ?? [];
   const taken = (runners.data ?? []).map((runner) => runner.name);
   const registered = (runners.data ?? []).toSorted(byStatus);
   const connected = registered.filter((runner) => runner.status === "connected").length;
   const away = registered.length - connected;
+  const off = registered.filter((runner) => offVersion(runner, server)).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
@@ -130,6 +140,8 @@ export function RunnersView() {
           `${connected} connected`,
           ...(away === 0 ? [] : [`${away} away`]),
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
+          ...(server === undefined ? [] : [`server v${server}`]),
+          ...(off === 0 ? [] : [`${off} on another version`]),
         ].join(" · ")}
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
@@ -187,9 +199,16 @@ export function RunnersView() {
                 </span>
                 <span className="text-fg-primary">{runner.name}</span>
                 <span className="text-fg-secondary">{runner.os}</span>
-                <span className="text-xs text-fg-muted">
-                  {runner.version === undefined ? "" : `v${runner.version}`}
-                </span>
+                {offVersion(runner, server) ? (
+                  <span className="text-xs text-amber-300" title={`the server runs v${server}`}>
+                    v{runner.version}
+                    <span className="sr-only">, not the server's v{server}</span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-fg-muted">
+                    {runner.version === undefined ? "" : `v${runner.version}`}
+                  </span>
+                )}
                 <span
                   className="truncate text-xs text-fg-muted"
                   title={runner.capabilities.join(", ")}

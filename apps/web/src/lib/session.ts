@@ -30,6 +30,12 @@ export function useSociety() {
   return useQuery({ queryKey: ["society"], queryFn: api.society, staleTime: 60_000 });
 }
 
+/** The server's release; an upgrade restarts it, and every runner registering again refreshes this. */
+export function useServerVersion() {
+  const { api } = useSession();
+  return useQuery({ queryKey: ["server-version"], queryFn: api.version, staleTime: Infinity });
+}
+
 /** Who the token acts as, which never changes while it lasts. */
 export function useMe() {
   const { api } = useSession();

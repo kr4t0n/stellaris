@@ -1839,6 +1839,32 @@ describe("turns on a runner over the runner protocol", () => {
         "does not hold the same files as task/",
       );
       expect(merges).toHaveLength(1);
+
+      // Merged by hand before the task finished, the pull request counts as landed, and its
+      // branch goes all the same.
+      const third = await board.createTask(USER, { project: "demo", title: "merged by hand" });
+      opened.push({ number: 3, branch: "feat/by-hand", content: "3\n" });
+      await run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: third.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+      const byHand = "https://github.com/acme/demo/pull/3";
+      await github.merge(byHand, pulls.get(3)?.head ?? "", { subject: "by hand", body: "" });
+      await board.updateTask(SAGE, { task_id: third.id, pull_request: { url: byHand } });
+      await board.claimTask(SAGE, { task_id: third.id });
+      await board.advanceTask(SAGE, { task_id: third.id });
+      expect(await hub.completeTask("demo", third.id)).toBe("done");
+      expect((await board.getTask(USER, { task_id: third.id })).status).toBe("done");
+      expect((await board.listThread(third.id)).at(-1)?.body).toContain("was merged already");
+      expect(merges).toHaveLength(2);
+      expect(deleted).toEqual(["feat/readable-1", "feat/by-hand"]);
+      // Checking a pull request's files leaves nothing behind in the runner's clone.
+      expect((await execa("git", ["for-each-ref", "refs/stellaris"], { cwd: clone })).stdout).toBe(
+        "",
+      );
     } finally {
       for (const key of Object.keys(rewrite)) {
         Reflect.deleteProperty(process.env, key);

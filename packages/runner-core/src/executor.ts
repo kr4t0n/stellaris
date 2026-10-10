@@ -599,7 +599,8 @@ export class TurnExecutor {
    * Merges a `ghpr` task's pull request on GitHub with the merge commit's subject and body its
    * agent gave, once it is open, into the default branch, and holds the task branch's files, so
    * what lands is the task's work; GitHub refuses the merge if the pull request moved on since.
-   * The head branch goes once merged, unless it is a fork's, and the clone follows the remote.
+   * The head branch goes once merged, by the board or by hand before it, unless it is a fork's,
+   * and the clone follows the remote.
    */
   private async landPullRequest(
     repoDir: string,
@@ -615,6 +616,7 @@ export class TurnExecutor {
     }
     const named = `pull request #${pr.number} (${pull.url})`;
     if (pr.state === "MERGED") {
+      await this.dropHeadBranch(pull.url, pr, base);
       await this.syncRemote(repoDir, request.repo, true);
       return {
         ok: true,
@@ -654,20 +656,30 @@ export class TurnExecutor {
       return { ok: false, detail: `GitHub did not merge ${named}: ${describeError(error)}` };
     }
     const merged = await this.pulls.view(pull.url).catch(() => null);
-    if (!pr.isCrossRepository && pr.headRefName !== base) {
-      await this.pulls.deleteBranch(pull.url, pr.headRefName).catch((error: unknown) => {
-        this.log.warn(
-          { url: pull.url, branch: pr.headRefName, error: describeError(error) },
-          "could not delete a merged pull request's branch",
-        );
-      });
-    }
+    await this.dropHeadBranch(pull.url, pr, base);
     await this.syncRemote(repoDir, request.repo, true);
     const commit = merged?.mergeCommit ?? null;
     return {
       ok: true,
       detail: `merged ${named} into ${base}${commit === null ? "" : ` as ${commit.slice(0, 7)}`}`,
     };
+  }
+
+  /**
+   * Deletes a merged pull request's branch on GitHub, unless it is a fork's or the default branch
+   * itself; a branch already gone, as when GitHub deletes merged branches by itself, is only
+   * logged, since the landing has happened either way.
+   */
+  private async dropHeadBranch(url: string, pr: PullRequestState, base: string): Promise<void> {
+    if (pr.isCrossRepository || pr.headRefName === base) {
+      return;
+    }
+    await this.pulls.deleteBranch(url, pr.headRefName).catch((error: unknown) => {
+      this.log.warn(
+        { url, branch: pr.headRefName, error: describeError(error) },
+        "could not delete a merged pull request's branch",
+      );
+    });
   }
 
   /**

@@ -81,7 +81,10 @@ export interface GitOps {
    * default branch leaves them when refused. True when there was anything.
    */
   tidyClone(repoDir: string): Promise<boolean>;
-  /** Fetches a pull request's head from the project's remote, GitHub's `refs/pull/<n>/head`. */
+  /**
+   * Fetches a pull request's head from the project's remote, GitHub's `refs/pull/<n>/head`, into
+   * no ref of the clone's: the landing reads it at once, and nothing is left behind.
+   */
   fetchPullHead(repoDir: string, number: number): Promise<string>;
   /** Whether two commits hold the same files. */
   sameTree(repoDir: string, a: string, b: string): Promise<boolean>;
@@ -546,16 +549,16 @@ export class ExecaGit implements GitOps {
   }
 
   async fetchPullHead(repoDir: string, number: number): Promise<string> {
-    const ref = `refs/stellaris/pull/${number}`;
     const fetched = await git(
-      ["fetch", "--quiet", "origin", `+refs/pull/${number}/head:${ref}`],
+      ["fetch", "--quiet", "origin", `refs/pull/${number}/head`],
       repoDir,
       FETCH_TIMEOUT_MS,
     );
     if (fetched.exitCode !== 0) {
       throw new Error(lines(fetched.stderr).at(-1) ?? `could not fetch pull request ${number}`);
     }
-    return (await must(["rev-parse", ref], repoDir)).trim();
+    // Landings run one at a time per project, so FETCH_HEAD is this fetch's until it is read.
+    return (await must(["rev-parse", "FETCH_HEAD^{commit}"], repoDir)).trim();
   }
 
   async sameTree(repoDir: string, a: string, b: string): Promise<boolean> {

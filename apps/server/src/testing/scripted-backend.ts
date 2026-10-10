@@ -298,6 +298,19 @@ export class ScriptedBackend implements AgentBackend {
       return done("nothing to do");
     }
 
+    // Asked for a recurring check, a citizen sets a cron where it was asked, and checks when it fires.
+    if (request.prompt.includes("set a cron to check the deploy")) {
+      await verb("create_cron", {
+        title: "Check the deploy",
+        note: "Read the deploy log and post what changed.",
+        cron: "*/15 * * * *",
+      });
+      return done("set a cron to check the deploy every fifteen minutes");
+    }
+    if (request.prompt.includes("Trigger: cron")) {
+      return done("checked the deploy");
+    }
+
     // A task is worked only in its own conversation: a stage wake names it, and a turn in its
     // thread says so. A mention elsewhere asking to take it is left to that conversation's turn.
     const taskId =

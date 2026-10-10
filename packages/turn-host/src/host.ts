@@ -14,6 +14,7 @@ import {
   wakeScope,
   type AgentEvent,
   type CliKind,
+  type Cron,
   type Message,
   type Name,
   type Project,
@@ -214,6 +215,7 @@ export class TurnHost {
       costUsd: 0,
       toolCalls: 0,
       model: agent.model ?? null,
+      ...(dispatch.crons === undefined ? {} : { crons: dispatch.crons }),
     };
     if (agent.status === "retired") {
       return { failed: await this.fail(base, `${agent.name} is retired`) };
@@ -368,8 +370,18 @@ export class TurnHost {
       dispatch.trigger.kind === "closing"
         ? await this.endingOf(dispatch.project, threadRecord, task, channel)
         : null;
+    const society = await this.board.society();
+    const crons: Cron[] = [];
+    for (const id of dispatch.crons ?? []) {
+      const cron = await this.board.readCron(id).catch(() => null);
+      if (cron !== null) {
+        crons.push(cron);
+      }
+    }
     const prompt = buildTurnPrompt({
       dispatch,
+      clock: { now: this.now(), timeZone: society.timezone },
+      crons,
       messages,
       threads,
       conversation,
@@ -815,6 +827,7 @@ export class TurnHost {
         costUsd: 0,
         toolCalls: 0,
         model: agent?.model ?? null,
+        ...(dispatch.crons === undefined ? {} : { crons: dispatch.crons }),
       },
       reason,
     );

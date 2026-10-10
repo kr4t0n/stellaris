@@ -8,6 +8,7 @@ import {
   ModelNameSchema,
   NameSchema,
   RoleCharterSchema,
+  TimeZoneSchema,
   UlidSchema,
   USER_ROLE,
   VerbNameSchema,
@@ -80,6 +81,7 @@ const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
 /** How many commits of a home's history one request reads. */
 const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
+const TimezoneBodySchema = z.object({ timezone: TimeZoneSchema });
 const ChannelBodySchema = z.object({
   project: NameSchema.nullable().default(null),
   name: NameSchema,
@@ -154,6 +156,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // Signing out ends the sign-in the bearer token belongs to; the user's own token is not one.
   api.delete("/sign-in", async (c) => c.json({ signedOut: await board.signOut(bearer(c) ?? "") }));
   api.get("/society", async (c) => c.json(await board.society()));
+  // The zone crons are read in when they name none, and every prompt tells the time in.
+  api.put("/society/timezone", async (c) => {
+    const body = TimezoneBodySchema.parse(await c.req.json());
+    return c.json(await board.setTimezone(c.get("actor"), body.timezone));
+  });
   api.get("/version", (c) => c.json({ version }));
   api.get("/agents", async (c) =>
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
@@ -217,6 +224,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     });
   }
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
+  // Every cron, ended ones too; they are set, changed, and ended through their verbs.
+  api.get("/crons", async (c) => c.json(await board.listCrons()));
   api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),

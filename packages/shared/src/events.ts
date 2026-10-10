@@ -57,6 +57,12 @@ export const BOARD_EVENT_TYPES = [
   "pull_request.closed",
   "pull_request.close_failed",
   "workspace.leftovers",
+  "society.configured",
+  "cron.created",
+  "cron.updated",
+  "cron.fired",
+  "cron.skipped",
+  "cron.ended",
 ] as const;
 export const BoardEventTypeSchema = z.enum(BOARD_EVENT_TYPES);
 export type BoardEventType = z.infer<typeof BoardEventTypeSchema>;

@@ -2,7 +2,9 @@ import { SYSTEM_ACTOR, type Board, type UnreadConversation } from "@stellaris/bo
 import {
   channelConversation,
   conversationPart,
+  CRON_FAILING_RUNS,
   currentStage,
+  nextFire,
   parseSessionKey,
   mayHoldStage,
   OpsSignalSchema,
@@ -20,6 +22,7 @@ import {
   workspaceConversationOf,
   type Agent,
   type BoardEvent,
+  type Cron,
   type Name,
   type OpsSignal,
   type OpsSignalKind,
@@ -195,6 +198,7 @@ const PendingSchema = z.object({
   newestMessage: UlidSchema.optional(),
   onlyMessages: z.boolean().optional(),
   steeredThrough: UlidSchema.optional(),
+  onlyCrons: z.boolean().optional(),
 });
 
 const StateSchema = z.object({
@@ -229,6 +233,8 @@ interface PendingTurn {
   onlyMessages?: boolean | undefined;
   /** The newest of those messages already steered into the conversation's turn in flight. */
   steeredThrough?: Ulid | undefined;
+  /** Every wake merged here was a cron's; removing those crons leaves nothing to run. */
+  onlyCrons?: boolean | undefined;
 }
 
 /** The message a wake was caused by, for the wakes a post makes: a mention, or a post by the user. */
@@ -320,6 +326,8 @@ export class Scheduler {
   private readonly landing = new Set<Ulid>();
   /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
   private readonly sweeping = new Set<Promise<void>>();
+  /** Crons whose fire's turn is running; a cron's next time passes while one is. */
+  private readonly cronsInFlight = new Set<Ulid>();
   private state: State = StateSchema.parse({
     cursor: null,
     lastHeartbeat: {},
@@ -409,6 +417,7 @@ export class Scheduler {
       this.state.cursor = event.id;
     }
     if (!paused) {
+      await this.checkCrons(now);
       await this.checkHeartbeats(now);
       await this.checkWaitingStages(now);
       await this.checkReflections(now);
@@ -704,6 +713,14 @@ export class Scheduler {
               this.pending.delete(key);
             }
           }
+        }
+        return;
+      }
+      case "cron.ended": {
+        // A cron ended by someone, not by its own one fire, takes back the wake it queued.
+        const cronId = stringOf(payload["cronId"]);
+        if (cronId !== null && event.actor !== SYSTEM_ACTOR.name) {
+          this.dropCronWakes(cronId);
         }
         return;
       }
@@ -1162,6 +1179,7 @@ export class Scheduler {
     const readyAt = now + debounce;
     const existing = this.pending.get(key);
     const message = messageOf(trigger);
+    const cron = trigger.kind === "cron" ? trigger.cronId : undefined;
     if (existing === undefined) {
       this.pending.set(key, {
         dispatch: {
@@ -1171,23 +1189,29 @@ export class Scheduler {
           trigger,
           priority: decision.priority,
           onboarding: trigger.kind === "onboarding",
+          ...(cron === undefined ? {} : { crons: [cron] }),
         },
         readyAt,
         ...(trigger.kind === "stage" ? { stageWakes: [trigger] } : {}),
         ...(message === undefined ? {} : { newestMessage: message }),
         onlyMessages: message !== undefined,
+        onlyCrons: cron !== undefined,
       });
       return;
     }
     const newestMessage = later(existing.newestMessage, message);
     const keepNew = decision.priority > existing.dispatch.priority;
     const priority = keepNew ? decision.priority : existing.dispatch.priority;
+    const crons = [
+      ...new Set([...(existing.dispatch.crons ?? []), ...(cron === undefined ? [] : [cron])]),
+    ];
     this.pending.set(key, {
       dispatch: {
         ...existing.dispatch,
         trigger: keepNew ? trigger : existing.dispatch.trigger,
         priority,
         onboarding: existing.dispatch.onboarding || trigger.kind === "onboarding",
+        ...(crons.length === 0 ? {} : { crons }),
       },
       readyAt: Math.min(existing.readyAt, readyAt),
       ...(existing.stageWakes !== undefined && trigger.kind === "stage"
@@ -1199,6 +1223,7 @@ export class Scheduler {
       ...(newestMessage === undefined ? {} : { newestMessage }),
       onlyMessages: existing.onlyMessages === true && message !== undefined,
       ...(existing.steeredThrough === undefined ? {} : { steeredThrough: existing.steeredThrough }),
+      onlyCrons: existing.onlyCrons === true && cron !== undefined,
     });
   }
 
@@ -1322,6 +1347,92 @@ export class Scheduler {
           }
         }
       }
+    }
+  }
+
+  /**
+   * Each active cron whose next time has come wakes its citizen in its conversation, unless the turn
+   * of its previous fire is still queued or running, in which case the time passes. The fire is
+   * recorded on the board, so its next time counts from it and a restart does not fire it again.
+   */
+  private async checkCrons(now: number): Promise<void> {
+    const crons = (await this.board.listCrons()).filter(
+      (cron) => cron.ended === undefined && cron.paused === undefined,
+    );
+    if (crons.length === 0) {
+      return;
+    }
+    const { timezone } = await this.board.society();
+    for (const cron of crons) {
+      const due = nextFire(cron, timezone);
+      if (due === null || due.getTime() > now) {
+        continue;
+      }
+      if (this.cronQueuedOrRunning(cron.id)) {
+        await this.board.cronSkipped(cron.id, iso(now));
+        this.log.info(
+          { cron: cron.id, agent: cron.agent },
+          "cron time passed, its previous turn has not ended",
+        );
+        continue;
+      }
+      const agent = await this.tryReadAgent(cron.agent);
+      if (agent === null) {
+        continue;
+      }
+      if ((await this.board.cronFired(cron.id, iso(now))) === null) {
+        continue;
+      }
+      this.enqueue(
+        agent.name,
+        cron.scope,
+        {
+          kind: "cron",
+          from: cron.createdBy,
+          fromUser: cron.createdBy === USER_NAME,
+          reason: `cron "${cron.title}" came due`,
+          cronId: cron.id,
+        },
+        now,
+        await this.cronConversation(cron),
+      );
+    }
+  }
+
+  /** The conversation a cron fires in, beside its scope's home or none for the home. */
+  private async cronConversation(cron: Cron): Promise<Beside | undefined> {
+    if (cron.thread !== undefined) {
+      return { thread: await this.conversationOf(cron.thread, cron.scope) };
+    }
+    return cron.channel === undefined ? undefined : { channel: cron.channel };
+  }
+
+  /** Whether a cron's wake waits in the queue or its turn is running. */
+  private cronQueuedOrRunning(id: Ulid): boolean {
+    return (
+      this.cronsInFlight.has(id) ||
+      [...this.pending.values()].some((item) => item.dispatch.crons?.includes(id) === true)
+    );
+  }
+
+  /** Takes an ended cron out of the queued wakes, and drops a wake left with nothing else to run. */
+  private dropCronWakes(id: Ulid): void {
+    for (const [key, item] of this.pending) {
+      const crons = item.dispatch.crons;
+      if (crons?.includes(id) !== true) {
+        continue;
+      }
+      const rest = crons.filter((each) => each !== id);
+      if (rest.length === 0 && item.onlyCrons === true) {
+        this.pending.delete(key);
+        this.log.info(
+          { agent: item.dispatch.agent, cron: id },
+          "dropping cron wake, the cron ended",
+        );
+        continue;
+      }
+      const { crons: _crons, ...dispatch } = item.dispatch;
+      item.dispatch = rest.length === 0 ? dispatch : { ...dispatch, crons: rest };
     }
   }
 
@@ -1571,6 +1682,7 @@ export class Scheduler {
       }
     }
 
+    const crons = (await this.board.listCrons()).filter((cron) => cron.ended === undefined);
     for (const agent of await this.board.listAgents()) {
       if (agent.status !== "active" || agent.cli === null) {
         continue;
@@ -1594,6 +1706,21 @@ export class Scheduler {
           agent: agent.name,
           role: agent.role,
         });
+      }
+
+      for (const cron of crons.filter((each) => each.agent === agent.name)) {
+        if (cron.failures >= CRON_FAILING_RUNS) {
+          signals.push({
+            kind: "cron_failing",
+            key: `cron_failing:${cron.id}`,
+            summary: `${agent.name}'s cron ${cron.id} "${cron.title}" has had ${cron.failures} failed turns in a row`,
+            value: cron.failures,
+            threshold: CRON_FAILING_RUNS,
+            agent: agent.name,
+            role: agent.role,
+            ...(cron.scope === SOCIETY_SCOPE ? {} : { project: cron.scope }),
+          });
+        }
       }
 
       const left = (await this.board.listHomeConflicts(agent.name)).filter(
@@ -1825,6 +1952,10 @@ export class Scheduler {
         },
         "dispatching turn",
       );
+      const crons = dispatch.crons ?? [];
+      for (const id of crons) {
+        this.cronsInFlight.add(id);
+      }
       const promise = (async (): Promise<void> => {
         try {
           const record = await this.runner.runTurn(dispatch, assignment);
@@ -1845,6 +1976,9 @@ export class Scheduler {
         } finally {
           this.running.delete(key);
           this.exclusive.delete(key);
+          for (const id of crons) {
+            this.cronsInFlight.delete(id);
+          }
         }
       })();
       this.running.set(key, promise);

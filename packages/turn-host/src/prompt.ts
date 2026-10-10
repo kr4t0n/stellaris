@@ -1,11 +1,17 @@
 import {
   channelRef,
+  DEFAULT_TIME_ZONE,
+  describeSchedule,
+  isOneTime,
+  localTime,
+  nextFire,
   parseChannelRef,
   PATH_TOKENS,
   SOCIETY_SCOPE,
   stageIndex,
   WORKSPACE_TOKEN,
   type ChannelRef,
+  type Cron,
   type HomeConflict,
   type Knowledge,
   type Member,
@@ -48,6 +54,10 @@ export interface KnowledgeView {
 
 export interface TurnPromptInput {
   readonly dispatch: TurnDispatch;
+  /** The time the turn starts and the society's time zone, which the prompt states. */
+  readonly clock?: { readonly now: Date; readonly timeZone: string } | undefined;
+  /** The crons whose fire started the turn, as the board has them now. */
+  readonly crons?: readonly Cron[] | undefined;
   readonly messages: readonly Message[];
   readonly heldClaims: readonly Task[];
   /** Tasks in the turn's project whose current stage waits for a holder the agent could be. */
@@ -254,6 +264,31 @@ function messageLines(
   return lines;
 }
 
+/** A cron that woke the turn: what it is, when it fires, how its previous turn went, and its note. */
+function cronLines(cron: Cron, timeZone: string): string[] {
+  const previous =
+    cron.lastRun === undefined
+      ? ""
+      : ` The turn of its previous fire ${cron.lastRun.outcome === "stopped" ? "was stopped by the user" : cron.lastRun.outcome} at ${cron.lastRun.at}.`;
+  const next = nextFire(cron, timeZone);
+  const state = isOneTime(cron.schedule)
+    ? " It fired once, as set, and has ended."
+    : cron.ended !== undefined
+      ? ` ${cron.ended.by} has ended it since it fired (${cron.ended.reason}), so do what it asks only if it still matters.`
+      : next === null
+        ? ""
+        : ` Next it fires at ${next.toISOString()}.`;
+  return [
+    `- "${cron.title}" (cron ${cron.id}), set by ${cron.createdBy} at ${cron.createdAt}, fires ${describeSchedule(cron.schedule, timeZone)}.${previous}${state}`,
+    "",
+    clip(cron.note)
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n"),
+    "",
+  ];
+}
+
 /** What a steer hands a running turn: the messages that arrived in its conversation meanwhile. */
 export function buildSteerText(
   messages: readonly Message[],
@@ -281,6 +316,12 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (dispatch.trigger.taskId !== undefined) {
     lines.push(`Task in question: ${dispatch.trigger.taskId}`);
   }
+  if (input.clock !== undefined) {
+    const { now, timeZone } = input.clock;
+    lines.push(
+      `It is ${now.toISOString()} now, ${localTime(now, timeZone)} in the society's time zone, ${timeZone}.`,
+    );
+  }
   const askedIn =
     dispatch.trigger.channel === undefined
       ? null
@@ -307,6 +348,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push(
       "A proposal you made was decided; the decision is the last post in the proposal's thread. A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows.",
     );
+  }
+  if (dispatch.trigger.kind === "cron") {
+    lines.push("A cron came due: what it asks is under Crons below.");
   }
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
@@ -358,6 +402,19 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "- It is yours and it matters: land it through a task. File one, or use one you hold, switch this worktree to its branch task/<id> (git switch -c task/<id> for a task filed in this turn), and commit there.",
       `- It matters but is someone else's to finish: put it on a task's branch the same way, then hand that task to whoever should own it and ask them in ${ending.askIn} with a mention, since this conversation takes no more posts.`,
       "- It is disposable: leave it, and it goes with the workspace.",
+    );
+  }
+
+  const crons = input.crons ?? [];
+  if (crons.length > 0) {
+    const timeZone = input.clock?.timeZone ?? DEFAULT_TIME_ZONE;
+    lines.push(
+      "",
+      "## Crons",
+      "",
+      "Each of these came due for this turn; its note says what to do. Change one with update_cron, or end it with remove_cron, by its id.",
+      "",
+      ...crons.flatMap((cron) => cronLines(cron, timeZone)),
     );
   }
 

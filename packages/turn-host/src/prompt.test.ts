@@ -1,4 +1,4 @@
-import { TaskFrontmatterSchema, TriggerSchema } from "@stellaris/shared";
+import { CronFrontmatterSchema, TaskFrontmatterSchema, TriggerSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
@@ -20,7 +20,86 @@ function listedProject(slug: string, runner?: string) {
   };
 }
 
+const cronlessDispatch = {
+  agent: "eng-1",
+  project: "demo",
+  trigger: TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" }),
+  priority: 0,
+  onboarding: false,
+};
+
 describe("buildTurnPrompt", () => {
+  it("tells the time in the society's zone, and quotes each cron that woke the turn", () => {
+    const cron = {
+      ...CronFrontmatterSchema.parse({
+        id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        title: "Check the deploy",
+        agent: "eng-1",
+        scope: "demo",
+        channel: "dev",
+        schedule: { cron: "0 * * * *" },
+        createdBy: "user",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        since: "2026-10-10T08:00:00.000Z",
+        lastFiredAt: "2026-10-10T10:00:00.000Z",
+        lastRun: {
+          turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          at: "2026-10-10T09:02:00.000Z",
+          outcome: "failed",
+        },
+      }),
+      note: "Read the deploy log and post what changed.",
+    };
+    const once = {
+      ...cron,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      title: "Look again",
+      schedule: { at: "2026-10-10T10:00:00.000Z" },
+      ended: { at: "2026-10-10T10:00:00.000Z", by: "board", reason: "fired once, as set" },
+      note: "Is the fix live?",
+    };
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "eng-1",
+        project: "demo",
+        channel: "dev",
+        trigger: TriggerSchema.parse({ kind: "cron", reason: 'cron "Check the deploy" came due' }),
+        priority: 1,
+        onboarding: false,
+        crons: [cron.id, once.id],
+      },
+      clock: { now: new Date("2026-10-10T10:00:00.000Z"), timeZone: "Asia/Shanghai" },
+      crons: [cron, once],
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(prompt).toContain(
+      "It is 2026-10-10T10:00:00.000Z now, Saturday 2026-10-10 18:00 in the society's time zone, Asia/Shanghai.",
+    );
+    expect(prompt).toContain("A cron came due: what it asks is under Crons below.");
+    expect(prompt).toContain(
+      `- "Check the deploy" (cron ${cron.id}), set by user at 2026-10-10T08:00:00.000Z, fires \`0 * * * *\` in the society's time zone, Asia/Shanghai. The turn of its previous fire failed at 2026-10-10T09:02:00.000Z. Next it fires at 2026-10-10T11:00:00.000Z.`,
+    );
+    expect(prompt).toContain("  Read the deploy log and post what changed.");
+    expect(prompt).toContain(`- "Look again" (cron ${once.id}),`);
+    expect(prompt).toContain(
+      "fires once at 2026-10-10T10:00:00.000Z. The turn of its previous fire failed",
+    );
+    expect(prompt).toContain("It fired once, as set, and has ended.");
+    // A turn no cron woke has no section for crons.
+    expect(
+      buildTurnPrompt({
+        dispatch: { ...cronlessDispatch },
+        messages: [],
+        heldClaims: [],
+        lastTurn: null,
+        onboarding: null,
+      }),
+    ).not.toContain("## Crons");
+  });
+
   it("carries the trigger, held claims, unread messages with thread titles, and a failed-turn note", () => {
     const prompt = buildTurnPrompt({
       dispatch: {

@@ -139,6 +139,12 @@ async function addWorkRoles(board: Board): Promise<void> {
   });
 }
 
+/** The cron wakes dispatched so far: whom, where, and which crons each carried. */
+const cronTurns = (runner: FakeRunner) =>
+  runner.dispatches
+    .filter((d) => (d.crons ?? []).length > 0)
+    .map((d) => [d.agent, d.project, d.channel ?? null, d.trigger.kind, d.crons]);
+
 describe("Scheduler", () => {
   let dir: string;
   let clock: Date;
@@ -1689,5 +1695,162 @@ describe("Scheduler", () => {
     await restarted.tick();
     await restarted.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-1", "mention"]]);
+  });
+
+  it("fires a cron in the conversation it was set from, on its schedule, with nothing unread", async () => {
+    const { board, runner, scheduler } = await setup();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo", channel: "dev" },
+      { title: "Check the deploy", note: "Read the deploy log.", cron: "*/15 * * * *" },
+    );
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toEqual([]);
+    advance(15 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toEqual([["eng-1", "demo", "dev", "cron", [cron.id]]]);
+    expect(runner.dispatches.at(-1)?.trigger).toMatchObject({ cronId: cron.id, from: "eng-1" });
+    expect((await board.readCron(cron.id)).lastFiredAt).toBe("2026-09-28T10:15:00.000Z");
+    advance(60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(1);
+    advance(14 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(2);
+  });
+
+  it("fires nothing while paused, a missed fire once on resume, and a resumed cron afresh", async () => {
+    const { board, runner, scheduler } = await setup();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Hourly", note: "Check.", cron: "0 * * * *" },
+    );
+    await board.setPaused(USER, true);
+    advance(3 * 3_600_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toEqual([]);
+    await board.setPaused(USER, false);
+    for (let i = 0; i < 2; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    // 11:00, 12:00, and 13:00 passed while paused, and come as one turn.
+    expect(cronTurns(runner)).toEqual([["eng-1", "demo", null, "cron", [cron.id]]]);
+    advance(30 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(1);
+    advance(30 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(2);
+
+    await board.updateCron(ENG, { cron_id: cron.id, paused: true });
+    advance(2 * 3_600_000 + 30 * 60_000);
+    await scheduler.tick();
+    await board.updateCron(ENG, { cron_id: cron.id, paused: false });
+    await scheduler.tick();
+    await scheduler.drain();
+    // Resumed at 16:30, it waits for 17:00 rather than making up for the times it was paused.
+    expect(cronTurns(runner)).toHaveLength(2);
+    advance(30 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(3);
+  });
+
+  it("passes a cron's time while its turn runs, and carries it in a queued wake it merges into", async () => {
+    const { board, runner, scheduler } = await setup();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Check", note: "Check.", cron: "*/15 * * * *" },
+    );
+    runner.hold = true;
+    advance(15 * 60_000);
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual(["eng-1/demo"]);
+    advance(15 * 60_000);
+    await scheduler.tick();
+    expect(scheduler.pendingCount).toBe(0);
+    expect((await board.readCron(cron.id)).lastSkippedAt).toBe("2026-09-28T10:30:00.000Z");
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toHaveLength(1);
+
+    // A cron that comes due while a mention waits rides in the mention's turn.
+    runner.away = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 a question" });
+    await scheduler.tick();
+    advance(15 * 60_000);
+    await scheduler.tick();
+    // rev-1's heartbeat has the post unread too; eng-1's mention and cron are one queued turn.
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    runner.away = false;
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner).at(-1)).toEqual(["eng-1", "demo", null, "mention", [cron.id]]);
+  });
+
+  it("drops a queued cron wake when someone ends the cron", async () => {
+    const { board, runner, scheduler } = await setup();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo", channel: "dev" },
+      { title: "Check", note: "Check.", cron: "*/15 * * * *" },
+    );
+    runner.away = true;
+    advance(15 * 60_000);
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo/#dev"]);
+    await board.removeCron(USER, { cron_id: cron.id, reason: "not needed" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([]);
+    runner.away = false;
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(cronTurns(runner)).toEqual([]);
+  });
+
+  it("signals a cron whose turns keep failing, without waking the steward", async () => {
+    const { board, runner, scheduler } = await setup();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Flaky", note: "Check.", cron: "0 * * * *" },
+    );
+    for (let i = 0; i < 3; i += 1) {
+      const turn = await board.beginTurn({
+        agent: "eng-1",
+        project: "demo",
+        runner: "test",
+        cli: "claude",
+        session: null,
+        trigger: { kind: "cron", fromUser: false, reason: "", cronId: cron.id },
+        startedAt: now().toISOString(),
+        endedAt: null,
+        exitReason: null,
+        status: null,
+        error: null,
+        usage: null,
+        costUsd: 0,
+        toolCalls: 0,
+        model: null,
+        crons: [cron.id],
+      });
+      await board.finishTurn({ ...turn, endedAt: now().toISOString(), exitReason: "error" });
+    }
+    advance(5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const failing = (await board.listSignals()).filter(
+      (record) => record.signal.kind === "cron_failing",
+    );
+    expect(failing.map((record) => record.signal)).toEqual([
+      expect.objectContaining({ key: `cron_failing:${cron.id}`, agent: "eng-1", value: 3 }),
+    ]);
+    expect(runner.dispatches.filter((d) => d.trigger.kind === "ops_event")).toEqual([]);
   });
 });

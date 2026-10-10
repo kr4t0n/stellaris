@@ -11,6 +11,12 @@ import {
   ChannelProposalSchema,
   CommitIdSchema,
   conflictCopyOf,
+  CRON_FLOOR_MS,
+  CronFrontmatterSchema,
+  fireTimes,
+  isOneTime,
+  shortestGapMs,
+  TimeZoneSchema,
   DashboardSchema,
   DecisionSchema,
   describeCharter,
@@ -57,6 +63,8 @@ import {
   type ChannelRef,
   type CompletionEffect,
   type CliKind,
+  type Cron,
+  type CronSchedule,
   type Dashboard,
   type Decision,
   type HomeConflict,
@@ -474,6 +482,10 @@ const ASKS_CHANNEL_OPENED = "asks-channel-opened";
 const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
 const CHANNEL_CONVERSATIONS = "channel-conversations";
 const DASHBOARD_UPDATES = "dashboard-updates-granted";
+const CRON_VERBS = "cron-verbs-granted";
+
+/** The verbs a citizen sets, changes, and ends its crons with. */
+const CRON_VERB_NAMES: readonly VerbName[] = ["create_cron", "update_cron", "remove_cron"];
 
 /** The line a project's dashboard began with, and the one it begins with since dashboards have a verb. */
 const OLD_DASHBOARD_LINE = "Agents may edit this file. It is rendered by the board UI.";
@@ -737,6 +749,7 @@ export class Board {
       KNOWLEDGE_REMOVAL,
       CHANNEL_CONVERSATIONS,
       DASHBOARD_UPDATES,
+      CRON_VERBS,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -776,6 +789,9 @@ export class Board {
       await this.grantBesideKnowledge("update_dashboard");
       await this.rewordDashboards();
     }
+    if (pending.includes(CRON_VERBS)) {
+      await this.grantToEveryRole(CRON_VERB_NAMES);
+    }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
 
@@ -790,6 +806,20 @@ export class Board {
           USER_NAME,
           { ...charter, verbs: [...charter.verbs, verb] },
           { verbsAdded: [verb] },
+        );
+      }
+    }
+  }
+
+  /** Grants verbs once to every charter but the user's, which holds every verb already. */
+  private async grantToEveryRole(verbs: readonly VerbName[]): Promise<void> {
+    for (const charter of await this.listRoles()) {
+      const missing = verbs.filter((verb) => !charter.verbs.includes(verb));
+      if (charter.name !== USER_ROLE && missing.length > 0) {
+        await this.writeRoleUnlocked(
+          USER_NAME,
+          { ...charter, verbs: [...charter.verbs, ...missing] },
+          { verbsAdded: missing },
         );
       }
     }
@@ -1930,6 +1960,22 @@ export class Board {
     });
   }
 
+  /** Sets the society's time zone, the user's alone: crons that name none are read in it. */
+  async setTimezone(actor: Actor, zone: string): Promise<Society> {
+    this.assertUser(actor, "only the user sets the society's time zone");
+    const timezone = TimeZoneSchema.parse(zone);
+    return this.mutex.run(async () => {
+      const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
+      const society: Society = { ...doc.data, timezone };
+      await writeMarkdown(this.paths.societyFile(), society, doc.body);
+      await this.events.append("society.configured", actor.name, {
+        timezone,
+        previousTimezone: doc.data.timezone,
+      });
+      return society;
+    });
+  }
+
   /** Releases every claim whose lease has expired. Called by the scheduler on its tick. */
   async expireLeases(): Promise<Task[]> {
     return this.mutex.run(async () => {
@@ -2455,6 +2501,318 @@ export class Board {
     });
   }
 
+  /** Every cron, ended ones included, oldest first. */
+  async listCrons(): Promise<Cron[]> {
+    const crons: Cron[] = [];
+    for (const file of await listFiles(this.paths.crons())) {
+      crons.push(await this.readCronFile(path.join(this.paths.crons(), file)));
+    }
+    return crons;
+  }
+
+  async readCron(id: Ulid): Promise<Cron> {
+    const file = this.paths.cron(id);
+    if (!(await exists(file))) {
+      throw new BoardError("NOT_FOUND", `cron ${id} not found`);
+    }
+    return this.readCronFile(file);
+  }
+
+  /**
+   * Sets a cron: one that wakes its setter, or, set by a planning role, any citizen. Without a
+   * place named it fires in the conversation of the turn that set it.
+   */
+  async createCron(actor: Actor, input: VerbInput<"create_cron">): Promise<Cron> {
+    const args = VerbInputs.create_cron.parse(input);
+    await this.authorize(actor, "create_cron");
+    const target = args.agent ?? actor.name;
+    this.assertMayCron(actor, target, "set");
+    if ((args.cron === undefined) === (args.at === undefined)) {
+      throw new BoardError(
+        "VALIDATION",
+        "a cron needs either cron, a five-field expression, or at, one time",
+      );
+    }
+    return this.mutex.run(async () => {
+      const agent = await this.readAgent(target);
+      if (agent.status !== "active" || agent.cli === null) {
+        throw new BoardError("INVALID_STATE", `${target} takes no turns, so no cron can wake it`);
+      }
+      const where = await this.cronConversation(actor, agent, args);
+      const now = this.now();
+      const schedule = await this.cronSchedule(args, undefined, now);
+      if (schedule === undefined) {
+        throw new BoardError("VALIDATION", "a cron needs a schedule");
+      }
+      const cron = await this.writeCron({
+        id: this.newId(),
+        title: args.title,
+        agent: agent.name,
+        ...where,
+        schedule,
+        createdBy: actor.name,
+        createdAt: now.toISOString(),
+        since: now.toISOString(),
+        failures: 0,
+        note: args.note,
+      });
+      await this.events.append("cron.created", actor.name, {
+        ...this.cronPayload(cron),
+        title: cron.title,
+        schedule: cron.schedule,
+      });
+      return cron;
+    });
+  }
+
+  /** Pauses, resumes, retitles, rewrites, or reschedules a cron; resuming or rescheduling starts it afresh. */
+  async updateCron(actor: Actor, input: VerbInput<"update_cron">): Promise<Cron> {
+    const args = VerbInputs.update_cron.parse(input);
+    await this.authorize(actor, "update_cron");
+    if (args.cron !== undefined && args.at !== undefined) {
+      throw new BoardError("VALIDATION", "a cron fires on an expression or at one time, not both");
+    }
+    return this.mutex.run(async () => {
+      const current = await this.readCron(args.cron_id);
+      this.assertMayCron(actor, current.agent, "change");
+      if (current.ended !== undefined) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `cron ${current.id} has ended (${current.ended.reason})`,
+        );
+      }
+      const now = this.now();
+      const schedule = await this.cronSchedule(args, current.schedule, now);
+      const resumed = args.paused === false && current.paused !== undefined;
+      const changed = [
+        ...(args.title === undefined ? [] : ["title"]),
+        ...(args.note === undefined ? [] : ["note"]),
+        ...(schedule === undefined ? [] : ["schedule"]),
+        ...(args.paused === true && current.paused === undefined ? ["paused"] : []),
+        ...(resumed ? ["resumed"] : []),
+      ];
+      if (changed.length === 0 && args.paused === undefined) {
+        throw new BoardError(
+          "VALIDATION",
+          "update_cron needs paused, title, note, cron, timezone, or at",
+        );
+      }
+      const ts = now.toISOString();
+      const { paused: wasPaused, ...rest } = current;
+      const paused =
+        args.paused === undefined
+          ? wasPaused
+          : args.paused
+            ? (wasPaused ?? { at: ts, by: actor.name })
+            : undefined;
+      const cron = await this.writeCron({
+        ...rest,
+        ...(args.title === undefined ? {} : { title: args.title }),
+        ...(args.note === undefined ? {} : { note: args.note }),
+        ...(schedule === undefined ? {} : { schedule }),
+        ...(schedule !== undefined || resumed ? { since: ts } : {}),
+        ...(paused === undefined ? {} : { paused }),
+      });
+      if (changed.length > 0) {
+        await this.events.append("cron.updated", actor.name, {
+          ...this.cronPayload(cron),
+          changed,
+          ...(schedule === undefined ? {} : { schedule }),
+        });
+      }
+      return cron;
+    });
+  }
+
+  /** Ends a cron for good: its setter's, or anyone's for a planning role. */
+  async removeCron(actor: Actor, input: VerbInput<"remove_cron">): Promise<Cron> {
+    const args = VerbInputs.remove_cron.parse(input);
+    await this.authorize(actor, "remove_cron");
+    return this.mutex.run(async () => {
+      const current = await this.readCron(args.cron_id);
+      this.assertMayCron(actor, current.agent, "end");
+      if (current.ended !== undefined) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `cron ${current.id} has ended already (${current.ended.reason})`,
+        );
+      }
+      return this.endCronUnlocked(current, actor.name, args.reason);
+    });
+  }
+
+  /** A cron wakes its setter; one that wakes another citizen is the planning roles' to set, change, and end. */
+  private assertMayCron(actor: Actor, agent: Name, what: string): void {
+    if (agent !== actor.name && !PLANNING_ROLES.includes(actor.role)) {
+      throw new BoardError(
+        "FORBIDDEN",
+        `only the user, the steward, and the concierge ${what} a cron that wakes another citizen`,
+      );
+    }
+  }
+
+  /**
+   * Where a cron fires for its citizen: the thread, the channel, or the scope's home it names, else
+   * the conversation of the turn that set it when it wakes its setter, else its home outside projects.
+   */
+  private async cronConversation(
+    actor: Actor,
+    agent: Agent,
+    named: {
+      readonly project?: Name | undefined;
+      readonly thread_id?: Ulid | undefined;
+      readonly channel?: Name | undefined;
+    },
+  ): Promise<{ scope: Name; thread?: Ulid; channel?: Name }> {
+    const own = actor.name === agent.name;
+    if (
+      named.project === undefined &&
+      named.thread_id === undefined &&
+      named.channel === undefined
+    ) {
+      return own && actor.scope !== undefined
+        ? this.cronConversation(actor, agent, {
+            project: actor.scope,
+            thread_id: actor.thread,
+            channel: actor.channel,
+          })
+        : { scope: SOCIETY_SCOPE };
+    }
+    if (named.thread_id !== undefined) {
+      const { thread } = await this.findThread(named.thread_id);
+      if (thread.state !== "open") {
+        throw new BoardError("INVALID_STATE", `thread ${thread.id} is closed`);
+      }
+      const scope = wakeScope(agent, parseChannelRef(thread.channel).project);
+      if (named.project !== undefined && named.project !== scope) {
+        throw new BoardError(
+          "VALIDATION",
+          `thread ${thread.id} is on ${thread.channel}, so ${agent.name}'s conversation there is in ${scope}, not ${named.project}`,
+        );
+      }
+      return { scope, thread: thread.id };
+    }
+    const scope = named.project ?? (own ? actor.scope : undefined) ?? SOCIETY_SCOPE;
+    if (scope !== SOCIETY_SCOPE) {
+      await this.readActiveProject(scope);
+      if (!agent.memberships.includes(scope)) {
+        throw new BoardError("VALIDATION", `${agent.name} is not a member of ${scope}`);
+      }
+    }
+    if (named.channel === undefined || named.channel === "general") {
+      return { scope };
+    }
+    await this.assertChannelOpen(channelRef(scope === SOCIETY_SCOPE ? null : scope, named.channel));
+    return { scope, channel: named.channel };
+  }
+
+  /**
+   * The schedule a cron verb asks for, or undefined when it asks for none: an expression, read in
+   * its zone or the society's, which must name a time to come and no two fires closer than the
+   * floor, or one time to come. A zone alone keeps the expression of `existing`.
+   */
+  private async cronSchedule(
+    args: {
+      readonly cron?: string | undefined;
+      readonly timezone?: string | null | undefined;
+      readonly at?: string | undefined;
+    },
+    existing: CronSchedule | undefined,
+    now: Date,
+  ): Promise<CronSchedule | undefined> {
+    if (args.at !== undefined) {
+      if (args.timezone !== undefined) {
+        throw new BoardError(
+          "VALIDATION",
+          "at carries its own offset; timezone is for a cron expression",
+        );
+      }
+      const at = new Date(args.at);
+      if (at <= now) {
+        throw new BoardError("VALIDATION", `${args.at} has passed; a cron fires at a time to come`);
+      }
+      return { at: at.toISOString() };
+    }
+    if (args.cron === undefined && args.timezone === undefined) {
+      return undefined;
+    }
+    const expression =
+      args.cron ?? (existing === undefined || isOneTime(existing) ? undefined : existing.cron);
+    if (expression === undefined) {
+      throw new BoardError(
+        "VALIDATION",
+        "timezone is for a cron expression, which this cron has not",
+      );
+    }
+    const kept =
+      args.timezone === undefined && existing !== undefined && !isOneTime(existing)
+        ? existing.timezone
+        : (args.timezone ?? undefined);
+    const schedule: CronSchedule = {
+      cron: expression,
+      ...(kept === undefined ? {} : { timezone: kept }),
+    };
+    const { timezone: societyZone } = await this.society();
+    if (fireTimes(schedule, societyZone, now, 1).length === 0) {
+      throw new BoardError("VALIDATION", `${expression} names no time to come`);
+    }
+    const gap = shortestGapMs(schedule, societyZone, now);
+    if (gap !== null && gap < CRON_FLOOR_MS) {
+      throw new BoardError(
+        "VALIDATION",
+        `${expression} fires ${Math.round(gap / 60_000)} minute(s) apart at its closest; a cron fires at most every ${CRON_FLOOR_MS / 60_000} minutes, and every fire is a turn`,
+      );
+    }
+    return schedule;
+  }
+
+  /** A cron's events name its citizen and the conversation it fires in, as turn events do. */
+  private cronPayload(cron: Cron): Record<string, unknown> {
+    return {
+      cronId: cron.id,
+      agent: cron.agent,
+      project: cron.scope,
+      ...(cron.thread === undefined ? {} : { thread: cron.thread }),
+      ...(cron.channel === undefined ? {} : { channel: cron.channel }),
+    };
+  }
+
+  private async readCronFile(file: string): Promise<Cron> {
+    const doc = await readMarkdown(file, CronFrontmatterSchema);
+    return { ...doc.data, note: doc.body.trimEnd() };
+  }
+
+  private async writeCron(cron: Cron): Promise<Cron> {
+    const { note, ...frontmatter } = cron;
+    const data = CronFrontmatterSchema.parse(
+      Object.fromEntries(Object.entries(frontmatter).filter(([, value]) => value !== undefined)),
+    );
+    await writeMarkdown(this.paths.cron(cron.id), data, note);
+    return { ...data, note };
+  }
+
+  private async endCronUnlocked(cron: Cron, by: Name, reason: string): Promise<Cron> {
+    const ended = await this.writeCron({
+      ...cron,
+      ended: { at: this.now().toISOString(), by, reason },
+    });
+    await this.events.append("cron.ended", by, { ...this.cronPayload(ended), reason });
+    return ended;
+  }
+
+  /** Ends every running cron `ends` picks, in the transaction that ends the conversation it fires in. */
+  private async endCronsUnlocked(
+    by: Name,
+    reason: string,
+    ends: (cron: Cron) => boolean,
+  ): Promise<void> {
+    for (const cron of await this.listCrons()) {
+      if (cron.ended === undefined && ends(cron)) {
+        await this.endCronUnlocked(cron, by, reason);
+      }
+    }
+  }
+
   async openThread(actor: Actor, input: VerbInput<"open_thread">): Promise<Thread> {
     const args = VerbInputs.open_thread.parse(input);
     await this.authorize(actor, "open_thread");
@@ -2746,6 +3104,11 @@ export class Board {
         threadId: thread.id,
         channel: thread.channel,
       });
+      await this.endCronsUnlocked(
+        actor.name,
+        "its thread closed",
+        (cron) => cron.thread === thread.id,
+      );
       return summary;
     });
   }
@@ -3559,6 +3922,11 @@ export class Board {
         members: project.members.filter((member) => member !== target),
       }));
       await this.refreshMember(target);
+      await this.endCronsUnlocked(
+        actor.name,
+        `${target} left ${args.project}`,
+        (cron) => cron.agent === target && cron.scope === args.project,
+      );
       await this.events.append("agent.left", actor.name, {
         name: target,
         project: args.project,
@@ -3629,6 +3997,12 @@ export class Board {
         return this.archiveChannel(actor, VerbInputs.archive_channel.parse(input));
       case "update_dashboard":
         return this.updateDashboard(actor, VerbInputs.update_dashboard.parse(input));
+      case "create_cron":
+        return this.createCron(actor, VerbInputs.create_cron.parse(input));
+      case "update_cron":
+        return this.updateCron(actor, VerbInputs.update_cron.parse(input));
+      case "remove_cron":
+        return this.removeCron(actor, VerbInputs.remove_cron.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -3921,6 +4295,9 @@ export class Board {
       }
       await this.writeTurnRecord(parsed);
       await this.refreshMember(parsed.agent);
+      for (const id of parsed.crons ?? []) {
+        await this.recordCronRun(id, parsed, failed);
+      }
       if (parsed.exitReason === "stopped") {
         await this.events.append("turn.stopped", parsed.stoppedBy ?? USER_NAME, {
           ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
@@ -4024,6 +4401,51 @@ export class Board {
       }
       await this.events.append("workspace.leftovers", SYSTEM_ACTOR.name, payload);
       return true;
+    });
+  }
+
+  /**
+   * Records a cron's fire, which the scheduler made; a one-time cron ends with it. Null, recording
+   * nothing, for a cron ended or paused since the scheduler read it, which does not fire.
+   */
+  async cronFired(id: Ulid, at: string): Promise<Cron | null> {
+    return this.mutex.run(async () => {
+      const current = await this.readCron(id);
+      if (current.ended !== undefined || current.paused !== undefined) {
+        return null;
+      }
+      const cron = await this.writeCron({ ...current, lastFiredAt: at });
+      await this.events.append("cron.fired", SYSTEM_ACTOR.name, this.cronPayload(cron));
+      return isOneTime(cron.schedule)
+        ? this.endCronUnlocked(cron, SYSTEM_ACTOR.name, "fired once, as set")
+        : cron;
+    });
+  }
+
+  /** Records a time a cron passed because the turn of its previous fire was still queued or running. */
+  async cronSkipped(id: Ulid, at: string): Promise<Cron> {
+    return this.mutex.run(async () => {
+      const cron = await this.writeCron({ ...(await this.readCron(id)), lastSkippedAt: at });
+      await this.events.append("cron.skipped", SYSTEM_ACTOR.name, this.cronPayload(cron));
+      return cron;
+    });
+  }
+
+  /**
+   * How the turn a cron's fire started ended. A failure counts toward `cron_failing`, a completed
+   * turn clears the count, and a stop, the user's decision, leaves it.
+   */
+  private async recordCronRun(id: Ulid, record: TurnRecord, failed: boolean): Promise<void> {
+    if (record.id === undefined || !(await exists(this.paths.cron(id)))) {
+      return;
+    }
+    const cron = await this.readCron(id);
+    const outcome = record.exitReason === "stopped" ? "stopped" : failed ? "failed" : "completed";
+    await this.writeCron({
+      ...cron,
+      lastRun: { turnId: record.id, at: record.endedAt ?? this.now().toISOString(), outcome },
+      failures:
+        outcome === "failed" ? cron.failures + 1 : outcome === "completed" ? 0 : cron.failures,
     });
   }
 
@@ -5041,6 +5463,13 @@ export class Board {
         archivedChannels: [...current.archivedChannels, archived],
       }));
     }
+    await this.endCronsUnlocked(
+      by,
+      `${ref} was archived`,
+      (cron) =>
+        (cron.scope === scope && cron.channel === channel) ||
+        (cron.thread !== undefined && threadsClosed.includes(cron.thread)),
+    );
     await this.events.append("channel.archived", by, {
       channel: ref,
       reason,
@@ -5178,6 +5607,12 @@ export class Board {
       });
       threadsClosed.push(doc.data.id);
     }
+    await this.endCronsUnlocked(
+      by,
+      `project ${slug} was archived`,
+      (cron) =>
+        cron.scope === slug || (cron.thread !== undefined && threadsClosed.includes(cron.thread)),
+    );
     const project = await this.updateProject(slug, (p) => ({
       ...p,
       members: [],
@@ -5253,6 +5688,7 @@ export class Board {
     }
     this.tokenIndex.delete(current.tokenHash);
     await this.refreshMember(name);
+    await this.endCronsUnlocked(by, `${name} was retired`, (cron) => cron.agent === name);
     await this.events.append("agent.retired", by, {
       name,
       role: agent.role,
@@ -5688,6 +6124,11 @@ export class Board {
       channel: found.thread.channel,
       ended,
     });
+    await this.endCronsUnlocked(
+      by,
+      `its thread closed: its ${found.thread.subject?.kind ?? "subject"} was ${ended}`,
+      (cron) => cron.thread === subjectId,
+    );
   }
 
   private async readMessagesIn(dir: string, since: Ulid | null): Promise<Message[]> {

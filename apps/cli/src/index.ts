@@ -8,7 +8,9 @@ import {
   CharterTriggerSchema,
   CliKindSchema,
   CompletionEffectSchema,
+  describeSchedule,
   isTaskStep,
+  nextFire,
   MEMBER_VERBS,
   parseChannelRef,
   PlanEditSchema,
@@ -16,6 +18,7 @@ import {
   ProposalKindSchema,
   stageIndex,
   VerbNameSchema,
+  type Cron,
   type Task,
 } from "@stellaris/shared";
 
@@ -835,6 +838,135 @@ program
     const board = await open();
     await board.setPaused(board.userActor(), false);
     print({ paused: false }, () => "Society resumed");
+  });
+
+program
+  .command("society")
+  .description("The society's settings")
+  .command("timezone [zone]")
+  .description("Show the society's time zone, or set it: crons that name none are read in it")
+  .action(async (zone: string | undefined) => {
+    const board = await open();
+    const society =
+      zone === undefined ? await board.society() : await board.setTimezone(board.userActor(), zone);
+    print({ timezone: society.timezone }, () => `Time zone: ${society.timezone}`);
+  });
+
+/** A cron in one line: its id, its state, whom it wakes where, and when. */
+function describeCron(cron: Cron, timeZone: string): string {
+  const where = [
+    cron.scope,
+    cron.thread,
+    cron.channel === undefined ? undefined : `#${cron.channel}`,
+  ]
+    .filter((part) => part !== undefined)
+    .join("/");
+  const next = nextFire(cron, timeZone);
+  const state =
+    cron.ended !== undefined
+      ? `ended (${cron.ended.reason})`
+      : cron.paused !== undefined
+        ? "paused"
+        : next === null
+          ? "no time to come"
+          : `next ${next.toISOString()}`;
+  return `${cron.id}\t${cron.agent}\t${where}\t${describeSchedule(cron.schedule, timeZone)}\t${state}\t${cron.title}`;
+}
+
+const cron = program.command("cron").description("Crons that wake citizens on a clock");
+
+cron
+  .command("list")
+  .description("List crons, ended ones too with --all")
+  .option("--all", "include ended crons", false)
+  .action(async (opts: { all: boolean }) => {
+    const board = await open();
+    const { timezone } = await board.society();
+    const crons = (await board.listCrons()).filter((each) => opts.all || each.ended === undefined);
+    print(crons, () =>
+      crons.length === 0
+        ? "No crons."
+        : crons.map((each) => describeCron(each, timezone)).join("\n"),
+    );
+  });
+
+cron
+  .command("add <agent> <title>")
+  .description("Set a cron that wakes a citizen, with a note on what to do then")
+  .requiredOption("--note <text>", "what the citizen does when it fires")
+  .option("--cron <expression>", "five fields: minute hour day-of-month month day-of-week")
+  .option("--timezone <zone>", "the zone the expression is read in; the society's otherwise")
+  .option("--at <time>", "one time to fire, with its offset, instead of --cron")
+  .option("--project <slug>", "where it fires: a project the citizen is in, or society")
+  .option("--thread <id>", "an open thread there whose conversation it fires in")
+  .option(
+    "--channel <name>",
+    "an open channel there, other than general, whose conversation it fires in",
+  )
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(
+    async (
+      agentName: string,
+      title: string,
+      opts: {
+        note: string;
+        cron?: string;
+        timezone?: string;
+        at?: string;
+        project?: string;
+        thread?: string;
+        channel?: string;
+        as?: string;
+      },
+    ) => {
+      const board = await open();
+      const created = await board.createCron(await actorFor(board, opts.as), {
+        title,
+        note: opts.note,
+        agent: agentName,
+        ...(opts.cron === undefined ? {} : { cron: opts.cron }),
+        ...(opts.timezone === undefined ? {} : { timezone: opts.timezone }),
+        ...(opts.at === undefined ? {} : { at: opts.at }),
+        ...(opts.project === undefined ? {} : { project: opts.project }),
+        ...(opts.thread === undefined ? {} : { thread_id: opts.thread }),
+        ...(opts.channel === undefined ? {} : { channel: opts.channel }),
+      });
+      const { timezone } = await board.society();
+      print(created, () => `Cron set: ${describeCron(created, timezone)}`);
+    },
+  );
+
+for (const [name, paused] of [
+  ["pause", true],
+  ["resume", false],
+] as const) {
+  cron
+    .command(`${name} <id>`)
+    .description(paused ? "Pause a cron" : "Resume a paused cron from its next time")
+    .option("--as <agent>", "act as this agent instead of the user")
+    .action(async (id: string, opts: { as?: string }) => {
+      const board = await open();
+      const updated = await board.updateCron(await actorFor(board, opts.as), {
+        cron_id: id,
+        paused,
+      });
+      const { timezone } = await board.society();
+      print(updated, () => describeCron(updated, timezone));
+    });
+}
+
+cron
+  .command("remove <id>")
+  .description("End a cron for good")
+  .requiredOption("--reason <text>", "why it ends")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (id: string, opts: { reason: string; as?: string }) => {
+    const board = await open();
+    const removed = await board.removeCron(await actorFor(board, opts.as), {
+      cron_id: id,
+      reason: opts.reason,
+    });
+    print(removed, () => `Cron ${removed.id} ended`);
   });
 
 const knowledge = program

@@ -7,7 +7,7 @@ import { TurnWorkSchema } from "./runner.js";
 /**
  * What caused a wake. `stage`: a stage became current and is the member's to take. `task_done`: a
  * task the member created is done. `proposal_decided`: a proposal the member made was approved or
- * rejected.
+ * rejected. `cron`: a cron set for the member came due.
  */
 export const TriggerKindSchema = z.enum([
   "mention",
@@ -21,6 +21,7 @@ export const TriggerKindSchema = z.enum([
   "ops_event",
   "user_post",
   "closing",
+  "cron",
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 
@@ -33,6 +34,8 @@ export const TriggerSchema = z.object({
   messageId: UlidSchema.optional(),
   /** The channel the waking message was posted in. */
   channel: ChannelRefSchema.optional(),
+  /** The cron that came due, for a `cron` wake. */
+  cronId: UlidSchema.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;
@@ -58,6 +61,8 @@ export const TurnDispatchSchema = z.object({
   trigger: TriggerSchema,
   priority: z.number().int().min(0).max(2),
   onboarding: z.boolean().default(false),
+  /** Every cron that came due for this turn, whatever wake it merged into; its prompt quotes each. */
+  crons: z.array(UlidSchema).optional(),
 });
 export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 
@@ -144,6 +149,8 @@ export const TurnRecordSchema = z.object({
   work: TurnWorkSchema.optional(),
   /** Who stopped the turn, for one that ended `stopped`. */
   stoppedBy: NameSchema.optional(),
+  /** The crons whose fire started the turn, which record how it ended. */
+  crons: z.array(UlidSchema).optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 

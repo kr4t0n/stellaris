@@ -30,6 +30,9 @@ export const VERB_NAMES = [
   "create_channel",
   "archive_channel",
   "update_dashboard",
+  "create_cron",
+  "update_cron",
+  "remove_cron",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -72,7 +75,7 @@ export type RoleCharterInput = z.input<typeof RoleCharterSchema>;
 export const USER_ROLE = "user";
 export const USER_NAME = "user";
 
-/** The verbs every working member needs: messaging, threads, tasks and their plans, membership, knowledge, dashboards. */
+/** The verbs every working member needs: messaging, threads, tasks and their plans, membership, knowledge, dashboards, crons. */
 export const MEMBER_VERBS: readonly VerbName[] = [
   "post_message",
   "read_inbox",
@@ -94,6 +97,9 @@ export const MEMBER_VERBS: readonly VerbName[] = [
   "plan_task",
   "advance_task",
   "update_dashboard",
+  "create_cron",
+  "update_cron",
+  "remove_cron",
 ];
 
 const GOVERNANCE_VERBS: readonly VerbName[] = ["approve", "reject"];

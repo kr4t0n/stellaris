@@ -2522,4 +2522,210 @@ describe("Board", () => {
       byAgent: [{ agent: "eng-1", role: "engineer", turns: 2, idle: 1 }],
     });
   });
+
+  it("lets a citizen set a cron for itself where its turn is, and only planners one for another", async () => {
+    const { board } = await society();
+    // Set from a turn in demo's dev channel, a cron fires in that conversation.
+    const own = await board.createCron(
+      { ...ENG, scope: "demo", channel: "dev" },
+      { title: "Check the deploy", note: "Read the deploy log.", cron: "*/30 * * * *" },
+    );
+    expect(own).toMatchObject({
+      agent: "eng-1",
+      scope: "demo",
+      channel: "dev",
+      schedule: { cron: "*/30 * * * *" },
+      createdBy: "eng-1",
+      since: "2026-09-28T10:00:00.000Z",
+      failures: 0,
+      note: "Read the deploy log.",
+    });
+    // Outside any turn, a cron fires at home outside projects.
+    expect(
+      (await board.createCron(ENG, { title: "Daily", note: "Summarize.", cron: "0 9 * * *" }))
+        .scope,
+    ).toBe("society");
+    await expect(
+      board.createCron(ENG, { title: "x", note: "x", cron: "0 9 * * *", agent: "rev-1" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.updateCron(REV, { cron_id: own.id, paused: true })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    // The user takes no turns, so it names the citizen; a planner may wake anyone.
+    await expect(
+      board.createCron(USER, { title: "x", note: "x", cron: "0 9 * * *" }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    const thread = await board.openThread(ENG, { channel: "demo/general", title: "Release" });
+    const forRev = await board.createCron(USER, {
+      title: "Weekly",
+      note: "Review the week.",
+      cron: "0 9 * * 1",
+      timezone: "asia/shanghai",
+      agent: "rev-1",
+      thread_id: thread.id,
+    });
+    expect(forRev).toMatchObject({
+      agent: "rev-1",
+      scope: "demo",
+      thread: thread.id,
+      schedule: { cron: "0 9 * * 1", timezone: "Asia/Shanghai" },
+    });
+    expect((await board.listCrons()).map((cron) => cron.id)).toHaveLength(3);
+    expect(
+      (await board.readEvents(null)).filter((event) => event.type === "cron.created"),
+    ).toHaveLength(3);
+  });
+
+  it("refuses a cron that fires too often, never, in the past, or with two schedules", async () => {
+    const { board } = await society();
+    const set = (input: Record<string, string>) =>
+      board.createCron(ENG, { title: "t", note: "n", ...input });
+    await expect(set({ cron: "*/5 * * * *" })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining("at most every 15 minutes"),
+    });
+    await expect(set({ cron: "0,10 9 * * *" })).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(set({ cron: "0 0 31 2 *" })).rejects.toMatchObject({
+      message: expect.stringContaining("no time to come"),
+    });
+    await expect(set({ cron: "61 * * * *" })).rejects.toThrow(/five-field cron expression/);
+    await expect(set({ cron: "0 9 * * *", timezone: "Mars/Olympus" })).rejects.toThrow(
+      /not a time zone/,
+    );
+    await expect(set({ at: "2026-09-28T09:00:00Z" })).rejects.toMatchObject({
+      message: expect.stringContaining("has passed"),
+    });
+    await expect(set({})).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(set({ cron: "0 9 * * *", at: "2026-09-29T09:00:00Z" })).rejects.toMatchObject({
+      code: "VALIDATION",
+    });
+    await expect(set({ cron: "*/15 * * * *" })).resolves.toMatchObject({ scope: "society" });
+    await expect(set({ at: "2026-09-28T10:05:00+02:00" })).rejects.toMatchObject({
+      code: "VALIDATION",
+    });
+    await expect(set({ at: "2026-09-28T12:05:00+02:00" })).resolves.toMatchObject({
+      schedule: { at: "2026-09-28T10:05:00.000Z" },
+    });
+  });
+
+  it("pauses, resumes afresh, reschedules, and ends a cron, recording how its turns end", async () => {
+    const { board } = await society();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Hourly", note: "Check.", cron: "0 * * * *" },
+    );
+    clock = new Date("2026-09-28T11:00:00.000Z");
+    expect((await board.updateCron(ENG, { cron_id: cron.id, paused: true })).paused).toEqual({
+      at: "2026-09-28T11:00:00.000Z",
+      by: "eng-1",
+    });
+    clock = new Date("2026-09-28T13:30:00.000Z");
+    const resumed = await board.updateCron(ENG, { cron_id: cron.id, paused: false });
+    expect(resumed.paused).toBeUndefined();
+    expect(resumed.since).toBe("2026-09-28T13:30:00.000Z");
+    const zoned = await board.updateCron(ENG, { cron_id: cron.id, timezone: "Europe/Berlin" });
+    expect(zoned.schedule).toEqual({ cron: "0 * * * *", timezone: "Europe/Berlin" });
+    await expect(board.updateCron(ENG, { cron_id: cron.id })).rejects.toMatchObject({
+      code: "VALIDATION",
+    });
+
+    // Each turn a fire started records how it ended; failures count until one completes.
+    await board.cronFired(cron.id, "2026-09-28T14:00:00.000Z");
+    const run = async (exitReason: "completed" | "error" | "stopped") => {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, clock.toISOString()),
+        crons: [cron.id],
+      });
+      await board.finishTurn({ ...turn, endedAt: clock.toISOString(), exitReason });
+      return board.readCron(cron.id);
+    };
+    expect((await run("error")).failures).toBe(1);
+    expect(await run("stopped")).toMatchObject({ failures: 1, lastRun: { outcome: "stopped" } });
+    expect((await run("error")).failures).toBe(2);
+    expect(await run("completed")).toMatchObject({
+      failures: 0,
+      lastRun: { outcome: "completed" },
+      lastFiredAt: "2026-09-28T14:00:00.000Z",
+    });
+
+    const removed = await board.removeCron(USER, { cron_id: cron.id, reason: "done" });
+    expect(removed.ended).toEqual({ at: "2026-09-28T13:30:00.000Z", by: "user", reason: "done" });
+    await expect(board.updateCron(ENG, { cron_id: cron.id, paused: true })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+
+    // A one-time cron ends once it fires.
+    const once = await board.createCron(ENG, {
+      title: "Once",
+      note: "Look again.",
+      at: "2026-09-28T15:00:00Z",
+    });
+    const fired = await board.cronFired(once.id, "2026-09-28T15:00:00.000Z");
+    expect(fired?.ended).toMatchObject({ by: "board", reason: "fired once, as set" });
+    // An ended cron does not fire again, though the scheduler read it before it ended.
+    expect(await board.cronFired(once.id, "2026-09-28T15:00:01.000Z")).toBeNull();
+  });
+
+  it("ends a cron with the conversation it fires in", async () => {
+    const { board } = await society();
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "Topic" });
+    const task = await board.createTask(USER, { project: "demo", title: "Build" });
+    const set = (title: string, where: Record<string, string>, as: Actor = ENG) =>
+      board.createCron(as, { title, note: "n", cron: "0 9 * * *", ...where });
+    const inTopic = await set("topic", { thread_id: topic.id });
+    const inTask = await set("task", { thread_id: task.id });
+    const inChannel = await set("channel", { project: "demo", channel: "dev" });
+    const atHome = await set("home", { project: "demo" });
+    const revHome = await set("rev", { project: "demo" }, REV);
+    const outside = await set("outside", { project: "society" });
+
+    await board.closeThread(ENG, { thread_id: topic.id, summary: "Settled." });
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    await board.leaveProject(USER, { project: "demo", agent: "eng-1" });
+    await board.retireAgent(USER, { name: "rev-1", reason: "done" });
+    const ended = new Map(
+      (await board.listCrons()).map((cron) => [cron.id, cron.ended?.reason ?? null]),
+    );
+    expect(ended.get(inTopic.id)).toBe("its thread closed");
+    expect(ended.get(inTask.id)).toBe("its thread closed: its task was abandoned");
+    expect(ended.get(inChannel.id)).toBe("demo/dev was archived");
+    expect(ended.get(atHome.id)).toBe("eng-1 left demo");
+    expect(ended.get(revHome.id)).toBe("rev-1 was retired");
+    expect(ended.get(outside.id)).toBeNull();
+  });
+
+  it("sets the society's time zone, the user's alone", async () => {
+    const { board } = await society();
+    expect((await board.society()).timezone).toBe("UTC");
+    await expect(board.setTimezone(ENG, "Asia/Shanghai")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.setTimezone(USER, "Nowhere/City")).rejects.toThrow(/not a time zone/);
+    expect((await board.setTimezone(USER, "asia/shanghai")).timezone).toBe("Asia/Shanghai");
+    await expect((await Board.open(dir, { now })).society()).resolves.toMatchObject({
+      timezone: "Asia/Shanghai",
+      channels: ["general", "governance", "asks"],
+    });
+  });
+
+  it("grants the cron verbs once to every charter but the user's", async () => {
+    const { board } = await society();
+    const without = MEMBER_VERBS.filter((verb) => !verb.endsWith("_cron"));
+    await board.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
+    await board.setRoleCharter(USER, {
+      name: "reviewer",
+      purpose: "Reviews.",
+      verbs: ["post_message", "read_inbox"],
+    });
+    const reopened = await Board.open(dir, { now });
+    for (const role of ["engineer", "reviewer", "steward", "concierge"]) {
+      expect((await reopened.readRole(role)).verbs).toEqual(
+        expect.arrayContaining(["create_cron", "update_cron", "remove_cron"]),
+      );
+    }
+    await reopened.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
+    await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).not.toContain("create_cron");
+  });
 });

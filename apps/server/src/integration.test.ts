@@ -196,6 +196,62 @@ describe("Phase 5 exit criterion", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("a citizen sets a cron where it was asked, and the cron wakes it there with its note", async () => {
+    const { board } = await Board.init(dir, { name: "e2e" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
+    await addWorkRoles(board);
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const { society, backend } = await scripted(board);
+    // Only the scheduler's clock jumps ahead, to the cron's time; the board keeps wall time.
+    let clock = Date.now();
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now: () => new Date(clock),
+      timings: {
+        debounceMs: 0,
+        userDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        waitingStageMs: 3_600_000,
+      },
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await settle();
+    await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "@eng-1 please set a cron to check the deploy",
+    });
+    await settle();
+    const [cron] = await board.listCrons();
+    expect(cron).toMatchObject({
+      agent: "eng-1",
+      scope: "demo",
+      channel: "dev",
+      createdBy: "eng-1",
+    });
+    if (cron === undefined) {
+      return;
+    }
+    clock += 16 * 60_000;
+    await settle();
+    const prompt = backend.prompts.at(-1) ?? "";
+    expect(prompt).toContain("Trigger: cron");
+    expect(prompt).toContain("This turn is in your conversation of demo/dev");
+    expect(prompt).toContain("  Read the deploy log and post what changed.");
+    expect(await board.readCron(cron.id)).toMatchObject({
+      lastRun: { outcome: "completed" },
+      failures: 0,
+    });
+  });
+
   it("the user posts naming no project and no citizen, and a resident concierge routes it", async () => {
     const { board, userToken } = await Board.init(dir, { name: "desk" });
     await board.addProject(USER, { slug: "demo" });

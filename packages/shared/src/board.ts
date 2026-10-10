@@ -7,6 +7,7 @@ import {
   UlidSchema,
   type Name,
 } from "./ids.js";
+import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
 import { RoleCharterSchema, USER_ROLE } from "./roles.js";
 
 /**
@@ -66,6 +67,8 @@ export const SocietySchema = z.object({
   /** The channels that take posts; an archived one moves to `archivedChannels`. */
   channels: z.array(NameSchema),
   archivedChannels: z.array(ArchivedChannelSchema).default([]),
+  /** The time zone crons are read in when they name none, and every prompt tells the time in; the user's to set. */
+  timezone: TimeZoneSchema.default(DEFAULT_TIME_ZONE),
 });
 export type Society = z.infer<typeof SocietySchema>;
 

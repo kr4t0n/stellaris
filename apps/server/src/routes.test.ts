@@ -346,6 +346,58 @@ describe("board server routes", () => {
     expect(signals.map((record) => record.signal.kind)).toEqual(["idle_member"]);
   });
 
+  it("sets crons through their verbs, lists them, and sets the society's time zone for the user alone", async () => {
+    const app = createApp({ board, version: "t" });
+    const created = await app.request("/api/verbs/create_cron", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: "Morning report",
+        note: "Post what changed overnight.",
+        cron: "0 9 * * 1-5",
+        agent: "eng-1",
+        project: "demo",
+      }),
+    });
+    expect(created.status).toBe(200);
+    const listed = z
+      .array(z.object({ agent: z.string(), scope: z.string(), note: z.string() }))
+      .parse(await (await app.request("/api/crons", { headers })).json());
+    expect(listed).toEqual([
+      { agent: "eng-1", scope: "demo", note: "Post what changed overnight." },
+    ]);
+    const tooOften = await app.request("/api/verbs/create_cron", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title: "x", note: "x", cron: "* * * * *", agent: "eng-1" }),
+    });
+    expect(tooOften.status).toBe(400);
+
+    const zone = await app.request("/api/society/timezone", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ timezone: "Asia/Shanghai" }),
+    });
+    expect(z.object({ timezone: z.string() }).parse(await zone.json()).timezone).toBe(
+      "Asia/Shanghai",
+    );
+    const unknown = await app.request("/api/society/timezone", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ timezone: "Mars/Olympus" }),
+    });
+    expect(unknown.status).toBe(400);
+    const engToken = (
+      await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "claude" })
+    ).token;
+    const forbidden = await app.request("/api/society/timezone", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${engToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ timezone: "UTC" }),
+    });
+    expect(forbidden.status).toBe(403);
+  });
+
   it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {
     const app = createApp({ board, version: "t" });
     await board.writeKnowledge(USER, {

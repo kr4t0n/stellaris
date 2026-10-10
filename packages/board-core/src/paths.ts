@@ -76,6 +76,13 @@ export class BoardPaths {
   members(): string {
     return path.join(this.society, "members");
   }
+  /** Crons, one file each with its note as the body; ended ones stay. */
+  crons(): string {
+    return path.join(this.society, "crons");
+  }
+  cron(id: Ulid): string {
+    return path.join(this.crons(), `${id}.md`);
+  }
   member(name: Name): string {
     return path.join(this.members(), `${name}.md`);
   }

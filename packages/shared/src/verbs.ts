@@ -9,8 +9,16 @@ import {
   PullRequestUrlSchema,
   StageIdSchema,
 } from "./board.js";
+import { CronExpressionSchema, TimeZoneSchema } from "./crons.js";
 import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
+
+/** A moment with its offset, such as 2026-10-12T09:00:00+08:00 or 2026-10-12T01:00:00Z. */
+const MomentSchema = z.iso.datetime({ offset: true });
+
+/** What a cron is called and what it asks of the turn it starts. */
+const CronTitleSchema = z.string().trim().min(1).max(120);
+const CronNoteSchema = z.string().trim().min(1).max(4_000);
 
 /**
  * Input schema per verb. These are the public contract between agents and the board:
@@ -136,6 +144,38 @@ export const VerbInputs = {
     /** The `revision` in the frontmatter of the dashboard you read, 0 when it names none. */
     revision: z.number().int().min(0),
   }),
+  create_cron: z.object({
+    title: CronTitleSchema,
+    /** What to do when it fires; quoted in the prompt of every turn it starts. */
+    note: CronNoteSchema,
+    /** Minute, hour, day of month, month, day of week, such as `0 9 * * 1-5`; or `at` instead. */
+    cron: CronExpressionSchema.optional(),
+    /** The IANA time zone `cron` is read in; the society's when left out. */
+    timezone: TimeZoneSchema.optional(),
+    /** One time to fire, instead of `cron`; the cron ends once it has fired. */
+    at: MomentSchema.optional(),
+    /** The citizen it wakes: yourself when left out. */
+    agent: NameSchema.optional(),
+    /** Where it fires: a project the citizen belongs to, or `society`; this turn's scope when left out. */
+    project: NameSchema.optional(),
+    /** An open thread there, whose conversation it fires in. */
+    thread_id: UlidSchema.optional(),
+    /** An open channel of that place other than general, whose conversation it fires in. */
+    channel: NameSchema.optional(),
+  }),
+  update_cron: z.object({
+    cron_id: UlidSchema,
+    /** Pause it, or resume it, which starts its schedule afresh from now. */
+    paused: z.boolean().optional(),
+    title: CronTitleSchema.optional(),
+    note: CronNoteSchema.optional(),
+    /** A new expression, or `at` for one time; either starts the schedule afresh. */
+    cron: CronExpressionSchema.optional(),
+    /** The zone `cron` is read in; null for the society's. */
+    timezone: TimeZoneSchema.nullable().optional(),
+    at: MomentSchema.optional(),
+  }),
+  remove_cron: z.object({ cron_id: UlidSchema, reason: z.string().trim().min(1) }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -191,4 +231,10 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Archive a channel whose workstream is done: its open threads close, its followers stop following it, and nothing more is posted or filed there, while its history stays readable. Refused while a task filed there is in play, and for the channels the board itself uses. User, steward, concierge.",
   update_dashboard:
     "Replace the dashboard of a project you are a member of, the status page the user reads on its view, with a whole markdown body. Pass the revision from the frontmatter of the dashboard you read; if it was updated since, the call is refused with the current text to merge yours into. dashboard.md in the board projection is a copy, so editing it changes nothing.",
+  create_cron:
+    "Set a cron that wakes you later: a title, a note on what to do then, and either cron, a five-field expression (minute hour day-of-month month day-of-week) read in timezone or the society's, or at, one time. It fires in this turn's conversation unless you name a project, thread_id, or channel, at most every 15 minutes, and every fire is a turn. Only the user, the steward, and the concierge set one that wakes another citizen (agent).",
+  update_cron:
+    "Pause or resume a cron, or change its title, note, or schedule; resuming or rescheduling starts it afresh from now. Yours, or anyone's for the user, the steward, and the concierge.",
+  remove_cron:
+    "End a cron for good, with a reason. Yours, or anyone's for the user, the steward, and the concierge. A cron also ends with its conversation, and a one-time cron once it fires.",
 };

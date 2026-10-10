@@ -296,6 +296,57 @@ describe("ExecaGit", () => {
     expect(await rev(clone, "next")).toBe(await rev(clone, "HEAD"));
   });
 
+  it("restores a default branch deleted from the clone, with the landings only the clone has", async () => {
+    // A merge project's clone of a remote: the board lands on main there and never pushes.
+    const seed = path.join(dir, "seed");
+    await execa("git", ["init", "-b", "main", seed]);
+    await execa("git", [...committer("u"), "commit", "--allow-empty", "-m", "root"], {
+      cwd: seed,
+    });
+    const origin = path.join(dir, "origin.git");
+    await execa("git", ["clone", "--bare", seed, origin]);
+    const repo = { slug: "lost", origin, defaultBranch: "main", boardLands: true };
+    const clone = await git.ensureRepo(repo, path.join(dir, "repos", "lost"));
+    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(clone, branch, "main");
+    const worktree = await git.ensureTaskWorktree(clone, path.join(dir, "wt", "t"), branch);
+    await writeFile(path.join(worktree, "b.txt"), "b\n", "utf8");
+    await execa("git", ["add", "b.txt"], { cwd: worktree });
+    await execa("git", [...committer("eng-1"), "commit", "-m", "work"], { cwd: worktree });
+    await git.handBack(worktree, null, { name: "eng-1", email: "eng-1@x" });
+    expect((await git.merge(clone, "main", branch)).ok).toBe(true);
+    const landed = await rev(clone, "main");
+    expect(await git.ensureDefaultBranch(clone, repo)).toBeNull();
+
+    // The guard lets a deletion through, since git's own housekeeping deletes loose refs.
+    const remove = async () => {
+      await execa("git", ["update-ref", "-d", "refs/heads/main"], { cwd: worktree });
+      expect(await git.branchExists(clone, "main")).toBe(false);
+    };
+    await remove();
+    expect(await git.ensureDefaultBranch(clone, repo)).toBe(
+      `restored main, deleted from the clone, at ${landed.slice(0, 7)} from the clone's history`,
+    );
+    expect(await rev(clone, "main")).toBe(landed);
+    expect((await execa("git", ["status", "--porcelain"], { cwd: clone })).stdout).toBe("");
+
+    // Without the clone's history, the remote's main is what is left.
+    await remove();
+    await rm(path.join(clone, ".git", "logs", "HEAD"));
+    expect(await git.ensureDefaultBranch(clone, repo)).toBe(
+      "restored main, deleted from the clone, from the remote",
+    );
+    expect(await rev(clone, "main")).toBe(await rev(origin, "main"));
+
+    // With neither, the runner says so rather than starting main anywhere.
+    await remove();
+    await rm(path.join(clone, ".git", "logs", "HEAD"));
+    await expect(git.ensureDefaultBranch(clone, { ...repo, origin: null })).rejects.toThrow(
+      "main was deleted from the clone, and neither the clone's history nor a remote has it",
+    );
+  });
+
   it("guards a merge project's default branch from everything but the runner", async () => {
     const seed = path.join(dir, "seed");
     await execa("git", ["init", "-b", "main", seed]);

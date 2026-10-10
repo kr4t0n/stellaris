@@ -30,9 +30,10 @@ export interface GitOps {
   /**
    * Makes sure the project's default branch is in the clone, as after the board moved the project
    * to another: fetched from the project's remote when it has one there, else started where the
-   * clone stands.
+   * clone stands. One the clone has checked out and lost is restored instead, at its last tip when
+   * the clone's history keeps it, which is said in the answer; null when nothing was lost.
    */
-  ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<void>;
+  ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<string | null>;
   /**
    * A task conversation's worktree, on the task's branch when no other worktree has it checked
    * out, else detached at the branch's tip, where the turn can read the work but not commit to it.
@@ -356,21 +357,58 @@ export class ExecaGit implements GitOps {
     }
   }
 
-  async ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<void> {
+  async ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<string | null> {
     const branch = project.defaultBranch;
     if (await this.branchExists(repoDir, branch)) {
-      return;
+      return null;
+    }
+    const ref = `refs/heads/${branch}`;
+    // The clone's HEAD names its default branch once it has landed there or was cloned on it; the
+    // guard lets a deletion through (see `guardDefaultBranch`), and HEAD's reflog outlives the
+    // branch's own, holding its last tip and every landing that only the clone has.
+    const lost = (await git(["symbolic-ref", "-q", "HEAD"], repoDir)).stdout.trim() === ref;
+    if (lost) {
+      const last = await this.lastHeadTip(repoDir);
+      if (last !== null) {
+        await must(["update-ref", ref, last, ""], repoDir);
+        return `restored ${branch}, deleted from the clone, at ${last.slice(0, 7)} from the clone's history`;
+      }
     }
     if (project.origin !== null) {
+      // Into the remote-tracking branch, since git refuses to fetch into one the clone has checked out.
       const fetched = await git(
-        ["fetch", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+        ["fetch", "--quiet", "origin", `+${ref}:refs/remotes/origin/${branch}`],
         repoDir,
       );
       if (fetched.exitCode === 0) {
-        return;
+        await must(["update-ref", ref, `refs/remotes/origin/${branch}`, ""], repoDir);
+        return lost ? `restored ${branch}, deleted from the clone, from the remote` : null;
       }
     }
+    if (lost) {
+      throw new Error(
+        `${branch} was deleted from the clone, and neither the clone's history nor a remote has it`,
+      );
+    }
     await must(["branch", branch, "HEAD"], repoDir);
+    return null;
+  }
+
+  /** The commit the clone's HEAD named last, from its reflog: git reads none while HEAD is unborn. */
+  private async lastHeadTip(repoDir: string): Promise<string | null> {
+    const log = (await git(["rev-parse", "--git-path", "logs/HEAD"], repoDir)).stdout.trim();
+    const text = await readFile(path.resolve(repoDir, log), "utf8").catch(() => "");
+    const newest = text.trimEnd().split("\n").at(-1) ?? "";
+    // Each entry is "<old> <new> <who> <when>\t<message>"; a deletion's new is all zeros.
+    const id = newest
+      .split(" ", 2)
+      .toReversed()
+      .find((part) => /^[0-9a-f]{40,64}$/.test(part) && /[^0]/.test(part));
+    if (id === undefined) {
+      return null;
+    }
+    const commit = await git(["rev-parse", "--verify", "-q", `${id}^{commit}`], repoDir);
+    return commit.exitCode === 0 ? commit.stdout.trim() : null;
   }
 
   async ensureTaskWorktree(repoDir: string, requestedDir: string, branch: string): Promise<string> {

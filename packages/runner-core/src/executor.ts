@@ -579,11 +579,19 @@ export class TurnExecutor {
       : this.layout.channelWorktree(agent, workspace.repo.slug, workspace.channel);
   }
 
+  /** The project's default branch in its clone here, with a warning when it had to be restored. */
+  private async ensureDefaultBranch(repoDir: string, repo: ProjectRepo): Promise<void> {
+    const restored = await this.git.ensureDefaultBranch(repoDir, repo);
+    if (restored !== null) {
+      this.log.warn({ project: repo.slug, detail: restored }, "restored a deleted default branch");
+    }
+  }
+
   /** Lands a task: merges its branch into the default branch of the project's repository here. */
   async land(request: LandRequest): Promise<MergeOutcome> {
     return this.withProjectLock(request.repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(request.repo, this.layout.repo(request.repo.slug));
-      await this.git.ensureDefaultBranch(repoDir, request.repo);
+      await this.ensureDefaultBranch(repoDir, request.repo);
       await this.guard(repoDir, request.repo);
       await this.syncRemote(repoDir, request.repo);
       if (request.pullRequest !== undefined) {
@@ -732,9 +740,7 @@ export class TurnExecutor {
       return null;
     }
     // Counted from the default branch, which a project moved to another may not have here yet.
-    await this.withProjectLock(read.repo.slug, () =>
-      this.git.ensureDefaultBranch(repoDir, read.repo),
-    );
+    await this.withProjectLock(read.repo.slug, () => this.ensureDefaultBranch(repoDir, read.repo));
     return this.git.branchChanges(
       repoDir,
       read.branch,
@@ -790,7 +796,7 @@ export class TurnExecutor {
     const base = repo.defaultBranch;
     return this.withProjectLock(repo.slug, async () => {
       const repoDir = await this.git.ensureRepo(repo, this.layout.repo(repo.slug));
-      await this.git.ensureDefaultBranch(repoDir, repo);
+      await this.ensureDefaultBranch(repoDir, repo);
       await this.guard(repoDir, repo);
       const remote = await this.syncRemote(repoDir, repo);
       if (workspace.kind === "task") {

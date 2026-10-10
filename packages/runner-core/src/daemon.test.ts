@@ -4,6 +4,8 @@ import path from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { RunnerHttpError } from "./client.js";
+import { EventSender, persist } from "./daemon.js";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 
@@ -16,6 +18,52 @@ describe("RunnerDaemon", () => {
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it("posts a turn's steps again while the server is out of reach, in order, and stops when refused", async () => {
+    const posted: string[][] = [];
+    let failures = 2;
+    const warnings: string[] = [];
+    const log = {
+      info() {},
+      warn(_context: object, message: string) {
+        warnings.push(message);
+      },
+      error(_context: object, message: string) {
+        warnings.push(message);
+      },
+    };
+    const sender = new EventSender(
+      (entries) => {
+        if (failures > 0) {
+          failures -= 1;
+          return Promise.reject(new TypeError("fetch failed"));
+        }
+        posted.push(entries.map((entry) => (entry.event.type === "text" ? entry.event.delta : "")));
+        return Promise.resolve();
+      },
+      log,
+      { retryMs: 5, forMs: 1_000 },
+    );
+    sender.push({ type: "text", delta: "one" });
+    await sender.flush();
+    sender.push({ type: "text", delta: "two" });
+    await sender.flush();
+    expect(posted).toEqual([["one"], ["two"]]);
+    expect(warnings).toEqual(["could not post a turn's steps", "could not post a turn's steps"]);
+
+    // A refusal, as for a turn the server has already ended, is not tried again.
+    let calls = 0;
+    const refused = await persist(
+      () => {
+        calls += 1;
+        return Promise.reject(new RunnerHttpError(404, "no such turn"));
+      },
+      { retryMs: 5, forMs: 1_000 },
+      () => undefined,
+    );
+    expect(refused).toBeNull();
+    expect(calls).toBe(1);
   });
 
   // Inside the test process something always holds the event loop, so only a process of its own

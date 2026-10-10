@@ -120,6 +120,11 @@ export function runnerRoutes(
     return c.json({ ok: true });
   });
 
+  routes.post("/turns/:id/received", (c) => {
+    hub.received(c.get("runner"), UlidSchema.parse(c.req.param("id")));
+    return c.json({ ok: true });
+  });
+
   routes.post("/turns/:id/outcome", async (c) =>
     c.json(
       await hub.turnOutcome(

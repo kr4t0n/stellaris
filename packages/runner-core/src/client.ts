@@ -28,6 +28,12 @@ export class RunnerHttpError extends Error {
 }
 
 /**
+ * How long the event stream may stay silent before the runner takes it for dead: the server writes
+ * a comment every 15 seconds, so this is three missed. Node's fetch alone waits five minutes.
+ */
+const STREAM_IDLE_MS = 45_000;
+
+/**
  * The runner's side of the runner protocol over HTTP: register, hold the server's event stream,
  * and post events, outcomes, answers, warm sessions, and files back, all with the runner's token.
  */
@@ -38,6 +44,7 @@ export class RunnerClient {
     baseUrl: string,
     private readonly token: string,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly streamIdleMs: number = STREAM_IDLE_MS,
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
@@ -48,8 +55,9 @@ export class RunnerClient {
 
   /**
    * Holds the server's event stream open and hands each message to `onMessage`, until the stream
-   * ends, fails, or `signal` aborts. `onOpen` runs once the server has attached the stream, and
-   * unknown or malformed messages are reported and skipped.
+   * ends, fails, goes silent for longer than the server's keepalives allow, or `signal` aborts.
+   * `onOpen` runs once the server has attached the stream, and unknown or malformed messages are
+   * reported and skipped.
    */
   async stream(
     signal: AbortSignal,
@@ -59,21 +67,52 @@ export class RunnerClient {
       readonly onMalformed?: ((problem: string) => void) | undefined;
     },
   ): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl}/runner/stream`, {
-      headers: { authorization: `Bearer ${this.token}`, accept: "text/event-stream" },
-      signal,
-    });
-    if (!response.ok || response.body === null) {
-      throw new RunnerHttpError(response.status, `the event stream answered ${response.status}`);
+    // A path that drops everything without closing the connection leaves a read waiting for good.
+    const silent = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const listen = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => silent.abort(), this.streamIdleMs);
+    };
+    try {
+      listen();
+      const response = await this.fetchImpl(`${this.baseUrl}/runner/stream`, {
+        headers: { authorization: `Bearer ${this.token}`, accept: "text/event-stream" },
+        signal: AbortSignal.any([signal, silent.signal]),
+      });
+      if (!response.ok || response.body === null) {
+        throw new RunnerHttpError(response.status, `the event stream answered ${response.status}`);
+      }
+      handlers.onOpen?.();
+      await this.read(response.body, handlers, listen);
+    } catch (error) {
+      if (silent.signal.aborted && !signal.aborted) {
+        throw new Error(`the event stream was silent for ${this.streamIdleMs / 1000}s`, {
+          cause: error,
+        });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    handlers.onOpen?.();
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  }
+
+  private async read(
+    body: ReadableStream<Uint8Array>,
+    handlers: {
+      readonly onMessage: (message: RunnerMessage) => void;
+      readonly onMalformed?: ((problem: string) => void) | undefined;
+    },
+    heard: () => void,
+  ): Promise<void> {
+    const reader = body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
     for (;;) {
       const { value, done } = await reader.read();
       if (done) {
         return;
       }
+      heard();
       buffer += value;
       let end = buffer.indexOf("\n\n");
       while (end !== -1) {
@@ -104,6 +143,11 @@ export class RunnerClient {
 
   async events(turnId: string, entries: readonly TranscriptEntry[]): Promise<void> {
     await this.call("POST", `/runner/turns/${turnId}/events`, { entries });
+  }
+
+  /** Tells the server a turn's job arrived, so it need not send it again. */
+  async received(turnId: string): Promise<void> {
+    await this.call("POST", `/runner/turns/${turnId}/received`);
   }
 
   async outcome(turnId: string, outcome: TurnOutcome): Promise<TurnAck> {

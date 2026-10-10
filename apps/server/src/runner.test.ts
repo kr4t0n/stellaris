@@ -22,6 +22,8 @@ import {
   RUNNER_PROTOCOL,
   RunnerModelsSchema,
   type AgentEvent,
+  type RunnerHello,
+  type RunnerMessage,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1373,6 +1375,102 @@ describe("turns on a runner over the runner protocol", () => {
     await expect(run(dispatch)).resolves.toMatchObject({ exitReason: "completed" });
   });
 
+  it("sends a job that never reached its runner again once it reconnects, and holds new turns meanwhile", async () => {
+    const { board } = await Board.init(dir, { name: "silent" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    society = await startTestSociety({
+      board,
+      backends: () => ({
+        claude: {
+          kind: "claude",
+          newSession: () => Promise.resolve("s"),
+          runTurn: () => Promise.resolve(completed("never runs here")),
+        },
+      }),
+      ackTimeoutMs: 50,
+      graceMs: 300,
+    });
+    const { run, hub } = society;
+    const hello: RunnerHello = {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    };
+    // A runner whose machine's network stopped passing traffic: its stream looks open, and
+    // nothing written into it arrives.
+    await board.addRunner(USER, "ghost");
+    await hub.register("ghost", hello);
+    const lost: RunnerMessage[] = [];
+    await hub.attach("ghost", (message) => lost.push(message) > 0);
+    await board.placeProject("demo", "ghost");
+    const dispatch = {
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 2,
+    };
+    const first = run(dispatch);
+    await vi.waitFor(() => expect(lost).toHaveLength(1));
+    const job = lost[0]?.type === "turn" ? lost[0].job : null;
+    expect(job).not.toBeNull();
+    const turnId = job?.turnId ?? "";
+
+    // Unacknowledged past the timeout, the runner gets no more turns, and the one it has carries on.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await hub.assign({ ...dispatch, onboarding: false })).toBeNull();
+    expect(hub.unacknowledged("ghost")).toEqual([turnId]);
+
+    // It connects again without the turn, which it never received: the job is sent again, not failed.
+    await hub.register("ghost", hello);
+    const delivered: RunnerMessage[] = [];
+    const detach = await hub.attach("ghost", (message) => delivered.push(message) > 0);
+    expect(delivered).toEqual([{ type: "turn", job }]);
+    hub.received("ghost", turnId);
+    expect(hub.unacknowledged("ghost")).toEqual([]);
+    await hub.turnOutcome("ghost", turnId, {
+      exitReason: "completed",
+      status: null,
+      error: null,
+      usage: ZERO_USAGE,
+      costUsd: 0,
+      session: "s",
+      model: null,
+      work: null,
+      leftovers: false,
+    });
+    expect(await first).toMatchObject({ exitReason: "completed" });
+
+    // A job that never arrived on a runner that then stays away is said to have never reached it.
+    const second = run(dispatch);
+    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await detach();
+    expect(await second).toMatchObject({
+      exitReason: "error",
+      error: expect.stringContaining("never reached runner ghost"),
+    });
+  });
+
   it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {
     const { board } = await Board.init(dir, { name: "away" });
     await board.addProject(USER, { slug: "demo" });
@@ -1412,9 +1510,10 @@ describe("turns on a runner over the runner protocol", () => {
       priority: 2,
     };
 
-    // A runner that registers again without a turn it was running: that turn ends as failed.
+    // A runner that registers again without a turn it took: that turn ends as failed.
     const running = run(dispatch);
     await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     await hub.register("pod", {
       protocol: RUNNER_PROTOCOL,
       version: "test",

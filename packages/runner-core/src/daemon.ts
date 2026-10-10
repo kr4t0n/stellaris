@@ -16,6 +16,7 @@ import {
 import { RunnerClient, RunnerHttpError } from "./client.js";
 import { TurnControl } from "./control.js";
 import { runnerOs } from "./enroll.js";
+import { describeError } from "./errors.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
 import { HomeSync } from "./home.js";
 import type { GitOps } from "./git.js";
@@ -35,10 +36,16 @@ export interface RunnerDaemonOptions {
   readonly log?: RunnerLog | undefined;
   /** How long to wait before connecting again after the stream ends; doubles up to 15 seconds. */
   readonly retryMs?: number | undefined;
+  /** How long a turn's steps and outcome are posted again while the server is out of reach. */
+  readonly postForMs?: number | undefined;
 }
 
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 const MAX_RETRY_MS = 15_000;
+/** Long enough to outlast a server restart or a node's network coming back. */
+const POST_FOR_MS = 15 * 60_000;
+/** A job's receipt matters only until the stream is known to work again, as a reconnect says. */
+const RECEIPT_ATTEMPTS = 3;
 /** Steps of a turn travel in small batches, so the live picture lags by at most this much. */
 const EVENT_BATCH_MS = 100;
 
@@ -50,8 +57,48 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return wait(ms, undefined, signal === undefined ? {} : { signal }).catch(() => undefined);
 }
 
-/** The steps of one turn, posted in order and in batches as they arrive. */
-class EventSender {
+/** Whether a failed call may succeed later: the server was out of reach or failed, not refused it. */
+function transient(error: unknown): boolean {
+  return !(error instanceof RunnerHttpError) || error.status >= 500 || error.status === 429;
+}
+
+export interface Persistence {
+  /** The first wait between attempts, doubling up to 15 seconds. */
+  readonly retryMs: number;
+  /** How long to keep trying before giving up. */
+  readonly forMs: number;
+}
+
+/**
+ * Calls until it succeeds, the server refuses, or `forMs` has passed, waiting longer each time.
+ * Null when it gave up, after `onFailure` heard of every failure.
+ */
+export async function persist<T>(
+  call: () => Promise<T>,
+  { retryMs, forMs }: Persistence,
+  onFailure: (error: unknown) => void,
+): Promise<T | null> {
+  const until = Date.now() + forMs;
+  let delay = retryMs;
+  for (;;) {
+    try {
+      return await call();
+    } catch (error) {
+      onFailure(error);
+      if (!transient(error) || Date.now() + delay > until) {
+        return null;
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, MAX_RETRY_MS);
+    }
+  }
+}
+
+/**
+ * The steps of one turn, posted in order and in batches as they arrive. A batch the server could
+ * not take is posted again, and those after it wait, so the transcript keeps every step in order.
+ */
+export class EventSender {
   private buffer: TranscriptEntry[] = [];
   private chain: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +106,7 @@ class EventSender {
   constructor(
     private readonly send: (entries: TranscriptEntry[]) => Promise<void>,
     private readonly log: RunnerLog,
+    private readonly persistence: Persistence,
   ) {}
 
   push(event: AgentEvent): void {
@@ -81,11 +129,18 @@ class EventSender {
     if (batch.length === 0) {
       return;
     }
-    this.chain = this.chain.then(() =>
-      this.send(batch).catch((error: unknown) => {
-        this.log.warn({ error: String(error) }, "could not post a turn's steps");
-      }),
+    this.chain = this.chain.then(() => this.deliver(batch));
+  }
+
+  private async deliver(batch: TranscriptEntry[]): Promise<void> {
+    const sent = await persist(
+      () => this.send(batch),
+      this.persistence,
+      (error) => this.log.warn({ error: describeError(error) }, "could not post a turn's steps"),
     );
+    if (sent === null) {
+      this.log.error({ steps: batch.length }, "gave up posting a turn's steps");
+    }
   }
 }
 
@@ -104,6 +159,7 @@ export class RunnerDaemon {
   private readonly capabilities: readonly string[];
   private readonly log: RunnerLog;
   private readonly retryMs: number;
+  private readonly postForMs: number;
   private readonly running = new Map<string, Promise<void>>();
   /** The jobs running, whose workspaces a sweep leaves to the end of their turn. */
   private readonly jobs = new Map<string, TurnJob>();
@@ -129,6 +185,7 @@ export class RunnerDaemon {
     this.capabilities = options.capabilities ?? [];
     this.log = options.log ?? SILENT;
     this.retryMs = options.retryMs ?? 1_000;
+    this.postForMs = options.postForMs ?? POST_FOR_MS;
     this.board = new TreeCopy(options.layout.board, options.layout.syncState("board"));
     this.homes = new HomeSync(options.layout, options.client.homeRemote(), this.log);
   }
@@ -184,7 +241,7 @@ export class RunnerDaemon {
     const report = [...keys];
     this.warmChain = this.warmChain.then(() =>
       this.client.warm(report).catch((error: unknown) => {
-        this.log.warn({ error: String(error) }, "could not report warm sessions");
+        this.log.warn({ error: describeError(error) }, "could not report warm sessions");
       }),
     );
   }
@@ -236,7 +293,7 @@ export class RunnerDaemon {
           return;
         }
         if (!this.stopped) {
-          this.log.warn({ error: String(error) }, "runner connection failed");
+          this.log.warn({ error: describeError(error) }, "runner connection failed");
         }
       }
       if (this.stopped) {
@@ -261,6 +318,7 @@ export class RunnerDaemon {
         this.jobs.delete(message.job.turnId);
       });
       this.running.set(message.job.turnId, run);
+      void this.acknowledge(message.job.turnId);
       return;
     }
     const answer = (work: Promise<unknown>): void => {
@@ -268,10 +326,10 @@ export class RunnerDaemon {
         .then(
           (value) => this.client.answer(message.request, { ok: true, value }),
           (error: unknown) =>
-            this.client.answer(message.request, { ok: false, error: String(error) }),
+            this.client.answer(message.request, { ok: false, error: describeError(error) }),
         )
         .catch((error: unknown) => {
-          this.log.warn({ error: String(error) }, "could not answer a request");
+          this.log.warn({ error: describeError(error) }, "could not answer a request");
         });
     };
     switch (message.type) {
@@ -321,12 +379,28 @@ export class RunnerDaemon {
     try {
       await this.client.workspaces(await this.executor.held());
     } catch (error) {
-      this.log.warn({ error: String(error) }, "could not report the workspaces held here");
+      this.log.warn({ error: describeError(error) }, "could not report the workspaces held here");
     }
   }
 
+  /**
+   * Tells the server a job arrived. A receipt that never gets through costs nothing: the turn is
+   * among those the next hello lists, which the server takes as received too.
+   */
+  private async acknowledge(turnId: string): Promise<void> {
+    await persist(
+      () => this.client.received(turnId),
+      { retryMs: this.retryMs, forMs: this.retryMs * 2 ** RECEIPT_ATTEMPTS },
+      (error) =>
+        this.log.warn({ turnId, error: describeError(error) }, "could not acknowledge a job"),
+    );
+  }
+
   private async runJob(job: TurnJob, control: TurnControl): Promise<void> {
-    const sender = new EventSender((entries) => this.client.events(job.turnId, entries), this.log);
+    const sender = new EventSender((entries) => this.client.events(job.turnId, entries), this.log, {
+      retryMs: this.retryMs,
+      forMs: this.postForMs,
+    });
     let outcome: TurnOutcome;
     try {
       await this.board.pull(this.client.boardTree());
@@ -336,7 +410,7 @@ export class RunnerDaemon {
       outcome = {
         exitReason: "error",
         status: null,
-        error: `the runner could not run the turn: ${String(error)}`,
+        error: `the runner could not run the turn: ${describeError(error)}`,
         usage: ZERO_USAGE,
         costUsd: 0,
         session: job.session ?? "unstarted",
@@ -348,7 +422,10 @@ export class RunnerDaemon {
     try {
       await this.homes.publish(job.agent, job.turnId);
     } catch (error) {
-      this.log.warn({ agent: job.agent, error: String(error) }, "could not push the agent's home");
+      this.log.warn(
+        { agent: job.agent, error: describeError(error) },
+        "could not push the agent's home",
+      );
     }
     await sender.flush();
     await this.warmChain;
@@ -358,19 +435,14 @@ export class RunnerDaemon {
     }
   }
 
-  /** Posts a turn's outcome, trying again while the server is unreachable, as across its restart. */
+  /** Posts a turn's outcome, trying again while the server is out of reach, as across its restart. */
   private async report(turnId: string, outcome: TurnOutcome): Promise<TurnAck | null> {
-    let delay = this.retryMs;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      try {
-        return await this.client.outcome(turnId, outcome);
-      } catch (error) {
-        this.log.warn({ turnId, error: String(error) }, "could not report a turn's outcome");
-        await sleep(delay);
-        delay = Math.min(delay * 2, MAX_RETRY_MS);
-      }
-    }
-    return null;
+    return persist(
+      () => this.client.outcome(turnId, outcome),
+      { retryMs: this.retryMs, forMs: this.postForMs },
+      (error) =>
+        this.log.warn({ turnId, error: describeError(error) }, "could not report a turn's outcome"),
+    );
   }
 }
 
@@ -386,7 +458,11 @@ export interface CreateRunnerOptions {
   readonly log?: RunnerLog | undefined;
   readonly git?: GitOps | undefined;
   readonly retryMs?: number | undefined;
+  /** How long a turn's steps and outcome are posted again while the server is out of reach. */
+  readonly postForMs?: number | undefined;
   readonly fetch?: typeof fetch | undefined;
+  /** How long the event stream may stay silent before the runner connects again. */
+  readonly streamIdleMs?: number | undefined;
   /** How often a project's remote is fetched at most; a minute unless set. */
   readonly fetchIntervalMs?: number | undefined;
 }
@@ -394,7 +470,12 @@ export interface CreateRunnerOptions {
 /** A runner with its client, layout, and executor wired together; call `start` to connect it. */
 export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
   const layout = new RunnerLayout(options.dataDir);
-  const client = new RunnerClient(options.serverUrl, options.token, options.fetch);
+  const client = new RunnerClient(
+    options.serverUrl,
+    options.token,
+    options.fetch,
+    options.streamIdleMs,
+  );
   let daemon: RunnerDaemon | null = null;
   const executor = new TurnExecutor({
     layout,
@@ -415,6 +496,7 @@ export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
     capabilities: options.capabilities,
     log: options.log,
     retryMs: options.retryMs,
+    postForMs: options.postForMs,
   });
   return daemon;
 }

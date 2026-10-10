@@ -26,6 +26,7 @@ import {
   type TurnDispatch,
   type TurnOutcome,
   type TurnRecord,
+  type TurnJob,
   type Ulid,
   type HeldWorkspace,
   type WorkspaceConversation,
@@ -43,6 +44,8 @@ export interface RunnerHubOptions {
   readonly graceMs?: number | undefined;
   /** How long a request to a runner, a landing or a model list, may take. */
   readonly requestTimeoutMs?: number | undefined;
+  /** How long a runner may take to acknowledge a job before no more turns go to it. */
+  readonly ackTimeoutMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: HostLog | undefined;
 }
@@ -57,6 +60,18 @@ interface Seat {
   warm: Set<string>;
   disconnectedAt: number | null;
   grace: ReturnType<typeof setTimeout> | null;
+  /** Jobs sent down its stream that it has not acknowledged, sent again when it reconnects. */
+  readonly unacked: Map<Ulid, Unacked>;
+  /**
+   * A job went unacknowledged for too long, so its stream may be delivering nothing although it
+   * looks open; no turn goes there until the runner acknowledges a job or connects again.
+   */
+  unconfirmed: boolean;
+}
+
+interface Unacked {
+  readonly job: TurnJob;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface Pending {
@@ -80,6 +95,8 @@ const CONTROL_TIMEOUT_MS = 15_000;
 const FILE_TIMEOUT_MS = 60_000;
 /** A sweep is a few git calls and a removal per citizen who took part in the conversation. */
 const SWEEP_TIMEOUT_MS = 2 * 60_000;
+/** A runner acknowledges a job as it arrives, before preparing anything. */
+const DEFAULT_ACK_TIMEOUT_MS = 30_000;
 
 /**
  * The runners connected to the board server, and the scheduler's way to them. It places each
@@ -94,6 +111,7 @@ export class RunnerHub implements TurnRunner {
   private readonly version: string;
   private readonly graceMs: number;
   private readonly requestTimeoutMs: number;
+  private readonly ackTimeoutMs: number;
   private readonly now: () => Date;
   private readonly log: HostLog;
   private readonly seats = new Map<Name, Seat>();
@@ -110,6 +128,7 @@ export class RunnerHub implements TurnRunner {
     this.version = options.version;
     this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.ackTimeoutMs = options.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? SILENT;
     this.startedAt = this.now().getTime();
@@ -135,9 +154,16 @@ export class RunnerHub implements TurnRunner {
   // The protocol, as the server's routes call it
   // -------------------------------------------------------------------------------------------
 
+  /** The jobs sent to a runner that it has not acknowledged yet. */
+  unacknowledged(runner: Name): Ulid[] {
+    return [...(this.seats.get(runner)?.unacked.keys() ?? [])];
+  }
+
   /**
-   * A runner registers, first or again. Its turns in flight that it no longer runs, because it
-   * restarted, end as failed.
+   * A runner registers, first or again. A turn in flight it still runs, or whose job it never
+   * acknowledged, carries on, the latter sent again once its stream opens, since a job written
+   * into a stream that had stopped delivering never arrived; one it took and no longer runs,
+   * because it restarted, ends as failed.
    */
   async register(name: Name, hello: RunnerHello): Promise<RunnerWelcome> {
     if (hello.protocol !== RUNNER_PROTOCOL) {
@@ -155,14 +181,19 @@ export class RunnerHub implements TurnRunner {
         warm: new Set(),
         disconnectedAt: null,
         grace: null,
+        unacked: new Map(),
+        unconfirmed: false,
       });
     } else {
       seat.hello = hello;
       seat.warm = new Set();
     }
     const still = new Set(hello.turns);
+    const unacked = this.seats.get(name)?.unacked ?? new Map<Ulid, Unacked>();
     for (const turnId of this.host.turnsOn(name)) {
-      if (!still.has(turnId)) {
+      if (still.has(turnId)) {
+        this.settle(unacked, turnId);
+      } else if (!unacked.has(turnId)) {
         await this.host.abortTurn(turnId, `runner ${name} restarted during the turn`);
       }
     }
@@ -188,9 +219,19 @@ export class RunnerHub implements TurnRunner {
     }
     seat.send = send;
     seat.disconnectedAt = null;
+    seat.unconfirmed = false;
     if (seat.grace !== null) {
       clearTimeout(seat.grace);
       seat.grace = null;
+    }
+    for (const { job } of seat.unacked.values()) {
+      if (send({ type: "turn", job })) {
+        this.expectAck(seat, job);
+        this.log.info(
+          { runner: name, turnId: job.turnId },
+          "sent again a job the runner never took",
+        );
+      }
     }
     await this.board.markRunner(name, { status: "connected" });
     this.runnerChanged(name);
@@ -217,6 +258,9 @@ export class RunnerHub implements TurnRunner {
         clearTimeout(seat.grace);
         seat.grace = null;
       }
+      for (const { timer } of seat.unacked.values()) {
+        clearTimeout(timer);
+      }
     }
     await Promise.allSettled(this.detaching);
   }
@@ -224,6 +268,19 @@ export class RunnerHub implements TurnRunner {
   async turnEvents(runner: Name, turnId: Ulid, entries: readonly TranscriptEntry[]): Promise<void> {
     this.assertOwns(runner, turnId);
     await this.host.addEvents(turnId, entries);
+  }
+
+  /** A runner's word that a turn's job arrived, which also shows its stream delivers again. */
+  received(runner: Name, turnId: Ulid): void {
+    const seat = this.seats.get(runner);
+    if (seat === undefined || !seat.unacked.has(turnId)) {
+      return;
+    }
+    this.settle(seat.unacked, turnId);
+    if (seat.unconfirmed) {
+      seat.unconfirmed = false;
+      this.log.info({ runner }, "runner is taking jobs again");
+    }
   }
 
   async turnOutcome(runner: Name, turnId: Ulid, outcome: TurnOutcome): Promise<TurnAck> {
@@ -407,6 +464,7 @@ export class RunnerHub implements TurnRunner {
     const cli = agent.cli;
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
+      !seat.unconfirmed &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots);
     let chosen: Seat | undefined;
@@ -454,6 +512,7 @@ export class RunnerHub implements TurnRunner {
       return this.host.refuseTurn(dispatch, "none", assignment.refused);
     }
     const seat = this.seats.get(assignment.runner);
+    let turnId: Ulid | null = null;
     try {
       if (seat === undefined) {
         return await this.host.refuseTurn(dispatch, assignment.runner, "the runner is gone");
@@ -467,11 +526,17 @@ export class RunnerHub implements TurnRunner {
           opened.job.turnId,
           `runner ${seat.name} went away before the turn`,
         );
+      } else {
+        this.expectAck(seat, opened.job);
       }
+      turnId = opened.job.turnId;
       return await opened.ended;
     } finally {
       if (seat !== undefined) {
         seat.inUse = Math.max(0, seat.inUse - 1);
+        if (turnId !== null) {
+          this.settle(seat.unacked, turnId);
+        }
       }
     }
   }
@@ -608,6 +673,39 @@ export class RunnerHub implements TurnRunner {
 
   // -------------------------------------------------------------------------------------------
 
+  /**
+   * Waits for a runner to acknowledge a job. One that does not in time may be behind a stream that
+   * looks open but delivers nothing, as when its machine's network stops passing traffic, so no
+   * more turns go to it until it acknowledges or connects again; the turns it has carry on, since
+   * they report by posts.
+   */
+  private expectAck(seat: Seat, job: TurnJob): void {
+    const previous = seat.unacked.get(job.turnId);
+    if (previous !== undefined) {
+      clearTimeout(previous.timer);
+    }
+    const timer = setTimeout(() => {
+      if (!seat.unacked.has(job.turnId) || seat.unconfirmed || seat.send === null) {
+        return;
+      }
+      seat.unconfirmed = true;
+      this.log.warn(
+        { runner: seat.name, turnId: job.turnId, waitedMs: this.ackTimeoutMs },
+        "runner has not acknowledged a job; no more turns go to it until it does or reconnects",
+      );
+    }, this.ackTimeoutMs);
+    timer.unref?.();
+    seat.unacked.set(job.turnId, { job, timer });
+  }
+
+  private settle(unacked: Map<Ulid, Unacked>, turnId: Ulid): void {
+    const entry = unacked.get(turnId);
+    if (entry !== undefined) {
+      clearTimeout(entry.timer);
+      unacked.delete(turnId);
+    }
+  }
+
   private async detach(seat: Seat): Promise<void> {
     seat.send = null;
     this.runnerChanged(seat.name);
@@ -630,7 +728,12 @@ export class RunnerHub implements TurnRunner {
         return;
       }
       for (const turnId of this.host.turnsOn(seat.name)) {
-        void this.host.abortTurn(turnId, `runner ${seat.name} went away during the turn`);
+        void this.host.abortTurn(
+          turnId,
+          seat.unacked.has(turnId)
+            ? `the turn never reached runner ${seat.name}, which went away`
+            : `runner ${seat.name} went away during the turn`,
+        );
       }
     }, this.graceMs);
     seat.grace.unref?.();

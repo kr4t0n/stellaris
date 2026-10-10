@@ -36,6 +36,8 @@ export interface TestSocietyOptions {
   readonly routes?: ((app: TestApp) => void) | undefined;
   /** How long a runner may be away before the hub moves or fails its work. */
   readonly graceMs?: number | undefined;
+  /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
+  readonly ackTimeoutMs?: number | undefined;
   /** More runners, each a machine of its own with a data directory of its own. */
   readonly extraRunners?:
     | ReadonlyArray<{
@@ -91,7 +93,13 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     residentIdleMs: options.residentIdleMs ?? 60_000,
     onEvent: (agent, scope, event, conversation) => turns.push(agent, scope, event, conversation),
   });
-  const hub = new RunnerHub({ board, host, version: "test", graceMs: options.graceMs ?? 5_000 });
+  const hub = new RunnerHub({
+    board,
+    host,
+    version: "test",
+    graceMs: options.graceMs ?? 5_000,
+    ackTimeoutMs: options.ackTimeoutMs,
+  });
   board.watchTurns(() => host.inFlight());
   const app = createApp({
     board,

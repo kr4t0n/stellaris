@@ -1017,9 +1017,9 @@ knowledge
     print(written, () => `Wrote ${written.topic} for ${written.project ?? "the society"}`);
   });
 
-program
-  .command("skill")
-  .description("Skills promoted to the society")
+const skill = program.command("skill").description("Skills promoted to the society");
+
+skill
   .command("list")
   .description("List the society's skills, and each member's own")
   .action(async () => {
@@ -1043,6 +1043,20 @@ program
           ),
         ].join("\n") || "No skills yet.",
     );
+  });
+
+skill
+  .command("remove <name>")
+  .description("Remove a skill from the society's skills; its text is set aside, not destroyed")
+  .requiredOption("--reason <text>", "why it is wrong, superseded, or no longer used")
+  .option("--as <agent>", "act as this agent instead of the user")
+  .action(async (name: string, opts: { reason: string; as?: string }) => {
+    const board = await open();
+    const removed = await board.removeSkill(await actorFor(board, opts.as), {
+      name,
+      reason: opts.reason,
+    });
+    print(removed, () => `Removed ${removed.name} from the society's skills: ${removed.reason}`);
   });
 
 const turn = program.command("turn").description("Turn operations");

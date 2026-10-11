@@ -26,6 +26,7 @@ import {
   isBoardChannel,
   KnowledgeSchema,
   RemovedKnowledgeSchema,
+  RemovedSkillSchema,
   mayHoldStage,
   MemberProposalSchema,
   MemberSchema,
@@ -72,6 +73,7 @@ import {
   type HomeHistory,
   type Knowledge,
   type RemovedKnowledge,
+  type RemovedSkill,
   type Member,
   type MemberProposal,
   type Message,
@@ -452,7 +454,7 @@ function withoutMentions(text: string): string {
   return text.replaceAll(MENTION_PATTERN, "$1$2");
 }
 
-/** Roles that may write society knowledge. */
+/** Roles that may write society knowledge and remove the society's skills. */
 const CURATING_ROLES: readonly Name[] = [USER_ROLE, "steward"];
 
 /** The heading under which a member's own seed instructions live in its role file. */
@@ -2535,6 +2537,52 @@ export class Board {
   }
 
   /**
+   * Takes a skill out of the society's skills, by the steward or the user. Its directory leaves
+   * the projection, so no skills index or search lists it from the next turn, and is set aside
+   * under `state/removed-skills` for the user to restore by hand. The notice is the board's, as a
+   * promotion's is, so a removal by the user wakes no front desk, and quotes the reason without
+   * its mentions. The proposer's own copy in its home is not touched.
+   */
+  async removeSkill(actor: Actor, input: VerbInput<"remove_skill">): Promise<RemovedSkill> {
+    const args = VerbInputs.remove_skill.parse(input);
+    await this.authorize(actor, "remove_skill");
+    if (!CURATING_ROLES.includes(actor.role)) {
+      throw new BoardError(
+        "FORBIDDEN",
+        "the society's skills are curated by the steward and the user",
+      );
+    }
+    return this.mutex.run(async () => {
+      if (!(await exists(this.paths.societySkillFile(args.name)))) {
+        throw new BoardError("NOT_FOUND", `the society has no skill ${args.name}`);
+      }
+      const removed = RemovedSkillSchema.parse({
+        name: args.name,
+        reason: args.reason,
+        removedBy: actor.name,
+        removedAt: this.now().toISOString(),
+      });
+      const aside = this.paths.removedSkills();
+      await mkdir(aside, { recursive: true });
+      // The time keeps every removal of a skill promoted again and removed again.
+      await rename(
+        this.paths.societySkill(args.name),
+        path.join(aside, `${args.name}.${removed.removedAt.replaceAll(":", "-")}`),
+      );
+      await this.events.append("skill.removed", actor.name, {
+        name: args.name,
+        reason: args.reason,
+      });
+      await this.appendMessage(
+        SYSTEM_ACTOR.name,
+        "general",
+        `Skill ${args.name} removed from the society by ${actor.name}: ${sentence(withoutMentions(args.reason))}. Every citizen's skills index stops listing it from its next turn.`,
+      );
+      return removed;
+    });
+  }
+
+  /**
    * Replaces a project's dashboard, by a member or the user. A turn reads the dashboard from the
    * copy of the projection pulled when it started, so a revision other than the current one means
    * someone updated it since; the refusal carries the current text, which that copy lacks.
@@ -4057,6 +4105,8 @@ export class Board {
         return this.writeKnowledge(actor, VerbInputs.write_knowledge.parse(input));
       case "remove_knowledge":
         return this.removeKnowledge(actor, VerbInputs.remove_knowledge.parse(input));
+      case "remove_skill":
+        return this.removeSkill(actor, VerbInputs.remove_skill.parse(input));
       case "plan_task":
         return this.planTask(actor, VerbInputs.plan_task.parse(input));
       case "advance_task":

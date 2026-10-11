@@ -39,6 +39,7 @@ export const BOARD_EVENT_TYPES = [
   "knowledge.removed",
   "dashboard.updated",
   "skill.promoted",
+  "skill.removed",
   "runner.added",
   "user.signed_in",
   "user.signed_out",

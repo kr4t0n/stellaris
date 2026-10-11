@@ -176,6 +176,7 @@ export const VerbInputs = {
     at: MomentSchema.optional(),
   }),
   remove_cron: z.object({ cron_id: UlidSchema, reason: z.string().trim().min(1) }),
+  remove_skill: z.object({ name: NameSchema, reason: z.string().trim().min(1) }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -237,4 +238,6 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Pause or resume a cron, or change its title, note, or schedule; resuming or rescheduling starts it afresh from now. Yours, or anyone's for the user, the steward, and the concierge.",
   remove_cron:
     "End a cron for good, with a reason. Yours, or anyone's for the user, the steward, and the concierge. A cron also ends with its conversation, and a one-time cron once it fires.",
+  remove_skill:
+    "Remove a skill from the society's skills, with a reason, when it is wrong, superseded, or no longer used: no skills index lists it from the next turn, and a notice in general says so with the reason. Its proposer's own copy stays in its home. Steward and user only; the board keeps its text aside for the user to restore.",
 };

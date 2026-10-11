@@ -107,7 +107,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type.startsWith("proposal.")) {
     return [["proposals"], ["proposal", text(payload["proposalId"])], ["metrics"]];
   }
-  if (type === "skill.promoted") {
+  if (type === "skill.promoted" || type === "skill.removed") {
     return [["skills"]];
   }
   if (type === "ops.signal") {

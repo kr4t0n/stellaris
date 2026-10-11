@@ -681,6 +681,15 @@ export const SkillSchema = z.object({
 });
 export type Skill = z.infer<typeof SkillSchema>;
 
+/** A skill taken out of the society's skills, by whom, when, and why. */
+export const RemovedSkillSchema = z.object({
+  name: NameSchema,
+  reason: z.string().min(1),
+  removedBy: NameSchema,
+  removedAt: IsoDateTimeSchema,
+});
+export type RemovedSkill = z.infer<typeof RemovedSkillSchema>;
+
 /**
  * A conflict copy in an agent's home: the agent's own version of a file, which a runner kept
  * beside the board's when two of its turns changed the same lines on different runners, until the

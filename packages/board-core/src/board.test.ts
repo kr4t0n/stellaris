@@ -1976,6 +1976,86 @@ describe("Board", () => {
     ]);
   });
 
+  it("removes a society skill for the steward and the user alone, and sets its text aside", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    for (const name of ["uv-setup", "old-plan"]) {
+      const proposal = await board.propose(ENG, {
+        kind: "skill",
+        charter: { name, summary: `The ${name} procedure`, body: `Steps for ${name}.` },
+      });
+      await board.approve(STEW, { proposal_id: proposal.id });
+    }
+    const skillHits = async () =>
+      (await board.search(REV, { query: "Steps for uv-setup" })).map((hit) => hit.ref);
+    expect(await skillHits()).toContain("society/skills/uv-setup");
+
+    // A work role lacks the verb, and a charter that grants it does not make a curator.
+    await expect(
+      board.removeSkill(ENG, { name: "uv-setup", reason: "Unused." }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await board.setRoleCharter(USER, {
+      name: "reviewer",
+      purpose: "Reviews.",
+      verbs: [...MEMBER_VERBS, "remove_skill"],
+    });
+    await expect(
+      board.removeSkill(REV, { name: "uv-setup", reason: "Unused." }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      board.removeSkill(STEW, { name: "missing", reason: "Unused." }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(board.removeSkill(STEW, { name: "uv-setup", reason: "  " })).rejects.toThrow(
+      /too small/i,
+    );
+
+    const removed = await board.removeSkill(STEW, {
+      name: "uv-setup",
+      reason: "Superseded by @eng-1's uv-project.",
+    });
+    expect(removed).toMatchObject({
+      name: "uv-setup",
+      reason: "Superseded by @eng-1's uv-project.",
+      removedBy: "stew",
+    });
+    expect((await board.listSocietySkills()).map((skill) => skill.name)).toEqual(["old-plan"]);
+    expect(await skillHits()).not.toContain("society/skills/uv-setup");
+    // The board's notice quotes the reason with its mentions as plain names, so it wakes nobody.
+    expect((await board.listChannel("general")).at(-1)).toMatchObject({
+      author: "board",
+      body: expect.stringContaining(
+        "Skill uv-setup removed from the society by stew: Superseded by eng-1's uv-project.",
+      ),
+      mentions: [],
+    });
+    // The text waits outside the projection for a restore by hand.
+    const aside = board.paths.removedSkills();
+    const [kept] = await readdir(aside);
+    expect(kept).toMatch(/^uv-setup\..+$/);
+    expect(await readFile(path.join(aside, kept ?? "", "SKILL.md"), "utf8")).toContain(
+      "Steps for uv-setup.",
+    );
+
+    await board.removeSkill(USER, { name: "old-plan", reason: "No longer used" });
+    expect(await board.listSocietySkills()).toEqual([]);
+    const events = (await board.readEvents(null)).filter((e) => e.type === "skill.removed");
+    expect(events.map((e) => [e.actor, e.payload])).toEqual([
+      ["stew", { name: "uv-setup", reason: "Superseded by @eng-1's uv-project." }],
+      ["user", { name: "old-plan", reason: "No longer used" }],
+    ]);
+
+    // A steward charter from before the verb gains it with the seed's other verbs on open.
+    const steward = await board.readRole("steward");
+    await board.setRoleCharter(USER, {
+      ...steward,
+      verbs: steward.verbs.filter((verb) => verb !== "remove_skill"),
+    });
+    expect((await (await Board.open(dir, { now })).readRole("steward")).verbs).toContain(
+      "remove_skill",
+    );
+  });
+
   it("grants remove_knowledge once to every charter that grants write_knowledge", async () => {
     const { board } = await society();
     await board.setRoleCharter(USER, {

@@ -219,4 +219,8 @@ export class BoardPaths {
   removedKnowledge(scope: Name): string {
     return path.join(this.state(), "removed-knowledge", scope);
   }
+  /** Skills removed from the society, set aside outside the projection, one directory per removal. */
+  removedSkills(): string {
+    return path.join(this.state(), "removed-skills");
+  }
 }

@@ -16,6 +16,7 @@ import {
   MemberSchema,
   MetricsSchema,
   RemovedKnowledgeSchema,
+  RemovedSkillSchema,
   RunnerModelsSchema,
   MessageFrontmatterSchema,
   NameSchema,
@@ -368,6 +369,9 @@ export function createApi(token: string) {
     /** Takes a topic off the board; the server keeps its text aside. */
     removeKnowledge: (input: { project: string | null; topic: string }) =>
       invoke("remove_knowledge", token, input, RemovedKnowledgeSchema),
+    /** Takes a skill out of the society's skills; the server keeps its text aside. */
+    removeSkill: (input: { name: string; reason: string }) =>
+      invoke("remove_skill", token, input, RemovedSkillSchema),
     /** A manual or reflection turn for a citizen in one of its scopes, queued by the scheduler. */
     wake: (input: {
       agent: string;

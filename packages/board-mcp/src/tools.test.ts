@@ -4,7 +4,7 @@ import { BOARD_TOOLS, toolsForRole } from "./index.js";
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
-    expect(BOARD_TOOLS).toHaveLength(30);
+    expect(BOARD_TOOLS).toHaveLength(31);
     for (const tool of BOARD_TOOLS) {
       expect(tool.description.length).toBeGreaterThan(10);
     }
@@ -24,5 +24,12 @@ describe("board tools", () => {
     expect(toolsForRole(user).map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["approve", "archive_project"]),
     );
+  });
+
+  it("shows remove_skill to the steward and the user alone", () => {
+    const holders = SEED_ROLES.filter((role) =>
+      toolsForRole(role).some((tool) => tool.name === "remove_skill"),
+    ).map((role) => role.name);
+    expect(holders).toEqual(["user", "steward"]);
   });
 });

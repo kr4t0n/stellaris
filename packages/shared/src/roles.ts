@@ -33,6 +33,7 @@ export const VERB_NAMES = [
   "create_cron",
   "update_cron",
   "remove_cron",
+  "remove_skill",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -112,6 +113,8 @@ const PLANNING_VERBS: readonly VerbName[] = [
 ];
 /** Archiving a project is the user's alone for now; other roles propose it. */
 const ARCHIVE_VERBS: readonly VerbName[] = ["archive_project"];
+/** Taking a promoted skill back out of the society, for those who curate its skills. */
+const CURATING_VERBS: readonly VerbName[] = ["remove_skill"];
 
 /**
  * Seed roles, written at society initialization and aligned on every open. Roles for the work
@@ -128,6 +131,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
       ...FRONT_DESK_VERBS,
       ...PLANNING_VERBS,
       ...ARCHIVE_VERBS,
+      ...CURATING_VERBS,
     ],
     wakeTriggers: [],
     maxReplicas: 1,
@@ -140,7 +144,7 @@ export const SEED_ROLES: readonly RoleCharter[] = [
     name: "steward",
     purpose:
       "Watches the operations signals and the task board for capacity, skill, and capability gaps, and turns signals into proposals: a member when a project's plans need a role nobody fills or a backlog persists, a role when a project's work needs one no existing role covers, a retirement when a member has been idle for a long time. Opens a channel with create_channel when a topic or a workstream needs one, and archives it once its work is done. Owns how work is shaped over time: answers stages waiting too long, stages assigned to roles nobody fills, and work sent back again and again by replanning with plan_task, adjusting gates, or proposing the role a plan needs; sets each project's completion effect with configure_project; turns recurring plan shapes into society skills and planning norms into the society's norms. Prefers scaling an existing role over inventing a new one. Never approves its own proposals; hiring, roles, and retirements are decided by the user, and channels, reallocations, and skills the steward may decide. Curates society knowledge and skills.",
-    verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS, ...PLANNING_VERBS],
+    verbs: [...MEMBER_VERBS, ...GOVERNANCE_VERBS, ...PLANNING_VERBS, ...CURATING_VERBS],
     wakeTriggers: ["ops_event", "heartbeat"],
     maxReplicas: 1,
     backlogThreshold: 3,

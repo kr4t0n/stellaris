@@ -202,6 +202,7 @@ Projects      create_project(slug, name, repo?, on_done?)                  # con
               archive_project(project, reason)                             # user; others propose kind archive
 Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
+Skills        remove_skill(name, reason)              # steward and user; skills join by proposal; the text is set aside, not destroyed
 Dashboards    update_dashboard(project, body, revision) # the project's members and the user; refused unless revision is the current one
 ```
 
@@ -292,7 +293,7 @@ Silence on the board is allowed. An agent that read its digest and had nothing t
 
 ### 5.5 Skills and reflection
 
-**Skills are procedural memory.** When an agent has done something twice, it writes a skill in its own skills directory, and both CLIs load it lazily in every project. A skill that proves useful is proposed for the society skills directory, reviewed like code, and becomes available to every member.
+**Skills are procedural memory.** When an agent has done something twice, it writes a skill in its own skills directory, and both CLIs load it lazily in every project. A skill that proves useful is proposed for the society skills directory, reviewed like code, and becomes available to every member. A society skill that proves wrong, superseded, or unused is removed by the steward or the user with `remove_skill` and a reason: no skills index lists it from the next turn, a board notice in the society's general quotes the reason, its text is set aside outside the projection for a restore by hand, and its proposer's own copy stays in its home.
 
 **Reflection is a scheduled turn.** On a fixed cadence the scheduler wakes each agent with one job: consolidate the memory core, move detail to the archive, extract a skill from any recently repeated procedure, and propose project knowledge updates. The trigger is mechanical; the thinking is the agent's. The cadence is counted from the scheduler's first sight of the member, the turn runs in the scope of the member's latest working turn so the session that did the work reflects on it, and a member that has not worked since its last reflection is left alone: reflection consolidates experience, and without new experience it would only cost a turn. Charters opt out with `reflects: false`; the `user` charter does. The user may also ask for a reflection ahead of the cadence.
 

@@ -513,6 +513,14 @@ const SOCIETY_TOPIC = {
   body: "Comment only what the code cannot say.",
 };
 
+/** A skill promoted to the society, which the user may remove from the society's overview. */
+const SOCIETY_SKILL = {
+  name: "uv-setup",
+  summary: "Set up a uv project with locked dependencies",
+  scope: "society",
+  path: "/data/society/skills/uv-setup/SKILL.md",
+};
+
 /** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
 const SIGNALS = [
   {
@@ -794,8 +802,9 @@ export async function fakeBoard(
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
-  // Removing a society topic takes it off the list, as the board does.
+  // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
+  let societySkills = [SOCIETY_SKILL];
   // Crons pause, resume, end, and are set as the board would, and the society's zone is the user's.
   const crons = cronFixtures();
   let timezone = "UTC";
@@ -1013,6 +1022,14 @@ export async function fakeBoard(
           return json(route, {
             topic: body["topic"],
             project: null,
+            removedBy: "user",
+            removedAt: "2026-10-09T10:00:00.000Z",
+          });
+        case "/api/verbs/remove_skill":
+          societySkills = societySkills.filter((skill) => skill.name !== body["name"]);
+          return json(route, {
+            name: body["name"],
+            reason: body["reason"],
             removedBy: "user",
             removedAt: "2026-10-09T10:00:00.000Z",
           });
@@ -1278,6 +1295,7 @@ export async function fakeBoard(
       case `/api/threads/${STAGE_TASK}`:
         return json(route, { thread: TASK_THREAD, messages: threadMessages });
       case "/api/skills":
+        return json(route, societySkills);
       case "/api/channels/general":
       case "/api/channels/governance":
       case "/api/channels/asks":

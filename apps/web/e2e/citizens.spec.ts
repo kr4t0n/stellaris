@@ -330,6 +330,33 @@ test("a society knowledge topic is removed from its page after a second click", 
   ]);
 });
 
+test("a society skill is removed from the society's overview with a reason", async ({ page }) => {
+  const board = await fakeBoard(page);
+  await page.goto("/society");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("uv-setup · Set up a uv project with locked dependencies");
+
+  // The first click asks for a reason and says what removing does; only the second removes.
+  await view.getByRole("button", { name: "Remove uv-setup…" }).click();
+  const form = page.getByRole("form", { name: "Remove uv-setup" });
+  await expect(form).toContainText("No citizen's skills index lists uv-setup");
+  const confirm = form.getByRole("button", { name: "Remove skill" });
+  await expect(confirm).toBeDisabled();
+  await expect(form.getByRole("textbox", { name: "Reason" })).toBeFocused();
+  await form.getByRole("textbox", { name: "Reason" }).fill("Superseded by uv-project");
+  expect(board.writes).toEqual([]);
+  await confirm.click();
+
+  await expect(form).toHaveCount(0);
+  await expect(view).toContainText("None yet. A citizen's skill joins the society by proposal.");
+  expect(board.writes).toEqual([
+    {
+      path: "/api/verbs/remove_skill",
+      body: { name: "uv-setup", reason: "Superseded by uv-project" },
+    },
+  ]);
+});
+
 test("a project's name and default branch are edited from its page, and its slug stays", async ({
   page,
 }) => {

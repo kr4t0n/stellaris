@@ -500,6 +500,7 @@ const DESK_TURN_CHANGE = [
 const LAB_TOPIC = {
   topic: "experiments",
   project: "lab",
+  revision: 3,
   updatedBy: "ada",
   updatedAt: CREATED,
   body: `Every run fixes its seed at 42.\n\nThe harness lives in \`bench/\`.\n\nTask ${STAGE_TASK} settled the seed; its branch is task/${STAGE_TASK}.`,
@@ -508,6 +509,7 @@ const LAB_TOPIC = {
 const SOCIETY_TOPIC = {
   topic: "code-comments",
   project: null,
+  revision: 1,
   updatedBy: "stew",
   updatedAt: CREATED,
   body: "Comment only what the code cannot say.",

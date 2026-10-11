@@ -982,7 +982,12 @@ knowledge
     print(topics, () =>
       topics.length === 0
         ? "No knowledge yet."
-        : topics.map((t) => `${t.topic}\tupdated by ${t.updatedBy} at ${t.updatedAt}`).join("\n"),
+        : topics
+            .map(
+              (t) =>
+                `${t.topic}\trevision ${t.revision}, updated by ${t.updatedBy} at ${t.updatedAt}`,
+            )
+            .join("\n"),
     );
   });
 
@@ -1002,20 +1007,36 @@ knowledge
 knowledge
   .command("write <topic>")
   .description("Write a knowledge topic as the user, from a file or standard input")
+  .requiredOption(
+    "--revision <n>",
+    "the revision it replaces, as knowledge list shows it; 0 for a new topic",
+  )
   .option("--project <slug>", "the project's topic instead of the society's")
   .option("--file <path>", "read the body from this file instead of standard input")
   .option("--as <agent>", "act as this agent instead of the user")
-  .action(async (topic: string, opts: { project?: string; file?: string; as?: string }) => {
-    const board = await open();
-    const body =
-      opts.file === undefined ? await readStdin() : await readFile(path.resolve(opts.file), "utf8");
-    const written = await board.writeKnowledge(await actorFor(board, opts.as), {
-      project: opts.project ?? null,
-      topic,
-      body,
-    });
-    print(written, () => `Wrote ${written.topic} for ${written.project ?? "the society"}`);
-  });
+  .action(
+    async (
+      topic: string,
+      opts: { revision: string; project?: string; file?: string; as?: string },
+    ) => {
+      const board = await open();
+      const body =
+        opts.file === undefined
+          ? await readStdin()
+          : await readFile(path.resolve(opts.file), "utf8");
+      const written = await board.writeKnowledge(await actorFor(board, opts.as), {
+        project: opts.project ?? null,
+        topic,
+        body,
+        revision: Number(opts.revision),
+      });
+      print(
+        written,
+        () =>
+          `Wrote ${written.topic} for ${written.project ?? "the society"} at revision ${written.revision}`,
+      );
+    },
+  );
 
 const skill = program.command("skill").description("Skills promoted to the society");
 

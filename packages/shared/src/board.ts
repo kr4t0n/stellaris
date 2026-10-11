@@ -757,10 +757,14 @@ export const HomeFileDiffSchema = HomeFileChangeSchema.pick({ path: true, status
 });
 export type HomeFileDiff = z.infer<typeof HomeFileDiffSchema>;
 
-/** A knowledge topic: a project's, or the society's when the project is null. */
+/**
+ * A knowledge topic: a project's, or the society's when the project is null. `revision` counts its
+ * writes, and a write names the revision it replaces, as a dashboard's update does.
+ */
 export const KnowledgeSchema = z.object({
   topic: NameSchema,
   project: NameSchema.nullable(),
+  revision: z.number().int().min(0),
   updatedBy: NameSchema,
   updatedAt: IsoDateTimeSchema,
 });

@@ -200,7 +200,7 @@ Governance    propose(kind, charter)
 Projects      create_project(slug, name, repo?, on_done?)                  # concierge and user
               configure_project(project, on_done?, name?, default_branch?) # user, steward, concierge; the slug never changes
               archive_project(project, reason)                             # user; others propose kind archive
-Knowledge     write_knowledge(project, topic, body)   # project null writes society knowledge; steward and user only
+Knowledge     write_knowledge(project, topic, body, revision) # project null writes society knowledge; steward and user only; refused unless revision is the current one, 0 for a new topic
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
 Skills        remove_skill(name, reason)              # steward and user; skills join by proposal; the text is set aside, not destroyed
 Dashboards    update_dashboard(project, body, revision) # the project's members and the user; refused unless revision is the current one
@@ -284,6 +284,8 @@ Silence on the board is allowed. An agent that read its digest and had nothing t
 **Core plus archive.** The always-loaded core is short and curated. Detail lives in topic files the agent can search. Without the split, memory is either useless or eats the context budget on every wakeup.
 
 **Project knowledge is shared, not per agent.** Stable facts enter the repository instructions file through normal review. Evolving notes go to the project's knowledge directory. A new member is productive on its first turn because the onboarding document already exists.
+
+**Knowledge is written over the revision read.** A turn reads a topic from the copy of the projection pulled when it started, and replaces its whole text, so a write names the revision it read, 0 for a new topic, and the board refuses any other with the current text to merge into, as it does a dashboard's update; two turns never overwrite each other's topic unseen. A topic written anew after a removal goes on from the revision it was removed at, so a write that read the removed text cannot pass as one over the new.
 
 **Knowledge can be retired.** A topic that is wrong, superseded, or folded into another is removed with `remove_knowledge` by whoever may write that scope's knowledge, and replacing its text with a pointer is no longer the only way to retire it. The board takes the topic out of the knowledge directory, so no turn, search, or digest finds it, and sets its text aside outside the projection with who removed it and when, so a mistaken removal can be restored by hand. Like a write, a removal posts a short note without a mention in the matching general channel and is logged as an event. Every charter that grants `write_knowledge` is granted `remove_knowledge` once when an existing society opens, so the two always go together, and the user removes a topic from its page on the board.
 

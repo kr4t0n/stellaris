@@ -1569,24 +1569,46 @@ export class Board {
       project === null ? this.paths.societyKnowledge() : this.paths.projectKnowledge(project);
     const topics: Knowledge[] = [];
     for (const file of await listFiles(dir)) {
-      const doc = await readMarkdown(path.join(dir, file), z.record(z.string(), z.unknown()));
-      const parsed = KnowledgeSchema.safeParse({
-        ...doc.data,
-        project,
-        topic: file.replace(/\.md$/, ""),
-      });
-      // A topic file without valid frontmatter still counts; its mtime stands in for the update.
-      const data = parsed.success
-        ? parsed.data
-        : {
-            topic: file.replace(/\.md$/, ""),
-            project,
-            updatedBy: SYSTEM_ACTOR.name,
-            updatedAt: (await stat(path.join(dir, file))).mtime.toISOString(),
-          };
-      topics.push({ ...data, body: doc.body });
+      topics.push(await this.knowledgeAt(path.join(dir, file), project, file.replace(/\.md$/, "")));
     }
     return topics;
+  }
+
+  private knowledgeFile(project: Name | null, topic: Name): string {
+    return project === null
+      ? this.paths.societyKnowledgeFile(topic)
+      : this.paths.projectKnowledgeFile(project, topic);
+  }
+
+  /**
+   * Read loosely, as a dashboard is: a topic written before revisions counts as revision 0, and an
+   * author or a time that does not parse is the board's at the file's mtime.
+   */
+  private async knowledgeAt(file: string, project: Name | null, topic: Name): Promise<Knowledge> {
+    const { data, body } = await readLooseMarkdown(file);
+    const revision = z.number().int().min(0).safeParse(data["revision"]);
+    const updatedBy = NameSchema.safeParse(data["updatedBy"]);
+    const updatedAt = IsoDateTimeSchema.safeParse(data["updatedAt"]);
+    return {
+      topic,
+      project,
+      revision: revision.success ? revision.data : 0,
+      updatedBy: updatedBy.success ? updatedBy.data : SYSTEM_ACTOR.name,
+      updatedAt: updatedAt.success ? updatedAt.data : (await stat(file)).mtime.toISOString(),
+      body,
+    };
+  }
+
+  /** The highest revision among a topic's removed copies, 0 when it has none. */
+  private async removedRevision(project: Name | null, topic: Name): Promise<number> {
+    const aside = this.paths.removedKnowledge(project ?? SOCIETY_SCOPE);
+    let highest = 0;
+    // Names hold no dots, so the prefix matches this topic's copies alone.
+    for (const file of (await listFiles(aside)).filter((name) => name.startsWith(`${topic}.`))) {
+      const copy = await this.knowledgeAt(path.join(aside, file), project, topic);
+      highest = Math.max(highest, copy.revision);
+    }
+    return highest;
   }
 
   /** Skills promoted to the society: every citizen may read them. */
@@ -2423,29 +2445,50 @@ export class Board {
 
   /**
    * Writes a topic: a project's by its members, the society's by the curating roles. The note in
-   * the matching general channel carries no mention, so nobody is woken.
+   * the matching general channel carries no mention, so nobody is woken. A turn reads a topic from
+   * the copy of the projection pulled when it started, so a revision other than the current one, 0
+   * for a topic not there, means someone wrote or removed it since; the refusal carries the current
+   * text, which that copy lacks.
    */
   async writeKnowledge(actor: Actor, input: VerbInput<"write_knowledge">): Promise<Knowledge> {
     const args = VerbInputs.write_knowledge.parse(input);
     await this.authorize(actor, "write_knowledge");
     return this.mutex.run(async () => {
       await this.assertMayCurate(actor, args.project);
+      const file = this.knowledgeFile(args.project, args.topic);
+      const current = (await exists(file))
+        ? await this.knowledgeAt(file, args.project, args.topic)
+        : null;
+      const place = args.project ?? "the society";
+      if (current === null && args.revision !== 0) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `${place} has no knowledge topic ${args.topic}, so it has no revision ${args.revision}: it was removed since you read it, or never written. Write it with revision 0 to start it anew.`,
+        );
+      }
+      if (current !== null && args.revision !== current.revision) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `the knowledge topic ${args.topic} of ${place} is at revision ${current.revision}, updated by ${current.updatedBy} at ${current.updatedAt}, not ${args.revision}. Merge your changes into its current text, below, and write again with revision ${current.revision}.\n\n${current.body}`,
+        );
+      }
+      // Written anew after a removal, a topic goes on from the revision it was removed at, so a
+      // write that read the removed text never passes as one over the new.
+      const base = current?.revision ?? (await this.removedRevision(args.project, args.topic));
       const data = KnowledgeSchema.parse({
         topic: args.topic,
         project: args.project,
+        revision: base + 1,
         updatedBy: actor.name,
         updatedAt: this.now().toISOString(),
       });
-      const file =
-        args.project === null
-          ? this.paths.societyKnowledgeFile(args.topic)
-          : this.paths.projectKnowledgeFile(args.project, args.topic);
-      const replaced = await exists(file);
+      const replaced = current !== null;
       await writeMarkdown(file, data, args.body);
       await this.events.append("knowledge.written", actor.name, {
         topic: args.topic,
         project: args.project,
         replaced,
+        revision: data.revision,
       });
       const where = args.project === null ? "general" : channelRef(args.project, "general");
       await this.appendMessage(
@@ -2479,10 +2522,7 @@ export class Board {
     await this.authorize(actor, "remove_knowledge");
     return this.mutex.run(async () => {
       await this.assertMayCurate(actor, args.project);
-      const file =
-        args.project === null
-          ? this.paths.societyKnowledgeFile(args.topic)
-          : this.paths.projectKnowledgeFile(args.project, args.topic);
+      const file = this.knowledgeFile(args.project, args.topic);
       if (!(await exists(file))) {
         throw new BoardError(
           "NOT_FOUND",

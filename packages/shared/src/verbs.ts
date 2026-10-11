@@ -108,6 +108,8 @@ export const VerbInputs = {
     project: NameSchema.nullable().default(null),
     topic: NameSchema,
     body: z.string().min(1),
+    /** The `revision` in the frontmatter of the topic you read, 0 when it names none or for a new topic. */
+    revision: z.number().int().min(0),
   }),
   remove_knowledge: z.object({
     /** As for write_knowledge: a project you belong to, or null for society knowledge. */
@@ -215,7 +217,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Join a project, or add another citizen to one when your role allows it. Membership gives the pair a worktree and an onboarding turn, and follows the project's general; the result lists its other open channels, to subscribe to when the work needs them.",
   leave_project: "Leave a project, or remove another citizen from one when your role allows it.",
   write_knowledge:
-    "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those.",
+    "Write or replace a knowledge topic: durable facts every member of a project should know, or with project null the society's shared knowledge (steward and user). Not a message; use post_message for those. Pass the revision from the frontmatter of the topic you read, or 0 for a new topic; if it was written since, the call is refused with the current text to merge yours into.",
   remove_knowledge:
     "Remove a knowledge topic that is wrong, superseded, or folded into another, so no turn or search finds it again. Whoever may write the topic may remove it; the board keeps its text aside for the user to restore.",
   plan_task:

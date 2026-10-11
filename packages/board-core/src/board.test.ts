@@ -1470,7 +1470,7 @@ describe("Board", () => {
       () => board.createTask(USER, { project: "demo", title: "more" }),
       () => board.openThread(USER, { channel: "demo/general", title: "more" }),
       () => board.joinProject(USER, { project: "demo", agent: "eng-1" }),
-      () => board.writeKnowledge(USER, { project: "demo", topic: "notes", body: "x" }),
+      () => board.writeKnowledge(USER, { project: "demo", topic: "notes", body: "x", revision: 0 }),
       () => board.subscribe(ENG, { channel: "demo/dev" }),
       () => board.archiveProject(USER, { project: "demo", reason: "again" }),
     ]) {
@@ -1942,8 +1942,14 @@ describe("Board", () => {
       project: null,
       topic: "old-norm",
       body: "A superseded rule.",
+      revision: 0,
     });
-    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run the tests." });
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run the tests.",
+      revision: 0,
+    });
 
     // Removing is curated as writing is; nothing removes a topic that is not there.
     await expect(
@@ -2092,9 +2098,24 @@ describe("Board", () => {
   it("gives knowledge notes from before notices their notice once, by the event log rather than their words", async () => {
     const { board } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
-    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run the tests." });
-    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run them twice." });
-    await board.writeKnowledge(STEW, { project: null, topic: "norms", body: "Be brief." });
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run the tests.",
+      revision: 0,
+    });
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run them twice.",
+      revision: 1,
+    });
+    await board.writeKnowledge(STEW, {
+      project: null,
+      topic: "norms",
+      body: "Be brief.",
+      revision: 0,
+    });
     await board.removeKnowledge(STEW, { project: null, topic: "norms" });
     // A post worded like a note follows no knowledge verb, so it is talk.
     await board.postMessage(ENG, {
@@ -2337,19 +2358,21 @@ describe("Board", () => {
       project: "demo",
       topic: "testing",
       body: "Run `uv run pytest -q`; fixtures live under tests/fixtures.",
+      revision: 0,
     });
     expect(written).toMatchObject({ project: "demo", topic: "testing", updatedBy: "eng-1" });
     await expect(
-      board.writeKnowledge(ENG, { project: null, topic: "norms", body: "x" }),
+      board.writeKnowledge(ENG, { project: null, topic: "norms", body: "x", revision: 0 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await board.addProject(USER, { slug: "other" });
     await expect(
-      board.writeKnowledge(ENG, { project: "other", topic: "t", body: "x" }),
+      board.writeKnowledge(ENG, { project: "other", topic: "t", body: "x", revision: 0 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await board.writeKnowledge(STEW, {
       project: null,
       topic: "norms",
       body: "Summaries close threads. Silence is allowed.",
+      revision: 0,
     });
     expect(await board.readSocietyNorms()).toContain("Silence is allowed");
     expect((await board.listKnowledge("demo")).map((k) => k.topic)).toEqual(["testing"]);
@@ -2368,6 +2391,7 @@ describe("Board", () => {
       project: "demo",
       topic: "testing",
       body: "Run `uv run pytest -q` (updated).",
+      revision: 1,
     });
     expect((await board.listKnowledge("demo"))[0]?.body).toContain("(updated)");
     expect((await board.listChannel("demo/general")).at(-1)).toMatchObject({
@@ -2453,6 +2477,91 @@ describe("Board", () => {
       kind: "reflection",
     });
     expect(wake.payload["kind"]).toBe("reflection");
+  });
+
+  it("writes knowledge one revision at a time, and refuses a stale write with the current text", async () => {
+    const { board } = await society();
+    const first = await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Run the tests with uv.",
+      revision: 0,
+    });
+    expect(first).toMatchObject({ revision: 1, updatedBy: "eng-1" });
+    expect(await readFile(board.paths.projectKnowledgeFile("demo", "testing"), "utf8")).toContain(
+      "revision: 1",
+    );
+
+    // A writer that took the topic for new learns it was written since, text included, and writes nothing.
+    const stale = await board
+      .writeKnowledge(REV, { project: "demo", topic: "testing", body: "Run nothing.", revision: 0 })
+      .catch((error: unknown) => error);
+    expect(stale).toMatchObject({ code: "INVALID_STATE" });
+    expect(String(stale)).toContain("revision 1, updated by eng-1");
+    expect(String(stale)).toContain("Run the tests with uv.");
+    expect((await board.listKnowledge("demo"))[0]?.body).toBe("Run the tests with uv.\n");
+
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "testing",
+      body: "Run the tests twice.",
+      revision: 1,
+    });
+    expect((await board.listKnowledge("demo"))[0]).toMatchObject({
+      revision: 2,
+      updatedBy: "rev-1",
+    });
+    const events = (await board.readEvents(null)).filter((e) => e.type === "knowledge.written");
+    expect(events.map((e) => [e.actor, e.payload])).toEqual([
+      ["eng-1", { topic: "testing", project: "demo", replaced: false, revision: 1 }],
+      ["rev-1", { topic: "testing", project: "demo", replaced: true, revision: 2 }],
+    ]);
+
+    // A removed topic has no revision to write over; written anew, it goes on from where it was
+    // removed, so a write that read the removed text cannot replace the new one.
+    await board.removeKnowledge(ENG, { project: "demo", topic: "testing" });
+    const gone = await board
+      .writeKnowledge(REV, { project: "demo", topic: "testing", body: "Back.", revision: 2 })
+      .catch((error: unknown) => error);
+    expect(gone).toMatchObject({ code: "INVALID_STATE" });
+    expect(String(gone)).toContain("demo has no knowledge topic testing");
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "testing",
+      body: "Back.",
+      revision: 0,
+    });
+    expect((await board.listKnowledge("demo"))[0]).toMatchObject({ revision: 3, body: "Back.\n" });
+    await expect(
+      board.writeKnowledge(REV, { project: "demo", topic: "testing", body: "Old.", revision: 1 }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+
+    // A topic written before revisions reads as revision 0 and keeps its author.
+    await mkdir(board.paths.societyKnowledge(), { recursive: true });
+    await writeFile(
+      board.paths.societyKnowledgeFile("norms"),
+      "---\ntopic: norms\nproject: null\nupdatedBy: user\nupdatedAt: '2026-09-30T05:19:26.611Z'\n---\nBe brief.\n",
+    );
+    expect(await board.listKnowledge(null)).toEqual([
+      {
+        topic: "norms",
+        project: null,
+        revision: 0,
+        updatedBy: "user",
+        updatedAt: "2026-09-30T05:19:26.611Z",
+        body: "Be brief.\n",
+      },
+    ]);
+    await expect(
+      board.writeKnowledge(USER, { project: null, topic: "norms", body: "Briefer.", revision: 1 }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    const norms = await board.writeKnowledge(USER, {
+      project: null,
+      topic: "norms",
+      body: "Briefer.",
+      revision: 0,
+    });
+    expect(norms).toMatchObject({ revision: 1, updatedBy: "user" });
   });
 
   it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {

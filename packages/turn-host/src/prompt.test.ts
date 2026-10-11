@@ -633,6 +633,7 @@ describe("buildTurnPrompt", () => {
           {
             topic: "testing",
             project: "demo",
+            revision: 2,
             updatedBy: "eng-1",
             updatedAt: "2026-09-28T10:00:00.000Z",
             body: "Run the tests with uv.",
@@ -642,7 +643,7 @@ describe("buildTurnPrompt", () => {
     });
     expect(listed).not.toContain("## Reflection");
     expect(listed).toContain("Topics under /data/board/projects/demo/knowledge");
-    expect(listed).toContain("- testing: updated by eng-1 at 2026-09-28T10:00:00.000Z");
+    expect(listed).toContain("- testing: revision 2, updated by eng-1 at 2026-09-28T10:00:00.000Z");
     expect(listed).not.toContain("Run the tests with uv.");
   });
 

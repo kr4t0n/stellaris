@@ -272,6 +272,7 @@ export class ScriptedBackend implements AgentBackend {
           project: "beta",
           topic: "testing",
           body: "Run uv sync --locked, then uv run pytest -q; carried over from alpha.",
+          revision: 0,
         });
         return done("onboarded on beta and wrote its testing knowledge from the alpha lesson");
       }
@@ -292,6 +293,7 @@ export class ScriptedBackend implements AgentBackend {
           project: "alpha",
           topic: "testing",
           body: "Run uv sync --locked, then uv run pytest -q.",
+          revision: 0,
         });
         return remembered("wrote the uv lesson, the uv-setup skill, and alpha's testing knowledge");
       }

@@ -404,8 +404,14 @@ describe("board server routes", () => {
       project: "demo",
       topic: "testing",
       body: "Run the tests with uv.",
+      revision: 0,
     });
-    await board.writeKnowledge(USER, { project: null, topic: "norms", body: "Be brief." });
+    await board.writeKnowledge(USER, {
+      project: null,
+      topic: "norms",
+      body: "Be brief.",
+      revision: 0,
+    });
     const topics = z.array(
       z.object({ topic: z.string(), project: z.string().nullable(), body: z.string() }),
     );

@@ -541,7 +541,7 @@ describe("Phase 6 exit criterion", () => {
     const reflection = backend.prompts.findLast((p) => p.includes("## Reflection"));
     expect(reflection).toContain("# Turn for mem-1 on alpha");
     expect(reflection).toContain("Trigger: reflection. scheduled reflection");
-    expect(reflection).toContain("- testing: updated by mem-1");
+    expect(reflection).toContain("- testing: revision 1, updated by mem-1");
     const proposals = await board.listProposals();
     expect(proposals).toEqual([
       expect.objectContaining({ kind: "skill", proposedBy: "mem-1", status: "proposed" }),

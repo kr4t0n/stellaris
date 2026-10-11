@@ -517,7 +517,9 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
         "",
       );
       for (const topic of knowledge.topics) {
-        lines.push(`- ${topic.topic}: updated by ${topic.updatedBy} at ${topic.updatedAt}`);
+        lines.push(
+          `- ${topic.topic}: revision ${topic.revision}, updated by ${topic.updatedBy} at ${topic.updatedAt}`,
+        );
       }
     }
   }

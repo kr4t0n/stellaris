@@ -1,6 +1,13 @@
 import type { Member, RoleCharter, RunningTurn } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { completeMention, listed, mentionAt, reachedTurns, wakeLine, wakesFor } from "./compose.js";
+import {
+  completeMention,
+  listed,
+  mentionAt,
+  reachedTurns,
+  reachLine,
+  wakesFor,
+} from "./compose.js";
 
 function member(name: string, role: string, extra: Partial<Member> = {}): Member {
   return {
@@ -75,7 +82,7 @@ describe("composing", () => {
     expect(listed(["desk", "ada"])).toBe("desk and ada");
   });
 
-  it("names whom a post reaches in a turn under way in its conversation, and whom it wakes", () => {
+  it("names whom a post reaches in a turn under way in its conversation", () => {
     const members = [
       member("ada", "researcher", { memberships: ["lab"] }),
       member("ref", "referee", { memberships: ["lab"] }),
@@ -103,11 +110,7 @@ describe("composing", () => {
     // desk's runner cannot steer: its post waits for a turn of its own.
     expect(reachedTurns(["desk"], members, turns, { channel: "general" })).toEqual([]);
 
-    expect(wakeLine(["ada"], ["desk"])).toBe(
-      "Sending reaches ada in the turn under way and wakes desk: a turn each.",
-    );
-    expect(wakeLine(["ada"], [])).toBe("Sending reaches ada in the turn under way.");
-    expect(wakeLine([], ["desk"])).toBe("Sending wakes desk: a turn each.");
-    expect(wakeLine([], [])).toBeNull();
+    expect(reachLine(["ada", "ref"])).toBe("Sending reaches ada and ref in the turn under way.");
+    expect(reachLine([])).toBeNull();
   });
 });

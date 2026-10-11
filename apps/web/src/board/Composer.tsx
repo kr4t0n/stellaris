@@ -6,7 +6,7 @@ import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useScheduler, useSession } from "../lib/session.js";
 import { askTitle } from "./asks.js";
-import { completeMention, mentionAt, reachedTurns, wakeLine, wakesFor } from "./compose.js";
+import { completeMention, mentionAt, reachedTurns, reachLine, wakesFor } from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -21,8 +21,8 @@ const MAX_CANDIDATES = 6;
 
 /**
  * Posts as the user into a channel or a thread. Enter sends and Shift+Enter breaks the line; an
- * `@` offers the citizens to mention; the line under the box names whom sending will wake, and
- * whom it reaches in a turn already under way in the conversation it goes to.
+ * `@` offers the citizens to mention; the line under the box names whom sending reaches in a turn
+ * already under way in the conversation it goes to.
  */
 export function Composer({
   target,
@@ -38,10 +38,7 @@ export function Composer({
   placeholder: string;
   /** What the box starts with, and returns to after a send, such as a mention. */
   initialText?: string;
-  /**
-   * The box with Send beside it and no line under it of whom sending wakes, for the ask box, where
-   * every post wakes the front desk.
-   */
+  /** The box with Send beside it and no line under it, for the ask box. */
   oneLine?: boolean;
   className?: string;
   /** For a composer the user just opened, such as the ask box. */
@@ -130,10 +127,7 @@ export function Composer({
           scheduler.data?.turns ?? [],
           "channel" in target ? { channel: target.channel } : { thread: target.threadId },
         );
-  const line = wakeLine(
-    reached,
-    wakes.filter((name) => !reached.includes(name)),
-  );
+  const line = reachLine(reached);
 
   const complete = (name: string): void => {
     if (fragment === null) {

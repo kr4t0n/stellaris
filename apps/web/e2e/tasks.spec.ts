@@ -15,6 +15,9 @@ test("a task's view holds its thread: each handover with its step, and what the 
 
   const box = view.getByRole("textbox", { name: "Write in the task's thread" });
   await box.fill("Reading it now; I'll sign off today.");
+  // The line under the box keeps its hint rather than counting the front desk's wake.
+  await expect(view).toContainText("Enter to send · Shift+Enter for a new line");
+  await expect(view).not.toContainText("Sending wakes");
   await box.press("Enter");
   await expect(thread).toContainText("Reading it now; I'll sign off today.");
   expect(board.writes.at(-1)).toEqual({

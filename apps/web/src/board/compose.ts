@@ -79,14 +79,9 @@ export function reachedTurns(
   );
 }
 
-/** The line under the composer: whom sending reaches in a turn under way, and whom it wakes. */
-export function wakeLine(reached: readonly string[], woken: readonly string[]): string | null {
-  const reaches = reached.length === 0 ? null : `reaches ${listed(reached)} in the turn under way`;
-  const wakes = woken.length === 0 ? null : `wakes ${listed(woken)}: a turn each`;
-  if (reaches === null && wakes === null) {
-    return null;
-  }
-  return `Sending ${[reaches, wakes].filter((part) => part !== null).join(" and ")}.`;
+/** The line under the composer when sending reaches a turn under way, else null. */
+export function reachLine(reached: readonly string[]): string | null {
+  return reached.length === 0 ? null : `Sending reaches ${listed(reached)} in the turn under way.`;
 }
 
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });

@@ -1,6 +1,6 @@
 import type { Message, MessageNotice } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { foldNotices, knowledgeDone, namesPhrase, noticeOf } from "./notices.js";
+import { foldNotices, knowledgeDone, namesPhrase } from "./notices.js";
 
 let next = 0;
 
@@ -29,54 +29,6 @@ function knowledge(
 function noted(notice: MessageNotice, author = "ada"): Message {
   return post("Knowledge noted.", { notice, author });
 }
-
-describe("noticeOf", () => {
-  it("takes a post's own notice, and leaves talk alone", () => {
-    expect(noticeOf(noted(knowledge("updated")))).toEqual(knowledge("updated"));
-    expect(noticeOf(post("The seeds are fixed now."))).toBeNull();
-  });
-
-  it("reads a knowledge note from before notices from the board's own words", () => {
-    expect(noticeOf(post("Knowledge updated: seeds. It is under knowledge/seeds.md."))).toEqual(
-      knowledge("updated"),
-    );
-    expect(
-      noticeOf(
-        post("Knowledge written: norms. It is under knowledge/norms.md of the society.", {
-          channel: "general",
-        }),
-      ),
-    ).toEqual(knowledge("written", "norms", null));
-    expect(
-      noticeOf(post("Knowledge removed: seeds. It is no longer under knowledge/seeds.md.\n")),
-    ).toEqual(knowledge("removed"));
-  });
-
-  it("reads no note that strays from the template or from where the board posts it", () => {
-    // Quoted in a longer post, in a thread, in another channel, or naming another place.
-    expect(
-      noticeOf(post("Knowledge updated: seeds. It is under knowledge/seeds.md. Read it.")),
-    ).toBeNull();
-    expect(
-      noticeOf(
-        post("Knowledge updated: seeds. It is under knowledge/seeds.md.", {
-          thread: "01M3Q2KKKKKKKKKKKKKKKKKKZZ",
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      noticeOf(
-        post("Knowledge updated: seeds. It is under knowledge/seeds.md.", {
-          channel: "lab/release-1",
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      noticeOf(post("Knowledge updated: seeds. It is under knowledge/seeds.md of the society.")),
-    ).toBeNull();
-    expect(noticeOf(post("Knowledge updated: seeds. It is under knowledge/other.md."))).toBeNull();
-  });
-});
 
 /** A folded stream of posts: each talk by its body, each run by its length. */
 function fold(messages: readonly Message[]): (string | number)[] {

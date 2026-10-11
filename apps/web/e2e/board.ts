@@ -125,13 +125,13 @@ function labPost(minute: number, author: string, body: string, notice?: unknown)
 
 const EXPERIMENTS = { kind: "knowledge", topic: "experiments", project: "lab" };
 
-/**
- * lab's general: talk, and the notes knowledge verbs posted, one from before notes carried their
- * notice, which the interface reads from its words.
- */
+/** lab's general: talk, and the notes knowledge verbs posted. */
 const LAB_GENERAL = [
   labPost(1, "ada", "Seeds are fixed at 42 from now on."),
-  labPost(2, "ada", "Knowledge written: experiments. It is under knowledge/experiments.md."),
+  labPost(2, "ada", "Knowledge written: experiments. It is under knowledge/experiments.md.", {
+    ...EXPERIMENTS,
+    action: "written",
+  }),
   labPost(3, "ref", "Knowledge updated: experiments. It is under knowledge/experiments.md.", {
     ...EXPERIMENTS,
     action: "updated",

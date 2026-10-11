@@ -10,7 +10,7 @@ test("a channel shows knowledge notes as quiet lines, a run on one topic as one,
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view).toContainText("Seeds are fixed at 42 from now on.");
   await expect(view).toContainText("Thanks, the harness reads it.");
-  // A note from before notices, read from its words, folds with the two after it.
+  // A topic written and then updated twice folds into one line, whoever wrote it.
   await expect(view).toContainText(
     "ada and ref wrote knowledge experiments · then updated it 2 times",
   );

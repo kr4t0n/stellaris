@@ -1,40 +1,4 @@
-import {
-  KnowledgeNoticeSchema,
-  parseChannelRef,
-  type KnowledgeNotice,
-  type Message,
-  type MessageNotice,
-} from "@stellaris/shared";
-
-/** The note a knowledge verb posted before posts carried their notice, in the board's own words. */
-const KNOWLEDGE_NOTE =
-  /^Knowledge (written|updated|removed): ([a-z0-9][a-z0-9-]{0,31})\. It is (?:no longer )?under knowledge\/\2\.md( of the society)?\.$/;
-
-/**
- * What a post records as a notice, or null for talk. A knowledge note from before posts carried
- * their notice is read from its text, which the board wrote from a fixed template.
- */
-export function noticeOf(message: Message): MessageNotice | null {
-  if (message.notice !== undefined) {
-    return message.notice;
-  }
-  const note = message.thread === undefined ? KNOWLEDGE_NOTE.exec(message.body.trim()) : null;
-  if (note === null) {
-    return null;
-  }
-  // The board posted it in the topic's own general: the society's for a society topic.
-  const { project, channel } = parseChannelRef(message.channel);
-  if (channel !== "general" || (note[3] !== undefined) !== (project === null)) {
-    return null;
-  }
-  const parsed = KnowledgeNoticeSchema.safeParse({
-    kind: "knowledge",
-    action: note[1],
-    topic: note[2],
-    project,
-  });
-  return parsed.success ? parsed.data : null;
-}
+import type { KnowledgeNotice, Message, MessageNotice } from "@stellaris/shared";
 
 /** Notices drawn as one line: one post's, or a run of posts in a row about one subject. */
 export interface NoticeRun {
@@ -72,8 +36,8 @@ export function foldNotices<T>(
   let open: { messages: Message[]; notices: MessageNotice[] } | null = null;
   for (const item of items) {
     const message = messageOf(item);
-    const notice = message === undefined ? null : noticeOf(message);
-    if (message === undefined || notice === null) {
+    const notice = message?.notice;
+    if (message === undefined || notice === undefined) {
       folded.push({ kind: "item", item });
       open = null;
     } else if (open !== null && continues(open, notice)) {

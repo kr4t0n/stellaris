@@ -2009,6 +2009,66 @@ describe("Board", () => {
     expect((await reopened.readRole("engineer")).verbs).not.toContain("remove_knowledge");
   });
 
+  it("gives knowledge notes from before notices their notice once, by the event log rather than their words", async () => {
+    const { board } = await society();
+    const STEW: Actor = { name: "stew", role: "steward" };
+    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run the tests." });
+    await board.writeKnowledge(ENG, { project: "demo", topic: "testing", body: "Run them twice." });
+    await board.writeKnowledge(STEW, { project: null, topic: "norms", body: "Be brief." });
+    await board.removeKnowledge(STEW, { project: null, topic: "norms" });
+    // A post worded like a note follows no knowledge verb, so it is talk.
+    await board.postMessage(ENG, {
+      channel: "demo/general",
+      body: "Knowledge updated: testing. It is under knowledge/testing.md.",
+    });
+    // As older builds wrote them: the same notes, with no notice.
+    const notes = [
+      ...(await board.listChannel("demo/general")),
+      ...(await board.listChannel("general")),
+    ].filter((message) => message.notice !== undefined);
+    expect(notes).toHaveLength(4);
+    for (const note of notes) {
+      const file = board.paths.messageFile(
+        board.paths.channelDir(note.channel),
+        note.id,
+        note.author,
+      );
+      const text = await readFile(file, "utf8");
+      await writeFile(file, text.replace(/^notice:\n(?: {2}.*\n)+/m, ""));
+    }
+    expect((await board.listChannel("demo/general")).map((message) => message.notice)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    const reopened = await Board.open(dir, { now });
+    const demo = await reopened.listChannel("demo/general");
+    expect(demo.map((message) => [message.author, message.notice?.action])).toEqual([
+      ["eng-1", "written"],
+      ["eng-1", "updated"],
+      ["eng-1", undefined],
+    ]);
+    expect(demo[0]?.notice).toEqual({
+      kind: "knowledge",
+      action: "written",
+      topic: "testing",
+      project: "demo",
+    });
+    expect(demo[0]?.body).toBe(notes[0]?.body);
+    expect(
+      (await reopened.listChannel("general")).flatMap((message) =>
+        message.notice === undefined ? [] : [[message.notice.action, message.notice.project]],
+      ),
+    ).toEqual([
+      ["written", null],
+      ["removed", null],
+    ]);
+    // Once applied, it is recorded and not applied again.
+    const alignments = await readFile(path.join(board.paths.state(), "alignments.json"), "utf8");
+    expect(alignments).toContain("knowledge-notices");
+  });
+
   it("lands a ghpr task through the pull request linked to it, on its project's GitHub repository", async () => {
     const { board } = await society();
     // Pull requests are merged on GitHub, so a project without a remote there cannot take ghpr.

@@ -484,6 +484,14 @@ const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
 const CHANNEL_CONVERSATIONS = "channel-conversations";
 const DASHBOARD_UPDATES = "dashboard-updates-granted";
 const CRON_VERBS = "cron-verbs-granted";
+const KNOWLEDGE_NOTICES = "knowledge-notices";
+
+/** What a knowledge verb's event says, which a note from before notices takes its notice from. */
+const KnowledgeEventSchema = z.object({
+  topic: NameSchema,
+  project: NameSchema.nullable(),
+  replaced: z.boolean().optional(),
+});
 
 /** The verbs a citizen sets, changes, and ends its crons with. */
 const CRON_VERB_NAMES: readonly VerbName[] = ["create_cron", "update_cron", "remove_cron"];
@@ -751,6 +759,7 @@ export class Board {
       CHANNEL_CONVERSATIONS,
       DASHBOARD_UPDATES,
       CRON_VERBS,
+      KNOWLEDGE_NOTICES,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -793,7 +802,64 @@ export class Board {
     if (pending.includes(CRON_VERBS)) {
       await this.grantToEveryRole(CRON_VERB_NAMES);
     }
+    if (pending.includes(KNOWLEDGE_NOTICES)) {
+      await this.noticeKnowledgeNotes();
+    }
     await writeJson(file, { applied: [...applied, ...pending] });
+  }
+
+  /**
+   * Gives each knowledge note from before notes carried their notice the notice it would carry
+   * now. The event log, not the note's words, says which post is one: a knowledge verb appends
+   * its event and then its note under the mutex, so a note is the post right after such an event,
+   * by the same actor, at the top of the general channel of the topic's place. A post written to
+   * look like a note follows no such event and is left as it is.
+   */
+  private async noticeKnowledgeNotes(): Promise<void> {
+    let before: BoardEvent | undefined;
+    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
+      const verb = before;
+      before = event;
+      if (
+        event.type !== "message.posted" ||
+        verb === undefined ||
+        verb.actor !== event.actor ||
+        (verb.type !== "knowledge.written" && verb.type !== "knowledge.removed")
+      ) {
+        continue;
+      }
+      const knowledge = KnowledgeEventSchema.safeParse(verb.payload);
+      const id = UlidSchema.safeParse(event.payload["id"]);
+      if (
+        !knowledge.success ||
+        !id.success ||
+        (event.payload["thread"] ?? null) !== null ||
+        event.payload["channel"] !== channelRef(knowledge.data.project, "general")
+      ) {
+        continue;
+      }
+      const { topic, project, replaced } = knowledge.data;
+      const file = this.paths.messageFile(
+        this.paths.channelDir(channelRef(project, "general")),
+        id.data,
+        event.actor,
+      );
+      if (!(await exists(file))) {
+        continue;
+      }
+      const { data, body, error } = await readLooseMarkdown(file);
+      if (error !== null || data["notice"] !== undefined) {
+        continue;
+      }
+      const notice: MessageNotice = {
+        kind: "knowledge",
+        action:
+          verb.type === "knowledge.removed" ? "removed" : replaced === true ? "updated" : "written",
+        topic,
+        project,
+      };
+      await writeMarkdown(file, { ...data, notice }, body);
+    }
   }
 
   /**

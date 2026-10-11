@@ -1,6 +1,6 @@
 import { describeCharter, type Proposal } from "@stellaris/shared";
 
-export type EntityKind = "task" | "proposal" | "thread";
+export type EntityKind = "task" | "proposal" | "thread" | "cron";
 
 /** Something on the board an id in text stands for, with the words to show in its place. */
 export interface Entity {
@@ -20,9 +20,9 @@ export const NO_ENTITIES: EntityIndex = new Map();
 const ULID = /(?<![\w/.-])[0-9A-HJKMNP-TV-Z]{26}(?![\w/-]|\.\w)/g;
 
 /**
- * What each id names: threads by their titles, tasks by theirs, and proposals as the board
- * describes their charters. A task's and a proposal's threads share their ids, so the later
- * sources win.
+ * What each id names: threads by their titles, tasks by theirs, proposals as the board describes
+ * their charters, and crons by their titles. A task's and a proposal's threads share their ids, so
+ * the later sources win.
  */
 export function entityIndex(
   threads: readonly {
@@ -32,6 +32,7 @@ export function entityIndex(
   }[],
   tasks: readonly { readonly id: string; readonly title: string }[],
   proposals: readonly Proposal[],
+  crons: readonly { readonly id: string; readonly title: string }[] = [],
 ): EntityIndex {
   const index = new Map<string, Entity>();
   for (const thread of threads) {
@@ -52,6 +53,9 @@ export function entityIndex(
       id: proposal.id,
       title: describeCharter(proposal.kind, proposal.charter),
     });
+  }
+  for (const cron of crons) {
+    index.set(cron.id, { kind: "cron", id: cron.id, title: cron.title });
   }
   return index;
 }
@@ -97,15 +101,20 @@ export function withTitles(text: string, index: EntityIndex): string {
     .join("");
 }
 
-/** Where an entity's view is, as the router's paths spell it. */
+/** Where an entity's view is, as the router's paths spell it; a cron opens in the crons view. */
 export function entityHref(entity: Entity): string {
-  return `/${entity.kind}/${entity.id}`;
+  return entity.kind === "cron" ? `/crons?cron=${entity.id}` : `/${entity.kind}/${entity.id}`;
 }
 
 const ENTITY_HREF = /^\/(task|proposal|thread)\/([0-9A-HJKMNP-TV-Z]{26})$/;
+const CRON_HREF = /^\/crons\?cron=([0-9A-HJKMNP-TV-Z]{26})$/;
 
 /** The entity a link made by `remarkEntities` points at, or null for any other link. */
 export function entityOfHref(href: string | undefined): { kind: EntityKind; id: string } | null {
+  const cron = href === undefined ? undefined : CRON_HREF.exec(href)?.[1];
+  if (cron !== undefined) {
+    return { kind: "cron", id: cron };
+  }
   const match = href === undefined ? null : ENTITY_HREF.exec(href);
   const kind = match?.[1];
   const id = match?.[2];
@@ -159,7 +168,7 @@ function walk(node: MdNode, index: EntityIndex): void {
   });
 }
 
-/** A remark plugin that turns the ids of known tasks, proposals, and threads into links named by their titles. */
+/** A remark plugin that turns the ids of known tasks, proposals, threads, and crons into links named by their titles. */
 export function remarkEntities(options: { index: EntityIndex }) {
   return (tree: MdNode): void => walk(tree, options.index);
 }

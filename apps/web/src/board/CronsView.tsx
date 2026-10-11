@@ -71,13 +71,23 @@ function CronRow({
   member,
   zone,
   now,
+  focused,
 }: {
   cron: CronRecord;
   next: Date | null;
   member: Member | undefined;
   zone: string;
   now: number;
+  /** The cron the address names, as a link from text that mentions it: opened and brought into view. */
+  focused: boolean;
 }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (focused && details.current !== null) {
+      details.current.open = true;
+      details.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [focused]);
   const { api } = useSession();
   const client = useQueryClient();
   const [removing, setRemoving] = useState(false);
@@ -108,8 +118,8 @@ function CronRow({
   const failing = failingCron(cron);
 
   return (
-    <li className="rounded-lg">
-      <details className="group">
+    <li className={`rounded-lg ${focused ? "bg-surface-2/30" : ""}`}>
+      <details ref={details} className="group">
         <summary className="cursor-pointer list-none rounded-lg px-2 py-2 hover:bg-surface-2/40 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none">
           <div className="flex items-baseline gap-2 text-sm">
             {member?.cli === undefined || member.cli === null ? null : (
@@ -502,7 +512,7 @@ function NewCronForm({
  * citizen, and the society's time zone, here. `agent` in the address shows one citizen's.
  */
 export function CronsView() {
-  const { agent } = useSearch({ from: "/crons" });
+  const { agent, cron: focus } = useSearch({ from: "/crons" });
   const crons = useCrons();
   const members = useMembers();
   const society = useSociety();
@@ -577,6 +587,7 @@ export function CronsView() {
                 member={memberOf(cron.agent)}
                 zone={zone}
                 now={now}
+                focused={cron.id === focus}
               />
             ))}
           </ul>
@@ -593,13 +604,14 @@ export function CronsView() {
                   member={memberOf(cron.agent)}
                   zone={zone}
                   now={now}
+                  focused={cron.id === focus}
                 />
               ))}
             </ul>
           </section>
         )}
         {groups.ended.length === 0 ? null : (
-          <details className="mt-3">
+          <details className="mt-3" open={groups.ended.some((cron) => cron.id === focus)}>
             <summary className="cursor-pointer px-2 pb-1 text-section">
               Ended ({groups.ended.length})
             </summary>
@@ -612,6 +624,7 @@ export function CronsView() {
                   member={memberOf(cron.agent)}
                   zone={zone}
                   now={now}
+                  focused={cron.id === focus}
                 />
               ))}
             </ul>

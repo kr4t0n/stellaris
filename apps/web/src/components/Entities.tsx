@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { createContext, useContext, type ReactNode } from "react";
 import { NO_ENTITIES, splitEntities, type EntityIndex, type EntityKind } from "../lib/entities.js";
 
-/** What each id in the board's text names; the Playground provides it from threads and proposals. */
+/** What each id in the board's text names; the Playground provides it from threads, tasks, proposals, and crons. */
 export const EntityContext = createContext<EntityIndex>(NO_ENTITIES);
 
 export function useEntities(): EntityIndex {
@@ -12,7 +12,7 @@ export function useEntities(): EntityIndex {
 const LINK =
   "text-fg-primary underline decoration-fg-muted underline-offset-2 hover:decoration-fg-primary";
 
-/** A link to a task's, a proposal's, or a thread's view, with its full id on hover. */
+/** A link to a task's, a proposal's, or a thread's view, or a cron in the crons view, with its full id on hover. */
 export function EntityLink({
   kind,
   id,
@@ -28,6 +28,13 @@ export function EntityLink({
   if (kind === "task") {
     return (
       <Link to="/task/$taskId" params={{ taskId: id }} title={title} className={className}>
+        {children}
+      </Link>
+    );
+  }
+  if (kind === "cron") {
+    return (
+      <Link to="/crons" search={{ cron: id }} title={title} className={className}>
         {children}
       </Link>
     );

@@ -626,7 +626,7 @@ function cronFixtures(): Array<Record<string, unknown>> {
       lastFiredAt: "2026-10-09T09:00:00.000Z",
       lastRun: { turnId: DESK_TURN_ID, at: "2026-10-09T09:01:00.000Z", outcome: "completed" },
       failures: 0,
-      note: "Summarize what changed overnight in **general**.",
+      note: "Summarize what changed overnight in **general**, once cron 01M3Q2CRNAAAAAAAAAAAAAAAA2 has run.",
     },
     {
       id: FAILING_CRON,

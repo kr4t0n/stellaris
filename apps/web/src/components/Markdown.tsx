@@ -17,7 +17,7 @@ function LocalPath({ href, children }: { href: string | undefined; children?: Re
 }
 
 /**
- * A link to a task, a proposal, or a thread, or to a file on a task's branch, stays in the
+ * A link to a task, a proposal, a thread, or a cron, or to a file on a task's branch, stays in the
  * playground; any other path on a machine is text, since nothing on the board can open it; and any
  * other link leaves in a new tab, without handing it a reference back.
  */

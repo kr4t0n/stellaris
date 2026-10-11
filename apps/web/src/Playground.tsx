@@ -94,9 +94,10 @@ export function Playground() {
   const threads = useThreads();
   const tasks = useAllTasks();
   const proposals = useProposals();
+  const cronList = useCrons();
   const entities = useMemo(
-    () => entityIndex(threads.data ?? [], tasks, proposals.data ?? []),
-    [threads.data, tasks, proposals.data],
+    () => entityIndex(threads.data ?? [], tasks, proposals.data ?? [], cronList.data ?? []),
+    [threads.data, tasks, proposals.data, cronList.data],
   );
   const navigate = useNavigate();
   const pause = useMutation({
@@ -171,7 +172,7 @@ export function Playground() {
         : null;
   const attention = useNeedsYou().length;
   const enrolling = useEnrollments().data?.length ?? 0;
-  const failingCrons = useCrons().data?.filter(failingCron).length ?? 0;
+  const failingCrons = cronList.data?.filter(failingCron).length ?? 0;
   const activeOverview =
     pathname === "/society"
       ? SOCIETY_SCOPE

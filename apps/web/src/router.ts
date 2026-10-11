@@ -95,9 +95,12 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/crons",
-    // `agent` shows one citizen's crons, as its view links them.
-    validateSearch: (search: Record<string, unknown>): { agent?: string } =>
-      typeof search["agent"] === "string" ? { agent: search["agent"] } : {},
+    // `agent` shows one citizen's crons, as its view links them; `cron` opens one, as text that
+    // names it links it.
+    validateSearch: (search: Record<string, unknown>): { agent?: string; cron?: string } => ({
+      ...(typeof search["agent"] === "string" ? { agent: search["agent"] } : {}),
+      ...(typeof search["cron"] === "string" ? { cron: search["cron"] } : {}),
+    }),
     component: lazyRouteComponent(() => import("./board/CronsView.js"), "CronsView"),
   }),
   createRoute({

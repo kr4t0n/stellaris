@@ -1,6 +1,7 @@
 import type { Proposal } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
+  entityHref,
   entityIndex,
   entityOfHref,
   remarkEntities,
@@ -12,6 +13,7 @@ import {
 const TASK = "01M3RC44KEZX7P9V3PY8YVH1SZ";
 const PROPOSAL = "01M3PY56V68VFS0EG5ER4B9AMD";
 const TOPIC = "01M3Q2AAAAAAAAAAAAAAAAAAA7";
+const CRON = "01M4N2H53YHDVEZZH37KZNDDYG";
 const UNKNOWN = "01M3ZZZZZZZZZZZZZZZZZZZZZZ";
 
 const proposal: Proposal = {
@@ -32,6 +34,7 @@ const index = entityIndex(
   ],
   [{ id: TASK, title: "Build the sorting page" }],
   [proposal],
+  [{ id: CRON, title: "Check the deploy" }],
 );
 
 const titles = (pieces: ReturnType<typeof splitEntities>) =>
@@ -43,7 +46,20 @@ describe("entities", () => {
       ["task", "Build the sorting page"],
       ["proposal", "skill refereed-research: Plan a refereed study"],
       ["thread", "Which source wins?"],
+      ["cron", "Check the deploy"],
     ]);
+  });
+
+  it("reads a cron's id as its title, linked to the crons view opened on it", () => {
+    expect(titles(splitEntities(`Set cron ${CRON} "Check the deploy" for nine.`, index))).toEqual([
+      "Set cron ",
+      "[cron:Check the deploy]",
+      " for nine.",
+    ]);
+    const cron = index.get(CRON);
+    expect(cron === undefined ? null : entityHref(cron)).toBe(`/crons?cron=${CRON}`);
+    expect(entityOfHref(`/crons?cron=${CRON}`)).toEqual({ kind: "cron", id: CRON });
+    expect(entityOfHref(`/crons?agent=desk`)).toBeNull();
   });
 
   it("reads known ids as what they name and leaves unknown ids, branches, and paths as written", () => {

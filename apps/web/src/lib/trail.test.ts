@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { placeName, previousView, visited } from "./trail.js";
 
 const TASK = "01M4D03FTQRBZ6JCCS1QNWDZ4Q";
+const CRON = "01M4N2H53YHDVEZZH37KZNDDYG";
 
 describe("the trail", () => {
   it("keeps the address of each step, and drops the steps a new visit replaces", () => {
@@ -25,7 +26,12 @@ describe("the trail", () => {
 
   it("names the view it returns to as the board knows it", () => {
     const names = {
-      entity: (id: string) => (id === TASK ? "Compare shortest-path algorithms" : undefined),
+      entity: (id: string) =>
+        id === TASK
+          ? "Compare shortest-path algorithms"
+          : id === CRON
+            ? "Check the deploy"
+            : undefined,
       project: (slug: string) => (slug === "lab" ? "Lab" : undefined),
     };
     expect(placeName(`/task/${TASK}/files/docs/report.md?line=7`, names)).toBe("report.md");
@@ -38,5 +44,7 @@ describe("the trail", () => {
     expect(placeName("/knowledge/lab/seeds", names)).toBe("seeds");
     expect(placeName("/citizen/ada?tab=turns", names)).toBe("ada");
     expect(placeName("/needs-you", names)).toBe("what needs you");
+    expect(placeName(`/crons?cron=${CRON}`, names)).toBe("Check the deploy");
+    expect(placeName("/crons?agent=ada", names)).toBe("the crons");
   });
 });

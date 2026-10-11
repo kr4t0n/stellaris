@@ -54,7 +54,7 @@ export function saveTrail(trail: Trail): void {
 
 /** What the board knows a place by, to name the view an arrow returns to. */
 export interface PlaceNames {
-  /** The title of a task, a proposal, or a thread, by id. */
+  /** The title of a task, a proposal, a thread, or a cron, by id. */
   readonly entity: (id: string) => string | undefined;
   /** A project's name, by slug. */
   readonly project: (slug: string) => string | undefined;
@@ -88,6 +88,10 @@ export function placeName(href: string, names: PlaceNames): string {
   }
   if (first === "citizen") {
     return decodeURIComponent(second);
+  }
+  if (first === "crons") {
+    const cron = new URL(href, "http://board").searchParams.get("cron");
+    return (cron === null ? undefined : names.entity(cron)) ?? "the crons";
   }
   const views: Readonly<Record<string, string>> = {
     society: "the society",

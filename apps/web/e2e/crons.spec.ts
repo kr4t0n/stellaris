@@ -39,7 +39,7 @@ test("pauses, resumes, and removes a cron, and sets the society's time zone", as
   const board = await fakeBoard(page);
   await page.goto("/crons");
   const running = page.getByRole("list", { name: "Running" });
-  await running.getByText("Check the build").click();
+  await running.locator("summary").getByText("Check the build").click();
   await running.getByRole("button", { name: "Pause" }).click();
   const paused = page.getByRole("region", { name: "Paused" });
   await expect(paused).toContainText("Check the build");
@@ -48,7 +48,7 @@ test("pauses, resumes, and removes a cron, and sets the society's time zone", as
   await paused.getByRole("button", { name: "Resume" }).click();
   await expect(paused).toBeHidden();
 
-  await running.getByText("Check the build").click();
+  await running.locator("summary").getByText("Check the build").click();
   await running.getByRole("button", { name: "Remove…" }).click();
   const remove = page.getByRole("form", { name: "Remove Check the build" });
   await expect(remove.getByRole("button", { name: "Remove cron" })).toBeDisabled();
@@ -119,4 +119,18 @@ test("sets a cron for a citizen, saying when it would fire or why it cannot", as
       },
     },
   ]);
+});
+
+test("a cron's id in text reads as its title, and opens the cron", async ({ page }) => {
+  await fakeBoard(page);
+  await page.goto("/crons");
+  const running = page.getByRole("list", { name: "Running" }).getByRole("listitem");
+  await running.nth(1).getByText("Morning digest").click();
+  // The digest's note names the build check by its id, which reads as the check's title.
+  const link = running.nth(1).getByRole("link", { name: "Check the build" });
+  await expect(link).toHaveAttribute("title", `cron ${FAILING_CRON}`);
+  await expect(running.nth(1)).not.toContainText(FAILING_CRON);
+  await link.click();
+  await expect(page).toHaveURL(`/crons?cron=${FAILING_CRON}`);
+  await expect(running.nth(0).getByText("Run the build and say what broke.")).toBeVisible();
 });

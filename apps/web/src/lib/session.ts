@@ -166,6 +166,19 @@ export function useTaskChanges(taskId: string) {
   });
 }
 
+/** What a task's branch did to one file, refreshed like its changes when a turn ends. */
+export function useTaskDiff(taskId: string, path: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["task-diff", taskId, path],
+    queryFn: () => api.taskDiff(taskId, path),
+    staleTime: 30_000,
+    retry: (failures, error) =>
+      failures < 1 &&
+      !(error instanceof ApiError && (error.status === 404 || error.status === 503)),
+  });
+}
+
 /** Every cron, ended ones too, refreshed by the board's cron events. */
 export function useCrons() {
   const { api } = useSession();

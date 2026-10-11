@@ -3,6 +3,7 @@ import { BoardError, SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
 import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/scheduler";
 import {
   BranchChangesSchema,
+  BranchFileDiffSchema,
   BranchFileSchema,
   MergeOutcomeSchema,
   ModelListSchema,
@@ -11,6 +12,7 @@ import {
   SweepResultSchema,
   type BranchChanges,
   type BranchFile,
+  type BranchFileDiff,
   type CliKind,
   type ModelOption,
   type Name,
@@ -699,6 +701,25 @@ export class RunnerHub implements TurnRunner {
       throw new BoardError("NOT_FOUND", `${project} has no ${branch} yet`);
     }
     return changes;
+  }
+
+  /**
+   * What a branch of a project's repository did to one file since it left the default branch, read
+   * on the runner the project lives on, with the same refusals as `branchChanges`.
+   */
+  async branchDiff(project: Name, branch: string, path: string): Promise<BranchFileDiff> {
+    const { seat, repo } = await this.projectSeat(project, "branchChanges", "list changes");
+    const diff = BranchFileDiffSchema.nullable().parse(
+      await this.request(
+        seat,
+        (request) => ({ type: "diff", request, read: { repo, branch, path } }),
+        FILE_TIMEOUT_MS,
+      ),
+    );
+    if (diff === null) {
+      throw new BoardError("NOT_FOUND", `${branch} did not change ${path}`);
+    }
+    return diff;
   }
 
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */

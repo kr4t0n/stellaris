@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   BRANCH_CHANGES_LIMIT,
   BRANCH_FILE_LIMIT_BYTES,
+  BRANCH_PATCH_LIMIT_CHARS,
   CliKindSchema,
   HeldWorkspaceSchema,
   HOME_SCRATCH,
@@ -15,7 +16,9 @@ import {
   type AgentEvent,
   type BranchChanges,
   type BranchChangesRead,
+  type BranchDiffRead,
   type BranchFile,
+  type BranchFileDiff,
   type BranchRead,
   type CliKind,
   type CloseRequest,
@@ -746,6 +749,22 @@ export class TurnExecutor {
       read.branch,
       read.repo.defaultBranch,
       BRANCH_CHANGES_LIMIT,
+    );
+  }
+
+  /** What a branch of a project's repository here did to one file, counted as its changes are. */
+  async branchDiff(read: BranchDiffRead): Promise<BranchFileDiff | null> {
+    const repoDir = await this.repoHere(read.repo.slug);
+    if (repoDir === null) {
+      return null;
+    }
+    await this.withProjectLock(read.repo.slug, () => this.ensureDefaultBranch(repoDir, read.repo));
+    return this.git.branchDiff(
+      repoDir,
+      read.branch,
+      read.repo.defaultBranch,
+      read.path,
+      BRANCH_PATCH_LIMIT_CHARS,
     );
   }
 

@@ -265,6 +265,39 @@ const TASK_CHANGES = {
   ],
 };
 
+/** What the survey's branch did to each file it changed, as the task's runner reads it. */
+const TASK_DIFFS: Readonly<Record<string, unknown>> = {
+  "docs/plot.png": {
+    head: TASK_COMMIT,
+    path: "docs/plot.png",
+    status: "added",
+    patch: null,
+    truncated: false,
+  },
+  "docs/report.md": {
+    head: TASK_COMMIT,
+    path: "docs/report.md",
+    status: "added",
+    patch:
+      "@@ -0,0 +1,7 @@\n+# Shortest paths\n+\n+Dijkstra wins on sparse graphs.\n+\n+![Runtime by graph size](plot.png)\n+\n+The raw numbers are in [the table](../results.csv).",
+    truncated: false,
+  },
+  "draft.md": {
+    head: TASK_COMMIT,
+    path: "draft.md",
+    status: "deleted",
+    patch: "@@ -1,4 +0,0 @@\n-# Draft\n-\n-Bellman-Ford first.\n-Then the rest.",
+    truncated: false,
+  },
+  "results.csv": {
+    head: TASK_COMMIT,
+    path: "results.csv",
+    status: "modified",
+    patch: '@@ -1,2 +1,3 @@\n method,runtime\n-Dijkstra,1.4\n+Dijkstra,1.2\n+"A*, tuned",0.9',
+    truncated: false,
+  },
+};
+
 /** What the survey's turns left on its branch: a report with a figure, and the table it cites. */
 const TASK_FILES: Readonly<Record<string, unknown>> = {
   "": {
@@ -1038,6 +1071,13 @@ export async function fakeBoard(
       return file === undefined
         ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
         : json(route, file);
+    }
+    const diffs = `/api/tasks/${STAGE_TASK}/diff/`;
+    if (pathname.startsWith(diffs)) {
+      const diff = TASK_DIFFS[decodeURIComponent(pathname.slice(diffs.length))];
+      return diff === undefined
+        ? json(route, { error: "NOT_FOUND", message: "the branch did not change it" }, 404)
+        : json(route, diff);
     }
     if (labChannels.some((each) => pathname === `/api/channels/lab/${each.name}`)) {
       return json(route, []);

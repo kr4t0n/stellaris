@@ -254,6 +254,35 @@ describe("ExecaGit", () => {
     expect(await git.branchChanges(repoDir, branch, "main", 2)).toMatchObject({ total: 4 });
     expect((await git.branchChanges(repoDir, branch, "main", 2))?.files).toHaveLength(2);
 
+    // Each file's patch covers the same range, so main's work merged in is no file's change.
+    const diff = (file: string, limit = 1000) =>
+      git.branchDiff(repoDir, branch, "main", file, limit);
+    const readme = await diff("README.md");
+    expect(readme).toEqual({
+      head: before?.head,
+      path: "README.md",
+      status: "modified",
+      patch: "@@ -1 +1 @@\n-demo\n+demo, reviewed",
+      truncated: false,
+    });
+    expect(await diff("report.md")).toMatchObject({
+      status: "added",
+      patch: "@@ -0,0 +1,3 @@\n+# Report\n+\n+second",
+    });
+    expect(await diff("old.txt")).toMatchObject({
+      status: "deleted",
+      patch: "@@ -1 +0,0 @@\n-gone soon",
+    });
+    expect(await diff("plot.png")).toMatchObject({ status: "added", patch: null });
+    expect(await diff("elsewhere.md")).toBeNull();
+    // A path is taken literally, never as a pattern.
+    expect(await diff("*.md")).toBeNull();
+    // A long patch is cut at a line's end.
+    expect(await diff("report.md", 20)).toMatchObject({
+      patch: "@@ -0,0 +1,3 @@",
+      truncated: true,
+    });
+
     // Landed, the branch is all on main, and the list still counts from where it left.
     await git.handBack(worktree, null, { name: "ref", email: "ref@x" });
     await writeFile(path.join(repoDir, "later.md"), "after the task\n");
@@ -262,7 +291,9 @@ describe("ExecaGit", () => {
     await writeFile(path.join(repoDir, "after.md"), "after landing\n");
     await commit(repoDir, "ada", "feat: after");
     expect(await git.branchChanges(repoDir, branch, "main", 10)).toEqual(before);
+    expect(await diff("README.md")).toEqual(readme);
     expect(await git.branchChanges(repoDir, "task/none", "main", 10)).toBeNull();
+    expect(await git.branchDiff(repoDir, "task/none", "main", "README.md", 1000)).toBeNull();
   });
 
   it("makes sure of a project's new default branch: from the remote, else where the clone stands", async () => {

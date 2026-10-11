@@ -42,6 +42,7 @@ describe("board events", () => {
       ["history", "ada"],
       ["task-file"],
       ["task-changes"],
+      ["task-diff"],
       ["metrics"],
       ["crons"],
     ]);

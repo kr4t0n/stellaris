@@ -307,6 +307,37 @@ export function changeLabel(change: {
   return change.status === "added" ? `new · ${lines}` : lines;
 }
 
+/** One line of a patch, with its number in the file on the branch for a line the file still has. */
+export interface PatchRow {
+  readonly kind: "hunk" | "added" | "removed" | "context" | "note";
+  readonly text: string;
+  readonly line?: number;
+}
+
+/** A patch's hunks as rows, each added or unchanged line numbered from its hunk's header. */
+export function patchRows(patch: string): PatchRow[] {
+  if (patch === "") {
+    return [];
+  }
+  let next = 0;
+  return patch.split("\n").map((text): PatchRow => {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+    if (hunk !== null) {
+      next = Number(hunk[1]);
+      return { kind: "hunk", text };
+    }
+    if (text.startsWith("-")) {
+      return { kind: "removed", text };
+    }
+    // "\ No newline at end of file" belongs to the line before it.
+    if (text.startsWith("\\")) {
+      return { kind: "note", text };
+    }
+    next += 1;
+    return { kind: text.startsWith("+") ? "added" : "context", text, line: next - 1 };
+  });
+}
+
 export interface TreeFile {
   readonly kind: "file";
   readonly name: string;

@@ -1,11 +1,14 @@
 import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  BranchChanges,
-  BranchFile,
-  BranchFileChange,
-  MergeOutcome,
-  ProjectRepo,
+import {
+  patchHunks,
+  type BranchChanges,
+  type BranchCommit,
+  type BranchFile,
+  type BranchFileChange,
+  type BranchFileDiff,
+  type MergeOutcome,
+  type ProjectRepo,
 } from "@stellaris/shared";
 import { execa } from "execa";
 
@@ -121,6 +124,17 @@ export interface GitOps {
     defaultBranch: string,
     limit: number,
   ): Promise<BranchChanges | null>;
+  /**
+   * What a branch did to one file, over the range `branchChanges` counts, with the patch cut at
+   * `limit` characters; null when the branch does not exist or left the file alone.
+   */
+  branchDiff(
+    repoDir: string,
+    branch: string,
+    defaultBranch: string,
+    file: string,
+    limit: number,
+  ): Promise<BranchFileDiff | null>;
 }
 
 type BranchEntry = Extract<BranchFile, { kind: "dir" }>["entries"][number];
@@ -763,22 +777,12 @@ export class ExecaGit implements GitOps {
     defaultBranch: string,
     limit: number,
   ): Promise<BranchChanges | null> {
-    const log = await git(
-      ["log", "-1", "--format=%H%x00%ct%x00%an", `refs/heads/${branch}`, "--"],
-      repoDir,
-    );
-    const [tip, seconds, author] = log.stdout.trim().split("\0");
-    if (log.exitCode !== 0 || tip === undefined || tip === "") {
+    const range = await this.branchRange(repoDir, branch, defaultBranch);
+    if (range === null) {
       return null;
     }
-    const head = {
-      id: tip,
-      at: new Date(Number(seconds) * 1000).toISOString(),
-      author: author ?? "",
-    };
-    const base = await this.forkPoint(repoDir, defaultBranch, tip);
-    // Without a common commit, everything on the branch is its change.
-    const from = base ?? (await must(["hash-object", "-t", "tree", "/dev/null"], repoDir)).trim();
+    const { head, base, from } = range;
+    const tip = head.id;
     const diff = ["diff", "--no-renames", "-z", from, tip];
     const listed = (await must([...diff, "--name-status"], repoDir)).split("\0");
     const counts = new Map<string, { added: number | null; removed: number | null }>();
@@ -801,12 +805,79 @@ export class ExecaGit implements GitOps {
       const last = touched.get(changed);
       files.push({
         path: changed,
-        status: letter === "A" ? "added" : letter === "D" ? "deleted" : "modified",
+        status: fileStatus(letter),
         ...(counts.get(changed) ?? { added: null, removed: null }),
         ...(last === undefined ? {} : { lastChange: last }),
       });
     }
     return { head, files, total };
+  }
+
+  async branchDiff(
+    repoDir: string,
+    branch: string,
+    defaultBranch: string,
+    file: string,
+    limit: number,
+  ): Promise<BranchFileDiff | null> {
+    const range = await this.branchRange(repoDir, branch, defaultBranch);
+    if (range === null) {
+      return null;
+    }
+    // The path names itself alone, glob characters and all, and no diff driver or text conversion
+    // the repository configures runs on a read.
+    const diff = [
+      "--literal-pathspecs",
+      "diff",
+      "--no-color",
+      "--no-renames",
+      "--no-ext-diff",
+      "--no-textconv",
+      range.from,
+      range.head.id,
+    ];
+    const [letter] = (await must([...diff, "--name-status", "-z", "--", file], repoDir)).split(
+      "\0",
+    );
+    if (letter === undefined || letter === "") {
+      return null;
+    }
+    const patch = await must([...diff, "--", file], repoDir);
+    return {
+      head: range.head,
+      path: file,
+      status: fileStatus(letter),
+      ...patchHunks(patch, limit),
+    };
+  }
+
+  /**
+   * What a branch's changes are counted over: its newest commit, where it left the default branch,
+   * or null when the two share no commit, and what to diff from, the empty tree then. Null when the
+   * branch does not exist.
+   */
+  private async branchRange(
+    repoDir: string,
+    branch: string,
+    defaultBranch: string,
+  ): Promise<{ head: BranchCommit; base: string | null; from: string } | null> {
+    const log = await git(
+      ["log", "-1", "--format=%H%x00%ct%x00%an", `refs/heads/${branch}`, "--"],
+      repoDir,
+    );
+    const [tip, seconds, author] = log.stdout.trim().split("\0");
+    if (log.exitCode !== 0 || tip === undefined || tip === "") {
+      return null;
+    }
+    const head = {
+      id: tip,
+      at: new Date(Number(seconds) * 1000).toISOString(),
+      author: author ?? "",
+    };
+    const base = await this.forkPoint(repoDir, defaultBranch, tip);
+    // Without a common commit, everything on the branch is its change.
+    const from = base ?? (await must(["hash-object", "-t", "tree", "/dev/null"], repoDir)).trim();
+    return { head, base, from };
   }
 
   /**
@@ -861,6 +932,10 @@ export class ExecaGit implements GitOps {
     }
     return touched;
   }
+}
+
+function fileStatus(letter: string): BranchFileChange["status"] {
+  return letter === "A" ? "added" : letter === "D" ? "deleted" : "modified";
 }
 
 /** A `--numstat` count, null where git counts a binary file as `-`. */

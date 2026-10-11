@@ -8,6 +8,7 @@ import {
   linkTarget,
   normalizePath,
   parseDelimited,
+  patchRows,
   rehypeLineTarget,
   sizeLabel,
   textOf,
@@ -202,6 +203,41 @@ describe("fileTree", () => {
     ]);
     expect([...openFolders(tree)]).toEqual(["evidence", "evidence/analysis"]);
     expect(openFolders(fileTree([change("a/b.md"), change("c/d.md")])).size).toBe(2);
+  });
+});
+
+describe("patchRows", () => {
+  it("numbers the lines the file still has, from each hunk's header", () => {
+    const rows = patchRows(
+      [
+        "@@ -1,3 +1,3 @@ # Report",
+        " # Report",
+        "-old",
+        "+new",
+        " end",
+        "@@ -20 +20,2 @@",
+        " tail",
+        "+more",
+        "\\ No newline at end of file",
+      ].join("\n"),
+    );
+    expect(rows.map((row) => [row.kind, row.line])).toEqual([
+      ["hunk", undefined],
+      ["context", 1],
+      ["removed", undefined],
+      ["added", 2],
+      ["context", 3],
+      ["hunk", undefined],
+      ["context", 20],
+      ["added", 21],
+      ["note", undefined],
+    ]);
+    expect(patchRows("@@ -1,2 +0,0 @@\n-a\n-b").map((row) => row.kind)).toEqual([
+      "hunk",
+      "removed",
+      "removed",
+    ]);
+    expect(patchRows("")).toEqual([]);
   });
 });
 

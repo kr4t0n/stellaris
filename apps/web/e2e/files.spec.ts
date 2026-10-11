@@ -45,7 +45,7 @@ test("a path a citizen wrote through a task's worktree opens the file from the t
   await expect(page).toHaveURL(`/task/${STAGE_TASK}`);
 });
 
-test("a task's view lists the files its branch changed, each opening in its file's view", async ({
+test("a task's view lists the files its branch changed, each opening to its patch and from there to the file", async ({
   page,
 }) => {
   await fakeBoard(page);
@@ -57,25 +57,43 @@ test("a task's view lists the files its branch changed, each opening in its file
   await expect(files).toContainText("new · +7");
   await expect(files).toContainText("+2 −1");
   await expect(files).toContainText("new · binary");
-  // A deleted file is listed, but it is not on the branch to open.
-  await expect(files).toContainText("draft.md");
-  await expect(files.getByRole("link", { name: "draft.md" })).toHaveCount(0);
 
   // Files sit under their folders, which open and close; a small change opens whole.
   const docs = files.getByRole("button", { name: /^docs\// });
   await expect(docs).toHaveAttribute("aria-expanded", "true");
   await expect(docs).toContainText("2 files");
-  await expect(files.getByRole("link", { name: "report.md" })).toBeVisible();
+  const report = files.getByRole("button", { name: /^report\.md/ });
+  await expect(report).toBeVisible();
   await docs.click();
   await expect(docs).toHaveAttribute("aria-expanded", "false");
-  await expect(files.getByRole("link", { name: "report.md" })).toHaveCount(0);
+  await expect(report).toHaveCount(0);
   await docs.click();
-  await expect(files.getByRole("link", { name: "report.md" })).toHaveAttribute(
-    "href",
-    `/task/${STAGE_TASK}/files/docs/report.md`,
-  );
 
-  await files.getByRole("link", { name: "results.csv" }).click();
+  // A file opens to what the branch did to it, and closes again.
+  const results = files.getByRole("button", { name: /^results\.csv/ });
+  await expect(results).toHaveAttribute("aria-expanded", "false");
+  await results.click();
+  await expect(results).toHaveAttribute("aria-expanded", "true");
+  await expect(files).toContainText("-Dijkstra,1.4");
+  await expect(files).toContainText('+"A*, tuned",0.9');
+  // Each line the file has links to it at that line, the removed one not.
+  await expect(files.getByTitle("Open results.csv at line 3")).toHaveAttribute(
+    "href",
+    `/task/${STAGE_TASK}/files/results.csv?line=3`,
+  );
+  await expect(files.getByTitle(/^Open results\.csv at line/)).toHaveCount(3);
+  await results.click();
+  await expect(files).not.toContainText("-Dijkstra,1.4");
+
+  // A deleted file shows what it held, with no file to open; a binary one says so.
+  await files.getByRole("button", { name: /^draft\.md/ }).click();
+  await expect(files).toContainText("-Bellman-Ford first.");
+  await files.getByRole("button", { name: /^plot\.png/ }).click();
+  await expect(files).toContainText("A binary file; its contents are not shown here.");
+  await expect(files.getByRole("link", { name: "Open the whole file" })).toHaveCount(1);
+
+  await results.click();
+  await files.getByRole("link", { name: "Open the whole file" }).last().click();
   await expect(page).toHaveURL(`/task/${STAGE_TASK}/files/results.csv`);
   await expect(view.getByRole("cell", { name: "A*, tuned" })).toBeVisible();
 

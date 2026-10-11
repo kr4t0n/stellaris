@@ -350,6 +350,20 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     return c.json(await deps.runners.branchChanges(task.project, `task/${task.id}`));
   });
+  // What a task's branch did to one file, counted as its changes are.
+  api.get("/tasks/:id/diff/:path{.+}", async (c) => {
+    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    if (deps.runners === undefined) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
+    }
+    return c.json(
+      await deps.runners.branchDiff(
+        task.project,
+        `task/${task.id}`,
+        BranchPathSchema.parse(c.req.param("path")),
+      ),
+    );
+  });
   api.get("/tasks/:id/files/:path{.+}", (c) => taskFile(c, c.req.param("path")));
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));

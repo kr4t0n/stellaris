@@ -2,6 +2,7 @@ import {
   ArchivedChannelSchema,
   BoardEventSchema,
   BranchChangesSchema,
+  BranchFileDiffSchema,
   BranchFileSchema,
   ChannelRefSchema,
   CronFrontmatterSchema,
@@ -152,6 +153,15 @@ function channelPath(ref: string): string {
   return ref.split("/").map(encodeURIComponent).join("/");
 }
 
+/** A path on a task's branch as the rest of an address: each segment after a slash, encoded. */
+function branchPath(path: string): string {
+  return path
+    .split("/")
+    .filter((segment) => segment !== "")
+    .map((segment) => `/${encodeURIComponent(segment)}`)
+    .join("");
+}
+
 /** Why the board refused a request, when it said. */
 const ErrorBodySchema = z.object({ message: z.string() });
 
@@ -248,18 +258,17 @@ export function createApi(token: string) {
     task: (id: string) => get(`/api/tasks/${encodeURIComponent(id)}`, token, TaskSchema),
     /** One path on a task's branch, read from its project's runner: a file, base64, or a folder. */
     taskFile: (id: string, path: string) =>
-      get(
-        `/api/tasks/${encodeURIComponent(id)}/files${path
-          .split("/")
-          .filter((segment) => segment !== "")
-          .map((segment) => `/${encodeURIComponent(segment)}`)
-          .join("")}`,
-        token,
-        BranchFileSchema,
-      ),
+      get(`/api/tasks/${encodeURIComponent(id)}/files${branchPath(path)}`, token, BranchFileSchema),
     /** What a task's branch changed since it left the default branch, file by file. */
     taskChanges: (id: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/changes`, token, BranchChangesSchema),
+    /** What a task's branch did to one file, counted as its changes are. */
+    taskDiff: (id: string, path: string) =>
+      get(
+        `/api/tasks/${encodeURIComponent(id)}/diff${branchPath(path)}`,
+        token,
+        BranchFileDiffSchema,
+      ),
     proposals: () => get("/api/proposals", token, ProposalSchema.array()),
     /** Every cron, ended ones too. */
     crons: () => get("/api/crons", token, CronSchema.array()),

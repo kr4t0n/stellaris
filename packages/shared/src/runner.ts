@@ -388,6 +388,47 @@ export const BranchChangesSchema = z.object({
 });
 export type BranchChanges = z.infer<typeof BranchChangesSchema>;
 
+/** A request for one file's patch on a branch, counted from where `BranchChanges` counts. */
+export const BranchDiffReadSchema = z.object({
+  repo: ProjectRepoSchema,
+  branch: BranchNameSchema,
+  path: BranchPathSchema.min(1),
+});
+export type BranchDiffRead = z.infer<typeof BranchDiffReadSchema>;
+
+/** The most of one file's patch a diff carries. */
+export const BRANCH_PATCH_LIMIT_CHARS = 100_000;
+
+/**
+ * What a branch did to one file since it left the default branch: the patch's hunks without its
+ * header, or null for a binary file, cut at a line's end past `BRANCH_PATCH_LIMIT_CHARS`.
+ */
+export const BranchFileDiffSchema = z.object({
+  head: BranchCommitSchema,
+  path: BranchPathSchema,
+  status: BranchFileChangeSchema.shape.status,
+  patch: z.string().nullable(),
+  truncated: z.boolean(),
+});
+export type BranchFileDiff = z.infer<typeof BranchFileDiffSchema>;
+
+/** The hunks of a one-file patch without its header, cut at `limit`, or null for a binary file. */
+export function patchHunks(
+  patch: string,
+  limit: number,
+): { patch: string | null; truncated: boolean } {
+  if (/^Binary files .* differ$/m.test(patch)) {
+    return { patch: null, truncated: false };
+  }
+  const start = patch.search(/^@@/m);
+  const hunks = start === -1 ? "" : patch.slice(start);
+  if (hunks.length <= limit) {
+    return { patch: hunks, truncated: false };
+  }
+  const cut = hunks.lastIndexOf("\n", limit);
+  return { patch: hunks.slice(0, cut === -1 ? limit : cut), truncated: true };
+}
+
 /**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
  * task's thread takes its id, or a channel's beside general in a scope.
@@ -452,6 +493,8 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
     request: z.string().min(1),
     read: BranchChangesReadSchema,
   }),
+  /** Answered with a `BranchFileDiff`, or null when the branch does not exist or left the path alone. */
+  z.object({ type: z.literal("diff"), request: z.string().min(1), read: BranchDiffReadSchema }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

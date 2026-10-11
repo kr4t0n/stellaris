@@ -349,6 +349,9 @@ export class RunnerDaemon {
       case "changes":
         answer(this.executor.branchChanges(message.read));
         return;
+      case "diff":
+        answer(this.executor.branchDiff(message.read));
+        return;
       case "steer": {
         const control = this.controls.get(message.turnId);
         answer(control === undefined ? Promise.resolve(false) : control.steer(message.steer));

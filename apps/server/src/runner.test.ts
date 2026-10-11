@@ -17,6 +17,7 @@ import {
 } from "@stellaris/runner-core";
 import {
   BranchChangesSchema,
+  BranchFileDiffSchema,
   BranchFileSchema,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
@@ -2024,6 +2025,21 @@ describe("turns on a runner over the runner protocol", () => {
       },
     ]);
     expect((await read(`${waiting.id}/changes`)).status).toBe(404);
+    // Each opens to its patch over the same range.
+    expect(
+      BranchFileDiffSchema.parse(await (await read(`${task.id}/diff/report.md`)).json()),
+    ).toEqual({
+      head: changes.head,
+      path: "report.md",
+      status: "added",
+      patch: "@@ -0,0 +1 @@\n+# Report",
+      truncated: false,
+    });
+    expect(
+      BranchFileDiffSchema.parse(await (await read(`${task.id}/diff/evidence/plot.png`)).json()),
+    ).toMatchObject({ status: "added", patch: null });
+    expect((await read(`${task.id}/diff/draft.md`)).status).toBe(404);
+    expect((await read(`${task.id}/diff/evidence%2F..%2Freport.md`)).status).toBe(400);
 
     expect((await read(`${task.id}/files/draft.md`)).status).toBe(404);
     // A URL's own `..` is resolved before any route sees it; one hidden behind encoded slashes is refused.
@@ -2051,6 +2067,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(old.status).toBe(409);
     expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });
     expect((await read(`${task.id}/changes`)).status).toBe(409);
+    expect((await read(`${task.id}/diff/report.md`)).status).toBe(409);
 
     await runner.stop();
     await vi.waitFor(() => expect(hub.connected).toEqual([]));

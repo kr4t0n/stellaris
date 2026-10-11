@@ -8,6 +8,7 @@ import {
   type HomeFileChange,
   type HomeFileDiff,
   type HomeHistory,
+  patchHunks,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { exists } from "./fs.js";
@@ -136,20 +137,6 @@ function lineCount(value: string | undefined): number | null {
 
 function fileStatus(letter: string): HomeFileChange["status"] {
   return letter === "A" ? "added" : letter === "D" ? "deleted" : "modified";
-}
-
-/** The hunks of a one-file patch without its header, cut at the limit, or null for a binary file. */
-function hunksOf(patch: string): { patch: string | null; truncated: boolean } {
-  if (/^Binary files .* differ$/m.test(patch)) {
-    return { patch: null, truncated: false };
-  }
-  const start = patch.search(/^@@/m);
-  const hunks = start === -1 ? "" : patch.slice(start);
-  if (hunks.length <= PATCH_LIMIT_CHARS) {
-    return { patch: hunks, truncated: false };
-  }
-  const cut = hunks.lastIndexOf("\n", PATCH_LIMIT_CHARS);
-  return { patch: hunks.slice(0, cut === -1 ? PATCH_LIMIT_CHARS : cut), truncated: true };
 }
 
 async function git(args: readonly string[], cwd: string): Promise<string> {
@@ -315,7 +302,8 @@ export class HomeRepos {
       if (others.length > 0 && (status !== "added" || conflictCopyOf(file) === null)) {
         continue;
       }
-      files.push({ path: file, status, ...hunksOf(await read(home, [...range, "--", file])) });
+      const patch = await read(home, [...range, "--", file]);
+      files.push({ path: file, status, ...patchHunks(patch, PATCH_LIMIT_CHARS) });
     }
     return files;
   }

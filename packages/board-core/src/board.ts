@@ -76,6 +76,7 @@ import {
   type MemberProposal,
   type Message,
   type MessageFrontmatter,
+  type MessageNotice,
   type MessageStep,
   type Name,
   type OpsSignal,
@@ -2385,6 +2386,12 @@ export class Board {
         `Knowledge ${replaced ? "updated" : "written"}: ${args.topic}. It is under knowledge/${args.topic}.md${
           args.project === null ? " of the society" : ""
         }.`,
+        {
+          kind: "knowledge",
+          action: replaced ? "updated" : "written",
+          topic: args.topic,
+          project: args.project,
+        },
       );
       return { ...data, body: args.body };
     });
@@ -2438,6 +2445,7 @@ export class Board {
         `Knowledge removed: ${args.topic}. It is no longer under knowledge/${args.topic}.md${
           args.project === null ? " of the society" : ""
         }.`,
+        { kind: "knowledge", action: "removed", topic: args.topic, project: args.project },
       );
       return removed;
     });
@@ -5709,9 +5717,18 @@ export class Board {
   }
 
   /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
-  private async appendMessage(author: Name, channel: ChannelRef, body: string): Promise<Message> {
+  private async appendMessage(
+    author: Name,
+    channel: ChannelRef,
+    body: string,
+    notice?: MessageNotice,
+  ): Promise<Message> {
     await this.assertChannelOpen(channel);
-    return this.writeMessage(this.paths.channelDir(channel), { author, channel }, body);
+    return this.writeMessage(
+      this.paths.channelDir(channel),
+      { author, channel, ...(notice === undefined ? {} : { notice }) },
+      body,
+    );
   }
 
   /** A thread's message carries the thread's channel; a caller naming another channel is refused. */
@@ -5745,7 +5762,14 @@ export class Board {
 
   private async writeMessage(
     dir: string,
-    head: { author: Name; channel: ChannelRef; thread?: Ulid; closes?: Ulid; step?: MessageStep },
+    head: {
+      author: Name;
+      channel: ChannelRef;
+      thread?: Ulid;
+      closes?: Ulid;
+      step?: MessageStep;
+      notice?: MessageNotice;
+    },
     body: string,
   ): Promise<Message> {
     const frontmatter: MessageFrontmatter = MessageFrontmatterSchema.parse({

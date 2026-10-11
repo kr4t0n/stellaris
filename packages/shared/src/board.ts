@@ -259,6 +259,22 @@ export function isTaskStep(step: MessageStep): step is TaskStep {
   return "stage" in step;
 }
 
+/** A knowledge topic written, written again, or removed, of a project or, with null, of the society. */
+export const KnowledgeNoticeSchema = z.object({
+  kind: z.literal("knowledge"),
+  action: z.enum(["written", "updated", "removed"]),
+  topic: NameSchema,
+  project: NameSchema.nullable(),
+});
+export type KnowledgeNotice = z.infer<typeof KnowledgeNoticeSchema>;
+
+/**
+ * What a verb recorded on the post it made about its work outside any thread, which the interface
+ * draws as a notice rather than as talk. Unlike a step, it changes no wake. One member per kind.
+ */
+export const MessageNoticeSchema = z.discriminatedUnion("kind", [KnowledgeNoticeSchema]);
+export type MessageNotice = z.infer<typeof MessageNoticeSchema>;
+
 /** Message frontmatter. The author is stamped by the board, never supplied by the caller. */
 export const MessageFrontmatterSchema = z.object({
   id: UlidSchema,
@@ -271,6 +287,8 @@ export const MessageFrontmatterSchema = z.object({
   closes: UlidSchema.optional(),
   /** On a post a task verb made in the task's thread, or a decision in a proposal's: the step it recorded. */
   step: MessageStepSchema.optional(),
+  /** On a post a verb made about its work, such as a knowledge topic's note: what it records. */
+  notice: MessageNoticeSchema.optional(),
   ts: IsoDateTimeSchema,
   mentions: z.array(NameSchema),
 });

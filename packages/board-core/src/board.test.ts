@@ -1957,9 +1957,10 @@ describe("Board", () => {
     expect(removed).toMatchObject({ topic: "old-norm", project: null, removedBy: "stew" });
     expect(await board.listKnowledge(null)).toEqual([]);
     expect(await board.search(STEW, { query: "superseded" })).toEqual([]);
-    expect((await board.listChannel("general")).at(-1)?.body).toContain(
-      "Knowledge removed: old-norm",
-    );
+    expect((await board.listChannel("general")).at(-1)).toMatchObject({
+      body: expect.stringContaining("Knowledge removed: old-norm"),
+      notice: { kind: "knowledge", action: "removed", topic: "old-norm", project: null },
+    });
     // The text waits outside the projection for a restore by hand.
     const aside = board.paths.removedKnowledge("society");
     const [kept] = await readdir(aside);
@@ -2212,16 +2213,27 @@ describe("Board", () => {
     });
     expect(await board.readSocietyNorms()).toContain("Silence is allowed");
     expect((await board.listKnowledge("demo")).map((k) => k.topic)).toEqual(["testing"]);
-    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain(
-      "Knowledge written: testing",
-    );
+    expect((await board.listChannel("demo/general")).at(-1)).toMatchObject({
+      author: "eng-1",
+      body: expect.stringContaining("Knowledge written: testing"),
+      notice: { kind: "knowledge", action: "written", topic: "testing", project: "demo" },
+    });
+    expect((await board.listChannel("general")).at(-1)?.notice).toEqual({
+      kind: "knowledge",
+      action: "written",
+      topic: "norms",
+      project: null,
+    });
     await board.writeKnowledge(ENG, {
       project: "demo",
       topic: "testing",
       body: "Run `uv run pytest -q` (updated).",
     });
     expect((await board.listKnowledge("demo"))[0]?.body).toContain("(updated)");
-    expect((await board.listChannel("demo/general")).at(-1)?.body).toContain("Knowledge updated");
+    expect((await board.listChannel("demo/general")).at(-1)).toMatchObject({
+      body: expect.stringContaining("Knowledge updated"),
+      notice: { action: "updated", topic: "testing" },
+    });
 
     // A citizen's own skill and archive are searchable by that citizen only, and the roster lists its skills.
     await mkdir(board.paths.agentSkill("eng-1", "uv-setup"), { recursive: true });

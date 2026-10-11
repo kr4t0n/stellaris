@@ -110,6 +110,50 @@ const ARCHIVED_POST = {
   body: "The findings are on task/01M3Q2AAAAAAAAAAAAAAAAAAA9.",
 };
 
+/** One post in lab's general, a minute after the task's thread opened there. */
+function labPost(minute: number, author: string, body: string, notice?: unknown) {
+  return {
+    id: `01M3Q2MMMMMMMMMMMMMMMMMM${String(minute).padStart(2, "0")}`,
+    author,
+    channel: "lab/general",
+    ts: new Date(Date.parse(CREATED) + minute * 60_000).toISOString(),
+    mentions: [],
+    body,
+    ...(notice === undefined ? {} : { notice }),
+  };
+}
+
+const EXPERIMENTS = { kind: "knowledge", topic: "experiments", project: "lab" };
+
+/**
+ * lab's general: talk, and the notes knowledge verbs posted, one from before notes carried their
+ * notice, which the interface reads from its words.
+ */
+const LAB_GENERAL = [
+  labPost(1, "ada", "Seeds are fixed at 42 from now on."),
+  labPost(2, "ada", "Knowledge written: experiments. It is under knowledge/experiments.md."),
+  labPost(3, "ref", "Knowledge updated: experiments. It is under knowledge/experiments.md.", {
+    ...EXPERIMENTS,
+    action: "updated",
+  }),
+  labPost(4, "ada", "Knowledge updated: experiments. It is under knowledge/experiments.md.", {
+    ...EXPERIMENTS,
+    action: "updated",
+  }),
+  labPost(5, "ref", "Thanks, the harness reads it."),
+  labPost(
+    6,
+    "ref",
+    "Knowledge removed: old-harness. It is no longer under knowledge/old-harness.md.",
+    {
+      kind: "knowledge",
+      action: "removed",
+      topic: "old-harness",
+      project: "lab",
+    },
+  ),
+];
+
 /** desk asks to archive lab, whose sign-off stage is still in play. */
 const ARCHIVE = {
   id: ARCHIVE_PROPOSAL,
@@ -1194,8 +1238,9 @@ export async function fakeBoard(
         return json(route, TASK_CHANGES);
       case "/api/projects/iphone/tasks":
       case "/api/projects/iphone/knowledge":
-      case "/api/channels/lab/general":
         return json(route, []);
+      case "/api/channels/lab/general":
+        return json(route, LAB_GENERAL);
       case "/api/projects/iphone/dashboard":
         return json(route, { project: "iphone", revision: 0, body: "" });
       case "/api/channels/iphone/general":

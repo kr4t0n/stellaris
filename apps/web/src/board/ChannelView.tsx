@@ -17,6 +17,8 @@ import {
 import { ArchiveChannelForm } from "./ChannelForms.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
+import { NoticeItem } from "./NoticeItem.js";
+import { foldNotices } from "./notices.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ThreadCard } from "./ThreadCard.js";
 import { NewThreadForm } from "./ThreadForms.js";
@@ -27,8 +29,9 @@ type Item =
   | { kind: "thread"; at: string; id: string; thread: ThreadSummary };
 
 /**
- * A channel's messages in time order, with each thread that hangs off it where it was opened. A
- * channel the board does not use itself can be archived here once its workstream is done.
+ * A channel's messages in time order, with each thread that hangs off it where it was opened, and
+ * the notices verbs posted, such as knowledge written, as quiet lines, a run about one subject as
+ * one. A channel the board does not use itself can be archived here once its workstream is done.
  */
 export function ChannelView() {
   const { _splat: ref = "general" } = useParams({ from: "/c/$" });
@@ -63,6 +66,10 @@ function ChannelStream({ channel }: { channel: string }) {
       (a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
     );
   }, [messages.data, threads.data, channel]);
+  const stream = useMemo(
+    () => foldNotices(items, (item) => (item.kind === "message" ? item.message : undefined)),
+    [items],
+  );
 
   const newest = messages.data?.at(-1)?.id ?? null;
   useEffect(() => markSeen(channel, newest), [channel, newest]);
@@ -109,13 +116,18 @@ function ChannelStream({ channel }: { channel: string }) {
         ) : items.length === 0 ? (
           <PaneNote>Nothing has been said here yet.</PaneNote>
         ) : (
-          items.map((item) =>
-            item.kind === "message" ? (
+          stream.map((entry) => {
+            if (entry.kind === "notices") {
+              const key = entry.run.messages[0]?.id ?? "";
+              return <NoticeItem key={key} run={entry.run} now={now} />;
+            }
+            const { item } = entry;
+            return item.kind === "message" ? (
               <MessageItem key={item.id} message={item.message} members={members.data} now={now} />
             ) : (
               <ThreadCard key={item.id} thread={item.thread} now={now} />
-            ),
-          )
+            );
+          })
         )}
       </div>
       {messages.data === undefined ? null : ended !== undefined ? (

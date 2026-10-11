@@ -1,11 +1,4 @@
-import {
-  channelConversation,
-  parseChannelRef,
-  wakeScope,
-  type Member,
-  type RoleCharter,
-  type RunningTurn,
-} from "@stellaris/shared";
+import type { Member, RoleCharter } from "@stellaris/shared";
 import { mentionsIn } from "../lib/mentions.js";
 
 /** The `@name` being typed where the caret is: where it starts and what is typed so far. */
@@ -48,40 +41,6 @@ export function wakesFor(
     active.some((member) => member.name === name),
   );
   return [...new Set([...frontDesk, ...mentioned])];
-}
-
-/**
- * Which of the citizens a post wakes are in a turn of the very conversation it goes to, whose
- * runner delivers it into that turn rather than waking another: the thread's, or for a channel
- * post, in the scope the wake rule gives, that channel's conversation, or the home for general.
- */
-export function reachedTurns(
-  names: readonly string[],
-  members: readonly Member[],
-  turns: readonly RunningTurn[],
-  place: { readonly channel: string } | { readonly thread: string },
-): string[] {
-  return names.filter((name) =>
-    turns.some((turn) => {
-      if (turn.agent !== name || !turn.steerable) {
-        return false;
-      }
-      if ("thread" in place) {
-        return turn.thread === place.thread;
-      }
-      const member = members.find((each) => each.name === name);
-      if (member === undefined || turn.thread !== undefined) {
-        return false;
-      }
-      const scope = wakeScope(member, parseChannelRef(place.channel).project);
-      return turn.scope === scope && turn.channel === channelConversation(scope, place.channel);
-    }),
-  );
-}
-
-/** The line under the composer when sending reaches a turn under way, else null. */
-export function reachLine(reached: readonly string[]): string | null {
-  return reached.length === 0 ? null : `Sending reaches ${listed(reached)} in the turn under way.`;
 }
 
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });

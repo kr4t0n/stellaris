@@ -78,7 +78,7 @@ test("a turn in flight takes a post into its conversation, and stops on a second
   const box = view.getByLabel("Message desk while it works");
   await expect(box).toHaveValue("@desk ");
   await box.fill("@desk also check the runners");
-  await expect(view.getByText("Sending reaches desk in the turn under way.")).toBeVisible();
+  await expect(view.getByText("Posts reach the turn at its next step.")).toBeVisible();
   await box.press("Enter");
   await expect
     .poll(() => board.writes.find((write) => write.path === "/api/verbs/post_message")?.body)

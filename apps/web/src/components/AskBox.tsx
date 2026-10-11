@@ -83,7 +83,6 @@ export function AskBox({
         <Composer
           target={{ ask: true }}
           placeholder="Ask the front desk"
-          oneLine
           className="p-2"
           focusOnOpen
           onEmptyEscape={onClose}

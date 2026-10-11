@@ -4,9 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
-import { useMembers, useRoles, useScheduler, useSession } from "../lib/session.js";
+import { useMembers, useSession } from "../lib/session.js";
 import { askTitle } from "./asks.js";
-import { completeMention, mentionAt, reachedTurns, reachLine, wakesFor } from "./compose.js";
+import { completeMention, mentionAt } from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -20,15 +20,13 @@ export type Target =
 const MAX_CANDIDATES = 6;
 
 /**
- * Posts as the user into a channel or a thread. Enter sends and Shift+Enter breaks the line; an
- * `@` offers the citizens to mention; the line under the box names whom sending reaches in a turn
- * already under way in the conversation it goes to.
+ * Posts as the user into a channel or a thread, in one row with Send beside the box. Enter sends
+ * and Shift+Enter breaks the line; an `@` offers the citizens to mention.
  */
 export function Composer({
   target,
   placeholder,
   initialText = "",
-  oneLine = false,
   className = "border-t border-line p-3",
   focusOnOpen = false,
   onPosted,
@@ -38,8 +36,6 @@ export function Composer({
   placeholder: string;
   /** What the box starts with, and returns to after a send, such as a mention. */
   initialText?: string;
-  /** The box with Send beside it and no line under it, for the ask box. */
-  oneLine?: boolean;
   className?: string;
   /** For a composer the user just opened, such as the ask box. */
   focusOnOpen?: boolean;
@@ -50,8 +46,6 @@ export function Composer({
   const { api } = useSession();
   const client = useQueryClient();
   const members = useMembers();
-  const roles = useRoles();
-  const scheduler = useScheduler();
   const [text, setText] = useState(initialText);
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
@@ -117,17 +111,6 @@ export function Composer({
       : citizens
           .filter((member) => member.name.startsWith(fragment.prefix))
           .slice(0, MAX_CANDIDATES);
-  const wakes = wakesFor(text, members.data ?? [], roles.data ?? []);
-  const reached =
-    "ask" in target
-      ? []
-      : reachedTurns(
-          wakes,
-          members.data ?? [],
-          scheduler.data?.turns ?? [],
-          "channel" in target ? { channel: target.channel } : { thread: target.threadId },
-        );
-  const line = reachLine(reached);
 
   const complete = (name: string): void => {
     if (fragment === null) {
@@ -173,15 +156,6 @@ export function Composer({
     }
   };
 
-  const sendButton = (
-    <Button
-      variant="primary"
-      type="submit"
-      disabled={text.trim() === "" || text.trim() === initialText.trim() || send.isPending}
-    >
-      {send.isPending ? "Sending…" : "Send"}
-    </Button>
-  );
   return (
     <form
       className={className}
@@ -190,11 +164,7 @@ export function Composer({
         submit();
       }}
     >
-      <div
-        className={`relative rounded-xl bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
-          oneLine ? "flex items-end gap-2 pr-1.5" : ""
-        }`}
-      >
+      <div className="relative flex items-end gap-2 rounded-xl bg-surface-2/50 pr-1.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]">
         {candidates.length > 0 ? (
           <ul
             aria-label="Citizens to mention"
@@ -236,20 +206,17 @@ export function Composer({
           }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}
-          className={`block max-h-48 w-full resize-none bg-transparent px-3 text-sm text-fg-primary outline-none placeholder:text-fg-muted ${
-            oneLine ? "py-2.5" : "pt-2.5 pb-1"
-          }`}
+          className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
         />
-        {oneLine ? (
-          <div className="shrink-0 pb-1.5">{sendButton}</div>
-        ) : (
-          <div className="flex items-center gap-2 px-3 pb-2">
-            <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-              {line ?? "Enter to send · Shift+Enter for a new line"}
-            </p>
-            {sendButton}
-          </div>
-        )}
+        <div className="shrink-0 pb-1.5">
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={text.trim() === "" || text.trim() === initialText.trim() || send.isPending}
+          >
+            {send.isPending ? "Sending…" : "Send"}
+          </Button>
+        </div>
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">

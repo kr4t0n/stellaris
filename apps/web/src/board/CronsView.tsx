@@ -20,7 +20,7 @@ import {
 import { scopeChoices, scopeName, wakeScopes } from "./citizen.js";
 import { cronGroups, cronPlace, failingCron, schedulePreview } from "./crons.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { Failure, FIELD } from "./ThreadForms.js";
+import { Failure, SMALL_AREA, SMALL_FIELD } from "./ThreadForms.js";
 import { ZoneField } from "./ZoneField.js";
 
 /** A picker with what it picks named before it, as the form reads: wakes …, at …, in …. */
@@ -191,7 +191,7 @@ function CronRow({
                 aria-label="Why it ends"
                 placeholder="Why it ends, which the cron keeps"
                 onChange={(event) => setReason(event.target.value)}
-                className={FIELD}
+                className={SMALL_FIELD}
               />
               <div className="flex items-center justify-end gap-2">
                 <Button onClick={() => setRemoving(false)}>Cancel</Button>
@@ -252,7 +252,7 @@ function TimezoneForm({ zone, onDone }: { zone: string; onDone: () => void }) {
           <Button onClick={() => setValue(browser)}>Use {browser}</Button>
         )}
       </div>
-      <p className="text-[11px] leading-relaxed text-fg-muted">
+      <p className="text-xs leading-relaxed text-fg-muted">
         Crons that name no zone are read in it, so their times move with it, and every turn's prompt
         tells the time in it.
       </p>
@@ -413,7 +413,7 @@ function NewCronForm({
         aria-label="Title"
         placeholder="Title, such as Morning report"
         onChange={(event) => setTitle(event.target.value)}
-        className={FIELD}
+        className={SMALL_FIELD}
       />
       <textarea
         value={note}
@@ -421,7 +421,7 @@ function NewCronForm({
         aria-label="Note"
         placeholder="What to do when it fires; the citizen reads this in every turn it starts."
         onChange={(event) => setNote(event.target.value)}
-        className={`${FIELD} resize-none`}
+        className={SMALL_AREA}
       />
       <fieldset className="flex gap-1">
         <legend className="sr-only">How often</legend>
@@ -455,7 +455,7 @@ function NewCronForm({
               aria-label="Cron expression"
               placeholder="minute hour day month weekday"
               onChange={(event) => setExpression(event.target.value)}
-              className={FIELD}
+              className={SMALL_FIELD}
             />
           </div>
           <ZoneField
@@ -471,10 +471,10 @@ function NewCronForm({
           value={at}
           aria-label="When, in this browser's time"
           onChange={(event) => setAt(event.target.value)}
-          className={FIELD}
+          className={SMALL_FIELD}
         />
       )}
-      <p aria-live="polite" className="text-[11px] leading-relaxed text-fg-muted">
+      <p aria-live="polite" className="text-xs leading-relaxed text-fg-muted">
         {"error" in preview ? (
           <span className="text-amber-300">{preview.error}</span>
         ) : (

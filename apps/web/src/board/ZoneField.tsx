@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { choiceClass, LIST_CARD } from "../components/Picker.js";
-import { FIELD } from "./ThreadForms.js";
+import { SMALL_FIELD } from "./ThreadForms.js";
 
 /** Every zone the browser knows, UTC first. */
 const ZONES = ["UTC", ...Intl.supportedValuesOf("timeZone").filter((zone) => zone !== "UTC")];
@@ -118,7 +118,7 @@ export function ZoneField({
         }}
         onClick={() => setOpen(true)}
         onKeyDown={keys}
-        className={FIELD}
+        className={SMALL_FIELD}
       />
       {open && matches.length > 0 && !(matches.length === 1 && matches[0] === value) ? (
         <div className={`max-h-48 ${LIST_CARD}`}>

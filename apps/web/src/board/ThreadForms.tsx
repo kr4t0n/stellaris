@@ -6,6 +6,15 @@ import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
 import { listed, wakesFor } from "./compose.js";
 
+/**
+ * A text field the size of a `Picker`, for forms made of pickers, so text and height are one
+ * throughout; a text area takes the same look with room for lines.
+ */
+export const SMALL_FIELD =
+  "block h-7 w-full rounded-md bg-surface-2/60 px-2.5 text-xs text-fg-primary outline-none placeholder:text-fg-muted focus-visible:ring-2 focus-visible:ring-fg-primary/30";
+export const SMALL_AREA =
+  "block w-full resize-none rounded-md bg-surface-2/60 px-2.5 py-1.5 text-xs leading-relaxed text-fg-primary outline-none placeholder:text-fg-muted focus-visible:ring-2 focus-visible:ring-fg-primary/30";
+
 /** A text field on an island. */
 export const FIELD =
   "block w-full rounded-lg bg-surface-2/50 px-3 py-2 text-sm text-fg-primary outline-none shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] placeholder:text-fg-muted focus:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]";

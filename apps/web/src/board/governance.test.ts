@@ -120,6 +120,47 @@ describe("governance", () => {
     );
   });
 
+  it("leaves a reallocation of verbs or replicas to the user, and says what it changes", () => {
+    const board = { members: [] as Member[], roles: [researcher], skills: [] };
+    const reallocation = (changes: Record<string, unknown>, role = "researcher") =>
+      proposal({
+        id: skill.id,
+        kind: "reallocation",
+        proposedBy: "desk",
+        charter: { role, changes, description: "More hands." },
+      });
+    const tune = reallocation({ backlogThreshold: 5 });
+    expect(decidersOf(tune, "concierge")).toBe("you or the steward");
+    expect(proposalTitle(tune)).toBe(
+      "Reallocation of role researcher (backlog threshold 5): More hands.",
+    );
+    expect(consequenceOf(tune, board)).toBe(
+      "Changes the researcher charter (backlogThreshold 3 → 5); no active member holds the role.",
+    );
+    const grant = reallocation({
+      maxReplicas: 2,
+      verbs: ["post_message", "claim_task", "plan_task"],
+    });
+    expect(decidersOf(grant, "concierge")).toBe("you");
+    expect(waitingOnYou(grant)).toBe(true);
+    expect(consequenceOf(grant, board)).toBe(
+      "Changes the researcher charter (maxReplicas 1 → 2; verbs +plan_task −write_knowledge); no active member holds the role.",
+    );
+    expect(consequenceOf(reallocation({ maxReplicas: 1 }), board)).toBe(
+      "The researcher role has these values already; approving it will fail.",
+    );
+    expect(consequenceOf(reallocation({ maxReplicas: 2 }, "nobody"), board)).toBe(
+      "No role nobody exists; approving it will fail.",
+    );
+    const legacy = proposal({
+      id: skill.id,
+      kind: "reallocation",
+      charter: { description: "Move rev-1 to api." },
+    });
+    expect(proposalTitle(legacy)).toBe("Reallocation: Move rev-1 to api.");
+    expect(consequenceOf(legacy, board)).toMatch(/applies nothing/);
+  });
+
   it("shows what a role proposal adds and removes, defaults included", () => {
     const next = RoleCharterSchema.parse({
       ...researcher,

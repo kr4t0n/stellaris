@@ -1,13 +1,16 @@
 import {
+  applyRoleChanges,
   ArchiveProposalSchema,
   ChannelProposalSchema,
   channelRef,
+  LegacyReallocationSchema,
   MemberProposalSchema,
   ReallocationProposalSchema,
   RetirementProposalSchema,
   SkillProposalSchema,
   type Member,
   type Proposal,
+  type ReallocationProposal,
   type RoleCharter,
 } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
@@ -127,6 +130,78 @@ function RoleCharterView({
         <Field label="Reflects">{next.reflects ? "yes" : "no"}</Field>
       </Fields>
     </>
+  );
+}
+
+/**
+ * A reallocation: while it waits, the role as approval would leave it against the charter it has
+ * now; once decided, what approval changed, or what was asked for a rejected one.
+ */
+function ReallocationView({
+  proposal,
+  reallocation,
+  current,
+  compare,
+}: {
+  proposal: Proposal;
+  reallocation: ReallocationProposal;
+  /** The role as it is now; null when no role has that name, undefined while roles load. */
+  current: RoleCharter | null | undefined;
+  compare: boolean;
+}) {
+  const { role, changes, description } = reallocation;
+  const changed = proposal.provision?.["changed"];
+  const applied = Array.isArray(changed)
+    ? changed.filter((line): line is string => typeof line === "string")
+    : null;
+  if (compare && current !== undefined && current !== null) {
+    return (
+      <>
+        <RoleCharterView next={applyRoleChanges(current, changes)} current={current} compare />
+        <Fields>
+          <Field label="Why">{description}</Field>
+        </Fields>
+      </>
+    );
+  }
+  return (
+    <Fields>
+      <Field label="Role">{role}</Field>
+      {compare && current === null ? (
+        <Field label="Role now">none by this name; approving it will fail</Field>
+      ) : null}
+      {applied === null ? (
+        <>
+          {changes.maxReplicas === undefined ? null : (
+            <Field label="Replicas per project">{changes.maxReplicas}</Field>
+          )}
+          {changes.backlogThreshold === undefined ? null : (
+            <Field label="Backlog per member">{changes.backlogThreshold}</Field>
+          )}
+          {changes.wakeTriggers === undefined ? null : (
+            <Field label="Wake triggers">{listed(changes.wakeTriggers)}</Field>
+          )}
+          {changes.verbs === undefined ? null : (
+            <Field label="Verbs">
+              <span className="flex flex-wrap gap-1">
+                {changes.verbs.map((verb) => (
+                  <Verb key={verb} name={verb} />
+                ))}
+              </span>
+            </Field>
+          )}
+        </>
+      ) : (
+        <Field label="Changed">
+          {applied.map((line) => (
+            <span key={line} className="block">
+              {line}
+            </span>
+          ))}
+        </Field>
+      )}
+      <Field label="Why">{description}</Field>
+    </Fields>
   );
 }
 
@@ -405,11 +480,26 @@ export function ProposalCharter({
     }
     case "reallocation": {
       const parsed = ReallocationProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
+      if (!parsed.success) {
+        const legacy = LegacyReallocationSchema.safeParse(charter);
+        if (!legacy.success) break;
+        return (
+          <Fields>
+            <Field label="Reallocation">{legacy.data.description}</Field>
+          </Fields>
+        );
+      }
       return (
-        <Fields>
-          <Field label="Reallocation">{parsed.data.description}</Field>
-        </Fields>
+        <ReallocationView
+          proposal={proposal}
+          reallocation={parsed.data}
+          current={
+            roles === undefined
+              ? undefined
+              : (roles.find((role) => role.name === parsed.data.role) ?? null)
+          }
+          compare={compare}
+        />
       );
     }
     default:

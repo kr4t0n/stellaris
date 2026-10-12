@@ -1463,14 +1463,101 @@ describe("Board", () => {
       agent: "eng-1",
       releasedTasks: [task.id],
     });
+  });
 
-    // A reallocation has nothing to provision; it stays approved on the record.
-    const reallocation = await board.propose(STEW, {
-      kind: "reallocation",
-      charter: { description: "Move rev-1 to the api project." },
+  it("reallocates a role by proposal, and leaves its verbs and replicas to the user", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const STEW: Actor = { name: "stew", role: "steward" };
+    const before = await board.readRole("engineer");
+    const reallocate = (role: string, changes: Record<string, unknown>, description = "why") =>
+      board.propose(DESK, { kind: "reallocation", charter: { role, changes, description } });
+
+    // A change of something a reallocation may change, in a role that exists, never the user's.
+    await expect(reallocate("engineer", {})).rejects.toMatchObject({ code: "VALIDATION" });
+    await expect(reallocate("engineer", { purpose: "Ships." })).rejects.toMatchObject({
+      code: "VALIDATION",
     });
-    await board.approve(USER, { proposal_id: reallocation.id });
-    expect((await board.readProposal(reallocation.id)).status).toBe("approved");
+    await expect(reallocate("nobody", { backlogThreshold: 5 })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(reallocate("user", { backlogThreshold: 5 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      reallocate("engineer", { backlogThreshold: before.backlogThreshold }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+
+    // A threshold and wakes the steward may decide; everything else in the charter stays.
+    const tune = await reallocate(
+      "engineer",
+      { backlogThreshold: 5, wakeTriggers: ["heartbeat", "user_post"] },
+      "Engineers should hear the user.",
+    );
+    expect((await board.listThread(tune.id)).at(0)?.body).toContain(
+      "reallocation of role engineer (backlog threshold 5, wakes on heartbeat, user_post): Engineers should hear the user.",
+    );
+    await board.approve(STEW, { proposal_id: tune.id });
+    expect(await board.readRole("engineer")).toEqual({
+      ...before,
+      backlogThreshold: 5,
+      wakeTriggers: ["heartbeat", "user_post"],
+    });
+    const tuned = await board.readProposal(tune.id);
+    expect(tuned.status).toBe("provisioned");
+    expect(tuned.provision).toEqual({
+      role: "engineer",
+      changed: [
+        `backlogThreshold ${before.backlogThreshold} → 5`,
+        "wakeTriggers heartbeat → heartbeat, user_post",
+      ],
+    });
+    expect((await board.listThread(tune.id)).at(-1)?.body).toContain(
+      `Provisioned: role engineer, changed backlogThreshold ${before.backlogThreshold} → 5`,
+    );
+
+    // Verbs are a tool grant and replicas are members the scheduler adds, so the user decides.
+    const verbs = [...before.verbs.filter((verb) => verb !== "search"), "create_channel"];
+    const grant = await reallocate("engineer", { maxReplicas: 3, verbs });
+    await expect(board.approve(STEW, { proposal_id: grant.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await board.approve(USER, { proposal_id: grant.id });
+    expect(await board.readRole("engineer")).toMatchObject({ maxReplicas: 3, verbs });
+    expect((await board.readProposal(grant.id)).provision?.["changed"]).toEqual([
+      `maxReplicas ${before.maxReplicas} → 3`,
+      "verbs +create_channel −search",
+    ]);
+  });
+
+  it("approves a reallocation filed before reallocations changed roles, and applies nothing", async () => {
+    const { board } = await society();
+    const id = ulid();
+    await writeFile(
+      board.paths.proposal(id),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: reallocation",
+        "proposedBy: rev-1",
+        "status: proposed",
+        `createdAt: '${now().toISOString()}'`,
+        "charter:",
+        "  description: Move rev-1 to the api project.",
+        "---",
+        "Filed before reallocations named a role.",
+        "",
+      ].join("\n"),
+    );
+    const before = await board.listRoles();
+    await board.approve(USER, { proposal_id: id });
+    expect((await board.readProposal(id)).status).toBe("approved");
+    expect(await board.listRoles()).toEqual(before);
+    expect((await board.listThread(id)).at(-1)?.body).toContain(
+      "Approved: reallocation: Move rev-1 to the api project.",
+    );
   });
 
   it("archives a project by the user alone, once no task there is in play, and keeps what it holds", async () => {

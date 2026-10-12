@@ -6,7 +6,7 @@ import {
   mayHoldStage,
   parseChannelRef,
   PATH_TOKENS,
-  ROLE_KIND_APPROVERS,
+  proposalApprovers,
   sessionKey,
   SOCIETY_SCOPE,
   USER_NAME,
@@ -979,7 +979,7 @@ export class TurnHost {
         (proposal) =>
           proposal.proposedBy === actor.name &&
           proposal.createdAt >= since &&
-          ROLE_KIND_APPROVERS[proposal.kind].includes(USER_ROLE),
+          proposalApprovers(proposal.kind, proposal.charter).includes(USER_ROLE),
       );
       if (proposed) {
         return;

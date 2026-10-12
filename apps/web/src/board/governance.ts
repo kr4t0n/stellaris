@@ -3,9 +3,12 @@ import {
   ChannelProposalSchema,
   channelRef,
   describeCharter,
+  LegacyReallocationSchema,
   MemberProposalSchema,
+  ReallocationProposalSchema,
   RetirementProposalSchema,
-  ROLE_KIND_APPROVERS,
+  proposalApprovers,
+  roleChangeLines,
   RoleCharterSchema,
   SkillProposalSchema,
   USER_NAME,
@@ -44,7 +47,7 @@ export function waitingOnYou(proposal: Proposal): boolean {
   return (
     proposal.status === "proposed" &&
     proposal.proposedBy !== USER_NAME &&
-    ROLE_KIND_APPROVERS[proposal.kind].includes(USER_ROLE)
+    proposalApprovers(proposal.kind, proposal.charter).includes(USER_ROLE)
   );
 }
 
@@ -80,7 +83,7 @@ const EITHER = new Intl.ListFormat("en", { type: "disjunction" });
  * that may decide it, since the proposer itself may not.
  */
 export function decidersOf(proposal: Proposal, proposerRole: string | undefined): string {
-  const who = ROLE_KIND_APPROVERS[proposal.kind].flatMap((role) => {
+  const who = proposalApprovers(proposal.kind, proposal.charter).flatMap((role) => {
     if (role === USER_ROLE) {
       return proposal.proposedBy === USER_NAME ? [] : ["you"];
     }
@@ -206,8 +209,29 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
       if (!parsed.success) break;
       return `Archives ${parsed.data.project}: its members leave, its open threads close, and it takes no more work; its channels, tasks, and history stay readable.`;
     }
-    case "reallocation":
-      return "Records the decision; the board carries out nothing for a reallocation.";
+    case "reallocation": {
+      const parsed = ReallocationProposalSchema.safeParse(proposal.charter);
+      if (!parsed.success) {
+        if (!LegacyReallocationSchema.safeParse(proposal.charter).success) break;
+        return "Records the decision; a reallocation from before reallocations changed roles applies nothing.";
+      }
+      const role = board.roles.find((candidate) => candidate.name === parsed.data.role);
+      if (role === undefined) {
+        return `No role ${parsed.data.role} exists; approving it will fail.`;
+      }
+      const lines = roleChangeLines(role, parsed.data.changes);
+      if (lines.length === 0) {
+        return `The ${role.name} role has these values already; approving it will fail.`;
+      }
+      const holders = board.members.filter(
+        (member) => member.role === role.name && member.status === "active",
+      ).length;
+      const whom =
+        holders === 0
+          ? "; no active member holds the role"
+          : ` for ${holders === 1 ? "its member" : `its ${holders} members`}, from their next turn`;
+      return `Changes the ${role.name} charter (${lines.join("; ")})${whom}.`;
+    }
     default:
       break;
   }

@@ -8,7 +8,13 @@ import {
   type Name,
 } from "./ids.js";
 import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
-import { RoleCharterSchema, USER_ROLE } from "./roles.js";
+import {
+  CharterTriggerSchema,
+  RoleCharterSchema,
+  USER_ROLE,
+  VerbNameSchema,
+  type RoleCharter,
+} from "./roles.js";
 
 /**
  * The society channel the user's asks open their threads on, which the front desk follows. It
@@ -590,9 +596,84 @@ export const ChannelProposalSchema = z.object({
   purpose: z.string().min(1),
 });
 export type ChannelProposal = z.infer<typeof ChannelProposalSchema>;
+/**
+ * What a reallocation changes in a role: each field given is the role's new value, `verbs` and
+ * `wakeTriggers` as whole lists, and every field left out stays as it is.
+ */
+export const RoleChangesSchema = z
+  .strictObject({
+    maxReplicas: z.number().int().min(1).optional(),
+    backlogThreshold: z.number().positive().optional(),
+    wakeTriggers: z.array(CharterTriggerSchema).optional(),
+    verbs: z.array(VerbNameSchema).optional(),
+  })
+  .refine((changes) => Object.values(changes).some((value) => value !== undefined), {
+    message:
+      "a reallocation changes at least one of maxReplicas, backlogThreshold, wakeTriggers, verbs",
+  });
+export type RoleChanges = z.infer<typeof RoleChangesSchema>;
+
+/** A reallocation: changes to an existing role's capacity, wakes, or verbs, and why. */
 export const ReallocationProposalSchema = z.object({
+  role: NameSchema,
+  changes: RoleChangesSchema,
   description: z.string().min(1),
 });
+export type ReallocationProposal = z.infer<typeof ReallocationProposalSchema>;
+
+/** A reallocation filed before reallocations changed anything; approving one only records it. */
+export const LegacyReallocationSchema = z.object({ description: z.string().min(1) });
+
+/** The role's charter with a reallocation's changes applied. */
+export function applyRoleChanges(role: RoleCharter, changes: RoleChanges): RoleCharter {
+  return {
+    ...role,
+    ...(changes.maxReplicas === undefined ? {} : { maxReplicas: changes.maxReplicas }),
+    ...(changes.backlogThreshold === undefined
+      ? {}
+      : { backlogThreshold: changes.backlogThreshold }),
+    ...(changes.wakeTriggers === undefined ? {} : { wakeTriggers: [...changes.wakeTriggers] }),
+    ...(changes.verbs === undefined ? {} : { verbs: [...changes.verbs] }),
+  };
+}
+
+function listedOrNone(values: readonly string[]): string {
+  return values.length === 0 ? "none" : values.join(", ");
+}
+
+/**
+ * What a reallocation would change in the role as it is, one line per field that differs, such as
+ * `maxReplicas 1 → 3` or `verbs +remove_knowledge −search`; empty when it changes nothing.
+ */
+export function roleChangeLines(role: RoleCharter, changes: RoleChanges): string[] {
+  const lines: string[] = [];
+  if (changes.maxReplicas !== undefined && changes.maxReplicas !== role.maxReplicas) {
+    lines.push(`maxReplicas ${role.maxReplicas} → ${changes.maxReplicas}`);
+  }
+  if (
+    changes.backlogThreshold !== undefined &&
+    changes.backlogThreshold !== role.backlogThreshold
+  ) {
+    lines.push(`backlogThreshold ${role.backlogThreshold} → ${changes.backlogThreshold}`);
+  }
+  const wakes = changes.wakeTriggers;
+  if (
+    wakes !== undefined &&
+    (wakes.length !== role.wakeTriggers.length ||
+      wakes.some((trigger) => !role.wakeTriggers.includes(trigger)))
+  ) {
+    lines.push(`wakeTriggers ${listedOrNone(role.wakeTriggers)} → ${listedOrNone(wakes)}`);
+  }
+  if (changes.verbs !== undefined) {
+    const next = changes.verbs;
+    const added = next.filter((verb) => !role.verbs.includes(verb)).map((verb) => `+${verb}`);
+    const removed = role.verbs.filter((verb) => !next.includes(verb)).map((verb) => `−${verb}`);
+    if (added.length + removed.length > 0) {
+      lines.push(`verbs ${[...added, ...removed].join(" ")}`);
+    }
+  }
+  return lines;
+}
 export const RetirementProposalSchema = z.object({
   agent: NameSchema,
   reason: z.string().min(1),
@@ -641,6 +722,54 @@ export const ROLE_KIND_APPROVERS: Readonly<Record<ProposalKind, readonly Name[]>
 };
 
 /**
+ * The fields of a reallocation only the user decides: verbs are tool grants, and a replica cap
+ * lets the scheduler add members of the role by itself.
+ */
+export const USER_DECIDED_ROLE_CHANGES = ["verbs", "maxReplicas"] as const;
+
+/**
+ * The roles that may decide this proposal: its kind's, narrowed to the user for a reallocation
+ * that changes any of `USER_DECIDED_ROLE_CHANGES`. A proposer never decides its own.
+ */
+export function proposalApprovers(
+  kind: ProposalKind,
+  charter: Record<string, unknown>,
+): readonly Name[] {
+  if (kind === "reallocation") {
+    const parsed = ReallocationProposalSchema.safeParse(charter);
+    if (
+      parsed.success &&
+      USER_DECIDED_ROLE_CHANGES.some((field) => parsed.data.changes[field] !== undefined)
+    ) {
+      return [USER_ROLE];
+    }
+  }
+  return ROLE_KIND_APPROVERS[kind];
+}
+
+/** A reallocation's changes in a few words, without the role's current values. */
+function describeRoleChanges(changes: RoleChanges): string {
+  const parts: string[] = [];
+  if (changes.maxReplicas !== undefined) {
+    parts.push(`up to ${changes.maxReplicas} per project`);
+  }
+  if (changes.backlogThreshold !== undefined) {
+    parts.push(`backlog threshold ${changes.backlogThreshold}`);
+  }
+  if (changes.wakeTriggers !== undefined) {
+    parts.push(
+      changes.wakeTriggers.length === 0
+        ? "no ambient wakes"
+        : `wakes on ${changes.wakeTriggers.join(", ")}`,
+    );
+  }
+  if (changes.verbs !== undefined) {
+    parts.push(`${changes.verbs.length} verbs`);
+  }
+  return parts.join(", ");
+}
+
+/**
  * One line for a proposal's charter, as the governance and decisions channels, its thread, and
  * the interface title it.
  */
@@ -671,8 +800,13 @@ export function describeCharter(kind: ProposalKind, charter: Record<string, unkn
     }
     case "reallocation": {
       const parsed = ReallocationProposalSchema.safeParse(charter);
-      if (!parsed.success) break;
-      return `reallocation: ${parsed.data.description}`;
+      if (parsed.success) {
+        const { role, changes, description } = parsed.data;
+        return `reallocation of role ${role} (${describeRoleChanges(changes)}): ${description}`;
+      }
+      const legacy = LegacyReallocationSchema.safeParse(charter);
+      if (!legacy.success) break;
+      return `reallocation: ${legacy.data.description}`;
     }
     case "skill": {
       const parsed = SkillProposalSchema.safeParse(charter);

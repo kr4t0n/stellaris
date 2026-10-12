@@ -46,8 +46,13 @@ import {
   ProposalCharterSchemas,
   ProposalFrontmatterSchema,
   isSafeRelativePath,
+  proposalApprovers,
+  ReallocationProposalSchema,
+  LegacyReallocationSchema,
+  applyRoleChanges,
+  roleChangeLines,
+  type ReallocationProposal,
   RetirementProposalSchema,
-  ROLE_KIND_APPROVERS,
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
@@ -5389,11 +5394,42 @@ export class Board {
       case "archive":
         await this.validateArchive(ArchiveProposalSchema.parse(charter).project);
         return;
-      case "reallocation":
+      case "reallocation": {
+        const parsed = ReallocationProposalSchema.safeParse(charter);
+        if (parsed.success) {
+          await this.reallocatedRole(parsed.data);
+        } else {
+          LegacyReallocationSchema.parse(charter);
+        }
         return;
+      }
       default:
         return;
     }
+  }
+
+  /**
+   * The role as a reallocation would leave it, with what changes: refused for the user's charter,
+   * a role that does not exist, a charter the changes would make invalid, and changes the role
+   * has already.
+   */
+  private async reallocatedRole(
+    reallocation: ReallocationProposal,
+  ): Promise<{ next: RoleCharter; changed: string[] }> {
+    if (reallocation.role === USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "the user charter is not subject to proposals");
+    }
+    const current = await this.readRole(reallocation.role);
+    const next = RoleCharterSchema.parse(applyRoleChanges(current, reallocation.changes));
+    await this.validateRole(next);
+    const changed = roleChangeLines(current, reallocation.changes);
+    if (changed.length === 0) {
+      throw new BoardError(
+        "VALIDATION",
+        `role ${current.name} has these values already; the reallocation changes nothing`,
+      );
+    }
+    return { next, changed };
   }
 
   private async executeProvision(
@@ -5450,8 +5486,16 @@ export class Board {
         const { members } = await this.archiveUnlocked(by, input.project, input.reason, meta);
         return { project: input.project, members };
       }
-      case "reallocation":
-        return undefined;
+      case "reallocation": {
+        const parsed = ReallocationProposalSchema.safeParse(proposal.charter);
+        // One filed before reallocations changed anything has nothing to apply.
+        if (!parsed.success) {
+          return undefined;
+        }
+        const { next, changed } = await this.reallocatedRole(parsed.data);
+        await this.writeRoleUnlocked(by, next, meta);
+        return { role: next.name, changed };
+      }
       default:
         return undefined;
     }
@@ -6396,7 +6440,7 @@ export class Board {
     if (filed.proposedBy === actor.name) {
       throw new BoardError("FORBIDDEN", "a proposer never decides its own proposal");
     }
-    const approvers = ROLE_KIND_APPROVERS[filed.kind];
+    const approvers = proposalApprovers(filed.kind, filed.charter);
     if (!approvers.includes(actor.role)) {
       throw new BoardError(
         "FORBIDDEN",
@@ -6516,7 +6560,7 @@ export class Board {
         if (
           proposal.proposedBy === actor.name ||
           proposal.decidedBy === actor.name ||
-          ROLE_KIND_APPROVERS[proposal.kind].includes(actor.role)
+          proposalApprovers(proposal.kind, proposal.charter).includes(actor.role)
         ) {
           return true;
         }

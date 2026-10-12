@@ -84,9 +84,11 @@ server:
     port: 4700
     annotations: {}
 
-  # On SIGTERM the server waits for running turns to report before it exits, so give it as long as
-  # the turn timeout. Pause the society before an upgrade (see the chart's README).
-  terminationGracePeriodSeconds: 1200
+  # On SIGTERM the server waits for running turns to report before it exits, and the board is down
+  # until it does, since the Deployment recreates its one pod. A minute lets the scheduler finish its
+  # pass; a turn still running then ends as failed. Pause the society before an upgrade (see the
+  # chart's README).
+  terminationGracePeriodSeconds: 60
 
   extraEnv: []
   extraEnvFrom: []

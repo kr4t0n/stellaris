@@ -12,7 +12,7 @@ import { useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { StateChip, subjectLabel } from "./ThreadCard.js";
+import { StateChip, subjectLabel } from "./ThreadItem.js";
 import { CloseThreadForm } from "./ThreadForms.js";
 import { useStickyScroll } from "./useStickyScroll.js";
 

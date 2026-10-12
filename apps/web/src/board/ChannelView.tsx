@@ -20,7 +20,7 @@ import { MessageItem } from "./MessageItem.js";
 import { NoticeItem } from "./NoticeItem.js";
 import { foldNotices } from "./notices.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { ThreadCard } from "./ThreadCard.js";
+import { ThreadItem } from "./ThreadItem.js";
 import { NewThreadForm } from "./ThreadForms.js";
 import { useStickyScroll } from "./useStickyScroll.js";
 
@@ -29,9 +29,10 @@ type Item =
   | { kind: "thread"; at: string; id: string; thread: ThreadSummary };
 
 /**
- * A channel's messages in time order, with each thread that hangs off it where it was opened, and
- * the notices verbs posted, such as knowledge written, as quiet lines, a run about one subject as
- * one. A channel the board does not use itself can be archived here once its workstream is done.
+ * A channel's messages in time order, with each thread that hangs off it where it was opened and
+ * the notices verbs posted, such as knowledge written, as quiet lines, a run of notices about one
+ * subject as one. A channel the board does not use itself can be archived here once its
+ * workstream is done.
  */
 export function ChannelView() {
   const { _splat: ref = "general" } = useParams({ from: "/c/$" });
@@ -125,7 +126,7 @@ function ChannelStream({ channel }: { channel: string }) {
             return item.kind === "message" ? (
               <MessageItem key={item.id} message={item.message} members={members.data} now={now} />
             ) : (
-              <ThreadCard key={item.id} thread={item.thread} now={now} />
+              <ThreadItem key={item.id} thread={item.thread} now={now} />
             );
           })
         )}

@@ -3783,6 +3783,9 @@ export class Board {
       }
       if (args.blocked_by !== undefined) {
         for (const id of args.blocked_by) {
+          if (id === current.id) {
+            throw new BoardError("VALIDATION", `task ${current.id} cannot be blocked by itself`);
+          }
           await this.findTask(id);
         }
         next = { ...next, blockedBy: [...args.blocked_by] };
@@ -3829,6 +3832,9 @@ export class Board {
           from: current.status,
           to: task.status,
           note: args.note ?? null,
+          ...(args.blocked_by === undefined
+            ? {}
+            : { blockedBy: task.blockedBy, previousBlockedBy: current.blockedBy }),
           ...(args.pull_request === undefined
             ? {}
             : { pullRequest: task.pullRequest?.url ?? null }),

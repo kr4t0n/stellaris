@@ -1050,6 +1050,28 @@ describe("Board", () => {
     expect(abandoned.returned).toBeUndefined();
   });
 
+  it("records what blocks a task, never the task itself, with the blockers before and after", async () => {
+    const { board } = await society();
+    const first = await board.createTask(USER, { project: "demo", title: "first" });
+    const second = await board.createTask(USER, { project: "demo", title: "second" });
+    await expect(
+      board.updateTask(USER, { task_id: second.id, blocked_by: [second.id] }),
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(
+      (await board.updateTask(USER, { task_id: second.id, blocked_by: [first.id] })).blockedBy,
+    ).toEqual([first.id]);
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [] });
+    await board.updateTask(USER, { task_id: second.id, note: "no change to its blockers" });
+    const updates = (await board.readEvents(null)).filter((event) => event.type === "task.updated");
+    expect(
+      updates.map((event) => [event.payload["blockedBy"], event.payload["previousBlockedBy"]]),
+    ).toEqual([
+      [[first.id], []],
+      [[], [first.id]],
+      [undefined, undefined],
+    ]);
+  });
+
   it("renames a project's display name and leaves its slug and completion effect alone", async () => {
     const { board } = await society();
     const before = await board.readProject("demo");

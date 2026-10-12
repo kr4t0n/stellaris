@@ -541,7 +541,7 @@ export class Scheduler {
         }
         // A holder's wake is marked first, so the pruning keeps it while the holder holds the stage.
         if (stringOf(payload["thread"]) !== taskId) {
-          await this.wakeHolder(taskId, event.actor, now);
+          await this.wakeHolder(taskId, event.actor, event.actor, now);
         }
         await this.pruneStageWakes(taskId);
         return;
@@ -567,6 +567,7 @@ export class Scheduler {
         if (creator !== null && creator !== event.actor) {
           await this.wakeCreator(taskId, project, creator, event.actor, now);
         }
+        await this.wakeDependents(taskId, event.actor, now);
         // A task's thread closes with it and is swept then; one from before threads has none.
         const threaded = await this.board.readThread(taskId).then(
           () => true,
@@ -590,12 +591,21 @@ export class Scheduler {
       }
       case "task.updated": {
         const taskId = stringOf(payload["taskId"]);
-        if (taskId !== null && payload["to"] === "abandoned") {
+        if (taskId === null) {
+          return;
+        }
+        if (payload["to"] === "abandoned") {
           delete this.state.releaseCounts[taskId];
           await this.queueClosing(taskId);
+          await this.wakeDependents(taskId, event.actor, now);
         }
-        if (taskId !== null) {
-          await this.pruneStageWakes(taskId);
+        await this.pruneStageWakes(taskId);
+        // Blockers changed: a task they no longer hold back wakes as its last blocker's end would.
+        if (
+          Array.isArray(payload["blockedBy"]) &&
+          (await this.blockersInPlay(stringArray(payload["previousBlockedBy"]))).length > 0
+        ) {
+          await this.wakeUnblocked(taskId, event.actor, now);
         }
         return;
       }
@@ -805,9 +815,15 @@ export class Scheduler {
 
   /**
    * Entering a stage wakes its named citizen, else its last holder when work returns to it, else
-   * the project's members of its role, else every member of the project who may hold it.
+   * the project's members of its role, else every member of the project who may hold it. A stage
+   * of a blocked task wakes nobody until its last blocker ends (`wakeUnblocked`).
    */
-  private async wakeStage(taskId: Ulid, from: Name, now: number, only?: Name): Promise<void> {
+  private async wakeStage(
+    taskId: Ulid,
+    from: Name,
+    now: number,
+    options: { only?: Name; state?: string } = {},
+  ): Promise<void> {
     let task: Task;
     try {
       task = (await this.board.findTask(taskId)).task;
@@ -818,6 +834,10 @@ export class Scheduler {
     if (stage === undefined || task.status !== "open" || task.completing) {
       return;
     }
+    if ((await this.blockersInPlay(task.blockedBy)).length > 0) {
+      return;
+    }
+    const { only, state = "is waiting for you" } = options;
     const lastHolder = stage.holders.at(-1);
     const targets =
       stage.agent !== undefined
@@ -835,7 +855,7 @@ export class Scheduler {
       if (agent === null || !mayHoldStage(agent, task)) {
         continue;
       }
-      await this.enqueueStage(agent, task, from, now, "is waiting for you");
+      await this.enqueueStage(agent, task, from, now, state);
     }
   }
 
@@ -845,7 +865,7 @@ export class Scheduler {
    */
   private async wakeNewcomer(name: Name, project: Name, now: number): Promise<void> {
     for (const task of await this.board.openTasks(project).catch(() => [])) {
-      await this.wakeStage(task.id, name, now, name);
+      await this.wakeStage(task.id, name, now, { only: name });
     }
   }
 
@@ -854,7 +874,13 @@ export class Scheduler {
    * worked in that conversation, which nothing else would start before the next heartbeat. Turns
    * of one conversation run one at a time, so the turn this queues is the one that sees the claim.
    */
-  private async wakeHolder(taskId: Ulid, holder: Name, now: number): Promise<void> {
+  private async wakeHolder(
+    taskId: Ulid,
+    holder: Name,
+    from: Name,
+    now: number,
+    state = "is yours; its work happens here",
+  ): Promise<void> {
     let task: Task;
     try {
       task = (await this.board.findTask(taskId)).task;
@@ -865,16 +891,77 @@ export class Scheduler {
     if (agent === null || task.status !== "claimed" || task.claimedBy !== holder) {
       return;
     }
-    const key = await this.enqueueStage(
-      agent,
-      task,
-      holder,
-      now,
-      "is yours; its work happens here",
-    );
+    const key = await this.enqueueStage(agent, task, from, now, state);
     const item = key === null ? undefined : this.pending.get(key);
     if (item?.stageWakes !== undefined) {
       item.holder = true;
+    }
+  }
+
+  /**
+   * The ids among these that name a task still open or claimed, a landing one included. A task
+   * blocked by any of them waits for them rather than for a holder: its stage wakes nobody, by
+   * coming up or on a heartbeat, until the last one ends.
+   */
+  private async blockersInPlay(ids: readonly Ulid[]): Promise<Ulid[]> {
+    const blocking: Ulid[] = [];
+    for (const id of ids) {
+      try {
+        const { task } = await this.board.findTask(id);
+        if (task.status === "open" || task.status === "claimed") {
+          blocking.push(id);
+        }
+      } catch {
+        // A task the board no longer finds blocks nothing.
+      }
+    }
+    return blocking;
+  }
+
+  /**
+   * A task's last blocker has ended, or its blockers were changed to none in play: its stage wakes
+   * as on coming up, or its holder in the task's conversation, since nothing woke either for it
+   * while it was blocked.
+   */
+  private async wakeUnblocked(taskId: Ulid, from: Name, now: number): Promise<void> {
+    let task: Task;
+    try {
+      task = (await this.board.findTask(taskId)).task;
+    } catch {
+      return;
+    }
+    if (task.completing || (await this.blockersInPlay(task.blockedBy)).length > 0) {
+      return;
+    }
+    if (task.status === "open") {
+      await this.wakeStage(task.id, from, now, {
+        state: "is waiting for you, now that nothing blocks it",
+      });
+    } else if (task.status === "claimed" && task.claimedBy !== undefined) {
+      await this.wakeHolder(
+        task.id,
+        task.claimedBy,
+        from,
+        now,
+        "is yours, and nothing blocks it any more",
+      );
+    }
+  }
+
+  /** A task that ended unblocks every task in play that names it, once nothing else blocks them. */
+  private async wakeDependents(taskId: Ulid, from: Name, now: number): Promise<void> {
+    for (const project of await this.board.listProjects()) {
+      if (project.archived !== undefined) {
+        continue;
+      }
+      for (const task of await this.board.listTasks(project.slug)) {
+        if (
+          task.blockedBy.includes(taskId) &&
+          (task.status === "open" || task.status === "claimed")
+        ) {
+          await this.wakeUnblocked(task.id, from, now);
+        }
+      }
     }
   }
 
@@ -930,9 +1017,9 @@ export class Scheduler {
   }
 
   /**
-   * The first of these stage wakes still due: its task waits, unheld, on a stage the agent may
-   * hold, or, with `holder`, the agent holds it, having claimed it outside the task's conversation.
-   * A wake for a stage the agent took in the turn the wake waited on is dropped.
+   * The first of these stage wakes still due: its task waits, unheld and unblocked, on a stage the
+   * agent may hold, or, with `holder`, the agent holds it, having claimed it outside the task's
+   * conversation. A wake for a stage the agent took in the turn the wake waited on is dropped.
    */
   private async stillWaiting(
     name: Name,
@@ -952,7 +1039,11 @@ export class Scheduler {
         if (task.completing || currentStage(task) === undefined) {
           continue;
         }
-        if (task.status === "open" && mayHoldStage(agent, task)) {
+        if (
+          task.status === "open" &&
+          mayHoldStage(agent, task) &&
+          (await this.blockersInPlay(task.blockedBy)).length === 0
+        ) {
           return wake;
         }
         if (holder && task.status === "claimed" && task.claimedBy === agent.name) {
@@ -1247,9 +1338,9 @@ export class Scheduler {
   /**
    * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
    * scope: the unread messages of its home, of each other channel, and of each thread, a stage the
-   * member holds, and a stage
-   * waiting that it may take, each in its task's thread. Each conversation with something wakes on
-   * its own, so a heartbeat never brings one task's business into another's turn.
+   * member holds, and a stage of an unblocked task waiting that it may take, each in its task's
+   * thread. Each conversation with something wakes on its own, so a heartbeat never brings one
+   * task's business into another's turn.
    */
   private async checkHeartbeats(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -1315,7 +1406,10 @@ export class Scheduler {
         }
         if (project !== SOCIETY_SCOPE) {
           for (const task of await this.board.openTasks(project)) {
-            if (mayHoldStage(agent, task)) {
+            if (
+              mayHoldStage(agent, task) &&
+              (await this.blockersInPlay(task.blockedBy)).length === 0
+            ) {
               reasonsIn({ thread: { id: task.id, task: true } }).waiting += 1;
             }
           }
@@ -1500,9 +1594,10 @@ export class Scheduler {
   }
 
   /**
-   * A current stage without a holder past the threshold is logged as a signal once while it waits.
-   * It wakes nobody by itself: its assignees see the stage on their heartbeat, and the steward reads
-   * the signal at its next turn and decides whether to replan or to mention someone.
+   * A current stage without a holder past the threshold is logged as a signal once while it waits,
+   * naming the tasks that still block it. It wakes nobody by itself: its assignees see the stage on
+   * their heartbeat, or a blocked one when its last blocker ends, and the steward reads the signal
+   * at its next turn and decides whether to replan or to mention someone.
    */
   private async checkWaitingStages(now: number): Promise<void> {
     const stillWaiting = new Set<string>();
@@ -1523,10 +1618,15 @@ export class Scheduler {
         }
         this.state.waitingSeen[key] = iso(now);
         const assignee = stage.agent ?? stage.role ?? "anyone in the project";
+        const blockers = await this.blockersInPlay(task.blockedBy);
+        const waited =
+          blockers.length === 0
+            ? "for a holder"
+            : `blocked by ${blockers.map((id) => `task ${id}`).join(", ")}`;
         await this.board.publishSignal({
           kind: "waiting_stage",
           key: `waiting_stage:${key}`,
-          summary: `stage "${stage.name}" of task ${task.id} "${task.title}" in ${project.slug}, for ${assignee}, has waited ${describeDuration(age)} for a holder`,
+          summary: `stage "${stage.name}" of task ${task.id} "${task.title}" in ${project.slug}, for ${assignee}, has waited ${describeDuration(age)} ${waited}`,
           value: age,
           threshold: this.timings.waitingStageMs,
           project: project.slug,

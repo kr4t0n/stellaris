@@ -578,7 +578,9 @@ stateDiagram-v2
 
 **Done wakes the creator.** When the creator is a citizen, finishing the task wakes it, so the concierge that routed a request learns it is finished and can tell the user.
 
-**What counts as finished belongs to the plan.** A task is done when its plan is, and the plan's stages and gates are what the society chose for that task, not a rule in code. Subtasks and blocked-by links remain for structure and are not enforced.
+**What counts as finished belongs to the plan.** A task is done when its plan is, and the plan's stages and gates are what the society chose for that task, not a rule in code. Subtasks and blocked-by links remain for structure and are not enforced: nothing refuses work on a blocked task.
+
+**A blocked task waits for its blockers, not for a heartbeat.** While a task it names in blocked-by is in play, a task's stage wakes nobody, neither on coming up nor on a heartbeat, and when the last of them ends, done or abandoned, the stage wakes as if it had just come up, or wakes its holder. The link is the planner's statement that the work cannot start yet; asking the assignee about it every heartbeat only buys a turn that says so.
 
 ### 9.3 Workspaces and integration
 

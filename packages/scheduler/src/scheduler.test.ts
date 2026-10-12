@@ -800,6 +800,114 @@ describe("Scheduler", () => {
     ]);
   });
 
+  it("wakes nobody for a blocked task until its last blocker ends, then wakes its stage", async () => {
+    const { board, runner, scheduler } = await setup();
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const woken = () => runner.dispatches.map((d) => [d.agent, d.thread?.id, d.trigger.kind]);
+    const first = await board.createTask(USER, {
+      project: "demo",
+      title: "first",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const second = await board.createTask(USER, {
+      project: "demo",
+      title: "second",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const third = await board.createTask(USER, {
+      project: "demo",
+      title: "third",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    // Blocked within the debounce: the wakes their filing queued leave the queue.
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [first.id] });
+    await board.updateTask(USER, { task_id: third.id, blocked_by: [first.id, second.id] });
+    await settle();
+    expect(woken()).toEqual([["eng-1", first.id, "stage"]]);
+
+    // The heartbeat brings back the stage that can be worked, and says why the others wait.
+    runner.dispatches.length = 0;
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(woken()).toEqual([["eng-1", first.id, "heartbeat"]]);
+    const waiting = (await board.listSignals()).filter((s) => s.signal.kind === "waiting_stage");
+    expect(waiting.find((s) => s.signal.taskId === third.id)?.signal.summary).toContain(
+      `blocked by task ${first.id}, task ${second.id}`,
+    );
+    expect(waiting.find((s) => s.signal.taskId === first.id)?.signal.summary).toContain(
+      "for a holder",
+    );
+
+    // The first ends: the second, which nothing else blocks, wakes; the third still waits.
+    runner.dispatches.length = 0;
+    const own = { ...ENG, scope: "demo" };
+    await board.claimTask({ ...own, thread: first.id }, { task_id: first.id });
+    await board.advanceTask({ ...own, thread: first.id }, { task_id: first.id });
+    await settle();
+    expect(woken()).toEqual([["eng-1", second.id, "stage"]]);
+    expect(runner.dispatches[0]?.trigger.reason).toContain("now that nothing blocks it");
+
+    // The second is abandoned, which ends the last of the third's blockers too.
+    runner.dispatches.length = 0;
+    await board.updateTask(USER, { task_id: second.id, status: "abandoned" });
+    await settle();
+    expect(woken()).toEqual([["eng-1", third.id, "stage"]]);
+  });
+
+  it("wakes a task whose blockers are changed to none in play, and its holder when it is held", async () => {
+    const { board, runner, scheduler } = await setup();
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const woken = () => runner.dispatches.map((d) => [d.agent, d.thread?.id, d.trigger.kind]);
+    const first = await board.createTask(USER, {
+      project: "demo",
+      title: "first",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const second = await board.createTask(USER, {
+      project: "demo",
+      title: "second",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [first.id] });
+    await settle();
+    runner.dispatches.length = 0;
+
+    // Cleared while the blocker is in play: the stage wakes as the blocker's end would have.
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [] });
+    await settle();
+    expect(woken()).toEqual([["eng-1", second.id, "stage"]]);
+
+    // Held, then blocked again: the blocker's end wakes the holder in the task's conversation.
+    runner.dispatches.length = 0;
+    const own = { ...ENG, scope: "demo" };
+    await board.claimTask({ ...own, thread: second.id }, { task_id: second.id });
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [first.id] });
+    await settle();
+    expect(woken()).toEqual([]);
+    await board.claimTask({ ...own, thread: first.id }, { task_id: first.id });
+    await board.advanceTask({ ...own, thread: first.id }, { task_id: first.id });
+    await settle();
+    expect(woken()).toEqual([["eng-1", second.id, "stage"]]);
+    expect(runner.dispatches[0]?.trigger.reason).toContain("is yours, and nothing blocks it");
+
+    // Clearing a blocker that had already ended wakes nobody again.
+    runner.dispatches.length = 0;
+    await board.updateTask(USER, { task_id: second.id, blocked_by: [] });
+    await settle();
+    expect(woken()).toEqual([]);
+  });
+
   it("wakes on heartbeat only when there is something to read or hold", async () => {
     const { board, runner, scheduler } = await setup();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

@@ -201,7 +201,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
   update_task:
-    "Move a task back to an earlier stage, abandon it, set what it is blocked by, or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
+    "Move a task back to an earlier stage, abandon it, set the tasks it is blocked by (blocked_by: its stage wakes nobody until they have all ended), or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
   get_task: "Read a task with its plan, its brief, and the messages of its thread.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",

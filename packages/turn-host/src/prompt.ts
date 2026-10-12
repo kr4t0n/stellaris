@@ -346,7 +346,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "proposal_decided") {
     lines.push(
-      "A proposal you made was decided; the decision is the last post in the proposal's thread. A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows.",
+      "A proposal you made was decided; the decision is the last post in the proposal's thread. A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows. An approved skill is published under society/skills/<name>/: delete your own skills/<name>/ from your home and report memoryUpdated, so your index lists the published copy alone.",
     );
   }
   if (dispatch.trigger.kind === "cron") {

@@ -527,6 +527,30 @@ describe("buildTurnPrompt", () => {
     expect(reader).not.toContain("## Operations signals");
   });
 
+  it("tells a proposer woken by a decision to drop its own copy of a skill once it is published", () => {
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "scout",
+        project: "society",
+        trigger: TriggerSchema.parse({
+          kind: "proposal_decided",
+          from: "stew",
+          reason: "proposal approved by stew",
+        }),
+        priority: 0,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+    });
+    expect(prompt).toContain("A proposal you made was decided");
+    expect(prompt).toContain(
+      "An approved skill is published under society/skills/<name>/: delete your own skills/<name>/ from your home and report memoryUpdated",
+    );
+  });
+
   it("shows a society role every runner, what it offers, and the projects living on it", () => {
     const prompt = buildTurnPrompt({
       dispatch: {

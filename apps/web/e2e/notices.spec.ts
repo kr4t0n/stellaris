@@ -36,12 +36,13 @@ test("a channel shows each thread where it was opened as one quiet line that ope
 
   const view = page.getByRole("region", { name: "Board content" });
   const open = view.getByRole("link", { name: /Who reviews the survey\?/ });
-  await expect(open).toContainText("you opened topic thread");
-  await expect(open).toContainText("2 messages · open");
-  // A closed thread says so and carries its summary under it.
+  // An open thread ends in its state alone, with no count and no time.
+  await expect(open).toHaveText("you opened topic thread Who reviews the survey?open");
+  // A closed thread says when it closed and carries its summary under it.
   const closed = view.getByRole("link", { name: /Merge the phone projects/ });
-  await expect(closed).toContainText("2 messages · closed");
+  await expect(closed).toContainText(/Merge the phone projectsclosed · \d+ days ago/);
   await expect(closed).toContainText("Filed the merge as a task in lab and proposed archiving");
+  await expect(closed).not.toContainText("messages");
 
   await open.click();
   await expect(page).toHaveURL(new RegExp(`/thread/${ANSWERED_ASK}$`));

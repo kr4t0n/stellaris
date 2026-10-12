@@ -39,12 +39,11 @@ function ThreadMark() {
 
 /**
  * A thread in its channel's stream where it was opened, as a quiet line like a notice's that opens
- * it: who opened what, its messages and state, and once closed, its summary under it.
+ * it: who opened what, and at its end a green open, or closed and when with its summary under it.
  */
 export function ThreadItem({ thread, now }: { thread: ThreadSummary; now: number }) {
   const displayName = useDisplayName();
   const summary = thread.state === "closed" ? firstParagraph(thread.body, 180) : "";
-  const replies = thread.messages === 1 ? "1 message" : `${thread.messages} messages`;
   return (
     <Link
       to="/thread/$threadId"
@@ -56,24 +55,27 @@ export function ThreadItem({ thread, now }: { thread: ThreadSummary; now: number
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-3">
-          {/* The title gives way first, so the counts and the state stay in view. */}
-          <p className="flex min-w-0 flex-1 items-baseline gap-1 text-sm text-fg-tertiary">
-            <span className="shrink-0">
-              {displayName(thread.openedBy)} opened {subjectLabel(thread.subject)} thread
-            </span>
-            <span className="min-w-0 truncate text-fg-secondary group-hover:text-fg-primary">
-              {thread.title}
-            </span>
-            <span className="shrink-0">
-              · {replies} ·{" "}
-              <span className={thread.state === "open" ? "text-emerald-300" : undefined}>
-                {thread.state}
-              </span>
-            </span>
+          <p className="min-w-0 flex-1 truncate text-sm text-fg-tertiary">
+            {displayName(thread.openedBy)} opened {subjectLabel(thread.subject)} thread{" "}
+            <span className="text-fg-secondary group-hover:text-fg-primary">{thread.title}</span>
           </p>
-          <time dateTime={thread.openedAt} title={thread.openedAt} className="shrink-0 text-meta">
-            {ago(thread.openedAt, now)}
-          </time>
+          {thread.state === "open" ? (
+            <span title={`opened ${thread.openedAt}`} className="shrink-0 text-xs text-emerald-300">
+              open
+            </span>
+          ) : (
+            <span className="shrink-0 text-meta">
+              closed
+              {thread.closedAt === undefined ? null : (
+                <>
+                  {" · "}
+                  <time dateTime={thread.closedAt} title={thread.closedAt}>
+                    {ago(thread.closedAt, now)}
+                  </time>
+                </>
+              )}
+            </span>
+          )}
         </div>
         {summary === "" ? null : (
           <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">

@@ -10,7 +10,7 @@ import {
   TurnHistoryEntrySchema,
 } from "@stellaris/shared";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
 import { addWorkRoles } from "./testing/scripted-backend.js";
@@ -780,6 +780,41 @@ describe("board server routes", () => {
       .parse(JSON.parse(frame ?? "{}"));
     // Nothing from before the stream opened is replayed.
     expect(event).toMatchObject({ type: "message.posted", payload: { channel: "demo/dev" } });
+  });
+
+  it("holds an idle board-event stream on the next append, without reading the log again", async () => {
+    const app = createApp({ board, version: "t" });
+    const reads = vi.spyOn(board, "readEvents");
+    const response = await app.request("/api/events/stream?since=latest", { headers });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    void board.postMessage(USER, { channel: "demo/dev", body: "woken" });
+    const [frame] = await readSse(response, 1);
+    expect(z.object({ type: z.string() }).parse(JSON.parse(frame ?? "{}")).type).toBe(
+      "message.posted",
+    );
+    reads.mockRestore();
+  });
+
+  it("pings an idle board-event stream, so a dead connection is found by a write", async () => {
+    const app = createApp({ board, version: "t", eventStreamPingMs: 20 });
+    const response = await app.request("/api/events/stream?since=latest", { headers });
+    const reader = response.body?.getReader();
+    if (reader === undefined) {
+      throw new Error("no body");
+    }
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes("event: ping")) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel();
+    expect(text).toContain("event: ping");
   });
 
   it("replays and streams live turn events", async () => {

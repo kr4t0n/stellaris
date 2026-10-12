@@ -1575,6 +1575,11 @@ export class Board {
     return this.events.lastId();
   }
 
+  /** Calls `listener` after each event the board appends, until the returned function is called. */
+  onEventAppended(listener: (event: BoardEvent) => void): () => void {
+    return this.events.onAppend(listener);
+  }
+
   /** The roster as projected: every citizen with identity, reach, availability, and profile. */
   async listMembers(): Promise<Member[]> {
     const members: Member[] = [];

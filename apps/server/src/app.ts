@@ -58,6 +58,8 @@ export interface AppDependencies {
   readonly trustedProxies?: number | undefined;
   /** Where refusals by a rate limit are logged. */
   readonly log?: { warn(details: object, message: string): void } | undefined;
+  /** How long a board-event stream waits for an append before it writes a ping; 15 seconds by default. */
+  readonly eventStreamPingMs?: number | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -71,6 +73,9 @@ const ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
   INVALID_TRANSITION: 409,
   INVALID_STATE: 409,
 };
+
+/** Events a board-event stream reads at once; a full page is followed by another read at once. */
+const EVENT_PAGE = 100;
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
 const RunnerBodySchema = z.object({ name: NameSchema });
@@ -106,6 +111,7 @@ function bearer(c: Context<Env>): string | null {
  */
 export function createApp(deps: AppDependencies): Hono<Env> {
   const { board, version, turns, scheduler, models } = deps;
+  const eventStreamPingMs = deps.eventStreamPingMs ?? 15_000;
   const app = new Hono<Env>();
 
   app.get("/health", (c) => c.json({ ok: true, version }));
@@ -395,19 +401,46 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     return c.json(await board.readEvents(since === "" ? null : since, limit));
   });
   // `since=latest` starts at the end of the log, for a client that has just read the board's state.
+  // An idle stream waits for the board's next append, and writes a ping when none comes, which
+  // also picks up another process's appends and makes a connection that died unnoticed close.
   api.get("/events/stream", (c) => {
     let cursor = c.req.query("since") ?? null;
     return streamSSE(c, async (stream) => {
-      if (cursor === "latest") {
-        cursor = await board.latestEventId();
-      }
-      while (!stream.aborted && !stream.closed) {
-        const events = await board.readEvents(cursor === "" ? null : cursor, 100);
-        for (const event of events) {
-          await stream.writeSSE({ id: event.id, event: event.type, data: JSON.stringify(event) });
-          cursor = event.id;
+      let appended = false;
+      let wake: (() => void) | null = null;
+      const unsubscribe = board.onEventAppended(() => {
+        appended = true;
+        wake?.();
+      });
+      stream.onAbort(() => wake?.());
+      try {
+        if (cursor === "latest") {
+          cursor = await board.latestEventId();
         }
-        await stream.sleep(500);
+        while (!stream.aborted && !stream.closed) {
+          appended = false;
+          const events = await board.readEvents(cursor === "" ? null : cursor, EVENT_PAGE);
+          for (const event of events) {
+            await stream.writeSSE({ id: event.id, event: event.type, data: JSON.stringify(event) });
+            cursor = event.id;
+          }
+          if (appended || events.length === EVENT_PAGE) {
+            continue;
+          }
+          const woken = await new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), eventStreamPingMs);
+            wake = () => {
+              clearTimeout(timer);
+              resolve(true);
+            };
+          });
+          wake = null;
+          if (!woken && !stream.aborted) {
+            await stream.writeSSE({ event: "ping", data: "" });
+          }
+        }
+      } finally {
+        unsubscribe();
       }
     });
   });

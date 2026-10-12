@@ -297,6 +297,19 @@ export interface Message extends MessageFrontmatter {
   readonly body: string;
 }
 
+/** Where a message is and who wrote it, for text that names it by its id. */
+export const MessageRefSchema = MessageFrontmatterSchema.pick({
+  id: true,
+  author: true,
+  channel: true,
+  thread: true,
+  ts: true,
+});
+export type MessageRef = z.infer<typeof MessageRefSchema>;
+
+/** The most message ids one lookup takes. */
+export const MESSAGE_LOOKUP_LIMIT = 50;
+
 /**
  * `open`: the current stage waits for a holder. `claimed`: a member holds it. The stages between
  * open and done are the task's plan; which one is current is recorded beside the status.

@@ -2639,6 +2639,21 @@ describe("Board", () => {
     ]);
   });
 
+  it("finds messages by id wherever they were posted, and leaves out ids that name none", async () => {
+    const { board } = await society();
+    const inProject = await board.postMessage(ENG, { channel: "demo/general", body: "plan" });
+    const inSociety = await board.postMessage(USER, { channel: "general", body: "hello" });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    const inThread = await board.postMessage(REV, { thread_id: topic.id, body: "zod" });
+    const found = await board.findMessages([inThread.id, ulid(), inSociety.id, inProject.id]);
+    expect(found.toSorted((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: inProject.id, author: "eng-1", channel: "demo/general", ts: inProject.ts },
+      { id: inSociety.id, author: "user", channel: "general", ts: inSociety.ts },
+      { id: inThread.id, author: "rev-1", channel: "demo/dev", thread: topic.id, ts: inThread.ts },
+    ]);
+    expect(await board.findMessages([ulid()])).toEqual([]);
+  });
+
   it("refuses to approve a skill whose folder its proposer's home does not give", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

@@ -1,6 +1,6 @@
 import { isBoardChannel, type Message } from "@stellaris/shared";
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/Button.js";
 import { ApiError, type ThreadSummary } from "../lib/api.js";
@@ -36,10 +36,11 @@ type Item =
  */
 export function ChannelView() {
   const { _splat: ref = "general" } = useParams({ from: "/c/$" });
-  return <ChannelStream key={ref} channel={ref} />;
+  const { message } = useSearch({ from: "/c/$" });
+  return <ChannelStream key={ref} channel={ref} target={message} />;
 }
 
-function ChannelStream({ channel }: { channel: string }) {
+function ChannelStream({ channel, target }: { channel: string; target: string | undefined }) {
   const { api } = useSession();
   const messages = useQuery({
     queryKey: ["channel", channel],
@@ -74,7 +75,7 @@ function ChannelStream({ channel }: { channel: string }) {
 
   const newest = messages.data?.at(-1)?.id ?? null;
   useEffect(() => markSeen(channel, newest), [channel, newest]);
-  const { ref, onScroll } = useStickyScroll();
+  const { ref, onScroll } = useStickyScroll(target === undefined);
 
   const [first, second] = channel.split("/");
   const name = second ?? first ?? channel;
@@ -124,7 +125,13 @@ function ChannelStream({ channel }: { channel: string }) {
             }
             const { item } = entry;
             return item.kind === "message" ? (
-              <MessageItem key={item.id} message={item.message} members={members.data} now={now} />
+              <MessageItem
+                key={item.id}
+                message={item.message}
+                members={members.data}
+                now={now}
+                target={item.id === target}
+              />
             ) : (
               <ThreadItem key={item.id} thread={item.thread} now={now} />
             );

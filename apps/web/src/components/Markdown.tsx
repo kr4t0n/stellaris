@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { entityOfHref, remarkEntities } from "../lib/entities.js";
 import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib/files.js";
 import { remarkMentions } from "../lib/mentions.js";
-import { EntityLink, useEntities } from "./Entities.js";
+import { EntityLink, useEntitiesFor } from "./Entities.js";
 import { FileBaseContext, TaskFileLink, TaskImage } from "./TaskFile.js";
 
 /** What a path on a runner's machine reads as: its text, with the path on hover. */
@@ -17,16 +17,16 @@ function LocalPath({ href, children }: { href: string | undefined; children?: Re
 }
 
 /**
- * A link to a task, a proposal, a thread, or a cron, or to a file on a task's branch, stays in the
- * playground; any other path on a machine is text, since nothing on the board can open it; and any
- * other link leaves in a new tab, without handing it a reference back.
+ * A link to a task, a proposal, a thread, a cron, or a message, or to a file on a task's branch,
+ * stays in the playground; any other path on a machine is text, since nothing on the board can
+ * open it; and any other link leaves in a new tab, without handing it a reference back.
  */
 function BoardLink({ href, children }: { href?: string | undefined; children?: ReactNode }) {
   const base = useContext(FileBaseContext);
   const entity = entityOfHref(href);
   if (entity !== null) {
     return (
-      <EntityLink kind={entity.kind} id={entity.id}>
+      <EntityLink kind={entity.kind} id={entity.id} place={entity.place}>
         {children}
       </EntityLink>
     );
@@ -78,8 +78,8 @@ function urlTransform(url: string): string {
 
 /**
  * A message body as markdown. Raw HTML is never rendered and unsafe URLs are dropped, so a message
- * cannot run script in the page that holds the board token. Ids of known tasks, proposals, and
- * threads read as links named by their titles. `base` is where a task's file sits on its branch,
+ * cannot run script in the page that holds the board token. Ids of known tasks, proposals,
+ * threads, crons, and messages read as links named by their titles. `base` is where a task's file sits on its branch,
  * for relative links and images inside it, and `line` a source line to mark as `line-target`.
  */
 export function Markdown({
@@ -91,7 +91,7 @@ export function Markdown({
   base?: FileBase | undefined;
   line?: number | undefined;
 }) {
-  const index = useEntities();
+  const index = useEntitiesFor(text);
   // Entities run before mentions, so a title that holds an @name is not marked as a mention.
   const plugins = useMemo(
     (): NonNullable<Options["remarkPlugins"]> => [

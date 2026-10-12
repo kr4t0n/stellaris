@@ -4,6 +4,7 @@ import {
   BranchPathSchema,
   CliKindSchema,
   EffortSchema,
+  MESSAGE_LOOKUP_LIMIT,
   MetricsWindowSchema,
   ModelNameSchema,
   NameSchema,
@@ -81,6 +82,11 @@ const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
 /** How many commits of a home's history one request reads. */
 const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
+/** Message ids, comma-separated, as the interface asks for the ones its text names. */
+const MessageIdsSchema = z
+  .string()
+  .transform((ids) => ids.split(",").filter((id) => id !== ""))
+  .pipe(z.array(UlidSchema).min(1).max(MESSAGE_LOOKUP_LIMIT));
 const TimezoneBodySchema = z.object({ timezone: TimeZoneSchema });
 const ChannelBodySchema = z.object({
   project: NameSchema.nullable().default(null),
@@ -227,6 +233,10 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // Every cron, ended ones too; they are set, changed, and ended through their verbs.
   api.get("/crons", async (c) => c.json(await board.listCrons()));
   api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
+  // Where the messages that text names by id are, for the interface to link them.
+  api.get("/messages", async (c) =>
+    c.json(await board.findMessages(MessageIdsSchema.parse(c.req.query("ids") ?? ""))),
+  );
   // A skill proposal's folder as the board took it from its proposer's home, with each file's text.
   api.get("/proposals/:id/files", async (c) =>
     c.json(await board.readSkillFiles(UlidSchema.parse(c.req.param("id")))),

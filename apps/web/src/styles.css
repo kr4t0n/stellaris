@@ -145,6 +145,10 @@
   .board-markdown hr {
     @apply border-line;
   }
+  /* The message a link named by its id, in its thread or channel. */
+  .message-target {
+    @apply bg-amber-300/[0.06] shadow-[inset_2px_0_0_rgb(252_211_77_/_0.5)];
+  }
   /* The block or line a citation such as `report.md:67` names, in a task's file. */
   .line-target {
     @apply rounded-sm bg-amber-300/10 shadow-[0_0_0_4px_rgb(252_211_77_/_0.1)];

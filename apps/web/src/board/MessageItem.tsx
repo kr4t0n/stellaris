@@ -1,5 +1,5 @@
 import type { Member, Message, Task } from "@stellaris/shared";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import { Avatar, useDisplayName } from "./Avatar.js";
@@ -13,20 +13,35 @@ export function MessageItem({
   members,
   now,
   task,
+  target = false,
 }: {
   message: Message;
   members: readonly Member[] | undefined;
   now: number;
   /** The task whose thread the message is in, to name the stages a step's chip mentions. */
   task?: Task | undefined;
+  /** The message a link named: marked, unfolded, and scrolled to. */
+  target?: boolean | undefined;
 }) {
   const long = message.body.length > FOLD_AT;
-  const [open, setOpen] = useState(false);
+  // Null until the reader folds or unfolds it; the message a link named starts whole.
+  const [unfolded, setUnfolded] = useState<boolean | null>(null);
+  const open = unfolded ?? target;
   const displayName = useDisplayName();
   const fromBoard = message.author === "board";
   const step = message.step === undefined ? null : stepLabel(message.step, task);
+  const article = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (target) {
+      article.current?.scrollIntoView({ block: "center" });
+    }
+  }, [target]);
   return (
-    <article className={`flex gap-3 px-4 py-2.5 ${fromBoard ? "opacity-70" : ""}`}>
+    <article
+      ref={article}
+      aria-current={target ? "true" : undefined}
+      className={`flex gap-3 px-4 py-2.5 ${fromBoard ? "opacity-70" : ""} ${target ? "message-target" : ""}`}
+    >
       <Avatar name={message.author} members={members} />
       <div className="min-w-0 flex-1">
         <header className="flex min-w-0 items-baseline gap-2">
@@ -49,7 +64,7 @@ export function MessageItem({
         {long ? (
           <button
             type="button"
-            onClick={() => setOpen(!open)}
+            onClick={() => setUnfolded(!open)}
             className="mt-1 text-xs text-fg-tertiary hover:text-fg-primary"
           >
             {open ? "Show less" : "Show more"}

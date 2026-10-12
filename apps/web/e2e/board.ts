@@ -586,7 +586,7 @@ const PITCH = {
   thread: SKILL_PROPOSAL,
   ts: CREATED,
   mentions: [],
-  body: `Proposal ${SKILL_PROPOSAL}: skill refereed-research.\n\nThe plan has run on four tasks.`,
+  body: `Proposal ${SKILL_PROPOSAL}: skill refereed-research.\n\nThe plan has run on four tasks. It follows ada's message ${HANDOVER.id}.`,
 };
 
 export const ANSWERED_ASK = "01M3Q2HHHHHHHHHHHHHHHHHHH1";
@@ -1157,6 +1157,29 @@ export async function fakeBoard(
         default:
           return json(route, { message: `no fake for ${pathname}` }, 404);
       }
+    }
+    if (pathname === "/api/messages") {
+      // Where each message the text names is, as the board finds it.
+      const ids = (new URL(request.url()).searchParams.get("ids") ?? "").split(",");
+      const known: Array<{
+        id: string;
+        author: string;
+        channel: string;
+        ts: string;
+        thread?: string;
+      }> = [HANDOVER, PITCH, ...LAB_GENERAL];
+      return json(
+        route,
+        known
+          .filter((message) => ids.includes(message.id))
+          .map((message) => ({
+            id: message.id,
+            author: message.author,
+            channel: message.channel,
+            ...(message.thread === undefined ? {} : { thread: message.thread }),
+            ts: message.ts,
+          })),
+      );
     }
     if (pathname === "/api/metrics") {
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));

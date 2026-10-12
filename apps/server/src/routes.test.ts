@@ -399,6 +399,18 @@ describe("board server routes", () => {
     expect(forbidden.status).toBe(403);
   });
 
+  it("looks up messages by id for the text that names them", async () => {
+    const app = createApp({ board, version: "t" });
+    const posted = await board.postMessage(USER, { channel: "demo/general", body: "plan" });
+    const missing = "01M3ZZZZZZZZZZZZZZZZZZZZZZ";
+    const found = await app.request(`/api/messages?ids=${posted.id},${missing}`, { headers });
+    expect(await found.json()).toEqual([
+      { id: posted.id, author: "user", channel: "demo/general", ts: posted.ts },
+    ]);
+    expect((await app.request("/api/messages?ids=not-an-id", { headers })).status).toBe(400);
+    expect((await app.request("/api/messages", { headers })).status).toBe(400);
+  });
+
   it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {
     const app = createApp({ board, version: "t" });
     await board.writeKnowledge(USER, {

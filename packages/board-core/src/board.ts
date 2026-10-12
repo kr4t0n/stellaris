@@ -32,6 +32,7 @@ import {
   MemberSchema,
   ModelNameSchema,
   MessageFrontmatterSchema,
+  MessageRefSchema,
   NameSchema,
   OpsSignalSchema,
   parsePullRequestUrl,
@@ -82,6 +83,7 @@ import {
   type Message,
   type MessageFrontmatter,
   type MessageNotice,
+  type MessageRef,
   type MessageStep,
   type Name,
   type OpsSignal,
@@ -1745,6 +1747,29 @@ export class Board {
 
   async readThread(id: Ulid): Promise<Thread> {
     return (await this.findThread(id)).thread;
+  }
+
+  /**
+   * Where each of the messages named is and who wrote it, for text that names them by id; an id
+   * that names no message is left out. Message files start with their ids, so only the files
+   * asked for are read.
+   */
+  async findMessages(ids: readonly Ulid[]): Promise<MessageRef[]> {
+    const wanted = new Set(ids);
+    const found: MessageRef[] = [];
+    for await (const dir of this.messageDirs()) {
+      for (const file of await listFiles(dir)) {
+        if (!wanted.delete(file.slice(0, 26))) {
+          continue;
+        }
+        const { data } = await readMarkdown(path.join(dir, file), MessageFrontmatterSchema);
+        found.push(MessageRefSchema.parse(data));
+      }
+      if (wanted.size === 0) {
+        break;
+      }
+    }
+    return found;
   }
 
   /**
@@ -6568,6 +6593,24 @@ export class Board {
         yield* await this.readMessagesIn(this.paths.projectChannel(slug, channel), since);
       }
       yield* this.threadMessagesIn(this.paths.threads(slug), since);
+    }
+  }
+
+  /** Every folder that holds messages: each channel's and each thread's, in the society and every project. */
+  private async *messageDirs(): AsyncGenerator<string> {
+    for (const channel of await listDirs(this.paths.societyChannels())) {
+      yield this.paths.societyChannel(channel);
+    }
+    for (const id of await listDirs(this.paths.societyThreads())) {
+      yield this.paths.threadMessages(this.paths.societyThreads(), id);
+    }
+    for (const slug of await listDirs(this.paths.projects())) {
+      for (const channel of await listDirs(this.paths.projectChannels(slug))) {
+        yield this.paths.projectChannel(slug, channel);
+      }
+      for (const id of await listDirs(this.paths.threads(slug))) {
+        yield this.paths.threadMessages(this.paths.threads(slug), id);
+      }
     }
   }
 

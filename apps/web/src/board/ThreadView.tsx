@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
@@ -19,10 +19,11 @@ import { useStickyScroll } from "./useStickyScroll.js";
 /** One thread: what it is about, its messages, and its summary once closed. */
 export function ThreadView() {
   const { threadId } = useParams({ from: "/thread/$threadId" });
-  return <ThreadStream key={threadId} id={threadId} />;
+  const { message } = useSearch({ from: "/thread/$threadId" });
+  return <ThreadStream key={threadId} id={threadId} target={message} />;
 }
 
-function ThreadStream({ id }: { id: string }) {
+function ThreadStream({ id, target }: { id: string; target: string | undefined }) {
   const { api } = useSession();
   const detail = useQuery({ queryKey: ["thread", id], queryFn: () => api.thread(id) });
   const members = useMembers();
@@ -31,7 +32,7 @@ function ThreadStream({ id }: { id: string }) {
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);
-  const { ref, onScroll } = useStickyScroll();
+  const { ref, onScroll } = useStickyScroll(target === undefined);
   const [closing, setClosing] = useState(false);
   const subject = detail.data?.thread.subject;
   const task = useTask(subject?.kind === "task" ? subject.id : null);
@@ -111,6 +112,7 @@ function ThreadStream({ id }: { id: string }) {
             members={members.data}
             now={now}
             task={task.data}
+            target={message.id === target}
           />
         ))}
         {thread.state === "closed" ? (

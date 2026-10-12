@@ -14,6 +14,7 @@ import {
   KnowledgeSchema,
   AgentSchema,
   MemberSchema,
+  MessageRefSchema,
   MetricsSchema,
   RemovedKnowledgeSchema,
   RemovedSkillSchema,
@@ -296,6 +297,9 @@ export function createApi(token: string) {
       write("PUT", "/api/society/timezone", token, { timezone }, SocietySchema),
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),
+    /** Where the messages named are and who wrote them; ids that name no message are left out. */
+    messages: (ids: readonly string[]) =>
+      get(`/api/messages?ids=${ids.join(",")}`, token, MessageRefSchema.array()),
     /** A skill proposal's folder as the board took it, each file with its text. */
     proposalFiles: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}/files`, token, SkillFileContentSchema.array()),

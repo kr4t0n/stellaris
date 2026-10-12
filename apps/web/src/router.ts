@@ -4,9 +4,15 @@ import {
   createRouter,
   lazyRouteComponent,
 } from "@tanstack/react-router";
-import { MetricsWindowSchema, type MetricsWindow } from "@stellaris/shared";
+import { MetricsWindowSchema, UlidSchema, type MetricsWindow } from "@stellaris/shared";
 import type { CitizenTab } from "./board/citizen.js";
 import { Playground } from "./Playground.js";
+
+/** A view's `message` search: the message a link named, which the view marks. */
+function messageSearch(search: Record<string, unknown>): { message?: string } {
+  const message = UlidSchema.safeParse(search["message"]);
+  return message.success ? { message: message.data } : {};
+}
 
 /** The sky alone: nothing opens in the content island. */
 function SkyOnly() {
@@ -22,11 +28,14 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/c/$",
+    // `message` is one text named by its id, marked in the stream and scrolled to.
+    validateSearch: messageSearch,
     component: lazyRouteComponent(() => import("./board/ChannelView.js"), "ChannelView"),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/thread/$threadId",
+    validateSearch: messageSearch,
     component: lazyRouteComponent(() => import("./board/ThreadView.js"), "ThreadView"),
   }),
   createRoute({

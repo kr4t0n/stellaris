@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 import { fakeBoard, SKILL_PROPOSAL, STAGE_TASK } from "./board.js";
 
+test("a message named by its id reads as who posted it where, and opens there, marked", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+  const thread = page.getByRole("region", { name: "Thread" });
+  const link = thread.getByRole("link", { name: "ada's post in Compare shortest-path algorithms" });
+  await expect(link).toBeVisible();
+  // "message" before the id, and whose it was, are the title's to say.
+  await expect(thread).toContainText("It follows ada's post in Compare shortest-path algorithms.");
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/thread/${STAGE_TASK}\\?message=`));
+  const marked = page.locator('article[aria-current="true"]');
+  await expect(marked).toHaveCount(1);
+  await expect(marked).toContainText("Survey done: twelve methods");
+});
+
 test("a skill proposed as a folder shows its SKILL.md and opens each file beside it", async ({
   page,
 }) => {

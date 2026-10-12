@@ -36,11 +36,18 @@ test("a channel shows each thread where it was opened as one quiet line that ope
 
   const view = page.getByRole("region", { name: "Board content" });
   const open = view.getByRole("link", { name: /Who reviews the survey\?/ });
-  // An open thread ends in its state alone, with no count and no time.
-  await expect(open).toHaveText("you opened topic thread Who reviews the survey?open");
-  // A closed thread says when it closed and carries its summary under it.
+  // An open thread's mark is green, its state is said only to screen readers, and the line ends
+  // in when it opened, with no count.
+  await expect(open).toHaveText(
+    /^you opened topic thread Who reviews the survey\?, open\d+ days ago$/,
+  );
+  await expect(open.getByTitle("open", { exact: true })).toHaveClass(/text-emerald-400/);
+  await expect(open.locator("time")).toHaveAttribute("title", /^opened /);
+  // A closed thread's mark stays quiet, and the line ends in when it closed, its summary under it.
   const closed = view.getByRole("link", { name: /Merge the phone projects/ });
-  await expect(closed).toContainText(/Merge the phone projectsclosed · \d+ days ago/);
+  await expect(closed).toContainText(/Merge the phone projects, closed\d+ days ago/);
+  await expect(closed.getByTitle("closed", { exact: true })).toHaveClass(/text-fg-muted/);
+  await expect(closed.locator("time")).toHaveAttribute("title", /^closed /);
   await expect(closed).toContainText("Filed the merge as a task in lab and proposed archiving");
   await expect(closed).not.toContainText("messages");
 

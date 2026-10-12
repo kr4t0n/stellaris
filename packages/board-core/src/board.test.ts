@@ -363,6 +363,47 @@ describe("Board", () => {
     ]);
   });
 
+  it("scans a digest without holding up a post, and counts nothing written during the scan", async () => {
+    const { board } = await society();
+    for (let n = 0; n < 500; n += 1) {
+      await board.postMessage(REV, { channel: "demo/general", body: `note ${n}` });
+    }
+    let scanned = false;
+    const scan = board.unreadByConversation(ENG).then((counts) => {
+      scanned = true;
+      return counts;
+    });
+    await board.postMessage(REV, { channel: "demo/general", body: "meanwhile" });
+    // The post did not wait for the heartbeat's scan of five hundred messages.
+    expect(scanned).toBe(false);
+    // The scan took its mark before the post, so it counts the five hundred alone; the next sees it.
+    expect(await scan).toEqual([{ scope: "demo", thread: null, channel: null, count: 500 }]);
+    expect(await board.unreadByConversation(ENG)).toEqual([
+      { scope: "demo", thread: null, channel: null, count: 501 },
+    ]);
+  });
+
+  it("never moves a cursor past a message written while its digest was read", async () => {
+    const { board } = await society();
+    const posted: string[] = [];
+    const delivered = new Set<string>();
+    for (let round = 0; round < 20; round += 1) {
+      const [digest, ...posts] = await Promise.all([
+        board.readDigest(ENG, { advance: true }),
+        board.postMessage(USER, { channel: "demo/dev", body: `@eng-1 dev ${round}` }),
+        board.postMessage(USER, { channel: "demo/general", body: `@eng-1 general ${round}` }),
+      ]);
+      posted.push(...posts.map((post) => post.id));
+      for (const message of digest.messages) {
+        delivered.add(message.id);
+      }
+    }
+    for (const message of (await board.readDigest(ENG, { advance: true })).messages) {
+      delivered.add(message.id);
+    }
+    expect(posted.filter((id) => !delivered.has(id))).toEqual([]);
+  });
+
   it("names on a stage only a citizen who could hold it", async () => {
     const { board } = await society();
     await board.addProject(USER, { slug: "lab" });

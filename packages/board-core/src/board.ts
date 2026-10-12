@@ -2193,26 +2193,24 @@ export class Board {
   async readDigest(actor: Actor, input: VerbInput<"read_inbox"> = {}): Promise<DigestResult> {
     const args = VerbInputs.read_inbox.parse(input);
     await this.authorize(actor, "read_inbox");
-    return this.mutex.run(async () => {
-      const stored = await this.readCursors(actor.name);
-      const from: Cursors =
-        args.since_cursor === undefined ? stored : { ...NO_CURSORS, digest: args.since_cursor };
-      const conversation =
-        actor.scope === undefined
-          ? undefined
-          : { scope: actor.scope, part: conversationPart(actor) ?? null };
-      const filed = (await this.digestSince(actor, from, conversation)).slice(0, args.limit);
-      if (args.advance) {
-        await this.advanceCursors(actor.name, filed);
-      }
-      const last = filed.at(-1)?.message.id;
-      const cursor =
-        last ??
-        (conversation === undefined
-          ? from.digest
-          : cursorOf(from, conversation.scope, conversation.part));
-      return { messages: filed.map((entry) => entry.message), cursor };
-    });
+    const { cursors: stored, upto } = await this.digestSnapshot(actor.name);
+    const from: Cursors =
+      args.since_cursor === undefined ? stored : { ...NO_CURSORS, digest: args.since_cursor };
+    const conversation =
+      actor.scope === undefined
+        ? undefined
+        : { scope: actor.scope, part: conversationPart(actor) ?? null };
+    const filed = (await this.digestSince(actor, from, upto, conversation)).slice(0, args.limit);
+    if (args.advance) {
+      await this.mutex.run(() => this.advanceCursors(actor.name, filed));
+    }
+    const last = filed.at(-1)?.message.id;
+    const cursor =
+      last ??
+      (conversation === undefined
+        ? from.digest
+        : cursorOf(from, conversation.scope, conversation.part));
+    return { messages: filed.map((entry) => entry.message), cursor };
   }
 
   /**
@@ -2225,32 +2223,41 @@ export class Board {
    * whose signals that call for action wake their readers directly.
    */
   async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
-    return this.mutex.run(async () => {
-      const counts = new Map<string, UnreadConversation>();
-      const unscoped = { name: actor.name, role: actor.role };
-      for (const { scope, part, message, news } of await this.digestSince(
-        unscoped,
-        await this.readCursors(actor.name),
-      )) {
-        // News waits for the citizen's next turn; it is never a reason for one.
-        if (news === true || message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
-          continue;
-        }
-        const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
-        if (posted !== scope && scope !== SOCIETY_SCOPE) {
-          continue;
-        }
-        const key = conversationKey(scope, part);
-        const entry = counts.get(key) ?? {
-          scope,
-          thread: threadOfPart(part) ?? null,
-          channel: channelOfPart(part) ?? null,
-          count: 0,
-        };
-        counts.set(key, { ...entry, count: entry.count + 1 });
+    const { cursors, upto } = await this.digestSnapshot(actor.name);
+    const counts = new Map<string, UnreadConversation>();
+    const unscoped = { name: actor.name, role: actor.role };
+    for (const { scope, part, message, news } of await this.digestSince(unscoped, cursors, upto)) {
+      // News waits for the citizen's next turn; it is never a reason for one.
+      if (news === true || message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
+        continue;
       }
-      return [...counts.values()];
-    });
+      const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
+      if (posted !== scope && scope !== SOCIETY_SCOPE) {
+        continue;
+      }
+      const key = conversationKey(scope, part);
+      const entry = counts.get(key) ?? {
+        scope,
+        thread: threadOfPart(part) ?? null,
+        channel: channelOfPart(part) ?? null,
+        count: 0,
+      };
+      counts.set(key, { ...entry, count: entry.count + 1 });
+    }
+    return [...counts.values()];
+  }
+
+  /**
+   * A reader's cursors and the id below which every message is already on disk, taken under the
+   * mutex, which a digest scan then leaves: messages carry ids from the same monotonic source and are
+   * written under the mutex, so the scan, which counts nothing newer than the mark, cannot pass over
+   * one written while it reads, and a post never waits for a scan.
+   */
+  private digestSnapshot(agent: Name): Promise<{ cursors: Cursors; upto: Ulid }> {
+    return this.mutex.run(async () => ({
+      cursors: await this.readCursors(agent),
+      upto: this.newId(),
+    }));
   }
 
   private async readCursors(agent: Name): Promise<Cursors> {
@@ -2295,11 +2302,13 @@ export class Board {
    * by the user wherever it is. With a conversation, only what is filed there: for a thread, every
    * message of the thread, since the conversation is about it; for a channel's, that channel's
    * top-level messages; for a scope's home, general's and those of a project the member is not in,
-   * since each thread and each other channel is a conversation of its own.
+   * since each thread and each other channel is a conversation of its own. Nothing newer than
+   * `upto` counts (see `digestSnapshot`).
    */
   private async digestSince(
     actor: Actor,
     cursors: Cursors,
+    upto: Ulid,
     conversation?: { scope: Name; part: string | null },
   ): Promise<DigestEntry[]> {
     const conversationThread = threadOfPart(conversation?.part);
@@ -2312,6 +2321,7 @@ export class Board {
       const messages = await this.readMessagesIn(
         this.paths.threadMessages(found.threads, conversationThread),
         cursorOf(cursors, scope, part),
+        upto,
       );
       return messages
         .filter((message) => message.author !== actor.name)
@@ -2345,7 +2355,7 @@ export class Board {
         ? null
         : (known.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0] ?? null);
 
-    for await (const message of this.iterateMessages(since)) {
+    for await (const message of this.iterateMessages(since, undefined, upto)) {
       const filedIn = wakeScope(agent, parseChannelRef(message.channel).project);
       const thread = message.thread ?? null;
       const asked =
@@ -6571,11 +6581,12 @@ export class Board {
     );
   }
 
-  private async readMessagesIn(dir: string, since: Ulid | null): Promise<Message[]> {
+  /** The messages in a folder after `since` and, when given, up to `upto`, read by name first. */
+  private async readMessagesIn(dir: string, since: Ulid | null, upto?: Ulid): Promise<Message[]> {
     const messages: Message[] = [];
     for (const file of await listFiles(dir)) {
       const id = file.slice(0, 26);
-      if (since !== null && id <= since) {
+      if ((since !== null && id <= since) || (upto !== undefined && id > upto)) {
         continue;
       }
       const doc = await readMarkdown(path.join(dir, file), MessageFrontmatterSchema);
@@ -6584,20 +6595,27 @@ export class Board {
     return messages;
   }
 
-  /** Every message newer than `since` across society channels, project channels, and threads. */
-  private async *iterateMessages(since: Ulid | null, project?: Name): AsyncGenerator<Message> {
+  /**
+   * Every message newer than `since`, and no newer than `upto` when given, across society
+   * channels, project channels, and threads.
+   */
+  private async *iterateMessages(
+    since: Ulid | null,
+    project?: Name,
+    upto?: Ulid,
+  ): AsyncGenerator<Message> {
     if (project === undefined) {
       for (const channel of await listDirs(this.paths.societyChannels())) {
-        yield* await this.readMessagesIn(this.paths.societyChannel(channel), since);
+        yield* await this.readMessagesIn(this.paths.societyChannel(channel), since, upto);
       }
-      yield* this.threadMessagesIn(this.paths.societyThreads(), since);
+      yield* this.threadMessagesIn(this.paths.societyThreads(), since, upto);
     }
     const projects = project === undefined ? await listDirs(this.paths.projects()) : [project];
     for (const slug of projects) {
       for (const channel of await listDirs(this.paths.projectChannels(slug))) {
-        yield* await this.readMessagesIn(this.paths.projectChannel(slug, channel), since);
+        yield* await this.readMessagesIn(this.paths.projectChannel(slug, channel), since, upto);
       }
-      yield* this.threadMessagesIn(this.paths.threads(slug), since);
+      yield* this.threadMessagesIn(this.paths.threads(slug), since, upto);
     }
   }
 
@@ -6619,9 +6637,13 @@ export class Board {
     }
   }
 
-  private async *threadMessagesIn(threads: string, since: Ulid | null): AsyncGenerator<Message> {
+  private async *threadMessagesIn(
+    threads: string,
+    since: Ulid | null,
+    upto?: Ulid,
+  ): AsyncGenerator<Message> {
     for (const id of await listDirs(threads)) {
-      yield* await this.readMessagesIn(this.paths.threadMessages(threads, id), since);
+      yield* await this.readMessagesIn(this.paths.threadMessages(threads, id), since, upto);
     }
   }
 }

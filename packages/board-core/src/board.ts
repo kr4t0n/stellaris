@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { decodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
@@ -44,11 +44,14 @@ import {
   ProjectSchema,
   ProposalCharterSchemas,
   ProposalFrontmatterSchema,
+  isSafeRelativePath,
   RetirementProposalSchema,
   ROLE_KIND_APPROVERS,
   RoleCharterSchema,
   RunnerSchema,
   SEED_ROLES,
+  SKILL_BYTES_LIMIT,
+  SKILL_FILES_LIMIT,
   SkillProposalSchema,
   stageIndex,
   SOCIETY_CHANNELS,
@@ -87,11 +90,14 @@ import {
   type Project,
   type Proposal,
   type ProposalKind,
+  type ProposalOrigin,
   type ProposalStatus,
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
   type Skill,
+  type SkillFileContent,
+  type SkillFiles,
   type SkillProposal,
   type Stage,
   type StageId,
@@ -136,6 +142,7 @@ import {
   exists,
   listDirs,
   listFiles,
+  parseLooseMarkdown,
   readJson,
   readLooseMarkdown,
   readMarkdown,
@@ -452,6 +459,32 @@ const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 /** Free text quoted in a board notice, its mentions written as plain names so they wake nobody. */
 function withoutMentions(text: string): string {
   return text.replaceAll(MENTION_PATTERN, "$1$2");
+}
+
+/** The most of a proposed skill's file the proposal's view shows. */
+const SKILL_TEXT_LIMIT_CHARS = 100_000;
+
+/** The skill a proposal publishes from its proposer's home, or null for any other proposal. */
+function skillFolderOf(proposal: Proposal): Name | null {
+  if (proposal.kind !== "skill") {
+    return null;
+  }
+  const parsed = SkillProposalSchema.safeParse(proposal.charter);
+  return parsed.success && parsed.data.body === undefined ? parsed.data.name : null;
+}
+
+/** Whether a proposal was filed from a conversation: its scope, and its thread or channel. */
+function proposedFrom(origin: ProposalOrigin | undefined, where: ProposalOrigin): boolean {
+  return (
+    origin !== undefined &&
+    origin.scope === where.scope &&
+    origin.thread === where.thread &&
+    origin.channel === where.channel
+  );
+}
+
+function megabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "");
 }
 
 /** Roles that may write society knowledge and remove the society's skills. */
@@ -3865,7 +3898,7 @@ export class Board {
       throw new BoardError("VALIDATION", `invalid ${args.kind} charter: ${parsed.error.message}`);
     }
     return this.mutex.run(async () => {
-      const proposal: Proposal = {
+      let proposal: Proposal = {
         ...ProposalFrontmatterSchema.parse({
           id: this.newId(),
           kind: args.kind,
@@ -3887,6 +3920,16 @@ export class Board {
       };
       // What approval would provision must be possible now, so nobody decides a doomed proposal.
       await this.validateProvision(proposal.kind, proposal.charter);
+      // A skill's folder reaches the board when the proposer's turn ends and its runner pushes the
+      // home; filed outside a turn, it is in the home already or never will be.
+      const skill = skillFolderOf(proposal);
+      if (skill !== null && proposal.filedFrom === undefined) {
+        const taken = await this.takeSkillFolderUnlocked(proposal, skill);
+        if (typeof taken === "string") {
+          throw new BoardError("VALIDATION", taken);
+        }
+        proposal = { ...proposal, skillFiles: taken };
+      }
       await this.writeProposal(proposal);
       await this.events.append("proposal.created", actor.name, {
         proposalId: proposal.id,
@@ -5353,7 +5396,7 @@ export class Board {
       }
       case "skill": {
         const skill = SkillProposalSchema.parse(proposal.charter);
-        const replaced = await this.promoteSkillUnlocked(by, proposal.proposedBy, skill, meta);
+        const replaced = await this.promoteSkillUnlocked(by, proposal, skill, meta);
         return { skill: skill.name, replaced };
       }
       case "archive": {
@@ -5368,31 +5411,53 @@ export class Board {
     }
   }
 
-  /** Writes a promoted skill under the society's skills, where every citizen's skills index lists it. */
+  /**
+   * Publishes a promoted skill under the society's skills, where every citizen's skills index lists
+   * it: the folder the board took from its proposer's home, or the text proposed alone. A
+   * replacement is the whole skill, so files the new version dropped go with the old one.
+   */
   private async promoteSkillUnlocked(
     by: Name,
-    proposedBy: Name,
+    proposal: Proposal,
     skill: SkillProposal,
     meta: Record<string, unknown>,
   ): Promise<boolean> {
+    const dir = this.paths.societySkill(skill.name);
     const file = this.paths.societySkillFile(skill.name);
     const replaced = await exists(file);
-    await ensureDir(this.paths.societySkill(skill.name));
+    const taken = proposal.skillFiles;
+    const staged = path.join(this.paths.proposalFiles(proposal.id), "SKILL.md");
+    if (skill.body === undefined && (taken === undefined || !(await exists(staged)))) {
+      throw new BoardError("INVALID_STATE", `proposal ${proposal.id} holds no skill files`);
+    }
+    await rm(dir, { recursive: true, force: true });
+    if (skill.body === undefined) {
+      await cp(this.paths.proposalFiles(proposal.id), dir, { recursive: true });
+    } else {
+      await ensureDir(dir);
+    }
+    const body = skill.body ?? (await readLooseMarkdown(file)).body;
     // The SKILL.md frontmatter the CLIs' validators accept: name, description, and a metadata map.
     await writeMarkdown(
       file,
       {
         name: skill.name,
         description: skill.summary,
-        metadata: { proposedBy, promotedBy: by, promotedAt: this.now().toISOString() },
+        metadata: {
+          proposedBy: proposal.proposedBy,
+          promotedBy: by,
+          promotedAt: this.now().toISOString(),
+          ...(taken === undefined ? {} : { commit: taken.commit }),
+        },
       },
-      skill.body,
+      body,
     );
     await this.events.append("skill.promoted", by, {
       name: skill.name,
       summary: skill.summary,
-      proposedBy,
+      proposedBy: proposal.proposedBy,
       replaced,
+      ...(taken === undefined ? {} : { files: taken.files.length }),
       ...meta,
     });
     await this.appendMessage(
@@ -5401,6 +5466,164 @@ export class Board {
       `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${sentence(skill.summary)}. Every citizen's skills index now lists it.`,
     );
     return replaced;
+  }
+
+  /**
+   * Copies a skill's folder from its proposer's home, as the home's newest commit holds it, into the
+   * proposal's folder in the projection, where its deciders read it and from where approval
+   * publishes it. Returns what was taken, or why the home could not give it.
+   */
+  private async takeSkillFolderUnlocked(
+    proposal: Proposal,
+    name: Name,
+  ): Promise<SkillFiles | string> {
+    const home = this.paths.agent(proposal.proposedBy);
+    const folder = `skills/${name}`;
+    const where = `${folder} in ${proposal.proposedBy}'s home`;
+    const taken = await this.homes.folder(home, folder);
+    if (taken === null || !taken.files.some((entry) => entry.path === "SKILL.md")) {
+      return `no ${folder}/SKILL.md in ${proposal.proposedBy}'s home`;
+    }
+    if (taken.files.length > SKILL_FILES_LIMIT) {
+      return `${where} holds ${taken.files.length} files, more than the ${SKILL_FILES_LIMIT} a society skill may`;
+    }
+    const bytes = taken.files.reduce((sum, entry) => sum + entry.size, 0);
+    if (bytes > SKILL_BYTES_LIMIT) {
+      return `${where} holds ${megabytes(bytes)} MB, more than the ${megabytes(SKILL_BYTES_LIMIT)} MB a society skill may`;
+    }
+    const contents = new Map<string, Buffer>();
+    for (const entry of taken.files) {
+      contents.set(entry.path, await this.homes.blob(home, entry.object));
+    }
+    const manual = parseLooseMarkdown(contents.get("SKILL.md")?.toString("utf8") ?? "");
+    if (manual.error !== null) {
+      return `the frontmatter of ${folder}/SKILL.md in ${proposal.proposedBy}'s home does not parse (${manual.error})`;
+    }
+    const dir = this.paths.proposalFiles(proposal.id);
+    await rm(dir, { recursive: true, force: true });
+    for (const entry of taken.files) {
+      const target = path.join(dir, ...entry.path.split("/"));
+      await ensureDir(path.dirname(target));
+      await writeFile(target, contents.get(entry.path) ?? Buffer.alloc(0));
+      await chmod(target, entry.executable ? 0o755 : 0o644);
+    }
+    return {
+      commit: taken.commit,
+      takenAt: this.now().toISOString(),
+      files: taken.files.map((entry) => ({
+        path: entry.path,
+        size: entry.size,
+        executable: entry.executable,
+      })),
+    };
+  }
+
+  /** Keeps what was taken of a skill proposal's folder on the proposal, and logs it. */
+  private async recordSkillFiles(proposal: Proposal, taken: SkillFiles): Promise<Proposal> {
+    const next: Proposal = { ...proposal, skillFiles: taken };
+    await this.writeProposal(next);
+    await this.events.append("proposal.files_taken", SYSTEM_ACTOR.name, {
+      proposalId: proposal.id,
+      kind: proposal.kind,
+      proposedBy: proposal.proposedBy,
+      commit: taken.commit,
+      files: taken.files.length,
+    });
+    return next;
+  }
+
+  /**
+   * A skill proposal with its folder, for approval: taken now when the turn that filed it ended
+   * without it, as when the server restarted before the turn's end was recorded, and refused while
+   * that turn is still in flight, since the folder reaches the board only when it ends.
+   */
+  private async skillFilesForApproval(proposal: Proposal): Promise<Proposal> {
+    const name = skillFolderOf(proposal);
+    if (name === null || proposal.skillFiles !== undefined) {
+      return proposal;
+    }
+    const cannot = `proposal ${proposal.id} cannot be approved`;
+    const filing = this.turnsInFlight().some(
+      (turn) => turn.agent === proposal.proposedBy && proposedFrom(proposal.filedFrom, turn),
+    );
+    if (filing) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `${cannot} until ${proposal.proposedBy}'s turn that proposed it ends, when the board takes the skill's folder from its home`,
+      );
+    }
+    const taken = await this.takeSkillFolderUnlocked(proposal, name);
+    if (typeof taken === "string") {
+      throw new BoardError("INVALID_STATE", `${cannot}: ${taken}; reject it with that reason`);
+    }
+    return this.recordSkillFiles(proposal, taken);
+  }
+
+  /**
+   * Takes the folders of the skills a citizen proposed from a conversation, once the turn there has
+   * ended and its runner has pushed the citizen's home. A proposal whose folder the home does not
+   * give is rejected by the board with the reason, which wakes the proposer to put it right; while
+   * someone is in a turn in the proposal's thread, it stays as it is, and approval meets the reason.
+   */
+  async takeSkillFiles(
+    turn: Pick<TurnRecord, "agent" | "project" | "thread" | "channel">,
+  ): Promise<void> {
+    const where = {
+      scope: turn.project,
+      ...(turn.thread === undefined ? {} : { thread: turn.thread }),
+      ...(turn.channel === undefined ? {} : { channel: turn.channel }),
+    };
+    await this.mutex.run(async () => {
+      for (const proposal of await this.listProposals()) {
+        const name = skillFolderOf(proposal);
+        if (
+          name === null ||
+          proposal.status !== "proposed" ||
+          proposal.skillFiles !== undefined ||
+          proposal.proposedBy !== turn.agent ||
+          !proposedFrom(proposal.filedFrom, where)
+        ) {
+          continue;
+        }
+        const taken = await this.takeSkillFolderUnlocked(proposal, name);
+        if (typeof taken !== "string") {
+          await this.recordSkillFiles(proposal, taken);
+          continue;
+        }
+        try {
+          await this.decideUnlocked(
+            SYSTEM_ACTOR,
+            proposal.id,
+            "rejected",
+            `${taken} when the turn that proposed it ended; propose it again once the folder is there`,
+          );
+        } catch (error) {
+          if (!(error instanceof BoardError)) {
+            throw error;
+          }
+        }
+      }
+    });
+  }
+
+  /** A skill proposal's files with their text, as the board took them; none before then. */
+  async readSkillFiles(proposalId: Ulid): Promise<SkillFileContent[]> {
+    const proposal = await this.readProposal(proposalId);
+    const dir = this.paths.proposalFiles(proposal.id);
+    const files: SkillFileContent[] = [];
+    for (const entry of proposal.skillFiles?.files ?? []) {
+      if (!isSafeRelativePath(entry.path)) {
+        continue;
+      }
+      const bytes = await readFile(path.join(dir, ...entry.path.split("/"))).catch(() => null);
+      const text = bytes === null || bytes.includes(0) ? null : bytes.toString("utf8");
+      files.push({
+        ...entry,
+        text: text === null ? null : text.slice(0, SKILL_TEXT_LIMIT_CHARS),
+        truncated: text !== null && text.length > SKILL_TEXT_LIMIT_CHARS,
+      });
+    }
+    return files;
   }
 
   private async validateAddAgent(input: AddAgentInput): Promise<void> {
@@ -6111,91 +6334,98 @@ export class Board {
     outcome: "approved" | "rejected",
     reason?: string,
   ): Promise<Decision> {
-    return this.mutex.run(async () => {
-      const proposal = await this.readProposal(proposalId);
-      if (proposal.status !== "proposed") {
-        throw new BoardError(
-          "INVALID_STATE",
-          `proposal ${proposalId} is already ${proposal.status}`,
-        );
-      }
-      if (proposal.proposedBy === actor.name) {
-        throw new BoardError("FORBIDDEN", "a proposer never decides its own proposal");
-      }
-      const approvers = ROLE_KIND_APPROVERS[proposal.kind];
-      if (!approvers.includes(actor.role)) {
-        throw new BoardError(
-          "FORBIDDEN",
-          `a ${proposal.kind} proposal requires one of: ${approvers.join(", ")}`,
-        );
-      }
-      if (outcome === "approved") {
-        await this.validateProvision(proposal.kind, proposal.charter);
-      }
-      this.assertNoTurnCut(
-        actor,
-        `proposal ${proposalId} cannot be decided`,
-        (turn) => turn.thread === proposalId,
+    return this.mutex.run(() => this.decideUnlocked(actor, proposalId, outcome, reason));
+  }
+
+  private async decideUnlocked(
+    actor: Actor,
+    proposalId: Ulid,
+    outcome: "approved" | "rejected",
+    reason?: string,
+  ): Promise<Decision> {
+    const filed = await this.readProposal(proposalId);
+    if (filed.status !== "proposed") {
+      throw new BoardError("INVALID_STATE", `proposal ${proposalId} is already ${filed.status}`);
+    }
+    if (filed.proposedBy === actor.name) {
+      throw new BoardError("FORBIDDEN", "a proposer never decides its own proposal");
+    }
+    const approvers = ROLE_KIND_APPROVERS[filed.kind];
+    if (!approvers.includes(actor.role)) {
+      throw new BoardError(
+        "FORBIDDEN",
+        `a ${filed.kind} proposal requires one of: ${approvers.join(", ")}`,
       );
-      if (outcome === "approved" && proposal.kind === "archive") {
-        await this.assertProjectQuiet(actor, ArchiveProposalSchema.parse(proposal.charter).project);
-      }
-      const ts = this.now().toISOString();
-      const decision: Decision = DecisionSchema.parse({
-        id: this.newId(),
-        proposalId,
-        decidedBy: actor.name,
-        outcome,
-        ...(reason === undefined ? {} : { reason }),
-        ts,
-      });
-      await writeMarkdown(this.paths.decision(decision.id), decision, reason ?? "");
-      const provision =
-        outcome === "approved" ? await this.executeProvision(actor.name, proposal) : undefined;
-      const status: ProposalStatus =
-        outcome === "rejected" ? "rejected" : provision === undefined ? "approved" : "provisioned";
-      await this.writeProposal({
-        ...proposal,
-        status,
-        decidedBy: actor.name,
-        decidedAt: ts,
-        ...(reason === undefined ? {} : { reason }),
-        ...(provision === undefined ? {} : { provisionedAt: ts, provision }),
-      });
-      await this.events.append("proposal.decided", actor.name, {
-        proposalId,
-        outcome,
-        kind: proposal.kind,
-        proposedBy: proposal.proposedBy,
-        ...(proposal.filedFrom === undefined ? {} : { filedFrom: proposal.filedFrom }),
-      });
-      if (provision !== undefined) {
-        await this.events.append("proposal.provisioned", actor.name, {
-          proposalId,
-          kind: proposal.kind,
-          ...provision,
-        });
-      }
-      const verdict = outcome === "approved" ? "Approved" : "Rejected";
-      const why = reason === undefined ? "" : ` Reason: ${reason}.`;
-      const result =
-        provision === undefined
-          ? ""
-          : ` Provisioned: ${Object.entries(provision)
-              .map(([key, value]) => `${key} ${plain(value)}`)
-              .join(", ")}.`;
-      // The decision is the proposal's last post, a step that wakes no front desk, and it ends
-      // the thread; the scheduler wakes the proposer from the event.
-      const thread = await this.proposalThreadUnlocked(actor.name, proposal);
-      await this.appendThreadMessage(
-        actor.name,
-        thread.id,
-        `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`,
-        { step: { action: outcome } },
-      );
-      await this.endThreadOf(proposalId, actor.name, outcome);
-      return decision;
+    }
+    if (outcome === "approved") {
+      await this.validateProvision(filed.kind, filed.charter);
+    }
+    this.assertNoTurnCut(
+      actor,
+      `proposal ${proposalId} cannot be decided`,
+      (turn) => turn.thread === proposalId,
+    );
+    if (outcome === "approved" && filed.kind === "archive") {
+      await this.assertProjectQuiet(actor, ArchiveProposalSchema.parse(filed.charter).project);
+    }
+    const proposal = outcome === "approved" ? await this.skillFilesForApproval(filed) : filed;
+    const ts = this.now().toISOString();
+    const decision: Decision = DecisionSchema.parse({
+      id: this.newId(),
+      proposalId,
+      decidedBy: actor.name,
+      outcome,
+      ...(reason === undefined ? {} : { reason }),
+      ts,
     });
+    await writeMarkdown(this.paths.decision(decision.id), decision, reason ?? "");
+    const provision =
+      outcome === "approved" ? await this.executeProvision(actor.name, proposal) : undefined;
+    const status: ProposalStatus =
+      outcome === "rejected" ? "rejected" : provision === undefined ? "approved" : "provisioned";
+    await this.writeProposal({
+      ...proposal,
+      status,
+      decidedBy: actor.name,
+      decidedAt: ts,
+      ...(reason === undefined ? {} : { reason }),
+      ...(provision === undefined ? {} : { provisionedAt: ts, provision }),
+    });
+    await this.events.append("proposal.decided", actor.name, {
+      proposalId,
+      outcome,
+      kind: proposal.kind,
+      proposedBy: proposal.proposedBy,
+      ...(proposal.filedFrom === undefined ? {} : { filedFrom: proposal.filedFrom }),
+    });
+    if (provision !== undefined) {
+      await this.events.append("proposal.provisioned", actor.name, {
+        proposalId,
+        kind: proposal.kind,
+        ...provision,
+      });
+    }
+    const verdict = outcome === "approved" ? "Approved" : "Rejected";
+    const why = reason === undefined ? "" : ` Reason: ${reason}.`;
+    const result =
+      provision === undefined
+        ? ""
+        : ` Provisioned: ${Object.entries(provision)
+            .map(([key, value]) => `${key} ${plain(value)}`)
+            .join(", ")}.`;
+    // The decision is the proposal's last post, a step that wakes no front desk, and it ends
+    // the thread; the scheduler wakes the proposer from the event.
+    const thread = await this.proposalThreadUnlocked(actor.name, proposal);
+    const post = `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`;
+    // The board's own decision quotes the proposer's words, whose mentions would wake as the board's.
+    await this.appendThreadMessage(
+      actor.name,
+      thread.id,
+      actor.name === SYSTEM_ACTOR.name ? withoutMentions(post) : post,
+      { step: { action: outcome } },
+    );
+    await this.endThreadOf(proposalId, actor.name, outcome);
+    return decision;
   }
 
   /** The opener, the people of its subject, and anyone who posted in it; mentions reach the rest. */

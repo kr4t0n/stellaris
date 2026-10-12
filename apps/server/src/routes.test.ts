@@ -9,6 +9,7 @@ import {
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
 } from "@stellaris/shared";
+import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -441,6 +442,40 @@ describe("board server routes", () => {
       .parse(await (await app.request("/api/skills", { headers })).json());
     expect(skills).toMatchObject([{ name: "release", summary: "Cut a release", scope: "society" }]);
     expect(stewToken).toMatch(/^stl_/);
+
+    // A skill proposed as a folder of its proposer's home is read with each file's text.
+    const home = board.paths.agent("eng-1");
+    await mkdir(path.join(home, "skills", "triage", "scripts"), { recursive: true });
+    await writeFile(
+      path.join(home, "skills", "triage", "SKILL.md"),
+      "# Triage\n\nRun the script.\n",
+    );
+    await writeFile(path.join(home, "skills", "triage", "scripts", "go.sh"), "#!/bin/sh\n", {
+      mode: 0o755,
+    });
+    await execa("git", ["add", "--all"], { cwd: home });
+    await execa("git", ["-c", "user.name=e", "-c", "user.email=e@x", "commit", "-qm", "t"], {
+      cwd: home,
+    });
+    const folder = await board.propose(
+      { name: "eng-1", role: "engineer" },
+      { kind: "skill", charter: { name: "triage", summary: "Triage" }, rationale: "x" },
+    );
+    const files = await app.request(`/api/proposals/${folder.id}/files`, { headers });
+    expect(await files.json()).toEqual([
+      {
+        path: "SKILL.md",
+        size: 26,
+        executable: false,
+        text: "# Triage\n\nRun the script.\n",
+        truncated: false,
+      },
+      { path: "scripts/go.sh", size: 10, executable: true, text: "#!/bin/sh\n", truncated: false },
+    ]);
+    expect(
+      await (await app.request(`/api/proposals/${proposal.id}/files`, { headers })).json(),
+    ).toEqual([]);
+    expect((await app.request("/api/proposals/..%2Fx/files", { headers })).status).toBe(400);
 
     const wake = await app.request("/api/wake", {
       method: "POST",

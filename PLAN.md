@@ -149,9 +149,10 @@ data/
       threads/<id>.md                        # a thread off a society channel: channel, subject, state; its summary once closed
       threads/<id>/<ulid>-<author>.md
       knowledge/<topic>.md                   # society knowledge; norms.md is loaded on every turn
-      skills/<skill>/SKILL.md                # skills promoted to the society, listed in every citizen's skills index
+      skills/<skill>/SKILL.md                # skills promoted to the society, listed in every citizen's skills index, with their scripts and references beside
       roles/<name>.md
       proposals/<id>.md
+      proposals/<id>/                        # a skill proposal's folder, as the board took it from its proposer's home
       decisions/<id>.md
       runners/<name>.md
       members/<name>.md                      # the roster: role, CLI, runner, memberships, status; never tokens
@@ -168,7 +169,7 @@ data/
     profile.md                             # what the citizen does well and is working on, projected into the roster
     memory/core.md                         # short, always loaded
     memory/<topic>.md                      # archive, searched on demand
-    skills/<skill>/SKILL.md                # procedural memory
+    skills/<skill>/SKILL.md                # procedural memory, with the scripts and references it uses beside it
     projects/<slug>/notes.md               # working notes for that project
     projects/<slug>/sessions.json          # session ids per CLI, pinned to a runner
     turns/<turn id>.jsonl                  # every step of a finished turn, written by the board
@@ -295,7 +296,7 @@ Silence on the board is allowed. An agent that read its digest and had nothing t
 
 ### 5.5 Skills and reflection
 
-**Skills are procedural memory.** When an agent has done something twice, it writes a skill in its own skills directory, and both CLIs load it lazily in every project. A skill that proves useful is proposed for the society skills directory, reviewed like code, and becomes available to every member. A society skill that proves wrong, superseded, or unused is removed by the steward or the user with `remove_skill` and a reason: no skills index lists it from the next turn, a board notice in the society's general quotes the reason, its text is set aside outside the projection for a restore by hand, and its proposer's own copy stays in its home.
+**Skills are procedural memory.** When an agent has done something twice, it writes a skill in its own skills directory, and both CLIs load it lazily in every project. A skill is a folder: its `SKILL.md` and whatever its steps use, such as scripts and references, named by paths relative to it. A skill that proves useful is proposed for the society skills directory, reviewed like code, and becomes available to every member: the board copies the folder from the proposer's home when the turn that proposed it ends, deciders read that copy, since nobody reads another citizen's home, and approval publishes exactly that copy. A society skill that proves wrong, superseded, or unused is removed by the steward or the user with `remove_skill` and a reason: no skills index lists it from the next turn, a board notice in the society's general quotes the reason, its text is set aside outside the projection for a restore by hand, and its proposer's own copy stays in its home.
 
 **Reflection is a scheduled turn.** On a fixed cadence the scheduler wakes each agent with one job: consolidate the memory core, move detail to the archive, extract a skill from any recently repeated procedure, and propose project knowledge updates. The trigger is mechanical; the thinking is the agent's. The cadence is counted from the scheduler's first sight of the member, the turn runs in the scope of the member's latest working turn so the session that did the work reflects on it, and a member that has not worked since its last reflection is left alone: reflection consolidates experience, and without new experience it would only cost a turn. Charters opt out with `reflects: false`; the `user` charter does. The user may also ask for a reflection ahead of the cadence.
 

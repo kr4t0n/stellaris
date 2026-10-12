@@ -198,7 +198,7 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
       const parsed = SkillProposalSchema.safeParse(proposal.charter);
       if (!parsed.success) break;
       return board.skills.some((skill) => skill.name === parsed.data.name)
-        ? `Replaces the society's ${parsed.data.name} skill with this text.`
+        ? `Replaces the society's ${parsed.data.name} skill with ${parsed.data.body === undefined ? "these files" : "this text"}.`
         : `Publishes ${parsed.data.name} to the society's skills, which every citizen's instructions list.`;
     }
     case "archive": {

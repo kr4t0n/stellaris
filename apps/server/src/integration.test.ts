@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -546,6 +546,11 @@ describe("Phase 6 exit criterion", () => {
     expect(proposals).toEqual([
       expect.objectContaining({ kind: "skill", proposedBy: "mem-1", status: "proposed" }),
     ]);
+    // Proposed as its folder: the board took it from the home the runner pushed as the turn ended.
+    expect(proposals[0]?.skillFiles?.files).toEqual([
+      { path: "SKILL.md", size: expect.any(Number), executable: false },
+      { path: "check.sh", size: expect.any(Number), executable: true },
+    ]);
     expect((await board.listMembers()).find((m) => m.name === "mem-1")?.profile).toContain(
       "Python projects with uv",
     );
@@ -558,6 +563,9 @@ describe("Phase 6 exit criterion", () => {
     expect((await board.listSocietySkills()).map((s) => [s.name, s.summary])).toEqual([
       ["uv-setup", "Set up a uv project with locked dependencies"],
     ]);
+    const script = path.join(board.paths.societySkill("uv-setup"), "check.sh");
+    expect(await readFile(script, "utf8")).toContain("uv sync --locked");
+    expect((await stat(script)).mode & 0o111).not.toBe(0);
     expect((await board.listChannel("general")).at(-1)?.body).toContain(
       "Skill uv-setup promoted to the society",
     );

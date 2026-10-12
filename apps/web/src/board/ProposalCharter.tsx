@@ -11,10 +11,11 @@ import {
   type RoleCharter,
 } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
-import { useProjects, useTasks } from "../lib/session.js";
+import { sizeLabel } from "../lib/files.js";
+import { useProjects, useProposalFiles, useTasks } from "../lib/session.js";
 import { Citizen } from "./Avatar.js";
 import { proposedRole, roleDiff, skillText } from "./governance.js";
 import { inPlay } from "./tasks.js";
@@ -185,6 +186,102 @@ function ArchiveCharterView({
   );
 }
 
+/**
+ * A skill proposed as a folder of its proposer's home: its SKILL.md, then every file beside it,
+ * each opening to its text. Until the proposer's turn ends, the board has not taken it yet.
+ */
+function SkillFolder({ proposal, name }: { proposal: Proposal; name: string }) {
+  const taken = proposal.skillFiles;
+  const files = useProposalFiles(proposal.id, taken !== undefined);
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  if (taken === undefined) {
+    return (
+      <p className="mt-2 text-sm text-fg-secondary">
+        {proposal.status === "proposed"
+          ? `The board takes skills/${name}/ from ${proposal.proposedBy}'s home when the turn that proposed it ends.`
+          : "The board took no files for it."}
+      </p>
+    );
+  }
+  if (files.data === undefined) {
+    return (
+      <p className="mt-2 text-meta">{files.isError ? "Could not read its files." : "Loading…"}</p>
+    );
+  }
+  const manual = files.data.find((file) => file.path === "SKILL.md");
+  const others = files.data.filter((file) => file.path !== "SKILL.md");
+  const toggle = (path: string): void => {
+    setShown((was) => {
+      const next = new Set(was);
+      if (!next.delete(path)) {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+  return (
+    <>
+      <Fields>
+        <Field label="Taken from">
+          {proposal.proposedBy}'s home at{" "}
+          <span className="font-mono">{taken.commit.slice(0, 7)}</span>
+        </Field>
+      </Fields>
+      {manual === undefined || manual.text === null ? null : (
+        <Block>
+          <Markdown text={skillText(manual.text)} />
+        </Block>
+      )}
+      {others.length === 0 ? null : (
+        <ul className="mt-2">
+          {others.map((file) => {
+            const open = shown.has(file.path);
+            return (
+              <li key={file.path}>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  title={file.path}
+                  onClick={() => toggle(file.path)}
+                  className={`group flex w-full items-baseline gap-2 rounded-md py-0.5 text-left text-sm hover:bg-surface-2/40 ${open ? "bg-surface-2/30" : ""}`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`inline-block w-2.5 shrink-0 text-[10px] text-fg-muted transition-transform ${open ? "rotate-90" : ""}`}
+                  >
+                    ▸
+                  </span>
+                  <span
+                    className={`min-w-0 truncate ${open ? "text-fg-primary" : "text-fg-secondary group-hover:text-fg-primary"}`}
+                  >
+                    {file.path}
+                  </span>
+                  <span className="shrink-0 text-meta">
+                    {sizeLabel(file.size)}
+                    {file.executable ? " · executable" : ""}
+                  </span>
+                </button>
+                {open ? (
+                  file.text === null ? (
+                    <p className="mt-1 mb-2 ml-[18px] text-meta">
+                      A binary file; it is published as it is.
+                    </p>
+                  ) : (
+                    <pre className="mt-1 mb-2 ml-[18px] max-h-96 overflow-auto rounded-lg bg-surface-2/40 p-3 font-mono text-[11px] leading-relaxed text-fg-secondary">
+                      {file.text}
+                      {file.truncated ? "\n…" : ""}
+                    </pre>
+                  )
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /** What approval would create or change, drawn for the proposal's kind. */
 export function ProposalCharter({
   proposal,
@@ -253,9 +350,13 @@ export function ProposalCharter({
             <Field label="Skill">{parsed.data.name}</Field>
             <Field label="Summary">{parsed.data.summary}</Field>
           </Fields>
-          <Block>
-            <Markdown text={skillText(parsed.data.body)} />
-          </Block>
+          {parsed.data.body === undefined ? (
+            <SkillFolder proposal={proposal} name={parsed.data.name} />
+          ) : (
+            <Block>
+              <Markdown text={skillText(parsed.data.body)} />
+            </Block>
+          )}
         </>
       );
     }

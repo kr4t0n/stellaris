@@ -195,6 +195,16 @@ export function useProposal(id: string) {
   return useQuery({ queryKey: ["proposal", id], queryFn: () => api.proposal(id) });
 }
 
+/** A skill proposal's files, read once the board has taken them; `proposal.` events refresh them. */
+export function useProposalFiles(id: string, taken: boolean) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["proposal", id, "files"],
+    queryFn: () => api.proposalFiles(id),
+    enabled: taken,
+  });
+}
+
 /** The society's skills, which a skill proposal may replace. */
 export function useSkills() {
   const { api } = useSession();

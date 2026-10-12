@@ -66,7 +66,11 @@ export interface LooseMarkdownDocument extends MarkdownDocument<Record<string, u
  * never validates: frontmatter that does not parse leaves the data empty and the body the whole text.
  */
 export async function readLooseMarkdown(file: string): Promise<LooseMarkdownDocument> {
-  const raw = await readFile(file, "utf8");
+  return parseLooseMarkdown(await readFile(file, "utf8"));
+}
+
+/** `readLooseMarkdown` over text already read. */
+export function parseLooseMarkdown(raw: string): LooseMarkdownDocument {
   try {
     const parsed = parseMatter(raw);
     return { data: parsed.data, body: parsed.content.replace(/^\n/, ""), error: null };

@@ -1,7 +1,18 @@
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
+import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -2477,6 +2488,186 @@ describe("Board", () => {
       kind: "reflection",
     });
     expect(wake.payload["kind"]).toBe("reflection");
+  });
+
+  it("takes a proposed skill's folder from its proposer's home when the turn that proposed it ends, and publishes it", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    let inFlight: TurnInFlight[] = [];
+    board.watchTurns(() => inFlight);
+    const home = board.paths.agent("eng-1");
+    const skill = board.paths.agentSkill("eng-1", "uv-setup");
+    // What a runner's push leaves in the home: the turn's files, committed.
+    const commitHome = async (): Promise<void> => {
+      await execa("git", ["add", "--all"], { cwd: home });
+      await execa(
+        "git",
+        ["-c", "user.name=eng-1", "-c", "user.email=e@x", "commit", "-qm", "turn"],
+        {
+          cwd: home,
+        },
+      );
+    };
+    const write = async (file: string, text: string, mode = 0o644): Promise<void> => {
+      await mkdir(path.dirname(path.join(skill, file)), { recursive: true });
+      await writeFile(path.join(skill, file), text, { mode });
+      await chmod(path.join(skill, file), mode);
+    };
+    const inTurn: Actor = { ...ENG, scope: "demo", thread: undefined };
+    const turnEnd = { agent: "eng-1", project: "demo" };
+
+    // Proposed from a turn whose files the board has not seen yet: nothing is taken until it ends,
+    // and approval waits for that turn.
+    await write(
+      "SKILL.md",
+      "---\nname: uv-setup\ndescription: Set up uv\n---\n# uv setup\n\nRun scripts/check.sh.\n",
+    );
+    await write("scripts/check.sh", "#!/bin/sh\nuv sync --locked\n", 0o755);
+    await write("references/flags.md", "# Flags\n\n--locked\n");
+    await write("SKILL.md.conflict-01J", "an edit to reconcile\n");
+    const proposal = await board.propose(inTurn, {
+      kind: "skill",
+      charter: { name: "uv-setup", summary: "Set up a uv project" },
+      rationale: "Every Python project here needs it.",
+    });
+    expect(proposal.skillFiles).toBeUndefined();
+    inFlight = [{ agent: "eng-1", scope: "demo" }];
+    await expect(board.approve(STEW, { proposal_id: proposal.id })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("until eng-1's turn that proposed it ends"),
+    });
+
+    // The runner pushes the home before it reports, so the turn's end finds the folder there. A
+    // turn in another conversation of the citizen's takes nothing.
+    await commitHome();
+    inFlight = [];
+    await board.takeSkillFiles({ ...turnEnd, thread: ulid() });
+    expect((await board.readProposal(proposal.id)).skillFiles).toBeUndefined();
+    await board.takeSkillFiles(turnEnd);
+    const taken = (await board.readProposal(proposal.id)).skillFiles;
+    expect(taken?.files).toEqual([
+      { path: "SKILL.md", size: expect.any(Number), executable: false },
+      { path: "references/flags.md", size: 18, executable: false },
+      { path: "scripts/check.sh", size: 27, executable: true },
+    ]);
+    expect(taken?.commit).toMatch(/^[0-9a-f]{40}$/);
+    const events = (await board.readEvents(null)).map((event) => event.type);
+    expect(events).toContain("proposal.files_taken");
+    // Deciders read it in the projection, and the interface through the board.
+    const staged = path.join(board.paths.board, "society", "proposals", proposal.id);
+    expect((await stat(path.join(staged, "scripts", "check.sh"))).mode & 0o777).toBe(0o755);
+    expect(await board.readSkillFiles(proposal.id)).toContainEqual({
+      path: "references/flags.md",
+      size: 18,
+      executable: false,
+      text: "# Flags\n\n--locked\n",
+      truncated: false,
+    });
+    // What the citizen changes after is not what was reviewed, and does not reach approval.
+    await write("scripts/check.sh", "#!/bin/sh\nrm -rf /\n", 0o755);
+    await commitHome();
+
+    await board.approve(STEW, { proposal_id: proposal.id });
+    const published = board.paths.societySkill("uv-setup");
+    expect(await readFile(path.join(published, "scripts", "check.sh"), "utf8")).toBe(
+      "#!/bin/sh\nuv sync --locked\n",
+    );
+    expect((await stat(path.join(published, "scripts", "check.sh"))).mode & 0o777).toBe(0o755);
+    expect(await readFile(path.join(published, "references", "flags.md"), "utf8")).toContain(
+      "--locked",
+    );
+    expect(await readdir(published)).toEqual(["SKILL.md", "references", "scripts"]);
+    const manual = await readFile(board.paths.societySkillFile("uv-setup"), "utf8");
+    expect(manual).toContain("description: Set up a uv project");
+    expect(manual).toContain(`commit: ${taken?.commit}`);
+    expect(manual).toContain("# uv setup\n\nRun scripts/check.sh.");
+    expect((await board.listSocietySkills()).map((s) => [s.name, s.summary])).toEqual([
+      ["uv-setup", "Set up a uv project"],
+    ]);
+
+    // A replacement is the whole skill: a file the new version dropped goes with the old one.
+    await rm(path.join(skill, "references"), { recursive: true });
+    await commitHome();
+    const again = await board.propose(inTurn, {
+      kind: "skill",
+      charter: { name: "uv-setup", summary: "Set up a uv project, checked" },
+      rationale: "The references moved into the steps.",
+    });
+    await board.takeSkillFiles(turnEnd);
+    await board.approve(STEW, { proposal_id: again.id });
+    expect(await readdir(published)).toEqual(["SKILL.md", "scripts"]);
+
+    // A folder the home does not hold when the turn ends is the board's to reject, with the reason,
+    // which wakes the proposer.
+    const missing = await board.propose(inTurn, {
+      kind: "skill",
+      charter: { name: "never-written", summary: "Something @rev-1 would use" },
+      rationale: "x",
+    });
+    await board.takeSkillFiles(turnEnd);
+    expect(await board.readProposal(missing.id)).toMatchObject({
+      status: "rejected",
+      decidedBy: "board",
+      reason: expect.stringContaining("no skills/never-written/SKILL.md in eng-1's home"),
+    });
+    const decided = (await board.readEvents(null)).findLast((e) => e.type === "proposal.decided");
+    expect(decided).toMatchObject({ actor: "board", payload: { proposedBy: "eng-1" } });
+    // The board quotes the summary, whose mention would otherwise wake rev-1 as the board's.
+    expect((await board.listThread(missing.id)).at(-1)).toMatchObject({
+      author: "board",
+      body: expect.stringContaining("Something rev-1 would use"),
+      mentions: [],
+    });
+
+    // Outside a turn there is nothing more to wait for: the folder is taken at once, or refused.
+    await expect(
+      board.propose(ENG, {
+        kind: "skill",
+        charter: { name: "never-written", summary: "Something" },
+        rationale: "x",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION", message: expect.stringContaining("no skills/") });
+    const direct = await board.propose(ENG, {
+      kind: "skill",
+      charter: { name: "uv-setup", summary: "Set up a uv project" },
+      rationale: "x",
+    });
+    expect(direct.skillFiles?.files.map((file) => file.path)).toEqual([
+      "SKILL.md",
+      "scripts/check.sh",
+    ]);
+  });
+
+  it("refuses to approve a skill whose folder its proposer's home does not give", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const STEW: Actor = { name: "stew", role: "steward" };
+    const inTurn: Actor = { ...ENG, scope: "demo" };
+    const proposal = await board.propose(inTurn, {
+      kind: "skill",
+      charter: { name: "broken", summary: "Something" },
+      rationale: "x",
+    });
+    // The turn's end was never recorded, as across a restart, and the home never got the folder.
+    await expect(board.approve(STEW, { proposal_id: proposal.id })).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("no skills/broken/SKILL.md in eng-1's home; reject it"),
+    });
+    // A SKILL.md whose frontmatter does not parse would publish a broken skill.
+    const skill = board.paths.agentSkill("eng-1", "broken");
+    await mkdir(skill, { recursive: true });
+    await writeFile(path.join(skill, "SKILL.md"), "---\ndescription: a: b\n---\nSteps\n", "utf8");
+    const home = board.paths.agent("eng-1");
+    await execa("git", ["add", "--all"], { cwd: home });
+    await execa("git", ["-c", "user.name=e", "-c", "user.email=e@x", "commit", "-qm", "turn"], {
+      cwd: home,
+    });
+    await expect(board.approve(STEW, { proposal_id: proposal.id })).rejects.toMatchObject({
+      message: expect.stringContaining("the frontmatter of skills/broken/SKILL.md"),
+    });
+    await board.reject(STEW, { proposal_id: proposal.id, reason: "fix its frontmatter" });
+    expect((await board.readProposal(proposal.id)).status).toBe("rejected");
   });
 
   it("writes knowledge one revision at a time, and refuses a stale write with the current text", async () => {

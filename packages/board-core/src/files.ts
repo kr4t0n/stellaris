@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { isSafeRelativePath } from "@stellaris/shared";
+import { fileVersion, isSafeRelativePath } from "@stellaris/shared";
 
 /** Which relative paths of a tree the file API serves. */
 export type FileFilter = (relative: string) => boolean;
@@ -21,7 +21,7 @@ function isMissing(error: unknown): boolean {
 
 /**
  * A directory as the runner protocol's file API sees it: regular files by relative path with
- * forward slashes, and their SHA-256. Hashes are kept per file until its size or modification time
+ * forward slashes, and their versions, the SHA-256 marked when the file is executable. Hashes are kept per file until its size or modification time
  * changes, so listing a tree again reads only what changed. Symbolic links are never followed, and
  * the temporary files of atomic writes are never listed.
  */
@@ -124,15 +124,16 @@ export class FileTree {
       if (info.size > MAX_FILE_BYTES) {
         return null;
       }
+      const executable = (info.mode & 0o111) !== 0;
       const known = this.hashes.get(absolute);
       if (known !== undefined && known.mtimeMs === info.mtimeMs && known.size === info.size) {
-        return known.sha;
+        return fileVersion(known.sha, executable);
       }
       const sha = createHash("sha256")
         .update(await readFile(absolute))
         .digest("hex");
       this.hashes.set(absolute, { mtimeMs: info.mtimeMs, size: info.size, sha });
-      return sha;
+      return fileVersion(sha, executable);
     } catch (error) {
       if (isMissing(error)) {
         return null;

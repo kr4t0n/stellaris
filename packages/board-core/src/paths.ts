@@ -61,6 +61,10 @@ export class BoardPaths {
   proposal(id: Ulid): string {
     return path.join(this.proposals(), `${id}.md`);
   }
+  /** A skill proposal's folder, as the board took it from its proposer's home. */
+  proposalFiles(id: Ulid): string {
+    return path.join(this.proposals(), id);
+  }
   decisions(): string {
     return path.join(this.society, "decisions");
   }

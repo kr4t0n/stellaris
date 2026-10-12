@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 import { fakeBoard, SKILL_PROPOSAL, STAGE_TASK } from "./board.js";
 
+test("a skill proposed as a folder shows its SKILL.md and opens each file beside it", async ({
+  page,
+}) => {
+  await fakeBoard(page, { skillFolder: true });
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+
+  await expect(page.getByText("stew's home at 4f1c2d9")).toBeVisible();
+  await expect(page.getByText("Run scripts/plan.sh first.")).toBeVisible();
+  const script = page.getByRole("button", { name: /scripts\/plan\.sh/ });
+  await expect(script).toContainText("executable");
+  await expect(script).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByText("echo stages: work review")).toHaveCount(0);
+  await script.click();
+  await expect(script).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("echo stages: work review")).toBeVisible();
+});
+
 test("approving takes a second click, says what it does, and shows what it made", async ({
   page,
 }) => {

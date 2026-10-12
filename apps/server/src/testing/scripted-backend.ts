@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ZERO_USAGE,
@@ -240,12 +240,12 @@ export class ScriptedBackend implements AgentBackend {
           "# Profile\n\nPython projects with uv; send me packaging and test setup.\n",
           "utf8",
         );
+        // The skill is its folder, script and all, which the board takes when this turn ends.
         await verb("propose", {
           kind: "skill",
           charter: {
             name: "uv-setup",
             summary: "Set up a uv project with locked dependencies",
-            body: await readFile(path.join(home, "skills", "uv-setup", "SKILL.md"), "utf8"),
           },
           rationale: "Every Python project in the society needs the same setup.",
         });
@@ -261,6 +261,17 @@ export class ScriptedBackend implements AgentBackend {
           !request.instructions.includes("- uv-setup (society)")
         ) {
           throw new Error("the skills index on beta misses a skill");
+        }
+        // The society's copy carries the script beside its SKILL.md, still executable.
+        const script = path.join(
+          request.spec.boardDir,
+          "society",
+          "skills",
+          "uv-setup",
+          "check.sh",
+        );
+        if (((await stat(script)).mode & 0o111) === 0) {
+          throw new Error("the society's uv-setup script reached the runner without its mode");
         }
         const hits = z
           .array(z.object({ kind: z.string(), ref: z.string() }))
@@ -286,8 +297,13 @@ export class ScriptedBackend implements AgentBackend {
         await mkdir(path.join(home, "skills", "uv-setup"), { recursive: true });
         await writeFile(
           path.join(home, "skills", "uv-setup", "SKILL.md"),
-          "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n# uv setup\n\n1. uv sync --locked\n2. uv run pytest -q\n",
+          "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n# uv setup\n\nRun check.sh, beside this file.\n",
           "utf8",
+        );
+        await writeFile(
+          path.join(home, "skills", "uv-setup", "check.sh"),
+          "#!/bin/sh\nuv sync --locked && uv run pytest -q\n",
+          { encoding: "utf8", mode: 0o755 },
         );
         await verb("write_knowledge", {
           project: "alpha",

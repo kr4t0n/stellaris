@@ -8,6 +8,7 @@ import {
   type HomeFileChange,
   type HomeFileDiff,
   type HomeHistory,
+  isSafeRelativePath,
   patchHunks,
 } from "@stellaris/shared";
 import { execa } from "execa";
@@ -97,6 +98,20 @@ while read old new ref; do
 done
 exit 0
 `;
+
+/** A file in a home's commit, by its path within the folder read and its blob. */
+export interface HomeFile {
+  readonly path: string;
+  readonly object: string;
+  readonly size: number;
+  readonly executable: boolean;
+}
+
+/** A folder of a home as a commit holds it. */
+export interface HomeFolder {
+  readonly commit: string;
+  readonly files: readonly HomeFile[];
+}
 
 /** The name the board commits under in a home; its history shows those commits as the board's. */
 const HOME_BOARD_AUTHOR = "stellaris-board";
@@ -306,6 +321,62 @@ export class HomeRepos {
       files.push({ path: file, status, ...patchHunks(patch, PATCH_LIMIT_CHARS) });
     }
     return files;
+  }
+
+  /**
+   * The files of a folder in a home's newest commit, by path within the folder, with the commit;
+   * conflict copies and anything but a regular file are left out. Null when the home is not a
+   * repository yet.
+   */
+  async folder(home: string, folder: string): Promise<HomeFolder | null> {
+    if (!(await exists(path.join(home, ".git")))) {
+      return null;
+    }
+    const commit = (await read(home, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+    const prefix = `${folder}/`;
+    const listed = await read(home, [
+      "ls-tree",
+      "-r",
+      "-z",
+      "--long",
+      "--full-tree",
+      commit,
+      prefix,
+    ]);
+    const files: HomeFile[] = [];
+    for (const entry of listed.split("\0")) {
+      const match = /^(100644|100755) blob ([0-9a-f]+) +(\d+)\t(.+)$/.exec(entry);
+      const [, mode = "", object = "", size = "0", file = ""] = match ?? [];
+      if (
+        match === null ||
+        !file.startsWith(prefix) ||
+        !isSafeRelativePath(file) ||
+        conflictCopyOf(file) !== null
+      ) {
+        continue;
+      }
+      files.push({
+        path: file.slice(prefix.length),
+        object,
+        size: Number.parseInt(size, 10),
+        executable: mode === "100755",
+      });
+    }
+    return { commit, files };
+  }
+
+  /** A blob of a home's repository, as `folder` names it. */
+  async blob(home: string, object: string): Promise<Buffer> {
+    const result = await execa("git", ["cat-file", "blob", object], {
+      cwd: home,
+      encoding: "buffer",
+      stripFinalNewline: false,
+      reject: false,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(`git cat-file failed: ${Buffer.from(result.stderr).toString().trim()}`);
+    }
+    return Buffer.from(result.stdout);
   }
 
   /** The conflict copies a merge added, against its first parent. */

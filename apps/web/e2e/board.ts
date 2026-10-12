@@ -560,6 +560,24 @@ const ASK = {
   body: "@user should the survey cover the 2025 results too?",
 };
 
+/** A skill proposal's folder as the board took it: its SKILL.md and a script beside it. */
+const SKILL_FILES = [
+  {
+    path: "SKILL.md",
+    size: 96,
+    executable: false,
+    text: "---\nname: refereed-research\ndescription: Plan a research task.\n---\n\n# Refereed research\n\nRun scripts/plan.sh first.\n",
+    truncated: false,
+  },
+  {
+    path: "scripts/plan.sh",
+    size: 31,
+    executable: true,
+    text: "#!/bin/sh\necho stages: work review\n",
+    truncated: false,
+  },
+];
+
 /** The skill proposal's pitch, which opened its thread in governance. */
 const PITCH = {
   id: "01M3Q2CCCCCCCCCCCCCCCCCCC1",
@@ -780,7 +798,8 @@ const CLAUDE_MODELS = [
  * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
  * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
  * starts with no token. With `inFlight`,
- * desk is in a turn at the society until the user stops it.
+ * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
+ * is a folder the board took from stew's home, with a script beside its SKILL.md.
  */
 export async function fakeBoard(
   page: Page,
@@ -792,6 +811,7 @@ export async function fakeBoard(
     github?: boolean;
     signedOut?: boolean;
     inFlight?: boolean;
+    skillFolder?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -833,8 +853,21 @@ export async function fakeBoard(
     charter: {
       name: "refereed-research",
       summary: "Plan a research task with a gated referee.",
-      body: "---\nname: refereed-research\ndescription: Plan a research task.\n---\n\n# Refereed research\n\nUse this for any study.",
+      ...(options.skillFolder === true
+        ? {}
+        : {
+            body: "---\nname: refereed-research\ndescription: Plan a research task.\n---\n\n# Refereed research\n\nUse this for any study.",
+          }),
     },
+    ...(options.skillFolder === true
+      ? {
+          skillFiles: {
+            commit: "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+            takenAt: CREATED,
+            files: SKILL_FILES.map(({ text: _text, truncated: _cut, ...file }) => file),
+          },
+        }
+      : {}),
     body: "The plan has run on four tasks.",
   };
 
@@ -1350,6 +1383,8 @@ export async function fakeBoard(
         return json(route, archived ? [proposal, ARCHIVE] : [proposal]);
       case `/api/proposals/${SKILL_PROPOSAL}`:
         return json(route, proposal);
+      case `/api/proposals/${SKILL_PROPOSAL}/files`:
+        return json(route, options.skillFolder === true ? SKILL_FILES : []);
       default:
         return json(route, { message: `no fake for ${pathname}` }, 404);
     }

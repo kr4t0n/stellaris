@@ -227,6 +227,10 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // Every cron, ended ones too; they are set, changed, and ended through their verbs.
   api.get("/crons", async (c) => c.json(await board.listCrons()));
   api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
+  // A skill proposal's folder as the board took it from its proposer's home, with each file's text.
+  api.get("/proposals/:id/files", async (c) =>
+    c.json(await board.readSkillFiles(UlidSchema.parse(c.req.param("id")))),
+  );
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
   );

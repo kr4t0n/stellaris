@@ -754,6 +754,7 @@ export class TurnHost {
         },
         "turn finished",
       );
+      await this.takeSkillFiles(finished);
       turn.done(finished);
     }
     return { dropWorkspace: ended && (closing ? decided : !outcome.leftovers) };
@@ -779,7 +780,23 @@ export class TurnHost {
     };
     if (await this.recorded(turn, () => this.board.finishTurn(finished, turn.transcript))) {
       this.log.warn({ agent: turn.job.agent, project: turn.job.scope, reason }, "turn aborted");
+      await this.takeSkillFiles(finished);
       turn.done(finished);
+    }
+  }
+
+  /**
+   * Takes the folders of the skills the turn proposed, which reached the board with the home its
+   * runner pushed before reporting. A failure only leaves them for approval to take.
+   */
+  private async takeSkillFiles(record: TurnRecord): Promise<void> {
+    try {
+      await this.board.takeSkillFiles(record);
+    } catch (error) {
+      this.log.warn(
+        { agent: record.agent, project: record.project, error: String(error) },
+        "could not take the folders of the skills a turn proposed",
+      );
     }
   }
 

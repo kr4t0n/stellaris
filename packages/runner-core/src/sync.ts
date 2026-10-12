@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { isSafeRelativePath } from "@stellaris/shared";
+import { fileVersion, isExecutableVersion, isSafeRelativePath } from "@stellaris/shared";
 import { z } from "zod";
 
 /** A tree on the server, as the runner protocol's file API serves it. */
@@ -22,8 +22,9 @@ function isMissing(error: unknown): boolean {
 
 /**
  * A runner's read-only mirror of a tree on the server, the board's projection: a pull fetches
- * every file whose hash differs from the server's and removes what the server no longer has.
- * Nothing here is written back, so the server's version always wins. Pulls run one at a time.
+ * every file whose version, its hash and whether it is executable, differs from the server's, and
+ * removes what the server no longer has. Nothing here is written back, so the server's version
+ * always wins. Pulls run one at a time.
  */
 export class TreeCopy {
   private readonly hashes = new Map<string, { mtimeMs: number; size: number; sha: string }>();
@@ -48,14 +49,19 @@ export class TreeCopy {
     const theirs = await remote.manifest();
     const ours = await this.manifest();
     const fetch = Object.entries(theirs)
-      .filter(([file, sha]) => isSafeRelativePath(file) && ours[file] !== sha)
+      .filter(([file, version]) => isSafeRelativePath(file) && ours[file] !== version)
       .map(([file]) => file);
     for (let index = 0; index < fetch.length; index += READ_BATCH) {
       const batch = fetch.slice(index, index + READ_BATCH);
       const contents = await remote.read(batch);
       for (const [file, content] of Object.entries(contents)) {
-        if (batch.includes(file)) {
-          await this.writeAtomic(file, Buffer.from(content, "base64"));
+        const version = theirs[file];
+        if (batch.includes(file) && version !== undefined) {
+          await this.writeAtomic(
+            file,
+            Buffer.from(content, "base64"),
+            isExecutableVersion(version),
+          );
         }
       }
     }
@@ -71,11 +77,12 @@ export class TreeCopy {
     return path.join(this.root, ...file.split("/"));
   }
 
-  private async writeAtomic(file: string, bytes: Buffer): Promise<void> {
+  private async writeAtomic(file: string, bytes: Buffer, executable: boolean): Promise<void> {
     const target = this.absolute(file);
     await mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(tmp, bytes);
+    await chmod(tmp, executable ? 0o755 : 0o644);
     await rename(tmp, target);
   }
 
@@ -97,7 +104,7 @@ export class TreeCopy {
     await rename(tmp, this.stateFile);
   }
 
-  /** The files of the local copy with their hashes; symbolic links are skipped. */
+  /** The files of the local copy with their versions; symbolic links are skipped. */
   private async manifest(): Promise<Record<string, string>> {
     const files: Record<string, string> = {};
     const walk = async (prefix: string): Promise<void> => {
@@ -135,15 +142,16 @@ export class TreeCopy {
       if (info.size > MAX_FILE_BYTES) {
         return null;
       }
+      const executable = (info.mode & 0o111) !== 0;
       const known = this.hashes.get(absolute);
       if (known !== undefined && known.mtimeMs === info.mtimeMs && known.size === info.size) {
-        return known.sha;
+        return fileVersion(known.sha, executable);
       }
       const sha = createHash("sha256")
         .update(await readFile(absolute))
         .digest("hex");
       this.hashes.set(absolute, { mtimeMs: info.mtimeMs, size: info.size, sha });
-      return sha;
+      return fileVersion(sha, executable);
     } catch (error) {
       if (isMissing(error)) {
         return null;

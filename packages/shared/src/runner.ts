@@ -526,8 +526,21 @@ export type RunnerAnswer = z.infer<typeof RunnerAnswerSchema>;
 /** The conversations a runner keeps warm right now, by session key. */
 export const WarmSessionsSchema = z.object({ warm: z.array(z.string()) });
 
-/** The board's files as the file API lists them: a relative path, with forward slashes, to its SHA-256. */
+/**
+ * The board's files as the file API lists them: a relative path, with forward slashes, to its
+ * version, `fileVersion` of its content's SHA-256 and whether it is executable.
+ */
 export const FileManifestSchema = z.object({ files: z.record(z.string(), z.string()) });
+
+/** A file's version in a manifest: its SHA-256, marked `+x` when it is executable, so a mode change is a change. */
+export function fileVersion(sha: string, executable: boolean): string {
+  return executable ? `${sha}+x` : sha;
+}
+
+/** Whether a manifest's version names an executable file. */
+export function isExecutableVersion(version: string): boolean {
+  return version.endsWith("+x");
+}
 export type FileManifest = z.infer<typeof FileManifestSchema>;
 
 export const FileReadSchema = z.object({ paths: z.array(z.string()) });

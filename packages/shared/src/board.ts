@@ -592,11 +592,16 @@ export const ArchiveProposalSchema = z.object({
 });
 export type ArchiveProposal = z.infer<typeof ArchiveProposalSchema>;
 
-/** A skill proposed for the society; approval copies the body under `society/skills/`. */
+/**
+ * A skill proposed for the society. Without `body`, the skill is the folder `skills/<name>/` in the
+ * proposer's home, SKILL.md and every file beside it, which the board takes once the turn that
+ * proposed it has ended; with it, the skill is that SKILL.md text alone. Approval publishes it under
+ * `society/skills/<name>/`.
+ */
 export const SkillProposalSchema = z.object({
   name: NameSchema,
   summary: z.string().min(1).max(200),
-  body: z.string().min(1),
+  body: z.string().min(1).optional(),
 });
 export type SkillProposal = z.infer<typeof SkillProposalSchema>;
 
@@ -807,6 +812,39 @@ export const ProposalOriginSchema = z.object({
 });
 export type ProposalOrigin = z.infer<typeof ProposalOriginSchema>;
 
+/** The most files a society skill's folder may hold, since every runner mirrors every one. */
+export const SKILL_FILES_LIMIT = 100;
+/** The most bytes a society skill's folder may hold in all. */
+export const SKILL_BYTES_LIMIT = 10 * 1024 * 1024;
+
+/** One file of a proposed skill's folder, by its path within the folder. */
+export const SkillFileSchema = z.object({
+  path: z.string().min(1),
+  size: z.number().int().nonnegative(),
+  executable: z.boolean(),
+});
+export type SkillFile = z.infer<typeof SkillFileSchema>;
+
+/**
+ * A proposed skill's folder as the board took it from its proposer's home, into
+ * `society/proposals/<id>/`, where its deciders read it and from where approval publishes it.
+ */
+export const SkillFilesSchema = z.object({
+  /** The commit of the proposer's home the files came from. */
+  commit: CommitIdSchema,
+  takenAt: IsoDateTimeSchema,
+  files: z.array(SkillFileSchema),
+});
+export type SkillFiles = z.infer<typeof SkillFilesSchema>;
+
+/** A proposed skill's file with its text, as the proposal's view shows it; null for a binary file. */
+export const SkillFileContentSchema = SkillFileSchema.extend({
+  text: z.string().nullable(),
+  /** The text was cut at its size limit. */
+  truncated: z.boolean(),
+});
+export type SkillFileContent = z.infer<typeof SkillFileContentSchema>;
+
 export const ProposalFrontmatterSchema = z.object({
   id: UlidSchema,
   kind: ProposalKindSchema,
@@ -815,6 +853,8 @@ export const ProposalFrontmatterSchema = z.object({
   createdAt: IsoDateTimeSchema,
   /** Absent for a proposal filed outside a turn, or before proposals recorded it. */
   filedFrom: ProposalOriginSchema.optional(),
+  /** A skill proposal's folder, once taken; absent for one proposed as text alone. */
+  skillFiles: SkillFilesSchema.optional(),
   decidedBy: NameSchema.optional(),
   decidedAt: IsoDateTimeSchema.optional(),
   reason: z.string().optional(),

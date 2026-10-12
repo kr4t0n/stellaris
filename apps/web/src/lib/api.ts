@@ -28,6 +28,7 @@ import {
   RoleCharterSchema,
   RunnerSchema,
   RunningTurnSchema,
+  SkillFileContentSchema,
   SkillSchema,
   SOCIETY_SCOPE,
   SocietySchema,
@@ -295,6 +296,9 @@ export function createApi(token: string) {
       write("PUT", "/api/society/timezone", token, { timezone }, SocietySchema),
     proposal: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}`, token, ProposalSchema),
+    /** A skill proposal's folder as the board took it, each file with its text. */
+    proposalFiles: (id: string) =>
+      get(`/api/proposals/${encodeURIComponent(id)}/files`, token, SkillFileContentSchema.array()),
     skills: () => get("/api/skills", token, SkillSchema.array()),
     turns: (name: string, limit: number) =>
       get(

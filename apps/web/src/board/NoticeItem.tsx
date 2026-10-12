@@ -64,20 +64,22 @@ export function NoticeItem({ run, now }: { run: NoticeRun; now: number }) {
   }
   const { mark, text } = describe(run);
   return (
-    <div className="flex items-center gap-3 px-4 py-1 text-meta">
-      <span className="grid w-7 shrink-0 place-items-center text-fg-muted">{mark}</span>
-      <p className="min-w-0 flex-1 truncate">
-        {namesPhrase(run.messages.map((message) => displayName(message.author)))} {text}
-      </p>
-      <time
-        dateTime={newest.ts}
-        title={run.messages
-          .map((message) => `${displayName(message.author)} ${message.ts}`)
-          .join("\n")}
-        className="shrink-0"
-      >
-        {ago(newest.ts, now)}
-      </time>
+    <div className="flex gap-3 px-4 py-1">
+      <span className="grid h-5 w-7 shrink-0 place-items-center text-fg-muted">{mark}</span>
+      <div className="flex min-w-0 flex-1 items-baseline gap-3">
+        <p className="min-w-0 flex-1 truncate text-sm text-fg-tertiary">
+          {namesPhrase(run.messages.map((message) => displayName(message.author)))} {text}
+        </p>
+        <time
+          dateTime={newest.ts}
+          title={run.messages
+            .map((message) => `${displayName(message.author)} ${message.ts}`)
+            .join("\n")}
+          className="shrink-0 text-meta"
+        >
+          {ago(newest.ts, now)}
+        </time>
+      </div>
     </div>
   );
 }

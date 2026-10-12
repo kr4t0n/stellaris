@@ -49,15 +49,15 @@ export function ThreadItem({ thread, now }: { thread: ThreadSummary; now: number
     <Link
       to="/thread/$threadId"
       params={{ threadId: thread.id }}
-      className="group flex gap-3 px-4 py-1 text-meta"
+      className="group flex gap-3 px-4 py-1"
     >
-      <span className="grid h-4 w-7 shrink-0 place-items-center text-fg-muted group-hover:text-fg-tertiary">
+      <span className="grid h-5 w-7 shrink-0 place-items-center text-fg-muted group-hover:text-fg-tertiary">
         <ThreadMark />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-3">
           {/* The title gives way first, so the counts and the state stay in view. */}
-          <p className="flex min-w-0 flex-1 items-baseline gap-1">
+          <p className="flex min-w-0 flex-1 items-baseline gap-1 text-sm text-fg-tertiary">
             <span className="shrink-0">
               {displayName(thread.openedBy)} opened {subjectLabel(thread.subject)} thread
             </span>
@@ -71,12 +71,12 @@ export function ThreadItem({ thread, now }: { thread: ThreadSummary; now: number
               </span>
             </span>
           </p>
-          <time dateTime={thread.openedAt} title={thread.openedAt} className="shrink-0">
+          <time dateTime={thread.openedAt} title={thread.openedAt} className="shrink-0 text-meta">
             {ago(thread.openedAt, now)}
           </time>
         </div>
         {summary === "" ? null : (
-          <p className="mt-0.5 line-clamp-2 leading-relaxed text-fg-secondary">
+          <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">
             <LinkedText text={summary} links={false} />
           </p>
         )}

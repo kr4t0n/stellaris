@@ -108,7 +108,7 @@ The data directory holds the board, the event log, and every agent's home as a g
 
 ## Upgrades
 
-On SIGTERM the server stops dispatching and waits for running turns to report, for up to `server.terminationGracePeriodSeconds`, a minute by default. The board is down while it drains, since the Deployment recreates its one pod, and the pod has left the Service's endpoints, so a runner may not reach it to report; a turn still running when the minute is up ends as failed, which loses nothing, since its digest is read again. A longer grace period lets running turns finish at the cost of that much downtime, and it cannot be shortened once the pod is stopping: a second `kubectl delete --grace-period` updates the pod, but the kubelet lets the stop already under way run to the first one. Runners in the cluster drain their turns the same way, for up to `runner.terminationGracePeriodSeconds`, and an upgrade that changes their image, as a new `appVersion` does, restarts them one at a time. To upgrade cleanly, pause the society with the board's Pause switch (or `POST /api/pause`), wait until the board shows no one working, upgrade, and resume:
+On SIGTERM the server stops dispatching and waits for running turns to report, for up to `server.terminationGracePeriodSeconds` (20 minutes, the default turn timeout). While it drains, the pod has left the Service's endpoints, so a runner may not reach it to report, and a turn still running may end as failed; a failed turn loses nothing, since its digest is read again. Runners in the cluster drain their turns the same way, for up to `runner.terminationGracePeriodSeconds`, and an upgrade that changes their image, as a new `appVersion` does, restarts them one at a time. To upgrade cleanly, pause the society with the board's Pause switch (or `POST /api/pause`), wait until the board shows no one working, upgrade, and resume:
 
 ```bash
 helm upgrade stellaris stellaris/stellaris -n stellaris
@@ -135,7 +135,7 @@ helm upgrade stellaris stellaris/stellaris -n stellaris
 | `server.config.residentIdleMs`         | empty, 10 minutes                                   | `STELLARIS_RESIDENT_IDLE_MS`                                                     |
 | `server.config.trustedProxies`         | empty, 1 with the Ingress, else 0                   | `STELLARIS_TRUSTED_PROXIES`, proxies that append the client to `X-Forwarded-For` |
 | `server.config.timings`                | `{}`                                                | `STELLARIS_TIMINGS`, scheduler timing overrides                                  |
-| `server.terminationGracePeriodSeconds` | `60`                                                | How long a stopping server may drain running turns, with the board down          |
+| `server.terminationGracePeriodSeconds` | `1200`                                              | How long a stopping server may drain running turns                               |
 | `server.extraEnv`, `extraEnvFrom`      | empty                                               | More environment for the server                                                  |
 | `persistence.size`                     | `10Gi`                                              | The data volume's size                                                           |
 | `persistence.storageClass`             | the cluster's default                               | `-` for none                                                                     |

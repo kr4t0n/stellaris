@@ -330,7 +330,7 @@ docker run --rm -v stellaris-data:/data $IMAGE stellaris init --name my-society 
 docker run -d --name stellaris -p 4700:4700 -v stellaris-data:/data --stop-timeout 1200 $IMAGE
 ```
 
-Run the CLI's setup commands before the server starts, or act through the API while it runs, so that one process writes the data directory at a time. A directory mounted at `/data` must be writable by uid 1000. On SIGTERM the server waits for running turns to report before it exits, so give it a stop timeout as long as the turn timeout, 20 minutes by default, with `--stop-timeout`. The Helm chart gives the server a minute instead, because on Kubernetes the board is down for the whole drain (see its README). Every server variable in the table above applies; the image sets `STELLARIS_DATA_DIR`, `STELLARIS_HOST`, `STELLARIS_PORT`, and `STELLARIS_WEB_DIR`.
+Run the CLI's setup commands before the server starts, or act through the API while it runs, so that one process writes the data directory at a time. A directory mounted at `/data` must be writable by uid 1000. On SIGTERM the server waits for running turns to report before it exits, so give it a stop timeout as long as the turn timeout, 20 minutes by default: `--stop-timeout` for Docker, `terminationGracePeriodSeconds` for Kubernetes. Every server variable in the table above applies; the image sets `STELLARIS_DATA_DIR`, `STELLARIS_HOST`, `STELLARIS_PORT`, and `STELLARIS_WEB_DIR`.
 
 ### The runner's image
 

@@ -204,6 +204,7 @@ export class RunnerHub implements TurnRunner {
       clis: hello.clis,
       capabilities: hello.capabilities,
       version: hello.version,
+      gitIdentityMissing: hello.gitIdentityMissing ?? null,
     });
     this.runnerChanged(name);
     this.log.info(

@@ -9,6 +9,9 @@ import {
   mayHoldStage,
   parseChannelRef,
   PlanStageSchema,
+  RUNNER_PROTOCOL,
+  RunnerHelloSchema,
+  RunnerSchema,
   SEED_ROLES,
   TaskFrontmatterSchema,
   turnStatusJsonSchema,
@@ -192,6 +195,44 @@ describe("runner protocol files", () => {
     for (const bad of ["", "/etc/passwd", "../x", "a/../b", "a//b", "./a", "a\\b"]) {
       expect(isSafeRelativePath(bad)).toBe(false);
     }
+  });
+});
+
+describe("runner hello", () => {
+  const older = {
+    protocol: RUNNER_PROTOCOL,
+    version: "0.3.21",
+    os: "linux",
+    clis: ["claude"],
+    slots: 2,
+  };
+
+  it("leaves a git identity unknown when an older runner's hello does not say", () => {
+    const hello = RunnerHelloSchema.parse(older);
+    expect(hello).not.toHaveProperty("gitIdentityMissing");
+    expect(hello.branchChanges).toBe(false);
+    expect(
+      RunnerSchema.parse({
+        name: "pod",
+        os: "linux",
+        clis: [],
+        capabilities: [],
+        status: "connected",
+      }),
+    ).not.toHaveProperty("gitIdentityMissing");
+  });
+
+  it("carries what the runner's account lacks of a git identity, and nothing else", () => {
+    expect(
+      RunnerHelloSchema.parse({ ...older, gitIdentityMissing: [] }).gitIdentityMissing,
+    ).toEqual([]);
+    expect(
+      RunnerHelloSchema.parse({ ...older, gitIdentityMissing: ["name", "email"] })
+        .gitIdentityMissing,
+    ).toEqual(["name", "email"]);
+    expect(
+      RunnerHelloSchema.safeParse({ ...older, gitIdentityMissing: ["signingkey"] }).success,
+    ).toBe(false);
   });
 });
 

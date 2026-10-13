@@ -18,6 +18,7 @@ import { TurnControl } from "./control.js";
 import { runnerOs } from "./enroll.js";
 import { describeError } from "./errors.js";
 import { TurnExecutor, type RunnerLog } from "./executor.js";
+import { GitIdentityCheck } from "./git-identity.js";
 import { HomeSync } from "./home.js";
 import type { GitOps } from "./git.js";
 import type { PullRequestOps } from "./pulls.js";
@@ -39,6 +40,8 @@ export interface RunnerDaemonOptions {
   readonly retryMs?: number | undefined;
   /** How long a turn's steps and outcome are posted again while the server is out of reach. */
   readonly postForMs?: number | undefined;
+  /** The watch on the account's git identity, checked before every hello; a new one unless set. */
+  readonly gitIdentity?: GitIdentityCheck | undefined;
 }
 
 const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
@@ -161,6 +164,7 @@ export class RunnerDaemon {
   private readonly log: RunnerLog;
   private readonly retryMs: number;
   private readonly postForMs: number;
+  private readonly identity: GitIdentityCheck;
   private readonly running = new Map<string, Promise<void>>();
   /** The jobs running, whose workspaces a sweep leaves to the end of their turn. */
   private readonly jobs = new Map<string, TurnJob>();
@@ -187,6 +191,7 @@ export class RunnerDaemon {
     this.log = options.log ?? SILENT;
     this.retryMs = options.retryMs ?? 1_000;
     this.postForMs = options.postForMs ?? POST_FOR_MS;
+    this.identity = options.gitIdentity ?? new GitIdentityCheck(this.log);
     this.board = new TreeCopy(options.layout.board, options.layout.syncState("board"));
     this.homes = new HomeSync(options.layout, options.client.homeRemote(), this.log);
   }
@@ -256,6 +261,7 @@ export class RunnerDaemon {
     while (!this.stopped) {
       try {
         const { all, resident, steerable, stoppable } = this.executor.clis;
+        const gitIdentityMissing = await this.identity.check();
         const welcome = await this.client.hello({
           protocol: RUNNER_PROTOCOL,
           version: this.version,
@@ -267,6 +273,7 @@ export class RunnerDaemon {
           branchReads: true,
           branchChanges: true,
           capabilities: [...this.capabilities],
+          ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
           turns: this.turns,
         });
@@ -474,6 +481,8 @@ export interface CreateRunnerOptions {
   readonly pullRequests?: PullRequestOps | undefined;
   /** How often a project's remote is fetched at most; a minute unless set. */
   readonly fetchIntervalMs?: number | undefined;
+  /** The watch on the account's git identity, as checked at startup; a new one unless set. */
+  readonly gitIdentity?: GitIdentityCheck | undefined;
 }
 
 /** A runner with its client, layout, and executor wired together; call `start` to connect it. */
@@ -507,6 +516,7 @@ export function createRunner(options: CreateRunnerOptions): RunnerDaemon {
     log: options.log,
     retryMs: options.retryMs,
     postForMs: options.postForMs,
+    gitIdentity: options.gitIdentity,
   });
   return daemon;
 }

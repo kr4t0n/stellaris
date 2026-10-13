@@ -96,6 +96,23 @@ describe("missingGitIdentity", () => {
     ).toEqual(["email"]);
     // An empty EMAIL is passed over, and git makes an address up.
     expect(missingGitIdentity(settings({ "user.name": "Op" }), { EMAIL: "" })).toEqual(["email"]);
+    // Any email setting, even another role's or an empty one, keeps git from reading EMAIL, so a
+    // role without one of its own commits with an empty address.
+    for (const set of [{ "committer.email": "ci@example.com" }, { "author.email": "" }]) {
+      expect(
+        missingGitIdentity(settings({ "user.name": "Op", ...set }), { EMAIL: "op@example.com" }),
+      ).toEqual(["email"]);
+    }
+    expect(
+      missingGitIdentity(
+        settings({
+          "user.name": "Op",
+          "author.email": "au@example.com",
+          "committer.email": "co@example.com",
+        }),
+        { EMAIL: "op@example.com" },
+      ),
+    ).toEqual([]);
     expect(
       missingGitIdentity(settings({ "user.name": "  ", "user.email": "op@example.com" }), {}),
     ).toEqual(["name"]);
@@ -215,7 +232,7 @@ describe("gitIdentityWarning", () => {
 
     const email = gitIdentityWarning(["email"]);
     expect(email).toContain(
-      "no git user.email, so the commits citizens make themselves carry an address git makes up",
+      "no git user.email, so the commits citizens make themselves carry an empty address, or one git makes up",
     );
     expect(email).toContain(`git config --global user.email "you@example.com"`);
     expect(email).not.toContain("user.name");

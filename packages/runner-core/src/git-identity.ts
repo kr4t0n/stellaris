@@ -29,16 +29,22 @@ function lacks(value: string | undefined): boolean {
  * What a commit made under `env` with these settings lacks of an identity, by git's own order of
  * places. For each of the author and the committer, the name is `GIT_<ROLE>_NAME`, else
  * `<role>.name`, else `user.name`, and the email is `GIT_<ROLE>_EMAIL`, else `<role>.email`, else
- * `user.email`, else `EMAIL`; the variables and `user.*` count when set even if empty, as in git,
- * and the others only when they hold something. Past those, git falls back to the account's full
- * name, refusing the commit when that is empty, as in a container's account, and makes an address
- * up from the account and the host's name; neither fallback counts, since nobody chose it.
+ * `user.email`; the variables and `user.*` count when set even if empty, as in git, and the others
+ * only when they hold something. `EMAIL` comes last, and only while no `user.email`,
+ * `author.email`, or `committer.email` is set at all: any of them, even empty, leaves a role that
+ * has none of its own with `user.email` or an empty address. Past those, git falls back to the
+ * account's full name, refusing the commit when that is empty, as in a container's account, and
+ * makes an address up from the account and the host's name; neither fallback counts, since nobody
+ * chose it.
  */
 export function missingGitIdentity(
   settings: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
 ): GitIdentityPart[] {
   const missing = new Set<GitIdentityPart>();
+  const emailSet = ["user.email", "author.email", "committer.email"].some((key) =>
+    settings.has(key),
+  );
   for (const { role, env: variable } of ROLES) {
     const name =
       env[`GIT_${variable}_NAME`] ??
@@ -48,7 +54,7 @@ export function missingGitIdentity(
       env[`GIT_${variable}_EMAIL`] ??
       filled(settings.get(`${role}.email`)) ??
       settings.get("user.email") ??
-      filled(env["EMAIL"]);
+      (emailSet ? undefined : filled(env["EMAIL"]));
     if (lacks(name)) {
       missing.add("name");
     }
@@ -118,7 +124,7 @@ export function gitIdentityWarning(missing: readonly GitIdentityPart[]): string 
   const keys = missing.map((part) => `user.${part}`).join(" or ");
   const effect = missing.includes("name")
     ? "git refuses the commits citizens make themselves"
-    : "the commits citizens make themselves carry an address git makes up from the account and the host's name";
+    : "the commits citizens make themselves carry an empty address, or one git makes up from the account and the host's name";
   const commands = missing
     .map(
       (part) =>

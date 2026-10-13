@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   CliKind,
+  CliQuota,
   ModelOption,
   Name,
   TurnExitReason,
@@ -72,6 +73,8 @@ export interface TurnResult {
   readonly model?: string | undefined;
   /** The session's running total after this turn, for CLIs that report one; `costUsd` is this turn's share. */
   readonly sessionCostUsd?: number | undefined;
+  /** The CLI's plan quota as the turn's stream last reported it, when it reported any. */
+  readonly quota?: CliQuota | undefined;
 }
 
 /** What a resident session needs at start: everything a turn needs except the prompt. */
@@ -116,6 +119,11 @@ export interface AgentBackend {
   startResident?(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession>;
   /** The models the CLI offers, from its own listing, for choosing a citizen's model. */
   listModels?(): Promise<ModelOption[]>;
+  /**
+   * The CLI's plan quota, asked of the CLI without a turn: a read of its usage that makes no model
+   * call, so it spends none of the quota it reports.
+   */
+  readQuota?(): Promise<CliQuota>;
 }
 
 export const ZERO_USAGE: Usage = Object.freeze({

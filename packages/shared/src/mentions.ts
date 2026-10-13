@@ -17,7 +17,8 @@ const CODE = new Set(["codeText", "codeFenced", "codeIndented"]);
  * GFM constructs left out because each makes the parse superlinear on ordinary text and tells no
  * code apart: an autolink literal is tried at every character, and a footnote call walks back over
  * its paragraph at every `]`. Without literals, a backtick right after a bare URL opens a code span,
- * as on GitHub, where the interface keeps it in the link.
+ * while GitHub and the interface keep it in the link, and later backticks in the paragraph can pair
+ * differently.
  */
 const SLOW = {
   disable: {

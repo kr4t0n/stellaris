@@ -139,11 +139,12 @@ import {
   type MetricsWindow,
   RunnerOsSchema,
 } from "@stellaris/shared";
-import { MENTION_PATTERN, mentionsIn } from "@stellaris/shared/mentions";
+import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
+import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
 import {
   ensureDir,
@@ -6237,7 +6238,7 @@ export class Board {
       id: this.newId(),
       ...head,
       ts: this.now().toISOString(),
-      mentions: mentionsIn(body),
+      mentions: postMentions(body),
     });
     const { author } = head;
     await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);

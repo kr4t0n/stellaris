@@ -2828,6 +2828,9 @@ describe("Board", () => {
         "[@eng-1](https://x.y/@rev-1) <!-- @ops-1 --> <b>@qa-1</b>",
         ["eng-1", "ops-1", "qa-1", "rev-1"],
       ],
+      ["a leading byte order mark", "\uFEFF@eng-10`npm test` please", ["eng-10"]],
+      // Thousands of list items nested on one line take micromark seconds to parse.
+      ["a post too slow to parse", `${"- ".repeat(4096)}\`@eng-1\` @rev-1`, ["eng-1", "rev-1"]],
     ];
     for (const [what, body, mentions] of cases) {
       const message = await board.postMessage(ENG, { channel: "demo/general", body });

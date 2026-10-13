@@ -14,17 +14,39 @@ export const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 const CODE = new Set(["codeText", "codeFenced", "codeIndented"]);
 
 /**
+ * GFM constructs left out because each makes the parse superlinear on ordinary text and tells no
+ * code apart: an autolink literal is tried at every character, and a footnote call walks back over
+ * its paragraph at every `]`. Without literals, a backtick right after a bare URL opens a code span,
+ * as on GitHub, where the interface keeps it in the link.
+ */
+const SLOW = {
+  disable: {
+    null: [
+      "wwwAutolink",
+      "protocolAutolink",
+      "emailAutolink",
+      "gfmFootnoteCall",
+      "gfmPotentialFootnoteCall",
+    ],
+  },
+};
+
+/**
  * Where a post's code is, as start and end offsets in document order. Parsed by micromark with
  * GFM, as the interface renders posts, so a name the interface shows as code never counts.
  */
 function codeRanges(markdown: string): [number, number][] {
+  // micromark drops a leading byte order mark before it counts offsets.
+  const shift = markdown.startsWith("﻿") ? 1 : 0;
   const events = postprocess(
-    parse({ extensions: [gfm()] })
+    parse({ extensions: [gfm(), SLOW] })
       .document()
       .write(preprocess()(markdown, undefined, true)),
   );
   return events.flatMap(([kind, token]): [number, number][] =>
-    kind === "enter" && CODE.has(token.type) ? [[token.start.offset, token.end.offset]] : [],
+    kind === "enter" && CODE.has(token.type)
+      ? [[token.start.offset + shift, token.end.offset + shift]]
+      : [],
   );
 }
 
@@ -49,5 +71,12 @@ export function mentionsIn(markdown: string): Name[] {
     from = end;
   }
   addMentions(found, markdown.slice(from));
+  return [...found].toSorted();
+}
+
+/** Every `@name` in a text, code included, sorted: the count for a post too slow to parse. */
+export function mentionsAnywhere(text: string): Name[] {
+  const found = new Set<Name>();
+  addMentions(found, text);
   return [...found].toSorted();
 }

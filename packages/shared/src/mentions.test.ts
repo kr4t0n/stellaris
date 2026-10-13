@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MENTION_PATTERN, mentionsIn } from "./mentions.js";
+import { MENTION_PATTERN, mentionsAnywhere, mentionsIn } from "./mentions.js";
 
 describe("mentionsIn", () => {
   it("reads names outside words and addresses, once each, sorted", () => {
@@ -36,6 +36,22 @@ describe("mentionsIn", () => {
     expect(mentionsIn('<a title="`">`@eng-1`')).toEqual([]);
     expect(mentionsIn("<https://x.y/`@eng-1`>")).toEqual(["eng-1"]);
     expect(mentionsIn("[`a](u)` @eng-1")).toEqual(["eng-1"]);
+  });
+
+  it("reads a backtick right after a bare URL as code, as GitHub does, and a footnote call as text", () => {
+    expect(mentionsIn("see http://x.y/`@eng-1` and @rev-1")).toEqual(["rev-1"]);
+    expect(mentionsIn("www.x.y/`@eng-1`")).toEqual([]);
+    expect(mentionsIn("[^1] `@eng-1` @rev-1\n\n[^1]: a note")).toEqual(["rev-1"]);
+  });
+
+  it("finds code where it is when a byte order mark leads the post", () => {
+    expect(mentionsIn("\uFEFF@eng-1`x` please")).toEqual(["eng-1"]);
+    expect(mentionsIn("\uFEFF@eng-10`npm test`")).toEqual(["eng-10"]);
+    expect(mentionsIn("\uFEFF`@eng-1` and @rev-1")).toEqual(["rev-1"]);
+  });
+
+  it("counts every name, code included, when asked for all of them", () => {
+    expect(mentionsAnywhere("`@eng-1` and @rev-1, then @eng-1")).toEqual(["eng-1", "rev-1"]);
   });
 
   it("leaves the shared pattern ready for the next search", () => {

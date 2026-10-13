@@ -2,6 +2,7 @@
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import {
+  GitIdentityCheck,
   RunnerHttpError,
   RunnerLayout,
   createRunner,
@@ -60,6 +61,11 @@ if (config.clis.includes("codex")) {
 
 const layout = new RunnerLayout(config.dataDir);
 
+// Checked at startup, before any enrollment, so a gap shows beside the code to approve, and again
+// before every hello, which warns again only when the gap changed.
+const identity = new GitIdentityCheck(log);
+await identity.check();
+
 function fail(message: string): never {
   log.error(message);
   process.exit(1);
@@ -111,6 +117,7 @@ async function connect(token: string): Promise<RunnerDaemon> {
     slots: config.slots,
     capabilities: config.capabilities,
     log,
+    gitIdentity: identity,
   });
   await daemon.start();
   return daemon;

@@ -1255,6 +1255,7 @@ export async function fakeBoard(
             clis: ["claude", "codex"],
             capabilities: [],
             version: "0.3.11",
+            gitIdentityMissing: ["email"],
             status: "connected",
           },
           {

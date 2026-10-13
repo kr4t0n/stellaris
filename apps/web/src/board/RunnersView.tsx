@@ -14,7 +14,7 @@ import {
   useSession,
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { offVersion, sameCode, suggestRunnerName } from "./runners.js";
+import { identityGap, offVersion, sameCode, suggestRunnerName } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 /** Connected runners first, each group by name. */
@@ -123,6 +123,7 @@ export function RunnersView() {
   const connected = registered.filter((runner) => runner.status === "connected").length;
   const away = registered.length - connected;
   const off = registered.filter((runner) => offVersion(runner, server)).length;
+  const unidentified = registered.filter((runner) => identityGap(runner) !== null).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
@@ -142,6 +143,7 @@ export function RunnersView() {
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
           ...(server === undefined ? [] : [`server v${server}`]),
           ...(off === 0 ? [] : [`${off} on another version`]),
+          ...(unidentified === 0 ? [] : [`${unidentified} without a git identity`]),
         ].join(" · ")}
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
@@ -172,12 +174,13 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
+          className="grid grid-cols-[auto_auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
             const places = living(runner);
             const lives = places.length === 0 ? "no projects" : places.join(", ");
+            const gap = identityGap(runner);
             const state =
               runner.status === "connected"
                 ? { label: "connected", detail: "connected", tone: "text-fg-muted" }
@@ -207,6 +210,13 @@ export function RunnersView() {
                 ) : (
                   <span className="text-xs text-fg-muted">
                     {runner.version === undefined ? "" : `v${runner.version}`}
+                  </span>
+                )}
+                {gap === null ? (
+                  <span />
+                ) : (
+                  <span className="text-xs text-amber-300" title={gap.detail}>
+                    {gap.label}
                   </span>
                 )}
                 <span

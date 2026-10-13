@@ -49,18 +49,24 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   await expect(page).toHaveURL("/runners");
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
   await expect(
-    page.getByText("1 connected · 1 away · server v0.3.11 · 1 on another version"),
+    page.getByText(
+      "1 connected · 1 away · server v0.3.11 · 1 on another version · 1 without a git identity",
+    ),
   ).toBeVisible();
-  // One row each, in columns, connected first; a runner away says so in words, not a dot, and
-  // one on another release than the server's is marked.
+  // One row each, in columns, connected first; a runner away says so in words, not a dot, one on
+  // another release than the server's is marked, and so is one whose account has no git identity,
+  // while one that never said, from before runners checked, is not.
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   await expect(rows).toHaveText([
-    /^claude, codex\s*pod\s*linux\s*v0\.3\.11\s*no projects\s*connected$/,
+    /^claude, codex\s*pod\s*linux\s*v0\.3\.11\s*no git user\.email\s*no projects\s*connected$/,
     /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away$/,
   ]);
   await expect(rows.nth(1).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(1).getByText("v0.3.10")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(0).getByText("v0.3.11")).not.toHaveClass(/text-amber-300/);
+  const gap = rows.nth(0).getByText("no git user.email");
+  await expect(gap).toHaveClass(/text-amber-300/);
+  await expect(gap).toHaveAttribute("title", /carry an address git made up/);
   await expect(page.getByText("●")).toHaveCount(0);
   await expect(runners).toHaveAttribute("aria-pressed", "true");
   await runners.click();

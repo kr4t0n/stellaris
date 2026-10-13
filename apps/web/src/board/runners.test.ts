@@ -1,6 +1,6 @@
 import { NAME_PATTERN } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { offVersion, sameCode, suggestRunnerName } from "./runners.js";
+import { identityGap, offVersion, sameCode, suggestRunnerName } from "./runners.js";
 
 describe("suggestRunnerName", () => {
   it("takes the hostname's first label as a name", () => {
@@ -29,6 +29,29 @@ describe("offVersion", () => {
     expect(offVersion({ version: "0.3.11" }, "0.3.11")).toBe(false);
     expect(offVersion({}, "0.3.11")).toBe(false);
     expect(offVersion({ version: "0.3.10" })).toBe(false);
+  });
+});
+
+describe("identityGap", () => {
+  it("marks only a runner that reported a gap in its account's git identity", () => {
+    expect(identityGap({})).toBeNull();
+    expect(identityGap({ gitIdentityMissing: [] })).toBeNull();
+    expect(identityGap({ gitIdentityMissing: ["name"] })).toEqual({
+      label: "no git user.name",
+      detail:
+        "Its account has no git user.name, so git refuses the commits citizens make themselves on it. Set it with git config --global there; the mark goes once the runner connects with it set.",
+    });
+    expect(identityGap({ gitIdentityMissing: ["email"] })).toEqual({
+      label: "no git user.email",
+      detail:
+        "Its account has no git user.email, so the commits citizens make themselves on it carry an address git made up. Set it with git config --global there; the mark goes once the runner connects with it set.",
+    });
+    expect(identityGap({ gitIdentityMissing: ["name", "email"] })).toMatchObject({
+      label: "no git identity",
+      detail: expect.stringMatching(
+        /^Its account has no git user\.name or user\.email, so git refuses/,
+      ),
+    });
   });
 });
 

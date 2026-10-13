@@ -5,6 +5,7 @@ import { Board } from "@stellaris/board-core";
 import {
   createRunner,
   EnrollmentDeniedError,
+  GitIdentityCheck,
   enrollRunner,
   readCredentials,
   RunnerLayout,
@@ -25,6 +26,7 @@ import {
   RUNNER_PROTOCOL,
   RunnerModelsSchema,
   type AgentEvent,
+  type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
 } from "@stellaris/shared";
@@ -2289,6 +2291,103 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await models.json()).toEqual([
       { id: "opus", name: "Opus", description: "", isDefault: true, efforts: [] },
     ]);
+  });
+
+  it("keeps what a runner's account lacks of a git identity from each hello, warning of it once", async () => {
+    const { board } = await Board.init(dir, { name: "identity" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { url, hub } = await start(board, backend);
+    const { token } = await board.addRunner(USER, "laptop");
+    let missing: GitIdentityPart[] | Error = ["email"];
+    let checks = 0;
+    const said: Array<{ level: string; message: string; context: object }> = [];
+    const note =
+      (level: string) =>
+      (context: object, message: string): void => {
+        said.push({ level, message, context });
+      };
+    const log = { info: note("info"), warn: note("warn"), error: note("error") };
+    const laptop = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: path.join(dir, "laptop"),
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 20,
+      // The stream goes quiet at once, so the runner connects again, and says hello, every 100 ms.
+      streamIdleMs: 100,
+      log,
+      gitIdentity: new GitIdentityCheck(log, () => {
+        checks += 1;
+        return missing instanceof Error ? Promise.reject(missing) : Promise.resolve(missing);
+      }),
+    });
+    const about = (pattern: RegExp) => said.filter((entry) => pattern.test(entry.message));
+    const identity = /git identity|no git user/;
+
+    await laptop.start();
+    expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["email"]);
+    // Each hello checks again, and the log speaks of a gap once, not on every reconnect.
+    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3));
+    expect(about(identity)).toEqual([
+      {
+        level: "warn",
+        context: { missing: ["email"] },
+        message: expect.stringContaining(`git config --global user.email "you@example.com"`),
+      },
+    ]);
+
+    // Set on the machine, the gap clears at the next hello.
+    missing = [];
+    await vi.waitFor(async () =>
+      expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+    );
+    expect(about(identity).map((entry) => entry.level)).toEqual(["warn", "info"]);
+
+    // A check that fails sends nothing, which the board takes as not knowing.
+    missing = new Error("git: not found");
+    await vi.waitFor(async () =>
+      expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+    );
+    expect(about(/could not check the git identity/)[0]?.context).toEqual({
+      error: "Error: git: not found",
+    });
+    await laptop.stop();
+
+    // An older runner's hello says nothing either, so what an earlier one reported goes.
+    const hello: RunnerHello = {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.21",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    };
+    await hub.register("laptop", { ...hello, gitIdentityMissing: ["name", "email"] });
+    expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["name", "email"]);
+    // Connecting and going away keep it.
+    const detach = await hub.attach("laptop", () => true);
+    await detach();
+    expect(await board.readRunner("laptop")).toMatchObject({
+      status: "disconnected",
+      gitIdentityMissing: ["name", "email"],
+    });
+    await hub.register("laptop", hello);
+    const record = await board.readRunner("laptop");
+    expect(record.version).toBe("0.3.21");
+    expect(record).not.toHaveProperty("gitIdentityMissing");
   });
 
   it("enrolls a runner the user approves on the board, hands its token over once, and refuses a denied one", async () => {

@@ -15,6 +15,7 @@ export { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 export type { ClaudeMcpConfig } from "./config-home.js";
 export { parseTurnStatus } from "./status.js";
 export { ExecaGit, taskBranch } from "./git.js";
+export { GitIdentityCheck } from "./git-identity.js";
 export type { GitAuthor, GitOps } from "./git.js";
 export { RunnerLayout } from "./layout.js";
 export { TreeCopy } from "./sync.js";

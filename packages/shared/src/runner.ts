@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { CliKindSchema, ModelOptionSchema, RunnerOsSchema, type Project } from "./board.js";
+import {
+  CliKindSchema,
+  GitIdentityPartSchema,
+  ModelOptionSchema,
+  RunnerOsSchema,
+  type Project,
+} from "./board.js";
 import {
   TranscriptEntrySchema,
   TurnExitReasonSchema,
@@ -68,6 +74,12 @@ export const RunnerHelloSchema = z.object({
   /** Whether the runner answers a read of a CLI's quota; one from before never does. */
   quotaReads: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
+  /**
+   * What the runner's account lacks of the git identity citizens' own commits carry, checked
+   * before each hello outside any repository; empty when it has both. Absent from a runner from
+   * before the check, which no default fills in, so the board marks only what a runner reported.
+   */
+  gitIdentityMissing: z.array(GitIdentityPartSchema).optional(),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
   /** Turns the runner is still running, when it registers again; the server fails the rest of its turns. */

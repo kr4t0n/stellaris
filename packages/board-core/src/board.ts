@@ -80,6 +80,7 @@ import {
   type CronSchedule,
   type Dashboard,
   type Decision,
+  type GitIdentityPart,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
@@ -262,6 +263,11 @@ export interface RunnerPatch {
   readonly clis?: readonly CliKind[] | undefined;
   readonly capabilities?: readonly string[] | undefined;
   readonly version?: string | undefined;
+  /**
+   * What the runner's account lacks of a git identity, as its hello reported; null when the hello
+   * said nothing, as an older runner's does, which drops what an earlier one reported.
+   */
+  readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
 }
 
 export interface SignalRecord {
@@ -2020,8 +2026,14 @@ export class Board {
         throw new BoardError("NOT_FOUND", `runner ${name} not found`);
       }
       const doc = await readMarkdown(file, RunnerSchema);
+      const { gitIdentityMissing: reported, ...rest } = doc.data;
+      const gitIdentityMissing =
+        patch.gitIdentityMissing === undefined ? reported : (patch.gitIdentityMissing ?? undefined);
       const next: Runner = RunnerSchema.parse({
-        ...doc.data,
+        ...rest,
+        ...(gitIdentityMissing === undefined
+          ? {}
+          : { gitIdentityMissing: [...gitIdentityMissing] }),
         ...(patch.status === undefined ? {} : { status: patch.status }),
         ...(patch.os === undefined ? {} : { os: patch.os }),
         ...(patch.clis === undefined ? {} : { clis: [...patch.clis] }),

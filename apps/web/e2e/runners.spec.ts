@@ -123,6 +123,8 @@ test("the suggested name follows the runners list as it changes, and a typed one
   await expect(name).toHaveValue("mac-studio");
   // An emptied field is the user's too, so the suggestion does not come back to fill it.
   await name.fill("");
+  add("studio-4");
+  await expect(rows).toHaveCount(5);
   await expect(name).toHaveValue("");
   await expect(form.getByRole("button", { name: "Approve" })).toBeDisabled();
 });

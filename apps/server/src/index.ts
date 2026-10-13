@@ -10,6 +10,7 @@ import pino from "pino";
 import { createApp } from "./app.js";
 import { EnrollmentDesk } from "./enrollment.js";
 import { ModelCatalog } from "./models.js";
+import { QuotaReads } from "./quotas.js";
 import { TurnHub } from "./turn-hub.js";
 
 const VERSION = STELLARIS_VERSION;
@@ -87,6 +88,7 @@ const app = createApp({
   turns,
   scheduler: view,
   models: new ModelCatalog(runners),
+  quotas: new QuotaReads(runners),
   runners,
   webDir,
   signIn: { github: config.github, log },

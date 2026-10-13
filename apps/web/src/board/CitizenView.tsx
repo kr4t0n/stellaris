@@ -18,7 +18,9 @@ import {
   useCrons,
   useMembers,
   useNow,
+  useProjects,
   useRoles,
+  useRunners,
   useScheduler,
   useTasks,
   useTurnHistory,
@@ -30,6 +32,7 @@ import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { ModelForm } from "./ModelForm.js";
 import { RunnerForm } from "./RunnerForm.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { CitizenQuota } from "./Quota.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { TurnControls } from "./TurnControls.js";
 import { useStickyScroll } from "./useStickyScroll.js";
@@ -114,6 +117,9 @@ function CitizenPage({
   const scheduler = useScheduler();
   const live = useLiveTurns();
   const crons = useCrons();
+  const runners = useRunners();
+  const projects = useProjects();
+  const clock = useNow(30_000);
   const [open, setOpen] = useState<"wake" | "model" | "runner" | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
@@ -187,6 +193,18 @@ function CitizenPage({
             </span>
           </>
         }
+      />
+      <CitizenQuota
+        member={member}
+        runners={runners.data ?? []}
+        placed={
+          new Map(
+            (projects.data ?? []).flatMap((project) =>
+              project.runner === undefined ? [] : [[project.slug, project.runner] as const],
+            ),
+          )
+        }
+        now={clock}
       />
       {open === "wake" ? (
         <WakeForm

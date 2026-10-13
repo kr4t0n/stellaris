@@ -20,6 +20,7 @@ import {
   BranchChangesSchema,
   BranchFileDiffSchema,
   BranchFileSchema,
+  CliQuotaSchema,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
@@ -55,6 +56,22 @@ async function commitTree(
     args.push("-m", paragraph);
   }
   return (await execa("git", args, { cwd: repo })).stdout.trim();
+}
+
+/** A time a few minutes past noon on 2026-10-13, for quota reports. */
+function quotaTime(minute: number): string {
+  return `2026-10-13T12:0${minute}:00.000Z`;
+}
+
+/** A 5-hour window of a quota report, used this much, reported at `minute`. */
+function fiveHour(usedPercent: number, minute: number) {
+  return {
+    key: "five_hour",
+    minutes: 300,
+    usedPercent,
+    resetsAt: "2026-10-13T17:00:00.000Z",
+    observedAt: quotaTime(minute),
+  };
 }
 
 function completed(summary: string, memoryUpdated = false): TurnResult {
@@ -1211,12 +1228,141 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
     });
     expect((await models()).models[0]?.efforts.map((effort) => effort.id)).toEqual(["low", "high"]);
     expect(listed).toEqual({ a: 0, b: 2 });
+  });
+
+  it("keeps each CLI's quota on its runner's record, from a turn and from a read the user asks for", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "quotas" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    let turnPercent = 35;
+    const reads: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () =>
+        Promise.resolve({
+          ...completed("done"),
+          quota: CliQuotaSchema.parse({
+            observedAt: quotaTime(0),
+            source: "turn",
+            status: "allowed",
+            windows: [fiveHour(turnPercent, 0)],
+          }),
+        }),
+      readQuota: () => {
+        reads.push("claude");
+        return Promise.resolve(
+          CliQuotaSchema.parse({
+            observedAt: quotaTime(5),
+            source: "read",
+            status: "allowed",
+            plan: "max",
+            windows: [
+              fiveHour(40, 5),
+              {
+                key: "seven_day_opus",
+                minutes: 10_080,
+                usedPercent: 3,
+                observedAt: quotaTime(5),
+              },
+            ],
+          }),
+        );
+      },
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend }),
+    });
+    const { app, run, hub } = society;
+    const turn = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    const logged = async () =>
+      (await board.readEvents(null, 500)).filter((event) => event.type === "runner.quota");
+
+    // A turn's report lands on the record of the runner it ran on.
+    await run(turn);
+    expect((await board.readRunner("pod")).quotas?.claude).toMatchObject({
+      source: "turn",
+      windows: [{ key: "five_hour", usedPercent: 35 }],
+    });
+    expect((await logged()).map((event) => event.payload)).toEqual([
+      { name: "pod", cli: "claude", status: "allowed" },
+    ]);
+    // Within the same whole percent, the record is written and nothing is logged; a new percent is.
+    turnPercent = 35.4;
+    await run(turn);
+    expect(await logged()).toHaveLength(1);
+    turnPercent = 36;
+    await run(turn);
+    expect(await logged()).toHaveLength(2);
+    // A quota the board cannot keep is the runner record's trouble, never the turn's.
+    const failing = vi
+      .spyOn(board, "recordQuota")
+      .mockRejectedValueOnce(new Error("the runner record could not be written"));
+    turnPercent = 50;
+    const kept = await run(turn);
+    expect(failing).toHaveBeenCalledTimes(1);
+    failing.mockRestore();
+    expect(kept.exitReason).toBe("completed");
+    expect(kept.error).toBeNull();
+    expect((await board.readRunner("pod")).quotas?.claude?.windows[0]?.usedPercent).toBe(36);
+
+    const refresh = (bearer: string, cli = "claude") =>
+      app.request(`/api/runners/pod/quota/${cli}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+    // A read starts a CLI process on the runner, so only the user asks for one.
+    expect((await refresh(board.issueTurnToken("stew", "steward", 60_000))).status).toBe(403);
+    const read = await refresh(userToken);
+    expect(read.status).toBe(200);
+    expect(CliQuotaSchema.parse(await read.json())).toMatchObject({ source: "read", plan: "max" });
+    // The read merges over the turn's report: its windows win, and the turn's others would stay.
+    const record = (await board.readRunner("pod")).quotas?.claude;
+    expect(record?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
+      ["five_hour", 40],
+      ["seven_day_opus", 3],
+    ]);
+    expect(record?.plan).toBe("max");
+    const listed = await app.request("/api/runners", {
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(JSON.stringify(await listed.json())).toContain('"seven_day_opus"');
+    // Asked again at once, the read is answered again rather than run again.
+    expect((await refresh(userToken)).status).toBe(200);
+    expect(reads).toEqual(["claude"]);
+    // A CLI the runner does not have is away there.
+    expect((await refresh(userToken, "codex")).status).toBe(503);
+    // A runner from before quota reads is refused at once rather than left to time out.
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.21",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    await expect(hub.quota("pod", "claude")).rejects.toThrow("upgrade it");
+    expect(reads).toEqual(["claude"]);
   });
 
   it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {
@@ -1462,6 +1608,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -1573,6 +1720,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2092,6 +2240,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: false,
       branchChanges: false,
+      quotaReads: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2232,6 +2381,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: false,
       capabilities: [],
       slots: null,
       turns: [],

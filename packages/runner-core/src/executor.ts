@@ -21,6 +21,7 @@ import {
   type BranchFileDiff,
   type BranchRead,
   type CliKind,
+  type CliQuota,
   type CloseRequest,
   type HeldWorkspace,
   type LandRequest,
@@ -320,6 +321,7 @@ export class TurnExecutor {
       model: result.model ?? null,
       work,
       leftovers,
+      ...(result.quota === undefined ? {} : { quota: result.quota }),
     };
   }
 
@@ -773,6 +775,12 @@ export class TurnExecutor {
   async models(cli: CliKind): Promise<ModelOption[]> {
     const backend = this.backends[cli];
     return backend?.listModels === undefined ? [] : backend.listModels();
+  }
+
+  /** A CLI's plan quota, read without a turn; null when its adapter cannot read one. */
+  async quota(cli: CliKind): Promise<CliQuota | null> {
+    const backend = this.backends[cli];
+    return backend?.readQuota === undefined ? null : backend.readQuota();
   }
 
   /** Lets every warm session go: called on shutdown. */

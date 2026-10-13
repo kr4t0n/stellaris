@@ -8,6 +8,7 @@ import {
   type Name,
 } from "./ids.js";
 import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
+import { CliQuotaSchema } from "./quota.js";
 import {
   CharterTriggerSchema,
   RoleCharterSchema,
@@ -568,6 +569,11 @@ export const RunnerSchema = z.object({
   gitIdentityMissing: z.array(GitIdentityPartSchema).optional(),
   status: z.enum(["connected", "disconnected"]),
   lastSeen: IsoDateTimeSchema.optional(),
+  /**
+   * Each CLI's plan quota as its login on this runner last reported it, from a turn's stream or a
+   * read; absent until one has.
+   */
+  quotas: z.partialRecord(CliKindSchema, CliQuotaSchema).optional(),
 });
 export type Runner = z.infer<typeof RunnerSchema>;
 

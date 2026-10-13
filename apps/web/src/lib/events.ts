@@ -99,6 +99,10 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "role.added") {
     return [["roles"]];
   }
+  // A CLI's quota changed on a runner's record; the runner's models and the server's version did not.
+  if (type === "runner.quota") {
+    return [["runners"]];
+  }
   // A runner that comes or goes may list other models, and the server forgets what it listed;
   // after the server's own upgrade, every runner registers again.
   if (type.startsWith("runner.")) {

@@ -55,6 +55,8 @@ import {
   RetirementProposalSchema,
   RoleCharterSchema,
   RunnerSchema,
+  mergeQuota,
+  quotaChanged,
   SEED_ROLES,
   SKILL_BYTES_LIMIT,
   SKILL_FILES_LIMIT,
@@ -73,6 +75,7 @@ import {
   type ChannelRef,
   type CompletionEffect,
   type CliKind,
+  type CliQuota,
   type Cron,
   type CronSchedule,
   type Dashboard,
@@ -2047,6 +2050,37 @@ export class Board {
           key: `runner:${name}`,
           summary: `runner ${name} is ${next.status}${clis}${capabilities}`,
           value: next.status === "connected" ? 1 : 0,
+        });
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Records a CLI's plan quota as a runner reported it, from a turn's stream or a read, merged over
+   * what the record held. The record is written on every report, so it says when the numbers were
+   * last seen; `runner.quota` is appended only when what a reader would see changes, since every
+   * turn reports.
+   */
+  async recordQuota(name: Name, cli: CliKind, quota: CliQuota): Promise<Runner> {
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const previous = doc.data.quotas?.[cli];
+      const merged = mergeQuota(previous, quota);
+      const next: Runner = RunnerSchema.parse({
+        ...doc.data,
+        quotas: { ...doc.data.quotas, [cli]: merged },
+      });
+      await writeMarkdown(file, next, doc.body);
+      if (quotaChanged(previous, merged)) {
+        await this.events.append("runner.quota", SYSTEM_ACTOR.name, {
+          name,
+          cli,
+          status: merged.status,
         });
       }
       return next;

@@ -139,6 +139,8 @@ describe("quotaLevel", () => {
     expect(quotaLevel(at(80), NOW)).toBe("warning");
     // A window that has reset since it was read no longer counts.
     expect(quotaLevel(at(95, "2026-10-13T11:59:59.000Z"), NOW)).toBe("ok");
+    // At its reset instant, a window has started afresh.
+    expect(quotaLevel(at(95, AT), NOW)).toBe("ok");
     expect(quotaLevel(at(95, "2026-10-13T12:00:01.000Z"), NOW)).toBe("warning");
     expect(quotaLevel(quota({ status: "warning" }), NOW)).toBe("warning");
   });

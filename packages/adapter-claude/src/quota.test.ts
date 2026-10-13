@@ -102,6 +102,23 @@ describe("a turn's rate-limit events", () => {
     });
   });
 
+  /**
+   * A turn recorded through this adapter from Claude Code 2.1.283 (the SDK 0.3.283 binary) on pod
+   * on 2026-10-13, on the runner's own login. Its event's fractions match the usage read made a
+   * minute earlier, which gave 15 and 12 percent.
+   */
+  it("report pod's recorded turn the same way", async () => {
+    const result = await backend(replay(await recorded("sdk-quota-recorded.jsonl"))).runTurn(
+      request,
+    );
+    expect(result.exitReason).toBe("completed");
+    expect(result.quota?.windows.map((window) => [window.key, window.usedPercent, window.resetsAt]))
+      .toEqual([
+        ["five_hour", 15, "2026-10-13T16:50:00.000Z"],
+        ["seven_day", 12, "2026-10-20T05:00:00.000Z"],
+      ]);
+  });
+
   it("read the steered turn's recorded event the same way", async () => {
     const event = (await recorded("sdk-steered-recorded.jsonl")).find(
       (message) => message.type === "rate_limit_event",
@@ -250,6 +267,32 @@ const USAGE = {
 };
 
 describe("the usage read", () => {
+  /**
+   * The usage read recorded on pod on 2026-10-13 from Claude Code 2.1.283 on the runner's login:
+   * besides the windows it names, it carries many it leaves null, the server's usage rows, and
+   * extra usage. It holds no account id.
+   */
+  it("maps pod's recorded answer to its windows, plan, and extra usage", async () => {
+    const raw: unknown = JSON.parse(
+      await readFile(path.join(fixtures, "sdk-usage-read-recorded.json"), "utf8"),
+    );
+    const quota = quotaFromUsage(raw, AT);
+    expect(quota).toMatchObject({
+      source: "read",
+      status: "allowed",
+      plan: "max",
+      extraUsage: { enabled: false, monthlyLimit: null, usedCredits: null, currency: null },
+    });
+    expect(quota.windows.map((window) => [window.key, window.usedPercent, window.resetsAt])).toEqual(
+      [
+        ["five_hour", 16, "2026-10-13T16:49:59.662Z"],
+        ["seven_day", 12, "2026-10-20T04:59:59.662Z"],
+        ["model:Fable", 0, "2026-10-20T05:00:00.000Z"],
+      ],
+    );
+  });
+
+
   it("asks a query that takes no turn, skipping the transcript scan, and closes it", async () => {
     const asked: unknown[] = [];
     let closed = false;

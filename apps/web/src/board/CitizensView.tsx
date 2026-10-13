@@ -2,9 +2,10 @@ import type { Member } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
-import { useMembers, useProjects, useScheduler } from "../lib/session.js";
+import { useMembers, useNow, useProjects, useRunners, useScheduler } from "../lib/session.js";
 import { runnersOf, scopeName } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { QuotaMark } from "./Quota.js";
 
 /**
  * The model a citizen runs: what its CLI last reported, else what it is set to, else the CLI's own,
@@ -28,13 +29,16 @@ function byRole(a: Member, b: Member): number {
 }
 
 /**
- * Every citizen at a glance, one row each in columns, ordered by role: its CLI, role, model, the
- * runners its turns run on, projects, and what it is doing; each opens the citizen's own view.
+ * Every citizen at a glance, one row each in columns, ordered by role: its CLI, marked when its
+ * quota is near or at its limit on a runner its turns use, role, model, the runners its turns run
+ * on, projects, and what it is doing; each opens the citizen's own view.
  */
 export function CitizensView() {
   const members = useMembers();
   const scheduler = useScheduler();
   const projectList = useProjects();
+  const runners = useRunners();
+  const clock = useNow(30_000);
   if (members.data === undefined) {
     return <PaneNote>Reading the roster…</PaneNote>;
   }
@@ -96,8 +100,14 @@ export function CitizensView() {
                   params={{ name: member.name }}
                   className="col-span-full grid grid-cols-subgrid items-center rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-2/50"
                 >
-                  <span className="grid size-4 place-items-center">
+                  <span className="relative grid size-4 place-items-center">
                     {member.cli === null ? null : <CliIcon cli={member.cli} size={13} />}
+                    <QuotaMark
+                      member={member}
+                      runners={runners.data ?? []}
+                      placed={placed}
+                      now={clock}
+                    />
                   </span>
                   <span className="text-fg-primary">{member.name}</span>
                   <span className="text-fg-secondary">{member.role}</span>

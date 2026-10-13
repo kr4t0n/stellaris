@@ -710,7 +710,12 @@ export interface FakeBoard {
   readonly writes: Write[];
   /** Makes the next decision fail as the board would, with this reason. */
   refuseNext(message: string): void;
+  /** Puts this many citizens in a turn at lab, and this many turns in the queue. */
+  setWorking(running: number, queued?: number): void;
 }
+
+/** The citizens `setWorking` puts in turns, in order. */
+const WORKERS = ["ada", "bo", "cy", "di", "eve", "fay", "gus", "hal", "ivo", "jo"];
 
 /** desk's crons: a morning digest at home, a check in the task's thread whose turns keep failing, and stew's, ended. */
 export const DIGEST_CRON = "01M3Q2CRNAAAAAAAAAAAAAAAA1";
@@ -821,6 +826,8 @@ export async function fakeBoard(
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
+  let working: string[] = [];
+  let queued: string[] = [];
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
@@ -1364,8 +1371,9 @@ export async function fakeBoard(
           running: [
             ...(answering === null ? [] : [`desk/society/${answering}`]),
             ...(inFlight ? ["desk/society"] : []),
+            ...working,
           ],
-          pending: [],
+          pending: queued,
           resident: [],
           signals: ["role_gap:lab:referee"],
           turns: inFlight
@@ -1416,6 +1424,10 @@ export async function fakeBoard(
     writes,
     refuseNext: (message) => {
       refusal = message;
+    },
+    setWorking: (running, waiting = 0) => {
+      working = WORKERS.slice(0, running).map((name) => `${name}/lab`);
+      queued = WORKERS.slice(running, running + waiting).map((name) => `${name}/lab`);
     },
   };
 }

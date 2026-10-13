@@ -865,7 +865,8 @@ const CLAUDE_MODELS = [
  * starts with no token. With `inFlight`,
  * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
  * is a folder the board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
- * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's; with
+ * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's and studio's
+ * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
  * `quotas: "limited"`, pod's Claude is limited for 40 minutes.
@@ -899,6 +900,8 @@ export async function fakeBoard(
       : options.quotas === "limited"
         ? { claude: claudeQuota(3, 100, true), codex: codexQuota(3) }
         : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
+  // studio's own login, with numbers of its own, reported as fresh as pod's.
+  const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
@@ -1031,6 +1034,9 @@ export async function fakeBoard(
         case "/api/runners/pod/quota/claude":
           podQuotas["claude"] = { ...claudeQuota(0, 41), source: "read" };
           return json(route, podQuotas["claude"]);
+        case "/api/runners/studio/quota/claude":
+          studioQuotas["claude"] = { ...claudeQuota(0, 20), source: "read" };
+          return json(route, studioQuotas["claude"]);
         case "/api/runners/pod/quota/codex":
           if (options.quotas === "reads") {
             return json(
@@ -1341,6 +1347,7 @@ export async function fakeBoard(
             version: "0.3.11",
             gitIdentityMissing: ["email"],
             status: "connected",
+            quotas: podQuotas,
           },
           {
             name: "studio",
@@ -1350,7 +1357,7 @@ export async function fakeBoard(
             version: "0.3.11",
             gitIdentityMissing: [],
             status: "connected",
-            quotas: podQuotas,
+            quotas: studioQuotas,
           },
           {
             name: "laptop",

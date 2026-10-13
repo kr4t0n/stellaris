@@ -128,7 +128,7 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
   const section = page.getByRole("region", { name: "Plan quota" });
   await expect(section.getByRole("heading", { name: "Plan quota" })).toBeVisible();
   const rows = section.locator('[aria-label="Quota by runner"] > li');
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(3);
 
   // laptop's Claude reports pod's numbers, so it shares pod's row rather than repeating them.
   const claude = rows.nth(0);
@@ -145,6 +145,9 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
   await expect(codex).toContainText("pod");
   await expect(codex).toContainText("codex · pro · credits 1,250.5");
   await expect(codex.getByRole("listitem")).toHaveText([/^7d\s*2%\s*resets in 6d 17h$/]);
+  // studio's login reports numbers of its own, so it has a row of its own.
+  await expect(rows.nth(2)).toContainText("studio");
+  await expect(rows.nth(2).getByRole("listitem").first()).toContainText("20%");
   // Every number is fresh, so opening the view read nothing.
   expect(board.writes).toEqual([]);
 });
@@ -175,11 +178,12 @@ test("the runners view reads numbers missing or old once on opening, and again o
 
   // Read again asks every CLI of every connected runner once more; laptop is away.
   await page.getByRole("button", { name: "Read again" }).click();
-  await expect.poll(() => board.writes.length).toBe(4);
+  await expect.poll(() => board.writes.length).toBe(5);
   expect(reads()).toEqual([
     "/api/runners/pod/quota/claude",
     "/api/runners/pod/quota/claude",
     "/api/runners/pod/quota/codex",
     "/api/runners/pod/quota/codex",
+    "/api/runners/studio/quota/claude",
   ]);
 });

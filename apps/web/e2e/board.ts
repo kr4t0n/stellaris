@@ -787,7 +787,7 @@ function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
         key: "five_hour",
         minutes: 300,
         usedPercent: fiveHour,
-        resetsAt: minutesFromNow(290),
+        resetsAt: minutesFromNow(limited ? 40 : 290),
         observedAt,
       },
       {
@@ -896,7 +896,9 @@ export async function fakeBoard(
   const podQuotas: Record<string, unknown> =
     options.quotas === "reads"
       ? { claude: claudeQuota(20, 35) }
-      : { claude: claudeQuota(3, 35, options.quotas === "limited"), codex: codexQuota(3) };
+      : options.quotas === "limited"
+        ? { claude: claudeQuota(3, 100, true), codex: codexQuota(3) }
+        : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;

@@ -38,15 +38,18 @@ function balance(quota: CliQuota): string | null {
   return `extra usage ${money(extra.usedCredits)}${extra.monthlyLimit === null ? "" : ` of ${money(extra.monthlyLimit)}`}`;
 }
 
-/** Each window of a CLI's quota as a meter: how full, and when it starts afresh. */
+/**
+ * Each window of a CLI's quota as a meter: how full, and when it starts afresh. A window used up,
+ * or the one a limit names while it holds, is red; one near full is amber.
+ */
 function Windows({ cli, quota, now }: { cli: CliKind; quota: CliQuota; now: number }) {
-  const limited = quotaWords(quota, now).level === "limited";
+  const binding = quotaWords(quota, now).level === "limited" ? quota.limitedBy : null;
   return (
     <ul className="mt-1 grid grid-cols-[auto_minmax(3rem,7rem)_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 pl-6">
       {quota.windows.map((window) => {
         const reading = windowReading(window, now);
         const fill =
-          limited || (reading.percent ?? 0) >= 100
+          window.key === binding || (reading.percent ?? 0) >= 100
             ? "bg-red-400"
             : reading.high
               ? "bg-amber-400"

@@ -203,6 +203,8 @@ describe("quotaChanged and sameQuotaNumbers", () => {
     const other = quota({ ...base, observedAt: "2026-10-13T12:07:00.000Z", source: "read" });
     expect(sameQuotaNumbers(base, other)).toBe(true);
     expect(sameQuotaNumbers(base, quota({ ...other, plan: "plus" }))).toBe(false);
+    // One runner's turn met the limit and the other has not run since: they report different things.
+    expect(sameQuotaNumbers(base, quota({ ...other, status: "limited" }))).toBe(false);
     expect(
       sameQuotaNumbers(
         base,

@@ -190,10 +190,17 @@ export function quotaChanged(previous: CliQuota | undefined, next: CliQuota): bo
 }
 
 /**
- * Whether two runners' reports of one CLI show the same numbers: the same windows, each at the same
- * whole percent and resetting the same minute. Two logins rarely match like that, so the runners
- * view shows such reports once, as most likely one login; nothing reads an account's identity.
+ * Whether two runners' reports of one CLI show the same numbers: the same plan, status, and limit,
+ * and the same windows, each at the same whole percent and resetting the same minute. Two logins
+ * rarely match like that, so the runners view shows such reports once, as most likely one login;
+ * nothing reads an account's identity.
  */
 export function sameQuotaNumbers(a: CliQuota, b: CliQuota): boolean {
-  return a.windows.length > 0 && a.plan === b.plan && readings(a) === readings(b);
+  return (
+    a.windows.length > 0 &&
+    a.plan === b.plan &&
+    a.status === b.status &&
+    a.limitedUntil === b.limitedUntil &&
+    readings(a) === readings(b)
+  );
 }

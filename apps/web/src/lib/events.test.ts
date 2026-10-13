@@ -44,6 +44,7 @@ describe("board events", () => {
       ["task-changes"],
       ["task-diff"],
       ["metrics"],
+      ["tokens"],
       ["crons"],
     ]);
     // A cron's own events, and the society's zone, which a cron naming none is read in.

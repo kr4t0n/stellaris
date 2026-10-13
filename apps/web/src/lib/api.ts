@@ -17,6 +17,7 @@ import {
   MemberSchema,
   MessageRefSchema,
   MetricsSchema,
+  TokenUseSchema,
   RemovedKnowledgeSchema,
   RemovedSkillSchema,
   RunnerModelsSchema,
@@ -251,6 +252,8 @@ export function createApi(token: string) {
     signals: (limit: number) =>
       get(`/api/signals?limit=${limit}`, token, SignalRecordSchema.array()),
     metrics: (window: MetricsWindow) => get(`/api/metrics?window=${window}`, token, MetricsSchema),
+    /** Each citizen's finished turns over a window and the tokens they counted. */
+    tokens: (window: MetricsWindow) => get(`/api/tokens?window=${window}`, token, TokenUseSchema),
     channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
     channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),

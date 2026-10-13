@@ -29,7 +29,8 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
 
   const form = page.getByRole("form", { name: "Approve Studio.local" });
   await expect(page.getByText(ENROLLING_CODE)).toBeVisible();
-  await expect(form.getByLabel("Runner name")).toHaveValue("studio");
+  // The society has a runner called studio already.
+  await expect(form.getByLabel("Runner name")).toHaveValue("studio-2");
   await form.getByLabel("Runner name").fill("studio-mac");
   await form.getByRole("button", { name: "Approve" }).click();
 
@@ -38,6 +39,94 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
   await expect(page.getByRole("button", { name: "Runners", exact: true })).toBeVisible();
+});
+
+for (const late of ["enrollments", "runners"] as const) {
+  test(`the suggested name skips the society's runners when the ${late} answer last`, async ({
+    page,
+  }) => {
+    await fakeBoard(page, { enrolling: true });
+    const { promise: held, resolve: answer } = Promise.withResolvers<void>();
+    // Registered after the fake board, so it answers first and holds one list back.
+    await page.route(`**/api/${late}`, async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await page.goto("/runners");
+    const name = page.getByRole("form", { name: "Approve Studio.local" }).getByLabel("Runner name");
+    if (late === "runners") {
+      // Until the runners are known, nothing is taken.
+      await expect(page.getByText("Reading the runners…")).toBeVisible();
+      await expect(name).toHaveValue("studio");
+    } else {
+      await expect(
+        page.getByRole("list", { name: "Registered" }).getByRole("listitem"),
+      ).toHaveCount(3);
+      await expect(name).toHaveCount(0);
+    }
+    answer();
+    await expect(name).toHaveValue("studio-2");
+  });
+}
+
+test("the suggested name follows the runners list as it changes, and a typed one stays", async ({
+  page,
+}) => {
+  await fakeBoard(page, { enrolling: true });
+  // Registered after the fake board, so they answer first: the runners as the test lists them, and
+  // the board's event stream, which says a runner was added each time the test adds one.
+  const names = ["pod", "studio"];
+  await page.route("**/api/runners", (route) =>
+    route.fulfill({
+      json: names.map((name) => ({
+        name,
+        os: "linux",
+        clis: ["claude"],
+        capabilities: [],
+        status: "connected",
+      })),
+    }),
+  );
+  let announce = Promise.withResolvers<void>();
+  await page.route("**/api/events/stream**", async (route) => {
+    await announce.promise;
+    announce = Promise.withResolvers<void>();
+    const event = {
+      id: `01M3Q2EEEEEEEEEEEEEEEEEEE${names.length}`,
+      ts: "2026-10-13T12:00:00.000Z",
+      type: "runner.added",
+      actor: "user",
+      payload: { name: names.at(-1) },
+    };
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify(event)}\n\n`,
+    });
+  });
+  const add = (runner: string): void => {
+    names.push(runner);
+    announce.resolve();
+  };
+  await page.goto("/runners");
+  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  const form = page.getByRole("form", { name: "Approve Studio.local" });
+  const name = form.getByLabel("Runner name");
+  await expect(name).toHaveValue("studio-2");
+
+  add("studio-2");
+  await expect(rows).toHaveCount(3);
+  await expect(name).toHaveValue("studio-3");
+
+  await name.fill("mac-studio");
+  add("studio-3");
+  await expect(rows).toHaveCount(4);
+  await expect(name).toHaveValue("mac-studio");
+  // An emptied field is the user's too, so the suggestion does not come back to fill it.
+  await name.fill("");
+  add("studio-4");
+  await expect(rows).toHaveCount(5);
+  await expect(name).toHaveValue("");
+  await expect(form.getByRole("button", { name: "Approve" })).toBeDisabled();
 });
 
 test("Runners in the top bar opens the runners view and closes it again", async ({ page }) => {

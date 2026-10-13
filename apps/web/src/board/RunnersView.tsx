@@ -45,7 +45,10 @@ function WaitingRunner({
 }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const [name, setName] = useState(() => suggestRunnerName(enrollment.hostname, taken));
+  // The suggestion follows the runners list, which may arrive or change after the enrollment, until
+  // the user types a name of their own.
+  const [typed, setTyped] = useState<string | null>(null);
+  const name = typed ?? suggestRunnerName(enrollment.hostname, taken);
   const refresh = (): void => {
     void client.invalidateQueries({ queryKey: ["enrollments"] });
     void client.invalidateQueries({ queryKey: ["runners"] });
@@ -87,7 +90,7 @@ function WaitingRunner({
           maxLength={32}
           spellCheck={false}
           aria-label="Runner name"
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => setTyped(event.target.value)}
           className={`${FIELD} min-w-0 flex-1 font-mono`}
         />
         <Button onClick={() => deny.mutate()} disabled={busy}>

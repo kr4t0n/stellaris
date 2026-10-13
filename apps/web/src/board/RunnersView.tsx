@@ -174,7 +174,7 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
+          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -200,7 +200,15 @@ export function RunnersView() {
                   ))}
                   <span className="sr-only">{clis}</span>
                 </span>
-                <span className="text-fg-primary">{runner.name}</span>
+                {/* A gap in the account's git identity sits under the name, so it takes no column. */}
+                <span>
+                  <span className="block text-fg-primary">{runner.name}</span>
+                  {gap === null ? null : (
+                    <span className="block text-xs text-amber-300" title={gap.detail}>
+                      {gap.label}
+                    </span>
+                  )}
+                </span>
                 <span className="text-fg-secondary">{runner.os}</span>
                 {offVersion(runner, server) ? (
                   <span className="text-xs text-amber-300" title={`the server runs v${server}`}>
@@ -210,13 +218,6 @@ export function RunnersView() {
                 ) : (
                   <span className="text-xs text-fg-muted">
                     {runner.version === undefined ? "" : `v${runner.version}`}
-                  </span>
-                )}
-                {gap === null ? (
-                  <span />
-                ) : (
-                  <span className="text-xs text-amber-300" title={gap.detail}>
-                    {gap.label}
                   </span>
                 )}
                 <span

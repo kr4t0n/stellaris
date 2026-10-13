@@ -1259,6 +1259,15 @@ export async function fakeBoard(
             status: "connected",
           },
           {
+            name: "studio",
+            os: "darwin",
+            clis: ["claude"],
+            capabilities: [],
+            version: "0.3.11",
+            gitIdentityMissing: [],
+            status: "connected",
+          },
+          {
             name: "laptop",
             os: "darwin",
             clis: ["claude"],

@@ -28,7 +28,7 @@ export function identityGap(runner: {
   const keys = missing.map((part) => `user.${part}`);
   const effect = missing.includes("name")
     ? "git refuses the commits citizens make themselves on it"
-    : "the commits citizens make themselves on it carry an address git made up";
+    : "the commits citizens make themselves on it carry an empty address or one git made up";
   return {
     label: missing.length === 1 ? `no git ${keys.join("")}` : "no git identity",
     detail: `Its account has no git ${keys.join(" or ")}, so ${effect}. Set ${missing.length === 1 ? "it" : "them"} with git config --global there; the mark goes once the runner connects with ${missing.length === 1 ? "it" : "them"} set.`,

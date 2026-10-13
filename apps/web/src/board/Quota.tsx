@@ -184,7 +184,9 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
     <section aria-label="Plan quota" className="mt-3 border-t border-line pt-3">
       <div className="flex items-center gap-2 px-2">
         <h2 className="flex-1 text-section text-fg-primary">Plan quota</h2>
+        {/* Pulled right by its own padding, so its words end where the rows' right column does. */}
         <Button
+          className="-mr-3"
           disabled={connected.length === 0 || reading.size > 0}
           onClick={() => {
             for (const runner of connected) {
@@ -197,9 +199,6 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
           {reading.size > 0 ? "Reading…" : "Read again"}
         </Button>
       </div>
-      <p className="px-2 pt-0.5 text-meta">
-        What each runner's CLI logins last reported of their plans, from a turn or a read.
-      </p>
       <ul aria-label="Quota by runner" className="mt-1.5 space-y-1">
         {rows.map((row) => {
           const first = row.runners[0] ?? "";

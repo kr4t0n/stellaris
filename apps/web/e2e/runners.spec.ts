@@ -33,7 +33,7 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await form.getByLabel("Runner name").fill("studio-mac");
   await form.getByRole("button", { name: "Approve" }).click();
 
-  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Waiting for approval" })).toHaveCount(0);
   expect(board.writes).toEqual([
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
@@ -99,7 +99,7 @@ test("a code nobody waits with says so, and a denial sends no name", async ({ pa
     .getByRole("form", { name: "Approve Studio.local" })
     .getByRole("button", { name: "Deny" })
     .click();
-  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Waiting for approval" })).toHaveCount(0);
   expect(board.writes).toEqual([{ path: `/api/enrollments/${ENROLLING_CODE}/deny`, body: {} }]);
 });
 

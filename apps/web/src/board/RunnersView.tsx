@@ -238,12 +238,6 @@ export function RunnersView() {
           })}
         </ul>
         <PlanQuota runners={registered} now={now} />
-        {enrollments.data === undefined || waiting.length > 0 ? null : (
-          <p className="mt-2 border-t border-line px-2 pt-2 text-meta">
-            A runner started with STELLARIS_SERVER_URL set to this board and no token asks to join
-            here, with a code to approve.
-          </p>
-        )}
       </div>
     </>
   );

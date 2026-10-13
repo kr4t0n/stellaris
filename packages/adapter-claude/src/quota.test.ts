@@ -430,6 +430,19 @@ describe("a rate-limit event outside what a quota may hold", () => {
     expect(result.quota === undefined || CliQuotaSchema.safeParse(result.quota).success).toBe(true);
   });
 
+  it("is no quota at all when it breaks a quota's bounds", () => {
+    const many = Object.fromEntries(
+      Array.from({ length: 25 }, (_, index) => [`seven_day_${index}`, { utilization: 0.1 }]),
+    );
+    expect(quotaFromRateLimit({ status: "allowed", unifiedWindows: many }, AT)).toBeNull();
+    expect(
+      quotaFromRateLimit(
+        { status: "allowed", unifiedWindows: { five_hour: { utilization: 1e307 } } },
+        AT,
+      ),
+    ).toBeNull();
+  });
+
   it("keeps the window whose reset it cannot read, with no reset", async () => {
     const result = await backend(replay(await withRateLimit(variants[0]![1]))).runTurn(request);
     expect(result.quota?.windows.map((window) => [window.key, window.resetsAt])).toEqual([

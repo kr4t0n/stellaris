@@ -95,7 +95,6 @@ export function useStickyScroll({
     }
     atEnd.current = true;
     jumping.current = element.scrollHeight;
-    lastTop.current = element.scrollTop;
     setAway(false);
     setSeen(newest);
     const behavior = scrollBehavior();
@@ -105,6 +104,8 @@ export function useStickyScroll({
     if (behavior === "smooth" && element.scrollTop < glideFrom) {
       element.scrollTop = glideFrom;
     }
+    // From here on, a scroll back up lets go, even one before the glide's first frame.
+    lastTop.current = element.scrollTop;
     element.scrollTo({ top: element.scrollHeight, behavior });
     const latest = [...element.querySelectorAll("article")].at(-1) ?? element.lastElementChild;
     if (focus && latest instanceof HTMLElement) {

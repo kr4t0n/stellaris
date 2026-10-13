@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { fakeBoard, SKILL_PROPOSAL, STAGE_TASK } from "./board.js";
+import { ARCHIVE_PROPOSAL, fakeBoard, SKILL_PROPOSAL, STAGE_TASK } from "./board.js";
 
 const THREAD = "01M3Q2MMMMMMMMMMMMMMMMMMM1";
 const OPENED = "2026-09-29T09:00:00.000Z";
@@ -90,6 +90,68 @@ async function longThread(page: Page, count: number, place: Place = TOPIC) {
       post.resolve(messageId(messages.length));
     },
   };
+}
+
+/** The record of a thread at `place`, as the board lists it. */
+function threadRecord(place: Place) {
+  return {
+    id: place.id,
+    channel: place.channel,
+    ...(place.subject === undefined ? {} : { subject: place.subject }),
+    title: "A long thread",
+    state: "open",
+    openedBy: "ada",
+    openedAt: OPENED,
+    body: "",
+  };
+}
+
+/**
+ * Serves a thread of 40 messages at `place`, numbered from `from` so that one thread's ids all come
+ * after another's, the first of them naming `link`, which the board shows as a link to it.
+ */
+async function serveThread(page: Page, place: Place, from: number, link: string) {
+  const messages = Array.from({ length: 40 }, (_, index) => message(from + index, place));
+  messages[0] = { ...message(from, place), body: `Message ${from}: see ${link}.` };
+  await page.route(`**/api/threads/${place.id}`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ thread: threadRecord(place), messages }),
+    }),
+  );
+}
+
+/** A task of one stage, blocked by `blocker`. */
+function fakeTask(id: string, blocker: string, title: string) {
+  return {
+    id,
+    project: "lab",
+    title,
+    status: "open",
+    createdBy: "desk",
+    createdAt: OPENED,
+    updatedAt: OPENED,
+    blockedBy: [blocker],
+    requiredCapabilities: [],
+    stages: [{ id: "s1", name: "Work", gate: false, holders: [] }],
+    stage: "s1",
+    stageSince: OPENED,
+    stageSeq: 1,
+    onDone: "none",
+    completing: false,
+    body: "",
+  };
+}
+
+/** A task's or a proposal's view, opened at its top, with nothing counted as new. */
+async function opensAfresh(page: Page, newest: string): Promise<void> {
+  await expect(page.getByText(newest)).toBeAttached();
+  await expect(jumpButton(page)).toHaveAccessibleName("Jump to latest");
+  const list = page
+    .locator("article")
+    .first()
+    .locator("xpath=ancestor::div[contains(@class, 'overflow-y-auto')][1]");
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
 }
 
 /** The thread's scrolling list: the parent of its messages. */
@@ -393,4 +455,123 @@ test("a proposal's view gets the same jump to its thread's newest message", asyn
   await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
   await expect(page.getByText("Message 40:")).toBeInViewport();
   await expect(jumpButton(page)).toHaveCount(0);
+});
+
+test("scrolling back up as the jump starts lets go of it, and what arrives next leaves the reader there", async ({
+  page,
+}) => {
+  const thread = await longThread(page, 60);
+  await page.goto(`/thread/${THREAD}`);
+  const list = listOf(page);
+  await expect(page.getByText("Message 60:")).toBeInViewport();
+  await scrollToDistance(list, 1e6);
+  await expect(jumpButton(page)).toBeVisible();
+  // The reader turns back up before the glide has drawn a frame. The interface handles clicks at
+  // its root, so a listener on the window runs after the jump has started.
+  await list.evaluate((element) => {
+    window.addEventListener(
+      "click",
+      () => {
+        element.scrollTop -= 300;
+      },
+      { once: true },
+    );
+  });
+  await jumpButton(page).click();
+  await expect(jumpButton(page)).toBeVisible();
+  const settled = await list.evaluate(async (element) => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return element.scrollTop;
+  });
+  expect(await distanceToEnd(list)).toBeGreaterThan(300);
+
+  thread.postMore(3);
+  await expect(page.getByText("Message 63:")).toBeAttached();
+  await expect(jumpButton(page)).toHaveAccessibleName("Jump to latest, 3 new");
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(settled);
+});
+
+test("going from one task to another already read starts the count and the place afresh", async ({
+  page,
+}) => {
+  const other = "01M3Q2BBBBBBBBBBBBBBBBBBB1";
+  const first: Place = {
+    id: STAGE_TASK,
+    channel: "lab/general",
+    subject: { kind: "task", id: STAGE_TASK },
+  };
+  const second: Place = { id: other, channel: "lab/general", subject: { kind: "task", id: other } };
+  // Each task is blocked by the other, so each view links the other.
+  const tasks = [
+    fakeTask(STAGE_TASK, other, "The first task"),
+    fakeTask(other, STAGE_TASK, "The second task"),
+  ];
+  await fakeBoard(page);
+  await page.route("**/api/projects/lab/tasks", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }),
+  );
+  for (const each of tasks) {
+    await page.route(`**/api/tasks/${each.id}`, (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(each) }),
+    );
+  }
+  await page.route("**/api/threads", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        [first, second].map((place) => ({
+          ...threadRecord(place),
+          messages: 40,
+          lastMessageId: null,
+        })),
+      ),
+    }),
+  );
+  // The second task's messages all come after the first's.
+  await serveThread(page, first, 1, "the board");
+  await serveThread(page, second, 101, "the board");
+  await page.goto(`/task/${other}`);
+  await opensAfresh(page, "Message 140:");
+  await page.locator(`a[href="/task/${STAGE_TASK}"]`).first().click();
+  await opensAfresh(page, "Message 40:");
+  // Read before, so the view goes straight to it without a pane in between.
+  await page.locator(`a[href="/task/${other}"]`).first().click();
+  await opensAfresh(page, "Message 140:");
+  await page.goBack();
+  await opensAfresh(page, "Message 40:");
+  await page.goForward();
+  await opensAfresh(page, "Message 140:");
+});
+
+test("going from one proposal to another already read starts the count afresh", async ({
+  page,
+}) => {
+  await fakeBoard(page, { archived: true });
+  // Each proposal's thread names the other, and the archive's messages come after the skill's.
+  await serveThread(
+    page,
+    {
+      id: SKILL_PROPOSAL,
+      channel: "governance",
+      subject: { kind: "proposal", id: SKILL_PROPOSAL },
+    },
+    1,
+    ARCHIVE_PROPOSAL,
+  );
+  await serveThread(
+    page,
+    {
+      id: ARCHIVE_PROPOSAL,
+      channel: "governance",
+      subject: { kind: "proposal", id: ARCHIVE_PROPOSAL },
+    },
+    101,
+    SKILL_PROPOSAL,
+  );
+  await page.goto(`/proposal/${ARCHIVE_PROPOSAL}`);
+  await opensAfresh(page, "Message 140:");
+  await page.locator(`article a[href="/proposal/${SKILL_PROPOSAL}"]`).first().click();
+  await opensAfresh(page, "Message 40:");
+  await page.locator(`article a[href="/proposal/${ARCHIVE_PROPOSAL}"]`).first().click();
+  await opensAfresh(page, "Message 140:");
 });

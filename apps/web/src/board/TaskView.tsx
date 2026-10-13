@@ -300,7 +300,9 @@ export function TaskView() {
           </span>
         }
       />
+      {/* Keyed by its subject: the route keeps the view mounted from one task to the next. */}
       <StickyList
+        key={current.id}
         stick={false}
         follow={false}
         ids={messages.data?.messages.map((message) => message.id)}

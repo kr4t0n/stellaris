@@ -51,8 +51,6 @@ export interface TurnRequest {
   readonly limits: TurnLimits;
   /** JSON Schema for the structured status the turn must end with. */
   readonly statusSchema: Record<string, unknown>;
-  /** Extra environment for the CLI process, for example git identity. */
-  readonly env: Readonly<Record<string, string>>;
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   readonly costSoFarUsd?: number | undefined;
 }
@@ -84,7 +82,6 @@ export interface ResidentStart {
   readonly mcp: { readonly url: string; readonly token: string };
   readonly limits: TurnLimits;
   readonly statusSchema: Record<string, unknown>;
-  readonly env: Readonly<Record<string, string>>;
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   readonly costSoFarUsd?: number | undefined;
 }

@@ -38,7 +38,7 @@ describe("mentionsIn", () => {
     expect(mentionsIn("[`a](u)` @eng-1")).toEqual(["eng-1"]);
   });
 
-  it("reads a backtick right after a bare URL as code, as GitHub does, and a footnote call as text", () => {
+  it("reads a backtick right after a bare URL as code, where GitHub keeps it in the link, and a footnote call as text", () => {
     expect(mentionsIn("see http://x.y/`@eng-1` and @rev-1")).toEqual(["rev-1"]);
     expect(mentionsIn("www.x.y/`@eng-1`")).toEqual([]);
     expect(mentionsIn("[^1] `@eng-1` @rev-1\n\n[^1]: a note")).toEqual(["rev-1"]);

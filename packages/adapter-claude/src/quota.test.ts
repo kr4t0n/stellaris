@@ -112,11 +112,12 @@ describe("a turn's rate-limit events", () => {
       request,
     );
     expect(result.exitReason).toBe("completed");
-    expect(result.quota?.windows.map((window) => [window.key, window.usedPercent, window.resetsAt]))
-      .toEqual([
-        ["five_hour", 15, "2026-10-13T16:50:00.000Z"],
-        ["seven_day", 12, "2026-10-20T05:00:00.000Z"],
-      ]);
+    expect(
+      result.quota?.windows.map((window) => [window.key, window.usedPercent, window.resetsAt]),
+    ).toEqual([
+      ["five_hour", 15, "2026-10-13T16:50:00.000Z"],
+      ["seven_day", 12, "2026-10-20T05:00:00.000Z"],
+    ]);
   });
 
   it("read the steered turn's recorded event the same way", async () => {
@@ -283,15 +284,14 @@ describe("the usage read", () => {
       plan: "max",
       extraUsage: { enabled: false, monthlyLimit: null, usedCredits: null, currency: null },
     });
-    expect(quota.windows.map((window) => [window.key, window.usedPercent, window.resetsAt])).toEqual(
-      [
-        ["five_hour", 16, "2026-10-13T16:49:59.662Z"],
-        ["seven_day", 12, "2026-10-20T04:59:59.662Z"],
-        ["model:Fable", 0, "2026-10-20T05:00:00.000Z"],
-      ],
-    );
+    expect(
+      quota.windows.map((window) => [window.key, window.usedPercent, window.resetsAt]),
+    ).toEqual([
+      ["five_hour", 16, "2026-10-13T16:49:59.662Z"],
+      ["seven_day", 12, "2026-10-20T04:59:59.662Z"],
+      ["model:Fable", 0, "2026-10-20T05:00:00.000Z"],
+    ]);
   });
-
 
   it("asks a query that takes no turn, skipping the transcript scan, and closes it", async () => {
     const asked: unknown[] = [];
@@ -326,14 +326,14 @@ describe("the usage read", () => {
       plan: "max",
       extraUsage: { enabled: false, monthlyLimit: null, usedCredits: null, currency: "USD" },
     });
-    expect(quota.windows.map((window) => [window.key, window.usedPercent, window.resetsAt])).toEqual(
-      [
-        ["five_hour", 35, "2026-10-13T15:00:00.000Z"],
-        ["seven_day", 100, "2026-10-15T05:00:00.000Z"],
-        ["seven_day_opus", 12.5, null],
-        ["model:Fable", 40, "2026-10-15T05:00:00.000Z"],
-      ],
-    );
+    expect(
+      quota.windows.map((window) => [window.key, window.usedPercent, window.resetsAt]),
+    ).toEqual([
+      ["five_hour", 35, "2026-10-13T15:00:00.000Z"],
+      ["seven_day", 100, "2026-10-15T05:00:00.000Z"],
+      ["seven_day_opus", 12.5, null],
+      ["model:Fable", 40, "2026-10-15T05:00:00.000Z"],
+    ]);
     expect(quota.windows[3]?.label).toBe("Fable");
   });
 

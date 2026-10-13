@@ -63,16 +63,13 @@ export function quotaFromRateLimit(raw: unknown, at: Date): CliQuota | null {
   }
   const info = parsed.data;
   const observedAt = at.toISOString();
-  const windows: Reading[] = Object.entries(info.unifiedWindows ?? {}).map(
-    ([key, window]) => ({
-      key,
-      minutes: minutesOf(key),
-      usedPercent:
-        window.utilization === undefined ? null : Math.max(0, window.utilization * 100),
-      resetsAt: fromEpoch(window.resetsAt),
-      observedAt,
-    }),
-  );
+  const windows: Reading[] = Object.entries(info.unifiedWindows ?? {}).map(([key, window]) => ({
+    key,
+    minutes: minutesOf(key),
+    usedPercent: window.utilization === undefined ? null : Math.max(0, window.utilization * 100),
+    resetsAt: fromEpoch(window.resetsAt),
+    observedAt,
+  }));
   const limited = info.status === "rejected";
   // The window that binds is named even when the event lists no windows of its own.
   if (

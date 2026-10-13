@@ -277,7 +277,9 @@ function handleMessage(
       // The API refused the turn for the plan's limit: the CLI says so in a synthetic message.
       if (message.error === "rate_limit") {
         const said = blocksOf(message.message.content)
-          .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+          .map((block) =>
+            block.type === "text" && typeof block.text === "string" ? block.text : "",
+          )
           .join(" ")
           .trim();
         state.limitText = said.length > 0 ? said : "the plan's usage limit";

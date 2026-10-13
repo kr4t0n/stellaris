@@ -17,7 +17,9 @@ describe("QuotaReads", () => {
       {
         quota: (runner: Name, cli: CliKind): Promise<CliQuota> => {
           asked.push(`${runner}/${cli}`);
-          return fail ? Promise.reject(new Error("the CLI could not read")) : Promise.resolve(QUOTA);
+          return fail
+            ? Promise.reject(new Error("the CLI could not read"))
+            : Promise.resolve(QUOTA);
         },
       },
       60_000,
@@ -27,7 +29,10 @@ describe("QuotaReads", () => {
     await expect(reads.read("pod", "codex")).rejects.toThrow("could not read");
     fail = false;
     // A failed read is not kept, so the next ask goes to the runner again.
-    const [first, second] = await Promise.all([reads.read("pod", "codex"), reads.read("pod", "codex")]);
+    const [first, second] = await Promise.all([
+      reads.read("pod", "codex"),
+      reads.read("pod", "codex"),
+    ]);
     expect(first).toBe(QUOTA);
     expect(second).toBe(QUOTA);
     expect(asked).toEqual(["pod/codex", "pod/codex"]);

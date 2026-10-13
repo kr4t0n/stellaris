@@ -148,10 +148,12 @@ describe("quotaLevel", () => {
   });
 });
 
+function name(input: Partial<QuotaWindowInput> & { key: string }): string {
+  return windowName(quota({ windows: [window(input)] }).windows[0]!);
+}
+
 describe("windowName", () => {
   it("names Claude's windows by key and label, and Codex's by length", () => {
-    const name = (input: Partial<QuotaWindowInput> & { key: string }): string =>
-      windowName(quota({ windows: [window(input)] }).windows[0]!);
     expect(name({ key: "five_hour", minutes: 300 })).toBe("5h");
     expect(name({ key: "seven_day_opus", minutes: 10_080 })).toBe("7d Opus");
     expect(name({ key: "model:Fable", label: "Fable", minutes: 10_080 })).toBe("7d Fable");

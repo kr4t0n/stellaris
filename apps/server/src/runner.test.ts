@@ -56,6 +56,22 @@ async function commitTree(
   return (await execa("git", args, { cwd: repo })).stdout.trim();
 }
 
+/** A time a few minutes past noon on 2026-10-13, for quota reports. */
+function quotaTime(minute: number): string {
+  return `2026-10-13T12:0${minute}:00.000Z`;
+}
+
+/** A 5-hour window of a quota report, used this much, reported at `minute`. */
+function fiveHour(usedPercent: number, minute: number) {
+  return {
+    key: "five_hour",
+    minutes: 300,
+    usedPercent,
+    resetsAt: "2026-10-13T17:00:00.000Z",
+    observedAt: quotaTime(minute),
+  };
+}
+
 function completed(summary: string, memoryUpdated = false): TurnResult {
   return {
     events: [],
@@ -1222,14 +1238,6 @@ describe("turns on a runner over the runner protocol", () => {
   it("keeps each CLI's quota on its runner's record, from a turn and from a read the user asks for", async () => {
     const { board, userToken } = await Board.init(dir, { name: "quotas" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
-    const at = (minute: number): string => `2026-10-13T12:0${minute}:00.000Z`;
-    const fiveHour = (usedPercent: number, minute: number) => ({
-      key: "five_hour",
-      minutes: 300,
-      usedPercent,
-      resetsAt: "2026-10-13T17:00:00.000Z",
-      observedAt: at(minute),
-    });
     let turnPercent = 35;
     const reads: string[] = [];
     const backend: AgentBackend = {
@@ -1239,7 +1247,7 @@ describe("turns on a runner over the runner protocol", () => {
         Promise.resolve({
           ...completed("done"),
           quota: CliQuotaSchema.parse({
-            observedAt: at(0),
+            observedAt: quotaTime(0),
             source: "turn",
             status: "allowed",
             windows: [fiveHour(turnPercent, 0)],
@@ -1249,13 +1257,18 @@ describe("turns on a runner over the runner protocol", () => {
         reads.push("claude");
         return Promise.resolve(
           CliQuotaSchema.parse({
-            observedAt: at(5),
+            observedAt: quotaTime(5),
             source: "read",
             status: "allowed",
             plan: "max",
             windows: [
               fiveHour(40, 5),
-              { key: "seven_day_opus", minutes: 10_080, usedPercent: 3, observedAt: at(5) },
+              {
+                key: "seven_day_opus",
+                minutes: 10_080,
+                usedPercent: 3,
+                observedAt: quotaTime(5),
+              },
             ],
           }),
         );

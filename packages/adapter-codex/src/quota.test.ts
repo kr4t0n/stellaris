@@ -108,48 +108,48 @@ describe("a recorded Codex turn's rate limits", () => {
   });
 });
 
-describe("a turn the plan's usage limit ended", () => {
-  /**
-   * The recorded turn with its end replaced as `codex app-server` describes one: an `error` whose
-   * `codexErrorInfo` is `usageLimitExceeded`, a rolling update with the window used up, and the
-   * turn completed as failed.
-   */
-  async function limitTurn(): Promise<string[]> {
-    const recorded = await lines("app-server-quota-recorded.jsonl");
-    const started = recorded.findIndex((line) => line.includes('"method":"turn/started"'));
-    const thread = "01a13547-73c0-70b3-8272-6815eabfc6f5";
-    const turn = "01a13547-76f2-75d2-9f90-e1f870435451";
-    const error = {
-      message: "You've hit your usage limit. Try again later.",
-      codexErrorInfo: "usageLimitExceeded",
-      additionalDetails: null,
-    };
-    return [
-      ...recorded.slice(0, started + 1),
-      JSON.stringify({
-        method: "account/rateLimits/updated",
-        params: {
-          rateLimits: {
-            limitId: "codex",
-            primary: { usedPercent: 100, windowDurationMins: 10_080, resetsAt: 1_792_473_118 },
-            secondary: null,
-            credits: null,
-            planType: null,
-            rateLimitReachedType: "rate_limit_reached",
-          },
+/**
+ * The recorded turn with its end replaced as `codex app-server` describes one: an `error` whose
+ * `codexErrorInfo` is `usageLimitExceeded`, a rolling update with the window used up, and the
+ * turn completed as failed.
+ */
+async function limitTurn(): Promise<string[]> {
+  const recorded = await lines("app-server-quota-recorded.jsonl");
+  const started = recorded.findIndex((line) => line.includes('"method":"turn/started"'));
+  const thread = "01a13547-73c0-70b3-8272-6815eabfc6f5";
+  const turn = "01a13547-76f2-75d2-9f90-e1f870435451";
+  const error = {
+    message: "You've hit your usage limit. Try again later.",
+    codexErrorInfo: "usageLimitExceeded",
+    additionalDetails: null,
+  };
+  return [
+    ...recorded.slice(0, started + 1),
+    JSON.stringify({
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 100, windowDurationMins: 10_080, resetsAt: 1_792_473_118 },
+          secondary: null,
+          credits: null,
+          planType: null,
+          rateLimitReachedType: "rate_limit_reached",
         },
-      }),
-      JSON.stringify({
-        method: "error",
-        params: { error, willRetry: false, threadId: thread, turnId: turn },
-      }),
-      JSON.stringify({
-        method: "turn/completed",
-        params: { threadId: thread, turn: { id: turn, status: "failed", error } },
-      }),
-    ];
-  }
+      },
+    }),
+    JSON.stringify({
+      method: "error",
+      params: { error, willRetry: false, threadId: thread, turnId: turn },
+    }),
+    JSON.stringify({
+      method: "turn/completed",
+      params: { threadId: thread, turn: { id: turn, status: "failed", error } },
+    }),
+  ];
+}
 
+describe("a turn the plan's usage limit ended", () => {
   it("fails with Codex's words and reports the limit until the window resets", async () => {
     const { spawn } = replay(await limitTurn());
     const result = await new CodexBackend({ spawn, now: () => AT }).runTurn(request);

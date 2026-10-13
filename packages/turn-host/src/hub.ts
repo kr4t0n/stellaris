@@ -4,6 +4,7 @@ import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/schedu
 import {
   BranchChangesSchema,
   BranchFileDiffSchema,
+  CliQuotaSchema,
   BranchFileSchema,
   MergeOutcomeSchema,
   ModelListSchema,
@@ -14,6 +15,7 @@ import {
   type BranchFile,
   type BranchFileDiff,
   type CliKind,
+  type CliQuota,
   type ModelOption,
   type Name,
   projectRepo,
@@ -748,6 +750,29 @@ export class RunnerHub implements TurnRunner {
     return ModelListSchema.parse(
       await this.request(seat, (request) => ({ type: "models", request, cli })),
     );
+  }
+
+  /**
+   * A CLI's plan quota, read on a runner without a turn and recorded on the runner's record.
+   * Refused for a runner not connected with the CLI, and for one from before quota reads, which
+   * would skip the request and leave the reader waiting.
+   */
+  async quota(runner: Name, cli: CliKind): Promise<CliQuota> {
+    const seat = this.seats.get(runner);
+    if (seat === undefined || seat.send === null || !seat.hello.clis.includes(cli)) {
+      throw new RunnerAwayError(`runner ${runner} is not connected with ${cli}`);
+    }
+    if (!seat.hello.quotaReads) {
+      throw new BoardError("INVALID_STATE", `runner ${runner} cannot read quotas yet; upgrade it`);
+    }
+    const quota = CliQuotaSchema.nullable().parse(
+      await this.request(seat, (request) => ({ type: "quota", request, cli }), FILE_TIMEOUT_MS),
+    );
+    if (quota === null) {
+      throw new BoardError("NOT_FOUND", `${cli} on runner ${runner} cannot read its quota`);
+    }
+    await this.board.recordQuota(runner, cli, quota);
+    return quota;
   }
 
   /** Calls `listener` whenever a runner registers, connects, or goes away. */

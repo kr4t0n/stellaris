@@ -7,10 +7,14 @@ import {
   nextFire,
   parseChannelRef,
   PATH_TOKENS,
+  quotaLevel,
   SOCIETY_SCOPE,
   stageIndex,
+  windowCurrent,
+  windowName,
   WORKSPACE_TOKEN,
   type ChannelRef,
+  type CliQuota,
   type Cron,
   type HomeConflict,
   type Knowledge,
@@ -194,7 +198,26 @@ function signalLine(ts: string, signal: OpsSignal): string {
 }
 
 /** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
-function runnerLine(runner: Runner, projects: readonly Project[]): string {
+/** One CLI's quota on a runner, as a planner reads it: a limit, else each window's use. */
+function quotaPhrase(cli: string, quota: CliQuota, now: Date): string {
+  const level = quotaLevel(quota, now);
+  if (level === "none") {
+    return `${cli} has no plan limits`;
+  }
+  if (level === "limited") {
+    return `${cli} limited until ${quota.limitedUntil ?? "an unknown time"}`;
+  }
+  const windows = quota.windows.map((window) =>
+    !windowCurrent(window, now)
+      ? `${windowName(window)} reset since`
+      : `${windowName(window)} ${window.usedPercent === null ? "?" : Math.round(window.usedPercent)}%`,
+  );
+  return `${cli} ${windows.length === 0 ? "allowed" : windows.join(", ")}${
+    level === "warning" ? " (near its limit)" : ""
+  } as of ${quota.observedAt}`;
+}
+
+function runnerLine(runner: Runner, projects: readonly Project[], now: Date): string {
   const living = projects
     .filter((project) => project.runner === runner.name)
     .map((project) => project.slug);
@@ -202,11 +225,15 @@ function runnerLine(runner: Runner, projects: readonly Project[]): string {
     runner.status === "connected"
       ? "connected"
       : `away${runner.lastSeen === undefined ? "" : ` since ${runner.lastSeen}`}`;
+  const quotas = runner.clis.flatMap((cli) => {
+    const quota = runner.quotas?.[cli];
+    return quota === undefined ? [] : [quotaPhrase(cli, quota, now)];
+  });
   return `- ${runner.name}: ${state}; ${runner.os}; CLIs ${
     runner.clis.length === 0 ? "none" : runner.clis.join(", ")
   }; offers ${runner.capabilities.length === 0 ? "nothing beyond its CLIs" : runner.capabilities.join(", ")}; ${
     living.length === 0 ? "no projects" : `projects ${living.join(", ")}`
-  }`;
+  }${quotas.length === 0 ? "" : `; quota ${quotas.join("; ")}`}`;
 }
 
 /** The first line of a profile that is not a heading, clipped. */
@@ -493,14 +520,14 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and never moves. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and never moves. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then.",
       "",
     );
     if (machines.runners.length === 0) {
       lines.push("None registered yet.");
     }
     for (const runner of machines.runners) {
-      lines.push(runnerLine(runner, machines.projects));
+      lines.push(runnerLine(runner, machines.projects, input.clock?.now ?? new Date()));
     }
   }
 

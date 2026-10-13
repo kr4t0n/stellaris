@@ -1,4 +1,9 @@
-import { CronFrontmatterSchema, TaskFrontmatterSchema, TriggerSchema } from "@stellaris/shared";
+import {
+  CliQuotaSchema,
+  CronFrontmatterSchema,
+  TaskFrontmatterSchema,
+  TriggerSchema,
+} from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
 
@@ -582,9 +587,46 @@ describe("buildTurnPrompt", () => {
             status: "disconnected",
             lastSeen: "2026-10-01T09:00:00.000Z",
           },
+          {
+            name: "merlin",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+            quotas: {
+              codex: CliQuotaSchema.parse({
+                observedAt: "2026-10-13T11:00:00.000Z",
+                source: "turn",
+                status: "limited",
+                limitedUntil: "2026-10-20T05:11:58.000Z",
+              }),
+              claude: CliQuotaSchema.parse({
+                observedAt: "2026-10-13T11:30:00.000Z",
+                source: "turn",
+                status: "allowed",
+                windows: [
+                  {
+                    key: "five_hour",
+                    minutes: 300,
+                    usedPercent: 84.6,
+                    resetsAt: "2026-10-13T14:00:00.000Z",
+                    observedAt: "2026-10-13T11:30:00.000Z",
+                  },
+                  {
+                    key: "seven_day",
+                    minutes: 10_080,
+                    usedPercent: 12,
+                    resetsAt: "2026-10-13T11:45:00.000Z",
+                    observedAt: "2026-10-13T11:30:00.000Z",
+                  },
+                ],
+              }),
+            },
+          },
         ],
         projects: [listedProject("lab", "pod"), listedProject("new")],
       },
+      clock: { now: new Date("2026-10-13T12:00:00.000Z"), timeZone: "UTC" },
     });
     expect(prompt).toContain("## Runners");
     expect(prompt).toContain(
@@ -595,6 +637,10 @@ describe("buildTurnPrompt", () => {
     );
     expect(prompt).toContain(
       "- laptop: away since 2026-10-01T09:00:00.000Z; darwin; CLIs claude; offers gpu, xcode; no projects",
+    );
+    // Each CLI's quota in the order the runner lists its CLIs; a window reset since reads so.
+    expect(prompt).toContain(
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; quota claude 5h 85%, 7d reset since (near its limit) as of 2026-10-13T11:30:00.000Z; codex limited until 2026-10-20T05:11:58.000Z",
     );
     // The front desk's project list says where each project lives.
     expect(prompt).toContain("on done none; on runner pod");

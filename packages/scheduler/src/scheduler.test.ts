@@ -248,6 +248,27 @@ describe("Scheduler", () => {
     expect(runner.dispatches.at(-1)?.trigger.fromUser).toBe(false);
   });
 
+  it("wakes nobody for a name in code, and whoever a name beside it mentions", async () => {
+    const { board, runner, scheduler } = await setup();
+    await board.postMessage(ENG, {
+      channel: "demo/general",
+      body: "Run `@rev-1 --fix`, then:\n\n```\n@rev-1\n```",
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toEqual([]);
+    expect(scheduler.pendingCount).toBe(0);
+
+    await board.postMessage(ENG, { channel: "demo/general", body: "`npm test`, @rev-1" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["rev-1", "mention"]]);
+  });
+
   it("holds dispatches while paused and releases them on resume", async () => {
     const { board, runner, scheduler } = await setup();
     await board.setPaused(USER, true);

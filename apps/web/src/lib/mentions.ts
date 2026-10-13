@@ -1,5 +1,4 @@
-/** The board's own mention pattern: `@name` not inside a word or an address. */
-const MENTION = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
+import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 
 /** The part of an mdast node this plugin reads and writes. */
 interface MdNode {
@@ -9,13 +8,16 @@ interface MdNode {
   data?: Record<string, unknown>;
 }
 
-/** Where a mention would not be one: code shows text as written, and links already say where. */
+/**
+ * Where a name is not highlighted: code shows text as written and wakes nobody (`mentionsIn`), and a
+ * link already says where, though a name in a link or in HTML still wakes.
+ */
 const OPAQUE = new Set(["code", "inlineCode", "link", "linkReference", "html"]);
 
 function split(value: string): MdNode[] {
   const nodes: MdNode[] = [];
   let last = 0;
-  for (const match of value.matchAll(MENTION)) {
+  for (const match of value.matchAll(MENTION_PATTERN)) {
     const start = (match.index ?? 0) + (match[1]?.length ?? 0);
     if (start > last) {
       nodes.push({ type: "text", value: value.slice(last, start) });
@@ -50,13 +52,6 @@ function walk(node: MdNode): void {
     }
     return [child];
   });
-}
-
-/** The names a text mentions, as the board reads them to decide whom a post wakes. */
-export function mentionsIn(text: string): string[] {
-  return [...new Set([...text.matchAll(MENTION)].map((match) => match[2] ?? ""))].filter(
-    (name) => name !== "",
-  );
 }
 
 /** A remark plugin that marks `@mentions` so they render highlighted, outside code and links. */

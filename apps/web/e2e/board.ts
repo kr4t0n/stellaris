@@ -767,6 +767,66 @@ function cronFixtures(): Array<Record<string, unknown>> {
   ];
 }
 
+/** A time this many minutes from now, or ago when negative, for quota reports. */
+function minutesFromNow(minutes: number): string {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
+/** Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much. */
+function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
+  const observedAt = minutesFromNow(-observedAgo);
+  return {
+    observedAt,
+    source: "turn",
+    status: limited ? "limited" : "allowed",
+    limitedUntil: limited ? minutesFromNow(40) : null,
+    limitedBy: limited ? "five_hour" : null,
+    plan: "max",
+    windows: [
+      {
+        key: "five_hour",
+        minutes: 300,
+        usedPercent: fiveHour,
+        resetsAt: minutesFromNow(290),
+        observedAt,
+      },
+      {
+        key: "seven_day",
+        minutes: 10_080,
+        usedPercent: 12,
+        resetsAt: minutesFromNow(8_620),
+        observedAt,
+      },
+    ],
+    credits: null,
+    extraUsage: null,
+  };
+}
+
+/** Codex's quota as a read gave it: one weekly window, the plan, and credits. */
+function codexQuota(observedAgo: number) {
+  const observedAt = minutesFromNow(-observedAgo);
+  return {
+    observedAt,
+    source: "read",
+    status: "allowed",
+    limitedUntil: null,
+    limitedBy: null,
+    plan: "pro",
+    windows: [
+      {
+        key: "primary",
+        minutes: 10_080,
+        usedPercent: 2,
+        resetsAt: minutesFromNow(9_670),
+        observedAt,
+      },
+    ],
+    credits: { hasCredits: true, unlimited: false, balance: "1250.5" },
+    extraUsage: null,
+  };
+}
+
 /** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
 export const ENROLLING_CODE = "BCDF-GHJK";
 
@@ -804,7 +864,11 @@ const CLAUDE_MODELS = [
  * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
  * starts with no token. With `inFlight`,
  * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
- * is a folder the board took from stew's home, with a script beside its SKILL.md.
+ * is a folder the board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
+ * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's; with
+ * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
+ * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes.
  */
 export async function fakeBoard(
   page: Page,
@@ -817,6 +881,7 @@ export async function fakeBoard(
     signedOut?: boolean;
     inFlight?: boolean;
     skillFolder?: boolean;
+    quotas?: "reads" | "limited";
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -828,6 +893,10 @@ export async function fakeBoard(
   let paused = false;
   let working: string[] = [];
   let queued: string[] = [];
+  const podQuotas: Record<string, unknown> =
+    options.quotas === "reads"
+      ? { claude: claudeQuota(20, 35) }
+      : { claude: claudeQuota(3, 35, options.quotas === "limited"), codex: codexQuota(3) };
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
@@ -957,6 +1026,19 @@ export async function fakeBoard(
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
       switch (pathname) {
+        case "/api/runners/pod/quota/claude":
+          podQuotas["claude"] = { ...claudeQuota(0, 41), source: "read" };
+          return json(route, podQuotas["claude"]);
+        case "/api/runners/pod/quota/codex":
+          if (options.quotas === "reads") {
+            return json(
+              route,
+              { error: "INVALID_STATE", message: "runner pod cannot read quotas yet; upgrade it" },
+              409,
+            );
+          }
+          podQuotas["codex"] = codexQuota(0);
+          return json(route, podQuotas["codex"]);
         case "/api/verbs/approve":
           return decide(route, "approved", body);
         case "/api/verbs/reject":
@@ -1256,6 +1338,7 @@ export async function fakeBoard(
             capabilities: [],
             version: "0.3.11",
             status: "connected",
+            quotas: podQuotas,
           },
           {
             name: "laptop",
@@ -1264,6 +1347,7 @@ export async function fakeBoard(
             capabilities: ["gpu"],
             version: "0.3.10",
             status: "disconnected",
+            quotas: { claude: claudeQuota(120, 35) },
           },
         ]);
       case "/api/agents/desk/models":

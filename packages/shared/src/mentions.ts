@@ -37,7 +37,7 @@ const SLOW = {
  */
 function codeRanges(markdown: string): [number, number][] {
   // micromark drops a leading byte order mark before it counts offsets.
-  const shift = markdown.startsWith("﻿") ? 1 : 0;
+  const shift = markdown.startsWith("\uFEFF") ? 1 : 0;
   const events = postprocess(
     parse({ extensions: [gfm(), SLOW] })
       .document()

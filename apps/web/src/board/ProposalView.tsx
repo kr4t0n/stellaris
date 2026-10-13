@@ -11,6 +11,7 @@ import {
   useProposal,
   useRoles,
   useSkills,
+  useThread,
   useThreads,
 } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
@@ -20,6 +21,7 @@ import { PaneHeader, PaneNote } from "./Pane.js";
 import { ProposalCharter } from "./ProposalCharter.js";
 import { StatusChip } from "./ProposalsView.js";
 import { Composer } from "./Composer.js";
+import { StickyList } from "./StickyList.js";
 import { SubjectThread } from "./SubjectThread.js";
 
 const ProvisionSchema = z.object({
@@ -112,6 +114,10 @@ export function ProposalView() {
   const threads = useThreads();
   const now = useNow(30_000);
   const displayName = useDisplayName();
+  // A proposal's thread takes the proposal's id.
+  const messages = useThread(
+    threads.data?.some((candidate) => candidate.id === proposalId) === true ? proposalId : null,
+  );
 
   if (proposal.data === undefined) {
     return (
@@ -156,7 +162,12 @@ export function ProposalView() {
         )}${open ? ` · for ${decidersOf(current, proposerRole)} to decide` : ""}`}
         trailing={<StatusChip status={current.status} />}
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <StickyList
+        stick={false}
+        follow={false}
+        ids={messages.data?.messages.map((message) => message.id)}
+        className="px-4 py-4"
+      >
         {open ? (
           <p className="rounded-lg bg-sky-400/10 px-3 py-2 text-xs leading-relaxed text-sky-200">
             If approved: {consequence}
@@ -206,7 +217,7 @@ export function ProposalView() {
             />
           )}
         </section>
-      </div>
+      </StickyList>
       {thread?.state === "open" ? (
         <Composer target={{ threadId: current.id }} placeholder="Write in the proposal's thread" />
       ) : null}

@@ -12,9 +12,9 @@ import { useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { StickyList } from "./StickyList.js";
 import { StateChip, subjectLabel } from "./ThreadItem.js";
 import { CloseThreadForm } from "./ThreadForms.js";
-import { useStickyScroll } from "./useStickyScroll.js";
 
 /** One thread: what it is about, its messages, and its summary once closed. */
 export function ThreadView() {
@@ -32,7 +32,6 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);
-  const { ref, onScroll } = useStickyScroll(target === undefined);
   const [closing, setClosing] = useState(false);
   const subject = detail.data?.thread.subject;
   const task = useTask(subject?.kind === "task" ? subject.id : null);
@@ -103,7 +102,11 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
           onDone={() => setClosing(false)}
         />
       ) : null}
-      <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
+      <StickyList
+        stick={target === undefined}
+        ids={messages.map((message) => message.id)}
+        className="py-2"
+      >
         {messages.length === 0 ? <PaneNote>No messages in this thread yet.</PaneNote> : null}
         {messages.map((message) => (
           <MessageItem
@@ -128,7 +131,7 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
             )}
           </section>
         ) : null}
-      </div>
+      </StickyList>
       {thread.state === "open" ? (
         <Composer target={{ threadId: thread.id }} placeholder="Reply in the thread" />
       ) : null}

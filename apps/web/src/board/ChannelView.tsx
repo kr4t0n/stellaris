@@ -20,9 +20,9 @@ import { MessageItem } from "./MessageItem.js";
 import { NoticeItem } from "./NoticeItem.js";
 import { foldNotices } from "./notices.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { StickyList } from "./StickyList.js";
 import { ThreadItem } from "./ThreadItem.js";
 import { NewThreadForm } from "./ThreadForms.js";
-import { useStickyScroll } from "./useStickyScroll.js";
 
 type Item =
   | { kind: "message"; at: string; id: string; message: Message }
@@ -75,7 +75,6 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
 
   const newest = messages.data?.at(-1)?.id ?? null;
   useEffect(() => markSeen(channel, newest), [channel, newest]);
-  const { ref, onScroll } = useStickyScroll(target === undefined);
 
   const [first, second] = channel.split("/");
   const name = second ?? first ?? channel;
@@ -110,7 +109,11 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
       {archiving ? (
         <ArchiveChannelForm channel={channel} onDone={() => setArchiving(false)} />
       ) : null}
-      <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
+      <StickyList
+        stick={target === undefined}
+        ids={messages.data?.map((message) => message.id)}
+        className="py-2"
+      >
         {messages.error instanceof ApiError && messages.error.status === 404 ? (
           <PaneNote>There is no channel {channel}.</PaneNote>
         ) : messages.data === undefined ? (
@@ -137,7 +140,7 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
             );
           })
         )}
-      </div>
+      </StickyList>
       {messages.data === undefined ? null : ended !== undefined ? (
         <p className="border-t border-line px-4 py-3 text-meta">
           Archived {ago(ended.at, now)} by {ended.by}: {ended.reason}. Its posts, threads, and tasks

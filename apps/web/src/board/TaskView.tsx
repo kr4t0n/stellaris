@@ -14,12 +14,14 @@ import {
   useProjects,
   useSession,
   useTask,
+  useThread,
   useThreads,
 } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { stageForYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { StickyList } from "./StickyList.js";
 import { SubjectThread } from "./SubjectThread.js";
 import { TaskFiles } from "./TaskFiles.js";
 import { Failure, FIELD } from "./ThreadForms.js";
@@ -248,6 +250,10 @@ export function TaskView() {
   const members = useMembers();
   const now = useNow(30_000);
   const displayName = useDisplayName();
+  // A task's thread takes the task's id.
+  const messages = useThread(
+    threads.data?.some((candidate) => candidate.id === taskId) === true ? taskId : null,
+  );
 
   if (task.data === undefined) {
     return (
@@ -294,7 +300,12 @@ export function TaskView() {
           </span>
         }
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <StickyList
+        stick={false}
+        follow={false}
+        ids={messages.data?.messages.map((message) => message.id)}
+        className="px-4 py-4"
+      >
         <h3 className="text-section">Plan</h3>
         {current.returned === undefined ? null : (
           <p className="mt-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-200">
@@ -359,7 +370,7 @@ export function TaskView() {
             />
           )}
         </section>
-      </div>
+      </StickyList>
       {thread?.state === "open" ? (
         <Composer target={{ threadId: current.id }} placeholder="Write in the task's thread" />
       ) : null}

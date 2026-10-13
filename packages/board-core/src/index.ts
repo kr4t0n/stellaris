@@ -23,6 +23,7 @@ export type {
 export { BoardError, isBoardError } from "./errors.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
+export { tokenUse } from "./turn-history.js";
 export type { BoardErrorCode } from "./errors.js";
 export { BoardPaths } from "./paths.js";
 export { HOME_GITIGNORE } from "./homes.js";

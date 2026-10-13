@@ -130,7 +130,6 @@ import {
   type SessionsFile,
   TranscriptEntrySchema,
   UlidSchema,
-  UsageSchema,
   type TranscriptEntry,
   type TurnHistoryEntry,
   type TurnRecord,
@@ -141,6 +140,7 @@ import {
   METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
+  type TokenUse,
   RunnerOsSchema,
 } from "@stellaris/shared";
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
@@ -150,6 +150,7 @@ import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
+import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
 import {
   ensureDir,
   exists,
@@ -303,20 +304,6 @@ const SignInsSchema = z.object({
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
-const TurnHistoryPayloadSchema = z.object({
-  project: NameSchema,
-  thread: UlidSchema.optional(),
-  channel: NameSchema.optional(),
-  trigger: z.string().default("manual"),
-  exitReason: z.string().nullable().default(null),
-  costUsd: z.number().default(0),
-  usage: UsageSchema.optional(),
-  model: z.string().nullable().default(null),
-  summary: z.string().nullable().default(null),
-  error: z.string().nullable().default(null),
-  toolCalls: z.number().int().nonnegative().optional(),
-  turnId: UlidSchema.optional(),
-});
 const TurnStartPayloadSchema = z.object({ project: NameSchema, turnId: UlidSchema.optional() });
 
 export interface DigestResult {
@@ -4398,6 +4385,15 @@ export class Board {
       }
     }
     return computeMetrics({ events, tasks, citizens, actions, activeSignals, window, now });
+  }
+
+  /**
+   * Each citizen's finished turns over a window and the tokens of those that counted them, from
+   * the event log alone, which holds every turn's end whatever runner it ran on.
+   */
+  async tokenUse(window: MetricsWindow): Promise<TokenUse> {
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return tokenUse(events, window, this.now());
   }
 
   /** The board actions a finished turn took, from its transcript; null when it kept none. */

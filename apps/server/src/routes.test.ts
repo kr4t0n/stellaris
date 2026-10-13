@@ -3,11 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
 import {
+  addUsage,
   DashboardSchema,
   HomeFileDiffSchema,
   HomeHistorySchema,
+  TokenUseSchema,
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
+  type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +20,15 @@ import { addWorkRoles } from "./testing/scripted-backend.js";
 import { TurnHub } from "./turn-hub.js";
 
 const USER = { name: "user", role: "user" } as const;
+
+function counted(input: number, output: number, cacheRead: number, cacheWrite: number): Usage {
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+  };
+}
 
 async function readSse(response: Response, wanted: number): Promise<string[]> {
   const reader = response.body?.getReader();
@@ -914,6 +926,70 @@ describe("board server routes", () => {
     });
     expect((await app.request("/api/metrics?window=all", { headers })).status).toBe(200);
     expect((await app.request("/api/metrics?window=year", { headers })).status).toBe(400);
+  });
+
+  it("sums each citizen's tokens over a window as its turn history counts them, and nothing more", async () => {
+    const app = createApp({ board, version: "t" });
+    await board.addAgent(USER, { name: "eng-2", role: "engineer", cli: "codex", memberships: [] });
+    const turn = {
+      project: "demo",
+      runner: "server",
+      session: "s",
+      trigger: { kind: "mention" as const, from: "user", fromUser: true, reason: "asked" },
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      exitReason: "completed" as const,
+      status: null,
+      error: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+    };
+    for (const [agent, cli, usage, exitReason] of [
+      ["eng-1", "claude", counted(12, 340, 151_000, 2_400), "completed"],
+      ["eng-1", "claude", counted(3, 90, 48_000, 0), "error"],
+      // Ended by the server when its runner went away, so it never reported its tokens.
+      ["eng-1", "claude", null, "error"],
+      ["eng-2", "codex", counted(9_000, 1_200, 30_000, 0), "completed"],
+    ] as const) {
+      const begun = await board.beginTurn({ ...turn, agent, cli, usage: null });
+      await board.finishTurn({ ...begun, usage, exitReason });
+    }
+
+    const day = TokenUseSchema.parse(await (await app.request("/api/tokens", { headers })).json());
+    expect(day.window).toBe("24h");
+    // The same turns, and the same sums, as each citizen's history lists them.
+    for (const agent of ["eng-1", "eng-2"]) {
+      const history = TurnHistoryEntrySchema.array().parse(
+        await (await app.request(`/api/agents/${agent}/turns?limit=50`, { headers })).json(),
+      );
+      const usages = history.flatMap((entry) => (entry.usage === undefined ? [] : [entry.usage]));
+      expect(day.citizens.find((row) => row.agent === agent)).toEqual({
+        agent,
+        turns: history.length,
+        withUsage: usages.length,
+        usage: usages.reduce<Usage | null>(
+          (sum, each) => (sum === null ? each : addUsage(sum, each)),
+          null,
+        ),
+      });
+    }
+    expect(day.citizens.find((row) => row.agent === "eng-1")).toMatchObject({
+      turns: 3,
+      withUsage: 2,
+      usage: counted(15, 430, 199_000, 2_400),
+    });
+    // Names and counts only: no summary, error, model, project, or thread of any turn.
+    const raw = z
+      .record(z.string(), z.unknown())
+      .parse(await (await app.request("/api/tokens?window=7d", { headers })).json());
+    expect(Object.keys(raw)).toEqual(["window", "since", "until", "citizens"]);
+    for (const row of z.array(z.record(z.string(), z.unknown())).parse(raw["citizens"])) {
+      expect(Object.keys(row)).toEqual(["agent", "turns", "withUsage", "usage"]);
+    }
+    expect((await app.request("/api/tokens?window=all", { headers })).status).toBe(200);
+    expect((await app.request("/api/tokens?window=year", { headers })).status).toBe(400);
+    expect((await app.request("/api/tokens")).status).toBe(401);
   });
 
   it("says the interface is not built when its directory has no page", async () => {

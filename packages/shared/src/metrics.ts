@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UsageSchema } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 
@@ -119,3 +120,26 @@ export const MetricsSchema = z.object({
   ),
 });
 export type Metrics = z.infer<typeof MetricsSchema>;
+
+/**
+ * The turns a citizen finished in a window, by the time each one's end was logged, and the tokens
+ * of those that counted them. A turn logged before turns counted tokens has none, and so does one
+ * that ended without its runner's report, as when the runner went away during it; `usage` is the
+ * sum over the `withUsage` turns alone, and null when none counted.
+ */
+export const CitizenTokensSchema = z.object({
+  agent: NameSchema,
+  turns: CountSchema,
+  withUsage: CountSchema,
+  usage: UsageSchema.nullable(),
+});
+export type CitizenTokens = z.infer<typeof CitizenTokensSchema>;
+
+/** Each citizen's tokens over a window, from the event log; a citizen with no turn in it has no entry. */
+export const TokenUseSchema = z.object({
+  window: MetricsWindowSchema,
+  since: IsoDateTimeSchema.nullable(),
+  until: IsoDateTimeSchema,
+  citizens: z.array(CitizenTokensSchema),
+});
+export type TokenUse = z.infer<typeof TokenUseSchema>;

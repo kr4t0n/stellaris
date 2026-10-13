@@ -57,5 +57,8 @@ describe("wakes", () => {
     expect(wakesFor("Run `@ada --fix`:\n\n```\n@ada\n```", members, roles)).toEqual(["desk"]);
     expect(wakesFor("Log:\n\n~~~\n@ada\n\nstill code, @ada", members, roles)).toEqual(["desk"]);
     expect(wakesFor("`@ada` means you, @ada", members, roles)).toEqual(["desk", "ada"]);
+    // Indentation alone makes code, so the form reads the text as it is sent.
+    expect(wakesFor("    @ada please run it", members, roles)).toEqual(["desk"]);
+    expect(wakesFor("@ada please run it", members, roles)).toEqual(["desk", "ada"]);
   });
 });

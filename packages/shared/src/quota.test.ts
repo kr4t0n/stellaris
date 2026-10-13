@@ -213,7 +213,9 @@ describe("quotaChanged and sameQuotaNumbers", () => {
         quota({ ...other, windows: [{ ...other.windows[0]!, usedPercent: 7 }] }),
       ),
     ).toBe(false);
-    // Two reports with no windows say nothing about whose they are.
+    // Two reports with no windows say nothing about whose they are, nor do idle windows with no reset.
     expect(sameQuotaNumbers(quota(), quota())).toBe(false);
+    const idle = quota({ windows: [window({ key: "five_hour", usedPercent: 0 })] });
+    expect(sameQuotaNumbers(idle, quota({ ...idle }))).toBe(false);
   });
 });

@@ -197,12 +197,14 @@ function signalLine(ts: string, signal: OpsSignal): string {
   return `- [${ts}] ${signal.kind}: ${signal.summary} (${facts.join("; ")})`;
 }
 
-/** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
-/** One CLI's quota on a runner, as a planner reads it: a limit, else each window's use. */
+/**
+ * One CLI's quota on a runner, as a planner reads it: a limit, else each window's use, in whole
+ * percent rounded down, as the runners view shows it.
+ */
 function quotaPhrase(cli: string, quota: CliQuota, now: Date): string {
   const level = quotaLevel(quota, now);
   if (level === "none") {
-    return `${cli} has no plan limits`;
+    return `${cli} reports no plan limits`;
   }
   if (level === "limited") {
     return `${cli} limited until ${quota.limitedUntil ?? "an unknown time"}`;
@@ -210,13 +212,14 @@ function quotaPhrase(cli: string, quota: CliQuota, now: Date): string {
   const windows = quota.windows.map((window) =>
     !windowCurrent(window, now)
       ? `${windowName(window)} reset since`
-      : `${windowName(window)} ${window.usedPercent === null ? "?" : Math.round(window.usedPercent)}%`,
+      : `${windowName(window)} ${window.usedPercent === null ? "?" : Math.floor(window.usedPercent)}%`,
   );
   return `${cli} ${windows.length === 0 ? "allowed" : windows.join(", ")}${
-    level === "warning" ? " (near its limit)" : ""
+    level === "warning" ? " (near a limit)" : ""
   } as of ${quota.observedAt}`;
 }
 
+/** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
 function runnerLine(runner: Runner, projects: readonly Project[], now: Date): string {
   const living = projects
     .filter((project) => project.runner === runner.name)

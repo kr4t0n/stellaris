@@ -110,6 +110,17 @@ describe("readings", () => {
     });
   });
 
+  it("shows a percent rounded down, so its label reads 80% exactly when it turns amber", () => {
+    expect(windowReading({ ...FIVE_HOUR, usedPercent: 79.6 }, NOON)).toMatchObject({
+      label: "79%",
+      high: false,
+    });
+    expect(windowReading({ ...FIVE_HOUR, usedPercent: 80 }, NOON)).toMatchObject({
+      label: "80%",
+      high: true,
+    });
+  });
+
   it("words a limit, a warning, a login without limits, and nothing to say", () => {
     expect(
       quotaWords(quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" }), NOON),
@@ -117,10 +128,10 @@ describe("readings", () => {
     expect(quotaWords(quota({ status: "limited" }), NOON).words).toBe("limited");
     expect(quotaWords(quota({ windows: [{ ...FIVE_HOUR, usedPercent: 90 }] }), NOON)).toEqual({
       level: "warning",
-      words: "near its limit",
+      words: "near a limit",
       tone: "text-amber-300",
     });
-    expect(quotaWords(quota({ status: "none" }), NOON).words).toBe("no plan limits");
+    expect(quotaWords(quota({ status: "none" }), NOON).words).toBe("no plan limits reported");
     expect(quotaWords(quota({ windows: [FIVE_HOUR] }), NOON).words).toBe("");
   });
 
@@ -136,7 +147,7 @@ describe("readings", () => {
         }),
         NOON,
       ),
-    ).toBe("5h 35% · 7d 85% · near its limit");
+    ).toBe("5h 35% · 7d 85% · near a limit");
     expect(quotaLine(quota({ status: "limited", limitedUntil: null }), NOON)).toBe("limited");
     expect(quotaLine(quota(), NOON)).toBe("no windows reported");
   });

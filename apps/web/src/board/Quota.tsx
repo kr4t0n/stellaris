@@ -219,6 +219,7 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
                 </span>
                 <span className={`ml-auto text-right text-xs ${state.tone}`} title={state.detail}>
                   {state.words}
+                  <span className="sr-only">, {state.detail}</span>
                 </span>
               </div>
               {row.quota === undefined || row.quota.windows.length === 0 ? null : (

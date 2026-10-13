@@ -34,7 +34,7 @@ export type QuotaWindowInput = z.input<typeof QuotaWindowSchema>;
 
 /**
  * What the CLI says of the plan as a whole: `allowed`, `warning` when it warns of a limit near,
- * `limited` when it refuses work until a reset, and `none` for a login with no plan limits, such
+ * `limited` when it refuses work until a reset, and `none` for a login that reports no plan limits, such
  * as an API key.
  */
 export const QuotaStatusSchema = z.enum(["allowed", "warning", "limited", "none"]);
@@ -193,11 +193,12 @@ export function quotaChanged(previous: CliQuota | undefined, next: CliQuota): bo
  * Whether two runners' reports of one CLI show the same numbers: the same plan, status, and limit,
  * and the same windows, each at the same whole percent and resetting the same minute. Two logins
  * rarely match like that, so the runners view shows such reports once, as most likely one login;
- * nothing reads an account's identity.
+ * nothing reads an account's identity. A reset time is what makes a match telling, so reports
+ * whose windows name none, as two idle logins' may, never match.
  */
 export function sameQuotaNumbers(a: CliQuota, b: CliQuota): boolean {
   return (
-    a.windows.length > 0 &&
+    a.windows.some((window) => window.resetsAt !== null) &&
     a.plan === b.plan &&
     a.status === b.status &&
     a.limitedUntil === b.limitedUntil &&

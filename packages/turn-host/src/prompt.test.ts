@@ -640,7 +640,7 @@ describe("buildTurnPrompt", () => {
     );
     // Each CLI's quota in the order the runner lists its CLIs; a window reset since reads so.
     expect(prompt).toContain(
-      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; quota claude 5h 85%, 7d reset since (near its limit) as of 2026-10-13T11:30:00.000Z; codex limited until 2026-10-20T05:11:58.000Z",
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; quota claude 5h 84%, 7d reset since (near a limit) as of 2026-10-13T11:30:00.000Z; codex limited until 2026-10-20T05:11:58.000Z",
     );
     // The front desk's project list says where each project lives.
     expect(prompt).toContain("on done none; on runner pod");

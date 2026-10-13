@@ -1,4 +1,5 @@
 import {
+  QUOTA_WARNING_PERCENT,
   quotaLevel,
   sameQuotaNumbers,
   windowCurrent,
@@ -76,6 +77,10 @@ export interface WindowReading {
   readonly high: boolean;
 }
 
+/**
+ * One window's meter. The percent is shown rounded down, so a label reads 80% exactly when the
+ * window is at `QUOTA_WARNING_PERCENT`, where it turns amber, as `quotaLevel` counts it.
+ */
 export function windowReading(window: QuotaWindow, now: number): WindowReading {
   const name = windowName(window);
   const current = windowCurrent(window, new Date(now));
@@ -86,9 +91,9 @@ export function windowReading(window: QuotaWindow, now: number): WindowReading {
   return {
     name,
     percent: used === null ? null : Math.min(100, used),
-    label: used === null ? "?" : `${Math.round(used)}%`,
+    label: used === null ? "?" : `${Math.floor(used)}%`,
     reset: window.resetsAt === null ? "" : `resets in ${until(Date.parse(window.resetsAt) - now)}`,
-    high: used !== null && used >= 80,
+    high: used !== null && used >= QUOTA_WARNING_PERCENT,
   };
 }
 
@@ -109,9 +114,13 @@ export function quotaWords(
     };
   }
   if (level === "warning") {
-    return { level, words: "near its limit", tone: "text-amber-300" };
+    return { level, words: "near a limit", tone: "text-amber-300" };
   }
-  return { level, words: level === "none" ? "no plan limits" : "", tone: "text-fg-muted" };
+  return {
+    level,
+    words: level === "none" ? "no plan limits reported" : "",
+    tone: "text-fg-muted",
+  };
 }
 
 /** A CLI's quota on one runner in a line, as a citizen's view shows it. */

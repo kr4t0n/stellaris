@@ -20,22 +20,30 @@ interface Reading {
 const MINUTES: Readonly<Record<string, number>> = { five_hour: 300 };
 const WEEK = 10_080;
 
+/**
+ * The windows that count every model's use, so the login stops when one of them is spent. A
+ * scoped window, such as `seven_day_opus` or a model's own weekly window, stops only its model,
+ * and turns on the others go on.
+ */
+const LOGIN_WINDOWS: ReadonlySet<string> = new Set(["five_hour", "seven_day"]);
+
 function minutesOf(key: string): number | null {
   return MINUTES[key] ?? (key.startsWith("seven_day") || key.startsWith("model:") ? WEEK : null);
 }
 
+/** A time as an ISO string, or null for one that is no date or out of an ISO string's years. */
+function isoAt(ms: number): string | null {
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  return Number.isNaN(date.getTime()) || year < 1970 || year > 9999 ? null : date.toISOString();
+}
+
 function fromEpoch(seconds: number | undefined): string | null {
-  return seconds === undefined || !Number.isFinite(seconds)
-    ? null
-    : new Date(seconds * 1_000).toISOString();
+  return seconds === undefined || !Number.isFinite(seconds) ? null : isoAt(seconds * 1_000);
 }
 
 function fromIso(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const at = Date.parse(value);
-  return Number.isNaN(at) ? null : new Date(at).toISOString();
+  return value === null || value === undefined ? null : isoAt(Date.parse(value));
 }
 
 /**
@@ -47,6 +55,8 @@ const RateLimitInfoSchema = z.object({
   status: z.enum(["allowed", "allowed_warning", "rejected"]),
   resetsAt: z.number().optional(),
   rateLimitType: z.string().min(1).max(80).optional(),
+  overageStatus: z.string().optional(),
+  isUsingOverage: z.boolean().optional(),
   unifiedWindows: z
     .record(
       z.string().min(1).max(80),
@@ -55,7 +65,13 @@ const RateLimitInfoSchema = z.object({
     .optional(),
 });
 
-/** The quota a turn's `rate_limit_event` reports, or null for one that does not parse. */
+/**
+ * The quota a turn's `rate_limit_event` reports, or null for one that does not parse or falls
+ * outside what a quota may hold, so a CLI release that changes the event costs its report, never
+ * the turn. A refusal limits the login only when it names a window every model counts and no extra
+ * usage covers it; one of a scoped window, or one extra usage takes over, is a warning, with the
+ * window shown used up.
+ */
 export function quotaFromRateLimit(raw: unknown, at: Date): CliQuota | null {
   const parsed = RateLimitInfoSchema.safeParse(raw);
   if (!parsed.success) {
@@ -70,7 +86,7 @@ export function quotaFromRateLimit(raw: unknown, at: Date): CliQuota | null {
     resetsAt: fromEpoch(window.resetsAt),
     observedAt,
   }));
-  const limited = info.status === "rejected";
+  const rejected = info.status === "rejected";
   // The window that binds is named even when the event lists no windows of its own.
   if (
     info.rateLimitType !== undefined &&
@@ -79,19 +95,32 @@ export function quotaFromRateLimit(raw: unknown, at: Date): CliQuota | null {
     windows.push({
       key: info.rateLimitType,
       minutes: minutesOf(info.rateLimitType),
-      usedPercent: limited ? 100 : null,
+      usedPercent: rejected ? 100 : null,
       resetsAt: fromEpoch(info.resetsAt),
       observedAt,
     });
   }
-  return CliQuotaSchema.parse({
+  const overage =
+    info.isUsingOverage === true ||
+    info.overageStatus === "allowed" ||
+    info.overageStatus === "allowed_warning";
+  const limited =
+    rejected &&
+    !overage &&
+    (info.rateLimitType === undefined || LOGIN_WINDOWS.has(info.rateLimitType));
+  const parsedQuota = CliQuotaSchema.safeParse({
     observedAt,
     source: "turn",
-    status: limited ? "limited" : info.status === "allowed_warning" ? "warning" : "allowed",
+    status: limited
+      ? "limited"
+      : rejected || info.status === "allowed_warning"
+        ? "warning"
+        : "allowed",
     limitedUntil: limited ? fromEpoch(info.resetsAt) : null,
     limitedBy: limited ? (info.rateLimitType ?? null) : null,
     windows,
   });
+  return parsedQuota.success ? parsedQuota.data : null;
 }
 
 /**
@@ -162,7 +191,11 @@ const READ_WINDOWS = [
   "seven_day_sonnet",
 ] as const;
 
-/** The quota the usage read reports; a login without plan limits reads as `none`. */
+/**
+ * The quota the usage read reports; a login that reports no plan limits, as an API key or a login
+ * without the profile scope, reads as `none`. Throws on an answer it cannot read, which fails the
+ * read and nothing else.
+ */
 export function quotaFromUsage(raw: unknown, at: Date): CliQuota {
   const read = UsageReadSchema.parse(raw);
   const observedAt = at.toISOString();
@@ -194,9 +227,13 @@ export function quotaFromUsage(raw: unknown, at: Date): CliQuota {
       observedAt,
     });
   }
-  // The read has no status of its own: a window used up is a limit until it resets.
+  // The read has no status of its own: a window every model counts, used up, is a limit until it
+  // resets. A scoped window used up stops only its model, and shows on its own meter.
   const spent = windows
-    .filter((window) => window.usedPercent !== null && window.usedPercent >= 100)
+    .filter(
+      (window) =>
+        LOGIN_WINDOWS.has(window.key) && window.usedPercent !== null && window.usedPercent >= 100,
+    )
     .toSorted((a, b) => (b.resetsAt ?? "").localeCompare(a.resetsAt ?? ""));
   const binding = spent[0];
   const extra = limits.extra_usage;

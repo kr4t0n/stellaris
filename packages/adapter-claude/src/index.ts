@@ -316,9 +316,14 @@ function handleMessage(
       return;
     }
     case "rate_limit_event": {
-      const quota = quotaFromRateLimit(message.rate_limit_info, context.now());
-      if (quota !== null) {
-        state.quota = mergeQuota(state.quota, quota);
+      // A report the adapter cannot read is dropped: it never changes how the turn ends.
+      try {
+        const quota = quotaFromRateLimit(message.rate_limit_info, context.now());
+        if (quota !== null) {
+          state.quota = mergeQuota(state.quota, quota);
+        }
+      } catch {
+        // The turn's last readable report stands.
       }
       return;
     }

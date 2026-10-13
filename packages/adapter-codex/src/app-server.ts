@@ -669,8 +669,13 @@ export class CodexAppServerSession implements ResidentSession {
     }
     // Rate limits come with the requests a turn makes, and between turns on a warm session.
     if (method === "account/rateLimits/updated") {
-      this.quota = mergeSnapshot(this.quota, params["rateLimits"], this.now(), "turn");
-      this.quotaFresh = this.quota !== undefined;
+      // A report the adapter cannot read is dropped: it never stops the reader, or the turn.
+      try {
+        this.quota = mergeSnapshot(this.quota, params["rateLimits"], this.now(), "turn");
+        this.quotaFresh = this.quota !== undefined;
+      } catch {
+        // The turn's last readable report stands.
+      }
       return;
     }
     if (method === "thread/tokenUsage/updated") {

@@ -17,6 +17,7 @@ const WindowSchema = z
   .optional();
 
 const SnapshotSchema = z.object({
+  limitId: z.string().min(1).max(40).nullable().optional(),
   primary: WindowSchema,
   secondary: WindowSchema,
   planType: z.string().min(1).max(40).nullable().optional(),
@@ -31,10 +32,21 @@ const SnapshotSchema = z.object({
     .optional(),
 });
 
+/** A time as an ISO string, or null for one that is no date or out of an ISO string's years. */
 function fromEpoch(seconds: number | null | undefined): string | null {
-  return seconds === null || seconds === undefined || !Number.isFinite(seconds)
-    ? null
-    : new Date(seconds * 1_000).toISOString();
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) {
+    return null;
+  }
+  const date = new Date(seconds * 1_000);
+  const year = date.getUTCFullYear();
+  return Number.isNaN(date.getTime()) || year < 1970 || year > 9999 ? null : date.toISOString();
+}
+
+/** The bucket every snapshot so far has come from; another bucket's windows are named by it. */
+const MAIN_BUCKET = "codex";
+
+function isScopedBucket(limitId: unknown): limitId is string {
+  return typeof limitId === "string" && limitId !== MAIN_BUCKET;
 }
 
 /** A window as read, before the schema checks it. */
@@ -46,7 +58,13 @@ interface Reading {
   readonly observedAt: string;
 }
 
-/** The quota a snapshot reports, or null for one that does not parse. */
+/**
+ * The quota a snapshot reports, or null for one that does not parse or falls outside what a quota
+ * may hold, so an app-server release that changes the snapshot costs its report, never the turn. A
+ * snapshot of a bucket other than the main one, by its `limitId`, names its windows
+ * `<limitId>:primary` and `<limitId>:secondary`, so its rolling updates never overwrite the main
+ * bucket's, and a limit there is a warning: it stops what that bucket meters, not the login.
+ */
 export function quotaFromSnapshot(
   raw: unknown,
   at: Date,
@@ -59,13 +77,15 @@ export function quotaFromSnapshot(
   const snapshot = parsed.data;
   const observedAt = at.toISOString();
   const windows: Reading[] = [];
+  const scoped = isScopedBucket(snapshot.limitId);
+  const bucket = scoped ? `${snapshot.limitId}:` : "";
   for (const key of ["primary", "secondary"] as const) {
     const window = snapshot[key];
     if (window === null || window === undefined) {
       continue;
     }
     windows.push({
-      key,
+      key: `${bucket}${key}`,
       minutes: window.windowDurationMins ?? null,
       usedPercent: Math.max(0, window.usedPercent),
       resetsAt: fromEpoch(window.resetsAt),
@@ -77,13 +97,14 @@ export function quotaFromSnapshot(
     .filter((window) => window.usedPercent >= 100)
     .toSorted((a, b) => (b.resetsAt ?? "").localeCompare(a.resetsAt ?? ""))[0];
   const reached = snapshot.rateLimitReachedType ?? null;
-  const limited = binding !== undefined || reached !== null;
+  const spent = binding !== undefined || reached !== null;
+  const limited = spent && !scoped;
   const credits = snapshot.credits;
-  return CliQuotaSchema.parse({
+  const parsedQuota = CliQuotaSchema.safeParse({
     observedAt,
     source,
-    status: limited ? "limited" : "allowed",
-    limitedUntil: binding?.resetsAt ?? null,
+    status: limited ? "limited" : spent ? "warning" : "allowed",
+    limitedUntil: limited ? (binding?.resetsAt ?? null) : null,
     limitedBy: limited ? (binding?.key ?? reached) : null,
     plan: snapshot.planType ?? null,
     windows,
@@ -96,11 +117,13 @@ export function quotaFromSnapshot(
             balance: credits.balance ?? null,
           },
   });
+  return parsedQuota.success ? parsedQuota.data : null;
 }
 
 /**
  * A snapshot merged over what was known. The app server's rolling updates are sparse, so one that
- * names no window and no limit says nothing about the limit, which stays as it was.
+ * names no window and no limit says nothing about the login's limit, which stays as it was, and
+ * nor does one of another bucket.
  */
 export function mergeSnapshot(
   known: CliQuota | undefined,
@@ -113,7 +136,9 @@ export function mergeSnapshot(
     return known;
   }
   const merged = mergeQuota(known, next);
-  if (known !== undefined && next.windows.length === 0 && next.limitedBy === null) {
+  const scoped =
+    typeof raw === "object" && raw !== null && isScopedBucket(Reflect.get(raw, "limitId"));
+  if (known !== undefined && (scoped || (next.windows.length === 0 && next.limitedBy === null))) {
     return {
       ...merged,
       status: known.status,
@@ -126,12 +151,17 @@ export function mergeSnapshot(
 
 /**
  * The answer to `account/rateLimits/read`: its single-bucket `rateLimits` snapshot, limited when the
- * backend says ordinary usage is not allowed. A login without plan limits, as an API key, reads as
- * `none`.
+ * backend says ordinary usage is not allowed. A login that reports no plan limits, as an API key,
+ * reads as `none`; a snapshot this adapter cannot read fails the read, and nothing else.
  */
 export function quotaFromRead(raw: unknown, at: Date): CliQuota {
   const answer = typeof raw === "object" && raw !== null ? raw : {};
-  const quota = quotaFromSnapshot(Reflect.get(answer, "rateLimits"), at, "read");
+  const snapshot: unknown = Reflect.get(answer, "rateLimits");
+  const quota =
+    snapshot === null || snapshot === undefined ? null : quotaFromSnapshot(snapshot, at, "read");
+  if (snapshot !== null && snapshot !== undefined && quota === null) {
+    throw new Error("Codex answered its rate limits in a shape this runner cannot read");
+  }
   if (quota === null || (quota.windows.length === 0 && quota.plan === null)) {
     return CliQuotaSchema.parse({ observedAt: at.toISOString(), source: "read", status: "none" });
   }

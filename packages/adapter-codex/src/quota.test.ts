@@ -246,3 +246,88 @@ describe("rolling updates", () => {
     expect(quota?.status).toBe("allowed");
   });
 });
+
+/** The recorded turn with its rate-limit update's text rewritten. */
+async function withUpdate(rewrite: (line: string) => string): Promise<string[]> {
+  return (await lines("app-server-quota-recorded.jsonl")).map((line) =>
+    line.includes('"method":"account/rateLimits/updated"') ? rewrite(line) : line,
+  );
+}
+
+describe("a rate-limit update outside what a quota may hold", () => {
+  it.each([
+    ["a reset in milliseconds", (line: string) => line.replace("1792473118", "1792473118000")],
+    [
+      "a percent past any number",
+      (line: string) => line.replace('"usedPercent":2', '"usedPercent":1e400'),
+    ],
+    [
+      "a plan name too long",
+      (line: string) => line.replace('"planType":"pro"', `"planType":"${"p".repeat(41)}"`),
+    ],
+  ])("with %s ends the turn as the recording does", async (_name, rewrite) => {
+    const { spawn } = replay(await withUpdate(rewrite));
+    const result = await new CodexBackend({ spawn, now: () => AT }).runTurn({
+      ...request,
+      limits: { timeoutMs: 10_000 },
+    });
+    expect(result.exitReason).toBe("completed");
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBeNull();
+    expect(result.quota === undefined || CliQuotaSchema.safeParse(result.quota).success).toBe(true);
+  });
+
+  it("keeps the window whose reset it cannot read, with no reset", async () => {
+    const { spawn } = replay(
+      await withUpdate((line) => line.replace("1792473118", "1792473118000")),
+    );
+    const result = await new CodexBackend({ spawn, now: () => AT }).runTurn(request);
+    expect(result.quota?.windows).toEqual([{ ...WEEKLY, resetsAt: null }]);
+  });
+
+  it("fails a read whose snapshot it cannot read, rather than calling it no plan limits", () => {
+    expect(() => quotaFromRead({ rateLimits: { primary: { usedPercent: Infinity } } }, AT)).toThrow(
+      "cannot read",
+    );
+  });
+});
+
+describe("a bucket other than the main one", () => {
+  const main = quotaFromSnapshot(
+    {
+      limitId: "codex",
+      primary: { usedPercent: 2, windowDurationMins: 10_080, resetsAt: 1_792_473_118 },
+      planType: "pro",
+    },
+    AT,
+    "turn",
+  );
+
+  it("names its windows by the bucket, and its spent window warns without limiting", () => {
+    const other = quotaFromSnapshot(
+      {
+        limitId: "codex_other",
+        primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1_792_473_118 },
+        rateLimitReachedType: "rate_limit_reached",
+      },
+      AT,
+      "turn",
+    );
+    expect(other).toMatchObject({ status: "warning", limitedUntil: null, limitedBy: null });
+    expect(other?.windows.map((window) => window.key)).toEqual(["codex_other:primary"]);
+  });
+
+  it("leaves the main bucket's windows and the login's status as they were", () => {
+    const merged = mergeSnapshot(
+      main ?? undefined,
+      { limitId: "codex_other", primary: { usedPercent: 100, windowDurationMins: 300 } },
+      AT,
+      "turn",
+    );
+    expect(merged?.status).toBe("allowed");
+    expect(merged?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
+      ["primary", 2],
+      ["codex_other:primary", 100],
+    ]);
+  });
+});

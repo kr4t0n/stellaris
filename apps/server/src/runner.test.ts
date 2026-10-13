@@ -1307,6 +1307,17 @@ describe("turns on a runner over the runner protocol", () => {
     turnPercent = 36;
     await run(turn);
     expect(await logged()).toHaveLength(2);
+    // A quota the board cannot keep is the runner record's trouble, never the turn's.
+    const failing = vi
+      .spyOn(board, "recordQuota")
+      .mockRejectedValueOnce(new Error("the runner record could not be written"));
+    turnPercent = 50;
+    const kept = await run(turn);
+    expect(failing).toHaveBeenCalledTimes(1);
+    failing.mockRestore();
+    expect(kept.exitReason).toBe("completed");
+    expect(kept.error).toBeNull();
+    expect((await board.readRunner("pod")).quotas?.claude?.windows[0]?.usedPercent).toBe(36);
 
     const refresh = (bearer: string, cli = "claude") =>
       app.request(`/api/runners/pod/quota/${cli}`, {

@@ -16,12 +16,17 @@ describe("within", () => {
     expect(within(() => "next", 1_000)).toBe("next");
   });
 
-  it("passes on any other failure", () => {
+  it("passes on any other failure, one with a code of its own included", () => {
     expect(() =>
       within(() => {
         throw new Error("boom");
       }, 1_000),
     ).toThrow("boom");
+    expect(() =>
+      within(() => {
+        throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      }, 1_000),
+    ).toThrow("disk full");
   });
 });
 

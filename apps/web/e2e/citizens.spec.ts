@@ -388,3 +388,25 @@ test("a project's name and default branch are edited from its page, and its slug
     },
   ]);
 });
+
+test("a citizen's view and the citizens list say when its CLI's quota is at its limit", async ({
+  page,
+}) => {
+  await fakeBoard(page, { quotas: "limited" });
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  // desk's turns run on pod, where Claude is limited, so its CLI is marked, in words for readers.
+  const mark = view.getByTitle(/^claude limited for (39|40)m on pod$/);
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveText(/claude limited for (39|40)m on pod/);
+
+  await page.goto("/citizen/desk");
+  const quota = view.locator("p", { hasText: /^claude quota/ });
+  await expect(quota).toContainText(/pod limited for (39|40)m/);
+  await expect(quota).toContainText("laptop 5h 35% · 7d 12%");
+  await quota.getByRole("link", { name: "claude quota" }).click();
+  await expect(page).toHaveURL("/runners");
+  await expect(
+    page.getByRole("region", { name: "Plan quota" }).getByText(/^limited for (39|40)m · as of/),
+  ).toBeVisible();
+});

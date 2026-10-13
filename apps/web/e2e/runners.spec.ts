@@ -33,7 +33,7 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await form.getByLabel("Runner name").fill("studio-mac");
   await form.getByRole("button", { name: "Approve" }).click();
 
-  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Waiting for approval" })).toHaveCount(0);
   expect(board.writes).toEqual([
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
@@ -99,7 +99,7 @@ test("a code nobody waits with says so, and a denial sends no name", async ({ pa
     .getByRole("form", { name: "Approve Studio.local" })
     .getByRole("button", { name: "Deny" })
     .click();
-  await expect(page.getByText("A runner started with STELLARIS_SERVER_URL")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Waiting for approval" })).toHaveCount(0);
   expect(board.writes).toEqual([{ path: `/api/enrollments/${ENROLLING_CODE}/deny`, body: {} }]);
 });
 
@@ -118,4 +118,72 @@ test("a refused GitHub sign-in says why, and a board without GitHub asks for a t
   await tokens.goto("/");
   await expect(tokens.getByRole("button", { name: "Enter the playground" })).toBeVisible();
   await expect(tokens.getByRole("link", { name: "Sign in with GitHub" })).toHaveCount(0);
+});
+
+test("the runners view shows each CLI login's plan quota, once for runners with the same numbers", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/runners");
+  const section = page.getByRole("region", { name: "Plan quota" });
+  await expect(section.getByRole("heading", { name: "Plan quota" })).toBeVisible();
+  const rows = section.locator('[aria-label="Quota by runner"] > li');
+  await expect(rows).toHaveCount(3);
+
+  // laptop's Claude reports pod's numbers, so it shares pod's row rather than repeating them.
+  const claude = rows.nth(0);
+  await expect(claude).toContainText("pod · laptop");
+  await expect(claude).toContainText("claude · max");
+  await expect(claude).toContainText("as of 3 minutes ago");
+  await expect(claude.getByRole("listitem")).toHaveText([
+    /^5h\s*35%\s*resets in 4h (49|50)m$/,
+    /^7d\s*12%\s*resets in 5d 23h$/,
+  ]);
+  await expect(claude).toContainText("Same numbers on pod and laptop, so most likely one login.");
+
+  const codex = rows.nth(1);
+  await expect(codex).toContainText("pod");
+  await expect(codex).toContainText("codex · pro · credits 1,250.5");
+  await expect(codex.getByRole("listitem")).toHaveText([/^7d\s*2%\s*resets in 6d 17h$/]);
+  // studio's login reports numbers of its own, so it has a row of its own.
+  await expect(rows.nth(2)).toContainText("studio");
+  await expect(rows.nth(2).getByRole("listitem").first()).toContainText("20%");
+  // Every number is fresh, so opening the view read nothing.
+  expect(board.writes).toEqual([]);
+});
+
+test("the runners view reads numbers missing or old once on opening, and again on request", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page, { quotas: "reads" });
+  await page.goto("/runners");
+  const rows = page
+    .getByRole("region", { name: "Plan quota" })
+    .locator('[aria-label="Quota by runner"] > li');
+  const reads = (): string[] => board.writes.map((write) => write.path).toSorted();
+  await expect
+    .poll(reads)
+    .toEqual(["/api/runners/pod/quota/claude", "/api/runners/pod/quota/codex"]);
+
+  // Claude's read came back with newer numbers, which no longer match laptop's.
+  await expect(rows.nth(0)).toContainText("as of just now");
+  await expect(rows.nth(0).getByRole("listitem").first()).toContainText("41%");
+  await expect(rows.nth(0)).not.toContainText("laptop");
+  // pod is too old to read Codex's quota, and says so rather than spinning.
+  const codex = rows.filter({ hasText: "codex" });
+  const refused = codex.getByText("runner too old to read");
+  await expect(refused).toBeVisible();
+  await expect(refused).toHaveAttribute("title", /upgrade it/);
+  await expect(rows.filter({ hasText: "laptop" })).toContainText("as of 2 hours ago");
+
+  // Read again asks every CLI of every connected runner once more; laptop is away.
+  await page.getByRole("button", { name: "Read again" }).click();
+  await expect.poll(() => board.writes.length).toBe(5);
+  expect(reads()).toEqual([
+    "/api/runners/pod/quota/claude",
+    "/api/runners/pod/quota/claude",
+    "/api/runners/pod/quota/codex",
+    "/api/runners/pod/quota/codex",
+    "/api/runners/studio/quota/claude",
+  ]);
 });

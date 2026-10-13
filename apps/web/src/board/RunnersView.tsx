@@ -14,6 +14,7 @@ import {
   useSession,
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { PlanQuota } from "./Quota.js";
 import { identityGap, offVersion, sameCode, suggestRunnerName } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
@@ -108,7 +109,7 @@ function WaitingRunner({
  * marked when it is not the server's, capabilities, the projects living on it, and whether it is
  * connected; above them, those asking to join. A runner started without a token asks the board to
  * enroll it and prints a link here with its code; approving it under a name registers it, and the
- * runner picks up its token on its next poll.
+ * runner picks up its token on its next poll. Under them, each CLI login's plan quota.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
@@ -236,12 +237,7 @@ export function RunnersView() {
             );
           })}
         </ul>
-        {enrollments.data === undefined || waiting.length > 0 ? null : (
-          <p className="mt-2 border-t border-line px-2 pt-2 text-meta">
-            A runner started with STELLARIS_SERVER_URL set to this board and no token asks to join
-            here, with a code to approve.
-          </p>
-        )}
+        <PlanQuota runners={registered} now={now} />
       </div>
     </>
   );

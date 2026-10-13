@@ -46,6 +46,7 @@ export const BOARD_EVENT_TYPES = [
   "user.signed_out",
   "user.token_rotated",
   "runner.changed",
+  "runner.quota",
   "ops.signal",
   "paused.changed",
   "wake.requested",

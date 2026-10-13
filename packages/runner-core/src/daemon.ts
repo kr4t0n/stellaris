@@ -272,6 +272,7 @@ export class RunnerDaemon {
           stoppableClis: stoppable,
           branchReads: true,
           branchChanges: true,
+          quotaReads: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
@@ -349,6 +350,9 @@ export class RunnerDaemon {
         return;
       case "models":
         answer(this.executor.models(message.cli));
+        return;
+      case "quota":
+        answer(this.executor.quota(message.cli));
         return;
       case "file":
         answer(this.executor.readBranch(message.read));

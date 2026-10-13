@@ -13,6 +13,7 @@ import {
   UsageSchema,
 } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
+import { CliQuotaSchema } from "./quota.js";
 
 /**
  * The runner protocol of PLAN.md section 7.1. A runner registers, holds one event stream open for
@@ -70,6 +71,8 @@ export const RunnerHelloSchema = z.object({
   branchReads: z.boolean().default(false),
   /** Whether the runner lists what a branch changed; one from before never does. */
   branchChanges: z.boolean().default(false),
+  /** Whether the runner answers a read of a CLI's quota; one from before never does. */
+  quotaReads: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /**
    * What the runner's account lacks of the git identity citizens' own commits carry, checked
@@ -251,6 +254,11 @@ export const TurnOutcomeSchema = z.object({
    * branch after the hand-back: uncommitted changes, or commits no branch contains.
    */
   leftovers: z.boolean().default(false),
+  /**
+   * The CLI's plan quota as the turn's stream last reported it, when it reported any; a runner from
+   * before never sends it.
+   */
+  quota: CliQuotaSchema.optional(),
 });
 export type TurnOutcome = z.infer<typeof TurnOutcomeSchema>;
 export type TurnOutcomeInput = z.input<typeof TurnOutcomeSchema>;
@@ -497,6 +505,11 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   /** Answered with a `MergeOutcome`. */
   z.object({ type: z.literal("close"), request: z.string().min(1), close: CloseRequestSchema }),
   z.object({ type: z.literal("models"), request: z.string().min(1), cli: CliKindSchema }),
+  /**
+   * Answered with a `CliQuota` read from the CLI without a turn, or null when its adapter cannot
+   * read one. Sent only to runners whose hello says `quotaReads`.
+   */
+  z.object({ type: z.literal("quota"), request: z.string().min(1), cli: CliKindSchema }),
   /** Answered with a `BranchFile`, or null when the branch or the path does not exist. */
   z.object({ type: z.literal("file"), request: z.string().min(1), read: BranchReadSchema }),
   /** Answered with `BranchChanges`, or null when the repository or the branch does not exist. */

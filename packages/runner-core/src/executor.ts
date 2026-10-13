@@ -221,12 +221,6 @@ export class TurnExecutor {
     await this.renderConfigHome(home, instructions, job.mcp.url);
     const newSession = job.session === null;
     const session = job.session ?? (await backend.newSession(spec));
-    const env = {
-      GIT_AUTHOR_NAME: job.agent,
-      GIT_AUTHOR_EMAIL: `${job.agent}@stellaris.local`,
-      GIT_COMMITTER_NAME: job.agent,
-      GIT_COMMITTER_EMAIL: `${job.agent}@stellaris.local`,
-    };
     const limits = { timeoutMs: job.limits.timeoutMs, maxTurns: job.limits.maxTurns };
     const statusSchema = turnStatusJsonSchema();
     this.log.info(
@@ -259,7 +253,6 @@ export class TurnExecutor {
           prompt,
           limits,
           statusSchema,
-          env,
           onEvent: collect,
           control,
         });
@@ -274,7 +267,6 @@ export class TurnExecutor {
             mcp: job.mcp,
             limits,
             statusSchema,
-            env,
             costSoFarUsd: job.costSoFarUsd,
           },
           collect,
@@ -939,7 +931,6 @@ export class TurnExecutor {
       prompt: string;
       limits: { timeoutMs: number | null; maxTurns: number | null };
       statusSchema: Record<string, unknown>;
-      env: Readonly<Record<string, string>>;
       onEvent: (event: AgentEvent) => void;
       control: TurnControl;
     },
@@ -967,7 +958,6 @@ export class TurnExecutor {
         mcp: job.mcp,
         limits: input.limits,
         statusSchema: input.statusSchema,
-        env: input.env,
         costSoFarUsd: job.costSoFarUsd,
       });
       current = {

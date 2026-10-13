@@ -1,6 +1,6 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentSpec, ResidentStart } from "@stellaris/runner-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
 
 const spec: AgentSpec = {
@@ -21,7 +21,6 @@ const start: ResidentStart = {
   mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_resident" },
   limits: { timeoutMs: 500, maxTurns: 10 },
   statusSchema: { type: "object" },
-  env: {},
 };
 
 /** Fixture frames the SDK would produce; only the fields the adapter reads are populated. */
@@ -168,5 +167,50 @@ describe("Claude resident sessions", () => {
     const result = await stalled;
     expect(result.exitReason).toBe("timeout");
     expect(result.error).toContain("exceeded 100 ms");
+  });
+});
+
+const GIT_IDENTITY = [
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+] as const;
+
+describe("the CLI's environment", () => {
+  it("is the runner's own with the board token, and no git identity, cold or warm", async () => {
+    // Whatever identity the test process inherited is the runner's own, which would pass through.
+    for (const name of GIT_IDENTITY) {
+      vi.stubEnv(name, undefined);
+    }
+    vi.stubEnv("STELLARIS_TEST_RUNNER_ENV", "kept");
+    try {
+      const envs: (Record<string, string | undefined> | undefined)[] = [];
+      const script = scripted();
+      const queryFn: QueryFn = (params) => {
+        envs.push(params.options?.env);
+        return script.queryFn(params);
+      };
+      const backend = new ClaudeAgentBackend({ queryFn, env: { EXTRA: "set" } });
+      const cold = await backend.runTurn({ ...start, spec, prompt: "hello" });
+      expect(cold.exitReason).toBe("completed");
+      const session = await backend.startResident(spec, start);
+      expect((await session.runTurn("again")).exitReason).toBe("completed");
+      await session.close();
+
+      expect(envs).toHaveLength(2);
+      for (const env of envs) {
+        expect(env).toMatchObject({
+          STELLARIS_TEST_RUNNER_ENV: "kept",
+          EXTRA: "set",
+          STELLARIS_AGENT_TOKEN: "stl_resident",
+        });
+        for (const name of GIT_IDENTITY) {
+          expect(env).not.toHaveProperty(name);
+        }
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

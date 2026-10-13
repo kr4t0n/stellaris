@@ -50,7 +50,6 @@ describe("recorded Claude stream", () => {
       mcp: { url: "http://127.0.0.1:4712/mcp", token: "t" },
       limits: { timeoutMs: 60_000 },
       statusSchema: { type: "object" },
-      env: {},
     });
     expect(result.exitReason).toBe("completed");
     expect(result.error).toBeUndefined();
@@ -124,7 +123,6 @@ describe("recorded Claude stream", () => {
       mcp: { url: "http://127.0.0.1:4791/mcp", token: "t" },
       limits: { timeoutMs: 60_000 },
       statusSchema: { type: "object" },
-      env: {},
     };
     const control = new TurnControl();
     const events: AgentEvent[] = [];

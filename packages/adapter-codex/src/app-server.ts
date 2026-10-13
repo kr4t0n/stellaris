@@ -512,7 +512,6 @@ export class CodexAppServerSession implements ResidentSession {
     const env: Record<string, string | undefined> = {
       ...process.env,
       ...options.env,
-      ...start.env,
       [AGENT_TOKEN_ENV]: start.mcp.token,
     };
     const spawn = options.spawn ?? defaultSpawnAppServer(options.codexPath ?? "codex");

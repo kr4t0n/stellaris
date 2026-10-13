@@ -75,6 +75,8 @@ class ResidentBackend implements AgentBackend {
   readonly closes: string[] = [];
   readonly prompts: string[] = [];
   readonly coldTurns: string[] = [];
+  /** Every request and resident start the runner handed over, as given. */
+  readonly handed: object[] = [];
   memoryUpdatedNext = false;
   coldMemoryUpdatedNext = false;
 
@@ -82,7 +84,8 @@ class ResidentBackend implements AgentBackend {
     return Promise.resolve("session-1");
   }
 
-  runTurn(): Promise<TurnResult> {
+  runTurn(request: object): Promise<TurnResult> {
+    this.handed.push(request);
     this.coldTurns.push("cold");
     const result = completed("cold turn", this.coldMemoryUpdatedNext);
     this.coldMemoryUpdatedNext = false;
@@ -93,6 +96,7 @@ class ResidentBackend implements AgentBackend {
     spec: { agent: string; model?: string | undefined; effort?: string | undefined },
     start: { session: string },
   ): Promise<ResidentSession> {
+    this.handed.push(start);
     this.starts.push(`${spec.agent}:${start.session}`);
     this.models.push(spec.model);
     this.efforts.push(spec.effort);
@@ -584,6 +588,25 @@ describe("turns on a runner over the runner protocol", () => {
     expect(hub.residentPairs).toEqual([]);
   });
 
+  it("hands the CLI no environment of its own, warm or cold", async () => {
+    const { board } = await Board.init(dir, { name: "env" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const backend = new ResidentBackend();
+    const { run } = await start(board, backend, { residentIdleMs: 60_000 });
+    await run(deskPost);
+    await run({ ...deskPost, thread: { id: ask.id, task: false } });
+    expect(backend.starts).toHaveLength(1);
+    expect(backend.coldTurns).toEqual(["cold"]);
+    // A citizen's own commits carry the runner account's identity, so no git identity, nor any
+    // other environment, rides along with a turn.
+    expect(backend.handed).toHaveLength(2);
+    for (const handed of backend.handed) {
+      expect(handed).not.toHaveProperty("env");
+      expect(JSON.stringify(handed)).not.toMatch(/GIT_(AUTHOR|COMMITTER)_/);
+    }
+  });
+
   it("starts a warm session afresh once another turn of its citizen changed the memory", async () => {
     const { board } = await Board.init(dir, { name: "stale" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
@@ -942,7 +965,7 @@ describe("turns on a runner over the runner protocol", () => {
       script = async (cwd) => {
         await writeFile(path.join(cwd, "mine.txt"), "mine\n", "utf8");
         await execa("git", ["add", "mine.txt"], { cwd });
-        // A real turn commits as its citizen through the runner's environment; this script has none.
+        // The test's account may have no git identity, as CI's has none, so the script names one.
         await execa(
           "git",
           ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-qm", "my own notes"],
@@ -1964,10 +1987,12 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const task = await board.createTask(USER, { project: "demo", title: "report" });
     const waiting = await board.createTask(USER, { project: "idle", title: "not started" });
+    let repoDir = "";
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
+        repoDir = request.spec.repoDir;
         await mkdir(path.join(request.spec.cwd, "evidence"), { recursive: true });
         await writeFile(path.join(request.spec.cwd, "report.md"), "# Report\n");
         await writeFile(
@@ -1996,6 +2021,13 @@ describe("turns on a runner over the runner protocol", () => {
       "# Report\n",
     );
     expect(file.commit.author).toBe("sage");
+    // The runner commits what the turn left as the citizen, author and committer alike.
+    const tip = await execa(
+      "git",
+      ["log", "-1", "--format=%an <%ae> | %cn <%ce>", `task/${task.id}`],
+      { cwd: repoDir },
+    );
+    expect(tip.stdout).toBe("sage <sage@stellaris.local> | sage <sage@stellaris.local>");
     const root = BranchFileSchema.parse(await (await read(`${task.id}/files`)).json());
     expect(root.kind === "dir" ? root.entries.map((entry) => entry.name) : null).toEqual([
       "evidence",

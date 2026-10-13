@@ -31,8 +31,14 @@ const start: ResidentStart = {
   mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
   limits: { timeoutMs: 5_000, maxTurns: 10 },
   statusSchema: { type: "object" },
-  env: { GIT_AUTHOR_NAME: "eng-1" },
 };
+
+const GIT_IDENTITY = [
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+] as const;
 
 function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
   return { ...start, spec, prompt: "Do the thing.", ...overrides };
@@ -375,7 +381,7 @@ describe("CodexBackend cold turns", () => {
     expect(paramsOf(unset.received, "turn/start")).not.toHaveProperty("effort");
   });
 
-  it("hands the server the board endpoint, the token, and the git identity", async () => {
+  it("hands the server the board endpoint and the token", async () => {
     const fake = fakeAppServer();
     await new CodexBackend({ spawn: fake.spawn, model: "gpt-5.3-codex" }).runTurn(request());
     const { args, cwd, env } = fake.spawned();
@@ -386,8 +392,38 @@ describe("CodexBackend cold turns", () => {
     expect(args).toContain('approval_policy="never"');
     expect(cwd).toBe("/tmp/wt");
     expect(env["STELLARIS_AGENT_TOKEN"]).toBe("stl_turn");
-    expect(env["GIT_AUTHOR_NAME"]).toBe("eng-1");
     expect(paramsOf(fake.received, "thread/start")).toMatchObject({ model: "gpt-5.3-codex" });
+  });
+
+  it("gives the server the runner's environment and no git identity, cold or warm", async () => {
+    // Whatever identity the test process inherited is the runner's own, which would pass through.
+    for (const name of GIT_IDENTITY) {
+      vi.stubEnv(name, undefined);
+    }
+    vi.stubEnv("STELLARIS_TEST_RUNNER_ENV", "kept");
+    try {
+      const cold = fakeAppServer();
+      await new CodexBackend({ spawn: cold.spawn, env: { EXTRA: "set" } }).runTurn(request());
+      const warm = fakeAppServer();
+      const session = await new CodexBackend({
+        spawn: warm.spawn,
+        env: { EXTRA: "set" },
+      }).startResident(spec, start);
+      await session.runTurn("hello");
+      await session.close();
+      for (const { env } of [cold.spawned(), warm.spawned()]) {
+        expect(env).toMatchObject({
+          STELLARIS_TEST_RUNNER_ENV: "kept",
+          EXTRA: "set",
+          STELLARIS_AGENT_TOKEN: "stl_turn",
+        });
+        for (const name of GIT_IDENTITY) {
+          expect(env).not.toHaveProperty(name);
+        }
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("resumes a known thread and starts a fresh one when the id names none", async () => {

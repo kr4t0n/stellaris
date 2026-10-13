@@ -828,7 +828,6 @@ export class ClaudeAgentBackend implements AgentBackend {
       mcp: start.mcp,
       limits: start.limits,
       statusSchema: start.statusSchema,
-      env: start.env,
     };
     const context: HandlerContext = {
       agent: spec.agent,
@@ -905,7 +904,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       // The CLI echoes each user message as it takes it, which is how a steer is known delivered.
       extraArgs: { "replay-user-messages": null },
       abortController: abort,
-      env: subprocessEnv(process.env, { ...this.options.env, ...request.env }, request.mcp.token),
+      env: subprocessEnv(process.env, this.options.env ?? {}, request.mcp.token),
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
       ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),

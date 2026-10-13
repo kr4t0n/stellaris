@@ -2804,6 +2804,42 @@ describe("Board", () => {
     expect(await board.findMessages([ulid()])).toEqual([]);
   });
 
+  it("counts a mention only outside code, which is where the interface shows it as one", async () => {
+    const { board } = await society();
+    const cases: [string, string, string[]][] = [
+      ["a code span", "Run `@eng-1 --fix` first.", []],
+      ["a double-backtick span", "Write ``a ` and @eng-1`` as one span.", []],
+      ["a backtick fence", "```ts\n// @eng-1\n```", []],
+      ["a tilde fence", "~~~\n@eng-1\n~~~", []],
+      ["an indented block", "Run:\n\n    npx @eng-1/cli\n\nthen stop.", []],
+      ["a lone backtick", "A lone ` opens no span, @eng-1.", ["eng-1"]],
+      ["an unclosed fence", "Log:\n\n```\n@eng-1\n\nstill code, @rev-1", []],
+      ["right next to a code span", "`npm test`@eng-1, then @rev-1`x`", ["eng-1", "rev-1"]],
+      ["in code and in text", "`@eng-1` means you, @eng-1.", ["eng-1"]],
+      [
+        "prose around code",
+        "# @eng-1\n\n- `x` @rev-1\n\n> **@ops-1** and *@qa-1*",
+        ["eng-1", "ops-1", "qa-1", "rev-1"],
+      ],
+      ["a fence in a quote", "> ```\n> @eng-1\n> ```\n\n@rev-1", ["rev-1"]],
+      ["an indented line in a paragraph", "Not code:\n    @eng-1", ["eng-1"]],
+      [
+        "a link and HTML, as before",
+        "[@eng-1](https://x.y/@rev-1) <!-- @ops-1 --> <b>@qa-1</b>",
+        ["eng-1", "ops-1", "qa-1", "rev-1"],
+      ],
+    ];
+    for (const [what, body, mentions] of cases) {
+      const message = await board.postMessage(ENG, { channel: "demo/general", body });
+      expect.soft(message.mentions, what).toEqual(mentions);
+    }
+    // The scheduler wakes whoever the posting event names.
+    const posted = (await board.readEvents(null)).filter((e) => e.type === "message.posted");
+    expect(posted.slice(-cases.length).map((e) => e.payload["mentions"])).toEqual(
+      cases.map(([, , mentions]) => mentions),
+    );
+  });
+
   it("refuses to approve a skill whose folder its proposer's home does not give", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

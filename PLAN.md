@@ -401,7 +401,7 @@ flowchart LR
 
 ### 6.1 Wake rules
 
-- **Direct wakes always fire.** A mention, a stage assigned to a citizen or its role becoming current, a finished task for its creator, an onboarding, a manual wake, and a reflection wake the addressed agent whatever its charter says. Mentions and stage assignments are debounced over a short window so a burst becomes one turn.
+- **Direct wakes always fire.** A mention, a stage assigned to a citizen or its role becoming current, a finished task for its creator, an onboarding, a manual wake, and a reflection wake the addressed agent whatever its charter says. Mentions and stage assignments are debounced over a short window so a burst becomes one turn. A mention is an `@name` outside code: a name in a code span or block shows as written and wakes nobody.
 - **Ambient wakes are opt-in by charter.** User posts (`user_post`), operations signals (`ops_event`), and heartbeats (`heartbeat`) wake a role only when its charter lists them, and a charter that lists none has the heartbeat. A charter lists only triggers the scheduler honors.
 - **User mentions have priority.** They jump the queue and use a shorter debounce than agent mentions.
 - **User posts wake the concierge.** Any post by the user, mentioned or not, wakes the roles charted for `user_post` at user priority with no debounce. It is the only trigger that fires on a post without a mention, and it exists so the user never has to know whom to address.

@@ -139,6 +139,7 @@ import {
   type MetricsWindow,
   RunnerOsSchema,
 } from "@stellaris/shared";
+import { MENTION_PATTERN, mentionsIn } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
@@ -461,9 +462,11 @@ function turnTime(record: TurnRecord): string {
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
-const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 
-/** Free text quoted in a board notice, its mentions written as plain names so they wake nobody. */
+/**
+ * Free text quoted in a board notice, its mentions written as plain names so they wake nobody. Every
+ * `@name` goes, in code too, since code in the text alone may not be code in the post it is quoted in.
+ */
 function withoutMentions(text: string): string {
   return text.replaceAll(MENTION_PATTERN, "$1$2");
 }
@@ -689,17 +692,6 @@ function unanswered(messages: readonly Message[]): Message[] {
     }
   }
   return waiting;
-}
-
-function extractMentions(body: string): Name[] {
-  const found = new Set<Name>();
-  for (const match of body.matchAll(MENTION_PATTERN)) {
-    const name = match[2];
-    if (name !== undefined) {
-      found.add(name);
-    }
-  }
-  return [...found].toSorted();
 }
 
 function snippetAround(text: string, query: string, radius = 80): string {
@@ -6245,7 +6237,7 @@ export class Board {
       id: this.newId(),
       ...head,
       ts: this.now().toISOString(),
-      mentions: extractMentions(body),
+      mentions: mentionsIn(body),
     });
     const { author } = head;
     await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);

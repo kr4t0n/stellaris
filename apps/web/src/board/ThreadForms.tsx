@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
-import { listed, wakesFor } from "./compose.js";
+import { listed } from "./compose.js";
+import { wakesFor } from "./wakes.js";
 
 /**
  * A text field the size of a `Picker`, for forms made of pickers, so text and height are one

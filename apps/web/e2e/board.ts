@@ -938,8 +938,9 @@ export async function fakeBoard(
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /**
-     * Gives desk a model set apart from the one it reports, an effort, and four projects, so its
-     * row in the Citizens list runs out of room.
+     * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
+     * two runners named as the chart names its pods, stew one of them, and adds hal, an
+     * investigator, on the other, so rows in the Citizens list run out of room.
      */
     crowded?: boolean;
   } = {},
@@ -964,7 +965,7 @@ export async function fakeBoard(
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
-  let deskRunner: string | null = "pod";
+  let deskRunner: string | null = crowded ? "stellaris-runner-0" : "pod";
   let deskEffort: string | null = crowded ? "xhigh" : null;
   // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
@@ -974,7 +975,7 @@ export async function fakeBoard(
   let timezone = "UTC";
   const cronById = (id: unknown) => crons.find((each) => each["id"] === id);
   // Renaming changes the name the board shows, never the slug.
-  let lab = PROJECT;
+  let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
   let task: typeof TASK = TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
@@ -1403,7 +1404,8 @@ export async function fakeBoard(
       case "/api/members":
         return json(route, [
           member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
-          member("stew", "steward", [], null, null),
+          member("stew", "steward", [], null, crowded ? "stellaris-runner-0" : null),
+          ...(crowded ? [member("hal", "investigator", [], null, "stellaris-runner-1")] : []),
           ...(options.retired === true
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),

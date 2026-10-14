@@ -1,6 +1,6 @@
 import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/shared";
 import { Link, useSearch } from "@tanstack/react-router";
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -97,8 +97,18 @@ function CitizenRow({
         <span className="truncate text-xs text-fg-muted" title={model}>
           {model}
         </span>
+        {/*
+          On one line each runner's name stays whole: a hostname's hyphens would otherwise break it
+          in every row while the model and projects still had room. A citizen's runners wrap
+          between names when the row has no room for them all.
+        */}
         <span className="text-xs text-fg-muted" title={runner.detail}>
-          {runner.label}
+          {runner.parts.map((part, index) => (
+            <Fragment key={part}>
+              {index === 0 ? null : " "}
+              <span className="@min-[560px]:whitespace-nowrap">{part}</span>
+            </Fragment>
+          ))}
         </span>
         <span className="truncate text-xs text-fg-muted" title={projects}>
           {projects}
@@ -254,9 +264,9 @@ export function CitizensView() {
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
           cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
-          before the state, and the model and projects share what the other columns leave, cutting
-          before anything else does. In a narrower island the counts would push the row past its
-          edge, so they take a line under it, and the model cuts before the projects go under 3rem.
+          before the state, and the model and projects share what the other columns leave, the only
+          cells that cut. In a narrower island the counts would push the row past its edge, so they
+          take a line under it, and the model cuts before the projects go under 3rem.
         */}
         <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>

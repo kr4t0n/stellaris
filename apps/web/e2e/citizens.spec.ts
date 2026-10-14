@@ -56,6 +56,40 @@ function isUnbreakable(element: Locator): Promise<boolean> {
   });
 }
 
+/** How many lines an element's text is drawn on. */
+function lineCountOf(element: Locator): Promise<number> {
+  return element.evaluate((node) => {
+    const tops = new Set<number>();
+    const range = document.createRange();
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+      range.selectNodeContents(text);
+      for (const rect of range.getClientRects()) {
+        if (rect.width > 0) {
+          tops.add(Math.round(rect.top));
+        }
+      }
+    }
+    return tops.size;
+  });
+}
+
+/**
+ * How far the Citizens list runs past its island, in pixels, as its scroller could scroll sideways:
+ * the list and each row are as wide as the columns together, so neither overflows itself.
+ */
+function sidewaysOf(view: Locator): Promise<number> {
+  return view
+    .locator("ul")
+    .first()
+    .evaluate((list) => {
+      const scroller = list.parentElement?.parentElement;
+      return scroller === null || scroller === undefined
+        ? Number.NaN
+        : scroller.scrollWidth - scroller.clientWidth;
+    });
+}
+
 /** How many pixels of its text the cell holding an element of a citizen's row cuts off. */
 function cutOf(element: Locator): Promise<number> {
   return element.evaluate((node) => {
@@ -497,7 +531,7 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
   page,
 }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
-  await fakeBoard(page, { retired: true });
+  await fakeBoard(page, { retired: true, crowded: true });
   await page.goto("/citizens");
   const view = page.getByRole("region", { name: "Board content" });
   const row = (name: string) =>
@@ -533,12 +567,7 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
     expect(await isWhole(state)).toBe(true);
     await expect(row(name).getByText("·", { exact: true })).toBeHidden();
   }
-  expect(
-    await view
-      .locator("ul")
-      .first()
-      .evaluate((list) => list.scrollWidth - list.clientWidth),
-  ).toBe(0);
+  expect(await sidewaysOf(view)).toBe(0);
 
   // A week holds turns without a count: a lower bound, and unknown where none counted.
   await window.getByRole("link", { name: "7d" }).click();
@@ -564,7 +593,8 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
 test("from a 576 px island, each citizen's tokens sit beside its state, and the model and projects cut first", async ({
   page,
 }) => {
-  // 1440 px gives the island 576 px; desk is in a turn, and its model and projects run long.
+  // 1440 px gives the island 576 px. desk is in a turn, its model and projects run long, and its
+  // turns run on two runners named as the chart names its pods, as stew's do on one.
   await page.setViewportSize({ width: 1440, height: 900 });
   await fakeBoard(page, { retired: true, crowded: true, inFlight: true });
   const { promise: counted, resolve: count } = Promise.withResolvers<void>();
@@ -638,14 +668,18 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   expect(await cutOf(model)).toBeGreaterThan(0);
   expect(await cutOf(projects)).toBeGreaterThan(0);
   const [modelBox, projectsBox] = await Promise.all([boxOf(model), boxOf(projects)]);
-  expect(modelBox.width).toBeGreaterThanOrEqual(32);
-  expect(projectsBox.width).toBeGreaterThanOrEqual(32);
-  expect(
-    await view
-      .locator("ul")
-      .first()
-      .evaluate((list) => list.scrollWidth - list.clientWidth),
-  ).toBe(0);
+  expect(modelBox.width).toBeGreaterThanOrEqual(12);
+  expect(projectsBox.width).toBeGreaterThanOrEqual(12);
+  expect(await sidewaysOf(view)).toBe(0);
+  // A runner's name stays whole, hyphens and all, so stew's row keeps to one line. desk's two
+  // runners have no room side by side, and they wrap between names, never inside one.
+  await expect(row("desk").getByTitle(/^outside projects: stellaris-runner-0; lab:/)).toHaveText(
+    "on stellaris-runner-0, stellaris-runner-1",
+  );
+  expect(await lineCountOf(row("stew").getByTitle("outside projects: stellaris-runner-0"))).toBe(1);
+  for (const part of ["on stellaris-runner-0,", "stellaris-runner-1"]) {
+    expect(await lineCountOf(row("desk").getByText(part, { exact: true }))).toBe(1);
+  }
 
   // A lower bound, a count unknown, and the widest counts still fit beside the state.
   const window = view.getByRole("navigation", { name: "Tokens" });
@@ -666,6 +700,7 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
     ["stew", /^≥7\.2M in · ≥40K out/, "resting"],
     ["ada", "88K in · 900 out", "retired"],
   ]);
+  expect(await sidewaysOf(view)).toBe(0);
 
   // The island's width decides, not the window's: narrowed a step, the counts go under the row,
   // and widened back, beside the state again.
@@ -683,4 +718,23 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   await handle.press("ArrowLeft");
   await expect(separator).toBeVisible();
   await oneLine([["desk", /^≥7\.4M in · ≥42K out/, "working"]]);
+});
+
+test("the counts move beside the state at a 576 px island, to the pixel", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "575"));
+  await fakeBoard(page);
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  const desk = view.getByRole("listitem").filter({ has: page.getByText("desk", { exact: true }) });
+  const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  const separator = desk.getByText("·", { exact: true });
+  await expect(handle).toHaveAccessibleName(/^Width of the board's content, 575 of/);
+  await expect(desk).toContainText("151K in · 1.5K out");
+  await expect(separator).toBeHidden();
+
+  await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "576"));
+  await page.reload();
+  await expect(handle).toHaveAccessibleName(/^Width of the board's content, 576 of/);
+  await expect(separator).toBeVisible();
 });

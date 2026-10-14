@@ -159,6 +159,7 @@ describe("citizen", () => {
     // A project member that works outside no project has no pin, yet runs where its projects live.
     expect(runnersOf(sage, new Map([["model-research", "pod"]]))).toEqual({
       label: "on pod",
+      parts: ["on pod"],
       detail: "model-research: pod; lab: placed on its first turn",
     });
     expect(
@@ -171,10 +172,12 @@ describe("citizen", () => {
       ),
     ).toEqual({
       label: "on laptop, pod",
+      parts: ["on laptop,", "pod"],
       detail: "outside projects: laptop; model-research: pod; lab: pod",
     });
     expect(runnersOf({ ...sage, memberships: [] }, new Map())).toEqual({
       label: "no runner yet",
+      parts: ["no runner yet"],
       detail: "pinned to a runner on its first turn",
     });
   });

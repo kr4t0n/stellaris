@@ -125,9 +125,9 @@ const RECONCILE =
 
 const REFLECTION_STEPS = [
   "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
-  '- Extract a skill: a procedure you have followed twice goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps, with any script or reference it uses in the same folder. Propose it with kind "skill" when other citizens would use it.',
+  '- Extract a skill: a procedure you have followed twice is a candidate, and one that makes a citizen better at a kind of work on any project goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps, with any script or reference it uses in the same folder. Propose it with kind "skill" when more than one citizen would use it and nothing in it is tied to one place; one only you use stays yours.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
-  "- Share: a durable fact about this scope's codebase or process goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
+  "- Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel; a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
   "- Report memoryUpdated: true in the status object when core.md or a skill changed.",
 ];
 
@@ -539,7 +539,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push("", `## Knowledge of ${dispatch.project}`, "");
     if (knowledge.topics.length === 0) {
       lines.push(
-        "None yet. A durable fact about this scope's codebase or process is worth a write_knowledge call.",
+        "None yet. A durable fact about this place, such as its runners, access, flow, or where results live, is worth a write_knowledge call.",
       );
     } else {
       lines.push(

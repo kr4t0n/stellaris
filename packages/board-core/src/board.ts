@@ -5174,7 +5174,9 @@ export class Board {
       { role: charter.name, agent },
       `# ${agent}, ${charter.name}\n\n${charter.purpose}\n\n` +
         `Route every lesson with one question: about me, my craft, or the user, it goes in memory/core.md; ` +
-        `about this codebase, it goes in the project's knowledge directory; something everyone should know, post it.\n` +
+        `about how this codebase behaves, it goes in the repo's AGENTS.md or README; ` +
+        `about this project as a place (runners, access, flow, where results live), it goes in the project's knowledge; ` +
+        `something everyone should know, post it.\n` +
         (seed.length === 0 ? "" : `\n${SEED_INSTRUCTIONS_HEADING}\n\n${seed}\n`),
     );
   }

@@ -268,6 +268,7 @@ The board server and each runner read their own.
 | `STELLARIS_CODEX_SANDBOX`             | `danger-full-access`    | runner; the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces |
 | `STELLARIS_RECORD_DIR`                | none                    | runner; when set, every turn's raw CLI stream is appended there as JSONL, for fixtures                                                                 |
 | `STELLARIS_AGENT_TOKEN`               | none                    | set per turn in the agent CLI's environment by the runner                                                                                              |
+| `HUSKY`                               | `0`                     | set in every agent CLI's environment by the runner, so husky neither points the clone away from the default branch's guard nor runs its hooks          |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | none                    | the agent CLIs on a runner; leave empty to use their own login state                                                                                   |
 
 Tokens are minted once and stored only as hashes: the user's, each runner's, each agent's, and each GitHub sign-in's. Agents receive short-lived turn tokens that live only in the server's memory. Never commit a real one, nor the GitHub client secret.

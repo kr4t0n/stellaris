@@ -14,6 +14,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  CLI_ENV,
   parseTurnStatus,
   ZERO_USAGE,
   type AgentBackend,
@@ -223,7 +224,10 @@ function usageOf(raw: unknown): Usage {
   };
 }
 
-/** The subprocess environment: inherit, add the board token, and drop nested-session markers. */
+/**
+ * The subprocess environment: inherit, add the runner's settings for every CLI and the board
+ * token, and drop nested-session markers.
+ */
 export function subprocessEnv(
   base: Readonly<Record<string, string | undefined>>,
   extra: Readonly<Record<string, string | undefined>>,
@@ -236,6 +240,7 @@ export function subprocessEnv(
     }
     env[key] = value;
   }
+  Object.assign(env, CLI_ENV);
   env[AGENT_TOKEN_ENV] = token;
   return env;
 }

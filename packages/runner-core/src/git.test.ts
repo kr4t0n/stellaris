@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExecaGit, taskBranch } from "./git.js";
 
 const project = { slug: "demo", origin: null, defaultBranch: "main", boardLands: false };
@@ -95,6 +95,19 @@ describe("ExecaGit", () => {
     expect(await git.handBack(worktree, "agent/eng-1", author)).toBeNull();
 
     await execa("git", ["switch", branch], { cwd: worktree });
+    // A project's commit hook, as `pre-commit install` in any worktree writes it into the clone,
+    // is for the citizens' own commits: on a branch without its configuration it fails them all.
+    await writeFile(
+      path.join(repoDir, ".git", "hooks", "pre-commit"),
+      "#!/bin/sh\necho 'No .pre-commit-config.yaml file was found' >&2\nexit 1\n",
+      { mode: 0o755 },
+    );
+    const own = await execa(
+      "git",
+      [...committer("eng-1"), "commit", "--allow-empty", "-m", "own"],
+      { cwd: worktree, reject: false },
+    );
+    expect(own.stderr).toContain("No .pre-commit-config.yaml");
     await writeFile(path.join(worktree, "notes.md"), "half done\n", "utf8");
     expect(await git.handBack(worktree, "agent/eng-1", author)).toEqual({
       branch,
@@ -338,7 +351,7 @@ describe("ExecaGit", () => {
     await execa("git", ["clone", "--bare", seed, origin]);
     const repo = { slug: "lost", origin, defaultBranch: "main", boardLands: true };
     const clone = await git.ensureRepo(repo, path.join(dir, "repos", "lost"));
-    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    expect(await git.guardDefaultBranch(clone, "main")).toMatchObject({ ok: true });
     const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     await git.ensureBranch(clone, branch, "main");
     const worktree = await git.ensureTaskWorktree(clone, path.join(dir, "wt", "t"), branch);
@@ -388,9 +401,9 @@ describe("ExecaGit", () => {
     await execa("git", ["clone", "--bare", seed, origin]);
     const repo = { slug: "guarded", origin, defaultBranch: "main", boardLands: true };
     const clone = await git.ensureRepo(repo, path.join(dir, "repos", "guarded"));
-    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    expect(await git.guardDefaultBranch(clone, "main")).toMatchObject({ ok: true });
     // Installing again rewrites nothing and keeps the guard.
-    expect(await git.guardDefaultBranch(clone, "main")).toBe(true);
+    expect(await git.guardDefaultBranch(clone, "main")).toMatchObject({ ok: true });
     const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     await git.ensureBranch(clone, branch, "main");
     const worktree = await git.ensureTaskWorktree(clone, path.join(dir, "wt", "t"), branch);
@@ -431,18 +444,86 @@ describe("ExecaGit", () => {
     expect(await git.tidyClone(clone)).toBe(false);
 
     // Lifted, as for a project whose agents land their own work, main moves for anyone.
-    expect(await git.guardDefaultBranch(clone, null)).toBe(true);
+    expect(await git.guardDefaultBranch(clone, null)).toMatchObject({ ok: true });
     await execa("git", ["update-ref", "refs/heads/main", before], { cwd: worktree });
     expect(await rev(clone, "main")).toBe(before);
   });
 
-  it("leaves a clone whose hooks are not the runner's unguarded", async () => {
-    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
-    await execa("git", ["config", "core.hooksPath", ".husky"], { cwd: repoDir });
-    expect(await git.guardDefaultBranch(repoDir, "main")).toBe(false);
-    await execa("git", ["config", "--unset", "core.hooksPath"], { cwd: repoDir });
-    await writeFile(path.join(repoDir, ".git", "hooks", "pre-push"), "#!/bin/sh\nexit 0\n");
-    expect(await git.guardDefaultBranch(repoDir, "main")).toBe(false);
+  it("takes the clone's hooks back from husky's hooks path and from hooks not the runner's", async () => {
+    const seed = path.join(dir, "seed");
+    await execa("git", ["init", "-b", "main", seed]);
+    await execa("git", [...committer("u"), "commit", "--allow-empty", "-m", "root"], {
+      cwd: seed,
+    });
+    const origin = path.join(dir, "origin.git");
+    await execa("git", ["clone", "--bare", seed, origin]);
+    const repo = { slug: "taken", origin, defaultBranch: "main", boardLands: true };
+    const clone = await git.ensureRepo(repo, path.join(dir, "repos", "taken"));
+    const branch = taskBranch("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await git.ensureBranch(clone, branch, "main");
+    const worktree = await git.ensureTaskWorktree(clone, path.join(dir, "wt", "t"), branch);
+    await execa("git", [...committer("eng-1"), "commit", "--allow-empty", "-m", "work"], {
+      cwd: worktree,
+    });
+    const main = await rev(clone, "main");
+    const agent = (args: readonly string[]) =>
+      execa("git", [...committer("eng-1"), ...args], { cwd: worktree, reject: false });
+    const hooksPath = async () =>
+      (await execa("git", ["config", "--get", "core.hooksPath"], { cwd: clone, reject: false }))
+        .stdout;
+    expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: null,
+      movedHooks: [],
+    });
+
+    // husky's install, which a project's `prepare` runs on `pnpm install` in any worktree, points
+    // the clone at that worktree's `.husky/_`, and git then runs none of the clone's hooks.
+    await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd: worktree });
+    expect((await agent(["update-ref", "refs/heads/main", branch])).exitCode).toBe(0);
+    await agent(["update-ref", "refs/heads/main", main]);
+    expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: ".husky/_",
+      movedHooks: [],
+    });
+    expect(await hooksPath()).toBe("");
+    const moved = await agent(["update-ref", "refs/heads/main", branch]);
+    expect(moved.stderr).toContain("only the runner moves it");
+    expect(await rev(clone, "main")).toBe(main);
+
+    // A hook of the guard's name that is not the runner's, as `pre-commit install --hook-type
+    // pre-push` leaves it, would let any push through; it is kept aside under a name git never runs.
+    const prePush = path.join(clone, ".git", "hooks", "pre-push");
+    const theirs = "#!/bin/sh\nexit 0\n";
+    await writeFile(prePush, theirs, { mode: 0o755 });
+    expect((await agent(["push", "--dry-run", "origin", `${branch}:main`])).exitCode).toBe(0);
+    expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: null,
+      movedHooks: ["pre-push"],
+    });
+    expect(await readFile(`${prePush}.replaced`, "utf8")).toBe(theirs);
+    const pushed = await agent(["push", "origin", `${branch}:main`]);
+    expect(pushed.stderr).toContain("only the runner moves it");
+    expect(await rev(origin, "main")).toBe(main);
+
+    // A hooks path from outside the clone, such as the account's own, is the account's to change:
+    // the clone keeps its own, and the guard says why it does not hold.
+    const global = path.join(dir, "gitconfig");
+    await writeFile(global, "[core]\n\thooksPath = /elsewhere/hooks\n", "utf8");
+    await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd: clone });
+    vi.stubEnv("GIT_CONFIG_GLOBAL", global);
+    try {
+      expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+        ok: false,
+        reason:
+          "core.hooksPath is /elsewhere/hooks in the global configuration, which the runner leaves alone",
+      });
+      expect(await hooksPath()).toBe(".husky/_");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

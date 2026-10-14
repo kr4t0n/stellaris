@@ -395,19 +395,23 @@ describe("CodexBackend cold turns", () => {
     expect(paramsOf(fake.received, "thread/start")).toMatchObject({ model: "gpt-5.3-codex" });
   });
 
-  it("gives the server the runner's environment and no git identity, cold or warm", async () => {
+  it("gives the server the runner's environment with husky off and no git identity, cold or warm", async () => {
     // Whatever identity the test process inherited is the runner's own, which would pass through.
     for (const name of GIT_IDENTITY) {
       vi.stubEnv(name, undefined);
     }
     vi.stubEnv("STELLARIS_TEST_RUNNER_ENV", "kept");
+    // husky's install would point the clone's hooks away from the runner's guard.
+    vi.stubEnv("HUSKY", "1");
     try {
       const cold = fakeAppServer();
-      await new CodexBackend({ spawn: cold.spawn, env: { EXTRA: "set" } }).runTurn(request());
+      await new CodexBackend({ spawn: cold.spawn, env: { EXTRA: "set", HUSKY: "1" } }).runTurn(
+        request(),
+      );
       const warm = fakeAppServer();
       const session = await new CodexBackend({
         spawn: warm.spawn,
-        env: { EXTRA: "set" },
+        env: { EXTRA: "set", HUSKY: "1" },
       }).startResident(spec, start);
       await session.runTurn("hello");
       await session.close();
@@ -415,6 +419,7 @@ describe("CodexBackend cold turns", () => {
         expect(env).toMatchObject({
           STELLARIS_TEST_RUNNER_ENV: "kept",
           EXTRA: "set",
+          HUSKY: "0",
           STELLARIS_AGENT_TOKEN: "stl_turn",
         });
         for (const name of GIT_IDENTITY) {

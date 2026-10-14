@@ -1817,6 +1817,78 @@ describe("turns on a runner over the runner protocol", () => {
     expect(refused).toEqual(["main", "trunk"]);
   });
 
+  it("takes a merge project's clone back from husky's hooks path before the next turn", async () => {
+    const { board } = await Board.init(dir, { name: "husky" });
+    await board.addProject(USER, { slug: "demo", onDone: "merge" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "sage",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    let turns = 0;
+    const seen: { hooksPath: string; refused: string }[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        turns += 1;
+        if (turns === 1) {
+          // What husky's install, run by a project's `prepare` on `pnpm install`, does to the clone.
+          await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd });
+          return completed("installed");
+        }
+        const hooksPath = (
+          await execa("git", ["config", "--get", "core.hooksPath"], { cwd, reject: false })
+        ).stdout;
+        await writeFile(path.join(cwd, "notes.md"), "notes\n");
+        await execa("git", ["add", "notes.md"], { cwd });
+        await execa(
+          "git",
+          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          {
+            cwd,
+          },
+        );
+        const moved = await execa("git", ["update-ref", "refs/heads/main", "HEAD"], {
+          cwd,
+          reject: false,
+        });
+        seen.push({ hooksPath, refused: moved.exitCode === 0 ? "" : moved.stderr });
+        return completed("wrote notes");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const task = await board.createTask(USER, { project: "demo", title: "notes" });
+    const turn = () =>
+      run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: task.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+    expect((await turn()).exitReason).toBe("completed");
+    const repo = runner.paths.repo("demo");
+    const main = (await execa("git", ["rev-parse", "main"], { cwd: repo })).stdout;
+    expect((await execa("git", ["config", "--get", "core.hooksPath"], { cwd: repo })).stdout).toBe(
+      ".husky/_",
+    );
+
+    expect((await turn()).exitReason).toBe("completed");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.hooksPath).toBe("");
+    expect(seen[0]?.refused).toContain("only the runner moves it");
+    expect((await execa("git", ["rev-parse", "main"], { cwd: repo })).stdout).toBe(main);
+  });
+
   it("lands a ghpr task by merging its pull request with the message its agent gave", async () => {
     // GitHub, played by a bare repository that git reaches for the project's GitHub address.
     const seed = path.join(dir, "seed");

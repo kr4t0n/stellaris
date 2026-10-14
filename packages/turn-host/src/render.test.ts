@@ -65,6 +65,7 @@ describe("config-home rendering", () => {
     });
     expect(bare).not.toContain("## Society norms");
     expect(bare).toContain("## Skills\n\nNone yet.");
+    expect(bare).toContain("done the same way twice is a candidate for the first");
 
     const full = renderInstructions({
       agentName: "eng-1",
@@ -104,5 +105,26 @@ describe("config-home rendering", () => {
     // Turns of one citizen may share its home at once, so memory is edited, never rewritten.
     expect(full).toContain("never rewrite one whole from an earlier read");
     expect(full).toContain("write_knowledge");
+    // How a codebase behaves goes in its own documents; project knowledge is about the place.
+    expect(full).toContain("how a codebase behaves (architecture");
+    expect(full).toContain("goes in its AGENTS.md or README");
+    // A repeated procedure is a candidate, and a skill only its author uses is not proposed.
+    expect(full).toContain("followed twice is a candidate for a skill");
+    expect(full).toContain(
+      "more than one citizen would use it and nothing in it is tied to one place",
+    );
+    expect(full).toContain("a skill only you use stays yours");
+  });
+
+  it("says who may send a task back, as the board allows, and what everyone else does", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread.",
+    );
   });
 });

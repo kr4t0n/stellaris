@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS, type Ulid } from "@stellaris/shared";
+import { MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1005,6 +1005,16 @@ describe("Board", () => {
       code: "FORBIDDEN",
     });
     await board.claimTask(ED2, { task_id: task.id });
+    // Only the stage's holder or a planner sends the work back, as update_task's description says.
+    await expect(board.updateTask(RES, { task_id: task.id, stage: "s2" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: expect.stringContaining(
+        "only the holder of the current stage, the user, the steward, or the concierge",
+      ),
+    });
+    expect(VERB_DESCRIPTIONS.update_task).toContain(
+      "the current stage's holder, the user, the steward, or the concierge; anyone else asks the concierge",
+    );
     const sentBack = await board.updateTask(ED2, {
       task_id: task.id,
       stage: "s2",
@@ -1399,6 +1409,10 @@ describe("Board", () => {
     expect(eng2.memberships).toEqual(["demo"]);
     expect((await board.readProject("demo")).members).toContain("eng-2");
     expect(await board.readAgentRoleBody("eng-2")).toContain("Focus on the API layer first.");
+    // How a codebase behaves goes in the repo's own documents; project knowledge is about the place.
+    expect(await board.readAgentRoleBody("eng-2")).toContain(
+      "about how this codebase behaves, it goes in the repo's AGENTS.md or README; about this project as a place",
+    );
     const added = (await board.readEvents(null)).find(
       (event) => event.type === "agent.added" && event.payload["name"] === "eng-2",
     );

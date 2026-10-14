@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
+import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -3428,11 +3428,14 @@ describe("Board", () => {
       code: "VALIDATION",
       message: expect.stringContaining("is not a PNG, JPEG, GIF, or WebP image"),
     });
-    bytes = Buffer.concat([png, Buffer.alloc(8 * 1024 * 1024)]);
+    bytes = Buffer.concat([png, Buffer.alloc(IMAGE_LIMIT_BYTES - png.length + 1)]);
     await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
       code: "VALIDATION",
-      message: expect.stringContaining("over the 8388608 an image may be"),
+      message: expect.stringContaining(`is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608`),
     });
+    bytes = bytes.subarray(0, IMAGE_LIMIT_BYTES);
+    const largest = await board.uploadImage(turn, upload);
+    expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
     // A runner's refusal reaches the citizen as it was given.
     board.readImagesWith(() =>
       Promise.reject(new BoardError("FORBIDDEN", "/etc/passwd is outside your worktree")),
@@ -3441,7 +3444,7 @@ describe("Board", () => {
       code: "FORBIDDEN",
       message: "/etc/passwd is outside your worktree",
     });
-    expect(await readdir(path.join(dir, "images"))).toEqual([uploaded.id]);
+    expect((await readdir(path.join(dir, "images"))).toSorted()).toEqual([uploaded.id, largest.id]);
 
     await expect(board.readImage("01M4WY483E0XG4Q2ZTHAX3JBZW")).rejects.toMatchObject({
       code: "NOT_FOUND",
@@ -3461,13 +3464,18 @@ describe("Board", () => {
     await board.setRoleCharter(USER, {
       name: "reviewer",
       purpose: "Reviews.",
+      verbs: ["post_message", "read_inbox"],
+    });
+    await board.setRoleCharter(USER, {
+      name: "reader",
+      purpose: "Reads.",
       verbs: ["read_inbox", "search"],
     });
     const reopened = await Board.open(dir, { now });
-    for (const role of ["engineer", "steward", "concierge", "user"]) {
+    for (const role of ["engineer", "reviewer", "steward", "concierge", "user"]) {
       expect((await reopened.readRole(role)).verbs).toContain("upload_image");
     }
-    expect((await reopened.readRole("reviewer")).verbs).not.toContain("upload_image");
+    expect((await reopened.readRole("reader")).verbs).not.toContain("upload_image");
     await reopened.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
     await Board.open(dir, { now });
     expect((await reopened.readRole("engineer")).verbs).not.toContain("upload_image");

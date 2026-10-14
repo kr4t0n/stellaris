@@ -2365,10 +2365,21 @@ describe("turns on a runner over the runner protocol", () => {
     const answers = new Map<string, { status: number; body: Record<string, unknown> }>();
     const prompts = new Map<string, string>();
     let hello: RunnerHello | null = null;
+    // eng-1's home turn runs all the while its thread's turn uploads, in a worktree of its own.
+    const home = Promise.withResolvers<void>();
+    const uploaded = Promise.withResolvers<void>();
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
+        if (
+          request.spec.agent === "eng-1" &&
+          board.resolveToken(request.mcp.token)?.thread === undefined
+        ) {
+          home.resolve();
+          await uploaded.promise;
+          return completed("worked at home");
+        }
         prompts.set(request.spec.agent, request.prompt);
         if (request.spec.agent !== "eng-1" || society === null) {
           return completed("read the thread");
@@ -2427,20 +2438,24 @@ describe("turns on a runner over the runner protocol", () => {
         const shown = answers.get("worktree")?.body["markdown"];
         await verb("post_message", { thread_id: topic.id, body: `Before: ${String(shown)}` });
         await rm(temp, { recursive: true, force: true });
+        uploaded.resolve();
         return completed("uploaded the board's screenshots");
       },
     };
     society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
     const { run, app } = society;
-    const turn = (agent: string) =>
+    const turn = (agent: string, thread: string | null = topic.id) =>
       run({
         agent,
         project: "demo",
-        thread: { id: topic.id, task: false },
+        ...(thread === null ? {} : { thread: { id: thread, task: false } }),
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
       });
+    const atHome = turn("eng-1", null);
+    await home.promise;
     expect((await turn("eng-1")).exitReason).toBe("completed");
+    expect((await atHome).exitReason).toBe("completed");
     expect(hello).not.toBeNull();
 
     const ids = ["worktree", "temp", "home"].map((label) => {

@@ -490,7 +490,7 @@ export class TurnExecutor {
     if (guard.movedHooks.length > 0) {
       this.log.warn(
         { project: repo.slug, hooks: guard.movedHooks },
-        "moved hooks that were not the runner's aside as <name>.replaced, so that git runs the default branch's guard in their place",
+        "moved hooks that were not the runner's aside as <name>.replaced (or .replaced-2 and on), so that git runs the default branch's guard in their place",
       );
     }
   }

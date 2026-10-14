@@ -491,6 +491,15 @@ describe("ExecaGit", () => {
     const moved = await agent(["update-ref", "refs/heads/main", branch]);
     expect(moved.stderr).toContain("only the runner moves it");
     expect(await rev(clone, "main")).toBe(main);
+    // Several values in `.git/config`, as `git config --add` leaves them, are cleared together.
+    await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd: clone });
+    await execa("git", ["config", "--add", "core.hooksPath", ".githooks"], { cwd: clone });
+    expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: ".husky/_, .githooks",
+      movedHooks: [],
+    });
+    expect(await hooksPath()).toBe("");
 
     // A hook of the guard's name that is not the runner's, as `pre-commit install --hook-type
     // pre-push` leaves it, would let any push through; it is kept aside under a name git never runs.
@@ -507,23 +516,79 @@ describe("ExecaGit", () => {
     const pushed = await agent(["push", "origin", `${branch}:main`]);
     expect(pushed.stderr).toContain("only the runner moves it");
     expect(await rev(origin, "main")).toBe(main);
+    // A later one is kept beside the first, not over it.
+    const later = "#!/bin/sh\n# a later one\nexit 0\n";
+    await writeFile(prePush, later, { mode: 0o755 });
+    expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: null,
+      movedHooks: ["pre-push"],
+    });
+    expect(await readFile(`${prePush}.replaced`, "utf8")).toBe(theirs);
+    expect(await readFile(`${prePush}.replaced-2`, "utf8")).toBe(later);
+  });
 
-    // A hooks path from outside the clone, such as the account's own, is the account's to change:
-    // the clone keeps its own, and the guard says why it does not hold.
-    const global = path.join(dir, "gitconfig");
-    await writeFile(global, "[core]\n\thooksPath = /elsewhere/hooks\n", "utf8");
-    await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd: clone });
-    vi.stubEnv("GIT_CONFIG_GLOBAL", global);
-    try {
-      expect(await git.guardDefaultBranch(clone, "main")).toEqual({
+  it("leaves a hooks path from anywhere but the clone's own .git/config, says why, and never throws", async () => {
+    const repoDir = await git.ensureRepo(project, path.join(dir, "repos", "demo"));
+    const own = async () =>
+      (
+        await execa("git", ["config", "--file", ".git/config", "--get-all", "core.hooksPath"], {
+          cwd: repoDir,
+        })
+      ).stdout;
+    const leftAlone = async (value: string, origin: string, scope: string) => {
+      expect(await git.guardDefaultBranch(repoDir, "main")).toEqual({
         ok: false,
-        reason:
-          "core.hooksPath is /elsewhere/hooks in the global configuration, which the runner leaves alone",
+        reason: `core.hooksPath is ${value} from ${origin} in the ${scope} configuration, which the runner leaves alone`,
       });
-      expect(await hooksPath()).toBe(".husky/_");
+      // Clearing the clone's own value would only hand git the other one.
+      expect(await own()).toBe(".husky/_");
+    };
+    await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd: repoDir });
+
+    // A file `.git/config` includes reads as the clone's own scope, but `--local` cannot edit it.
+    await writeFile(
+      path.join(repoDir, ".git", "extra.cfg"),
+      "[core]\n\thooksPath = .githooks\n",
+      "utf8",
+    );
+    await execa("git", ["config", "include.path", "extra.cfg"], { cwd: repoDir });
+    await leftAlone(".githooks", "file:.git/extra.cfg", "local");
+    await execa("git", ["config", "--unset", "include.path"], { cwd: repoDir });
+
+    // The account's and the machine's configuration are theirs to change.
+    const other = path.join(dir, "gitconfig");
+    await writeFile(other, "[core]\n\thooksPath = /elsewhere/hooks\n", "utf8");
+    try {
+      vi.stubEnv("GIT_CONFIG_GLOBAL", other);
+      await leftAlone("/elsewhere/hooks", `file:${other}`, "global");
+      vi.unstubAllEnvs();
+      vi.stubEnv("GIT_CONFIG_NOSYSTEM", undefined);
+      vi.stubEnv("GIT_CONFIG_SYSTEM", other);
+      await leftAlone("/elsewhere/hooks", `file:${other}`, "system");
     } finally {
       vi.unstubAllEnvs();
     }
+
+    // So is one worktree's own configuration.
+    await execa("git", ["config", "extensions.worktreeConfig", "true"], { cwd: repoDir });
+    await execa("git", ["config", "--worktree", "core.hooksPath", ".wt-hooks"], { cwd: repoDir });
+    await leftAlone(".wt-hooks", "file:.git/config.worktree", "worktree");
+    await execa("git", ["config", "--worktree", "--unset", "core.hooksPath"], { cwd: repoDir });
+
+    // A value the runner may clear but cannot is a reason too, never a failed turn.
+    await writeFile(path.join(repoDir, ".git", "config.lock"), "", "utf8");
+    const locked = await git.guardDefaultBranch(repoDir, "main");
+    expect(locked).toMatchObject({ ok: false });
+    expect(locked.ok ? "" : locked.reason).toContain(
+      "could not clear core.hooksPath from .git/config",
+    );
+    await rm(path.join(repoDir, ".git", "config.lock"));
+    expect(await git.guardDefaultBranch(repoDir, "main")).toEqual({
+      ok: true,
+      clearedHooksPath: ".husky/_",
+      movedHooks: [],
+    });
   });
 
   it("reports missing branches and aborts conflicting merges cleanly", async () => {

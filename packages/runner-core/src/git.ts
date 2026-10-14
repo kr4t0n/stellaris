@@ -75,10 +75,11 @@ export interface GitOps {
   /**
    * Makes the clone's hooks, which every worktree of it shares, refuse any move of `branch` but
    * the runner's own, and any push of other work to it on the remote; null lifts the guard. Git
-   * runs the guard only from the clone's own hooks folder, so the clone's `core.hooksPath`, as
-   * husky's install sets it, is cleared, and a hook of the guard's names that is not the runner's
-   * is moved aside. Not guarded only when `core.hooksPath` comes from outside the clone, as from
-   * the account's configuration, which the runner leaves alone.
+   * runs the guard only from the clone's own hooks folder, so a `core.hooksPath` in the clone's
+   * `.git/config`, as husky's install sets it, is cleared, and a hook of the guard's names that is
+   * not the runner's is moved aside. Not guarded when `core.hooksPath` comes from anywhere else,
+   * such as a file `.git/config` includes or the account's configuration, which the runner leaves
+   * alone; never throws for it.
    */
   guardDefaultBranch(repoDir: string, branch: string | null): Promise<GuardOutcome>;
   /**
@@ -170,7 +171,10 @@ export type GuardOutcome =
       readonly ok: true;
       /** The clone's own `core.hooksPath`, cleared so that git runs the guard, when it had one. */
       readonly clearedHooksPath: string | null;
-      /** Hooks of the guard's names that were not the runner's, moved aside as `<name>.replaced`. */
+      /**
+       * Hooks of the guard's names that were not the runner's, moved aside as `<name>.replaced`,
+       * or `<name>.replaced-2` and on when an earlier one holds that name.
+       */
       readonly movedHooks: readonly string[];
     }
   | { readonly ok: false; readonly reason: string };
@@ -267,6 +271,16 @@ async function exists(file: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Where a hook that is not the runner's goes: a name git never runs, and no earlier one's. */
+async function asideName(file: string): Promise<string> {
+  for (let copy = 1; ; copy += 1) {
+    const name = copy === 1 ? `${file}.replaced` : `${file}.replaced-${copy}`;
+    if (!(await exists(name))) {
+      return name;
+    }
   }
 }
 
@@ -602,22 +616,37 @@ export class ExecaGit implements GitOps {
       await git(["config", "--unset", GUARD_KEY], repoDir);
       return { ok: true, clearedHooksPath: null, movedHooks: [] };
     }
-    // Each line is a scope and a value; exits 1 when the key is set nowhere.
+    // Each line is a scope, the file the value came from, and the value; exits 1 when the key is
+    // set nowhere. A file `.git/config` includes reports as `local` too, while `--local` edits
+    // `.git/config` alone, so only a value from there is the runner's to clear.
     const hooksPaths = lines(
-      (await git(["config", "--show-scope", "--get-all", "core.hooksPath"], repoDir)).stdout,
+      (
+        await git(
+          ["config", "--show-scope", "--show-origin", "--get-all", "core.hooksPath"],
+          repoDir,
+        )
+      ).stdout,
     ).map((line) => {
-      const [scope = "", ...value] = line.split("\t");
-      return { scope, value: value.join("\t") };
+      const [scope = "", origin = "", ...value] = line.split("\t");
+      return { scope, origin, value: value.join("\t") };
     });
-    const outside = hooksPaths.find(({ scope }) => scope !== "local");
+    const outside = hooksPaths.find(
+      ({ scope, origin }) => scope !== "local" || origin !== "file:.git/config",
+    );
     if (outside !== undefined) {
       return {
         ok: false,
-        reason: `core.hooksPath is ${outside.value} in the ${outside.scope} configuration, which the runner leaves alone`,
+        reason: `core.hooksPath is ${outside.value} from ${outside.origin} in the ${outside.scope} configuration, which the runner leaves alone`,
       };
     }
     if (hooksPaths.length > 0) {
-      await must(["config", "--local", "--unset-all", "core.hooksPath"], repoDir);
+      const cleared = await git(["config", "--local", "--unset-all", "core.hooksPath"], repoDir);
+      if (cleared.exitCode !== 0) {
+        return {
+          ok: false,
+          reason: `could not clear core.hooksPath from .git/config: ${cleared.stderr.trim() || `git exited ${cleared.exitCode}`}`,
+        };
+      }
     }
     const hooks = path.join(repoDir, ".git", "hooks");
     await mkdir(hooks, { recursive: true });
@@ -627,7 +656,7 @@ export class ExecaGit implements GitOps {
       const existing = await readFile(file, "utf8").catch(() => null);
       if (existing !== null && !existing.includes(GUARD_MARK)) {
         // Kept under a name git never runs, for whoever wants it back.
-        await rename(file, `${file}.replaced`);
+        await rename(file, await asideName(file));
         movedHooks.push(name);
       }
       if (existing !== script) {

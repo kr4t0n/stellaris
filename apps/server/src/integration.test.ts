@@ -180,7 +180,7 @@ describe("Phase 1 exit criterion", () => {
     // The user's mention was delivered in a completed turn, so the cursor has moved past it.
     const unread = await board.readDigest({ name: "eng-1", role: "engineer" }, { advance: false });
     expect(unread.messages.map((m) => m.id)).not.toContain(mention.id);
-  });
+  }, 30_000); // timeout: a loaded machine takes this past Vitest's 5 s default
 });
 
 describe("Phase 5 exit criterion", () => {

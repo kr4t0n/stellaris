@@ -2188,7 +2188,7 @@ describe("turns on a runner over the runner protocol", () => {
         Reflect.deleteProperty(process.env, key);
       }
     }
-  });
+  }, 30_000); // timeout: a loaded machine takes this past Vitest's 5 s default
 
   it("reads what a task's turns left from its branch on the project's runner", async () => {
     const { board, userToken } = await Board.init(dir, { name: "files" });

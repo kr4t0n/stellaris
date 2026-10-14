@@ -107,7 +107,12 @@ describe("config-home rendering", () => {
     expect(full).toContain("write_knowledge");
     // How a codebase behaves goes in its own documents; project knowledge is about the place.
     expect(full).toContain("how a codebase behaves (architecture");
-    expect(full).toContain("goes in its AGENTS.md or README");
+    expect(full).toContain(
+      "goes in its AGENTS.md or README, committed on a task's branch like any change to the code, or proposed in the task's thread or the project channel when it is outside the task at hand",
+    );
+    expect(full).toContain(
+      "a durable fact about a project as a place (runners, access, flow, where results live) goes through `write_knowledge`",
+    );
     // A repeated procedure is a candidate, and a skill only its author uses is not proposed.
     expect(full).toContain("followed twice is a candidate for a skill");
     expect(full).toContain(

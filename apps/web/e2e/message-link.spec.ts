@@ -20,8 +20,18 @@ const REPORT = Array.from(
     `Paragraph ${index + 1} of the report, with enough words to wrap across the island at any width it takes.`,
 ).join("\n\n");
 
-/** Post `n` of 40, two minutes apart, in the channel or in the thread; `long` ones are reports. */
-function post(n: number, thread: boolean, long: readonly number[]) {
+/** A report a few hundred pixels tall, short enough not to be folded. */
+const BRIEF = Array.from(
+  { length: 6 },
+  (_, index) =>
+    `Paragraph ${index + 1} of the brief, with enough words to wrap across the island at any width it takes.`,
+).join("\n\n");
+
+/**
+ * Post `n` of 40, two minutes apart, in the channel or in the thread; `long` ones are reports, and
+ * `brief` ones short reports.
+ */
+function post(n: number, thread: boolean, long: readonly number[], brief: readonly number[]) {
   return {
     id: postId(n),
     author: n % 2 === 0 ? "ada" : "desk",
@@ -31,7 +41,9 @@ function post(n: number, thread: boolean, long: readonly number[]) {
     mentions: [],
     body: long.includes(n)
       ? `Post ${n}: the full report.\n\n${REPORT}`
-      : `Post ${n}: the survey's next step.\n\nA second paragraph, so each post takes a few lines.`,
+      : brief.includes(n)
+        ? `Post ${n}: the brief.\n\n${BRIEF}`
+        : `Post ${n}: the survey's next step.\n\nA second paragraph, so each post takes a few lines.`,
   };
 }
 
@@ -39,10 +51,10 @@ function post(n: number, thread: boolean, long: readonly number[]) {
  * The channel's 40 posts, with a thread opened after every tenth, so thread lines run all the way
  * down the stream, as they do on a board in use; and a thread of 40 posts of its own.
  */
-async function serve(page: Page, long: readonly number[] = []) {
+async function serve(page: Page, long: readonly number[] = [], brief: readonly number[] = []) {
   await fakeBoard(page);
   const posts = (thread: boolean) =>
-    Array.from({ length: 40 }, (_, index) => post(index + 1, thread, long));
+    Array.from({ length: 40 }, (_, index) => post(index + 1, thread, long, brief));
   const threads = [10, 20, 30, 38].map((n, index) => ({
     id: `01M3Q2PPPPPPPPPPPPPPPPPPQ${index + 1}`,
     channel: CHANNEL,
@@ -177,6 +189,42 @@ test("a linked post centers in its list, and one taller than the list opens at i
       expect(target.height).toBeGreaterThan(list.height);
       expect(Math.abs(target.y - list.y)).toBeLessThanOrEqual(1);
       await expect(report.locator("header")).toBeInViewport();
+    }
+  }
+});
+
+test("a linked post just taller than its list opens at its top, and one just shorter is centered", async ({
+  page,
+}) => {
+  await serve(page, [], [20]);
+  for (const view of [`/thread/${THREAD}`, `/c/${CHANNEL}`]) {
+    // The window's height less the list's is what the rest of the board takes, at any height.
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto("about:blank");
+    await page.goto(`${view}?message=${postId(20)}`);
+    await expect(marked(page)).toContainText("Post 20: the brief.");
+    const { height, rest } = await marked(page).evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      rest: window.innerHeight - (element.parentElement?.clientHeight ?? 0),
+    }));
+
+    // A list 40 px shorter than the post, then one with 40 px to spare.
+    for (const room of [-40, 40]) {
+      await page.setViewportSize({ width: 1280, height: Math.round(height + room + rest) });
+      await page.goto("about:blank");
+      await page.goto(`${view}?message=${postId(20)}`);
+      await expect(marked(page)).toContainText("Post 20: the brief.");
+      const { list, target } = await placed(page);
+      expect(Math.abs(list.height - (target.height + room))).toBeLessThanOrEqual(1);
+      if (room < 0) {
+        expect(Math.abs(target.y - list.y)).toBeLessThanOrEqual(1);
+      } else {
+        expect(
+          Math.abs(target.y + target.height / 2 - (list.y + list.height / 2)),
+        ).toBeLessThanOrEqual(1);
+        expect(target.y).toBeGreaterThanOrEqual(list.y);
+        expect(target.y + target.height).toBeLessThanOrEqual(list.y + list.height);
+      }
     }
   }
 });

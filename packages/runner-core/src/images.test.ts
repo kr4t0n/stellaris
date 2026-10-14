@@ -81,6 +81,8 @@ describe("readTurnImage", () => {
     expect(await readTurnImage("../../../../elsewhere/credentials.png", places)).toMatchObject({
       why: "outside",
     });
+    // A folder that holds a root is not inside it.
+    expect(await readTurnImage(dir, places)).toMatchObject({ why: "outside" });
     // A link inside the worktree is followed before the file is placed, a folder's link too.
     await symlink(secret, path.join(worktree, "shot.png"));
     await symlink(elsewhere, path.join(temp, "shots"));
@@ -161,5 +163,14 @@ describe("readTurnImage", () => {
     });
     // A smaller limit is the same rule.
     expect(await readTurnImage(file, places, PIXEL.length - 1)).toMatchObject({ why: "too_big" });
+  });
+
+  it("stops reading at the limit a file its size does not tell runs past", async () => {
+    // A file under /proc says it holds nothing, and holds more than ten bytes.
+    expect(await readTurnImage("status", { cwd: "/proc/self", roots: ["/proc"] }, 10)).toEqual({
+      kind: "refused",
+      why: "too_big",
+      detail: "status is over the 10 bytes an image may be",
+    });
   });
 });

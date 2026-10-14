@@ -2355,7 +2355,7 @@ describe("turns on a runner over the runner protocol", () => {
       verbs: [...MEMBER_VERBS],
       wakeTriggers: ["heartbeat"],
     });
-    for (const name of ["eng-1", "rev-1"]) {
+    for (const name of ["eng-1", "eng-2", "rev-1"]) {
       await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
     }
     const topic = await board.openThread(USER, {
@@ -2365,20 +2365,25 @@ describe("turns on a runner over the runner protocol", () => {
     const answers = new Map<string, { status: number; body: Record<string, unknown> }>();
     const prompts = new Map<string, string>();
     let hello: RunnerHello | null = null;
-    // eng-1's home turn runs all the while its thread's turn uploads, in a worktree of its own.
+    // eng-1's home turn and eng-2's turn in the thread run all the while eng-1's turn there
+    // uploads, each in a worktree of its own.
     const home = Promise.withResolvers<void>();
+    const beside = Promise.withResolvers<void>();
     const uploaded = Promise.withResolvers<void>();
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
-        if (
-          request.spec.agent === "eng-1" &&
-          board.resolveToken(request.mcp.token)?.thread === undefined
-        ) {
+        const inThread = board.resolveToken(request.mcp.token)?.thread !== undefined;
+        if (request.spec.agent === "eng-1" && !inThread) {
           home.resolve();
           await uploaded.promise;
           return completed("worked at home");
+        }
+        if (request.spec.agent === "eng-2") {
+          beside.resolve();
+          await uploaded.promise;
+          return completed("worked in the thread");
         }
         prompts.set(request.spec.agent, request.prompt);
         if (request.spec.agent !== "eng-1" || society === null) {
@@ -2452,10 +2457,24 @@ describe("turns on a runner over the runner protocol", () => {
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
       });
-    const atHome = turn("eng-1", null);
-    await home.promise;
-    expect((await turn("eng-1")).exitReason).toBe("completed");
-    expect((await atHome).exitReason).toBe("completed");
+    // The temp folder is a place of its own, apart from the runner's data folder, as on a machine.
+    const tmpdir = process.env["TMPDIR"];
+    process.env["TMPDIR"] = await mkdtemp(path.join(dir, "tmp-"));
+    try {
+      const others = [turn("eng-1", null), turn("eng-2")];
+      await home.promise;
+      await beside.promise;
+      expect((await turn("eng-1")).exitReason).toBe("completed");
+      for (const other of await Promise.all(others)) {
+        expect(other.exitReason).toBe("completed");
+      }
+    } finally {
+      if (tmpdir === undefined) {
+        delete process.env["TMPDIR"];
+      } else {
+        process.env["TMPDIR"] = tmpdir;
+      }
+    }
     expect(hello).not.toBeNull();
 
     const ids = ["worktree", "temp", "home"].map((label) => {

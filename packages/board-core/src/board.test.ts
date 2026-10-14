@@ -3449,12 +3449,22 @@ describe("Board", () => {
     await expect(board.readImage("01M4WY483E0XG4Q2ZTHAX3JBZW")).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+    // A file in the images folder that is no image, as one put there by hand, is not served.
+    await writeFile(path.join(dir, "images", "01M4WY483E0XG4Q2ZTHAX3JBZW"), "<svg/>");
+    await expect(board.readImage("01M4WY483E0XG4Q2ZTHAX3JBZW")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "image 01M4WY483E0XG4Q2ZTHAX3JBZW is not an image the board shows",
+    });
+    board.readImagesWith(() => Promise.resolve(png));
     await board.setRoleCharter(USER, {
       name: "engineer",
       purpose: "Builds.",
       verbs: ["post_message"],
     });
-    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "role engineer may not upload_image",
+    });
   });
 
   it("grants upload_image once to every charter that may post", async () => {

@@ -132,4 +132,17 @@ describe("config-home rendering", () => {
       "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread.",
     );
   });
+
+  it("has a citizen show an image by uploading it and linking its id, never by pasting its bytes", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "call upload_image with its path, and put the markdown it returns in the post, `![what it shows](image:<id>)`",
+    );
+    expect(text).toContain("Never put an image or any other file into a message as base64");
+  });
 });

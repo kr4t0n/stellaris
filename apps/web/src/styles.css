@@ -158,6 +158,17 @@
   }
 }
 
+/*
+ * A box that scrolls without a scrollbar of its own, inside one that has one: the standard
+ * property where a browser has it, and the WebKit pseudo-element where it does not.
+ */
+@utility scrollbar-hidden {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* The token gate settles into place once, as the sky's stars do. */
 @keyframes gate-rise {
   from {

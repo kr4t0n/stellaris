@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { execa } from "execa";
 import {
+  CLI_ENV,
   parseTurnStatus,
   type AgentSpec,
   type ResidentSession,
@@ -551,6 +552,7 @@ export class CodexAppServerSession implements ResidentSession {
     const env: Record<string, string | undefined> = {
       ...process.env,
       ...options.env,
+      ...CLI_ENV,
       [AGENT_TOKEN_ENV]: start.mcp.token,
     };
     const spawn = options.spawn ?? defaultSpawnAppServer(options.codexPath ?? "codex");

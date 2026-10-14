@@ -178,12 +178,14 @@ const GIT_IDENTITY = [
 ] as const;
 
 describe("the CLI's environment", () => {
-  it("is the runner's own with the board token, and no git identity, cold or warm", async () => {
+  it("is the runner's own with husky off, the board token, and no git identity, cold or warm", async () => {
     // Whatever identity the test process inherited is the runner's own, which would pass through.
     for (const name of GIT_IDENTITY) {
       vi.stubEnv(name, undefined);
     }
     vi.stubEnv("STELLARIS_TEST_RUNNER_ENV", "kept");
+    // husky's install would point the clone's hooks away from the runner's guard.
+    vi.stubEnv("HUSKY", "1");
     try {
       const envs: (Record<string, string | undefined> | undefined)[] = [];
       const script = scripted();
@@ -191,7 +193,7 @@ describe("the CLI's environment", () => {
         envs.push(params.options?.env);
         return script.queryFn(params);
       };
-      const backend = new ClaudeAgentBackend({ queryFn, env: { EXTRA: "set" } });
+      const backend = new ClaudeAgentBackend({ queryFn, env: { EXTRA: "set", HUSKY: "1" } });
       const cold = await backend.runTurn({ ...start, spec, prompt: "hello" });
       expect(cold.exitReason).toBe("completed");
       const session = await backend.startResident(spec, start);
@@ -203,6 +205,7 @@ describe("the CLI's environment", () => {
         expect(env).toMatchObject({
           STELLARIS_TEST_RUNNER_ENV: "kept",
           EXTRA: "set",
+          HUSKY: "0",
           STELLARIS_AGENT_TOKEN: "stl_resident",
         });
         for (const name of GIT_IDENTITY) {

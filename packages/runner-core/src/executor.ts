@@ -466,17 +466,31 @@ export class TurnExecutor {
         "put away what was left in the clone, such as a refused merge into the default branch; git stash list has it",
       );
     }
-    const guarded = await this.git.guardDefaultBranch(
+    const guard = await this.git.guardDefaultBranch(
       repoDir,
       repo.boardLands ? repo.defaultBranch : null,
     );
-    if (guarded) {
-      this.unguarded.delete(repo.slug);
-    } else if (!this.unguarded.has(repo.slug)) {
-      this.unguarded.add(repo.slug);
+    if (!guard.ok) {
+      if (!this.unguarded.has(repo.slug)) {
+        this.unguarded.add(repo.slug);
+        this.log.warn(
+          { project: repo.slug, reason: guard.reason },
+          "cannot guard the default branch",
+        );
+      }
+      return;
+    }
+    this.unguarded.delete(repo.slug);
+    if (guard.clearedHooksPath !== null) {
       this.log.warn(
-        { project: repo.slug },
-        "cannot guard the default branch: the clone runs hooks from core.hooksPath, or has hooks of its own by those names",
+        { project: repo.slug, hooksPath: guard.clearedHooksPath },
+        "cleared core.hooksPath from the clone, which kept git from running the default branch's guard; the hooks it named no longer run",
+      );
+    }
+    if (guard.movedHooks.length > 0) {
+      this.log.warn(
+        { project: repo.slug, hooks: guard.movedHooks },
+        "moved hooks that were not the runner's aside as <name>.replaced (or .replaced-2 and on), so that git runs the default branch's guard in their place",
       );
     }
   }

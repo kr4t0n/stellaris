@@ -146,6 +146,16 @@ export function useTask(id: string | null) {
   });
 }
 
+/** One thread and its messages; `null` reads nothing, as for a task or proposal with no thread. */
+export function useThread(id: string | null) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["thread", id],
+    queryFn: () => api.thread(id ?? ""),
+    enabled: id !== null,
+  });
+}
+
 /**
  * One path on a task's branch. A path not on the branch, or a runner that is away, is not asked
  * again at once; a finished turn refreshes it, since the hand-back is what commits a turn's files.

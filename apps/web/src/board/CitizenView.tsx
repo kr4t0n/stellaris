@@ -31,11 +31,11 @@ import { CitizenTurns } from "./CitizenTurns.js";
 import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { ModelForm } from "./ModelForm.js";
 import { RunnerForm } from "./RunnerForm.js";
+import { StickyList } from "./StickyList.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { CitizenQuota } from "./Quota.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { TurnControls } from "./TurnControls.js";
-import { useStickyScroll } from "./useStickyScroll.js";
 import { useStoredTurn } from "./useStoredTurn.js";
 import { WakeForm } from "./WakeForm.js";
 
@@ -294,7 +294,6 @@ function NowTab({
 }) {
   const live = useLiveTurns();
   const now = useNow(5_000);
-  const { ref, onScroll } = useStickyScroll();
   const turns = turnsOf(live, name);
   // After a restart the live buffer is empty; the last finished turn is still on disk.
   const history = useTurnHistory(name, 1);
@@ -357,7 +356,7 @@ function NowTab({
           <HeldTasks project={scope} name={name} />
         )}
       </section>
-      <div ref={ref} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3">
+      <StickyList className="px-4 py-3">
         {turn === undefined ? (
           <PaneNote>
             {state === "working"
@@ -410,7 +409,7 @@ function NowTab({
             <TurnFooter turn={turn} running={turnRunning} now={now} />
           </>
         )}
-      </div>
+      </StickyList>
       {control === undefined ? null : <TurnControls name={name} turn={control} />}
     </>
   );

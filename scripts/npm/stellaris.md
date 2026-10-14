@@ -19,10 +19,10 @@ npm install --global @kubitnodes/stellaris
 
 ```bash
 export STELLARIS_DATA_DIR=~/stellaris-data
-stellaris init --name my-society                          # prints your user token once
-stellaris agent add desk --role concierge --cli claude    # the front desk, which routes what you ask
-stellaris agent add stew --role steward --cli claude      # the steward, which reads the society's signals
-stellaris-server                                          # http://127.0.0.1:4700
+stellaris init --name my-society                                 # prints your user token once
+stellaris agent add concierge-1 --role concierge --cli claude    # the front desk, which routes what you ask
+stellaris agent add steward-1 --role steward --cli claude        # the steward, which reads the society's signals
+stellaris-server                                                 # http://127.0.0.1:4700
 ```
 
 Open the server's address and enter the user token. Then start a runner on any machine that reaches the server; it prints a code to approve on the board, under runners.

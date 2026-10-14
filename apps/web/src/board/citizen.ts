@@ -178,11 +178,13 @@ export function turnRunners(member: Member, placed: ReadonlyMap<string, string>)
 /**
  * Where a citizen's turns run: its work outside projects on the runner it is pinned to, and its
  * work in each project on the runner that project lives on. Either is set by the first such turn.
+ * `parts` is the label in the pieces a line may break between, one runner each, so a list can wrap
+ * between runners while each name, whose hyphens a hostname's would otherwise break at, stays whole.
  */
 export function runnersOf(
   member: Member,
   placed: ReadonlyMap<string, string>,
-): { label: string; detail: string } {
+): { label: string; parts: string[]; detail: string } {
   const places = [
     ...(member.homeRunner === undefined
       ? []
@@ -193,8 +195,16 @@ export function runnersOf(
   const detail = places
     .map((place) => `${place.what}: ${place.runner ?? "placed on its first turn"}`)
     .join("; ");
+  const parts =
+    runners.length === 0
+      ? ["no runner yet"]
+      : runners.map(
+          (name, index) =>
+            `${index === 0 ? "on " : ""}${name}${index < runners.length - 1 ? "," : ""}`,
+        );
   return {
-    label: runners.length === 0 ? "no runner yet" : `on ${runners.join(", ")}`,
+    label: parts.join(" "),
+    parts,
     detail: detail === "" ? "pinned to a runner on its first turn" : detail,
   };
 }

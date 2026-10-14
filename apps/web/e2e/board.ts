@@ -937,6 +937,12 @@ export async function fakeBoard(
     quotas?: "reads" | "limited";
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
+    /**
+     * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
+     * two runners named as the chart names its pods, stew one of them, and adds hal, an
+     * investigator, on the other, so rows in the Citizens list run out of room.
+     */
+    crowded?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -956,9 +962,11 @@ export async function fakeBoard(
         : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
   // studio's own login, with numbers of its own, reported as fresh as pod's.
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
-  let deskModel: string | null = null;
-  let deskRunner: string | null = "pod";
-  let deskEffort: string | null = null;
+  const crowded = options.crowded === true;
+  const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
+  let deskModel: string | null = crowded ? "opus" : null;
+  let deskRunner: string | null = crowded ? "stellaris-runner-0" : "pod";
+  let deskEffort: string | null = crowded ? "xhigh" : null;
   // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
   let societySkills = [SOCIETY_SKILL];
@@ -967,7 +975,7 @@ export async function fakeBoard(
   let timezone = "UTC";
   const cronById = (id: unknown) => crons.find((each) => each["id"] === id);
   // Renaming changes the name the board shows, never the slug.
-  let lab = PROJECT;
+  let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
   let task: typeof TASK = TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
@@ -1109,7 +1117,7 @@ export async function fakeBoard(
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/verbs/advance_task":
           task = {
@@ -1223,13 +1231,13 @@ export async function fakeBoard(
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/agents/desk/runner":
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/wake":
           return json(route, {
@@ -1395,8 +1403,9 @@ export async function fakeBoard(
         return json(route, crons);
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
-          member("stew", "steward", [], null, null),
+          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+          member("stew", "steward", [], null, crowded ? "stellaris-runner-0" : null),
+          ...(crowded ? [member("hal", "investigator", [], null, "stellaris-runner-1")] : []),
           ...(options.retired === true
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),

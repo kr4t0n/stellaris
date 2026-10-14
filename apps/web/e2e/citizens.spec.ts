@@ -410,3 +410,65 @@ test("a citizen's view and the citizens list say when its CLI's quota is at its 
     page.getByRole("region", { name: "Plan quota" }).getByText(/^limited for (39|40)m · as of/),
   ).toBeVisible();
 });
+
+test("the citizens list shows each citizen's tokens over a window, retired ones apart", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await fakeBoard(page, { retired: true });
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+  const window = view.getByRole("navigation", { name: "Tokens" });
+
+  // The last day by default: desk's one counted turn, as its Turns tab adds it up.
+  await expect(window.getByRole("link", { name: "24h" })).toHaveAttribute("aria-current", "page");
+  await expect(row("desk")).toContainText("151K in · 1.5K out");
+  await expect(
+    row("desk").getByTitle(/^151,361 input tokens: 146,048 read from the cache/),
+  ).toHaveAttribute("title", /; over 1 finished turn in the last 24 hours$/);
+  await expect(row("stew")).toContainText("no turns");
+  const retired = view.getByRole("region", { name: "Retired" });
+  await expect(retired.getByRole("heading", { name: "Retired" })).toBeVisible();
+  await expect(retired.getByRole("listitem")).toHaveCount(1);
+  await expect(row("ada")).toContainText("retired");
+  await expect(row("ada")).toContainText("no turns");
+
+  // The line of counts ends where the row does, under its state, and nothing runs out of the list.
+  const [counts, state] = await Promise.all([
+    row("desk").getByText("151K in · 1.5K out").boundingBox(),
+    row("desk").getByText("resting").boundingBox(),
+  ]);
+  if (counts === null || state === null) {
+    throw new Error("desk's row is not on the page");
+  }
+  expect(Math.abs(counts.x + counts.width - state.x - state.width)).toBeLessThan(1);
+  expect(counts.y).toBeGreaterThanOrEqual(state.y + state.height - 1);
+  expect(
+    await view
+      .locator("ul")
+      .first()
+      .evaluate((list) => list.scrollWidth - list.clientWidth),
+  ).toBe(0);
+
+  // A week holds turns without a count: a lower bound, and unknown where none counted.
+  await window.getByRole("link", { name: "7d" }).click();
+  await expect(page).toHaveURL(/\/citizens\?window=7d$/);
+  await expect(window.getByRole("link", { name: "7d" })).toHaveAttribute("aria-current", "page");
+  await expect(row("desk")).toContainText("≥151K in · ≥1.5K out");
+  await expect(row("desk").getByRole("link")).toHaveAccessibleName(
+    /over 1 of 3 finished turns in the last 7 days/,
+  );
+  await expect(row("desk").getByTitle(/The other 2 have no count/)).toBeVisible();
+  await expect(row("stew")).toContainText("tokens unknown");
+  await expect(
+    row("stew").getByTitle(/^2 finished turns in the last 7 days, none with a token count/),
+  ).toBeVisible();
+
+  await window.getByRole("link", { name: "All" }).click();
+  await expect(page).toHaveURL(/\/citizens\?window=all$/);
+  await expect(row("desk")).toContainText("≥7.4M in · ≥42K out");
+  await expect(row("stew")).toContainText("≥7.2M in · ≥40K out");
+  await expect(row("ada")).toContainText("88K in · 900 out");
+});

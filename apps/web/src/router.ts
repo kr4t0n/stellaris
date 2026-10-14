@@ -86,6 +86,11 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/citizens",
+    // `window` picks how far back the citizens' tokens count; a day when none is named.
+    validateSearch: (search: Record<string, unknown>): { window?: MetricsWindow } => {
+      const window = MetricsWindowSchema.safeParse(search["window"]);
+      return window.success ? { window: window.data } : {};
+    },
     component: lazyRouteComponent(() => import("./board/CitizensView.js"), "CitizensView"),
   }),
   createRoute({

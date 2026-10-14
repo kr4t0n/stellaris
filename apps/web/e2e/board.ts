@@ -645,6 +645,58 @@ function askFixtures(): Map<string, AskFixture> {
   ]);
 }
 
+/**
+ * Each citizen's tokens over a window: desk's one counted turn in the last day, as its Turns tab
+ * lists it; over the week two more of its turns without a count, and stew's two with none; over
+ * the whole log a second counted turn of each.
+ */
+function tokens(window: string) {
+  const counted = DESK_TURN.usage;
+  const more = {
+    inputTokens: 2_000,
+    outputTokens: 40_000,
+    cacheReadTokens: 7_200_000,
+    cacheWriteTokens: 0,
+  };
+  const sum = (a: typeof counted, b: typeof counted) => ({
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+  });
+  const citizens =
+    window === "24h"
+      ? [{ agent: "desk", turns: 1, withUsage: 1, usage: counted }]
+      : window === "7d"
+        ? [
+            { agent: "desk", turns: 3, withUsage: 1, usage: counted },
+            { agent: "stew", turns: 2, withUsage: 0, usage: null },
+          ]
+        : [
+            { agent: "desk", turns: 4, withUsage: 2, usage: sum(counted, more) },
+            { agent: "stew", turns: 3, withUsage: 1, usage: more },
+          ];
+  return {
+    window,
+    since:
+      window === "all"
+        ? null
+        : window === "7d"
+          ? "2026-09-22T09:05:00.000Z"
+          : "2026-09-28T09:05:00.000Z",
+    until: "2026-09-29T09:05:00.000Z",
+    citizens,
+  };
+}
+
+/** ada's two counted turns, before it retired. */
+const RETIRED_TOKENS = {
+  agent: "ada",
+  turns: 2,
+  withUsage: 2,
+  usage: { inputTokens: 40, outputTokens: 900, cacheReadTokens: 88_000, cacheWriteTokens: 0 },
+};
+
 /** A week of metrics, or more decisions over the whole log, so the window switch shows. */
 function metrics(window: string) {
   return {
@@ -883,6 +935,8 @@ export async function fakeBoard(
     inFlight?: boolean;
     skillFolder?: boolean;
     quotas?: "reads" | "limited";
+    /** Adds ada, a researcher retired after two counted turns. */
+    retired?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -1278,6 +1332,15 @@ export async function fakeBoard(
           })),
       );
     }
+    if (pathname === "/api/tokens") {
+      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h");
+      return json(
+        route,
+        options.retired === true && use.window === "all"
+          ? { ...use, citizens: [RETIRED_TOKENS, ...use.citizens] }
+          : use,
+      );
+    }
     if (pathname === "/api/metrics") {
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
@@ -1334,6 +1397,9 @@ export async function fakeBoard(
         return json(route, [
           member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           member("stew", "steward", [], null, null),
+          ...(options.retired === true
+            ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
+            : []),
         ]);
       case "/api/version":
         return json(route, { version: "0.3.11" });

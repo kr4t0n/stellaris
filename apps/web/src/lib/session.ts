@@ -90,6 +90,15 @@ export function useMetrics(window: MetricsWindow) {
   });
 }
 
+export function useTokenUse(window: MetricsWindow) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["tokens", window],
+    queryFn: () => api.tokens(window),
+    refetchInterval: 60_000,
+  });
+}
+
 export function useChannels() {
   const { api } = useSession();
   return useQuery({ queryKey: ["channels"], queryFn: api.channels, refetchInterval: 60_000 });

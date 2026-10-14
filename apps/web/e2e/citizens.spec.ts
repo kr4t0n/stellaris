@@ -1,5 +1,87 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { DESK_TURN_IN_FLIGHT, fakeBoard, STAGE_TASK } from "./board.js";
+
+/** Where an element is on the page, failing when it is not shown. */
+async function boxOf(element: Locator) {
+  const box = await element.boundingBox();
+  if (box === null) {
+    throw new Error("an element is not on the page");
+  }
+  return box;
+}
+
+/**
+ * Where an element's text is drawn, leaving out text only screen readers get: a cell's own box
+ * spans its whole column, wherever its text sits in it.
+ */
+function textBoxOf(element: Locator) {
+  return element.evaluate((node) => {
+    const range = document.createRange();
+    const rects: DOMRect[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+      if (text.parentElement?.closest(".sr-only") === null) {
+        range.selectNodeContents(text);
+        rects.push(...range.getClientRects());
+      }
+    }
+    if (rects.length === 0) {
+      throw new Error("no text is drawn");
+    }
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  });
+}
+
+/**
+ * Whether the cell holding an element of a citizen's row keeps its text on one line however
+ * narrow the other columns leave its own: its narrowest width is its whole width.
+ */
+function isUnbreakable(element: Locator): Promise<boolean> {
+  return element.evaluate((node) => {
+    const cell = node.closest("a > *");
+    if (!(cell instanceof HTMLElement)) {
+      return false;
+    }
+    const width = cell.style.width;
+    cell.style.width = "min-content";
+    const narrowest = cell.getBoundingClientRect().width;
+    cell.style.width = "max-content";
+    const widest = cell.getBoundingClientRect().width;
+    cell.style.width = width;
+    return widest - narrowest < 0.5;
+  });
+}
+
+/** How many pixels of its text the cell holding an element of a citizen's row cuts off. */
+function cutOf(element: Locator): Promise<number> {
+  return element.evaluate((node) => {
+    const cell = node.closest("a > *");
+    return cell === null ? Number.NaN : cell.scrollWidth - cell.clientWidth;
+  });
+}
+
+/**
+ * Whether an element in a citizen's row shows all of its text: its cell cuts none of it, and it
+ * ends inside the row.
+ */
+function isWhole(element: Locator): Promise<boolean> {
+  return element.evaluate((node) => {
+    const cell = node.closest("a > *");
+    const row = node.closest("a");
+    if (cell === null || row === null) {
+      return false;
+    }
+    const box = node.getBoundingClientRect();
+    const bounds = row.getBoundingClientRect();
+    return (
+      cell.scrollWidth <= cell.clientWidth && box.left >= bounds.left && box.right <= bounds.right
+    );
+  });
+}
 
 test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await fakeBoard(page);
@@ -435,16 +517,22 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
   await expect(row("ada")).toContainText("retired");
   await expect(row("ada")).toContainText("no turns");
 
-  // The line of counts ends where the row does, under its state, and nothing runs out of the list.
-  const [counts, state] = await Promise.all([
-    row("desk").getByText("151K in · 1.5K out").boundingBox(),
-    row("desk").getByText("resting").boundingBox(),
-  ]);
-  if (counts === null || state === null) {
-    throw new Error("desk's row is not on the page");
+  // The island is 420 px wide, too narrow for the counts beside the rest: they take a line under
+  // the row, ending under its state, with no separator, and nothing is cut or runs out of the list.
+  for (const [name, label, word] of [
+    ["desk", "151K in · 1.5K out", "resting"],
+    ["stew", "no turns", "resting"],
+    ["ada", "no turns", "retired"],
+  ] as const) {
+    const counts = row(name).getByText(label);
+    const state = row(name).getByText(word, { exact: true });
+    const [countsBox, stateBox] = await Promise.all([textBoxOf(counts), textBoxOf(state)]);
+    expect(Math.abs(countsBox.x + countsBox.width - stateBox.x - stateBox.width)).toBeLessThan(1);
+    expect(countsBox.y).toBeGreaterThanOrEqual(stateBox.y + stateBox.height - 1);
+    expect(await isWhole(counts)).toBe(true);
+    expect(await isWhole(state)).toBe(true);
+    await expect(row(name).getByText("·", { exact: true })).toBeHidden();
   }
-  expect(Math.abs(counts.x + counts.width - state.x - state.width)).toBeLessThan(1);
-  expect(counts.y).toBeGreaterThanOrEqual(state.y + state.height - 1);
   expect(
     await view
       .locator("ul")
@@ -471,4 +559,128 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
   await expect(row("desk")).toContainText("≥7.4M in · ≥42K out");
   await expect(row("stew")).toContainText("≥7.2M in · ≥40K out");
   await expect(row("ada")).toContainText("88K in · 900 out");
+});
+
+test("from a 576 px island, each citizen's tokens sit beside its state, and the model and projects cut first", async ({
+  page,
+}) => {
+  // 1440 px gives the island 576 px; desk is in a turn, and its model and projects run long.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page, { retired: true, crowded: true, inFlight: true });
+  const { promise: counted, resolve: count } = Promise.withResolvers<void>();
+  await page.route("**/api/tokens**", async (route) => {
+    await counted;
+    await route.fallback();
+  });
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+
+  // Each row's counts and state share a line, neither cut nor able to wrap, a space's width apart
+  // around the separator, and the counts end where the other rows' do, and the states start where
+  // theirs do.
+  const oneLine = async (rows: ReadonlyArray<readonly [string, string | RegExp, string]>) => {
+    const ends: number[] = [];
+    const starts: number[] = [];
+    for (const [name, label, word] of rows) {
+      const counts = row(name).getByText(label);
+      const separator = row(name).getByText("·", { exact: true });
+      const state = row(name).getByText(word, { exact: true });
+      await expect(separator).toBeVisible();
+      const [countsBox, dotBox, stateBox] = await Promise.all([
+        textBoxOf(counts),
+        textBoxOf(separator),
+        textBoxOf(state),
+      ]);
+      expect(Math.abs(countsBox.y - stateBox.y)).toBeLessThanOrEqual(1);
+      expect(dotBox.x - countsBox.x - countsBox.width).toBeGreaterThanOrEqual(0);
+      expect(dotBox.x - countsBox.x - countsBox.width).toBeLessThan(8);
+      expect(stateBox.x).toBeGreaterThanOrEqual(dotBox.x + dotBox.width);
+      expect(await isWhole(counts)).toBe(true);
+      expect(await isWhole(state)).toBe(true);
+      expect(await isUnbreakable(state)).toBe(true);
+      ends.push(countsBox.x + countsBox.width);
+      starts.push(stateBox.x);
+    }
+    expect(Math.max(...ends) - Math.min(...ends)).toBeLessThan(1);
+    expect(Math.max(...starts) - Math.min(...starts)).toBeLessThan(1);
+  };
+
+  // While the counts load, and once they are in.
+  await expect(row("desk")).toContainText("counting…");
+  await oneLine([
+    ["desk", "counting…", "working"],
+    ["stew", "counting…", "resting"],
+    ["ada", "counting…", "retired"],
+  ]);
+  count();
+  await expect(row("desk")).toContainText("151K in · 1.5K out");
+  await oneLine([
+    ["desk", "151K in · 1.5K out", "working"],
+    ["stew", "no turns", "resting"],
+    ["ada", "no turns", "retired"],
+  ]);
+  // The state keeps its tone and its own hover, and the counts theirs.
+  const working = row("desk").getByText("working", { exact: true });
+  await expect(working).toHaveClass(/text-emerald-300/);
+  await expect(working).toHaveAttribute("title", "in a turn at the society");
+  await expect(row("desk").getByText("151K in · 1.5K out")).toHaveAttribute(
+    "title",
+    /^151,361 input tokens: 146,048 read from the cache/,
+  );
+  // The separator is not read out: the row's name is as it was.
+  await expect(row("desk").getByRole("link")).toHaveAccessibleName(/151K in · 1\.5K out working$/);
+
+  // The model and projects give way first, sharing what is left, and nothing runs out of the list.
+  const model = row("desk").getByTitle("claude-opus-5-5 · set to opus · xhigh");
+  const projects = row("desk").getByTitle("lab, atlas, beacon, comet");
+  expect(await cutOf(model)).toBeGreaterThan(0);
+  expect(await cutOf(projects)).toBeGreaterThan(0);
+  const [modelBox, projectsBox] = await Promise.all([boxOf(model), boxOf(projects)]);
+  expect(modelBox.width).toBeGreaterThanOrEqual(32);
+  expect(projectsBox.width).toBeGreaterThanOrEqual(32);
+  expect(
+    await view
+      .locator("ul")
+      .first()
+      .evaluate((list) => list.scrollWidth - list.clientWidth),
+  ).toBe(0);
+
+  // A lower bound, a count unknown, and the widest counts still fit beside the state.
+  const window = view.getByRole("navigation", { name: "Tokens" });
+  await window.getByRole("link", { name: "7d" }).click();
+  await expect(row("desk")).toContainText("≥151K in · ≥1.5K out");
+  await oneLine([
+    ["desk", /^≥151K in · ≥1\.5K out/, "working"],
+    ["stew", "tokens unknown", "resting"],
+    ["ada", "no turns", "retired"],
+  ]);
+  await expect(row("desk").getByRole("link")).toHaveAccessibleName(
+    /over 1 of 3 finished turns in the last 7 days/,
+  );
+  await window.getByRole("link", { name: "All" }).click();
+  await expect(row("desk")).toContainText("≥7.4M in · ≥42K out");
+  await oneLine([
+    ["desk", /^≥7\.4M in · ≥42K out/, "working"],
+    ["stew", /^≥7\.2M in · ≥40K out/, "resting"],
+    ["ada", "88K in · 900 out", "retired"],
+  ]);
+
+  // The island's width decides, not the window's: narrowed a step, the counts go under the row,
+  // and widened back, beside the state again.
+  const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  await handle.press("ArrowRight");
+  await expect(handle).toHaveAccessibleName(/^Width of the board's content, 544 of/);
+  const separator = row("desk").getByText("·", { exact: true });
+  await expect(separator).toBeHidden();
+  const [under, beside] = await Promise.all([
+    textBoxOf(row("desk").getByText(/^≥7\.4M in · ≥42K out/)),
+    textBoxOf(row("desk").getByText("working", { exact: true })),
+  ]);
+  expect(under.y).toBeGreaterThanOrEqual(beside.y + beside.height - 1);
+  expect(Math.abs(under.x + under.width - beside.x - beside.width)).toBeLessThan(1);
+  await handle.press("ArrowLeft");
+  await expect(separator).toBeVisible();
+  await oneLine([["desk", /^≥7\.4M in · ≥42K out/, "working"]]);
 });

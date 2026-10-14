@@ -104,18 +104,28 @@ function CitizenRow({
           {projects}
         </span>
         {/*
-          A line of its own under the row, ending at its right edge so the counts line up from row
-          to row, which a column beside the others would only have had room for by cutting them.
+          The counts, right-aligned so they line up from row to row: a column of their own before
+          the state where the list is wide enough, else a line of their own under the row, ending
+          at its right edge.
         */}
         <span
-          className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums"
+          className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
           title={tokens.detail}
         >
           {tokens.label}
           {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
         </span>
-        <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
-          {state.label}
+        {/*
+          On one line, the state's cell reaches into the column gap, so its separator sits a space
+          after the counts, as the separators inside them do.
+        */}
+        <span className="text-right text-xs whitespace-nowrap @min-[560px]:-ml-2 @min-[560px]:text-left">
+          <span aria-hidden="true" className="hidden text-fg-muted @min-[560px]:inline">
+            ·{" "}
+          </span>
+          <span className={state.tone} title={state.detail}>
+            {state.label}
+          </span>
         </span>
       </Link>
     </li>
@@ -125,9 +135,9 @@ function CitizenRow({
 /**
  * Every citizen at a glance, one row each in columns, ordered by role: its CLI, marked when its
  * quota is near or at its limit on a runner its turns use, role, model, the runners its turns run
- * on, projects, and what it is doing, and under them the tokens its turns counted over the window
- * the header picks; each opens the citizen's own view. Retired citizens follow in a section of
- * their own.
+ * on, projects, and the tokens its turns counted over the window the header picks beside what it
+ * is doing, or under the row in an island too narrow for them; each opens the citizen's own view.
+ * Retired citizens follow in a section of their own.
  */
 export function CitizensView() {
   const { window = "24h" } = useSearch({ from: "/citizens" });
@@ -235,7 +245,7 @@ export function CitizensView() {
         subtitle={`${active.length} active in ${roles === 1 ? "1 role" : `${roles} roles`}${retired.length === 0 ? "" : ` · ${retired.length} retired`}`}
         trailing={switcher}
       />
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div className="@container flex-1 overflow-y-auto px-2 py-2">
         {active.length === 0 ? (
           <p className="px-2 py-2 text-meta">
             {retired.length === 0 ? "No citizens yet." : "No active citizens."}
@@ -243,9 +253,12 @@ export function CitizensView() {
         ) : null}
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
-          cell. In a narrow island the model cuts before the projects go under 3rem.
+          cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
+          before the state, and the model and projects share what the other columns leave, cutting
+          before anything else does. In a narrower island the counts would push the row past its
+          edge, so they take a line under it, and the model cuts before the projects go under 3rem.
         */}
-        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3">
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
           {retired.length === 0 ? null : (
             <section

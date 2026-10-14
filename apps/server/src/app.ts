@@ -4,6 +4,7 @@ import {
   BranchPathSchema,
   CliKindSchema,
   EffortSchema,
+  IMAGE_MEDIA_TYPES,
   MESSAGE_LOOKUP_LIMIT,
   MetricsWindowSchema,
   ModelNameSchema,
@@ -406,6 +407,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     );
   });
   api.get("/tasks/:id/files/:path{.+}", (c) => taskFile(c, c.req.param("path")));
+  // An image a citizen uploaded, as its bytes: it never changes, and only a holder of a token sees
+  // it, so a browser keeps it privately for good, and never runs it as anything but an image.
+  api.get("/images/:id", async (c) => {
+    const { type, bytes } = await board.readImage(UlidSchema.parse(c.req.param("id")));
+    return c.body(new Uint8Array(bytes), 200, {
+      "content-type": IMAGE_MEDIA_TYPES[type],
+      "cache-control": "private, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+    });
+  });
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));
   api.get("/threads/:id", async (c) => {

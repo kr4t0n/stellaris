@@ -109,6 +109,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     ackTimeoutMs: options.ackTimeoutMs,
   });
   board.watchTurns(() => host.inFlight());
+  board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));
   const app = createApp({
     board,
     version: "test",

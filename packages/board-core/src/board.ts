@@ -22,6 +22,9 @@ import {
   describeCharter,
   EffortSchema,
   githubRepository,
+  IMAGE_LIMIT_BYTES,
+  IMAGE_SCHEME,
+  imageTypeOf,
   IsoDateTimeSchema,
   isBoardChannel,
   KnowledgeSchema,
@@ -84,6 +87,7 @@ import {
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
+  type ImageType,
   type Knowledge,
   type RemovedKnowledge,
   type RemovedSkill,
@@ -141,6 +145,7 @@ import {
   type Metrics,
   type MetricsWindow,
   type TokenUse,
+  type UploadedImage,
   RunnerOsSchema,
 } from "@stellaris/shared";
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
@@ -190,6 +195,12 @@ export interface TurnInFlight {
   readonly thread?: Ulid | undefined;
   readonly channel?: Name | undefined;
 }
+
+/**
+ * Reads the image file a citizen's turn names, on the runner that turn runs on, refusing with a
+ * `BoardError` a file it may not hand over.
+ */
+export type ImageSource = (actor: Actor, file: string) => Promise<Uint8Array>;
 
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
@@ -527,6 +538,7 @@ const CHANNEL_CONVERSATIONS = "channel-conversations";
 const DASHBOARD_UPDATES = "dashboard-updates-granted";
 const CRON_VERBS = "cron-verbs-granted";
 const KNOWLEDGE_NOTICES = "knowledge-notices";
+const IMAGE_UPLOADS = "image-uploads-granted";
 
 /** What a knowledge verb's event says, which a note from before notices takes its notice from. */
 const KnowledgeEventSchema = z.object({
@@ -713,6 +725,7 @@ export class Board {
   private readonly mutex = new Mutex();
   /** The turns in flight, which the server hosting them supplies; none until it does. */
   private turnsInFlight: () => readonly TurnInFlight[] = () => [];
+  private imageSource: ImageSource | null = null;
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
@@ -791,6 +804,7 @@ export class Board {
       DASHBOARD_UPDATES,
       CRON_VERBS,
       KNOWLEDGE_NOTICES,
+      IMAGE_UPLOADS,
     ].filter((name) => !applied.includes(name));
     if (pending.length === 0) {
       return;
@@ -821,13 +835,13 @@ export class Board {
     }
     if (pending.includes(KNOWLEDGE_REMOVAL)) {
       // Whoever may write a scope's knowledge may remove it.
-      await this.grantBesideKnowledge("remove_knowledge");
+      await this.grantBeside("write_knowledge", "remove_knowledge");
     }
     if (pending.includes(CHANNEL_CONVERSATIONS)) {
       await this.startChannelCursors();
     }
     if (pending.includes(DASHBOARD_UPDATES)) {
-      await this.grantBesideKnowledge("update_dashboard");
+      await this.grantBeside("write_knowledge", "update_dashboard");
       await this.rewordDashboards();
     }
     if (pending.includes(CRON_VERBS)) {
@@ -835,6 +849,10 @@ export class Board {
     }
     if (pending.includes(KNOWLEDGE_NOTICES)) {
       await this.noticeKnowledgeNotes();
+    }
+    if (pending.includes(IMAGE_UPLOADS)) {
+      // Whoever may post may show an image in the post.
+      await this.grantBeside("post_message", "upload_image");
     }
     await writeJson(file, { applied: [...applied, ...pending] });
   }
@@ -894,12 +912,12 @@ export class Board {
   }
 
   /**
-   * Grants `verb` once to every charter granting `write_knowledge`, the work roles' charters in
-   * practice; seed roles have it from their seed.
+   * Grants `verb` once to every charter granting `beside`, the work roles' charters in practice;
+   * seed roles have it from their seed.
    */
-  private async grantBesideKnowledge(verb: VerbName): Promise<void> {
+  private async grantBeside(beside: VerbName, verb: VerbName): Promise<void> {
     for (const charter of await this.listRoles()) {
-      if (charter.verbs.includes("write_knowledge") && !charter.verbs.includes(verb)) {
+      if (charter.verbs.includes(beside) && !charter.verbs.includes(verb)) {
         await this.writeRoleUnlocked(
           USER_NAME,
           { ...charter, verbs: [...charter.verbs, verb] },
@@ -2767,6 +2785,72 @@ export class Board {
     });
   }
 
+  /**
+   * Keeps an image a citizen's turn names by its path, read on the runner the turn runs on, which
+   * refuses a file outside the turn's worktree, the citizen's home, and the system temp folder.
+   * Only the bytes of a PNG, JPEG, GIF, or WebP of at most `IMAGE_LIMIT_BYTES` are kept, checked
+   * here again whatever the runner said, under a new id outside the projection, so no runner
+   * mirrors them and no prompt carries them: a post shows the image by its `image:` address.
+   */
+  async uploadImage(actor: Actor, input: VerbInput<"upload_image">): Promise<UploadedImage> {
+    const args = VerbInputs.upload_image.parse(input);
+    await this.authorize(actor, "upload_image");
+    if (actor.scope === undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        "upload_image reads the file on the machine a turn runs on, so only a turn can call it",
+      );
+    }
+    if (this.imageSource === null) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to read an image from");
+    }
+    // Read outside the mutex: the runner may take a while, and the board waits for nobody.
+    const bytes = await this.imageSource(actor, args.path);
+    const type = imageTypeOf(bytes);
+    if (type === null) {
+      throw new BoardError(
+        "VALIDATION",
+        `${args.path} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
+      );
+    }
+    if (bytes.byteLength > IMAGE_LIMIT_BYTES) {
+      throw new BoardError(
+        "VALIDATION",
+        `${args.path} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+      );
+    }
+    return this.mutex.run(async () => {
+      const id = this.newId();
+      await writeFileAtomic(this.paths.image(id), bytes);
+      await this.events.append("image.uploaded", actor.name, {
+        id,
+        type,
+        size: bytes.byteLength,
+      });
+      const name = path.basename(args.path).replaceAll(/[[\]\\\r\n]/g, "");
+      return {
+        id,
+        type,
+        size: bytes.byteLength,
+        markdown: `![${name}](${IMAGE_SCHEME}${id})`,
+      };
+    });
+  }
+
+  /** An uploaded image's bytes and kind, which its first bytes tell. */
+  async readImage(id: Ulid): Promise<{ type: ImageType; bytes: Uint8Array }> {
+    const file = this.paths.image(UlidSchema.parse(id));
+    if (!(await exists(file))) {
+      throw new BoardError("NOT_FOUND", `image ${id} not found`);
+    }
+    const bytes = await readFile(file);
+    const type = imageTypeOf(bytes);
+    if (type === null) {
+      throw new BoardError("NOT_FOUND", `image ${id} is not an image the board shows`);
+    }
+    return { type, bytes };
+  }
+
   /** Every cron, ended ones included, oldest first. */
   async listCrons(): Promise<Cron[]> {
     const crons: Cron[] = [];
@@ -3277,6 +3361,14 @@ export class Board {
    */
   watchTurns(source: () => readonly TurnInFlight[]): void {
     this.turnsInFlight = source;
+  }
+
+  /**
+   * Where `upload_image` reads a file from: the runner the calling turn runs on, through the server
+   * that hosts the runners. Without one, as in the admin CLI, nothing can be uploaded.
+   */
+  readImagesWith(source: ImageSource): void {
+    this.imageSource = source;
   }
 
   /**
@@ -4287,6 +4379,8 @@ export class Board {
         return this.updateCron(actor, VerbInputs.update_cron.parse(input));
       case "remove_cron":
         return this.removeCron(actor, VerbInputs.remove_cron.parse(input));
+      case "upload_image":
+        return this.uploadImage(actor, VerbInputs.upload_image.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }

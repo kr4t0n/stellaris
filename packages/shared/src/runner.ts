@@ -13,6 +13,7 @@ import {
   UsageSchema,
 } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
+import { ImageTypeSchema } from "./images.js";
 import { CliQuotaSchema } from "./quota.js";
 
 /**
@@ -73,6 +74,8 @@ export const RunnerHelloSchema = z.object({
   branchChanges: z.boolean().default(false),
   /** Whether the runner answers a read of a CLI's quota; one from before never does. */
   quotaReads: z.boolean().default(false),
+  /** Whether the runner reads an image a turn running there uploads; one from before never does. */
+  imageReads: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /**
    * What the runner's account lacks of the git identity citizens' own commits carry, checked
@@ -450,6 +453,39 @@ export function patchHunks(
 }
 
 /**
+ * A request to read the image file a turn running on the runner names in `upload_image`: a path
+ * on that machine, absolute or relative to the turn's working directory.
+ */
+export const TurnImageReadSchema = z.object({
+  turnId: UlidSchema,
+  path: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((value) => !value.includes("\0"), { message: "a path with no NUL" }),
+});
+export type TurnImageRead = z.infer<typeof TurnImageReadSchema>;
+
+/** Why a runner would not hand over a file as an image. */
+export const ImageRefusalSchema = z.enum(["missing", "outside", "not_image", "too_big"]);
+export type ImageRefusal = z.infer<typeof ImageRefusalSchema>;
+
+/**
+ * What a runner read for `upload_image`: the image, base64, or why it refused, in words for the
+ * citizen who named the file.
+ */
+export const TurnImageSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("image"),
+    type: ImageTypeSchema,
+    size: z.number().int().positive(),
+    content: z.string(),
+  }),
+  z.object({ kind: z.literal("refused"), why: ImageRefusalSchema, detail: z.string() }),
+]);
+export type TurnImage = z.infer<typeof TurnImageSchema>;
+
+/**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
  * task's thread takes its id, or a channel's beside general in a scope.
  */
@@ -520,6 +556,11 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   }),
   /** Answered with a `BranchFileDiff`, or null when the branch does not exist or left the path alone. */
   z.object({ type: z.literal("diff"), request: z.string().min(1), read: BranchDiffReadSchema }),
+  /**
+   * Answered with a `TurnImage`, or null when the turn is not running there. Sent only to runners
+   * whose hello says `imageReads`.
+   */
+  z.object({ type: z.literal("image"), request: z.string().min(1), read: TurnImageReadSchema }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

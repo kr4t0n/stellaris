@@ -171,7 +171,8 @@ function branchPath(path: string): string {
 /** Why the board refused a request, when it said. */
 const ErrorBodySchema = z.object({ message: z.string() });
 
-async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promise<T> {
+/** A read with the board's token; the board's refusal comes back as an ApiError with its reason. */
+async function fetchOk(path: string, token: string): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(path, { headers: { authorization: `Bearer ${token}` } });
@@ -185,7 +186,29 @@ async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promis
       detail.success ? detail.data.message : `${path} answered ${response.status}`,
     );
   }
-  return schema.parse(await response.json());
+  return response;
+}
+
+async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promise<T> {
+  return schema.parse(await (await fetchOk(path, token)).json());
+}
+
+/**
+ * An image's bytes as a data URL, since an `<img>` cannot send the board's token; a data URL
+ * rather than an object URL, so nothing has to be let go when the view does.
+ */
+async function getImage(path: string, token: string): Promise<string> {
+  const blob = await (await fetchOk(path, token)).blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new ApiError(0, `${path} could not be read`)),
+    );
+    reader.addEventListener("error", () => reject(new ApiError(0, `${path} could not be read`)));
+    reader.readAsDataURL(blob);
+  });
 }
 
 /** A write as the signed-in actor; the board's refusal comes back as an ApiError with its reason. */
@@ -267,6 +290,8 @@ export function createApi(token: string) {
     /** One path on a task's branch, read from its project's runner: a file, base64, or a folder. */
     taskFile: (id: string, path: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/files${branchPath(path)}`, token, BranchFileSchema),
+    /** An image a citizen uploaded, as a data URL. */
+    image: (id: string) => getImage(`/api/images/${encodeURIComponent(id)}`, token),
     /** What a task's branch changed since it left the default branch, file by file. */
     taskChanges: (id: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/changes`, token, BranchChangesSchema),

@@ -234,4 +234,9 @@ describe("entities", () => {
       UNKNOWN,
     ]);
   });
+
+  it("never asks about an uploaded image's id as a message's", () => {
+    expect(unknownIds(`![the board](image:${UNKNOWN})`, index)).toEqual([]);
+    expect(unknownIds(`![the board](image:${UNKNOWN}) is ${UNKNOWN}`, index)).toEqual([UNKNOWN]);
+  });
 });

@@ -176,6 +176,7 @@ data/
     .claude/  .codex/                      # rendered before each turn, never hand-edited
   worktrees/<agent>/<project>/             # one persistent worktree per pair, on the pair's runner
   events/                                  # JSONL event log and cursors
+  images/<id>                              # images citizens uploaded, outside the projection
 ```
 
 ### 4.3 Verbs
@@ -205,6 +206,7 @@ Knowledge     write_knowledge(project, topic, body, revision) # project null wri
               remove_knowledge(project, topic)        # whoever may write it; the text is set aside, not destroyed
 Skills        remove_skill(name, reason)              # steward and user; skills join by proposal; the text is set aside, not destroyed
 Dashboards    update_dashboard(project, body, revision) # the project's members and the user; refused unless revision is the current one
+Images        upload_image(path)                      # a PNG, JPEG, GIF, or WebP the caller's turn names, read on its runner; a post shows it as ![…](image:<id>)
 ```
 
 Rules:

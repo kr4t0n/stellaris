@@ -145,3 +145,32 @@ test("an ask becomes a planned task that citizens carry to done, and the sky fol
     timeout: STEP,
   });
 });
+
+test("a citizen shows the user a screenshot it uploaded from its runner, in the ask's thread", async ({
+  page,
+  request,
+}) => {
+  const { token } = z
+    .object({ token: z.string() })
+    .parse(await (await request.post(`${society.url}/test/token`)).json());
+  await page.goto(society.url);
+  await page.getByLabel("Board token").fill(token);
+  await page.getByRole("button", { name: "Enter the playground" }).click();
+  await expect(page.getByRole("button", { name: "Space to ask" })).toBeVisible();
+
+  await page.keyboard.press("Space");
+  const box = page.getByRole("region", { name: "Ask", exact: true });
+  const field = box.getByRole("textbox", { name: "Ask the front desk" });
+  await field.fill("Show me the board as it looks now.");
+  await field.press("Enter");
+  const ask = box.getByRole("listitem").first();
+  await expect(ask).toContainText("answered by desk", { timeout: STEP });
+  await ask.getByRole("link", { name: /Show me the board/ }).click();
+
+  // The file is gone from the runner; the board kept the image and shows it in the post.
+  const content = page.getByRole("region", { name: "Board content" });
+  await expect(content).toContainText("Here it is:");
+  const shot = content.getByRole("img", { name: "The board, as it looks now" });
+  await expect(shot).toBeVisible();
+  await expect.poll(() => shot.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
+});

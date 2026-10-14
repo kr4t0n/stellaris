@@ -273,6 +273,7 @@ export class RunnerDaemon {
           branchReads: true,
           branchChanges: true,
           quotaReads: true,
+          imageReads: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
@@ -362,6 +363,9 @@ export class RunnerDaemon {
         return;
       case "diff":
         answer(this.executor.branchDiff(message.read));
+        return;
+      case "image":
+        answer(this.executor.readImage(message.read));
         return;
       case "steer": {
         const control = this.controls.get(message.turnId);

@@ -172,6 +172,18 @@ export function useTaskFile(taskId: string, path: string) {
   });
 }
 
+/** An image a citizen uploaded, which never changes once kept. */
+export function useUploadedImage(id: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["image", id],
+    queryFn: () => api.image(id),
+    staleTime: Infinity,
+    retry: (failures, error) =>
+      failures < 1 && !(error instanceof ApiError && error.status >= 400 && error.status < 500),
+  });
+}
+
 /** What a task's branch changed, refreshed like its files when a turn ends. */
 export function useTaskChanges(taskId: string) {
   const { api } = useSession();

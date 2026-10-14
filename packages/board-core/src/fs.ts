@@ -17,7 +17,7 @@ export async function exists(file: string): Promise<boolean> {
 }
 
 /** Writes through a temporary file and a rename so readers never observe a partial file. */
-export async function writeFileAtomic(file: string, content: string): Promise<void> {
+export async function writeFileAtomic(file: string, content: string | Uint8Array): Promise<void> {
   await ensureDir(path.dirname(file));
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, content, "utf8");

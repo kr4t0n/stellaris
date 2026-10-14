@@ -66,6 +66,7 @@ export const BOARD_EVENT_TYPES = [
   "cron.fired",
   "cron.skipped",
   "cron.ended",
+  "image.uploaded",
 ] as const;
 export const BoardEventTypeSchema = z.enum(BOARD_EVENT_TYPES);
 export type BoardEventType = z.infer<typeof BoardEventTypeSchema>;

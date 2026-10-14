@@ -1,6 +1,9 @@
 import { mentionsIn } from "@stellaris/shared/mentions";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { createApi } from "../lib/api.js";
+import { SessionContext } from "../lib/session.js";
 import { Markdown } from "./Markdown.js";
 
 /** The names a text renders highlighted as mentions. */
@@ -59,6 +62,27 @@ describe("Markdown", () => {
     );
     expect(html).toContain('<li class="line-target">two, line six</li>');
     expect(html.match(/line-target/g)).toHaveLength(1);
+  });
+
+  it("shows an image uploaded to the board by its id, and a link to one as text", () => {
+    const shown = "01M4WY483E0XG4Q2ZTHAX3JBZV";
+    const loading = "01M4WY483E0XG4Q2ZTHAX3JBZW";
+    const client = new QueryClient();
+    client.setQueryData(["image", shown], "data:image/png;base64,iVBORw0KGgo=");
+    const session = { api: createApi("t"), token: "t", signOut() {}, expire() {} };
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <SessionContext value={session}>
+          <Markdown
+            text={`![The board](image:${shown}) ![The runners](image:${loading}) [the shot](image:${shown})`}
+          />
+        </SessionContext>
+      </QueryClientProvider>,
+    );
+    expect(html).toContain('<img src="data:image/png;base64,iVBORw0KGgo=" alt="The board"');
+    expect(html).toContain("Loading The runners…");
+    expect(html).toContain("<span>the shot</span>");
+    expect(html).not.toContain('href="image:');
   });
 
   it("never renders raw HTML or script URLs from a message", () => {

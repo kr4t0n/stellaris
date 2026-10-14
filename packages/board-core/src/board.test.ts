@@ -11,12 +11,12 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
+import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Board, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
+import { Board, BoardError, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -3377,6 +3377,121 @@ describe("Board", () => {
       timezone: "Asia/Shanghai",
       channels: ["general", "governance", "asks"],
     });
+  });
+
+  it("keeps an image a turn uploads outside the projection, checked again whatever its runner said", async () => {
+    const { board } = await society();
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const turn: Actor = { ...ENG, scope: "demo", thread: "01M4WY483E0XG4Q2ZTHAX3JBZV" };
+    const upload = { path: "/tmp/shots/the board [before].png" };
+    // Nothing reads files on a board without runners, and only a turn says where to read them.
+    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const asked: Array<{ actor: Actor; file: string }> = [];
+    let bytes: Uint8Array = png;
+    board.readImagesWith((actor, file) => {
+      asked.push({ actor, file });
+      return Promise.resolve(bytes);
+    });
+    await expect(board.uploadImage(ENG, upload)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("only a turn can call it"),
+    });
+    await expect(board.uploadImage(turn, { path: "/tmp/shots/board\0.png" })).rejects.toThrow(
+      "a path with no NUL character",
+    );
+    await expect(board.uploadImage(USER, upload)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect(asked).toEqual([]);
+
+    const uploaded = await board.uploadImage(turn, upload);
+    expect(asked).toEqual([{ actor: turn, file: upload.path }]);
+    expect(uploaded).toEqual({
+      id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
+      type: "png",
+      size: png.length,
+      markdown: `![the board before.png](image:${uploaded.id})`,
+    });
+    expect(await board.readImage(uploaded.id)).toEqual({ type: "png", bytes: png });
+    // Beside the event log, never in the projection every runner mirrors.
+    expect(await readdir(path.join(dir, "images"))).toEqual([uploaded.id]);
+    expect(
+      Object.keys(await board.boardManifest()).filter((file) => file.includes(uploaded.id)),
+    ).toEqual([]);
+    const event = (await board.readEvents(null)).find((each) => each.type === "image.uploaded");
+    expect(event).toMatchObject({
+      actor: "eng-1",
+      payload: { id: uploaded.id, type: "png", size: png.length },
+    });
+
+    // The board takes no runner's word for what an image is.
+    bytes = Buffer.from("<svg><script>alert(1)</script></svg>");
+    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining("is not a PNG, JPEG, GIF, or WebP image"),
+    });
+    bytes = Buffer.concat([png, Buffer.alloc(IMAGE_LIMIT_BYTES - png.length + 1)]);
+    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining(`is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608`),
+    });
+    bytes = bytes.subarray(0, IMAGE_LIMIT_BYTES);
+    const largest = await board.uploadImage(turn, upload);
+    expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
+    // A runner's refusal reaches the citizen as it was given.
+    board.readImagesWith(() =>
+      Promise.reject(new BoardError("FORBIDDEN", "/etc/passwd is outside your worktree")),
+    );
+    await expect(board.uploadImage(turn, { path: "/etc/passwd" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "/etc/passwd is outside your worktree",
+    });
+    expect((await readdir(path.join(dir, "images"))).toSorted()).toEqual([uploaded.id, largest.id]);
+
+    await expect(board.readImage("01M4WY483E0XG4Q2ZTHAX3JBZW")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    // A file in the images folder that is no image, as one put there by hand, is not served.
+    await writeFile(path.join(dir, "images", "01M4WY483E0XG4Q2ZTHAX3JBZW"), "<svg/>");
+    await expect(board.readImage("01M4WY483E0XG4Q2ZTHAX3JBZW")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "image 01M4WY483E0XG4Q2ZTHAX3JBZW is not an image the board shows",
+    });
+    board.readImagesWith(() => Promise.resolve(png));
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: ["post_message"],
+    });
+    await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "role engineer may not upload_image",
+    });
+  });
+
+  it("grants upload_image once to every charter that may post", async () => {
+    const { board } = await society();
+    const without = MEMBER_VERBS.filter((verb) => verb !== "upload_image");
+    await board.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
+    await board.setRoleCharter(USER, {
+      name: "reviewer",
+      purpose: "Reviews.",
+      verbs: ["post_message", "read_inbox"],
+    });
+    await board.setRoleCharter(USER, {
+      name: "reader",
+      purpose: "Reads.",
+      verbs: ["read_inbox", "search"],
+    });
+    const reopened = await Board.open(dir, { now });
+    for (const role of ["engineer", "reviewer", "steward", "concierge", "user"]) {
+      expect((await reopened.readRole(role)).verbs).toContain("upload_image");
+    }
+    expect((await reopened.readRole("reader")).verbs).not.toContain("upload_image");
+    await reopened.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
+    await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).not.toContain("upload_image");
   });
 
   it("grants the cron verbs once to every charter but the user's", async () => {

@@ -1,4 +1,4 @@
-import { describeCharter, type MessageRef, type Proposal } from "@stellaris/shared";
+import { describeCharter, IMAGE_SCHEME, type MessageRef, type Proposal } from "@stellaris/shared";
 
 export type EntityKind = "task" | "proposal" | "thread" | "cron" | "message";
 
@@ -140,11 +140,15 @@ export function splitEntities(text: string, index: EntityIndex): Piece[] {
   return pieces;
 }
 
-/** The ids in a text the index does not know yet, which may name messages. */
+/**
+ * The ids in a text the index does not know yet, which may name messages; an uploaded image's,
+ * written `image:<id>`, never does.
+ */
 export function unknownIds(text: string, index: EntityIndex): string[] {
-  return [...new Set([...text.matchAll(ULID)].map((match) => match[0]))].filter(
-    (id) => !index.has(id),
-  );
+  const ids = [...text.matchAll(ULID)]
+    .filter((match) => !text.endsWith(IMAGE_SCHEME, match.index))
+    .map((match) => match[0]);
+  return [...new Set(ids)].filter((id) => !index.has(id));
 }
 
 /** The text with each known id read as its title, for places that cannot hold a link. */

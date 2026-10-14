@@ -98,6 +98,18 @@ describe("linkTarget", () => {
       expect(linkTarget(href)).toBeNull();
     }
   });
+
+  it("reads image: and an id as an image uploaded to the board, inside a task's file too", () => {
+    expect(linkTarget(`image:${TASK}`)).toEqual({ kind: "upload", id: TASK });
+    expect(linkTarget(`image:${TASK}`, { taskId: TASK, dir: "docs" })).toEqual({
+      kind: "upload",
+      id: TASK,
+    });
+    // Anything else after image: is no id, and stays the browser's like any other scheme.
+    for (const href of [`image:${TASK.toLowerCase()}`, `image:${TASK}x`, "image:", "image:/x"]) {
+      expect(linkTarget(href)).toBeNull();
+    }
+  });
 });
 
 /** A hast node as the line plugin sees one. */

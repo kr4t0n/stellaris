@@ -151,3 +151,32 @@ for (const [width, height] of [
     }
   });
 }
+
+test("a linked post centers in its list, and one taller than the list opens at its top, unfolded", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await serve(page, [5, 35]);
+
+  for (const view of [`/thread/${THREAD}`, `/c/${CHANNEL}`]) {
+    await page.goto(`${view}?message=${postId(20)}`);
+    await expect(marked(page)).toContainText("Post 20:");
+    const short = await placed(page);
+    expect(
+      Math.abs(short.target.y + short.target.height / 2 - (short.list.y + short.list.height / 2)),
+    ).toBeLessThanOrEqual(1);
+
+    // Near the start or near the end, a report opens at who wrote it and its first lines.
+    for (const n of [5, 35]) {
+      await page.goto("about:blank");
+      await page.goto(`${view}?message=${postId(n)}`);
+      const report = marked(page);
+      await expect(report).toContainText(`Post ${n}: the full report.`);
+      await expect(report.getByRole("button", { name: "Show less" })).toBeVisible();
+      const { list, target } = await placed(page);
+      expect(target.height).toBeGreaterThan(list.height);
+      expect(Math.abs(target.y - list.y)).toBeLessThanOrEqual(1);
+      await expect(report.locator("header")).toBeInViewport();
+    }
+  }
+});

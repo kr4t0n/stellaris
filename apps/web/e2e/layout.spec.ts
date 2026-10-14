@@ -55,6 +55,9 @@ for (const size of [
   test(`Working now keeps two rows and half a third however many citizens are in a turn, scrolls the rest without a scrollbar of its own, and the navigator under it stays put (${size.width}×${size.height})`, async ({
     page,
   }) => {
+    // Each of the five changes in who is working waits up to 3 s for the scheduler's poll, and on a
+    // loaded machine the test took 27 to 29 s of the default 30 s.
+    test.setTimeout(60_000);
     await page.setViewportSize(size);
     const board = await fakeBoard(page);
     await page.goto("/c/general");

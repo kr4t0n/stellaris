@@ -51,6 +51,17 @@ export function imageTypeOf(bytes: Uint8Array): ImageType | null {
   return null;
 }
 
+/**
+ * The path of an image file on the machine a turn runs on, as `upload_image` takes it and the
+ * runner is asked for it: one schema for both, so a path the verb takes is never one the runner's
+ * stream refuses, which would leave the call waiting for an answer that never comes.
+ */
+export const ImagePathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => !value.includes("\0"), { message: "a path with no NUL character" });
+
 /** How an uploaded image is written in a post's markdown: `image:` and its id. */
 export const IMAGE_SCHEME = "image:";
 

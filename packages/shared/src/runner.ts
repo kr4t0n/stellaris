@@ -13,7 +13,7 @@ import {
   UsageSchema,
 } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
-import { ImageTypeSchema } from "./images.js";
+import { ImagePathSchema, ImageTypeSchema } from "./images.js";
 import { CliQuotaSchema } from "./quota.js";
 
 /**
@@ -458,11 +458,7 @@ export function patchHunks(
  */
 export const TurnImageReadSchema = z.object({
   turnId: UlidSchema,
-  path: z
-    .string()
-    .min(1)
-    .max(4096)
-    .refine((value) => !value.includes("\0"), { message: "a path with no NUL" }),
+  path: ImagePathSchema,
 });
 export type TurnImageRead = z.infer<typeof TurnImageReadSchema>;
 

@@ -2420,6 +2420,7 @@ describe("turns on a runner over the runner protocol", () => {
         await writeFile(path.join(cwd, "shots", "notes.png"), "notes, not a picture\n");
         await upload("text", "shots/notes.png");
         await upload("missing", "shots/gone.png");
+        await upload("nul", "shots/board.png\0.png");
         // A runner from before image reads is refused at once rather than left to time out.
         hello = {
           protocol: RUNNER_PROTOCOL,
@@ -2504,6 +2505,14 @@ describe("turns on a runner over the runner protocol", () => {
       status: 404,
       body: { message: "shots/gone.png does not exist on this runner" },
     });
+    // A path no runner could be asked for is refused before any runner is.
+    expect(answers.get("nul")).toMatchObject({
+      status: 400,
+      body: {
+        error: "VALIDATION",
+        message: expect.stringContaining("a path with no NUL character"),
+      },
+    });
     expect(answers.get("old")).toMatchObject({
       status: 409,
       body: { message: "runner pod, where the turn runs, cannot read images yet; upgrade it" },
@@ -2519,6 +2528,7 @@ describe("turns on a runner over the runner protocol", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("image/png");
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
       expect(response.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(PIXEL);
     }
@@ -2543,6 +2553,73 @@ describe("turns on a runner over the runner protocol", () => {
     await turn("rev-1");
     expect(prompts.get("rev-1")).toContain(`Before: ![board.png](image:${ids[0]})`);
     expect(prompts.get("rev-1")).not.toContain(PIXEL.toString("base64").slice(0, 16));
+  });
+
+  it("reads an upload from the very turn that asked, among one citizen's turns in two projects and a channel", async () => {
+    const { board } = await Board.init(dir, { name: "image-turns" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
+    await board.addProject(USER, { slug: "lab" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo", "lab"],
+    });
+    // Each turn writes a file only its own worktree has, and uploads it by a relative path once all
+    // three are in flight, so a turn matched by fewer than all its parts reads another's worktree.
+    const statuses = new Map<string, number>();
+    const written = Promise.withResolvers<void>();
+    const uploaded = Promise.withResolvers<void>();
+    let writers = 0;
+    let uploaders = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const actor = board.resolveToken(request.mcp.token);
+        const key = `${actor?.scope ?? ""}${actor?.channel === undefined ? "" : `#${actor.channel}`}`;
+        await mkdir(path.join(request.spec.cwd, "shots"), { recursive: true });
+        await writeFile(path.join(request.spec.cwd, "shots", `${key}.png`), PIXEL);
+        writers += 1;
+        if (writers === 3) {
+          written.resolve();
+        }
+        await written.promise;
+        const response = await society?.app.request("/api/verbs/upload_image", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${request.mcp.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ path: `shots/${key}.png` }),
+        });
+        statuses.set(key, response?.status ?? 0);
+        uploaders += 1;
+        if (uploaders === 3) {
+          uploaded.resolve();
+        }
+        await uploaded.promise;
+        return completed("uploaded");
+      },
+    };
+    const { run } = await start(board, backend);
+    const turn = (project: string, channel?: string) =>
+      run({
+        agent: "eng-1",
+        project,
+        ...(channel === undefined ? {} : { channel }),
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    const turns = await Promise.all([turn("demo"), turn("demo", "release"), turn("lab")]);
+    expect(turns.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
+    expect(Object.fromEntries(statuses)).toEqual({ demo: 200, "demo#release": 200, lab: 200 });
   });
 
   it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {

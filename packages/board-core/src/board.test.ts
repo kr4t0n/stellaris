@@ -3399,6 +3399,9 @@ describe("Board", () => {
       code: "INVALID_STATE",
       message: expect.stringContaining("only a turn can call it"),
     });
+    await expect(board.uploadImage(turn, { path: "/tmp/shots/board\0.png" })).rejects.toThrow(
+      "a path with no NUL character",
+    );
     await expect(board.uploadImage(USER, upload)).rejects.toMatchObject({ code: "INVALID_STATE" });
     expect(asked).toEqual([]);
 

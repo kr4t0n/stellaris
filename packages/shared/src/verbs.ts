@@ -10,6 +10,7 @@ import {
   StageIdSchema,
 } from "./board.js";
 import { CronExpressionSchema, TimeZoneSchema } from "./crons.js";
+import { ImagePathSchema } from "./images.js";
 import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 
@@ -181,7 +182,7 @@ export const VerbInputs = {
   remove_skill: z.object({ name: NameSchema, reason: z.string().trim().min(1) }),
   upload_image: z.object({
     /** The image file on the machine your turn runs on: absolute, or relative to your working directory. */
-    path: z.string().min(1).max(4096),
+    path: ImagePathSchema,
   }),
 } as const satisfies Record<VerbName, z.ZodType>;
 

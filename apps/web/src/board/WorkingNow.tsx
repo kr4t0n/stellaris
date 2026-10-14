@@ -8,25 +8,32 @@ import { conversationOf, elapsed, lastLine, pairKey, useLiveTurns } from "../lib
 import { useMembers, useNow, useScheduler } from "../lib/session.js";
 
 /**
- * The rows the list has room for: two, and half of a third, whose cut edge says the list scrolls,
- * since it shows no scrollbar beside the navigator's. More scroll inside it, so nothing under the
- * section moves.
+ * The rows the list has room for: two, and half of a third, fading out at the list's foot, which
+ * says the list scrolls, since it shows no scrollbar beside the navigator's. More scroll inside it,
+ * so nothing under the section moves.
  */
 const ROWS = 2.5;
 
 /**
  * A row is a 20 px line and an 11 px line at the inherited 1.5 leading, 2 px apart, with 6 px
  * above and below. The list's 2 px above and below its rows keep a focused row's ring inside it,
- * and put its bottom edge in the gap between the third row's lines, so that row's name shows whole.
+ * and put its bottom edge in the gap between the third row's lines, so the fade there runs over
+ * that row's name and leaves it readable.
  */
 const LIST_HEIGHT = `calc(${ROWS} * (1.25rem + 0.125rem + 11px * 1.5 + 0.75rem) + 0.25rem)`;
 
 /**
- * The list's top edge fades once rows lie above it, as deep as its scroll padding, so a row the
- * keyboard brings into view stays clear of the fade. Its bottom edge never fades: the half row cut
- * there is what says more follow, and a fade would wash out the name it shows.
+ * A list's edges fade where rows lie beyond them, as deep as its scroll padding, so a row the
+ * keyboard brings into view stays clear of the fade.
  */
-const FADE_ABOVE = "linear-gradient(to bottom, transparent, black 1rem)";
+function fade(above: boolean, below: boolean): string | undefined {
+  if (!above && !below) {
+    return undefined;
+  }
+  const top = above ? "transparent, black 1rem" : "black";
+  const bottom = below ? "black calc(100% - 1rem), transparent" : "black";
+  return `linear-gradient(to bottom, ${top}, ${bottom})`;
+}
 
 /**
  * Whether a scrolling box has more above or below what it shows, followed as it scrolls and as
@@ -85,6 +92,7 @@ export function WorkingNow({
     list.above || list.below ? `${running.length} running` : null,
     queued > 0 ? `${queued} queued` : null,
   ].filter((count) => count !== null);
+  const mask = fade(list.above, list.below);
 
   return (
     <section aria-label="Working now" className="mt-3">
@@ -97,7 +105,10 @@ export function WorkingNow({
       <div
         ref={box}
         className="scrollbar-hidden -mx-1 scroll-py-4 overflow-y-auto px-1 py-0.5"
-        style={{ height: LIST_HEIGHT, ...(list.above ? { maskImage: FADE_ABOVE } : {}) }}
+        style={{
+          height: LIST_HEIGHT,
+          ...(mask === undefined ? {} : { maskImage: mask }),
+        }}
       >
         <div ref={content}>
           {running.length === 0 ? (

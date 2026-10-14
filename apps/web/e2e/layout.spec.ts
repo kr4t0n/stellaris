@@ -92,19 +92,30 @@ for (const size of [
       return Math.min(box.y + box.height, item.y + item.height) - item.y;
     };
     // The list as drawn: the room a scrollbar takes beside its rows, whether they overflow it,
-    // its height, and its fade.
+    // its height, and which edges fade and how deep, read from its mask's computed gradient.
     const drawn = () =>
       list.evaluate((box) => {
         if (!(box instanceof HTMLElement)) {
           throw new Error("the list is not an HTML element");
         }
+        const mask = getComputedStyle(box).maskImage;
+        const clear = "rgba(0, 0, 0, 0)";
+        const edges =
+          mask === "none"
+            ? []
+            : [
+                ...(mask.startsWith(`linear-gradient(${clear}`) ? ["top"] : []),
+                ...(mask.endsWith(`${clear})`) ? ["bottom"] : []),
+              ];
         return {
           scrollbar: box.offsetWidth - box.clientWidth,
           overflows: box.scrollHeight > box.clientHeight,
           height: box.getBoundingClientRect().height,
-          mask: getComputedStyle(box).maskImage,
+          fades: edges,
+          depth: Number(/(\d+)px/.exec(mask)?.[1] ?? 0),
         };
       });
+    const fades = async () => (await drawn()).fades;
 
     await expect(section.getByText("Nobody is in a turn.")).toBeVisible();
     const idle = await place();
@@ -118,16 +129,16 @@ for (const size of [
     await working(1);
     await working(2);
     await expect(heading).toHaveText(/^Working now2 queued$/);
-    expect(await drawn()).toMatchObject({ overflows: false, mask: "none" });
+    expect(await drawn()).toMatchObject({ overflows: false, fades: [] });
 
-    // Three rows: two whole and the top half of the third, cut under its name and not faded,
-    // which with the count in the heading says the list scrolls, since it shows no scrollbar.
+    // Three rows: two whole and the top half of the third, fading out at the list's foot, which
+    // with the count in the heading says the list scrolls, since it shows no scrollbar.
     await working(3);
     await expect(heading).toHaveText(/3 running · 2 queued$/);
     const row = (await rows.first().boundingBox())?.height ?? 0;
     expect(row).toBeGreaterThan(40);
     const three = await drawn();
-    expect(three).toMatchObject({ scrollbar: 0, overflows: true, mask: "none" });
+    expect(three).toMatchObject({ scrollbar: 0, overflows: true, fades: ["bottom"], depth: 16 });
     expect(three.height).toBeCloseTo(2.5 * row + 4, 1);
     expect(await visible(2)).toBeCloseTo(row / 2 + 2, 1);
     await expect(rows.nth(2)).toBeInViewport({ ratio: 0.5 });
@@ -146,25 +157,28 @@ for (const size of [
     expect(outer.overflows).toBe(size.navigatorScrolls);
     expect(outer.scrollbar > 0).toBe(size.navigatorScrolls);
 
-    // Seven rows: the wheel brings the rest into view, and the top edge fades once rows lie above.
+    // Seven rows: the wheel brings the rest into view, and each edge fades while rows lie beyond it.
     await working(7);
     await expect(heading).toHaveText(/7 running · 2 queued$/);
     expect(await shown(1)).toBe(true);
     expect(await shown(2)).toBe(false);
-    expect(await drawn()).toMatchObject({ scrollbar: 0, overflows: true, mask: "none" });
+    expect(await drawn()).toMatchObject({ scrollbar: 0, overflows: true, fades: ["bottom"] });
     await rows.first().hover();
     await page.mouse.wheel(0, 1_000);
     await expect.poll(() => shown(6)).toBe(true);
-    await expect.poll(async () => (await drawn()).mask).not.toBe("none");
+    await expect.poll(fades).toEqual(["top"]);
     await page.mouse.wheel(0, -1_000);
     await expect.poll(() => shown(0)).toBe(true);
-    await expect.poll(async () => (await drawn()).mask).toBe("none");
+    await expect.poll(fades).toEqual(["bottom"]);
     // Tab brings each row into view clear of the edges, as far as the last one.
     await rows.first().getByRole("link").focus();
     for (let next = 1; next < 7; next += 1) {
       await page.keyboard.press("Tab");
       await expect(rows.nth(next).getByRole("link")).toBeFocused();
       await expect.poll(() => shown(next, next < 6 ? 16 : 0)).toBe(true);
+      if (next === 3) {
+        await expect.poll(fades).toEqual(["top", "bottom"]);
+      }
     }
     expect(await place()).toEqual(idle);
 

@@ -25,6 +25,7 @@ import type { EnrollmentDesk } from "./enrollment.js";
 import { githubAuthRoutes, type GithubAuthOptions } from "./github-auth.js";
 import { ENROLL_LIMIT, RateLimiter, rateLimit, SIGN_IN_LIMIT } from "./rate-limit.js";
 import type { ModelSource } from "./models.js";
+import type { QuotaSource } from "./quotas.js";
 import { runnerRoutes } from "./runner-routes.js";
 import { spaHandler } from "./static.js";
 import type { TurnHub } from "./turn-hub.js";
@@ -46,6 +47,8 @@ export interface AppDependencies {
   readonly scheduler?: SchedulerView | undefined;
   /** The models each CLI offers, for choosing a citizen's model. */
   readonly models?: ModelSource | undefined;
+  /** Each runner's CLI quotas, read without a turn when the user refreshes them. */
+  readonly quotas?: QuotaSource | undefined;
   /** The runners' way in: the runner protocol is served under `/runner` when set. */
   readonly runners?: RunnerHub | undefined;
   /** The built interface. When set, every path the API and MCP do not answer serves it. */
@@ -110,7 +113,7 @@ function bearer(c: Context<Env>): string | null {
  * endpoint, and the built interface.
  */
 export function createApp(deps: AppDependencies): Hono<Env> {
-  const { board, version, turns, scheduler, models } = deps;
+  const { board, version, turns, scheduler, models, quotas } = deps;
   const eventStreamPingMs = deps.eventStreamPingMs ?? 15_000;
   const app = new Hono<Env>();
 
@@ -207,6 +210,19 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   );
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
+  // A CLI's quota read on a runner without a turn, for the runners view when its numbers are old or
+  // the user refreshes them. Each read starts a CLI process there, so only the user asks.
+  api.post("/runners/:name/quota/:cli", async (c) => {
+    if (c.get("actor").role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user reads a runner's quota");
+    }
+    const runner = NameSchema.parse(c.req.param("name"));
+    const cli = CliKindSchema.parse(c.req.param("cli"));
+    if (quotas === undefined) {
+      throw new RunnerAwayError("this server asks no runner for quotas");
+    }
+    return c.json(await quotas.read(runner, cli));
+  });
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.
   api.post("/runners", async (c) => {
     const body = RunnerBodySchema.parse(await c.req.json());
@@ -254,6 +270,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/metrics", async (c) => {
     const window = MetricsWindowSchema.parse(c.req.query("window") ?? "7d");
     return c.json(await board.metrics(window, new Set(scheduler?.activeSignals ?? [])));
+  });
+  // Each citizen's finished turns over a window and the tokens they counted: names and counts only.
+  api.get("/tokens", async (c) => {
+    const window = MetricsWindowSchema.parse(c.req.query("window") ?? "24h");
+    return c.json(await board.tokenUse(window));
   });
   // The shared memory tiers: the society's knowledge topics and its promoted skills.
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));

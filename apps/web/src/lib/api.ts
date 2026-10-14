@@ -5,6 +5,7 @@ import {
   BranchFileDiffSchema,
   BranchFileSchema,
   ChannelRefSchema,
+  CliQuotaSchema,
   CronFrontmatterSchema,
   DashboardSchema,
   DecisionSchema,
@@ -16,6 +17,7 @@ import {
   MemberSchema,
   MessageRefSchema,
   MetricsSchema,
+  TokenUseSchema,
   RemovedKnowledgeSchema,
   RemovedSkillSchema,
   RunnerModelsSchema,
@@ -38,6 +40,7 @@ import {
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
   UlidSchema,
+  type CliKind,
   type MetricsWindow,
 } from "@stellaris/shared";
 import { z } from "zod";
@@ -249,6 +252,8 @@ export function createApi(token: string) {
     signals: (limit: number) =>
       get(`/api/signals?limit=${limit}`, token, SignalRecordSchema.array()),
     metrics: (window: MetricsWindow) => get(`/api/metrics?window=${window}`, token, MetricsSchema),
+    /** Each citizen's finished turns over a window and the tokens they counted. */
+    tokens: (window: MetricsWindow) => get(`/api/tokens?window=${window}`, token, TokenUseSchema),
     channels: () => get("/api/channels", token, ChannelSummarySchema.array()),
     channel: (ref: string) => get(`/api/channels/${channelPath(ref)}`, token, MessagesSchema),
     threads: () => get("/api/threads", token, ThreadSummarySchema.array()),
@@ -398,6 +403,18 @@ export function createApi(token: string) {
       get(`/api/agents/${encodeURIComponent(name)}/models`, token, RunnerModelsSchema),
     /** The runners the society has, connected or not, with what each offers. */
     runners: () => get("/api/runners", token, RunnerSchema.array()),
+    /**
+     * Has a runner read a CLI's plan quota without a turn, which the runner's record then holds;
+     * each read starts the CLI there, so the server answers one made within the minute again.
+     */
+    readQuota: (runner: string, cli: CliKind) =>
+      write(
+        "POST",
+        `/api/runners/${encodeURIComponent(runner)}/quota/${cli}`,
+        token,
+        {},
+        CliQuotaSchema,
+      ),
     /** Runners that asked to join and wait for the user's approval, newest first. */
     enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),
     /** Registers a waiting runner under `name`; the runner picks up its token on its next poll. */

@@ -59,7 +59,6 @@ const request: TurnRequest = {
   mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
   limits: { timeoutMs: 60_000, maxTurns: 10 },
   statusSchema: { type: "object" },
-  env: {},
 };
 
 describe("ClaudeAgentBackend replay", () => {

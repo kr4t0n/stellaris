@@ -38,6 +38,18 @@ export async function addWorkRoles(board: Board): Promise<void> {
 
 export const ULID = /[0-9A-HJKMNP-TV-Z]{26}/;
 
+/**
+ * The git identity a scripted citizen commits with, standing in for the runner account's global
+ * gitconfig, which a real CLI's commits take; CI's account has none, and it overrides whatever
+ * identity the test process inherited.
+ */
+const RUNNER_ACCOUNT = {
+  GIT_AUTHOR_NAME: "runner",
+  GIT_AUTHOR_EMAIL: "runner@example.com",
+  GIT_COMMITTER_NAME: "runner",
+  GIT_COMMITTER_EMAIL: "runner@example.com",
+};
+
 export function done(summary: string): TurnResult {
   return {
     events: [{ type: "tool_call", name: "mcp__board__post_message", input: {} }],
@@ -106,7 +118,6 @@ export class ScriptedBackend implements AgentBackend {
           mcp: start.mcp,
           limits: start.limits,
           statusSchema: start.statusSchema,
-          env: start.env,
         }),
       close: () => {
         this.residentCloses.push(key);
@@ -338,7 +349,7 @@ export class ScriptedBackend implements AgentBackend {
       return done("nothing to do");
     }
     const git = (...args: string[]) =>
-      execa("git", args, { cwd: request.spec.cwd, env: { ...process.env, ...request.env } });
+      execa("git", args, { cwd: request.spec.cwd, env: { ...process.env, ...RUNNER_ACCOUNT } });
     const branch = `task/${taskId}`;
 
     // The engineer builds on the task's branch; a second pass adds what the review asked for.

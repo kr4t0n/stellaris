@@ -645,6 +645,58 @@ function askFixtures(): Map<string, AskFixture> {
   ]);
 }
 
+/**
+ * Each citizen's tokens over a window: desk's one counted turn in the last day, as its Turns tab
+ * lists it; over the week two more of its turns without a count, and stew's two with none; over
+ * the whole log a second counted turn of each.
+ */
+function tokens(window: string) {
+  const counted = DESK_TURN.usage;
+  const more = {
+    inputTokens: 2_000,
+    outputTokens: 40_000,
+    cacheReadTokens: 7_200_000,
+    cacheWriteTokens: 0,
+  };
+  const sum = (a: typeof counted, b: typeof counted) => ({
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+  });
+  const citizens =
+    window === "24h"
+      ? [{ agent: "desk", turns: 1, withUsage: 1, usage: counted }]
+      : window === "7d"
+        ? [
+            { agent: "desk", turns: 3, withUsage: 1, usage: counted },
+            { agent: "stew", turns: 2, withUsage: 0, usage: null },
+          ]
+        : [
+            { agent: "desk", turns: 4, withUsage: 2, usage: sum(counted, more) },
+            { agent: "stew", turns: 3, withUsage: 1, usage: more },
+          ];
+  return {
+    window,
+    since:
+      window === "all"
+        ? null
+        : window === "7d"
+          ? "2026-09-22T09:05:00.000Z"
+          : "2026-09-28T09:05:00.000Z",
+    until: "2026-09-29T09:05:00.000Z",
+    citizens,
+  };
+}
+
+/** ada's two counted turns, before it retired. */
+const RETIRED_TOKENS = {
+  agent: "ada",
+  turns: 2,
+  withUsage: 2,
+  usage: { inputTokens: 40, outputTokens: 900, cacheReadTokens: 88_000, cacheWriteTokens: 0 },
+};
+
 /** A week of metrics, or more decisions over the whole log, so the window switch shows. */
 function metrics(window: string) {
   return {
@@ -710,7 +762,12 @@ export interface FakeBoard {
   readonly writes: Write[];
   /** Makes the next decision fail as the board would, with this reason. */
   refuseNext(message: string): void;
+  /** Puts this many citizens in a turn at lab, and this many turns in the queue. */
+  setWorking(running: number, queued?: number): void;
 }
+
+/** The citizens `setWorking` puts in turns, in order. */
+const WORKERS = ["ada", "bo", "cy", "di", "eve", "fay", "gus", "hal", "ivo", "jo"];
 
 /** desk's crons: a morning digest at home, a check in the task's thread whose turns keep failing, and stew's, ended. */
 export const DIGEST_CRON = "01M3Q2CRNAAAAAAAAAAAAAAAA1";
@@ -762,6 +819,66 @@ function cronFixtures(): Array<Record<string, unknown>> {
   ];
 }
 
+/** A time this many minutes from now, or ago when negative, for quota reports. */
+function minutesFromNow(minutes: number): string {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
+/** Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much. */
+function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
+  const observedAt = minutesFromNow(-observedAgo);
+  return {
+    observedAt,
+    source: "turn",
+    status: limited ? "limited" : "allowed",
+    limitedUntil: limited ? minutesFromNow(40) : null,
+    limitedBy: limited ? "five_hour" : null,
+    plan: "max",
+    windows: [
+      {
+        key: "five_hour",
+        minutes: 300,
+        usedPercent: fiveHour,
+        resetsAt: minutesFromNow(limited ? 40 : 290),
+        observedAt,
+      },
+      {
+        key: "seven_day",
+        minutes: 10_080,
+        usedPercent: 12,
+        resetsAt: minutesFromNow(8_620),
+        observedAt,
+      },
+    ],
+    credits: null,
+    extraUsage: null,
+  };
+}
+
+/** Codex's quota as a read gave it: one weekly window, the plan, and credits. */
+function codexQuota(observedAgo: number) {
+  const observedAt = minutesFromNow(-observedAgo);
+  return {
+    observedAt,
+    source: "read",
+    status: "allowed",
+    limitedUntil: null,
+    limitedBy: null,
+    plan: "pro",
+    windows: [
+      {
+        key: "primary",
+        minutes: 10_080,
+        usedPercent: 2,
+        resetsAt: minutesFromNow(9_670),
+        observedAt,
+      },
+    ],
+    credits: { hasCredits: true, unlimited: false, balance: "1250.5" },
+    extraUsage: null,
+  };
+}
+
 /** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
 export const ENROLLING_CODE = "BCDF-GHJK";
 
@@ -799,7 +916,12 @@ const CLAUDE_MODELS = [
  * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
  * starts with no token. With `inFlight`,
  * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
- * is a folder the board took from stew's home, with a script beside its SKILL.md.
+ * is a folder the board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
+ * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's and studio's
+ * with its own; with
+ * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
+ * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes.
  */
 export async function fakeBoard(
   page: Page,
@@ -812,6 +934,9 @@ export async function fakeBoard(
     signedOut?: boolean;
     inFlight?: boolean;
     skillFolder?: boolean;
+    quotas?: "reads" | "limited";
+    /** Adds ada, a researcher retired after two counted turns. */
+    retired?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -821,6 +946,16 @@ export async function fakeBoard(
   const writes: Write[] = [];
   let refusal: string | null = null;
   let paused = false;
+  let working: string[] = [];
+  let queued: string[] = [];
+  const podQuotas: Record<string, unknown> =
+    options.quotas === "reads"
+      ? { claude: claudeQuota(20, 35) }
+      : options.quotas === "limited"
+        ? { claude: claudeQuota(3, 100, true), codex: codexQuota(3) }
+        : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
+  // studio's own login, with numbers of its own, reported as fresh as pod's.
+  const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
   let deskModel: string | null = null;
   let deskRunner: string | null = "pod";
   let deskEffort: string | null = null;
@@ -950,6 +1085,22 @@ export async function fakeBoard(
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
       switch (pathname) {
+        case "/api/runners/pod/quota/claude":
+          podQuotas["claude"] = { ...claudeQuota(0, 41), source: "read" };
+          return json(route, podQuotas["claude"]);
+        case "/api/runners/studio/quota/claude":
+          studioQuotas["claude"] = { ...claudeQuota(0, 20), source: "read" };
+          return json(route, studioQuotas["claude"]);
+        case "/api/runners/pod/quota/codex":
+          if (options.quotas === "reads") {
+            return json(
+              route,
+              { error: "INVALID_STATE", message: "runner pod cannot read quotas yet; upgrade it" },
+              409,
+            );
+          }
+          podQuotas["codex"] = codexQuota(0);
+          return json(route, podQuotas["codex"]);
         case "/api/verbs/approve":
           return decide(route, "approved", body);
         case "/api/verbs/reject":
@@ -1181,6 +1332,15 @@ export async function fakeBoard(
           })),
       );
     }
+    if (pathname === "/api/tokens") {
+      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h");
+      return json(
+        route,
+        options.retired === true && use.window === "all"
+          ? { ...use, citizens: [RETIRED_TOKENS, ...use.citizens] }
+          : use,
+      );
+    }
     if (pathname === "/api/metrics") {
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
@@ -1237,6 +1397,9 @@ export async function fakeBoard(
         return json(route, [
           member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
           member("stew", "steward", [], null, null),
+          ...(options.retired === true
+            ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
+            : []),
         ]);
       case "/api/version":
         return json(route, { version: "0.3.11" });
@@ -1248,7 +1411,19 @@ export async function fakeBoard(
             clis: ["claude", "codex"],
             capabilities: [],
             version: "0.3.11",
+            gitIdentityMissing: ["email"],
             status: "connected",
+            quotas: podQuotas,
+          },
+          {
+            name: "studio",
+            os: "darwin",
+            clis: ["claude"],
+            capabilities: [],
+            version: "0.3.11",
+            gitIdentityMissing: [],
+            status: "connected",
+            quotas: studioQuotas,
           },
           {
             name: "laptop",
@@ -1257,6 +1432,7 @@ export async function fakeBoard(
             capabilities: ["gpu"],
             version: "0.3.10",
             status: "disconnected",
+            quotas: { claude: claudeQuota(120, 35) },
           },
         ]);
       case "/api/agents/desk/models":
@@ -1364,8 +1540,9 @@ export async function fakeBoard(
           running: [
             ...(answering === null ? [] : [`desk/society/${answering}`]),
             ...(inFlight ? ["desk/society"] : []),
+            ...working,
           ],
-          pending: [],
+          pending: queued,
           resident: [],
           signals: ["role_gap:lab:referee"],
           turns: inFlight
@@ -1416,6 +1593,10 @@ export async function fakeBoard(
     writes,
     refuseNext: (message) => {
       refusal = message;
+    },
+    setWorking: (running, waiting = 0) => {
+      working = WORKERS.slice(0, running).map((name) => `${name}/lab`);
+      queued = WORKERS.slice(running, running + waiting).map((name) => `${name}/lab`);
     },
   };
 }

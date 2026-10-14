@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
-import { listed, wakesFor } from "./compose.js";
+import { listed } from "./compose.js";
+import { wakesFor } from "./wakes.js";
 
 /**
  * A text field the size of a `Picker`, for forms made of pickers, so text and height are one
@@ -40,11 +41,13 @@ export function NewThreadForm({ channel, onDone }: { channel: string; onDone: ()
   const titleField = useRef<HTMLInputElement>(null);
   useEffect(() => titleField.current?.focus(), []);
 
+  // What is sent, so whom it wakes is read from the same text: indentation can make it code.
+  const first = body.trim();
   const open = useMutation({
     mutationFn: async () => {
       const thread = await api.openThread({ channel, title: title.trim() });
-      if (body.trim() !== "") {
-        await api.sendMessage({ thread_id: thread.id, body: body.trim() });
+      if (first !== "") {
+        await api.sendMessage({ thread_id: thread.id, body: first });
       }
       return thread;
     },
@@ -54,7 +57,7 @@ export function NewThreadForm({ channel, onDone }: { channel: string; onDone: ()
       void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });
     },
   });
-  const wakes = body.trim() === "" ? [] : wakesFor(body, members.data ?? [], roles.data ?? []);
+  const wakes = first === "" ? [] : wakesFor(first, members.data ?? [], roles.data ?? []);
 
   return (
     <form

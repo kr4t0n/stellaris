@@ -743,6 +743,16 @@ export class TurnHost {
         }
       }
     });
+    // What the CLI said of its plan's quota, kept on the runner's record before the turn's end is
+    // announced. A failure here is the runner record's, never the turn's.
+    if (outcome.quota !== undefined) {
+      await this.board.recordQuota(turn.runner, job.cli, outcome.quota).catch((error: unknown) => {
+        this.log.warn(
+          { runner: turn.runner, cli: job.cli, error: String(error) },
+          "could not record a quota",
+        );
+      });
+    }
     if (recorded) {
       this.log.info(
         {

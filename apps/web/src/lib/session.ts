@@ -90,6 +90,15 @@ export function useMetrics(window: MetricsWindow) {
   });
 }
 
+export function useTokenUse(window: MetricsWindow) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["tokens", window],
+    queryFn: () => api.tokens(window),
+    refetchInterval: 60_000,
+  });
+}
+
 export function useChannels() {
   const { api } = useSession();
   return useQuery({ queryKey: ["channels"], queryFn: api.channels, refetchInterval: 60_000 });
@@ -133,6 +142,16 @@ export function useTask(id: string | null) {
   return useQuery({
     queryKey: ["task", id],
     queryFn: () => api.task(id ?? ""),
+    enabled: id !== null,
+  });
+}
+
+/** One thread and its messages; `null` reads nothing, as for a task or proposal with no thread. */
+export function useThread(id: string | null) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["thread", id],
+    queryFn: () => api.thread(id ?? ""),
     enabled: id !== null,
   });
 }

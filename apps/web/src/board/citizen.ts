@@ -1,7 +1,9 @@
 import {
   addUsage,
   SOCIETY_SCOPE,
+  type CitizenTokens,
   type Member,
+  type MetricsWindow,
   type TurnHistoryEntry,
   type Usage,
 } from "@stellaris/shared";
@@ -102,12 +104,75 @@ export function historyTotals(entries: readonly TurnHistoryEntry[]): {
   };
 }
 
+const PERIODS: Readonly<Record<MetricsWindow, string>> = {
+  "24h": "in the last 24 hours",
+  "7d": "in the last 7 days",
+  all: "in all",
+};
+
+function turnsOf(count: number): string {
+  return count === 1 ? "1 finished turn" : `${count} finished turns`;
+}
+
+/**
+ * A citizen's tokens over a window as the Citizens list shows them: "in · out" as on its Turns
+ * tab, marked as a lower bound when some of its turns have no count, unknown when none has, and
+ * the counts in full with the turns they cover on hover, which `spoken` says to screen readers
+ * when the label alone would mislead. A turn has no count when it was logged before turns counted
+ * tokens, or ended without its runner's report, as when the runner went away during it.
+ */
+export function tokenUseCell(
+  row: CitizenTokens | undefined,
+  window: MetricsWindow,
+): { label: string; detail: string; spoken: string | null } {
+  const period = PERIODS[window];
+  if (row === undefined || row.turns === 0) {
+    return { label: "no turns", detail: `no finished turn ${period}`, spoken: null };
+  }
+  const missing = row.turns - row.withUsage;
+  const why = "logged before turns counted tokens, or ended without their runner's report";
+  if (row.usage === null) {
+    return {
+      label: "tokens unknown",
+      detail: `${turnsOf(row.turns)} ${period}, none with a token count: ${why}`,
+      spoken: `${turnsOf(row.turns)} ${period}, none counted`,
+    };
+  }
+  if (missing === 0) {
+    return {
+      label: tokensLabel(row.usage),
+      detail: `${tokensDetail(row.usage)}; over ${turnsOf(row.turns)} ${period}`,
+      spoken: null,
+    };
+  }
+  const over = `over ${row.withUsage} of ${turnsOf(row.turns)} ${period}`;
+  return {
+    label: `≥${compact.format(inputTokens(row.usage))} in · ≥${compact.format(row.usage.outputTokens)} out`,
+    detail: [
+      `${tokensDetail(row.usage)}; ${over}.`,
+      `The other ${missing === 1 ? "one has" : `${missing} have`} no count: ${why}.`,
+    ].join(" "),
+    spoken: over,
+  };
+}
+
 /** A markdown file without a leading heading that only repeats the title it is shown under. */
 export function withoutTitle(markdown: string, title: string): string {
   const match = /^\s*#{1,6}\s+(.+?)\s*(?:\n|$)/.exec(markdown);
   return match?.[1]?.toLowerCase() === title.toLowerCase()
     ? markdown.slice(match[0].length).trim()
     : markdown;
+}
+
+/** The runners a citizen's turns run on: the one it is pinned to, then its projects' runners. */
+export function turnRunners(member: Member, placed: ReadonlyMap<string, string>): string[] {
+  return [
+    ...new Set(
+      [member.homeRunner, ...member.memberships.map((slug) => placed.get(slug))].filter(
+        (runner): runner is string => runner !== undefined,
+      ),
+    ),
+  ];
 }
 
 /**
@@ -124,9 +189,7 @@ export function runnersOf(
       : [{ what: "outside projects", runner: member.homeRunner }]),
     ...member.memberships.map((slug) => ({ what: slug, runner: placed.get(slug) })),
   ];
-  const runners = [
-    ...new Set(places.flatMap((place) => (place.runner === undefined ? [] : [place.runner]))),
-  ];
+  const runners = turnRunners(member, placed);
   const detail = places
     .map((place) => `${place.what}: ${place.runner ?? "placed on its first turn"}`)
     .join("; ");

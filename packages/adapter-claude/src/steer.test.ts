@@ -25,7 +25,6 @@ const request: TurnRequest = {
   mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
   limits: { timeoutMs: 5_000, maxTurns: 10 },
   statusSchema: { type: "object" },
-  env: {},
 };
 
 // Test frames stand in for the SDK's own union, which is far too large to build here.

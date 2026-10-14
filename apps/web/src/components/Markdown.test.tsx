@@ -1,6 +1,14 @@
+import { mentionsIn } from "@stellaris/shared/mentions";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Markdown } from "./Markdown.js";
+
+/** The names a text renders highlighted as mentions. */
+function highlighted(text: string): string[] {
+  const html = renderToStaticMarkup(<Markdown text={text} />);
+  const marked = html.matchAll(/<span class="mention">@([a-z0-9-]+)<\/span>/g);
+  return [...new Set([...marked].map((match) => match[1] ?? ""))].toSorted();
+}
 
 describe("Markdown", () => {
   it("highlights mentions in text, but not in code, links, or addresses", () => {
@@ -14,6 +22,23 @@ describe("Markdown", () => {
     expect(html).toContain("<code>@not-code</code>");
     expect(html).not.toContain('<span class="mention">@not-link</span>');
     expect(html).not.toContain('<span class="mention">@b</span>');
+  });
+
+  it("highlights exactly the names the board counts when only code is around them", () => {
+    const texts = [
+      "Run `@ada --fix`, then @ref",
+      "``a ` @ada`` and @ref",
+      "```\n@ada\n```\n\n@ref",
+      "Log:\n\n~~~\n@ada\n\nstill code, @ref",
+      "Run:\n\n    @ada\n\nthen @ref",
+      "- item\n\n      @ada\n- @ref",
+      "> ```\n> @ada\n> ```\n\n@ref",
+      "A lone ` opens no span, @ada",
+      "`x`@ada and @ref`y`",
+    ];
+    expect(texts.map((text) => [text, highlighted(text)])).toEqual(
+      texts.map((text) => [text, mentionsIn(text)]),
+    );
   });
 
   it("reads a path on a runner's machine as text, never as a link to the board's own address", () => {

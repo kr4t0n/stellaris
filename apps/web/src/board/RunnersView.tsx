@@ -14,7 +14,8 @@ import {
   useSession,
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { offVersion, sameCode, suggestRunnerName } from "./runners.js";
+import { PlanQuota } from "./Quota.js";
+import { identityGap, offVersion, sameCode, suggestRunnerName } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 /** Connected runners first, each group by name. */
@@ -44,7 +45,10 @@ function WaitingRunner({
 }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const [name, setName] = useState(() => suggestRunnerName(enrollment.hostname, taken));
+  // The suggestion follows the runners list, which may arrive or change after the enrollment, until
+  // the user types a name of their own.
+  const [typed, setTyped] = useState<string | null>(null);
+  const name = typed ?? suggestRunnerName(enrollment.hostname, taken);
   const refresh = (): void => {
     void client.invalidateQueries({ queryKey: ["enrollments"] });
     void client.invalidateQueries({ queryKey: ["runners"] });
@@ -86,7 +90,7 @@ function WaitingRunner({
           maxLength={32}
           spellCheck={false}
           aria-label="Runner name"
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => setTyped(event.target.value)}
           className={`${FIELD} min-w-0 flex-1 font-mono`}
         />
         <Button onClick={() => deny.mutate()} disabled={busy}>
@@ -108,7 +112,7 @@ function WaitingRunner({
  * marked when it is not the server's, capabilities, the projects living on it, and whether it is
  * connected; above them, those asking to join. A runner started without a token asks the board to
  * enroll it and prints a link here with its code; approving it under a name registers it, and the
- * runner picks up its token on its next poll.
+ * runner picks up its token on its next poll. Under them, each CLI login's plan quota.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
@@ -123,6 +127,7 @@ export function RunnersView() {
   const connected = registered.filter((runner) => runner.status === "connected").length;
   const away = registered.length - connected;
   const off = registered.filter((runner) => offVersion(runner, server)).length;
+  const unidentified = registered.filter((runner) => identityGap(runner) !== null).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
@@ -142,6 +147,7 @@ export function RunnersView() {
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
           ...(server === undefined ? [] : [`server v${server}`]),
           ...(off === 0 ? [] : [`${off} on another version`]),
+          ...(unidentified === 0 ? [] : [`${unidentified} without a git identity`]),
         ].join(" · ")}
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
@@ -178,6 +184,7 @@ export function RunnersView() {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
             const places = living(runner);
             const lives = places.length === 0 ? "no projects" : places.join(", ");
+            const gap = identityGap(runner);
             const state =
               runner.status === "connected"
                 ? { label: "connected", detail: "connected", tone: "text-fg-muted" }
@@ -197,7 +204,15 @@ export function RunnersView() {
                   ))}
                   <span className="sr-only">{clis}</span>
                 </span>
-                <span className="text-fg-primary">{runner.name}</span>
+                {/* A gap in the account's git identity sits under the name, so it takes no column. */}
+                <span>
+                  <span className="block text-fg-primary">{runner.name}</span>
+                  {gap === null ? null : (
+                    <span className="block text-xs text-amber-300" title={gap.detail}>
+                      {gap.label}
+                    </span>
+                  )}
+                </span>
                 <span className="text-fg-secondary">{runner.os}</span>
                 {offVersion(runner, server) ? (
                   <span className="text-xs text-amber-300" title={`the server runs v${server}`}>
@@ -225,12 +240,7 @@ export function RunnersView() {
             );
           })}
         </ul>
-        {enrollments.data === undefined || waiting.length > 0 ? null : (
-          <p className="mt-2 border-t border-line px-2 pt-2 text-meta">
-            A runner started with STELLARIS_SERVER_URL set to this board and no token asks to join
-            here, with a code to approve.
-          </p>
-        )}
+        <PlanQuota runners={registered} now={now} />
       </div>
     </>
   );

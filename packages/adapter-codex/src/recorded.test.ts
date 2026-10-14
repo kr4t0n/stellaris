@@ -64,7 +64,6 @@ function request(overrides: Partial<TurnRequest>): TurnRequest {
     mcp: { url: "http://127.0.0.1:9/mcp", token: "probe" },
     limits: { timeoutMs: 60_000 },
     statusSchema: turnStatusJsonSchema(),
-    env: {},
     ...overrides,
   };
 }

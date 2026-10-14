@@ -330,6 +330,9 @@ importers:
       '@stellaris/shared':
         specifier: workspace:*
         version: link:../shared
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/adapter-codex:
     dependencies:
@@ -408,6 +411,12 @@ importers:
       croner:
         specifier: 10.0.1
         version: 10.0.1
+      micromark:
+        specifier: 4.0.3
+        version: 4.0.3
+      micromark-extension-gfm:
+        specifier: 3.0.0
+        version: 3.0.0
       zod:
         specifier: 4.6.5
         version: 4.6.5

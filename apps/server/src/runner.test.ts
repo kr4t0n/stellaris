@@ -5,6 +5,7 @@ import { Board } from "@stellaris/board-core";
 import {
   createRunner,
   EnrollmentDeniedError,
+  GitIdentityCheck,
   enrollRunner,
   readCredentials,
   RunnerLayout,
@@ -19,11 +20,13 @@ import {
   BranchChangesSchema,
   BranchFileDiffSchema,
   BranchFileSchema,
+  CliQuotaSchema,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
   RunnerModelsSchema,
   type AgentEvent,
+  type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
 } from "@stellaris/shared";
@@ -55,6 +58,22 @@ async function commitTree(
   return (await execa("git", args, { cwd: repo })).stdout.trim();
 }
 
+/** A time a few minutes past noon on 2026-10-13, for quota reports. */
+function quotaTime(minute: number): string {
+  return `2026-10-13T12:0${minute}:00.000Z`;
+}
+
+/** A 5-hour window of a quota report, used this much, reported at `minute`. */
+function fiveHour(usedPercent: number, minute: number) {
+  return {
+    key: "five_hour",
+    minutes: 300,
+    usedPercent,
+    resetsAt: "2026-10-13T17:00:00.000Z",
+    observedAt: quotaTime(minute),
+  };
+}
+
 function completed(summary: string, memoryUpdated = false): TurnResult {
   return {
     events: [],
@@ -75,6 +94,8 @@ class ResidentBackend implements AgentBackend {
   readonly closes: string[] = [];
   readonly prompts: string[] = [];
   readonly coldTurns: string[] = [];
+  /** Every request and resident start the runner handed over, as given. */
+  readonly handed: object[] = [];
   memoryUpdatedNext = false;
   coldMemoryUpdatedNext = false;
 
@@ -82,7 +103,8 @@ class ResidentBackend implements AgentBackend {
     return Promise.resolve("session-1");
   }
 
-  runTurn(): Promise<TurnResult> {
+  runTurn(request: object): Promise<TurnResult> {
+    this.handed.push(request);
     this.coldTurns.push("cold");
     const result = completed("cold turn", this.coldMemoryUpdatedNext);
     this.coldMemoryUpdatedNext = false;
@@ -93,6 +115,7 @@ class ResidentBackend implements AgentBackend {
     spec: { agent: string; model?: string | undefined; effort?: string | undefined },
     start: { session: string },
   ): Promise<ResidentSession> {
+    this.handed.push(start);
     this.starts.push(`${spec.agent}:${start.session}`);
     this.models.push(spec.model);
     this.efforts.push(spec.effort);
@@ -584,6 +607,25 @@ describe("turns on a runner over the runner protocol", () => {
     expect(hub.residentPairs).toEqual([]);
   });
 
+  it("hands the CLI no environment of its own, warm or cold", async () => {
+    const { board } = await Board.init(dir, { name: "env" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const backend = new ResidentBackend();
+    const { run } = await start(board, backend, { residentIdleMs: 60_000 });
+    await run(deskPost);
+    await run({ ...deskPost, thread: { id: ask.id, task: false } });
+    expect(backend.starts).toHaveLength(1);
+    expect(backend.coldTurns).toEqual(["cold"]);
+    // A citizen's own commits carry the runner account's identity, so no git identity, nor any
+    // other environment, rides along with a turn.
+    expect(backend.handed).toHaveLength(2);
+    for (const handed of backend.handed) {
+      expect(handed).not.toHaveProperty("env");
+      expect(JSON.stringify(handed)).not.toMatch(/GIT_(AUTHOR|COMMITTER)_/);
+    }
+  });
+
   it("starts a warm session afresh once another turn of its citizen changed the memory", async () => {
     const { board } = await Board.init(dir, { name: "stale" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
@@ -942,7 +984,7 @@ describe("turns on a runner over the runner protocol", () => {
       script = async (cwd) => {
         await writeFile(path.join(cwd, "mine.txt"), "mine\n", "utf8");
         await execa("git", ["add", "mine.txt"], { cwd });
-        // A real turn commits as its citizen through the runner's environment; this script has none.
+        // The test's account may have no git identity, as CI's has none, so the script names one.
         await execa(
           "git",
           ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-qm", "my own notes"],
@@ -1186,12 +1228,141 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
     });
     expect((await models()).models[0]?.efforts.map((effort) => effort.id)).toEqual(["low", "high"]);
     expect(listed).toEqual({ a: 0, b: 2 });
+  });
+
+  it("keeps each CLI's quota on its runner's record, from a turn and from a read the user asks for", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "quotas" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    let turnPercent = 35;
+    const reads: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () =>
+        Promise.resolve({
+          ...completed("done"),
+          quota: CliQuotaSchema.parse({
+            observedAt: quotaTime(0),
+            source: "turn",
+            status: "allowed",
+            windows: [fiveHour(turnPercent, 0)],
+          }),
+        }),
+      readQuota: () => {
+        reads.push("claude");
+        return Promise.resolve(
+          CliQuotaSchema.parse({
+            observedAt: quotaTime(5),
+            source: "read",
+            status: "allowed",
+            plan: "max",
+            windows: [
+              fiveHour(40, 5),
+              {
+                key: "seven_day_opus",
+                minutes: 10_080,
+                usedPercent: 3,
+                observedAt: quotaTime(5),
+              },
+            ],
+          }),
+        );
+      },
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend }),
+    });
+    const { app, run, hub } = society;
+    const turn = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    const logged = async () =>
+      (await board.readEvents(null, 500)).filter((event) => event.type === "runner.quota");
+
+    // A turn's report lands on the record of the runner it ran on.
+    await run(turn);
+    expect((await board.readRunner("pod")).quotas?.claude).toMatchObject({
+      source: "turn",
+      windows: [{ key: "five_hour", usedPercent: 35 }],
+    });
+    expect((await logged()).map((event) => event.payload)).toEqual([
+      { name: "pod", cli: "claude", status: "allowed" },
+    ]);
+    // Within the same whole percent, the record is written and nothing is logged; a new percent is.
+    turnPercent = 35.4;
+    await run(turn);
+    expect(await logged()).toHaveLength(1);
+    turnPercent = 36;
+    await run(turn);
+    expect(await logged()).toHaveLength(2);
+    // A quota the board cannot keep is the runner record's trouble, never the turn's.
+    const failing = vi
+      .spyOn(board, "recordQuota")
+      .mockRejectedValueOnce(new Error("the runner record could not be written"));
+    turnPercent = 50;
+    const kept = await run(turn);
+    expect(failing).toHaveBeenCalledTimes(1);
+    failing.mockRestore();
+    expect(kept.exitReason).toBe("completed");
+    expect(kept.error).toBeNull();
+    expect((await board.readRunner("pod")).quotas?.claude?.windows[0]?.usedPercent).toBe(36);
+
+    const refresh = (bearer: string, cli = "claude") =>
+      app.request(`/api/runners/pod/quota/${cli}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+    // A read starts a CLI process on the runner, so only the user asks for one.
+    expect((await refresh(board.issueTurnToken("stew", "steward", 60_000))).status).toBe(403);
+    const read = await refresh(userToken);
+    expect(read.status).toBe(200);
+    expect(CliQuotaSchema.parse(await read.json())).toMatchObject({ source: "read", plan: "max" });
+    // The read merges over the turn's report: its windows win, and the turn's others would stay.
+    const record = (await board.readRunner("pod")).quotas?.claude;
+    expect(record?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
+      ["five_hour", 40],
+      ["seven_day_opus", 3],
+    ]);
+    expect(record?.plan).toBe("max");
+    const listed = await app.request("/api/runners", {
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(JSON.stringify(await listed.json())).toContain('"seven_day_opus"');
+    // Asked again at once, the read is answered again rather than run again.
+    expect((await refresh(userToken)).status).toBe(200);
+    expect(reads).toEqual(["claude"]);
+    // A CLI the runner does not have is away there.
+    expect((await refresh(userToken, "codex")).status).toBe(503);
+    // A runner from before quota reads is refused at once rather than left to time out.
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.21",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    await expect(hub.quota("pod", "claude")).rejects.toThrow("upgrade it");
+    expect(reads).toEqual(["claude"]);
   });
 
   it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {
@@ -1437,6 +1608,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -1548,6 +1720,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: true,
       branchChanges: true,
+      quotaReads: true,
       capabilities: [],
       slots: null,
       turns: [],
@@ -1642,6 +1815,78 @@ describe("turns on a runner over the runner protocol", () => {
     expect((await board.getTask(USER, { task_id: second.id })).status).toBe("done");
     // The guard followed the default branch from main to trunk.
     expect(refused).toEqual(["main", "trunk"]);
+  });
+
+  it("takes a merge project's clone back from husky's hooks path before the next turn", async () => {
+    const { board } = await Board.init(dir, { name: "husky" });
+    await board.addProject(USER, { slug: "demo", onDone: "merge" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "sage",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    let turns = 0;
+    const seen: { hooksPath: string; refused: string }[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        turns += 1;
+        if (turns === 1) {
+          // What husky's install, run by a project's `prepare` on `pnpm install`, does to the clone.
+          await execa("git", ["config", "core.hooksPath", ".husky/_"], { cwd });
+          return completed("installed");
+        }
+        const hooksPath = (
+          await execa("git", ["config", "--get", "core.hooksPath"], { cwd, reject: false })
+        ).stdout;
+        await writeFile(path.join(cwd, "notes.md"), "notes\n");
+        await execa("git", ["add", "notes.md"], { cwd });
+        await execa(
+          "git",
+          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          {
+            cwd,
+          },
+        );
+        const moved = await execa("git", ["update-ref", "refs/heads/main", "HEAD"], {
+          cwd,
+          reject: false,
+        });
+        seen.push({ hooksPath, refused: moved.exitCode === 0 ? "" : moved.stderr });
+        return completed("wrote notes");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const task = await board.createTask(USER, { project: "demo", title: "notes" });
+    const turn = () =>
+      run({
+        agent: "sage",
+        project: "demo",
+        thread: { id: task.id, task: true },
+        trigger: { kind: "manual", fromUser: true, reason: "test" },
+        priority: 2,
+      });
+    expect((await turn()).exitReason).toBe("completed");
+    const repo = runner.paths.repo("demo");
+    const main = (await execa("git", ["rev-parse", "main"], { cwd: repo })).stdout;
+    expect((await execa("git", ["config", "--get", "core.hooksPath"], { cwd: repo })).stdout).toBe(
+      ".husky/_",
+    );
+
+    expect((await turn()).exitReason).toBe("completed");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.hooksPath).toBe("");
+    expect(seen[0]?.refused).toContain("only the runner moves it");
+    expect((await execa("git", ["rev-parse", "main"], { cwd: repo })).stdout).toBe(main);
   });
 
   it("lands a ghpr task by merging its pull request with the message its agent gave", async () => {
@@ -1964,10 +2209,12 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const task = await board.createTask(USER, { project: "demo", title: "report" });
     const waiting = await board.createTask(USER, { project: "idle", title: "not started" });
+    let repoDir = "";
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
+        repoDir = request.spec.repoDir;
         await mkdir(path.join(request.spec.cwd, "evidence"), { recursive: true });
         await writeFile(path.join(request.spec.cwd, "report.md"), "# Report\n");
         await writeFile(
@@ -1996,6 +2243,13 @@ describe("turns on a runner over the runner protocol", () => {
       "# Report\n",
     );
     expect(file.commit.author).toBe("sage");
+    // The runner commits what the turn left as the citizen, author and committer alike.
+    const tip = await execa(
+      "git",
+      ["log", "-1", "--format=%an <%ae> | %cn <%ce>", `task/${task.id}`],
+      { cwd: repoDir },
+    );
+    expect(tip.stdout).toBe("sage <sage@stellaris.local> | sage <sage@stellaris.local>");
     const root = BranchFileSchema.parse(await (await read(`${task.id}/files`)).json());
     expect(root.kind === "dir" ? root.entries.map((entry) => entry.name) : null).toEqual([
       "evidence",
@@ -2058,6 +2312,7 @@ describe("turns on a runner over the runner protocol", () => {
       stoppableClis: [],
       branchReads: false,
       branchChanges: false,
+      quotaReads: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2119,6 +2374,103 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await models.json()).toEqual([
       { id: "opus", name: "Opus", description: "", isDefault: true, efforts: [] },
     ]);
+  });
+
+  it("keeps what a runner's account lacks of a git identity from each hello, warning of it once", async () => {
+    const { board } = await Board.init(dir, { name: "identity" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { url, hub } = await start(board, backend);
+    const { token } = await board.addRunner(USER, "laptop");
+    let missing: GitIdentityPart[] | Error = ["email"];
+    let checks = 0;
+    const said: Array<{ level: string; message: string; context: object }> = [];
+    const note =
+      (level: string) =>
+      (context: object, message: string): void => {
+        said.push({ level, message, context });
+      };
+    const log = { info: note("info"), warn: note("warn"), error: note("error") };
+    const laptop = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: path.join(dir, "laptop"),
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 20,
+      // The stream goes quiet at once, so the runner connects again, and says hello, every 100 ms.
+      streamIdleMs: 100,
+      log,
+      gitIdentity: new GitIdentityCheck(log, () => {
+        checks += 1;
+        return missing instanceof Error ? Promise.reject(missing) : Promise.resolve(missing);
+      }),
+    });
+    const about = (pattern: RegExp) => said.filter((entry) => pattern.test(entry.message));
+    const identity = /git identity|no git user/;
+
+    await laptop.start();
+    expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["email"]);
+    // Each hello checks again, and the log speaks of a gap once, not on every reconnect.
+    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3));
+    expect(about(identity)).toEqual([
+      {
+        level: "warn",
+        context: { missing: ["email"] },
+        message: expect.stringContaining(`git config --global user.email "you@example.com"`),
+      },
+    ]);
+
+    // Set on the machine, the gap clears at the next hello.
+    missing = [];
+    await vi.waitFor(async () =>
+      expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+    );
+    expect(about(identity).map((entry) => entry.level)).toEqual(["warn", "info"]);
+
+    // A check that fails sends nothing, which the board takes as not knowing.
+    missing = new Error("git: not found");
+    await vi.waitFor(async () =>
+      expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+    );
+    expect(about(/could not check the git identity/)[0]?.context).toEqual({
+      error: "Error: git: not found",
+    });
+    await laptop.stop();
+
+    // An older runner's hello says nothing either, so what an earlier one reported goes.
+    const hello: RunnerHello = {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.21",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    };
+    await hub.register("laptop", { ...hello, gitIdentityMissing: ["name", "email"] });
+    expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["name", "email"]);
+    // Connecting and going away keep it.
+    const detach = await hub.attach("laptop", () => true);
+    await detach();
+    expect(await board.readRunner("laptop")).toMatchObject({
+      status: "disconnected",
+      gitIdentityMissing: ["name", "email"],
+    });
+    await hub.register("laptop", hello);
+    const record = await board.readRunner("laptop");
+    expect(record.version).toBe("0.3.21");
+    expect(record).not.toHaveProperty("gitIdentityMissing");
   });
 
   it("enrolls a runner the user approves on the board, hands its token over once, and refuses a denied one", async () => {

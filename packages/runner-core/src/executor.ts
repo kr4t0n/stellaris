@@ -21,6 +21,7 @@ import {
   type BranchFileDiff,
   type BranchRead,
   type CliKind,
+  type CliQuota,
   type CloseRequest,
   type HeldWorkspace,
   type LandRequest,
@@ -221,12 +222,6 @@ export class TurnExecutor {
     await this.renderConfigHome(home, instructions, job.mcp.url);
     const newSession = job.session === null;
     const session = job.session ?? (await backend.newSession(spec));
-    const env = {
-      GIT_AUTHOR_NAME: job.agent,
-      GIT_AUTHOR_EMAIL: `${job.agent}@stellaris.local`,
-      GIT_COMMITTER_NAME: job.agent,
-      GIT_COMMITTER_EMAIL: `${job.agent}@stellaris.local`,
-    };
     const limits = { timeoutMs: job.limits.timeoutMs, maxTurns: job.limits.maxTurns };
     const statusSchema = turnStatusJsonSchema();
     this.log.info(
@@ -259,7 +254,6 @@ export class TurnExecutor {
           prompt,
           limits,
           statusSchema,
-          env,
           onEvent: collect,
           control,
         });
@@ -274,7 +268,6 @@ export class TurnExecutor {
             mcp: job.mcp,
             limits,
             statusSchema,
-            env,
             costSoFarUsd: job.costSoFarUsd,
           },
           collect,
@@ -328,6 +321,7 @@ export class TurnExecutor {
       model: result.model ?? null,
       work,
       leftovers,
+      ...(result.quota === undefined ? {} : { quota: result.quota }),
     };
   }
 
@@ -472,17 +466,31 @@ export class TurnExecutor {
         "put away what was left in the clone, such as a refused merge into the default branch; git stash list has it",
       );
     }
-    const guarded = await this.git.guardDefaultBranch(
+    const guard = await this.git.guardDefaultBranch(
       repoDir,
       repo.boardLands ? repo.defaultBranch : null,
     );
-    if (guarded) {
-      this.unguarded.delete(repo.slug);
-    } else if (!this.unguarded.has(repo.slug)) {
-      this.unguarded.add(repo.slug);
+    if (!guard.ok) {
+      if (!this.unguarded.has(repo.slug)) {
+        this.unguarded.add(repo.slug);
+        this.log.warn(
+          { project: repo.slug, reason: guard.reason },
+          "cannot guard the default branch",
+        );
+      }
+      return;
+    }
+    this.unguarded.delete(repo.slug);
+    if (guard.clearedHooksPath !== null) {
       this.log.warn(
-        { project: repo.slug },
-        "cannot guard the default branch: the clone runs hooks from core.hooksPath, or has hooks of its own by those names",
+        { project: repo.slug, hooksPath: guard.clearedHooksPath },
+        "cleared core.hooksPath from the clone, which kept git from running the default branch's guard; the hooks it named no longer run",
+      );
+    }
+    if (guard.movedHooks.length > 0) {
+      this.log.warn(
+        { project: repo.slug, hooks: guard.movedHooks },
+        "moved hooks that were not the runner's aside as <name>.replaced (or .replaced-2 and on), so that git runs the default branch's guard in their place",
       );
     }
   }
@@ -783,6 +791,12 @@ export class TurnExecutor {
     return backend?.listModels === undefined ? [] : backend.listModels();
   }
 
+  /** A CLI's plan quota, read without a turn; null when its adapter cannot read one. */
+  async quota(cli: CliKind): Promise<CliQuota | null> {
+    const backend = this.backends[cli];
+    return backend?.readQuota === undefined ? null : backend.readQuota();
+  }
+
   /** Lets every warm session go: called on shutdown. */
   async close(): Promise<void> {
     await Promise.all([...this.residents.keys()].map((key) => this.closeResident(key, "shutdown")));
@@ -939,7 +953,6 @@ export class TurnExecutor {
       prompt: string;
       limits: { timeoutMs: number | null; maxTurns: number | null };
       statusSchema: Record<string, unknown>;
-      env: Readonly<Record<string, string>>;
       onEvent: (event: AgentEvent) => void;
       control: TurnControl;
     },
@@ -967,7 +980,6 @@ export class TurnExecutor {
         mcp: job.mcp,
         limits: input.limits,
         statusSchema: input.statusSchema,
-        env: input.env,
         costSoFarUsd: job.costSoFarUsd,
       });
       current = {

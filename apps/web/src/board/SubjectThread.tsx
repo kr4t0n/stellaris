@@ -1,11 +1,10 @@
 import type { Task } from "@stellaris/shared";
-import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Markdown } from "../components/Markdown.js";
 import type { ThreadSummary } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { markSeen } from "../lib/seen.js";
-import { useMembers, useSession } from "../lib/session.js";
+import { useMembers, useThread } from "../lib/session.js";
 import { MessageItem } from "./MessageItem.js";
 
 /**
@@ -25,12 +24,8 @@ export function SubjectThread({
   /** What to say while nothing has been posted. */
   empty: string;
 }) {
-  const { api } = useSession();
   const members = useMembers();
-  const detail = useQuery({
-    queryKey: ["thread", thread.id],
-    queryFn: () => api.thread(thread.id),
-  });
+  const detail = useThread(thread.id);
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(thread.id, newest), [thread.id, newest]);

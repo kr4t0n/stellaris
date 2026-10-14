@@ -9,10 +9,12 @@ import {
   type ModelInfo,
   type Options,
   type PermissionMode,
+  type Query,
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  CLI_ENV,
   parseTurnStatus,
   ZERO_USAGE,
   type AgentBackend,
@@ -28,19 +30,31 @@ import {
   addUsage,
   AGENT_TOKEN_ENV,
   capOutput,
+  mergeQuota,
   type AgentEvent,
+  type CliQuota,
   type ModelOption,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
 
+import { limitedQuota, quotaFromRateLimit, quotaFromUsage } from "./quota.js";
+
 export { parseTurnStatus };
+export { limitedQuota, quotaFromRateLimit, quotaFromUsage };
+
+/**
+ * The SDK's usage read behind `/usage`, marked experimental and named to say so. Typed from the
+ * SDK's own `Query`, so a release that renames or drops it fails the type check here.
+ */
+type UsageRead = Query["usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"];
 
 /** What a query returns: the message stream, plus the controls a resident session uses when the SDK offers them. */
 export type QueryStream = AsyncIterable<SDKMessage> & {
   interrupt?: () => Promise<unknown>;
   close?: () => void;
   supportedModels?: () => Promise<ModelInfo[]>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: UsageRead;
 };
 
 /** Streaming input that never sends a message, for a query opened only to ask the CLI something. */
@@ -113,6 +127,8 @@ export interface ClaudeBackendOptions {
   readonly recordDir?: string | undefined;
   readonly queryFn?: QueryFn | undefined;
   readonly sessionExists?: ((session: SessionId, cwd: string) => Promise<boolean>) | undefined;
+  /** The clock quota reports are stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
 }
 
 interface Block {
@@ -139,6 +155,10 @@ interface TurnState {
   model: string | undefined;
   /** Whether the turn has seen its init message; the SDK can send more than one per query. */
   initialized: boolean;
+  /** The plan quota the turn's rate-limit events reported, merged in order. */
+  quota: CliQuota | undefined;
+  /** What the CLI said when the API refused the turn for the plan's limit. */
+  limitText: string | undefined;
 }
 
 interface HandlerContext {
@@ -146,6 +166,7 @@ interface HandlerContext {
   readonly runner: string;
   /** Cold turns announce themselves on the SDK's init message; resident turns announce per prompt. */
   readonly announceOnInit: boolean;
+  readonly now: () => Date;
 }
 
 function freshState(model?: string): TurnState {
@@ -159,6 +180,8 @@ function freshState(model?: string): TurnState {
     sawResult: false,
     model,
     initialized: false,
+    quota: undefined,
+    limitText: undefined,
   };
 }
 
@@ -201,7 +224,10 @@ function usageOf(raw: unknown): Usage {
   };
 }
 
-/** The subprocess environment: inherit, add the board token, and drop nested-session markers. */
+/**
+ * The subprocess environment: inherit, add the runner's settings for every CLI and the board
+ * token, and drop nested-session markers.
+ */
 export function subprocessEnv(
   base: Readonly<Record<string, string | undefined>>,
   extra: Readonly<Record<string, string | undefined>>,
@@ -214,6 +240,7 @@ export function subprocessEnv(
     }
     env[key] = value;
   }
+  Object.assign(env, CLI_ENV);
   env[AGENT_TOKEN_ENV] = token;
   return env;
 }
@@ -252,6 +279,17 @@ function handleMessage(
       return;
     }
     case "assistant": {
+      // The API refused the turn for the plan's limit: the CLI says so in a synthetic message.
+      if (message.error === "rate_limit") {
+        const said = blocksOf(message.message.content)
+          .map((block) =>
+            block.type === "text" && typeof block.text === "string" ? block.text : "",
+          )
+          .join(" ")
+          .trim();
+        state.limitText = said.length > 0 ? said : "the plan's usage limit";
+        state.quota = limitedQuota(state.quota, context.now());
+      }
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
           emit({ type: "text", delta: block.text });
@@ -279,6 +317,18 @@ function handleMessage(
             ...(output === "" ? {} : { output: capOutput(output) }),
           });
         }
+      }
+      return;
+    }
+    case "rate_limit_event": {
+      // A report the adapter cannot read is dropped: it never changes how the turn ends.
+      try {
+        const quota = quotaFromRateLimit(message.rate_limit_info, context.now());
+        if (quota !== null) {
+          state.quota = mergeQuota(state.quota, quota);
+        }
+      } catch {
+        // The turn's last readable report stands.
       }
       return;
     }
@@ -326,6 +376,17 @@ function finishTurn(
   emit: (event: AgentEvent) => void,
 ): TurnResult {
   const status = parseTurnStatus(state.structured, state.finalText);
+  // A turn the plan's limit refused did no work, so it fails rather than completing without a
+  // report, which keeps its digest for the next turn.
+  if (
+    state.limitText !== undefined &&
+    status === null &&
+    state.exitReason !== "stopped" &&
+    state.exitReason !== "timeout"
+  ) {
+    state.exitReason = "error";
+    state.error = `usage limit reached: ${state.limitText}`;
+  }
   if (state.exitReason === "completed" && status === null && state.error === undefined) {
     state.error = "the turn ended without a parsable status object";
   }
@@ -349,6 +410,7 @@ function finishTurn(
     ...(state.error === undefined ? {} : { error: state.error }),
     ...(state.model === undefined ? {} : { model: state.model }),
     ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
+    ...(state.quota === undefined ? {} : { quota: state.quota }),
   };
 }
 
@@ -646,10 +708,12 @@ export class ClaudeAgentBackend implements AgentBackend {
   readonly stops = true;
   private readonly queryFn: QueryFn;
   private readonly sessionExists: (session: SessionId, cwd: string) => Promise<boolean>;
+  private readonly now: () => Date;
 
   constructor(private readonly options: ClaudeBackendOptions = {}) {
     this.queryFn = options.queryFn ?? ((params) => query(params));
     this.sessionExists = options.sessionExists ?? defaultSessionExists;
+    this.now = options.now ?? (() => new Date());
   }
 
   /** The session id is chosen up front so the runner can record it before the turn starts. */
@@ -659,7 +723,38 @@ export class ClaudeAgentBackend implements AgentBackend {
 
   /** The models the CLI offers, asked of a query that is closed before it takes a turn. */
   async listModels(): Promise<ModelOption[]> {
-    const listing = this.queryFn({
+    const listing = this.ask();
+    try {
+      return listing.supportedModels === undefined
+        ? []
+        : modelOptions(await listing.supportedModels());
+    } finally {
+      listing.close?.();
+    }
+  }
+
+  /**
+   * The plan quota from the usage read behind `/usage`, asked of a query that is closed before it
+   * takes a turn. The read fetches the claude.ai usage endpoint and makes no model call, so it
+   * spends none of the quota; it skips the scan of local transcripts that fills the dialog's
+   * breakdown. Rejects when this Claude Code cannot read its usage.
+   */
+  async readQuota(): Promise<CliQuota> {
+    const asking = this.ask();
+    try {
+      const read = asking.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+      if (read === undefined) {
+        throw new Error("this Claude Code cannot read its usage");
+      }
+      return quotaFromUsage(await read.call(asking, { skipBehaviors: true }), this.now());
+    } finally {
+      asking.close?.();
+    }
+  }
+
+  /** A query opened only to ask the CLI something: it never sends a prompt, so it makes no turn. */
+  private ask(): QueryStream {
+    return this.queryFn({
       prompt: silentInput(),
       options: {
         cwd: os.tmpdir(),
@@ -671,13 +766,6 @@ export class ClaudeAgentBackend implements AgentBackend {
           : { pathToClaudeCodeExecutable: this.options.pathToClaudeCodeExecutable }),
       },
     });
-    try {
-      return listing.supportedModels === undefined
-        ? []
-        : modelOptions(await listing.supportedModels());
-    } finally {
-      listing.close?.();
-    }
   }
 
   /**
@@ -714,6 +802,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       agent: request.spec.agent,
       runner: request.spec.runner,
       announceOnInit: true,
+      now: this.now,
     };
 
     // The runner records the session id before the first turn so a crash cannot lose it. If that
@@ -828,12 +917,12 @@ export class ClaudeAgentBackend implements AgentBackend {
       mcp: start.mcp,
       limits: start.limits,
       statusSchema: start.statusSchema,
-      env: start.env,
     };
     const context: HandlerContext = {
       agent: spec.agent,
       runner: spec.runner,
       announceOnInit: false,
+      now: this.now,
     };
     const record =
       this.options.recordDir === undefined
@@ -905,7 +994,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       // The CLI echoes each user message as it takes it, which is how a steer is known delivered.
       extraArgs: { "replay-user-messages": null },
       abortController: abort,
-      env: subprocessEnv(process.env, { ...this.options.env, ...request.env }, request.mcp.token),
+      env: subprocessEnv(process.env, this.options.env ?? {}, request.mcp.token),
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
       ...(this.options.stderr === undefined ? {} : { stderr: this.options.stderr }),

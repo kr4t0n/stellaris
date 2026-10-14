@@ -9,12 +9,13 @@ import type {
   TurnRequest,
   TurnResult,
 } from "@stellaris/runner-core";
-import type { AgentEvent, ModelOption } from "@stellaris/shared";
+import type { AgentEvent, CliQuota, ModelOption } from "@stellaris/shared";
 import { z } from "zod";
 import {
   CodexAppServerSession,
   listAppServerModels,
   PENDING_THREAD_PREFIX,
+  readAppServerQuota,
   type AppServerSessionOptions,
   type SpawnAppServer,
 } from "./app-server.js";
@@ -35,6 +36,8 @@ export interface CodexOptions {
   readonly recordDir?: string | undefined;
   /** Spawns `codex app-server`; injectable for tests. */
   readonly spawn?: SpawnAppServer | undefined;
+  /** The clock quota reports are stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
 }
 
 /**
@@ -64,6 +67,11 @@ export class CodexBackend implements AgentBackend {
     return listAppServerModels(this.sessionOptions());
   }
 
+  /** The plan quota from `account/rateLimits/read`, asked of a server started for the question. */
+  readQuota(): Promise<CliQuota> {
+    return readAppServerQuota(this.sessionOptions());
+  }
+
   async runTurn(
     request: TurnRequest,
     onEvent?: (event: AgentEvent) => void,
@@ -88,6 +96,7 @@ export class CodexBackend implements AgentBackend {
       ...(options.env === undefined ? {} : { env: options.env }),
       ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
       ...(options.recordDir === undefined ? {} : { recordDir: options.recordDir }),
+      ...(options.now === undefined ? {} : { now: options.now }),
     };
   }
 }

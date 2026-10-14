@@ -55,6 +55,8 @@ import {
   RetirementProposalSchema,
   RoleCharterSchema,
   RunnerSchema,
+  mergeQuota,
+  quotaChanged,
   SEED_ROLES,
   SKILL_BYTES_LIMIT,
   SKILL_FILES_LIMIT,
@@ -73,10 +75,12 @@ import {
   type ChannelRef,
   type CompletionEffect,
   type CliKind,
+  type CliQuota,
   type Cron,
   type CronSchedule,
   type Dashboard,
   type Decision,
+  type GitIdentityPart,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
@@ -126,7 +130,6 @@ import {
   type SessionsFile,
   TranscriptEntrySchema,
   UlidSchema,
-  UsageSchema,
   type TranscriptEntry,
   type TurnHistoryEntry,
   type TurnRecord,
@@ -137,13 +140,17 @@ import {
   METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
+  type TokenUse,
   RunnerOsSchema,
 } from "@stellaris/shared";
+import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
+import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
+import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
 import {
   ensureDir,
   exists,
@@ -259,6 +266,11 @@ export interface RunnerPatch {
   readonly clis?: readonly CliKind[] | undefined;
   readonly capabilities?: readonly string[] | undefined;
   readonly version?: string | undefined;
+  /**
+   * What the runner's account lacks of a git identity, as its hello reported; null when the hello
+   * said nothing, as an older runner's does, which drops what an earlier one reported.
+   */
+  readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
 }
 
 export interface SignalRecord {
@@ -292,20 +304,6 @@ const SignInsSchema = z.object({
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
-const TurnHistoryPayloadSchema = z.object({
-  project: NameSchema,
-  thread: UlidSchema.optional(),
-  channel: NameSchema.optional(),
-  trigger: z.string().default("manual"),
-  exitReason: z.string().nullable().default(null),
-  costUsd: z.number().default(0),
-  usage: UsageSchema.optional(),
-  model: z.string().nullable().default(null),
-  summary: z.string().nullable().default(null),
-  error: z.string().nullable().default(null),
-  toolCalls: z.number().int().nonnegative().optional(),
-  turnId: UlidSchema.optional(),
-});
 const TurnStartPayloadSchema = z.object({ project: NameSchema, turnId: UlidSchema.optional() });
 
 export interface DigestResult {
@@ -461,9 +459,11 @@ function turnTime(record: TurnRecord): string {
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
-const MENTION_PATTERN = /(^|[^\w@])@([a-z0-9][a-z0-9-]{0,31})(?![\w-])/g;
 
-/** Free text quoted in a board notice, its mentions written as plain names so they wake nobody. */
+/**
+ * Free text quoted in a board notice, its mentions written as plain names so they wake nobody. Every
+ * `@name` goes, in code too, since code in the text alone may not be code in the post it is quoted in.
+ */
 function withoutMentions(text: string): string {
   return text.replaceAll(MENTION_PATTERN, "$1$2");
 }
@@ -689,17 +689,6 @@ function unanswered(messages: readonly Message[]): Message[] {
     }
   }
   return waiting;
-}
-
-function extractMentions(body: string): Name[] {
-  const found = new Set<Name>();
-  for (const match of body.matchAll(MENTION_PATTERN)) {
-    const name = match[2];
-    if (name !== undefined) {
-      found.add(name);
-    }
-  }
-  return [...found].toSorted();
 }
 
 function snippetAround(text: string, query: string, radius = 80): string {
@@ -2017,8 +2006,14 @@ export class Board {
         throw new BoardError("NOT_FOUND", `runner ${name} not found`);
       }
       const doc = await readMarkdown(file, RunnerSchema);
+      const { gitIdentityMissing: reported, ...rest } = doc.data;
+      const gitIdentityMissing =
+        patch.gitIdentityMissing === undefined ? reported : (patch.gitIdentityMissing ?? undefined);
       const next: Runner = RunnerSchema.parse({
-        ...doc.data,
+        ...rest,
+        ...(gitIdentityMissing === undefined
+          ? {}
+          : { gitIdentityMissing: [...gitIdentityMissing] }),
         ...(patch.status === undefined ? {} : { status: patch.status }),
         ...(patch.os === undefined ? {} : { os: patch.os }),
         ...(patch.clis === undefined ? {} : { clis: [...patch.clis] }),
@@ -2042,6 +2037,37 @@ export class Board {
           key: `runner:${name}`,
           summary: `runner ${name} is ${next.status}${clis}${capabilities}`,
           value: next.status === "connected" ? 1 : 0,
+        });
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Records a CLI's plan quota as a runner reported it, from a turn's stream or a read, merged over
+   * what the record held. The record is written on every report, so it says when the numbers were
+   * last seen; `runner.quota` is appended only when what a reader would see changes, since every
+   * turn reports.
+   */
+  async recordQuota(name: Name, cli: CliKind, quota: CliQuota): Promise<Runner> {
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const previous = doc.data.quotas?.[cli];
+      const merged = mergeQuota(previous, quota);
+      const next: Runner = RunnerSchema.parse({
+        ...doc.data,
+        quotas: { ...doc.data.quotas, [cli]: merged },
+      });
+      await writeMarkdown(file, next, doc.body);
+      if (quotaChanged(previous, merged)) {
+        await this.events.append("runner.quota", SYSTEM_ACTOR.name, {
+          name,
+          cli,
+          status: merged.status,
         });
       }
       return next;
@@ -4361,6 +4387,15 @@ export class Board {
     return computeMetrics({ events, tasks, citizens, actions, activeSignals, window, now });
   }
 
+  /**
+   * Each citizen's finished turns over a window and the tokens of those that counted them, from
+   * the event log alone, which holds every turn's end whatever runner it ran on.
+   */
+  async tokenUse(window: MetricsWindow): Promise<TokenUse> {
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return tokenUse(events, window, this.now());
+  }
+
   /** The board actions a finished turn took, from its transcript; null when it kept none. */
   private async turnActions(agent: Name, turnId: string): Promise<number | null> {
     // A transcript is written before its turn's end is logged and never changes after.
@@ -6245,7 +6280,7 @@ export class Board {
       id: this.newId(),
       ...head,
       ts: this.now().toISOString(),
-      mentions: extractMentions(body),
+      mentions: postMentions(body),
     });
     const { author } = head;
     await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);

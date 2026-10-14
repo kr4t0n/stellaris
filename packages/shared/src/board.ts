@@ -8,6 +8,7 @@ import {
   type Name,
 } from "./ids.js";
 import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
+import { CliQuotaSchema } from "./quota.js";
 import {
   CharterTriggerSchema,
   RoleCharterSchema,
@@ -546,6 +547,14 @@ export interface Member extends MemberFrontmatter {
 }
 
 export const RunnerOsSchema = z.enum(["linux", "windows", "darwin"]);
+
+/**
+ * The two halves of the git identity a commit carries. A citizen's own commits carry its runner's
+ * account's, and git refuses one without a name and makes an address up without an email.
+ */
+export const GitIdentityPartSchema = z.enum(["name", "email"]);
+export type GitIdentityPart = z.infer<typeof GitIdentityPartSchema>;
+
 export const RunnerSchema = z.object({
   name: NameSchema,
   os: RunnerOsSchema,
@@ -553,8 +562,18 @@ export const RunnerSchema = z.object({
   capabilities: z.array(z.string()),
   /** The release the runner reported when it last registered; absent until it has. */
   version: z.string().optional(),
+  /**
+   * What the runner's account lacked of a git identity when it last registered, empty when it had
+   * both; absent while the runner has not said, as one from before runners checked never does.
+   */
+  gitIdentityMissing: z.array(GitIdentityPartSchema).optional(),
   status: z.enum(["connected", "disconnected"]),
   lastSeen: IsoDateTimeSchema.optional(),
+  /**
+   * Each CLI's plan quota as its login on this runner last reported it, from a turn's stream or a
+   * read; absent until one has.
+   */
+  quotas: z.partialRecord(CliKindSchema, CliQuotaSchema).optional(),
 });
 export type Runner = z.infer<typeof RunnerSchema>;
 

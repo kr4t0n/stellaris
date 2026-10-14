@@ -67,15 +67,17 @@ runner:
 
 runs a runner beside the server from the runner image, which brings Claude Code, Codex, and the toolchains agents use. It is a StatefulSet: each pod is a runner of its own, with a name that stays and a claim of its own (`home-stellaris-runner-0`) as its home, which holds the CLIs' logins, the runner's token, the agents' homes, and the repositories and worktrees of the projects living on it, their only copy. The runners reach the server through the chart's Service, and their agents reach the board's MCP endpoint the same way. `runner.serverUrl` names another server; with `server.enabled: false` it is required, and the chart deploys runners alone, for a board elsewhere.
 
-A pod starts with its CLIs logged out and enrolls. Log both CLIs in, then approve the code from its log on the board under runners, where the pod's name is the suggested one:
+A pod starts with its CLIs logged out and enrolls. Log both CLIs in and give the runner's account a git identity, then approve the code from its log on the board under runners, where the pod's name is the suggested one:
 
 ```bash
 kubectl -n stellaris exec -it stellaris-runner-0 -c runner -- claude auth login
 kubectl -n stellaris exec -it stellaris-runner-0 -c runner -- codex login --device-auth
+kubectl -n stellaris exec stellaris-runner-0 -c runner -- git config --global user.name "Your Name"
+kubectl -n stellaris exec stellaris-runner-0 -c runner -- git config --global user.email you@example.com
 kubectl -n stellaris logs stellaris-runner-0 -c runner | grep approve
 ```
 
-Logging in first means no turn fails for want of a login, since a runner waiting for approval takes none. The logins and the token stay on the claim, so a restarted pod connects as the same runner, logged in. An API key from a Secret in `runner.extraEnv`, such as `ANTHROPIC_API_KEY`, signs a CLI in instead; a `CLAUDE_CODE_*` variable does not, because the runner drops them before starting Claude Code. A runner registered by hand takes its token from `runner.existingSecret`, with one replica, since a token is one runner.
+Logging in first means no turn fails for want of a login, since a runner waiting for approval takes none. The git identity is what agents' own commits carry, since the runner gives them none, and without one git refuses them. A runner whose account lacks a name or an email when it starts or connects warns in its log, beside the code to approve on a first start, with the commands that set them, and the board's runners view marks it until it connects with both set, as after `kubectl -n stellaris delete pod stellaris-runner-0`. The logins and the token stay on the claim, so a restarted pod connects as the same runner, logged in. An API key from a Secret in `runner.extraEnv`, such as `ANTHROPIC_API_KEY`, signs a CLI in instead; a `CLAUDE_CODE_*` variable does not, because the runner drops them before starting Claude Code. A runner registered by hand takes its token from `runner.existingSecret`, with one replica, since a token is one runner.
 
 What a runner needs in its home before it starts, such as an SSH key for git over SSH, comes from a Secret in `runner.extraVolumes` and an init container in `runner.extraInitContainers` that copies it in, mounting the claim by its name, `home`, which no extra volume may take. `fsGroup` has made the home writable by the runner's user and given the Secret's files the same group before any container starts, so with `defaultMode: 0440` the init container needs no root; `values.yaml` shows one.
 
@@ -167,7 +169,7 @@ The probes, resources, security contexts, and scheduling fields under `server` a
 
 ## Releasing a new chart version
 
-Bump `version` in `Chart.yaml` and push to `main`: `helm-publish.yml` packages the chart, adds it to the index on the `gh-pages` branch, and never replaces a version already published, so a chart change without a version bump publishes nothing. `appVersion` names the image tag pulled by default, which the image's publish workflow pushes from a `v<appVersion>` git tag.
+A release bumps `version` in `Chart.yaml`, beside `appVersion`, in its `chore(release)` commit on `dev`, and the chart publishes once the release's pull request merges into `main`: `helm-publish.yml` runs on a push to `main` that changes `helm/**`, packages the chart, adds it to the index on the `gh-pages` branch, and never replaces a version already published, so a chart change without a version bump publishes nothing. `appVersion` names the image tag pulled by default, which the image's publish workflow pushes from a `v<appVersion>` git tag.
 
 ## Uninstall
 

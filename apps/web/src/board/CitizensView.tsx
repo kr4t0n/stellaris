@@ -1,10 +1,30 @@
-import type { Member } from "@stellaris/shared";
-import { Link } from "@tanstack/react-router";
+import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/shared";
+import { Link, useSearch } from "@tanstack/react-router";
+import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
-import { useMembers, useProjects, useScheduler } from "../lib/session.js";
-import { runnersOf, scopeName } from "./citizen.js";
+import { ago } from "../lib/format.js";
+import {
+  useMembers,
+  useNow,
+  useProjects,
+  useRunners,
+  useScheduler,
+  useTokenUse,
+} from "../lib/session.js";
+import { runnersOf, scopeName, tokenUseCell } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { QuotaMark } from "./Quota.js";
+
+const WINDOWS: ReadonlyArray<{
+  readonly window: MetricsWindow;
+  readonly label: string;
+  readonly title: string;
+}> = [
+  { window: "24h", label: "24h", title: "the last 24 hours" },
+  { window: "7d", label: "7d", title: "the last 7 days" },
+  { window: "all", label: "All", title: "all time" },
+];
 
 /**
  * The model a citizen runs: what its CLI last reported, else what it is set to, else the CLI's own,
@@ -27,14 +47,98 @@ function byRole(a: Member, b: Member): number {
   return a.role.localeCompare(b.role) || byName(a, b);
 }
 
+/** A row's state, in one word so the column stays narrow, with more on hover. */
+interface RowState {
+  readonly label: string;
+  readonly detail: string;
+  readonly tone: string;
+}
+
+/** A row's tokens over the window: as `tokenUseCell` words them, or why they are not shown. */
+interface RowTokens {
+  readonly label: string;
+  readonly detail: string | undefined;
+  readonly spoken: string | null;
+}
+
+function CitizenRow({
+  member,
+  state,
+  tokens,
+  runners,
+  placed,
+  now,
+}: {
+  member: Member;
+  state: RowState;
+  tokens: RowTokens;
+  runners: readonly Runner[];
+  placed: ReadonlyMap<string, string>;
+  now: number;
+}) {
+  const model = modelOf(member);
+  const projects = member.memberships.length === 0 ? "no projects" : member.memberships.join(", ");
+  const runner = runnersOf(member, placed);
+  return (
+    <li className="col-span-full grid grid-cols-subgrid">
+      <Link
+        to="/citizen/$name"
+        params={{ name: member.name }}
+        className="col-span-full grid grid-cols-subgrid items-center rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-2/50"
+      >
+        <span className="relative grid size-4 place-items-center">
+          {member.cli === null ? null : <CliIcon cli={member.cli} size={13} />}
+          {member.status === "active" ? (
+            <QuotaMark member={member} runners={runners} placed={placed} now={now} />
+          ) : null}
+        </span>
+        <span className="text-fg-primary">{member.name}</span>
+        <span className="text-fg-secondary">{member.role}</span>
+        <span className="truncate text-xs text-fg-muted" title={model}>
+          {model}
+        </span>
+        <span className="text-xs text-fg-muted" title={runner.detail}>
+          {runner.label}
+        </span>
+        <span className="truncate text-xs text-fg-muted" title={projects}>
+          {projects}
+        </span>
+        {/*
+          A line of its own under the row, ending at its right edge so the counts line up from row
+          to row, which a column beside the others would only have had room for by cutting them.
+        */}
+        <span
+          className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums"
+          title={tokens.detail}
+        >
+          {tokens.label}
+          {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
+        </span>
+        <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
+          {state.label}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 /**
- * Every citizen at a glance, one row each in columns, ordered by role: its CLI, role, model, the
- * runners its turns run on, projects, and what it is doing; each opens the citizen's own view.
+ * Every citizen at a glance, one row each in columns, ordered by role: its CLI, marked when its
+ * quota is near or at its limit on a runner its turns use, role, model, the runners its turns run
+ * on, projects, and what it is doing, and under them the tokens its turns counted over the window
+ * the header picks; each opens the citizen's own view. Retired citizens follow in a section of
+ * their own.
  */
 export function CitizensView() {
+  const { window = "24h" } = useSearch({ from: "/citizens" });
   const members = useMembers();
   const scheduler = useScheduler();
   const projectList = useProjects();
+  const runners = useRunners();
+  const tokenUse = useTokenUse(window);
+  const clock = useNow(30_000);
+  const switcherLabel = useId();
+  const retiredHeading = useId();
   if (members.data === undefined) {
     return <PaneNote>Reading the roster…</PaneNote>;
   }
@@ -50,9 +154,20 @@ export function CitizensView() {
       project.runner === undefined ? [] : [[project.slug, project.runner] as const],
     ),
   );
+  const counted = new Map<string, CitizenTokens>(
+    (tokenUse.data?.citizens ?? []).map((row) => [row.agent, row]),
+  );
 
   // One word each, so the column stays narrow; where a turn runs is on hover and in Working now.
-  const state = (member: Member): { label: string; detail: string; tone: string } => {
+  const state = (member: Member): RowState => {
+    if (member.status !== "active") {
+      return {
+        label: "retired",
+        detail:
+          member.retiredAt === undefined ? "retired" : `retired ${ago(member.retiredAt, clock)}`,
+        tone: "text-fg-muted",
+      };
+    }
     const at = [
       ...new Set(running.filter((pair) => pair.agent === member.name).map((pair) => pair.scope)),
     ];
@@ -68,61 +183,82 @@ export function CitizensView() {
       : { label: "resting", detail: "resting", tone: "text-fg-muted" };
   };
 
+  const tokens = (member: Member): RowTokens => {
+    if (tokenUse.data !== undefined) {
+      return tokenUseCell(counted.get(member.name), window);
+    }
+    return tokenUse.error === null
+      ? { label: "counting…", detail: undefined, spoken: null }
+      : { label: "tokens unknown", detail: tokenUse.error.message, spoken: null };
+  };
+
+  const row = (member: Member) => (
+    <CitizenRow
+      key={member.name}
+      member={member}
+      state={state(member)}
+      tokens={tokens(member)}
+      runners={runners.data ?? []}
+      placed={placed}
+      now={clock}
+    />
+  );
+
+  const switcher = (
+    <nav aria-labelledby={switcherLabel} className="flex shrink-0 items-center gap-1">
+      <span id={switcherLabel} className="mr-1 text-caps">
+        Tokens
+      </span>
+      {WINDOWS.map((each) => (
+        <Link
+          key={each.window}
+          to="/citizens"
+          search={{ window: each.window }}
+          title={each.title}
+          aria-current={each.window === window ? "page" : undefined}
+          className={`rounded-md px-2 py-1 text-xs transition-colors ${
+            each.window === window
+              ? "bg-surface-2 text-fg-primary"
+              : "text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+          }`}
+        >
+          {each.label}
+        </Link>
+      ))}
+    </nav>
+  );
+
   return (
     <>
       <PaneHeader
         title="Citizens"
         subtitle={`${active.length} active in ${roles === 1 ? "1 role" : `${roles} roles`}${retired.length === 0 ? "" : ` · ${retired.length} retired`}`}
+        trailing={switcher}
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {active.length === 0 ? (
-          <p className="px-2 py-2 text-meta">No citizens yet. Ask the concierge for one.</p>
+          <p className="px-2 py-2 text-meta">
+            {retired.length === 0 ? "No citizens yet." : "No active citizens."}
+          </p>
         ) : null}
         {/*
-          Rows are subgrids of one grid, so each column is as wide as its widest cell. In a narrow
-          island the model cuts before the projects go under 3rem.
+          Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
+          cell. In a narrow island the model cuts before the projects go under 3rem.
         */}
-        <ul className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3">
-          {active.map((member) => {
-            const now = state(member);
-            const model = modelOf(member);
-            const projects =
-              member.memberships.length === 0 ? "no projects" : member.memberships.join(", ");
-            const runner = runnersOf(member, placed);
-            return (
-              <li key={member.name} className="col-span-full grid grid-cols-subgrid">
-                <Link
-                  to="/citizen/$name"
-                  params={{ name: member.name }}
-                  className="col-span-full grid grid-cols-subgrid items-center rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-2/50"
-                >
-                  <span className="grid size-4 place-items-center">
-                    {member.cli === null ? null : <CliIcon cli={member.cli} size={13} />}
-                  </span>
-                  <span className="text-fg-primary">{member.name}</span>
-                  <span className="text-fg-secondary">{member.role}</span>
-                  <span className="truncate text-xs text-fg-muted" title={model}>
-                    {model}
-                  </span>
-                  <span className="text-xs text-fg-muted" title={runner.detail}>
-                    {runner.label}
-                  </span>
-                  <span className="truncate text-xs text-fg-muted" title={projects}>
-                    {projects}
-                  </span>
-                  <span className={`text-right text-xs ${now.tone}`} title={now.detail}>
-                    {now.label}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-        {retired.length === 0 ? null : (
-          <p className="mt-2 border-t border-line px-2 pt-2 text-meta">
-            Retired: {retired.map((member) => `${member.name} (${member.role})`).join(", ")}
-          </p>
-        )}
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3">
+          <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
+          {retired.length === 0 ? null : (
+            <section
+              aria-labelledby={retiredHeading}
+              className="col-span-full mt-2 grid grid-cols-subgrid border-t border-line pt-2"
+            >
+              <h3 id={retiredHeading} className="col-span-full px-2 py-1 text-section">
+                Retired
+              </h3>
+              <ul className="col-span-full grid grid-cols-subgrid">{retired.map(row)}</ul>
+            </section>
+          )}
+        </div>
       </div>
     </>
   );

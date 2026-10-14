@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { execa } from "execa";
 import {
+  CLI_ENV,
   parseTurnStatus,
   type AgentSpec,
   type ResidentSession,
@@ -19,11 +20,13 @@ import {
   EffortOptionSchema,
   ModelOptionSchema,
   type AgentEvent,
+  type CliQuota,
   type EffortOption,
   type ModelOption,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
+import { isUsageLimit, limitedQuota, mergeSnapshot, quotaFromRead } from "./quota.js";
 
 /**
  * A Codex thread over `codex app-server`: JSON-RPC 2.0 over stdio, one JSON object per line. The
@@ -58,6 +61,8 @@ export interface AppServerSessionOptions {
   /** Directory to append the server's raw output to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
   readonly clientVersion?: string | undefined;
+  /** The clock quota reports are stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
 }
 
 type Dict = Record<string, unknown>;
@@ -353,10 +358,14 @@ function modelOf(raw: unknown): ModelOption | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** The models the app server offers, from `model/list` on a server started only to ask. */
-export async function listAppServerModels(
+/**
+ * Runs `ask` against an app server started only to answer it, initialized and stopped after: it
+ * opens no thread, so it takes no turn.
+ */
+async function askAppServer<T>(
   options: Omit<AppServerSessionOptions, "sandbox">,
-): Promise<ModelOption[]> {
+  ask: (client: JsonRpcClient) => Promise<T>,
+): Promise<T> {
   const args = ["app-server", "--stdio"];
   for (const override of options.extraConfig ?? []) {
     args.push("-c", override);
@@ -379,6 +388,17 @@ export async function listAppServerModels(
       capabilities: null,
     });
     client.notify("initialized", {});
+    return await ask(client);
+  } finally {
+    client.close();
+  }
+}
+
+/** The models the app server offers, from `model/list` on a server started only to ask. */
+export function listAppServerModels(
+  options: Omit<AppServerSessionOptions, "sandbox">,
+): Promise<ModelOption[]> {
+  return askAppServer(options, async (client) => {
     const models: ModelOption[] = [];
     let cursor: string | null = null;
     do {
@@ -394,9 +414,23 @@ export async function listAppServerModels(
       cursor = isDict(page) ? (str(page["nextCursor"]) ?? null) : null;
     } while (cursor !== null);
     return models;
-  } finally {
-    client.close();
-  }
+  });
+}
+
+/**
+ * The plan quota from `account/rateLimits/read` on a server started only to ask. The read fetches
+ * the account's usage and makes no model call, so it spends none of the quota; it skips the reset
+ * credits' details, as the protocol suggests for background reads.
+ */
+export function readAppServerQuota(
+  options: Omit<AppServerSessionOptions, "sandbox">,
+): Promise<CliQuota> {
+  return askAppServer(options, async (client) =>
+    quotaFromRead(
+      await client.request("account/rateLimits/read", { excludeResetCreditDetails: true }),
+      (options.now ?? (() => new Date()))(),
+    ),
+  );
 }
 
 /** A thread's token totals as the app server counts them, where the input includes the cached input. */
@@ -448,6 +482,8 @@ interface TurnCollector {
   /** Steers the app server accepted and has not yet delivered as a user message. */
   readonly outstanding: Set<string>;
   stopped: boolean;
+  /** Whether Codex ended the turn for the plan's usage limit. */
+  limited: boolean;
 }
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
@@ -464,6 +500,10 @@ export class CodexAppServerSession implements ResidentSession {
   private closed = false;
   private readonly stderrTail: string[] = [];
   private readonly recorded: string[] = [];
+  /** The plan quota as the app server last reported it, merged from its sparse updates. */
+  private quota: CliQuota | undefined;
+  /** Whether the quota changed since a turn last reported it. */
+  private quotaFresh = false;
 
   private constructor(
     private readonly options: AppServerSessionOptions,
@@ -512,7 +552,7 @@ export class CodexAppServerSession implements ResidentSession {
     const env: Record<string, string | undefined> = {
       ...process.env,
       ...options.env,
-      ...start.env,
+      ...CLI_ENV,
       [AGENT_TOKEN_ENV]: start.mcp.token,
     };
     const spawn = options.spawn ?? defaultSpawnAppServer(options.codexPath ?? "codex");
@@ -620,9 +660,24 @@ export class CodexAppServerSession implements ResidentSession {
     );
   }
 
+  private now(): Date {
+    return (this.options.now ?? (() => new Date()))();
+  }
+
   private onNotification(method: string, params: unknown): void {
     const turn = this.active;
     if (!isDict(params)) {
+      return;
+    }
+    // Rate limits come with the requests a turn makes, and between turns on a warm session.
+    if (method === "account/rateLimits/updated") {
+      // A report the adapter cannot read is dropped: it never stops the reader, or the turn.
+      try {
+        this.quota = mergeSnapshot(this.quota, params["rateLimits"], this.now(), "turn");
+        this.quotaFresh = this.quota !== undefined;
+      } catch {
+        // The turn's last readable report stands.
+      }
       return;
     }
     if (method === "thread/tokenUsage/updated") {
@@ -707,6 +762,7 @@ export class CodexAppServerSession implements ResidentSession {
         const error = completed["error"];
         if (isDict(error)) {
           turn.error = str(error["message"]) ?? "turn failed";
+          turn.limited ||= isUsageLimit(error);
         }
         turn.settle();
         return;
@@ -721,6 +777,7 @@ export class CodexAppServerSession implements ResidentSession {
           return;
         }
         turn.error = message;
+        turn.limited ||= isUsageLimit(error);
         return;
       }
       default:
@@ -760,6 +817,7 @@ export class CodexAppServerSession implements ResidentSession {
       settle,
       outstanding: new Set(),
       stopped: false,
+      limited: false,
     };
     this.active = turn;
     emit({
@@ -830,6 +888,13 @@ export class CodexAppServerSession implements ResidentSession {
     if (exitReason === "completed" && status === null) {
       turn.error = "the turn ended without a parsable status object";
     }
+    if (turn.limited && exitReason === "error") {
+      turn.error = `usage limit reached: ${turn.error ?? "the plan's usage limit"}`;
+      this.quota = limitedQuota(this.quota, this.now());
+      this.quotaFresh = true;
+    }
+    const quota = this.quotaFresh ? this.quota : undefined;
+    this.quotaFresh = false;
     if (turn.error !== undefined) {
       emit({ type: "error", message: turn.error });
     }
@@ -845,6 +910,7 @@ export class CodexAppServerSession implements ResidentSession {
       ...(turn.error === undefined ? {} : { error: turn.error }),
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
+      ...(quota === undefined ? {} : { quota }),
     };
   }
 

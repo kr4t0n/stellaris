@@ -67,6 +67,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["task-changes"],
       ["task-diff"],
       ["metrics"],
+      ["tokens"],
       ["crons"],
     ];
   }

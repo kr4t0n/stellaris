@@ -271,6 +271,11 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const window = MetricsWindowSchema.parse(c.req.query("window") ?? "7d");
     return c.json(await board.metrics(window, new Set(scheduler?.activeSignals ?? [])));
   });
+  // Each citizen's finished turns over a window and the tokens they counted: names and counts only.
+  api.get("/tokens", async (c) => {
+    const window = MetricsWindowSchema.parse(c.req.query("window") ?? "24h");
+    return c.json(await board.tokenUse(window));
+  });
   // The shared memory tiers: the society's knowledge topics and its promoted skills.
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));

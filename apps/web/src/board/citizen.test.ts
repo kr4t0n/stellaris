@@ -6,6 +6,7 @@ import {
   runnersOf,
   tokensDetail,
   tokensLabel,
+  tokenUseCell,
   turnLength,
   wakeScopes,
   withoutTitle,
@@ -80,6 +81,46 @@ describe("citizen", () => {
       withUsage: 2,
     });
     expect(historyTotals([entry()])).toMatchObject({ usage: null, withUsage: 0 });
+  });
+
+  it("words a citizen's tokens over a window, a lower bound when some turns have no count", () => {
+    const usage = {
+      inputTokens: 5_313,
+      outputTokens: 1_540,
+      cacheReadTokens: 146_048,
+      cacheWriteTokens: 0,
+    };
+    const row = { agent: "desk", turns: 3, withUsage: 3, usage };
+    expect(tokenUseCell(row, "24h")).toEqual({
+      label: "151K in · 1.5K out",
+      detail: `${tokensDetail(usage)}; over 3 finished turns in the last 24 hours`,
+      spoken: null,
+    });
+    // As the Turns tab adds up the same turns.
+    expect(tokenUseCell(row, "24h").label).toBe(tokensLabel(usage));
+    expect(tokenUseCell({ ...row, turns: 5 }, "7d")).toEqual({
+      label: "≥151K in · ≥1.5K out",
+      detail:
+        `${tokensDetail(usage)}; over 3 of 5 finished turns in the last 7 days. The other 2 have ` +
+        "no count: logged before turns counted tokens, or ended without their runner's report.",
+      spoken: "over 3 of 5 finished turns in the last 7 days",
+    });
+    expect(tokenUseCell({ ...row, turns: 4 }, "all").detail).toContain(
+      "over 3 of 4 finished turns in all. The other one has no count",
+    );
+    // Unknown, never zero, when no turn counted; and a citizen with no turn in the window.
+    expect(tokenUseCell({ ...row, turns: 1, withUsage: 0, usage: null }, "24h")).toEqual({
+      label: "tokens unknown",
+      detail:
+        "1 finished turn in the last 24 hours, none with a token count: logged before turns " +
+        "counted tokens, or ended without their runner's report",
+      spoken: "1 finished turn in the last 24 hours, none counted",
+    });
+    expect(tokenUseCell(undefined, "7d")).toEqual({
+      label: "no turns",
+      detail: "no finished turn in the last 7 days",
+      spoken: null,
+    });
   });
 
   it("counts a turn's whole input, cached or not, and says how it splits", () => {

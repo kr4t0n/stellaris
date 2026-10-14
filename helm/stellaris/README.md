@@ -169,7 +169,7 @@ The probes, resources, security contexts, and scheduling fields under `server` a
 
 ## Releasing a new chart version
 
-Bump `version` in `Chart.yaml` and push to `main`: `helm-publish.yml` packages the chart, adds it to the index on the `gh-pages` branch, and never replaces a version already published, so a chart change without a version bump publishes nothing. `appVersion` names the image tag pulled by default, which the image's publish workflow pushes from a `v<appVersion>` git tag.
+A release bumps `version` in `Chart.yaml`, beside `appVersion`, in its `chore(release)` commit on `dev`, and the chart publishes once the release's pull request merges into `main`: `helm-publish.yml` runs on a push to `main` that changes `helm/**`, packages the chart, adds it to the index on the `gh-pages` branch, and never replaces a version already published, so a chart change without a version bump publishes nothing. `appVersion` names the image tag pulled by default, which the image's publish workflow pushes from a `v<appVersion>` git tag.
 
 ## Uninstall
 

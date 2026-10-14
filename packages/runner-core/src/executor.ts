@@ -1,4 +1,5 @@
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   BRANCH_CHANGES_LIMIT,
@@ -30,6 +31,8 @@ import {
   type Name,
   type ProjectRepo,
   type SweepResult,
+  type TurnImage,
+  type TurnImageRead,
   type TurnJob,
   type TurnOutcome,
   type TurnWork,
@@ -39,6 +42,7 @@ import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
 import { describeError } from "./errors.js";
 import { ExecaGit, taskBranch, type GitOps, type RemoteSync } from "./git.js";
+import { readTurnImage, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
   ZERO_USAGE,
@@ -144,6 +148,8 @@ export class TurnExecutor {
   private readonly fetched = new Map<Name, { at: number; error?: string | undefined }>();
   /** Projects whose default branch could not be guarded, said once each. */
   private readonly unguarded = new Set<Name>();
+  /** Where each turn whose CLI is running may upload an image from, by turn id. */
+  private readonly imagePlaces = new Map<string, ImagePlaces>();
 
   constructor(options: TurnExecutorOptions) {
     this.layout = options.layout;
@@ -241,6 +247,10 @@ export class TurnExecutor {
       events.push(event);
       onEvent(event);
     };
+    this.imagePlaces.set(job.turnId, {
+      cwd: workspace.cwd,
+      roots: [workspace.cwd, home, tmpdir()],
+    });
     let result: TurnResult;
     try {
       if (control.stopped) {
@@ -285,6 +295,7 @@ export class TurnExecutor {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+    this.imagePlaces.delete(job.turnId);
     // A turn the user stopped ended because of it, however its CLI reported the end.
     if (control.stopped && result.exitReason !== "completed") {
       result = { ...result, exitReason: "stopped" };
@@ -784,6 +795,15 @@ export class TurnExecutor {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The image a turn running here names for `upload_image`, from its worktree, its citizen's home,
+   * or the system temp folder; null when no such turn's CLI is running here.
+   */
+  async readImage(read: TurnImageRead): Promise<TurnImage | null> {
+    const places = this.imagePlaces.get(read.turnId);
+    return places === undefined ? null : readTurnImage(read.path, places);
   }
 
   async models(cli: CliKind): Promise<ModelOption[]> {

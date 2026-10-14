@@ -1,4 +1,5 @@
 import { useContext, useMemo, type ReactNode } from "react";
+import { uploadedImageId } from "@stellaris/shared";
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { entityOfHref, remarkEntities } from "../lib/entities.js";
@@ -6,6 +7,7 @@ import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib
 import { remarkMentions } from "../lib/mentions.js";
 import { EntityLink, useEntitiesFor } from "./Entities.js";
 import { FileBaseContext, TaskFileLink, TaskImage } from "./TaskFile.js";
+import { UploadedImage } from "./UploadedImage.js";
 
 /** What a path on a runner's machine reads as: its text, with the path on hover. */
 function LocalPath({ href, children }: { href: string | undefined; children?: ReactNode }) {
@@ -42,6 +44,10 @@ function BoardLink({ href, children }: { href?: string | undefined; children?: R
   if (target?.kind === "local") {
     return <LocalPath href={href}>{children}</LocalPath>;
   }
+  if (target?.kind === "upload") {
+    // An uploaded image shows where a post writes it as an image; a link to one has nowhere to go.
+    return <span>{children}</span>;
+  }
   return (
     <a href={href} target="_blank" rel="noreferrer noopener">
       {children}
@@ -49,12 +55,18 @@ function BoardLink({ href, children }: { href?: string | undefined; children?: R
   );
 }
 
-/** An image on a task's branch shows in place; one elsewhere on a machine is its description. */
+/**
+ * An image on a task's branch or uploaded to the board shows in place; one elsewhere on a machine
+ * is its description.
+ */
 function BoardImage({ src, alt }: { src?: string | Blob | undefined; alt?: string | undefined }) {
   const base = useContext(FileBaseContext);
   const target = linkTarget(typeof src === "string" ? src : undefined, base);
   if (target?.kind === "task-file") {
     return <TaskImage taskId={target.taskId} path={target.path} alt={alt ?? ""} />;
+  }
+  if (target?.kind === "upload") {
+    return <UploadedImage id={target.id} alt={alt ?? ""} />;
   }
   if (target?.kind === "local") {
     const path = typeof src === "string" ? src : undefined;
@@ -71,9 +83,12 @@ function BoardImage({ src, alt }: { src?: string | Blob | undefined; alt?: strin
 
 const COMPONENTS: Components = { a: BoardLink, img: BoardImage };
 
-/** The default refusal of unsafe URLs, which would also refuse `report.md:67` as a scheme. */
+/**
+ * The default refusal of unsafe URLs, which would also refuse `report.md:67` and an uploaded
+ * image's `image:<id>` as schemes.
+ */
 function urlTransform(url: string): string {
-  return isCitedPath(url) ? url : defaultUrlTransform(url);
+  return isCitedPath(url) || uploadedImageId(url) !== null ? url : defaultUrlTransform(url);
 }
 
 /**

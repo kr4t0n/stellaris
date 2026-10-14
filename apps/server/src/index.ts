@@ -53,6 +53,8 @@ const host = new TurnHost({
 const runners = new RunnerHub({ board, host, version: VERSION, log });
 // The board refuses to end a conversation under someone else's turn in flight.
 board.watchTurns(() => host.inFlight());
+// An image a citizen uploads is read on the runner its turn runs on.
+board.readImagesWith((actor, file) => runners.readTurnImage(actor, file));
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.

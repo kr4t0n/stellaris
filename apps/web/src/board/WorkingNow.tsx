@@ -7,13 +7,18 @@ import { pairsOf } from "../lib/api.js";
 import { conversationOf, elapsed, lastLine, pairKey, useLiveTurns } from "../lib/live.js";
 import { useMembers, useNow, useScheduler } from "../lib/session.js";
 
-/** The rows the list has room for; more scroll inside it, so nothing under the section moves. */
-const ROWS = 4;
+/**
+ * The rows the list has room for: two, and half of a third, fading out at the list's foot, which
+ * says the list scrolls, since it shows no scrollbar beside the navigator's. More scroll inside it,
+ * so nothing under the section moves.
+ */
+const ROWS = 2.5;
 
 /**
  * A row is a 20 px line and an 11 px line at the inherited 1.5 leading, 2 px apart, with 6 px
- * above and below, so the list fits its rows exactly and scrolls only when there are more. The
- * list's 2 px above and below its rows keep a focused row's ring inside it.
+ * above and below. The list's 2 px above and below its rows keep a focused row's ring inside it,
+ * and put its bottom edge in the gap between the third row's lines, so the fade there runs over
+ * that row's name and leaves it readable.
  */
 const LIST_HEIGHT = `calc(${ROWS} * (1.25rem + 0.125rem + 11px * 1.5 + 0.75rem) + 0.25rem)`;
 
@@ -99,7 +104,7 @@ export function WorkingNow({
       </h3>
       <div
         ref={box}
-        className="-mx-1 scroll-py-4 overflow-y-auto px-1 py-0.5"
+        className="scrollbar-hidden -mx-1 scroll-py-4 overflow-y-auto px-1 py-0.5"
         style={{
           height: LIST_HEIGHT,
           ...(mask === undefined ? {} : { maskImage: mask }),

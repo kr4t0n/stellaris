@@ -690,6 +690,19 @@ describe("buildTurnPrompt", () => {
     expect(empty).toContain("skills/<name>/SKILL.md");
     expect(empty).toContain("memoryUpdated: true");
     expect(empty).toContain("## Knowledge of demo\n\nNone yet.");
+    // A repeated procedure is a candidate for a skill, proposed only when others would use it.
+    expect(empty).toContain("followed twice is a candidate");
+    expect(empty).toContain(
+      "more than one citizen would use it and nothing in it is tied to one place",
+    );
+    // How a codebase behaves goes in its own documents, not in project knowledge.
+    expect(empty).toContain(
+      "Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel",
+    );
+    expect(empty).toContain(
+      "a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge",
+    );
+    expect(empty).toContain("A durable fact about this place, such as its runners");
 
     const listed = buildTurnPrompt({
       dispatch: { ...dispatch, trigger: TriggerSchema.parse({ kind: "heartbeat" }) },

@@ -10,6 +10,7 @@ export type {
   ChannelSummary,
   ThreadSummary,
   DigestResult,
+  ImageSource,
   InitInput,
   JoinedProject,
   RetireAgentInput,

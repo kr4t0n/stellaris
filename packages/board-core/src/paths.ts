@@ -213,6 +213,14 @@ export class BoardPaths {
     return path.join(this.events(), "log.jsonl");
   }
 
+  /** Images citizens uploaded, by id: outside the projection, which every runner mirrors. */
+  images(): string {
+    return path.join(this.dataDir, "images");
+  }
+  image(id: Ulid): string {
+    return path.join(this.images(), id);
+  }
+
   state(): string {
     return path.join(this.dataDir, "state");
   }

@@ -7,6 +7,10 @@ export const ISLAND_SURFACE =
 /**
  * A floating island: a rounded panel inset from the window's edges and floating over the sky,
  * never docked flush against an edge. The caller places it.
+ *
+ * Its content scrolls inside it, never the island itself: it clips what overflows rather than
+ * hiding it, since a box that hides its overflow still scrolls for `scrollIntoView`, focus, and
+ * find-in-page.
  */
 export function Island({
   label,
@@ -23,7 +27,7 @@ export function Island({
     <section
       aria-label={label}
       style={style}
-      className={`absolute flex flex-col overflow-hidden ${ISLAND_SURFACE} ${className}`}
+      className={`absolute flex flex-col overflow-clip ${ISLAND_SURFACE} ${className}`}
     >
       {children}
     </section>

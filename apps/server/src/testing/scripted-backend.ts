@@ -1,4 +1,5 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   ZERO_USAGE,
@@ -37,6 +38,12 @@ export async function addWorkRoles(board: Board): Promise<void> {
 }
 
 export const ULID = /[0-9A-HJKMNP-TV-Z]{26}/;
+
+/** A screenshot as a scripted citizen takes one: the smallest PNG there is, one pixel. */
+const SCREENSHOT = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 /**
  * The git identity a scripted citizen commits with, standing in for the runner account's global
@@ -190,6 +197,23 @@ export class ScriptedBackend implements AgentBackend {
           });
         }
         return done("planned the ask as a reviewed task on demo");
+      }
+      // Asked to show the board, it saves a screenshot in a temp folder, uploads it, and shows it
+      // in the ask's thread, where it stays after the file is gone.
+      if (request.prompt.includes("Show me the board")) {
+        const folder = await mkdtemp(path.join(os.tmpdir(), "stellaris-shot-"));
+        const file = path.join(folder, "board.png");
+        await writeFile(file, SCREENSHOT);
+        const { id } = z
+          .object({ id: z.string() })
+          .parse(await verb("upload_image", { path: file }));
+        await rm(folder, { recursive: true, force: true });
+        const thread = /thread_id ([0-9A-HJKMNP-TV-Z]{26})/.exec(request.prompt)?.[1];
+        await verb("post_message", {
+          ...(thread === undefined ? { channel: "general" } : { thread_id: thread }),
+          body: `Here it is: ![The board, as it looks now](image:${id})`,
+        });
+        return done("showed the user the board");
       }
       if (request.prompt.includes("new project called api")) {
         await verb("create_project", { slug: "api", name: "Public API" });

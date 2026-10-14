@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BoardError, SYSTEM_ACTOR, type Board } from "@stellaris/board-core";
+import { BoardError, SYSTEM_ACTOR, type Actor, type Board } from "@stellaris/board-core";
 import type { SteerOutcome, TurnAssignment, TurnRunner } from "@stellaris/scheduler";
 import {
   BranchChangesSchema,
@@ -11,6 +11,7 @@ import {
   RUNNER_PROTOCOL,
   SOCIETY_SCOPE,
   SweepResultSchema,
+  TurnImageSchema,
   type BranchChanges,
   type BranchFile,
   type BranchFileDiff,
@@ -31,6 +32,7 @@ import {
   type TurnOutcome,
   type TurnRecord,
   type TurnJob,
+  type ImageRefusal,
   type Ulid,
   type HeldWorkspace,
   type WorkspaceConversation,
@@ -97,6 +99,13 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const CONTROL_TIMEOUT_MS = 15_000;
 /** A file read is a few git calls and up to 8 MB on the way back, which someone is waiting for. */
 const FILE_TIMEOUT_MS = 60_000;
+/** What a refusal of `upload_image` reads as: a file not there, one out of reach, one no image. */
+const IMAGE_REFUSALS: Record<ImageRefusal, "NOT_FOUND" | "FORBIDDEN" | "VALIDATION"> = {
+  missing: "NOT_FOUND",
+  outside: "FORBIDDEN",
+  not_image: "VALIDATION",
+  too_big: "VALIDATION",
+};
 /** A sweep is a few git calls and a removal per citizen who took part in the conversation. */
 const SWEEP_TIMEOUT_MS = 2 * 60_000;
 /** A runner acknowledges a job as it arrives, before preparing anything. */
@@ -723,6 +732,54 @@ export class RunnerHub implements TurnRunner {
       throw new BoardError("NOT_FOUND", `${branch} did not change ${path}`);
     }
     return diff;
+  }
+
+  /**
+   * The image file a citizen's turn names for `upload_image`, read on the runner that turn runs on,
+   * which refuses a file outside the turn's worktree, its citizen's home, and the system temp
+   * folder, and anything but a PNG, JPEG, GIF, or WebP within the size limit; each refusal comes
+   * back as a `BoardError` in the runner's words.
+   */
+  async readTurnImage(actor: Actor, file: string): Promise<Uint8Array> {
+    const turn = this.host
+      .runningTurns()
+      .find(
+        (each) =>
+          each.agent === actor.name &&
+          each.scope === actor.scope &&
+          each.thread === actor.thread &&
+          each.channel === actor.channel,
+      );
+    if (turn === undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `${actor.name} has no turn running in this conversation to read ${file} from`,
+      );
+    }
+    const seat = this.seats.get(turn.runner);
+    if (seat === undefined || seat.send === null) {
+      throw new RunnerAwayError(`runner ${turn.runner}, where the turn runs, is not connected`);
+    }
+    if (!seat.hello.imageReads) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name}, where the turn runs, cannot read images yet; upgrade it`,
+      );
+    }
+    const image = TurnImageSchema.nullable().parse(
+      await this.request(
+        seat,
+        (request) => ({ type: "image", request, read: { turnId: turn.turnId, path: file } }),
+        FILE_TIMEOUT_MS,
+      ),
+    );
+    if (image === null) {
+      throw new BoardError("INVALID_STATE", `the turn is no longer running on runner ${seat.name}`);
+    }
+    if (image.kind === "refused") {
+      throw new BoardError(IMAGE_REFUSALS[image.why], image.detail);
+    }
+    return Buffer.from(image.content, "base64");
   }
 
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */

@@ -32,9 +32,15 @@ export function MessageItem({
   const step = message.step === undefined ? null : stepLabel(message.step, task);
   const article = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (target) {
-      article.current?.scrollIntoView({ block: "center" });
+    const element = article.current;
+    if (!target || element === null) {
+      return;
     }
+    // Centered in the list it is in, unless it is taller than the list: then from its top, so it
+    // opens at who wrote it rather than halfway down.
+    const list = element.parentElement;
+    const tall = list !== null && element.offsetHeight > list.clientHeight;
+    element.scrollIntoView({ block: tall ? "start" : "center" });
   }, [target]);
   return (
     <article

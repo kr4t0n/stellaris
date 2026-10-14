@@ -1,4 +1,4 @@
-import type { BranchFileChange } from "@stellaris/shared";
+import { uploadedImageId, type BranchFileChange } from "@stellaris/shared";
 
 /** Where relative links in a task's file resolve: the file's folder on the task's branch. */
 export interface FileBase {
@@ -7,8 +7,9 @@ export interface FileBase {
 }
 
 /**
- * What a link or an image in the board's text points at: a file on a task's branch, some other
- * place on a machine that nothing on the board can open, or, as null, an address the browser opens.
+ * What a link or an image in the board's text points at: a file on a task's branch, an image a
+ * citizen uploaded, some other place on a machine that nothing on the board can open, or, as null,
+ * an address the browser opens.
  */
 export type LinkTarget =
   | {
@@ -18,6 +19,7 @@ export type LinkTarget =
       /** The line the link cites, as `report.md:67` or `#L67` name it. */
       readonly line?: number;
     }
+  | { readonly kind: "upload"; readonly id: string }
   | { readonly kind: "local" };
 
 const LOCAL: LinkTarget = { kind: "local" };
@@ -87,13 +89,17 @@ function decoded(href: string): string {
 /**
  * Where a link goes. Agents name their work by the paths their tools used, on a runner's disk; one
  * through a task's worktree is that task's file, and so is a relative one in a task's file, beside
- * it. Any other path names a place the board cannot open. An address with a scheme, `//`, or only
- * a fragment is the browser's.
+ * it. Any other path names a place the board cannot open. `image:<id>` is an image a citizen
+ * uploaded. Any other address with a scheme, `//`, or only a fragment is the browser's.
  */
 export function linkTarget(href: string | undefined, base?: FileBase): LinkTarget | null {
   // react-markdown turns an unsafe URL, such as a script's, into an empty one.
   if (href === undefined || href === "") {
     return LOCAL;
+  }
+  const upload = uploadedImageId(href);
+  if (upload !== null) {
+    return { kind: "upload", id: upload };
   }
   if (href.startsWith("#") || href.startsWith("//") || (SCHEME.test(href) && !isCitedPath(href))) {
     return null;

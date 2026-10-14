@@ -262,6 +262,21 @@ const HANDOVER = {
   body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md). The [table's citation](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md:7) points at the numbers.`,
 };
 
+/** An image ada uploaded to the board, and an id that names none. */
+export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
+export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
+
+/** ada's screenshots in the task's thread, with `uploads`: one the board has, one it does not. */
+const SCREENSHOTS = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAB2",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  ts: CREATED,
+  mentions: [],
+  body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})`,
+};
+
 /** The branch's newest commit, as the task's runner reports it with every read. */
 const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATED, author: "ada" };
 
@@ -921,7 +936,8 @@ const CLAUDE_MODELS = [
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
- * `quotas: "limited"`, pod's Claude is limited for 40 minutes.
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows two
+ * screenshots in the task's thread, one of them an image the board does not have.
  */
 export async function fakeBoard(
   page: Page,
@@ -935,8 +951,15 @@ export async function fakeBoard(
     inFlight?: boolean;
     skillFolder?: boolean;
     quotas?: "reads" | "limited";
+    uploads?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
+    /**
+     * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
+     * two runners named as the chart names its pods, stew one of them, and adds hal, an
+     * investigator, on the other, so rows in the Citizens list run out of room.
+     */
+    crowded?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -956,9 +979,11 @@ export async function fakeBoard(
         : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
   // studio's own login, with numbers of its own, reported as fresh as pod's.
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
-  let deskModel: string | null = null;
-  let deskRunner: string | null = "pod";
-  let deskEffort: string | null = null;
+  const crowded = options.crowded === true;
+  const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
+  let deskModel: string | null = crowded ? "opus" : null;
+  let deskRunner: string | null = crowded ? "stellaris-runner-0" : "pod";
+  let deskEffort: string | null = crowded ? "xhigh" : null;
   // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
   let societySkills = [SOCIETY_SKILL];
@@ -967,7 +992,7 @@ export async function fakeBoard(
   let timezone = "UTC";
   const cronById = (id: unknown) => crons.find((each) => each["id"] === id);
   // Renaming changes the name the board shows, never the slug.
-  let lab = PROJECT;
+  let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
   let task: typeof TASK = TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
@@ -977,7 +1002,11 @@ export async function fakeBoard(
   }> = [];
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
-  const threadMessages: Array<Record<string, unknown>> = waitingAsk ? [HANDOVER, ASK] : [HANDOVER];
+  const threadMessages: Array<Record<string, unknown>> = [
+    HANDOVER,
+    ...(options.uploads === true ? [SCREENSHOTS] : []),
+    ...(waitingAsk ? [ASK] : []),
+  ];
   const proposalMessages: Array<Record<string, unknown>> = [PITCH];
   const proposal: Proposal = {
     id: SKILL_PROPOSAL,
@@ -1109,7 +1138,7 @@ export async function fakeBoard(
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/verbs/advance_task":
           task = {
@@ -1223,13 +1252,13 @@ export async function fakeBoard(
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/agents/desk/runner":
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
           return json(
             route,
-            member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
         case "/api/wake":
           return json(route, {
@@ -1344,6 +1373,11 @@ export async function fakeBoard(
     if (pathname === "/api/metrics") {
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
+    if (pathname.startsWith("/api/images/")) {
+      return pathname === `/api/images/${UPLOADED_IMAGE}`
+        ? route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") })
+        : json(route, { error: "NOT_FOUND", message: "image not found" }, 404);
+    }
     const files = `/api/tasks/${STAGE_TASK}/files`;
     if (pathname === files || pathname.startsWith(`${files}/`)) {
       const file = TASK_FILES[decodeURIComponent(pathname.slice(files.length + 1))];
@@ -1395,8 +1429,9 @@ export async function fakeBoard(
         return json(route, crons);
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", ["lab"], deskModel, deskRunner, deskEffort),
-          member("stew", "steward", [], null, null),
+          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+          member("stew", "steward", [], null, crowded ? "stellaris-runner-0" : null),
+          ...(crowded ? [member("hal", "investigator", [], null, "stellaris-runner-1")] : []),
           ...(options.retired === true
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),

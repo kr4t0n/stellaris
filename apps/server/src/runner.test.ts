@@ -958,6 +958,8 @@ describe("turns on a runner over the runner protocol", () => {
       resumeFailed: "lost",
       sessionDropped: true,
     });
+    // A lost session is no retry: nothing counts toward the three a retry gets.
+    expect(lost.resumeRetries).toBeUndefined();
     expect(await board.readSessions("desk", "society", thread.id)).toEqual({ runner: "pod" });
     // The next turn starts a session, with the whole thread and the reason in its prompt.
     await run(inThread);

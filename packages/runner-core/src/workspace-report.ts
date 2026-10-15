@@ -12,6 +12,10 @@ export interface WorkspaceReport {
         /** A task's worktree: what landed on the default branch since its branch forked. */
         readonly kind: "task";
         readonly branch: string;
+        /** Who holds the task's stage when it is not this turn's citizen, which leaves it the branch. */
+        readonly holder: string | null;
+        /** Commits the worktree holds that the task's branch lacks, by `GitOps.beyondBranch`. */
+        readonly beyond: Listed;
         readonly state: WorktreeState;
         readonly behind: Ahead;
       }
@@ -63,9 +67,17 @@ export function renderWorkspaceReport(report: WorkspaceReport): string {
         `${commits(worktree.behind.commits.total)} landed on ${base} since your branch ${worktree.branch} left it, changing ${listed(worktree.behind.files)}. Merging ${base} into it is your decision.`,
       );
     }
-    if (state.onNoBranch.total > 0) {
+    if (worktree.beyond.total > 0) {
       notes.push(
-        `This worktree holds commits on no branch, so it was left where it is rather than switched to ${worktree.branch}: ${listed(state.onNoBranch)}. Put what matters on ${worktree.branch}.`,
+        `This worktree holds commits that ${worktree.branch} lacks, so it was left where it is rather than switched to ${worktree.branch}: ${listed(worktree.beyond)}. The runner moves ${worktree.branch} on to them when a turn in this task ends with the branch free, if they build on its tip; if it has moved on without them, put what matters on it yourself, by a merge or a cherry-pick, and drop the rest.`,
+      );
+    } else if (state.branch === null) {
+      const why =
+        worktree.holder === null
+          ? `another turn in this task has ${worktree.branch} checked out`
+          : `${worktree.holder} holds the task's stage, and its turns have ${worktree.branch} to themselves`;
+      notes.push(
+        `This worktree is detached at the tip of ${worktree.branch}, because ${why}. Commits you make here reach ${worktree.branch} only when it takes them: \`git push . HEAD:${worktree.branch}\` fast-forwards it to them once no other worktree has it checked out, and git refuses it otherwise, as it refuses anything but a fast-forward. The runner does the same when a turn in this task ends with the branch free, and tells the task's thread of commits that no longer build on its tip. Until then ${worktree.branch} lacks them, so push HEAD rather than ${worktree.branch} to a remote, and name commits rather than the branch in a handover. Work left uncommitted stays here for your next turn in this task.`,
       );
     }
   }

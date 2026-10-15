@@ -30,6 +30,7 @@ import {
   type ModelOption,
   type Name,
   type ProjectRepo,
+  type StuckWork,
   type SweepResult,
   type TurnImage,
   type TurnImageRead,
@@ -101,6 +102,15 @@ interface Found {
   readonly repo: Name | null;
 }
 
+async function exists(file: string): Promise<boolean> {
+  try {
+    await access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function dirs(dir: string): Promise<string[]> {
   try {
     return (await readdir(dir, { withFileTypes: true }))
@@ -148,8 +158,13 @@ export class TurnExecutor {
   private readonly fetched = new Map<Name, { at: number; error?: string | undefined }>();
   /** Projects whose default branch could not be guarded, said once each. */
   private readonly unguarded = new Set<Name>();
-  /** Where each turn whose CLI is running may upload an image from, by turn id. */
+  /**
+   * Where each turn whose CLI is running works and may upload an image from, by turn id; its
+   * worktree is left to its own hand-back meanwhile.
+   */
   private readonly imagePlaces = new Map<string, ImagePlaces>();
+  /** The commit each worktree's stuck work was last told at, so a hand-back tells it once. */
+  private readonly stuckTold = new Map<string, string>();
 
   constructor(options: TurnExecutorOptions) {
     this.layout = options.layout;
@@ -308,7 +323,7 @@ export class TurnExecutor {
         }
       }
     }
-    const work = await this.handBack(job.agent, workspace);
+    const { work, stuck } = await this.handBack(job, workspace);
     const leftovers = workspace.own && (await this.leftoversIn(workspace.cwd));
     this.log.info(
       {
@@ -331,6 +346,7 @@ export class TurnExecutor {
       model: result.model ?? null,
       work,
       leftovers,
+      ...(stuck.length === 0 ? {} : { stuck }),
       ...(result.quota === undefined ? {} : { quota: result.quota }),
     };
   }
@@ -855,10 +871,17 @@ export class TurnExecutor {
         const branch = taskBranch(workspace.taskId);
         await this.git.ensureBranch(repoDir, branch, base);
         await this.git.followBase(repoDir, branch, base);
+        // The stage's holder has the branch to itself; anyone else's turn works beside it.
+        const holder =
+          workspace.holder === undefined || workspace.holder === job.agent
+            ? null
+            : workspace.holder;
         const cwd = await this.git.ensureTaskWorktree(
           repoDir,
           this.layout.taskWorktree(job.agent, workspace.taskId),
           branch,
+          base,
+          holder === null,
         );
         const report: WorkspaceReport = {
           defaultBranch: base,
@@ -866,6 +889,8 @@ export class TurnExecutor {
           worktree: {
             kind: "task",
             branch,
+            holder,
+            beyond: await this.git.beyondBranch(cwd, branch, base),
             state: await this.git.worktreeState(cwd),
             behind: await this.git.ahead(repoDir, branch, base, LISTED),
           },
@@ -929,12 +954,17 @@ export class TurnExecutor {
 
   /**
    * Commits what the turn left on a task branch and returns the worktree to the agent's own
-   * branch, or for a task's own worktree detaches it, which frees the branch for the next holder.
-   * Reports the task branch the turn left work on, with its commit.
+   * branch, or for a task's own worktree detaches it, which frees the branch for the next holder,
+   * then moves the branch on to what the task's worktrees committed beside it. Reports the task
+   * branch the turn left work on, with its commit, and the commits the branch could not take.
    */
-  private async handBack(agent: Name, workspace: Workspace): Promise<TurnWork | null> {
-    if (workspace.handBack === null) {
-      return null;
+  private async handBack(
+    job: TurnJob,
+    workspace: Workspace,
+  ): Promise<{ work: TurnWork | null; stuck: StuckWork[] }> {
+    const { agent } = job;
+    if (workspace.handBack === null || job.workspace.kind === "home") {
+      return { work: null, stuck: [] };
     }
     try {
       const handed = await this.git.handBack(workspace.cwd, workspace.handBack.to, {
@@ -946,14 +976,64 @@ export class TurnExecutor {
       }
       const branch = handed?.branch ?? workspace.taskBranch;
       if (branch === null) {
-        return null;
+        return { work: null, stuck: [] };
       }
+      const stuck = await this.settle(job.workspace.repo, workspace.repoDir, branch);
       const head = await this.git.head(workspace.repoDir, branch);
-      return head === null ? null : { branch, head };
+      return { work: head === null ? null : { branch, head }, stuck };
     } catch (error) {
       this.log.warn({ agent, error: String(error) }, "could not hand the worktree back");
-      return null;
+      return { work: null, stuck: [] };
     }
+  }
+
+  /**
+   * Moves a task's branch on to what the task's worktrees here committed beyond it, as a turn does
+   * that worked detached because another turn had the branch or another citizen held the stage,
+   * leaving out worktrees whose turn's CLI still runs. Answers the commits it cannot take that
+   * were not told before.
+   */
+  private async settle(repo: ProjectRepo, repoDir: string, branch: string): Promise<StuckWork[]> {
+    const taskId = branch.slice("task/".length);
+    const running = new Set([...this.imagePlaces.values()].map((places) => places.cwd));
+    const owners = new Map<string, Name>();
+    for (const agent of await dirs(path.join(this.layout.root, "worktrees"))) {
+      const dir = path.resolve(this.layout.taskWorktree(agent, taskId));
+      if (!running.has(dir) && (await exists(path.join(dir, ".git")))) {
+        owners.set(dir, agent);
+      }
+    }
+    const settled = await this.withProjectLock(repo.slug, () =>
+      this.git.settleTaskBranch(repoDir, branch, repo.defaultBranch, [...owners.keys()]),
+    );
+    if (settled.moved !== null) {
+      this.log.info(
+        { branch, to: settled.moved },
+        "moved a task's branch on to commits made beside it",
+      );
+    }
+    const told: StuckWork[] = [];
+    for (const [dir, agent] of owners) {
+      const stuck = settled.stuck.find((each) => each.worktree === dir);
+      if (stuck === undefined) {
+        this.stuckTold.delete(dir);
+      } else if (this.stuckTold.get(dir) !== stuck.head) {
+        this.stuckTold.set(dir, stuck.head);
+        told.push({
+          branch,
+          agent,
+          commits: [...stuck.commits.items],
+          total: stuck.commits.total,
+        });
+      }
+    }
+    if (told.length > 0) {
+      this.log.warn(
+        { branch, stuck: told.map((each) => each.agent) },
+        "commits beside a task's branch it cannot take",
+      );
+    }
+    return told;
   }
 
   /**

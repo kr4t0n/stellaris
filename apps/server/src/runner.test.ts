@@ -179,6 +179,26 @@ async function commitHome(board: Board, agent: string, message: string): Promise
   );
 }
 
+/** Commits nothing, as `agent`, in a worktree; returns the commit. */
+async function commitEmpty(cwd: string, agent: string, message: string): Promise<string> {
+  await execa(
+    "git",
+    [
+      "-c",
+      `user.name=${agent}`,
+      "-c",
+      `user.email=${agent}@x`,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      message,
+    ],
+    { cwd },
+  );
+  return (await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+}
+
 /** A verb's answer or refusal, as a JSON object. */
 const AnswerSchema = z.record(z.string(), z.unknown());
 
@@ -401,6 +421,231 @@ describe("turns on a runner over the runner protocol", () => {
     });
     // Both projects were placed on the runner that took their first turns.
     expect((await board.listProjects()).map((project) => project.runner)).toEqual(["pod", "pod"]);
+  });
+
+  it("keeps a task's branch for its stage's holder, and puts commits made beside it on it or says why not", async () => {
+    const { board } = await Board.init(dir, { name: "beside" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["ref", "eng-1"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const holder = { name: "eng-1", role: "engineer" } as const;
+
+    // ref, a participant, is in a turn in the task's thread while eng-1, its stage's holder, works.
+    let refStarted = Promise.withResolvers<void>();
+    let refRelease = Promise.withResolvers<void>();
+    let engWork: ((cwd: string) => Promise<void>) | null = null;
+    let refWork: ((cwd: string) => Promise<void>) | null = null;
+    const seen = new Map<string, { branch: string; prompt: string }>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const actor = board.resolveToken(request.mcp.token);
+        const { cwd } = request.spec;
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+        seen.set(`${actor?.name}/${actor?.thread}`, {
+          branch: head.stdout.trim(),
+          prompt: request.prompt,
+        });
+        if (actor?.name === "ref") {
+          await refWork?.(cwd);
+          refStarted.resolve();
+          await refRelease.promise;
+        } else {
+          await engWork?.(cwd);
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = (agent: string, task: string) =>
+      run({
+        agent,
+        project: "demo",
+        thread: { id: task, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    const tip = async (task: string) =>
+      (
+        await execa("git", ["rev-parse", `task/${task}`], { cwd: runner.paths.repo("demo") })
+      ).stdout.trim();
+    const notices = async (task: string) =>
+      (await board.listThread(task)).filter((message) => message.author === "board");
+    const overlap = async (task: string) => {
+      refStarted = Promise.withResolvers<void>();
+      refRelease = Promise.withResolvers<void>();
+      const participant = turn("ref", task);
+      await refStarted.promise;
+      return {
+        participant,
+        release: async () => {
+          refRelease.resolve();
+          await participant;
+        },
+      };
+    };
+
+    // The holder's turn has the branch though the participant's started first, which works beside it.
+    const held = await board.createTask(USER, { project: "demo", title: "held" });
+    await board.claimTask(holder, { task_id: held.id });
+    let reviewed = "";
+    engWork = async (cwd) => {
+      reviewed = await commitEmpty(cwd, "eng-1", "review");
+    };
+    const first = await overlap(held.id);
+    await turn("eng-1", held.id);
+    expect(seen.get(`eng-1/${held.id}`)?.branch).toBe(`task/${held.id}`);
+    expect(seen.get(`ref/${held.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`ref/${held.id}`)?.prompt).toContain(
+      `eng-1 holds the task's stage, and its turns have task/${held.id} to themselves`,
+    );
+    expect(await tip(held.id)).toBe(reviewed);
+    await first.release();
+    expect(await tip(held.id)).toBe(reviewed);
+
+    // The user takes no turns, so a stage it holds keeps the branch from nobody.
+    const approval = await board.createTask(USER, {
+      project: "demo",
+      title: "approval",
+      stages: [{ name: "approve", agent: "user" }],
+    });
+    await board.claimTask(USER, { task_id: approval.id });
+    // Released above, so this turn of ref's runs straight through.
+    await turn("ref", approval.id);
+    expect(seen.get(`ref/${approval.id}`)?.branch).toBe(`task/${approval.id}`);
+
+    // Taken before anyone held the stage, the branch stays the participant's: the holder works
+    // beside it, and its commits go on the branch once the participant's turn lets it go.
+    const open = await board.createTask(USER, { project: "demo", title: "open" });
+    const second = await overlap(open.id);
+    const before = await tip(open.id);
+    await board.claimTask(holder, { task_id: open.id });
+    await turn("eng-1", open.id);
+    expect(seen.get(`eng-1/${open.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`eng-1/${open.id}`)?.prompt).toContain(
+      `another turn in this task has task/${open.id} checked out`,
+    );
+    expect(await tip(open.id)).toBe(before);
+    await second.release();
+    expect(await tip(open.id)).toBe(reviewed);
+    expect(await notices(open.id)).toEqual([]);
+
+    // When the participant's turn commits on the branch meanwhile, the holder's commits are left
+    // where they are, and the task's thread is told once.
+    const split = await board.createTask(USER, { project: "demo", title: "split" });
+    const third = await overlap(split.id);
+    await board.claimTask(holder, { task_id: split.id });
+    let refHead = "";
+    engWork = async (cwd) => {
+      refHead = await commitEmpty(runner.paths.taskWorktree("ref", split.id), "ref", "ref work");
+      // Backticks in a subject end the notice's code span early, which would leave the name awake.
+      reviewed = await commitEmpty(cwd, "eng-1", "eng-1 review of `x` for @ref");
+      // A branch of its own holds the commit too, which leaves it no less beside the task's.
+      await execa("git", ["branch", "fix/review"], { cwd });
+    };
+    await turn("eng-1", split.id);
+    expect(await tip(split.id)).toBe(refHead);
+    const told = await notices(split.id);
+    expect(told).toHaveLength(1);
+    expect(told[0]?.body).toContain(
+      `eng-1's worktree for this task holds commits that \`task/${split.id}\` lacks`,
+    );
+    expect(told[0]?.body).toContain(`\`${reviewed.slice(0, 7)} eng-1 review of \`x\` for ref\``);
+    expect(told[0]?.mentions).toEqual([]);
+    await third.release();
+    expect(await tip(split.id)).toBe(refHead);
+    expect(await notices(split.id)).toHaveLength(1);
+    expect(
+      (
+        await execa("git", ["rev-parse", "HEAD"], {
+          cwd: runner.paths.taskWorktree("eng-1", split.id),
+        })
+      ).stdout,
+    ).toBe(reviewed);
+
+    // The holder's next turn there is left where its commits are and told so; once it commits
+    // again, the thread is told of the new head too.
+    let again = "";
+    engWork = async (cwd) => {
+      expect((await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout).toBe(reviewed);
+      again = await commitEmpty(cwd, "eng-1", "eng-1 second look");
+    };
+    await turn("eng-1", split.id);
+    expect(seen.get(`eng-1/${split.id}`)?.prompt).toContain(
+      `This worktree holds commits that task/${split.id} lacks, so it was left where it is`,
+    );
+    const toldAgain = await notices(split.id);
+    expect(toldAgain).toHaveLength(2);
+    expect(toldAgain[1]?.body).toContain(`\`${again.slice(0, 7)} eng-1 second look\``);
+    expect(await tip(split.id)).toBe(refHead);
+
+    // A participant's commits made beside the holder's turn follow the branch too, but only from
+    // its own hand-back: the holder's leaves the worktree of a turn still running alone.
+    const beside = await board.createTask(USER, { project: "demo", title: "beside" });
+    await board.claimTask(holder, { task_id: beside.id });
+    let note = "";
+    refWork = async (cwd) => {
+      note = await commitEmpty(cwd, "ref", "ref note");
+    };
+    engWork = null;
+    const fourth = await overlap(beside.id);
+    // The participant's turn has committed beside the branch by now, which stays where it was.
+    const from = await tip(beside.id);
+    expect(from).not.toBe(note);
+    await turn("eng-1", beside.id);
+    expect(seen.get(`eng-1/${beside.id}`)?.branch).toBe(`task/${beside.id}`);
+    expect(await tip(beside.id)).toBe(from);
+    await fourth.release();
+    expect(await tip(beside.id)).toBe(note);
+    expect(await notices(beside.id)).toEqual([]);
+  });
+
+  it("gives a task's branch to any turn once its holder's lease has run out", async () => {
+    // Every claim's lease runs out at once, as a holder's does that no turn renews.
+    const { board } = await Board.init(dir, { name: "lapsed" }, { leaseMs: 1 });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["ref", "eng-1"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const task = await board.createTask(USER, { project: "demo", title: "lapsed" });
+    await board.claimTask({ name: "eng-1", role: "engineer" }, { task_id: task.id });
+    let branch = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: request.spec.cwd,
+        });
+        branch = head.stdout.trim();
+        return completed("done");
+      },
+    };
+    const { run } = await start(board, backend);
+    const turn = (id: string) =>
+      run({
+        agent: "ref",
+        project: "demo",
+        thread: { id, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    await turn(task.id);
+    expect(branch).toBe(`task/${task.id}`);
   });
 
   it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {

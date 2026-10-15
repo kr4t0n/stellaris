@@ -20,6 +20,7 @@ import {
   type Project,
   projectRepo,
   type RunningTurn,
+  type StuckWork,
   type Task,
   type Thread,
   type TranscriptEntry,
@@ -133,6 +134,14 @@ const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
 const LEASE_RENEW_MS = 10 * 60_000;
 const USER_POST_TRIGGER = "user_post";
 const OPS_TRIGGER = "ops_event";
+
+/** What a task's thread is told of commits its branch cannot take. */
+function stuckNotice(stuck: StuckWork): string {
+  const more = stuck.total - stuck.commits.length;
+  const commits = `${stuck.commits.map((commit) => `\`${commit}\``).join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+  return `${stuck.agent}'s worktree for this task holds commits on no branch that the runner cannot fast-forward \`${stuck.branch}\` to, because they no longer build on its tip or another worktree's commits build on it too: ${commits}. Until someone puts them on the branch, it lacks them, and so does what lands from it; any worktree of the project's clone can cherry-pick or merge them by id.`;
+}
+
 /** How many signals a reader's prompt lists at most, newest kept. */
 const MAX_SIGNALS = 30;
 
@@ -227,8 +236,15 @@ export class TurnHost {
     const societyScope = dispatch.project === SOCIETY_SCOPE;
 
     const taskId = thread?.task === true ? thread.id : undefined;
+    const task: Task | null =
+      taskId === undefined
+        ? null
+        : await this.board
+            .findTask(taskId)
+            .then((found) => found.task)
+            .catch(() => null);
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
-    const workspace = await this.workspaceOf(project, thread, channel);
+    const workspace = await this.workspaceOf(project, thread, channel, task);
     const sessions = await this.board.readSessions(agent.name, dispatch.project, part);
     // A session lives on the runner it began on; anywhere else the conversation starts afresh.
     const recorded = sessions.runner === runner.name ? sessions[agent.cli] : undefined;
@@ -259,13 +275,6 @@ export class TurnHost {
         : null;
     const messages = threadSoFar ?? digest.messages;
     const cursorAfter = threadSoFar?.at(-1)?.id ?? digest.cursor;
-    const task: Task | null =
-      taskId === undefined
-        ? null
-        : await this.board
-            .findTask(taskId)
-            .then((found) => found.task)
-            .catch(() => null);
     // Stages are a task conversation's business: its own task's, and nothing in other conversations.
     const held =
       task === null
@@ -753,6 +762,18 @@ export class TurnHost {
         );
       });
     }
+    // Commits a task's branch could not take are said where everyone on the task reads, rather
+    // than only in their citizen's next turn there. A failure here is the post's, never the turn's.
+    for (const stuck of outcome.stuck ?? []) {
+      await this.board
+        .postTaskNotice(stuck.branch.slice("task/".length), stuckNotice(stuck))
+        .catch((error: unknown) => {
+          this.log.warn(
+            { branch: stuck.branch, agent: stuck.agent, error: String(error) },
+            "could not tell a task's thread of commits its branch cannot take",
+          );
+        });
+    }
     if (recorded) {
       this.log.info(
         {
@@ -892,13 +913,14 @@ export class TurnHost {
   }
 
   /**
-   * Where a conversation works: a task's on its branch, any other thread's and a channel's in a
-   * place of its own, and the home in the citizen's own.
+   * Where a conversation works: a task's on its branch, which its stage's holder has to itself,
+   * any other thread's and a channel's in a place of its own, and the home in the citizen's own.
    */
   private async workspaceOf(
     project: Project | null,
     thread: TurnDispatch["thread"],
     channel: Name | undefined,
+    task: Task | null,
   ): Promise<TurnWorkspace> {
     const own =
       thread !== undefined
@@ -913,12 +935,22 @@ export class TurnHost {
     }
     const repo = projectRepo(project);
     if (thread?.task === true) {
-      return { kind: "task", repo, taskId: thread.id };
+      // A claim held past its lease is open to anyone, as the board treats it, and the user, who
+      // takes no turns, keeps the branch from nobody.
+      const holder =
+        task?.status === "claimed" &&
+        task.claimedBy !== undefined &&
+        task.claimedBy !== USER_NAME &&
+        (task.leaseExpiresAt === undefined ||
+          new Date(task.leaseExpiresAt).getTime() > this.now().getTime())
+          ? task.claimedBy
+          : undefined;
+      return { kind: "task", repo, taskId: thread.id, ...(holder === undefined ? {} : { holder }) };
     }
     // Every task in play gets its branch before a home turn, so a holder only has to switch to it.
     const branches = (await this.board.listTasks(project.slug))
-      .filter((task) => task.status === "open" || task.status === "claimed")
-      .map((task) => `task/${task.id}`);
+      .filter((each) => each.status === "open" || each.status === "claimed")
+      .map((each) => `task/${each.id}`);
     return { kind: "project", repo, branches, ...own };
   }
 

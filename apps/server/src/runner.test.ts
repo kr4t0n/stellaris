@@ -178,6 +178,26 @@ async function commitHome(board: Board, agent: string, message: string): Promise
   );
 }
 
+/** Commits nothing, as `agent`, in a worktree; returns the commit. */
+async function commitEmpty(cwd: string, agent: string, message: string): Promise<string> {
+  await execa(
+    "git",
+    [
+      "-c",
+      `user.name=${agent}`,
+      "-c",
+      `user.email=${agent}@x`,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      message,
+    ],
+    { cwd },
+  );
+  return (await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+}
+
 /** A verb's answer or refusal, as a JSON object. */
 const AnswerSchema = z.record(z.string(), z.unknown());
 
@@ -400,6 +420,193 @@ describe("turns on a runner over the runner protocol", () => {
     });
     // Both projects were placed on the runner that took their first turns.
     expect((await board.listProjects()).map((project) => project.runner)).toEqual(["pod", "pod"]);
+  });
+
+  it("keeps a task's branch for its stage's holder, and puts commits made beside it on it or says why not", async () => {
+    const { board } = await Board.init(dir, { name: "beside" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["flux", "loom"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const loom = { name: "loom", role: "engineer" } as const;
+
+    // flux, a participant, is in a turn in the task's thread while loom, its stage's holder, works.
+    let fluxStarted = Promise.withResolvers<void>();
+    let fluxRelease = Promise.withResolvers<void>();
+    let loomWork: ((cwd: string) => Promise<void>) | null = null;
+    const seen = new Map<string, { branch: string; prompt: string }>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const actor = board.resolveToken(request.mcp.token);
+        const { cwd } = request.spec;
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+        seen.set(`${actor?.name}/${actor?.thread}`, {
+          branch: head.stdout.trim(),
+          prompt: request.prompt,
+        });
+        if (actor?.name === "flux") {
+          fluxStarted.resolve();
+          await fluxRelease.promise;
+        } else {
+          await loomWork?.(cwd);
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = (agent: string, task: string) =>
+      run({
+        agent,
+        project: "demo",
+        thread: { id: task, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    const tip = async (task: string) =>
+      (
+        await execa("git", ["rev-parse", `task/${task}`], { cwd: runner.paths.repo("demo") })
+      ).stdout.trim();
+    const notices = async (task: string) =>
+      (await board.listThread(task)).filter((message) => message.author === "board");
+    const overlap = async (task: string) => {
+      fluxStarted = Promise.withResolvers<void>();
+      fluxRelease = Promise.withResolvers<void>();
+      const flux = turn("flux", task);
+      await fluxStarted.promise;
+      return {
+        flux,
+        release: async () => {
+          fluxRelease.resolve();
+          await flux;
+        },
+      };
+    };
+
+    // The holder's turn has the branch though the participant's started first, which works beside it.
+    const held = await board.createTask(USER, { project: "demo", title: "held" });
+    await board.claimTask(loom, { task_id: held.id });
+    let reviewed = "";
+    loomWork = async (cwd) => {
+      reviewed = await commitEmpty(cwd, "loom", "review");
+    };
+    const first = await overlap(held.id);
+    await turn("loom", held.id);
+    expect(seen.get(`loom/${held.id}`)?.branch).toBe(`task/${held.id}`);
+    expect(seen.get(`flux/${held.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`flux/${held.id}`)?.prompt).toContain(
+      `loom holds the task's stage, and its turns have task/${held.id} to themselves`,
+    );
+    expect(await tip(held.id)).toBe(reviewed);
+    await first.release();
+    expect(await tip(held.id)).toBe(reviewed);
+
+    // The user takes no turns, so a stage it holds keeps the branch from nobody.
+    const approval = await board.createTask(USER, {
+      project: "demo",
+      title: "approval",
+      stages: [{ name: "approve", agent: "user" }],
+    });
+    await board.claimTask(USER, { task_id: approval.id });
+    // Released above, so this turn of flux's runs straight through.
+    await turn("flux", approval.id);
+    expect(seen.get(`flux/${approval.id}`)?.branch).toBe(`task/${approval.id}`);
+
+    // Taken before anyone held the stage, the branch stays the participant's: the holder works
+    // beside it, and its commits go on the branch once the participant's turn lets it go.
+    const open = await board.createTask(USER, { project: "demo", title: "open" });
+    const second = await overlap(open.id);
+    const before = await tip(open.id);
+    await board.claimTask(loom, { task_id: open.id });
+    await turn("loom", open.id);
+    expect(seen.get(`loom/${open.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`loom/${open.id}`)?.prompt).toContain(
+      `another turn in this task has task/${open.id} checked out`,
+    );
+    expect(await tip(open.id)).toBe(before);
+    await second.release();
+    expect(await tip(open.id)).toBe(reviewed);
+    expect(await notices(open.id)).toEqual([]);
+
+    // When the participant's turn commits on the branch meanwhile, the holder's commits are left
+    // where they are, and the task's thread is told once.
+    const split = await board.createTask(USER, { project: "demo", title: "split" });
+    const third = await overlap(split.id);
+    await board.claimTask(loom, { task_id: split.id });
+    let fluxHead = "";
+    loomWork = async (cwd) => {
+      fluxHead = await commitEmpty(
+        runner.paths.taskWorktree("flux", split.id),
+        "flux",
+        "flux work",
+      );
+      // Backticks in a subject end the notice's code span early, which would leave the name awake.
+      reviewed = await commitEmpty(cwd, "loom", "loom review of `x` for @flux");
+    };
+    await turn("loom", split.id);
+    expect(await tip(split.id)).toBe(fluxHead);
+    const told = await notices(split.id);
+    expect(told).toHaveLength(1);
+    expect(told[0]?.body).toContain(`loom's worktree for this task holds commits on no branch`);
+    expect(told[0]?.body).toContain(`\`${reviewed.slice(0, 7)} loom review of \`x\` for flux\``);
+    expect(told[0]?.mentions).toEqual([]);
+    await third.release();
+    expect(await tip(split.id)).toBe(fluxHead);
+    expect(await notices(split.id)).toHaveLength(1);
+    expect(
+      (
+        await execa("git", ["rev-parse", "HEAD"], {
+          cwd: runner.paths.taskWorktree("loom", split.id),
+        })
+      ).stdout,
+    ).toBe(reviewed);
+  });
+
+  it("gives a task's branch to any turn once its holder's lease has run out", async () => {
+    // Every claim's lease runs out at once, as a holder's does that no turn renews.
+    const { board } = await Board.init(dir, { name: "lapsed" }, { leaseMs: 1 });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["flux", "loom"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const task = await board.createTask(USER, { project: "demo", title: "lapsed" });
+    await board.claimTask({ name: "loom", role: "engineer" }, { task_id: task.id });
+    let branch = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: request.spec.cwd,
+        });
+        branch = head.stdout.trim();
+        return completed("done");
+      },
+    };
+    const { run } = await start(board, backend);
+    const turn = (id: string) =>
+      run({
+        agent: "flux",
+        project: "demo",
+        thread: { id, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    await turn(task.id);
+    expect(branch).toBe(`task/${task.id}`);
   });
 
   it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {

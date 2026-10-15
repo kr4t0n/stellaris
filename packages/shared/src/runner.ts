@@ -192,7 +192,16 @@ export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
     thread: UlidSchema.optional(),
     channel: NameSchema.optional(),
   }),
-  z.object({ kind: z.literal("task"), repo: ProjectRepoSchema, taskId: UlidSchema }),
+  z.object({
+    kind: z.literal("task"),
+    repo: ProjectRepoSchema,
+    taskId: UlidSchema,
+    /**
+     * The citizen holding the task's current stage, when someone does: a turn of anyone else
+     * works detached at the branch's tip, so the holder's turns find the branch free.
+     */
+    holder: NameSchema.optional(),
+  }),
 ]);
 export type TurnWorkspace = z.infer<typeof TurnWorkspaceSchema>;
 
@@ -236,6 +245,18 @@ export type TurnJob = z.infer<typeof TurnJobSchema>;
 export const TurnWorkSchema = z.object({ branch: z.string().min(1), head: z.string().min(1) });
 export type TurnWork = z.infer<typeof TurnWorkSchema>;
 
+/**
+ * Commits a task's worktree holds on no branch that the hand-back could not put on the task's
+ * branch by a fast-forward, whose worktree belongs to `agent`: the first of them and how many.
+ */
+export const StuckWorkSchema = z.object({
+  branch: z.string().min(1),
+  agent: NameSchema,
+  commits: z.array(z.string()),
+  total: z.number().int().positive(),
+});
+export type StuckWork = z.infer<typeof StuckWorkSchema>;
+
 export const TurnEventsSchema = z.object({ entries: z.array(TranscriptEntrySchema) });
 export type TurnEvents = z.infer<typeof TurnEventsSchema>;
 
@@ -257,6 +278,11 @@ export const TurnOutcomeSchema = z.object({
    * branch after the hand-back: uncommitted changes, or commits no branch contains.
    */
   leftovers: z.boolean().default(false),
+  /**
+   * Commits the hand-back found its task's worktrees holding that no fast-forward of the task's
+   * branch can take, each told once; a runner from before never sends it.
+   */
+  stuck: z.array(StuckWorkSchema).optional(),
   /**
    * The CLI's plan quota as the turn's stream last reported it, when it reported any; a runner from
    * before never sends it.

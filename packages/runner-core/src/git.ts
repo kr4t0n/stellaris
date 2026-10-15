@@ -38,10 +38,28 @@ export interface GitOps {
    */
   ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<string | null>;
   /**
-   * A task conversation's worktree, on the task's branch when no other worktree has it checked
-   * out, else detached at the branch's tip, where the turn can read the work but not commit to it.
+   * A task conversation's worktree, on the task's branch when `take` is set and no other worktree
+   * has it checked out, else detached at the branch's tip, where commits wait on no branch until
+   * `settleTaskBranch` moves the branch on to them. A worktree holding commits on no branch is
+   * left where it is.
    */
-  ensureTaskWorktree(repoDir: string, worktreeDir: string, branch: string): Promise<string>;
+  ensureTaskWorktree(
+    repoDir: string,
+    worktreeDir: string,
+    branch: string,
+    take?: boolean,
+  ): Promise<string>;
+  /**
+   * Moves a task's branch on to the commits its worktrees, those given, hold on no branch, as a
+   * turn leaves them when it worked detached at the branch's tip: only while no worktree has the
+   * branch checked out, and only by a fast-forward, to the furthest of those commits when every
+   * other one is on its way there.
+   */
+  settleTaskBranch(
+    repoDir: string,
+    branch: string,
+    worktrees: readonly string[],
+  ): Promise<TaskBranchSettled>;
   /**
    * A proposal's, a topic's, or a channel's conversation's worktree, made detached at the tip of
    * `from` and kept as its turns left it.
@@ -163,6 +181,25 @@ export interface WorktreeState {
   readonly uncommitted: Listed;
   /** Commits reachable from the worktree's HEAD and from no local or remote branch. */
   readonly onNoBranch: Listed;
+}
+
+/** A worktree's commits on no branch, and the commit its HEAD is at. */
+export interface StrandedWork {
+  readonly worktree: string;
+  readonly head: string;
+  readonly commits: Listed;
+}
+
+/** Where settling a task's branch moved it, and the commits it could not take. */
+export interface TaskBranchSettled {
+  /** The commit the branch moved on to, or null when it stayed. */
+  readonly moved: string | null;
+  /**
+   * Worktrees whose commits no fast-forward of the branch can take: they left its line, or two
+   * worktrees' commits each build on its tip and only a merge takes both. Those that build on
+   * the tip of a branch another worktree has checked out wait for that worktree's hand-back.
+   */
+  readonly stuck: readonly StrandedWork[];
 }
 
 /** What guarding a clone's default branch took, or why the guard does not hold. */
@@ -461,7 +498,12 @@ export class ExecaGit implements GitOps {
     return commit.exitCode === 0 ? commit.stdout.trim() : null;
   }
 
-  async ensureTaskWorktree(repoDir: string, requestedDir: string, branch: string): Promise<string> {
+  async ensureTaskWorktree(
+    repoDir: string,
+    requestedDir: string,
+    branch: string,
+    take = true,
+  ): Promise<string> {
     const worktreeDir = path.resolve(requestedDir);
     if (!(await exists(path.join(worktreeDir, ".git")))) {
       await mkdir(path.dirname(worktreeDir), { recursive: true });
@@ -470,12 +512,69 @@ export class ExecaGit implements GitOps {
       // Switching away would lose commits no branch holds; the turn is told of them instead.
       return worktreeDir;
     }
-    // A branch is checked out in one worktree at a time: another holder's turn may have it.
-    const switched = await git(["switch", "--quiet", branch], worktreeDir);
-    if (switched.exitCode !== 0) {
+    // A branch is checked out in one worktree at a time: another turn in the task may have it.
+    const switched = take && (await git(["switch", "--quiet", branch], worktreeDir)).exitCode === 0;
+    if (!switched) {
       await must(["switch", "--quiet", "--detach", branch], worktreeDir);
     }
     return worktreeDir;
+  }
+
+  async settleTaskBranch(
+    repoDir: string,
+    branch: string,
+    worktrees: readonly string[],
+  ): Promise<TaskBranchSettled> {
+    const waiting: StrandedWork[] = [];
+    for (const worktree of worktrees) {
+      const state = await this.worktreeState(worktree);
+      if (state.onNoBranch.total > 0) {
+        const head = (await must(["rev-parse", "HEAD"], worktree)).trim();
+        waiting.push({ worktree: path.resolve(worktree), head, commits: state.onNoBranch });
+      }
+    }
+    const tip = await this.head(repoDir, branch);
+    if (tip === null || waiting.length === 0) {
+      return { moved: null, stuck: [] };
+    }
+    const building: StrandedWork[] = [];
+    for (const each of waiting) {
+      if (await isAncestor(repoDir, tip, each.head)) {
+        building.push(each);
+      }
+    }
+    let furthest: StrandedWork | undefined;
+    for (const candidate of building) {
+      let reaches = true;
+      for (const other of building) {
+        reaches &&= await isAncestor(repoDir, other.head, candidate.head);
+      }
+      if (reaches) {
+        furthest = candidate;
+        break;
+      }
+    }
+    if (furthest === undefined) {
+      return { moved: null, stuck: waiting };
+    }
+    // A push into the clone is refused for a branch a worktree has checked out or is rebasing,
+    // which `worktree list` shows as detached, and that worktree's hand-back settles what builds
+    // on the tip; it is refused too unless a fast-forward under the ref's lock, so a commit that
+    // reached the branch since its tip was read, as another turn's hand-back makes, stays on it.
+    const moved = await git(
+      ["push", "--quiet", "--no-verify", ".", `${furthest.head}:refs/heads/${branch}`],
+      repoDir,
+    );
+    if (moved.exitCode !== 0) {
+      return { moved: null, stuck: waiting.filter((each) => !building.includes(each)) };
+    }
+    const stuck: StrandedWork[] = [];
+    for (const each of waiting) {
+      if (!(await isAncestor(repoDir, each.head, furthest.head))) {
+        stuck.push(each);
+      }
+    }
+    return { moved: furthest.head, stuck };
   }
 
   async ensureThreadWorktree(repoDir: string, requestedDir: string, from: string): Promise<string> {

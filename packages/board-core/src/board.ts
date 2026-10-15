@@ -4759,6 +4759,21 @@ export class Board {
   }
 
   /**
+   * Posts the board's word on a task's work into the task's thread, such as commits a runner
+   * could not put on its branch: as the board, with every `@name` written as a plain name, so it
+   * wakes nobody and counts toward no heartbeat. Null, posting nothing, once the thread is closed.
+   */
+  async postTaskNotice(taskId: Ulid, body: string): Promise<Message | null> {
+    return this.mutex.run(async () => {
+      const found = await this.tryFindThread(taskId);
+      if (found === null || found.thread.state !== "open") {
+        return null;
+      }
+      return this.appendThreadMessage(SYSTEM_ACTOR.name, taskId, withoutMentions(body));
+    });
+  }
+
+  /**
    * Records that a citizen's workspace in a conversation that has ended holds work on no branch, so
    * the scheduler gives the citizen a closing turn there to decide about it. False, recording
    * nothing, once `CLOSING_ATTEMPTS` closing turns have been given for it.

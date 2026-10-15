@@ -302,17 +302,6 @@ describe("ClaudeAgentBackend replay", () => {
     expect(unsaid.exitReason).toBe("error");
     expect(unsaid.error).toBe("the turn ended on an API error");
 
-    // So does any result that failed the turn.
-    const maxTurns: unknown[] = [
-      { type: "result", subtype: "error_max_turns", errors: ["10"], total_cost_usd: 0 },
-    ];
-    const limited = await coldTurn(
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      exitingAfter(maxTurns as SDKMessage[]),
-    );
-    expect(limited.exitReason).toBe("error");
-    expect(limited.error).toBe("turn limit reached: 10");
-
     // A process that exits with no result, or after one that completed, fails with what the SDK
     // threw, as before.
     for (const frames of [[], await recorded("sdk-synthetic.jsonl")]) {
@@ -320,6 +309,23 @@ describe("ClaudeAgentBackend replay", () => {
       expect(crashed.exitReason).toBe("error");
       expect(crashed.error).toBe("Claude Code process exited with code 1");
     }
+
+    // So does one after an error subtype's result, which the SDK words itself, as Claude Code
+    // 2.1.283 did for a transcript holding only a summary line.
+    const missing = "No conversation found with session ID: 92132dad-48ca-450a-a7e7-82f8b2ab9b24";
+    const unresumed: unknown[] = [
+      { type: "result", subtype: "error_during_execution", errors: [missing], total_cost_usd: 0 },
+    ];
+    const sdkWords = `Claude Code returned an error result: ${missing}`;
+    const failed = await coldTurn(() =>
+      (async function* () {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        yield* unresumed as SDKMessage[];
+        throw new Error(sdkWords);
+      })(),
+    );
+    expect(failed.exitReason).toBe("error");
+    expect(failed.error).toBe(sdkWords);
   });
 
   it("treats a stream without a result message as an error", async () => {

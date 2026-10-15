@@ -1,4 +1,4 @@
-import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentSpec, ResidentStart } from "@stellaris/runner-core";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
@@ -106,6 +106,36 @@ function scripted(stallOn: number | null = null, savedCost = 0) {
 }
 
 describe("Claude resident sessions", () => {
+  it("starts afresh in place of a recorded id the CLI cannot take, under an id it reports", async () => {
+    const { queryFn } = scripted();
+    const options: Array<Options | undefined> = [];
+    const asked: string[] = [];
+    const backend = new ClaudeAgentBackend({
+      queryFn: (params) => {
+        options.push(params.options);
+        return queryFn(params);
+      },
+      sessionExists: (session) => {
+        asked.push(session);
+        return Promise.resolve(false);
+      },
+    });
+    // What runners before 0.3.24 recorded for a conversation whose first turn never started its CLI.
+    const session = await backend.startResident(spec, {
+      ...start,
+      session: "unstarted",
+      newSession: false,
+      costSoFarUsd: 4,
+    });
+    const fresh = options[0]?.sessionId;
+    expect(fresh).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(options[0]?.resume).toBeUndefined();
+    expect(session.session).toBe(fresh);
+    expect(asked).toEqual([]);
+    expect((await session.runTurn("hello")).costUsd).toBeCloseTo(0.1);
+    await session.close();
+  });
+
   it("measures a resumed session's first turn from the total its transcript saved", async () => {
     const script = scripted(null, 4.2);
     const backend = new ClaudeAgentBackend({

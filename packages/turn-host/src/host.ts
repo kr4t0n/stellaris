@@ -700,7 +700,7 @@ export class TurnHost {
     // A closing turn decided about what its workspace held, unless it failed before deciding.
     const decided = closing && outcome.exitReason !== "error" && outcome.exitReason !== "timeout";
     const recorded = await this.recorded(turn, async () => {
-      if (outcome.session !== job.session) {
+      if (outcome.session !== null && outcome.session !== job.session) {
         // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
         await this.board.writeSession(
           job.agent,

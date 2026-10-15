@@ -207,9 +207,8 @@ export class TurnExecutor {
       mcp: { ...received.mcp, url: received.mcp.url.replaceAll(SERVER_TOKEN, this.serverUrl) },
     };
     const backend = this.backends[job.cli];
-    const fallbackSession = job.session ?? "unstarted";
     if (backend === undefined) {
-      return failed(fallbackSession, `no backend registered for ${job.cli}`);
+      return failed(job.session, `no backend registered for ${job.cli}`);
     }
     const home = this.layout.agent(job.agent);
     await mkdir(home, { recursive: true });
@@ -217,7 +216,7 @@ export class TurnExecutor {
     try {
       workspace = await this.prepare(job, home);
     } catch (error) {
-      return failed(fallbackSession, `could not prepare the workspace: ${String(error)}`);
+      return failed(job.session, `could not prepare the workspace: ${String(error)}`);
     }
     const report = workspace.report === null ? "" : renderWorkspaceReport(workspace.report);
     const spec: AgentSpec = {
@@ -1182,8 +1181,8 @@ function stoppedResult(events: AgentEvent[]): TurnResult {
   };
 }
 
-/** The outcome of a turn that never reached its CLI. */
-function failed(session: string, error: string): TurnOutcome {
+/** The outcome of a turn that never reached its CLI, which started no session. */
+function failed(session: string | null, error: string): TurnOutcome {
   return {
     exitReason: "error",
     status: null,

@@ -163,6 +163,17 @@ test("a click enlarges an uploaded image over the whole window, fitted to it, an
   await page.keyboard.press(" ");
   await expect(dialog).toBeVisible();
   await expect(ask).toHaveCount(0);
+
+  // Closed and opened again within one task, as a press can come before the browser's own
+  // `close` event: the image is open, not shut a moment later.
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>("dialog button[aria-label='Close']")?.click();
+    document
+      .querySelector<HTMLButtonElement>("button[aria-label='Enlarge The survey page, before']")
+      ?.click();
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
 });
 
 test("the keyboard enlarges an image with Enter, or Space once Tab reached it", async ({
@@ -245,8 +256,12 @@ test("an image on the web enlarges too, to the window's height when it is tall",
     taskThread(page).getByRole("img", { name: "The survey page, before" }),
   );
   expect(inline.x).toBe(before.x);
-  // Narrower than the post: a click in the space beside it opens nothing.
-  await page.mouse.click(inline.x + inline.width + 40, inline.y + inline.height / 2);
+  // Narrower than the post: a click in the space beside it, in view, opens nothing.
+  await enlarge.locator("img").scrollIntoViewIfNeeded();
+  const shown = await boxOf(enlarge.locator("img"));
+  expect(shown.y + shown.height).toBeLessThanOrEqual(1000);
+  await page.mouse.click(shown.x + shown.width + 40, shown.y + shown.height / 2);
+  await page.waitForTimeout(300);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await enlarge.locator("img").click();

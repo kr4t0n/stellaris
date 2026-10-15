@@ -75,10 +75,7 @@ function ImageDialog({ src, alt, onClose }: { src: string; alt: string; onClose:
     <dialog
       ref={dialog}
       aria-label={alt === "" ? "The image" : alt}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
+      onCancel={onClose}
       className="m-0 size-full max-h-none max-w-none cursor-zoom-out border-0 bg-transparent p-0 text-fg-primary backdrop:bg-black/85"
     >
       {/* Every click in the window bubbles here, Close's too; the keyboard leaves by Escape or

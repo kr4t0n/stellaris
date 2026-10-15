@@ -256,6 +256,16 @@ test("an image on the web enlarges too, to the window's height when it is tall",
     taskThread(page).getByRole("img", { name: "The survey page, before" }),
   );
   expect(inline.x).toBe(before.x);
+  // And it leaves no gap under it in its paragraph, as an inline box would for the line's descent.
+  expect(
+    await enlarge
+      .locator("img")
+      .evaluate(
+        (image) =>
+          (image.closest("p")?.getBoundingClientRect().bottom ?? 0) -
+          image.getBoundingClientRect().bottom,
+      ),
+  ).toBe(0);
   // Narrower than the post: a click in the space beside it, in view, opens nothing.
   await enlarge.locator("img").scrollIntoViewIfNeeded();
   const shown = await boxOf(enlarge.locator("img"));

@@ -589,6 +589,59 @@ describe("turns on a runner over the runner protocol", () => {
     expect(unadapted.session).toBeNull();
   });
 
+  it("records the session an adapter starts in place of a recorded one, cold and warm, and hands it to the next turn", async () => {
+    const { board } = await Board.init(dir, { name: "replaced" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    // What a turn that never reached its CLI recorded before 0.3.24, in a thread and at home.
+    await board.writeSession("desk", "society", "claude", "unstarted", "pod", thread.id);
+    await board.writeSession("desk", "society", "claude", "unstarted", "pod");
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const started: string[] = [];
+    // As the Claude adapter does, a recorded id that names no session gives way to a fresh one.
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("fresh"),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        const result = completed("cold turn");
+        return Promise.resolve(
+          request.session === "unstarted" ? { ...result, session: "replaced-cold" } : result,
+        );
+      },
+      startResident: (_spec, resident) => {
+        started.push(resident.session);
+        return Promise.resolve({
+          session: resident.session === "unstarted" ? "replaced-warm" : resident.session,
+          // A changed memory lets the session go, so the next turn starts from the record.
+          runTurn: () => Promise.resolve(completed("warm turn", true)),
+          close: () => Promise.resolve(),
+        });
+      },
+    };
+    const { run } = await start(board, backend);
+
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    await run(inThread);
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({
+      claude: "replaced-cold",
+      runner: "pod",
+    });
+    await run(inThread);
+    expect(handed).toEqual([
+      { session: "unstarted", newSession: false },
+      { session: "replaced-cold", newSession: false },
+    ]);
+
+    await run(deskPost);
+    expect(await board.readSessions("desk", "society")).toEqual({
+      claude: "replaced-warm",
+      runner: "pod",
+    });
+    await run(deskPost);
+    expect(started).toEqual(["unstarted", "replaced-warm"]);
+  });
+
   it("starts a warm session afresh when the citizen's model or effort changes", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

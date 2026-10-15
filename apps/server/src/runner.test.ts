@@ -887,6 +887,87 @@ describe("turns on a runner over the runner protocol", () => {
     expect(started).toEqual(["unstarted", "replaced-warm"]);
   });
 
+  // What each adapter's session does once its CLI ended between turns: Claude's throws, with the
+  // SDK's words after a crash and its own after a clean end, and Codex's returns the failure.
+  const deadSessions = [
+    {
+      shape: "throws after a crash, as Claude's does",
+      error: "Claude Code process terminated by signal SIGKILL",
+      throws: true,
+    },
+    {
+      shape: "throws after a clean end, as Claude's does",
+      error: "the resident session has ended",
+      throws: true,
+    },
+    {
+      shape: "returns the failure, as Codex's does",
+      error: "codex app-server is closed",
+      throws: false,
+    },
+  ];
+  for (const { shape, error, throws } of deadSessions) {
+    it(`lets a warm session go once its CLI has ended, when the turn on it ${shape}`, async () => {
+      const { board } = await Board.init(dir, { name: "dead" });
+      await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+      const started: string[] = [];
+      let closes = 0;
+      let alive = true;
+      const backend: AgentBackend = {
+        kind: "claude",
+        newSession: () => Promise.resolve("s1"),
+        runTurn: () => Promise.resolve(completed("cold")),
+        startResident: (_spec, resident) => {
+          started.push(resident.session);
+          alive = true;
+          return Promise.resolve({
+            session: resident.session,
+            runTurn: () => {
+              if (alive) {
+                return Promise.resolve(completed("warm"));
+              }
+              if (throws) {
+                return Promise.reject(new Error(error));
+              }
+              return Promise.resolve({
+                ...completed("closed"),
+                status: null,
+                exitReason: "error" as const,
+                error,
+              });
+            },
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          });
+        },
+      };
+      const { run, hub } = await start(board, backend);
+      const records = [await run(deskPost)];
+      expect(hub.residentPairs).toEqual(["desk/society"]);
+      alive = false;
+      // The failed turn lets the session go at once, so the runner no longer reports it warm.
+      records.push(await run(deskPost));
+      expect(hub.residentPairs).toEqual([]);
+      for (let i = 0; i < 2; i += 1) {
+        records.push(await run(deskPost));
+      }
+      // The failed turn is recorded with the adapter's words, and the next one starts a new
+      // process on the saved session.
+      expect(hub.residentPairs).toEqual(["desk/society"]);
+      expect(records.map((record) => [record.exitReason, record.error ?? null])).toEqual([
+        ["completed", null],
+        ["error", error],
+        ["completed", null],
+        ["completed", null],
+      ]);
+      expect(started).toEqual(["s1", "s1"]);
+      expect(closes).toBe(1);
+      expect(await board.readSessions("desk", "society")).toEqual({ claude: "s1", runner: "pod" });
+    });
+  }
+
   it("starts a warm session afresh when the citizen's model or effort changes", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

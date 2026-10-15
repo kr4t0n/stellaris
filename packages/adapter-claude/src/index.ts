@@ -159,6 +159,8 @@ interface TurnState {
   quota: CliQuota | undefined;
   /** What the CLI said when the API refused the turn for the plan's limit. */
   limitText: string | undefined;
+  /** Whether the latest result ended its run on an API error: a success marked `is_error`. */
+  apiError: boolean;
 }
 
 interface HandlerContext {
@@ -182,6 +184,7 @@ function freshState(model?: string): TurnState {
     initialized: false,
     quota: undefined,
     limitText: undefined,
+    apiError: false,
   };
 }
 
@@ -337,10 +340,19 @@ function handleMessage(
       // Each result counts only its own run, and a turn can run more than once in one process.
       state.usage = addUsage(state.usage, usageOf(message.usage));
       state.totalCostUsd = message.total_cost_usd;
+      state.apiError = message.subtype === "success" && message.is_error;
       if (message.subtype === "success") {
         state.finalText = message.result;
         state.structured = message.structured_output ?? null;
-        state.exitReason = "completed";
+        // A run that ended on an API error is a success marked `is_error`, its text the API's words.
+        if (state.apiError) {
+          state.exitReason = "error";
+          state.error = message.result || "the turn ended on an API error";
+        } else {
+          // The latest run decides how the turn ended, so an earlier run's error goes with it.
+          state.exitReason = "completed";
+          state.error = undefined;
+        }
         return;
       }
       const detail = message.errors.join("; ");
@@ -886,7 +898,8 @@ export class ClaudeAgentBackend implements AgentBackend {
         }
       }
     } catch (caught) {
-      if (!abort.signal.aborted && !stopped) {
+      // The API's words say why the turn failed; the CLI's exit after them, with code 1, says less.
+      if (!abort.signal.aborted && !stopped && !state.apiError) {
         state.exitReason = "error";
         state.error = caught instanceof Error ? caught.message : String(caught);
       }

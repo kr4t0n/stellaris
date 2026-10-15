@@ -1097,7 +1097,15 @@ export class TurnExecutor {
       clearTimeout(current.timer);
       current.timer = null;
     }
-    const result = await current.session.runTurn(input.prompt, input.onEvent, input.control);
+    let result: TurnResult;
+    try {
+      result = await current.session.runTurn(input.prompt, input.onEvent, input.control);
+    } catch (error) {
+      // A session whose CLI has gone throws on every later turn, and its idle timer is cleared, so
+      // it goes now; the next turn starts a new process on the saved session.
+      await this.closeResident(resident.key, "turn threw");
+      throw error;
+    }
     const stale = result.status?.memoryUpdated === true || result.exitReason !== "completed";
     if (stale) {
       // The instructions carry the memory core; a changed memory or a broken turn means a fresh start next time.

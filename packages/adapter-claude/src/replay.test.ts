@@ -61,6 +61,53 @@ function checkingIds(queryFn: QueryFn): QueryFn {
   };
 }
 
+/**
+ * A turn the API refused, as Claude Code 2.1.283 streamed it against a local server answering 400:
+ * a synthetic assistant message with the API's words, then a `success` result marked `is_error`.
+ */
+function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
+  const frames: unknown[] = [
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        model: "<synthetic>",
+        stop_reason: "stop_sequence",
+        usage: { input_tokens: 0, output_tokens: 0 },
+        content: [{ type: "text", text }],
+      },
+      parent_tool_use_id: null,
+      error: "unknown",
+      is_api_error_message: true,
+      session_id: "recorded",
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 400,
+      terminal_reason: "api_error",
+      result: text,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      num_turns: 1,
+      session_id: "recorded",
+    },
+  ];
+  // Hand-built frames in the SDK's shapes; the union is far too large to build here.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return frames as SDKMessage[];
+}
+
+/** A cold run that ends as the SDK reports a CLI that exits with code 1 after these frames. */
+function exitingAfter(frames: readonly SDKMessage[]): QueryFn {
+  return () =>
+    (async function* () {
+      yield* frames;
+      throw new Error("Claude Code process exited with code 1");
+    })();
+}
+
 const request: TurnRequest = {
   spec: {
     agent: "eng-1",
@@ -80,6 +127,13 @@ const request: TurnRequest = {
   limits: { timeoutMs: 60_000, maxTurns: 10 },
   statusSchema: { type: "object" },
 };
+
+/** A cold turn of a session that exists, on these frames. */
+function coldTurn(queryFn: QueryFn) {
+  return new ClaudeAgentBackend({ queryFn, sessionExists: () => Promise.resolve(true) }).runTurn(
+    request,
+  );
+}
 
 describe("ClaudeAgentBackend replay", () => {
   it("announces a turn once when the SDK sends a second init message", async () => {
@@ -235,6 +289,82 @@ describe("ClaudeAgentBackend replay", () => {
     }).runTurn(request);
     expect(kept.calls[0]?.options?.sessionId).toBe(request.session);
     expect(created.session).toBeUndefined();
+  });
+
+  it("fails a turn the API refused with the API's words, not the exit that follows them", async () => {
+    for (const queryFn of [replaying(refusedTurn()).queryFn, exitingAfter(refusedTurn())]) {
+      const result = await coldTurn(queryFn);
+      expect(result.exitReason).toBe("error");
+      expect(result.error).toBe("API Error: 400 stub refuses");
+      expect(result.status).toBeNull();
+    }
+    const unsaid = await coldTurn(replaying(refusedTurn("")).queryFn);
+    expect(unsaid.exitReason).toBe("error");
+    expect(unsaid.error).toBe("the turn ended on an API error");
+
+    // A process that exits with no result, or after one that completed, fails with what the SDK
+    // threw, as before.
+    for (const frames of [[], await recorded("sdk-synthetic.jsonl")]) {
+      const crashed = await coldTurn(exitingAfter(frames));
+      expect(crashed.exitReason).toBe("error");
+      expect(crashed.error).toBe("Claude Code process exited with code 1");
+    }
+
+    // So does one after an error subtype's result, which the SDK words itself, as Claude Code
+    // 2.1.283 did for a transcript holding only a summary line. That result is marked `is_error`
+    // too, and only a `success` so marked is an API error.
+    const missing = "No conversation found with session ID: 92132dad-48ca-450a-a7e7-82f8b2ab9b24";
+    const unresumed: unknown[] = [
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: [missing],
+        total_cost_usd: 0,
+      },
+    ];
+    const sdkWords = `Claude Code returned an error result: ${missing}`;
+    const failed = await coldTurn(() =>
+      (async function* () {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        yield* unresumed as SDKMessage[];
+        throw new Error(sdkWords);
+      })(),
+    );
+    expect(failed.exitReason).toBe("error");
+    expect(failed.error).toBe(sdkWords);
+  });
+
+  it("ends a turn of several runs as its latest run did", async () => {
+    // A turn runs more than once in one process for a background task a resumed session reports
+    // before the prompt, or for a steer the CLI takes after its result.
+    const done = (await recorded("sdk-synthetic.jsonl")).filter((frame) => frame.type === "result");
+    const maxTurns: unknown[] = [
+      { type: "result", subtype: "error_max_turns", errors: ["10"], total_cost_usd: 0 },
+    ];
+    for (const earlier of [
+      refusedTurn("API Error: 529 overloaded"),
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      maxTurns as SDKMessage[],
+    ]) {
+      const completed = await coldTurn(replaying([...earlier, ...done]).queryFn);
+      expect(completed.exitReason).toBe("completed");
+      expect(completed.error).toBeUndefined();
+      expect(completed.status?.summary).toBe("nothing to do");
+      expect(completed.events.filter((event) => event.type === "error")).toEqual([]);
+    }
+
+    // A run that completed after an API error leaves the CLI's exit after it to say why it failed.
+    const exited = await coldTurn(
+      exitingAfter([...refusedTurn("API Error: 529 overloaded"), ...done]),
+    );
+    expect(exited.exitReason).toBe("error");
+    expect(exited.error).toBe("Claude Code process exited with code 1");
+
+    // And an API error after a completed run fails the turn.
+    const refusedLast = await coldTurn(replaying([...done, ...refusedTurn()]).queryFn);
+    expect(refusedLast.exitReason).toBe("error");
+    expect(refusedLast.error).toBe("API Error: 400 stub refuses");
   });
 
   it("treats a stream without a result message as an error", async () => {

@@ -23,6 +23,9 @@ test("an archived project leaves the projects for the navigator's archive and re
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "New thread" })).toHaveCount(0);
   await expect(page.getByRole("textbox")).toHaveCount(0);
+  // Its arrow still goes up, to the archived project.
+  await page.getByRole("link", { name: "Back to iPhone study", exact: true }).click();
+  await expect(page).toHaveURL("/p/iphone");
   expect(board.writes).toEqual([]);
 });
 
@@ -64,6 +67,7 @@ test("a channel is opened for a workstream from its project's page and archived 
   await view.getByRole("button", { name: "Archive…" }).click();
   const archive = page.getByRole("form", { name: "Archive the channel" });
   await expect(archive.getByRole("button", { name: "Archive channel" })).toBeDisabled();
+  await expect(view.getByRole("button", { name: "Back to Lab", exact: true })).toBeVisible();
   await archive.getByRole("textbox", { name: "Reason" }).fill("0.1.0 shipped");
   await archive.getByRole("button", { name: "Archive channel" }).click();
 
@@ -71,6 +75,9 @@ test("a channel is opened for a workstream from its project's page and archived 
   await expect(view.getByRole("button", { name: "New thread" })).toHaveCount(0);
   await expect(view.getByRole("textbox")).toHaveCount(0);
   await expect(navigator.getByRole("link", { name: /release-1/ })).toHaveCount(0);
+  // It keeps its arrow back to the project it was opened from.
+  await view.getByRole("button", { name: "Back to Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab");
   await page.goto("/c/lab/general");
   await expect(view.getByRole("button", { name: "Archive…" })).toHaveCount(0);
 

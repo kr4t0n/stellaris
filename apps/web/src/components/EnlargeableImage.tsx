@@ -25,7 +25,7 @@ export function EnlargeableImage({ src, alt }: { src: string; alt: string }) {
         aria-label={`Enlarge ${alt === "" ? "the image" : alt}`}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
-        className="block w-fit max-w-full cursor-zoom-in rounded-lg focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+        className="block max-w-full cursor-zoom-in rounded-lg focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
       >
         <img src={src} alt={alt} className={`block ${INLINE_IMAGE}`} />
       </button>

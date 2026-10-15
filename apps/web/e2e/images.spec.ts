@@ -216,6 +216,8 @@ test("an image on the web enlarges too, to the window's height when it is tall",
     taskThread(page).getByRole("img", { name: "The survey page, before" }),
   );
   expect(inline.x).toBe(before.x);
+  // Narrower than the post, and so is its button: the space beside it is no button.
+  expect(await boxOf(enlarge)).toEqual(inline);
 
   await enlarge.click();
   const dialog = page.getByRole("dialog", { name: "The survey page on a phone" });

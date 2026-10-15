@@ -311,10 +311,17 @@ describe("ClaudeAgentBackend replay", () => {
     }
 
     // So does one after an error subtype's result, which the SDK words itself, as Claude Code
-    // 2.1.283 did for a transcript holding only a summary line.
+    // 2.1.283 did for a transcript holding only a summary line. That result is marked `is_error`
+    // too, and only a `success` so marked is an API error.
     const missing = "No conversation found with session ID: 92132dad-48ca-450a-a7e7-82f8b2ab9b24";
     const unresumed: unknown[] = [
-      { type: "result", subtype: "error_during_execution", errors: [missing], total_cost_usd: 0 },
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: [missing],
+        total_cost_usd: 0,
+      },
     ];
     const sdkWords = `Claude Code returned an error result: ${missing}`;
     const failed = await coldTurn(() =>
@@ -326,6 +333,38 @@ describe("ClaudeAgentBackend replay", () => {
     );
     expect(failed.exitReason).toBe("error");
     expect(failed.error).toBe(sdkWords);
+  });
+
+  it("ends a turn of several runs as its latest run did", async () => {
+    // A turn runs more than once in one process for a background task a resumed session reports
+    // before the prompt, or for a steer the CLI takes after its result.
+    const done = (await recorded("sdk-synthetic.jsonl")).filter((frame) => frame.type === "result");
+    const maxTurns: unknown[] = [
+      { type: "result", subtype: "error_max_turns", errors: ["10"], total_cost_usd: 0 },
+    ];
+    for (const earlier of [
+      refusedTurn("API Error: 529 overloaded"),
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      maxTurns as SDKMessage[],
+    ]) {
+      const completed = await coldTurn(replaying([...earlier, ...done]).queryFn);
+      expect(completed.exitReason).toBe("completed");
+      expect(completed.error).toBeUndefined();
+      expect(completed.status?.summary).toBe("nothing to do");
+      expect(completed.events.filter((event) => event.type === "error")).toEqual([]);
+    }
+
+    // A run that completed after an API error leaves the CLI's exit after it to say why it failed.
+    const exited = await coldTurn(
+      exitingAfter([...refusedTurn("API Error: 529 overloaded"), ...done]),
+    );
+    expect(exited.exitReason).toBe("error");
+    expect(exited.error).toBe("Claude Code process exited with code 1");
+
+    // And an API error after a completed run fails the turn.
+    const refusedLast = await coldTurn(replaying([...done, ...refusedTurn()]).queryFn);
+    expect(refusedLast.exitReason).toBe("error");
+    expect(refusedLast.error).toBe("API Error: 400 stub refuses");
   });
 
   it("treats a stream without a result message as an error", async () => {

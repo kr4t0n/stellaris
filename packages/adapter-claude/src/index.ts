@@ -349,7 +349,9 @@ function handleMessage(
           state.exitReason = "error";
           state.error = message.result || "the turn ended on an API error";
         } else {
+          // The latest run decides how the turn ended, so an earlier run's error goes with it.
           state.exitReason = "completed";
+          state.error = undefined;
         }
         return;
       }

@@ -51,11 +51,35 @@ function frames(turn: number, text: string, totalCost: number, stall = false): S
   return (stall ? [assistant] : [assistant, result]) as unknown as SDKMessage[];
 }
 
+/** A turn the API refused, as Claude Code 2.1.283 streamed it against a local server answering 400. */
+function refusedFrames(): SDKMessage[] {
+  const text = "API Error: 400 stub refuses";
+  const assistant = {
+    type: "assistant",
+    session_id: start.session,
+    error: "unknown",
+    is_api_error_message: true,
+    message: { role: "assistant", model: "<synthetic>", content: [{ type: "text", text }] },
+  };
+  const result = {
+    type: "result",
+    subtype: "success",
+    is_error: true,
+    api_error_status: 400,
+    session_id: start.session,
+    result: text,
+    total_cost_usd: 0,
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return [assistant, result] as unknown as SDKMessage[];
+}
+
 /**
  * A scripted SDK: reads user messages from the streamed prompt and answers each with the frames
  * for that turn, the way a real query does in streaming-input mode. Records interrupts and closes.
  */
-function scripted(stallOn: number | null = null, savedCost = 0) {
+function scripted(stallOn: number | null = null, savedCost = 0, refuseOn: number | null = null) {
   const prompts: string[] = [];
   const calls = { interrupts: 0, closes: 0 };
   let userMessages: AsyncIterable<SDKUserMessage> | null = null;
@@ -82,12 +106,9 @@ function scripted(stallOn: number | null = null, savedCost = 0) {
         // The CLI echoes each user message it takes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         yield { ...message, session_id: start.session, isReplay: true } as unknown as SDKMessage;
-        for (const frame of frames(
-          turn,
-          `reply ${turn}`,
-          savedCost + 0.1 * turn,
-          stallOn === turn,
-        )) {
+        for (const frame of refuseOn === turn
+          ? refusedFrames()
+          : frames(turn, `reply ${turn}`, savedCost + 0.1 * turn, stallOn === turn)) {
           yield frame;
         }
       }
@@ -183,6 +204,25 @@ describe("Claude resident sessions", () => {
     await session.close();
     expect(script.calls.closes).toBe(1);
     await expect(session.runTurn("late")).rejects.toThrow(/ended/);
+  });
+
+  it("fails a turn the API refused with the API's words, and runs the next one", async () => {
+    const script = scripted(null, 0, 1);
+    const backend = new ClaudeAgentBackend({ queryFn: script.queryFn });
+    const session = await backend.startResident(spec, start);
+
+    const refused = await session.runTurn("hello");
+    expect(refused.exitReason).toBe("error");
+    expect(refused.error).toBe("API Error: 400 stub refuses");
+    expect(refused.finalText).toBe("API Error: 400 stub refuses");
+    expect(refused.status).toBeNull();
+
+    // The CLI stays up after an API error, and the next turn starts from a clean state.
+    const next = await session.runTurn("again");
+    expect(next.exitReason).toBe("completed");
+    expect(next.error).toBeUndefined();
+    expect(next.status?.summary).toBe("turn 2");
+    await session.close();
   });
 
   it("interrupts a turn that exceeds its limit and reports a timeout", async () => {

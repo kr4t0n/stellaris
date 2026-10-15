@@ -340,7 +340,13 @@ function handleMessage(
       if (message.subtype === "success") {
         state.finalText = message.result;
         state.structured = message.structured_output ?? null;
-        state.exitReason = "completed";
+        // A turn that ended on an API error is a success marked `is_error`, its text the API's words.
+        if (message.is_error) {
+          state.exitReason = "error";
+          state.error = message.result || "the turn ended on an API error";
+        } else {
+          state.exitReason = "completed";
+        }
         return;
       }
       const detail = message.errors.join("; ");
@@ -886,7 +892,8 @@ export class ClaudeAgentBackend implements AgentBackend {
         }
       }
     } catch (caught) {
-      if (!abort.signal.aborted && !stopped) {
+      // A result that failed the turn said why; the CLI's exit after it, with code 1, says less.
+      if (!abort.signal.aborted && !stopped && !(state.sawResult && state.exitReason === "error")) {
         state.exitReason = "error";
         state.error = caught instanceof Error ? caught.message : String(caught);
       }

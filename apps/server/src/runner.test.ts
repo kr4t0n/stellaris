@@ -887,6 +887,67 @@ describe("turns on a runner over the runner protocol", () => {
     expect(started).toEqual(["unstarted", "replaced-warm"]);
   });
 
+  for (const shape of ["throws, as Claude's does", "returns the failure, as Codex's does"]) {
+    it(`lets a warm session go once its CLI has ended, when the turn on it ${shape}`, async () => {
+      const { board } = await Board.init(dir, { name: "dead" });
+      await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+      const started: string[] = [];
+      let closes = 0;
+      let alive = true;
+      const backend: AgentBackend = {
+        kind: "claude",
+        newSession: () => Promise.resolve("s1"),
+        runTurn: () => Promise.resolve(completed("cold")),
+        startResident: (_spec, resident) => {
+          started.push(resident.session);
+          alive = true;
+          return Promise.resolve({
+            session: resident.session,
+            // What each adapter's session does once its CLI ended between turns.
+            runTurn: () => {
+              if (alive) {
+                return Promise.resolve(completed("warm"));
+              }
+              if (shape.startsWith("throws")) {
+                return Promise.reject(new Error("the resident session has ended"));
+              }
+              return Promise.resolve({
+                ...completed("closed"),
+                status: null,
+                exitReason: "error" as const,
+                error: "codex app-server is closed",
+              });
+            },
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          });
+        },
+      };
+      const { run } = await start(board, backend);
+      const records = [await run(deskPost)];
+      alive = false;
+      for (let i = 0; i < 3; i += 1) {
+        records.push(await run(deskPost));
+      }
+      // The failed turn is recorded with the adapter's words, and the next one starts a new
+      // process on the saved session.
+      const error = shape.startsWith("throws")
+        ? "the resident session has ended"
+        : "codex app-server is closed";
+      expect(records.map((record) => [record.exitReason, record.error ?? null])).toEqual([
+        ["completed", null],
+        ["error", error],
+        ["completed", null],
+        ["completed", null],
+      ]);
+      expect(started).toEqual(["s1", "s1"]);
+      expect(closes).toBe(1);
+      expect(await board.readSessions("desk", "society")).toEqual({ claude: "s1", runner: "pod" });
+    });
+  }
+
   it("starts a warm session afresh when the citizen's model or effort changes", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

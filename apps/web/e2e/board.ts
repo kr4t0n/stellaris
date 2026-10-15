@@ -322,6 +322,26 @@ const SCREENSHOTS = {
   body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})\n\nOn a phone: ![The survey page on a phone](${PHONE_URL})`,
 };
 
+/** Where the web images of ada's other post live: a vector with no size of its own, and nothing. */
+export const VECTOR_URL = "https://images.example.test/shape.svg";
+export const BROKEN_URL = "https://images.example.test/gone.png";
+export const BADGE_TARGET = "https://ci.example.test/runs";
+
+/**
+ * ada's other images in the task's thread, with `uploads`: one inside a link, as a README's badge
+ * is, a vector, one that fails to load, one with no description, and two inside links to a
+ * proposal and to a file on the task's branch.
+ */
+const IMAGE_EDGES = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAB3",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  ts: CREATED,
+  mentions: [],
+  body: `Badge: [![The badge](${PHONE_URL})](${BADGE_TARGET})\n\nVector: ![The vector picture](${VECTOR_URL})\n\nBroken: ![The broken picture](${BROKEN_URL})\n\nUnnamed: ![](${PHONE_URL})\n\nOn the board: [![The proposal's mark](${VECTOR_URL})](/proposal/${SKILL_PROPOSAL}) and [![The report's mark](${VECTOR_URL})](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md)`,
+};
+
 /** The same screenshot in lab's general, with `uploads`. */
 const CHANNEL_SCREENSHOT = labPost(
   7,
@@ -990,7 +1010,8 @@ const CLAUDE_MODELS = [
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
  * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows three
  * screenshots in the task's thread, one of them an image the board does not have and one on the
- * web, and the one the board has in lab's general.
+ * web, a post of web images in shapes that stay plain or size themselves, and the screenshot the
+ * board has in lab's general.
  */
 export async function fakeBoard(
   page: Page,
@@ -1059,7 +1080,7 @@ export async function fakeBoard(
     options.uploads === true ? png(SCREENSHOT_SIZE.width, SCREENSHOT_SIZE.height) : Buffer.alloc(0);
   const threadMessages: Array<Record<string, unknown>> = [
     HANDOVER,
-    ...(options.uploads === true ? [SCREENSHOTS] : []),
+    ...(options.uploads === true ? [SCREENSHOTS, IMAGE_EDGES] : []),
     ...(waitingAsk ? [ASK] : []),
   ];
   const proposalMessages: Array<Record<string, unknown>> = [PITCH];
@@ -1167,6 +1188,13 @@ export async function fakeBoard(
     await page.route(PHONE_URL, (route) =>
       route.fulfill({ contentType: "image/png", body: phone }),
     );
+    await page.route(VECTOR_URL, (route) =>
+      route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect width="40" height="20" fill="teal"/></svg>',
+      }),
+    );
+    await page.route(BROKEN_URL, (route) => route.fulfill({ status: 404, body: "" }));
   }
   await page.route("**/api/**", async (route) => {
     const request = route.request();

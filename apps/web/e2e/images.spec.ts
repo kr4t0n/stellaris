@@ -1,9 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
+  BADGE_TARGET,
   fakeBoard,
   MISSING_IMAGE,
   PHONE_SIZE,
   SCREENSHOT_SIZE,
+  SKILL_PROPOSAL,
   STAGE_TASK,
   TOKEN,
   UPLOADED_IMAGE,
@@ -91,16 +93,20 @@ test("a click enlarges an uploaded image over the whole window, fitted to it, an
   await page.goto(`/task/${STAGE_TASK}`);
 
   const enlarge = taskThread(page).getByRole("button", { name: "Enlarge The survey page, before" });
-  await expect(enlarge).toHaveCSS("cursor", "zoom-in");
-  const inline = await boxOf(enlarge.locator("img"));
-  // The button is the image's own box, so its focus ring goes round the image.
-  expect(await boxOf(enlarge)).toEqual(inline);
+  const image = enlarge.locator("img");
+  await expect(image).toHaveCSS("cursor", "zoom-in");
+  const inline = await boxOf(image);
   const dialog = page.getByRole("dialog", { name: "The survey page, before" });
   const enlarged = dialog.getByRole("img", { name: "The survey page, before" });
 
-  await enlarge.click();
-  // Over the whole window, not only the content island it was opened from.
+  await image.click();
+  // Over the whole window, not only the content island it was opened from, in the body rather
+  // than the post's paragraph, with the board dimmed behind it.
   expect(await boxOf(dialog)).toEqual({ x: 0, y: 0, width: 1600, height: 1000 });
+  expect(await dialog.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  expect(
+    await dialog.evaluate((element) => getComputedStyle(element, "::backdrop").backgroundColor),
+  ).toBe("oklab(0 0 0 / 0.85)");
   const island = await boxOf(page.getByRole("region", { name: "Board content" }));
   expect(island.x).toBeGreaterThan(8);
   expect(await dialogAt(page, 8, 8)).toBe(true);
@@ -121,29 +127,42 @@ test("a click enlarges an uploaded image over the whole window, fitted to it, an
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 
   // A click beside the image, where the board shows dimmed.
-  await enlarge.click();
+  await image.click();
   await expect(dialog).toBeVisible();
   await page.mouse.click(8, 500);
   await expect(dialog).toHaveCount(0);
   await expect(enlarge).toBeFocused();
 
-  await enlarge.click();
+  await image.click();
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(enlarge).toBeFocused();
 
-  await enlarge.click();
+  await image.click();
   await enlarged.click();
   await expect(dialog).toHaveCount(0);
   await expect(enlarge).toBeFocused();
 
   // Space while the image is open closes it, rather than opening the ask box behind it.
-  await enlarge.click();
+  const ask = page.getByRole("region", { name: "Ask", exact: true });
+  await image.click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press(" ");
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "Ask", exact: true })).toHaveCount(0);
+  await expect(ask).toHaveCount(0);
   await expect(enlarge).toBeFocused();
+
+  // Tab inside the open image counts as the keyboard's, so after Escape, Space presses the image
+  // again rather than opening the ask box.
+  await image.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(enlarge).toBeFocused();
+  await page.keyboard.press(" ");
+  await expect(dialog).toBeVisible();
+  await expect(ask).toHaveCount(0);
 });
 
 test("the keyboard enlarges an image with Enter, or Space once Tab reached it", async ({
@@ -173,12 +192,22 @@ test("the keyboard enlarges an image with Enter, or Space once Tab reached it", 
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Tab");
   await expect(enlarge).toBeFocused();
+  // The focus ring goes round the image, not the button, which is as wide as the post.
+  await expect(enlarge.locator("img")).not.toHaveCSS("box-shadow", "none");
   await page.keyboard.press(" ");
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("region", { name: "Ask", exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(enlarge).toBeFocused();
+
+  // Space straight after Escape opens it again: the close is done before the next key.
+  await page.keyboard.press(" ");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press(" ");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
 });
 
 test("an image the board does not have stays its description, with nothing to enlarge", async ({
@@ -216,10 +245,11 @@ test("an image on the web enlarges too, to the window's height when it is tall",
     taskThread(page).getByRole("img", { name: "The survey page, before" }),
   );
   expect(inline.x).toBe(before.x);
-  // Narrower than the post, and so is its button: the space beside it is no button.
-  expect(await boxOf(enlarge)).toEqual(inline);
+  // Narrower than the post: a click in the space beside it opens nothing.
+  await page.mouse.click(inline.x + inline.width + 40, inline.y + inline.height / 2);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  await enlarge.click();
+  await enlarge.locator("img").click();
   const dialog = page.getByRole("dialog", { name: "The survey page on a phone" });
   const box = await expectFitted(page, dialog.getByRole("img"), PHONE_SIZE);
   expect(box.height).toBeGreaterThan(inline.height);
@@ -249,7 +279,7 @@ for (const place of [
         .getByRole("button", { name: `Enlarge ${place.name}` });
       const inline = await boxOf(enlarge.locator("img"));
 
-      await enlarge.click();
+      await enlarge.locator("img").click();
       const dialog = page.getByRole("dialog", { name: place.name });
       expect(await boxOf(dialog)).toEqual({ x: 0, y: 0, ...window });
       const box = await expectFitted(page, dialog.getByRole("img"), SCREENSHOT_SIZE);
@@ -261,3 +291,76 @@ for (const place of [
     });
   }
 }
+
+test("an image inside a link opens the link alone, as a plain image", async ({ page }) => {
+  await page
+    .context()
+    .route(`${BADGE_TARGET}**`, (route) => route.fulfill({ contentType: "text/plain", body: "" }));
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const link = taskThread(page).getByRole("link", { name: "The badge" });
+  await expect(link.getByRole("img", { name: "The badge" })).toBeVisible();
+  await expect(link.locator("button")).toHaveCount(0);
+
+  const popup = page.waitForEvent("popup");
+  await link.getByRole("img", { name: "The badge" }).click();
+  await (await popup).waitForURL(BADGE_TARGET);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // So does one inside a link to something on the board or to a file on a task's branch.
+  for (const name of ["The proposal's mark", "The report's mark"]) {
+    const boardLink = taskThread(page).getByRole("link", { name });
+    await expect(boardLink.getByRole("img", { name })).toBeVisible();
+    await expect(boardLink.locator("button")).toHaveCount(0);
+  }
+  await taskThread(page).getByRole("img", { name: "The proposal's mark" }).click();
+  await expect(page).toHaveURL(new RegExp(`/proposal/${SKILL_PROPOSAL}$`));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("a vector with no size of its own shows as wide as the post, and enlarges to the window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const thread = taskThread(page);
+  const enlarge = thread.getByRole("button", { name: "Enlarge The vector picture" });
+  const inline = await boxOf(enlarge.locator("img"));
+  const before = await boxOf(thread.getByRole("img", { name: "The survey page, before" }));
+  expect(inline.width).toBe(before.width);
+  expect(inline.width / inline.height).toBeCloseTo(2, 2);
+
+  await enlarge.locator("img").click();
+  const enlarged = await boxOf(
+    page.getByRole("dialog", { name: "The vector picture" }).getByRole("img"),
+  );
+  expect(enlarged.width).toBeGreaterThan(inline.width * 2);
+  expect(enlarged.width / enlarged.height).toBeCloseTo(2, 2);
+  expect(enlarged.x).toBeGreaterThanOrEqual(16);
+  expect(enlarged.x + enlarged.width).toBeLessThanOrEqual(1600 - 16);
+});
+
+test("a web image that fails to load stays a plain image, with nothing to enlarge", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const thread = taskThread(page);
+  await expect(thread.getByRole("img", { name: "The broken picture" })).toHaveCount(1);
+  await expect(thread.getByRole("button", { name: /The broken picture/ })).toHaveCount(0);
+  await thread.getByRole("img", { name: "The broken picture" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("an image with no description is named for what it is", async ({ page }) => {
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const enlarge = taskThread(page).getByRole("button", { name: "Enlarge the image", exact: true });
+  await enlarge.locator("img").click();
+  const dialog = page.getByRole("dialog", { name: "The image", exact: true });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(enlarge).toBeFocused();
+});

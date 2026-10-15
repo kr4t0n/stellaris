@@ -201,6 +201,10 @@ export function Playground() {
       if (event.key === "Tab") {
         pointerFocus.current = false;
       }
+      // A modal dialog, such as an enlarged image, owns the keyboard: Escape closes it alone.
+      if (document.querySelector(":modal") !== null) {
+        return;
+      }
       const target = event.target instanceof HTMLElement ? event.target : null;
       const typing = target?.closest("input, textarea, select, [contenteditable]") != null;
       if (typing || event.metaKey || event.ctrlKey || event.altKey) {

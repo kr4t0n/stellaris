@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { entityOfHref, remarkEntities } from "../lib/entities.js";
 import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib/files.js";
 import { remarkMentions } from "../lib/mentions.js";
+import { EnlargeableImage, INLINE_IMAGE } from "./EnlargeableImage.js";
 import { EntityLink, useEntitiesFor } from "./Entities.js";
 import { FileBaseContext, TaskFileLink, TaskImage } from "./TaskFile.js";
 import { UploadedImage } from "./UploadedImage.js";
@@ -72,13 +73,10 @@ function BoardImage({ src, alt }: { src?: string | Blob | undefined; alt?: strin
     const path = typeof src === "string" ? src : undefined;
     return <LocalPath href={path}>{alt === undefined || alt === "" ? path : alt}</LocalPath>;
   }
-  return (
-    <img
-      src={typeof src === "string" ? src : undefined}
-      alt={alt}
-      className="max-h-[32rem] max-w-full rounded-lg"
-    />
-  );
+  if (typeof src !== "string") {
+    return <img alt={alt} className={INLINE_IMAGE} />;
+  }
+  return <EnlargeableImage src={src} alt={alt ?? ""} />;
 }
 
 const COMPONENTS: Components = { a: BoardLink, img: BoardImage };

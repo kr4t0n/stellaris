@@ -1,3 +1,4 @@
+import { crc32, deflateSync } from "node:zlib";
 import type { Page, Route } from "@playwright/test";
 
 export const TOKEN = "stl_e2e_fixture";
@@ -266,7 +267,51 @@ const HANDOVER = {
 export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
 export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
 
-/** ada's screenshots in the task's thread, with `uploads`: one the board has, one it does not. */
+/** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
+function pngChunk(type: string, data: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, "latin1");
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+
+/** A PNG of the given size, a gradient under a grid, so it reads as a picture once enlarged. */
+function png(width: number, height: number): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  // Eight bits a channel, truecolor, the standard compression, filter, and no interlace.
+  header.set([8, 2, 0, 0, 0], 8);
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    for (let x = 0; x < width; x++) {
+      const grid = x % 100 < 2 || y % 100 < 2;
+      rows.set(
+        grid ? [70, 80, 110] : [20 + (x * 60) / width, 30 + (y * 60) / height, 60],
+        row + 1 + x * 3,
+      );
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(rows)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** The sizes of the screenshot ada uploaded, a window's, and of the one on the web, a phone's. */
+export const SCREENSHOT_SIZE = { width: 1600, height: 1000 };
+export const PHONE_SIZE = { width: 600, height: 1400 };
+export const PHONE_URL = "https://images.example.test/survey-phone.png";
+
+/**
+ * ada's screenshots in the task's thread, with `uploads`: one the board has, one it does not, and
+ * one on the web.
+ */
 const SCREENSHOTS = {
   id: "01M3Q2AAAAAAAAAAAAAAAAAAB2",
   author: "ada",
@@ -274,8 +319,15 @@ const SCREENSHOTS = {
   thread: STAGE_TASK,
   ts: CREATED,
   mentions: [],
-  body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})`,
+  body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})\n\nOn a phone: ![The survey page on a phone](${PHONE_URL})`,
 };
+
+/** The same screenshot in lab's general, with `uploads`. */
+const CHANNEL_SCREENSHOT = labPost(
+  7,
+  "ada",
+  `The survey page as it ships: ![The survey page in lab](image:${UPLOADED_IMAGE})`,
+);
 
 /** The branch's newest commit, as the task's runner reports it with every read. */
 const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATED, author: "ada" };
@@ -936,8 +988,9 @@ const CLAUDE_MODELS = [
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
- * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows two
- * screenshots in the task's thread, one of them an image the board does not have.
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows three
+ * screenshots in the task's thread, one of them an image the board does not have and one on the
+ * web, and the one the board has in lab's general.
  */
 export async function fakeBoard(
   page: Page,
@@ -1002,6 +1055,8 @@ export async function fakeBoard(
   }> = [];
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
+  const screenshot =
+    options.uploads === true ? png(SCREENSHOT_SIZE.width, SCREENSHOT_SIZE.height) : Buffer.alloc(0);
   const threadMessages: Array<Record<string, unknown>> = [
     HANDOVER,
     ...(options.uploads === true ? [SCREENSHOTS] : []),
@@ -1107,6 +1162,12 @@ export async function fakeBoard(
   await page.route("https://avatars.githubusercontent.com/**", (route) =>
     route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") }),
   );
+  if (options.uploads === true) {
+    const phone = png(PHONE_SIZE.width, PHONE_SIZE.height);
+    await page.route(PHONE_URL, (route) =>
+      route.fulfill({ contentType: "image/png", body: phone }),
+    );
+  }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -1375,7 +1436,7 @@ export async function fakeBoard(
     }
     if (pathname.startsWith("/api/images/")) {
       return pathname === `/api/images/${UPLOADED_IMAGE}`
-        ? route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") })
+        ? route.fulfill({ contentType: "image/png", body: screenshot })
         : json(route, { error: "NOT_FOUND", message: "image not found" }, 404);
     }
     const files = `/api/tasks/${STAGE_TASK}/files`;
@@ -1526,7 +1587,10 @@ export async function fakeBoard(
       case "/api/projects/iphone/knowledge":
         return json(route, []);
       case "/api/channels/lab/general":
-        return json(route, LAB_GENERAL);
+        return json(
+          route,
+          options.uploads === true ? [...LAB_GENERAL, CHANNEL_SCREENSHOT] : LAB_GENERAL,
+        );
       case "/api/projects/iphone/dashboard":
         return json(route, { project: "iphone", revision: 0, body: "" });
       case "/api/channels/iphone/general":

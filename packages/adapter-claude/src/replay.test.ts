@@ -41,6 +41,26 @@ function replaying(messages: readonly SDKMessage[]): { queryFn: QueryFn; calls: 
   return { queryFn, calls };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The CLI's own check of the id it is to create a session under, which Claude Code 2.1.283 makes
+ * before anything else: it exits with this error for an id that is not a UUID.
+ */
+function checkingIds(queryFn: QueryFn): QueryFn {
+  return (params) => {
+    const stream = queryFn(params);
+    const id = params.options?.sessionId;
+    if (id === undefined || UUID.test(id)) {
+      return stream;
+    }
+    const exited = new Error(
+      "Claude Code process exited with code 1. stderr: Error: Invalid session ID. Must be a valid UUID.",
+    );
+    return { [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(exited) }) };
+  };
+}
+
 const request: TurnRequest = {
   spec: {
     agent: "eng-1",
@@ -181,6 +201,40 @@ describe("ClaudeAgentBackend replay", () => {
     const options = calls[0]?.options;
     expect(options?.sessionId).toBe("92132dad-48ca-450a-a7e7-82f8b2ab9b24");
     expect(options?.resume).toBeUndefined();
+  });
+
+  it("creates a fresh session in place of a recorded id the CLI cannot take, and reports it", async () => {
+    const messages = await recorded("sdk-synthetic.jsonl");
+    const { queryFn, calls } = replaying(messages);
+    const asked: string[] = [];
+    const backend = new ClaudeAgentBackend({
+      queryFn: checkingIds(queryFn),
+      sessionExists: (session) => {
+        asked.push(session);
+        return Promise.resolve(false);
+      },
+    });
+    // What runners before 0.3.24 recorded for a conversation whose first turn never started its CLI.
+    const result = await backend.runTurn({ ...request, session: "unstarted", costSoFarUsd: 0.1 });
+    expect(result.error).toBeUndefined();
+    expect(result.exitReason).toBe("completed");
+    const fresh = calls[0]?.options?.sessionId;
+    expect(fresh).toMatch(UUID);
+    expect(calls[0]?.options?.resume).toBeUndefined();
+    // The runner records the new id, so the conversation's next turn resumes it.
+    expect(result.session).toBe(fresh);
+    // Nothing of a session that never existed is counted.
+    expect(result.costUsd).toBeCloseTo(0.1922);
+    expect(asked).toEqual([]);
+
+    // A recorded UUID that names no session yet stays its id: the session is created under it.
+    const kept = replaying(messages);
+    const created = await new ClaudeAgentBackend({
+      queryFn: checkingIds(kept.queryFn),
+      sessionExists: () => Promise.resolve(false),
+    }).runTurn(request);
+    expect(kept.calls[0]?.options?.sessionId).toBe(request.session);
+    expect(created.session).toBeUndefined();
   });
 
   it("treats a stream without a result message as an error", async () => {

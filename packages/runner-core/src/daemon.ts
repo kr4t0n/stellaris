@@ -435,7 +435,7 @@ export class RunnerDaemon {
         error: `the runner could not run the turn: ${describeError(error)}`,
         usage: ZERO_USAGE,
         costUsd: 0,
-        session: job.session ?? "unstarted",
+        session: job.session,
         model: null,
         work: null,
         leftovers: false,

@@ -466,6 +466,15 @@ function isUuid(id: string): id is UUID {
 }
 
 /**
+ * The id a session goes by: the one recorded, or a fresh one in place of an id the CLI cannot
+ * create a session under, such as `unstarted`, which runners once recorded for a conversation whose
+ * first turn never reached its CLI. Such an id names no session, so starting afresh loses nothing.
+ */
+function usableSession(recorded: SessionId): SessionId {
+  return isUuid(recorded) ? recorded : randomUUID();
+}
+
+/**
  * A user message for the CLI's streaming input, with an id the CLI echoes when it takes it. A
  * steer goes in with priority `next`, which the CLI folds into the running turn between steps;
  * left unset, the priority may be `later`, which waits for the turn to end, and `now` would
@@ -716,7 +725,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** The session id is chosen up front so the runner can record it before the turn starts. */
+  /** The session id is chosen before the CLI starts, so the turn reports it however it ends. */
   newSession(): Promise<SessionId> {
     return Promise.resolve(randomUUID());
   }
@@ -805,11 +814,13 @@ export class ClaudeAgentBackend implements AgentBackend {
       now: this.now,
     };
 
-    // The runner records the session id before the first turn so a crash cannot lose it. If that
-    // first turn died before the CLI wrote anything, the id names no session yet: create it now.
-    const resumable = request.newSession
-      ? false
-      : await this.sessionExists(request.session, request.spec.cwd);
+    // The runner picks the session id before the first turn and records it however the turn ends,
+    // so a crash cannot lose it. If that turn died before the CLI wrote anything, the id names no
+    // session yet: create it now.
+    const session = usableSession(request.session);
+    const replaced = session !== request.session;
+    const resumable =
+      !request.newSession && !replaced && (await this.sessionExists(session, request.spec.cwd));
 
     const source = new PushSource<SDKUserMessage>();
     const promptId = randomUUID();
@@ -822,7 +833,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     let stopped = false;
     const stream = this.queryFn({
       prompt: source,
-      options: this.buildOptions(request, abort, resumable),
+      options: this.buildOptions({ ...request, session }, abort, resumable),
     });
     const detach = control?.attach({
       steer: (steer) => {
@@ -902,15 +913,22 @@ export class ClaudeAgentBackend implements AgentBackend {
     // A resumed session's total starts from what its transcript saved: the earlier turns' cost.
     const costSoFarUsd = resumable ? (request.costSoFarUsd ?? 0) : 0;
     const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
-    return finishTurn(state, costUsd, events, emit);
+    const result = finishTurn(state, costUsd, events, emit);
+    // A replacement is the conversation's session from now on, which the runner records.
+    return replaced ? { ...result, session } : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */
   async startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
-    const resumable = start.newSession ? false : await this.sessionExists(start.session, spec.cwd);
+    // The runner records the id the session goes by, a replacement included, after each turn.
+    const session = usableSession(start.session);
+    const resumable =
+      !start.newSession &&
+      session === start.session &&
+      (await this.sessionExists(session, spec.cwd));
     const request: TurnRequest = {
       spec,
-      session: start.session,
+      session,
       newSession: start.newSession,
       prompt: "",
       instructions: start.instructions,
@@ -931,7 +949,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     return new ClaudeResident(
       context,
       { timeoutMs: start.limits.timeoutMs },
-      start.session,
+      session,
       resumable ? (start.costSoFarUsd ?? 0) : 0,
       this.queryFn,
       this.buildOptions(request, new AbortController(), resumable),

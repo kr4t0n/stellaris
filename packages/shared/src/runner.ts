@@ -247,8 +247,12 @@ export const TurnOutcomeSchema = z.object({
   costUsd: z.number().nonnegative(),
   /** The session's running total after this turn, for CLIs that report one. */
   sessionCostUsd: z.number().nonnegative().optional(),
-  /** The session the CLI used, which differs from the job's for CLIs that assign their own ids. */
-  session: z.string().min(1),
+  /**
+   * The session the CLI used, which differs from the job's for CLIs that assign their own ids and
+   * where the CLI could not take the job's. A turn that failed before it reached its CLI reports
+   * the job's own, null in a conversation's first turn, so a session never started is not recorded.
+   */
+  session: z.string().min(1).nullable(),
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),

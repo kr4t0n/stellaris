@@ -552,7 +552,9 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await tip(split.id)).toBe(refHead);
     const told = await notices(split.id);
     expect(told).toHaveLength(1);
-    expect(told[0]?.body).toContain(`eng-1's worktree for this task holds commits on no branch`);
+    expect(told[0]?.body).toContain(
+      `eng-1's worktree for this task holds commits that \`task/${split.id}\` lacks`,
+    );
     expect(told[0]?.body).toContain(`\`${reviewed.slice(0, 7)} eng-1 review of \`x\` for ref\``);
     expect(told[0]?.mentions).toEqual([]);
     await third.release();
@@ -565,6 +567,22 @@ describe("turns on a runner over the runner protocol", () => {
         })
       ).stdout,
     ).toBe(reviewed);
+
+    // The holder's next turn there is left where its commits are and told so; once it commits
+    // again, the thread is told of the new head too.
+    let again = "";
+    engWork = async (cwd) => {
+      expect((await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout).toBe(reviewed);
+      again = await commitEmpty(cwd, "eng-1", "eng-1 second look");
+    };
+    await turn("eng-1", split.id);
+    expect(seen.get(`eng-1/${split.id}`)?.prompt).toContain(
+      `This worktree holds commits that task/${split.id} lacks, so it was left where it is`,
+    );
+    const toldAgain = await notices(split.id);
+    expect(toldAgain).toHaveLength(2);
+    expect(toldAgain[1]?.body).toContain(`\`${again.slice(0, 7)} eng-1 second look\``);
+    expect(await tip(split.id)).toBe(refHead);
 
     // A participant's commits made beside the holder's turn follow the branch too, but only from
     // its own hand-back: the holder's leaves the worktree of a turn still running alone.

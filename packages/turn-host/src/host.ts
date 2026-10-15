@@ -139,7 +139,7 @@ const OPS_TRIGGER = "ops_event";
 function stuckNotice(stuck: StuckWork): string {
   const more = stuck.total - stuck.commits.length;
   const commits = `${stuck.commits.map((commit) => `\`${commit}\``).join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
-  return `${stuck.agent}'s worktree for this task holds commits on no branch that the runner cannot fast-forward \`${stuck.branch}\` to, because they no longer build on its tip or another worktree's commits build on it too: ${commits}. Until someone puts them on the branch, it lacks them, and so does what lands from it; any worktree of the project's clone can cherry-pick or merge them by id.`;
+  return `${stuck.agent}'s worktree for this task holds commits that \`${stuck.branch}\` lacks and that the runner cannot fast-forward it to, because they no longer build on its tip or another worktree's commits build on it too: ${commits}. Until someone puts them on the branch, it lacks them, and so does what lands from it; any worktree of the project's clone can cherry-pick or merge them by id.`;
 }
 
 /** How many signals a reader's prompt lists at most, newest kept. */

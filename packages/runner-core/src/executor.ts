@@ -881,6 +881,7 @@ export class TurnExecutor {
           repoDir,
           this.layout.taskWorktree(job.agent, workspace.taskId),
           branch,
+          base,
           holder === null,
         );
         const report: WorkspaceReport = {
@@ -890,6 +891,7 @@ export class TurnExecutor {
             kind: "task",
             branch,
             holder,
+            beyond: await this.git.beyondBranch(cwd, branch, base),
             state: await this.git.worktreeState(cwd),
             behind: await this.git.ahead(repoDir, branch, base, LISTED),
           },
@@ -977,7 +979,7 @@ export class TurnExecutor {
       if (branch === null) {
         return { work: null, stuck: [] };
       }
-      const stuck = await this.settle(job.workspace.repo.slug, workspace.repoDir, branch);
+      const stuck = await this.settle(job.workspace.repo, workspace.repoDir, branch);
       const head = await this.git.head(workspace.repoDir, branch);
       return { work: head === null ? null : { branch, head }, stuck };
     } catch (error) {
@@ -987,12 +989,12 @@ export class TurnExecutor {
   }
 
   /**
-   * Moves a task's branch on to what the task's worktrees here committed on no branch, as a turn
-   * does that worked detached because another turn had the branch or another citizen held the
-   * stage, leaving out worktrees whose turn's CLI still runs. Answers the commits it cannot take
-   * that were not told before.
+   * Moves a task's branch on to what the task's worktrees here committed beyond it, as a turn does
+   * that worked detached because another turn had the branch or another citizen held the stage,
+   * leaving out worktrees whose turn's CLI still runs. Answers the commits it cannot take that
+   * were not told before.
    */
-  private async settle(slug: Name, repoDir: string, branch: string): Promise<StuckWork[]> {
+  private async settle(repo: ProjectRepo, repoDir: string, branch: string): Promise<StuckWork[]> {
     const taskId = branch.slice("task/".length);
     const running = new Set([...this.imagePlaces.values()].map((places) => places.cwd));
     const owners = new Map<string, Name>();
@@ -1002,8 +1004,8 @@ export class TurnExecutor {
         owners.set(dir, agent);
       }
     }
-    const settled = await this.withProjectLock(slug, () =>
-      this.git.settleTaskBranch(repoDir, branch, [...owners.keys()]),
+    const settled = await this.withProjectLock(repo.slug, () =>
+      this.git.settleTaskBranch(repoDir, branch, repo.defaultBranch, [...owners.keys()]),
     );
     if (settled.moved !== null) {
       this.log.info(

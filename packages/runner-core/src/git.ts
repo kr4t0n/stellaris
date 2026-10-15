@@ -39,27 +39,35 @@ export interface GitOps {
   ensureDefaultBranch(repoDir: string, project: ProjectRepo): Promise<string | null>;
   /**
    * A task conversation's worktree, on the task's branch when `take` is set and no other worktree
-   * has it checked out, else detached at the branch's tip, where commits wait on no branch until
-   * `settleTaskBranch` moves the branch on to them. A worktree holding commits on no branch is
-   * left where it is.
+   * has it checked out, else detached at the branch's tip, where commits wait until
+   * `settleTaskBranch` moves the branch on to them. A worktree holding commits the branch lacks,
+   * as `beyondBranch` counts them, is left where it is.
    */
   ensureTaskWorktree(
     repoDir: string,
     worktreeDir: string,
     branch: string,
+    base: string,
     take?: boolean,
   ): Promise<string>;
   /**
-   * Moves a task's branch on to the commits its worktrees, those given, hold on no branch, as a
-   * turn leaves them when it worked detached at the branch's tip: only while no worktree has the
+   * Moves a task's branch on to the commits its worktrees, those given, hold beyond it, as a turn
+   * leaves them when it worked detached at the branch's tip: only while no worktree has the
    * branch checked out, and only by a fast-forward, to the furthest of those commits when every
    * other one is on its way there.
    */
   settleTaskBranch(
     repoDir: string,
     branch: string,
+    base: string,
     worktrees: readonly string[],
   ): Promise<TaskBranchSettled>;
+  /**
+   * The commits a worktree's HEAD holds that `branch` lacks, leaving out `base`'s, which a branch
+   * takes by merging it: the work done there that has not reached the branch, whether or not
+   * another ref holds it too, as a pull request's branch it was pushed to does.
+   */
+  beyondBranch(worktree: string, branch: string, base: string): Promise<Listed>;
   /**
    * A proposal's, a topic's, or a channel's conversation's worktree, made detached at the tip of
    * `from` and kept as its turns left it.
@@ -183,7 +191,7 @@ export interface WorktreeState {
   readonly onNoBranch: Listed;
 }
 
-/** A worktree's commits on no branch, and the commit its HEAD is at. */
+/** A worktree's commits its task's branch lacks, and the commit its HEAD is at. */
 export interface StrandedWork {
   readonly worktree: string;
   readonly head: string;
@@ -502,14 +510,16 @@ export class ExecaGit implements GitOps {
     repoDir: string,
     requestedDir: string,
     branch: string,
+    base: string,
     take = true,
   ): Promise<string> {
     const worktreeDir = path.resolve(requestedDir);
     if (!(await exists(path.join(worktreeDir, ".git")))) {
       await mkdir(path.dirname(worktreeDir), { recursive: true });
       await must(["worktree", "add", "--detach", worktreeDir, branch], repoDir);
-    } else if ((await this.worktreeState(worktreeDir)).onNoBranch.total > 0) {
-      // Switching away would lose commits no branch holds; the turn is told of them instead.
+    } else if ((await this.beyondBranch(worktreeDir, branch, base)).total > 0) {
+      // Switching away would leave commits the branch lacks, which no branch may hold, or only a
+      // pull request's that the branch would then not match; the turn is told of them instead.
       return worktreeDir;
     }
     // A branch is checked out in one worktree at a time: another turn in the task may have it.
@@ -523,18 +533,22 @@ export class ExecaGit implements GitOps {
   async settleTaskBranch(
     repoDir: string,
     branch: string,
+    base: string,
     worktrees: readonly string[],
   ): Promise<TaskBranchSettled> {
+    const tip = await this.head(repoDir, branch);
+    if (tip === null) {
+      return { moved: null, stuck: [] };
+    }
     const waiting: StrandedWork[] = [];
     for (const worktree of worktrees) {
-      const state = await this.worktreeState(worktree);
-      if (state.onNoBranch.total > 0) {
+      const beyond = await this.beyondBranch(worktree, branch, base);
+      if (beyond.total > 0) {
         const head = (await must(["rev-parse", "HEAD"], worktree)).trim();
-        waiting.push({ worktree: path.resolve(worktree), head, commits: state.onNoBranch });
+        waiting.push({ worktree: path.resolve(worktree), head, commits: beyond });
       }
     }
-    const tip = await this.head(repoDir, branch);
-    if (tip === null || waiting.length === 0) {
+    if (waiting.length === 0) {
       return { moved: null, stuck: [] };
     }
     const building: StrandedWork[] = [];
@@ -575,6 +589,23 @@ export class ExecaGit implements GitOps {
       }
     }
     return { moved: furthest.head, stuck };
+  }
+
+  async beyondBranch(worktree: string, branch: string, base: string): Promise<Listed> {
+    const known: string[] = [];
+    for (const ref of [`refs/heads/${branch}`, `refs/heads/${base}`]) {
+      if ((await git(["rev-parse", "--verify", "--quiet", ref], worktree)).exitCode === 0) {
+        known.push(ref);
+      }
+    }
+    const range = ["HEAD", "--not", ...known];
+    const items = lines(
+      await must(["log", `--max-count=${LISTED}`, "--format=%h %s", ...range], worktree),
+    );
+    return {
+      items,
+      total: items.length < LISTED ? items.length : await count(worktree, range),
+    };
   }
 
   async ensureThreadWorktree(repoDir: string, requestedDir: string, from: string): Promise<string> {

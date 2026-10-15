@@ -246,8 +246,8 @@ export const TurnWorkSchema = z.object({ branch: z.string().min(1), head: z.stri
 export type TurnWork = z.infer<typeof TurnWorkSchema>;
 
 /**
- * Commits a task's worktree holds on no branch that the hand-back could not put on the task's
- * branch by a fast-forward, whose worktree belongs to `agent`: the first of them and how many.
+ * Commits a task's worktree holds that the task's branch lacks and that the hand-back could not
+ * put on it by a fast-forward, whose worktree belongs to `agent`: the first of them and how many.
  */
 export const StuckWorkSchema = z.object({
   branch: z.string().min(1),

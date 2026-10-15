@@ -227,7 +227,7 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
   await expect(claude.getByRole("listitem")).toHaveText([
     /^5h\s*35%\s*resets in 4h (49|50)m$/,
     /^7d\s*12%\s*resets in 5d 23h$/,
-    /^7d Fable\s*9%\s*resets in 5d 23h$/,
+    /^7d fable\s*9%\s*resets in 5d 23h$/,
   ]);
   await expect(claude).toContainText("Same numbers on pod and laptop, so most likely one login.");
 
@@ -261,7 +261,7 @@ test("every row's windows share columns, so bars start together whatever the CLI
       new RegExp(`^Width of the board's content, ${island} of`),
     );
     // Claude names a model's weekly window, wider than any of Codex's.
-    await expect(rows.nth(0).getByRole("listitem").nth(2)).toHaveText(/^7d Fable/);
+    await expect(rows.nth(0).getByRole("listitem").nth(2)).toHaveText(/^7d fable/);
     await expect(rows.nth(1)).toContainText("codex");
     await expect(rows.nth(1).getByRole("listitem")).toHaveText([/^7d\s*2%/]);
     // Each window's name, bar, percent, and reset, where they start and the percent where it ends,

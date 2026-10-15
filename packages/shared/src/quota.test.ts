@@ -157,8 +157,10 @@ function name(input: Partial<QuotaWindowInput> & { key: string }): string {
 describe("windowName", () => {
   it("names Claude's windows by key and label, and Codex's by length", () => {
     expect(name({ key: "five_hour", minutes: 300 })).toBe("5h");
-    expect(name({ key: "seven_day_opus", minutes: 10_080 })).toBe("7d Opus");
-    expect(name({ key: "model:Fable", label: "Fable", minutes: 10_080 })).toBe("7d Fable");
+    expect(name({ key: "seven_day_opus", minutes: 10_080 })).toBe("7d opus");
+    // A model's name, as the CLI gives it, reads in lowercase like the rest.
+    expect(name({ key: "model:Fable", label: "Fable", minutes: 10_080 })).toBe("7d fable");
+    expect(name({ key: "model:Fable", label: "Fable", minutes: 1_440 })).toBe("fable");
     expect(name({ key: "primary", minutes: 10_080 })).toBe("7d");
     expect(name({ key: "secondary", minutes: 300 })).toBe("5h");
     expect(name({ key: "primary", minutes: 90 })).toBe("90m");

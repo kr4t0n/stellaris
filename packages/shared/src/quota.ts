@@ -131,17 +131,21 @@ export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
 const WINDOW_NAMES: Readonly<Record<string, string>> = {
   five_hour: "5h",
   seven_day: "7d",
-  seven_day_opus: "7d Opus",
-  seven_day_sonnet: "7d Sonnet",
+  seven_day_opus: "7d opus",
+  seven_day_sonnet: "7d sonnet",
   seven_day_oauth_apps: "7d apps",
   seven_day_overage_included: "7d extra",
   overage: "extra usage",
 };
 
-/** A window's short name: Claude's by its key or label, Codex's by its length, as `5h` or `7d`. */
+/**
+ * A window's short name in lowercase: Claude's by its key or label, a model's name as `7d fable`,
+ * and Codex's by its length, as `5h` or `7d`.
+ */
 export function windowName(window: QuotaWindow): string {
   if (window.label !== undefined) {
-    return window.minutes === 10_080 ? `7d ${window.label}` : window.label;
+    const label = window.label.toLowerCase();
+    return window.minutes === 10_080 ? `7d ${label}` : label;
   }
   const named = WINDOW_NAMES[window.key];
   if (named !== undefined) {

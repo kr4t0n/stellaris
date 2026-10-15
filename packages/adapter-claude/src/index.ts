@@ -725,7 +725,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** The session id is chosen up front so the runner can record it before the turn starts. */
+  /** The session id is chosen before the CLI starts, so the turn reports it however it ends. */
   newSession(): Promise<SessionId> {
     return Promise.resolve(randomUUID());
   }

@@ -547,6 +547,8 @@ describe("turns on a runner over the runner protocol", () => {
       refHead = await commitEmpty(runner.paths.taskWorktree("ref", split.id), "ref", "ref work");
       // Backticks in a subject end the notice's code span early, which would leave the name awake.
       reviewed = await commitEmpty(cwd, "eng-1", "eng-1 review of `x` for @ref");
+      // A branch of its own holds the commit too, which leaves it no less beside the task's.
+      await execa("git", ["branch", "fix/review"], { cwd });
     };
     await turn("eng-1", split.id);
     expect(await tip(split.id)).toBe(refHead);

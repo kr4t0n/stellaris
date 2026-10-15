@@ -401,6 +401,18 @@ describe("ExecaGit", () => {
     expect(await git.beyondBranch(other, branch, "main")).toEqual({ items: [], total: 0 });
     expect(await git.ensureTaskWorktree(repoDir, other, branch, "main")).toBe(other);
     expect((await git.worktreeState(other)).branch).toBe(branch);
+
+    // Past the ten it lists, it still counts them all.
+    await run(other, ["switch", "--quiet", "--detach"]);
+    for (let n = 1; n <= 11; n += 1) {
+      await run(other, ["commit", "--quiet", "--allow-empty", "-m", `step ${n}`]);
+    }
+    const many = await git.beyondBranch(other, branch, "main");
+    expect([many.items.length, many.total, many.items[0]]).toEqual([
+      10,
+      11,
+      expect.stringContaining("step 11"),
+    ]);
   });
 
   it("reads a file or a folder on a branch as its newest commit has it, byte for byte", async () => {

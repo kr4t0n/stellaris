@@ -284,6 +284,89 @@ test("an image on the web enlarges too, to the window's height when it is tall",
   await expect(enlarge).toBeFocused();
 });
 
+test("closing the enlarged image leaves the thread where it was, with the image cut off at either edge", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const enlarge = taskThread(page).getByRole("button", {
+    name: "Enlarge The survey page on a phone",
+  });
+  const image = enlarge.locator("img");
+  const dialog = page.getByRole("dialog", { name: "The survey page on a phone" });
+  await expect(image).toBeVisible();
+  // Every image in the thread loaded, so nothing moves the list but what is under test.
+  await page.waitForFunction(() => Array.from(document.images).every((each) => each.complete));
+
+  for (const edge of ["bottom", "top"] as const) {
+    for (const close of ["Escape", "a click", "Close"] as const) {
+      // The list scrolled so that only 200 px of the image show, at that edge of the list.
+      const shown = await image.evaluate(async (element, at) => {
+        let list = element.parentElement;
+        while (
+          list !== null &&
+          !(
+            list.scrollHeight > list.clientHeight &&
+            /auto|scroll/.test(getComputedStyle(list).overflowY)
+          )
+        ) {
+          list = list.parentElement;
+        }
+        if (list === null) {
+          return null;
+        }
+        const box = element.getBoundingClientRect();
+        const view = list.getBoundingClientRect();
+        list.scrollTop +=
+          at === "bottom" ? box.top - (view.bottom - 200) : box.bottom - (view.top + 200);
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        const after = element.getBoundingClientRect();
+        const top = Math.max(after.top, view.top);
+        const bottom = Math.min(after.bottom, view.bottom);
+        return {
+          scrollTop: list.scrollTop,
+          cut: after.top < view.top || after.bottom > view.bottom,
+          x: after.left + after.width / 2,
+          y: (top + bottom) / 2,
+        };
+      }, edge);
+      expect(shown).not.toBeNull();
+      if (shown === null) {
+        return;
+      }
+      expect(shown.cut).toBe(true);
+      const listTop = () =>
+        image.evaluate((element) => {
+          let list = element.parentElement;
+          while (
+            list !== null &&
+            !(
+              list.scrollHeight > list.clientHeight &&
+              /auto|scroll/.test(getComputedStyle(list).overflowY)
+            )
+          ) {
+            list = list.parentElement;
+          }
+          return list?.scrollTop ?? null;
+        });
+
+      await page.mouse.click(shown.x, shown.y);
+      await expect(dialog).toBeVisible();
+      if (close === "Escape") {
+        await page.keyboard.press("Escape");
+      } else if (close === "a click") {
+        await page.mouse.click(8, 500);
+      } else {
+        await dialog.getByRole("button", { name: "Close" }).click();
+      }
+      await expect(dialog).toHaveCount(0);
+      await expect(enlarge).toBeFocused();
+      expect(await listTop(), `closed by ${close}, cut off at the ${edge}`).toBe(shown.scrollTop);
+    }
+  }
+});
+
 for (const place of [
   { view: "a task's thread", path: `/task/${STAGE_TASK}`, name: "The survey page, before" },
   { view: "a thread", path: `/thread/${STAGE_TASK}`, name: "The survey page, before" },

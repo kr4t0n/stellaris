@@ -20,9 +20,10 @@ export function EnlargeableImage({ src, alt }: { src: string; alt: string }) {
   const [failed, setFailed] = useState<string | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const closed = useCallback(() => {
-    // Off the page before focus goes back, since nothing behind an open modal takes focus.
+    // Off the page before focus goes back, since nothing behind an open modal takes focus, and
+    // back without scrolling, so a thread whose edge cuts the image off stays where it was.
     flushSync(() => setOpen(false));
-    button.current?.focus();
+    button.current?.focus({ preventScroll: true });
   }, []);
   if (insideLink || failed === src) {
     return <img src={src} alt={alt} className={INLINE_IMAGE} />;

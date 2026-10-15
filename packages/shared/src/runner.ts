@@ -7,6 +7,7 @@ import {
   type Project,
 } from "./board.js";
 import {
+  ResumeFailureSchema,
   TranscriptEntrySchema,
   TurnExitReasonSchema,
   TurnStatusSchema,
@@ -269,11 +270,17 @@ export const TurnOutcomeSchema = z.object({
   /** The session's running total after this turn, for CLIs that report one. */
   sessionCostUsd: z.number().nonnegative().optional(),
   /**
-   * The session the CLI used, which differs from the job's for CLIs that assign their own ids and
-   * where the CLI could not take the job's. A turn that failed before it reached its CLI reports
-   * the job's own, null in a conversation's first turn, so a session never started is not recorded.
+   * The session the CLI used, which differs from the job's for CLIs that assign their own ids. A
+   * turn whose CLI never started, because it failed or was stopped first, reports the job's own,
+   * null in a conversation's first turn, so a session never started is not recorded.
    */
   session: z.string().min(1).nullable(),
+  /**
+   * Set when the CLI could not resume the job's session, which failed the turn before any model
+   * call; the server then drops a `lost` session, and one that failed `retry` too often in a row. A
+   * runner from before never sends it.
+   */
+  resumeFailed: ResumeFailureSchema.optional(),
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),

@@ -48,7 +48,8 @@ const request: TurnRequest = {
     configHome: "/tmp/home",
     boardDir: "/tmp/board",
   },
-  session: "recorded",
+  // Claude Code resumes a session only by its UUID.
+  session: "215844ad-fd75-4d7c-86b6-b48ea26215aa",
   newSession: false,
   prompt: "Digest.",
   instructions: "# cc",
@@ -60,7 +61,6 @@ const request: TurnRequest = {
 function backend(queryFn: QueryFn): ClaudeAgentBackend {
   return new ClaudeAgentBackend({
     queryFn,
-    sessionExists: () => Promise.resolve(true),
     now: () => AT,
   });
 }

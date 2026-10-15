@@ -4,6 +4,7 @@ import type {
   CliQuota,
   ModelOption,
   Name,
+  ResumeFailure,
   TurnExitReason,
   TurnStatus,
   Usage,
@@ -75,6 +76,24 @@ export interface TurnResult {
   readonly sessionCostUsd?: number | undefined;
   /** The CLI's plan quota as the turn's stream last reported it, when it reported any. */
   readonly quota?: CliQuota | undefined;
+  /** Set when the CLI could not resume the requested session, which failed the turn before any model call. */
+  readonly resumeFailed?: ResumeFailure | undefined;
+}
+
+/**
+ * Thrown by an adapter whose CLI could not resume the requested session, before any model call. An
+ * adapter never starts another session in its place: the server decides whether the conversation
+ * starts afresh, so the prompt it builds always matches the session.
+ */
+export class ResumeError extends Error {
+  override readonly name = "ResumeError";
+
+  constructor(
+    readonly failure: ResumeFailure,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /** What a resident session needs at start: everything a turn needs except the prompt. */

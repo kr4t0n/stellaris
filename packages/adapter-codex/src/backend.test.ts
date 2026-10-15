@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import {
+  ResumeError,
   TurnControl,
   type AgentSpec,
   type ResidentStart,
@@ -110,6 +111,13 @@ function fakeAppServer(
     steered?: (params: Record<string, unknown>, turn: TurnContext) => void;
     /** Refuses every steer, as the server does for a review or a compaction. */
     refuseSteers?: boolean;
+    /**
+     * What the server says to resuming a thread it does not know, `no rollout found` unless told,
+     * or `exit` to end the process instead, as a server dying at start does.
+     */
+    refuseResume?: string;
+    /** Ends the process at the handshake, before anything is resumed. */
+    dieAtStart?: boolean;
   } = {},
 ): {
   spawn: SpawnAppServer;
@@ -169,6 +177,10 @@ function fakeAppServer(
     const answer = (message: Received): void => {
       switch (message.method) {
         case "initialize":
+          if (script.dieAtStart === true) {
+            exit(1);
+            return;
+          }
           send({ id: message.id, result: { userAgent: "codex-fake" } });
           return;
         case "thread/start":
@@ -177,9 +189,16 @@ function fakeAppServer(
         case "thread/resume": {
           const id = String(message.params?.["threadId"]);
           if (!(script.known ?? []).includes(id)) {
+            if (script.refuseResume === "exit") {
+              exit(1);
+              return;
+            }
             send({
               id: message.id,
-              error: { code: -32600, message: `no rollout found for ${id}` },
+              error: {
+                code: -32600,
+                message: script.refuseResume ?? `no rollout found for thread id ${id}`,
+              },
             });
             return;
           }
@@ -431,7 +450,7 @@ describe("CodexBackend cold turns", () => {
     }
   });
 
-  it("resumes a known thread and starts a fresh one when the id names none", async () => {
+  it("resumes a known thread with its instructions, counting none of its earlier turns", async () => {
     const fake = fakeAppServer({ known: ["thread-3"] });
     const backend = new CodexBackend({ spawn: fake.spawn });
     const resumed = await backend.runTurn(request({ session: "thread-3", newSession: false }));
@@ -449,27 +468,64 @@ describe("CodexBackend cold turns", () => {
       developerInstructions: start.instructions,
     });
     expect(fake.received.some((m) => m.method === "thread/start")).toBe(false);
+  });
 
-    const lost = fakeAppServer();
-    const fresh = await new CodexBackend({ spawn: lost.spawn }).runTurn(
-      request({ session: "thread-0", newSession: false }),
-    );
-    expect(lost.received.map((m) => m.method).slice(2, 4)).toEqual([
-      "thread/resume",
-      "thread/start",
-    ]);
-    expect(fresh.exitReason).toBe("completed");
-    expect(fresh.session).toBe("thread-7");
+  it("fails a thread it cannot resume before any turn, lost or retry, and starts no other", async () => {
+    // What codex-cli 0.162.0 answers: an id with no rollout, which a thread that never ran a turn
+    // has too; ids saved before, which are no thread's; and a rollout it cannot read.
+    const refusals: Array<[string, string]> = [
+      ["thread-0", "no rollout found for thread id thread-0"],
+      [
+        "unstarted",
+        "invalid session id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `u` at 1",
+      ],
+      [
+        "pending-1",
+        "invalid session id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `p` at 1",
+      ],
+      [
+        "thread-3",
+        "failed to read thread: thread-store internal error: failed to read session metadata /tmp/rollout.jsonl: Permission denied (os error 13)",
+      ],
+    ];
+    for (const [session, said] of refusals) {
+      const fake = fakeAppServer({ refuseResume: said });
+      await expect(
+        new CodexBackend({ spawn: fake.spawn }).runTurn(request({ session, newSession: false })),
+      ).rejects.toMatchObject({ name: "ResumeError", failure: "lost", message: said });
+      expect(fake.received.map((m) => m.method)).toEqual([
+        "initialize",
+        "initialized",
+        "thread/resume",
+      ]);
+      expect(fake.killed()).toBe(1);
+    }
 
-    // Runners once recorded `unstarted` for a conversation whose first turn never reached its CLI;
-    // the app server refuses to resume it (0.162.0: "invalid session id"), so a thread starts too.
-    const unstarted = fakeAppServer();
-    const recovered = await new CodexBackend({ spawn: unstarted.spawn }).runTurn(
-      request({ session: "unstarted", newSession: false }),
+    // A server that ends during the resume may resume the thread next time; so may a warm one.
+    const exiting = fakeAppServer({ refuseResume: "exit" });
+    await expect(
+      new CodexBackend({ spawn: exiting.spawn }).runTurn(
+        request({ session: "thread-3", newSession: false }),
+      ),
+    ).rejects.toMatchObject({ name: "ResumeError", failure: "retry" });
+    expect(exiting.received.some((m) => m.method === "thread/start")).toBe(false);
+    const warm = fakeAppServer();
+    await expect(
+      new CodexBackend({ spawn: warm.spawn }).startResident(spec, {
+        ...start,
+        session: "thread-0",
+        newSession: false,
+      }),
+    ).rejects.toMatchObject({ name: "ResumeError", failure: "lost" });
+    expect(warm.received.some((m) => m.method === "thread/start")).toBe(false);
+
+    // A server that ends before it is asked to resume anything did not fail a resume.
+    const dead = fakeAppServer({ dieAtStart: true });
+    const ended = new CodexBackend({ spawn: dead.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
     );
-    expect(paramsOf(unstarted.received, "thread/resume")).toMatchObject({ threadId: "unstarted" });
-    expect(unstarted.received.some((m) => m.method === "thread/start")).toBe(true);
-    expect(recovered.session).toBe("thread-7");
+    await expect(ended).rejects.toThrow("codex app-server exited");
+    await expect(ended).rejects.not.toBeInstanceOf(ResumeError);
   });
 
   it("reports a web search when it completes, with what it looked for", async () => {

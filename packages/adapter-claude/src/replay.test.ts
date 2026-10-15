@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { TurnRequest } from "@stellaris/runner-core";
+import { TurnControl, type TurnRequest } from "@stellaris/runner-core";
 import { describe, expect, it } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
 
@@ -41,32 +41,14 @@ function replaying(messages: readonly SDKMessage[]): { queryFn: QueryFn; calls: 
   return { queryFn, calls };
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * The CLI's own check of the id it is to create a session under, which Claude Code 2.1.283 makes
- * before anything else: it exits with this error for an id that is not a UUID.
- */
-function checkingIds(queryFn: QueryFn): QueryFn {
-  return (params) => {
-    const stream = queryFn(params);
-    const id = params.options?.sessionId;
-    if (id === undefined || UUID.test(id)) {
-      return stream;
-    }
-    const exited = new Error(
-      "Claude Code process exited with code 1. stderr: Error: Invalid session ID. Must be a valid UUID.",
-    );
-    return { [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(exited) }) };
-  };
-}
-
 /**
  * A turn the API refused, as Claude Code 2.1.283 streamed it against a local server answering 400:
- * a synthetic assistant message with the API's words, then a `success` result marked `is_error`.
+ * the init message that says it opened the session, a synthetic assistant message with the API's
+ * words, then a `success` result marked `is_error`.
  */
 function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
   const frames: unknown[] = [
+    { type: "system", subtype: "init", session_id: "recorded", model: "claude-opus-5-5" },
     {
       type: "assistant",
       message: {
@@ -99,12 +81,15 @@ function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
   return frames as SDKMessage[];
 }
 
-/** A cold run that ends as the SDK reports a CLI that exits with code 1 after these frames. */
-function exitingAfter(frames: readonly SDKMessage[]): QueryFn {
+/** A cold run that ends as the SDK reports a CLI that exits, with code 1 unless told, after these frames. */
+function exitingAfter(
+  frames: readonly SDKMessage[],
+  error = "Claude Code process exited with code 1",
+): QueryFn {
   return () =>
     (async function* () {
       yield* frames;
-      throw new Error("Claude Code process exited with code 1");
+      throw new Error(error);
     })();
 }
 
@@ -130,9 +115,7 @@ const request: TurnRequest = {
 
 /** A cold turn of a session that exists, on these frames. */
 function coldTurn(queryFn: QueryFn) {
-  return new ClaudeAgentBackend({ queryFn, sessionExists: () => Promise.resolve(true) }).runTurn(
-    request,
-  );
+  return new ClaudeAgentBackend({ queryFn }).runTurn(request);
 }
 
 describe("ClaudeAgentBackend replay", () => {
@@ -141,7 +124,7 @@ describe("ClaudeAgentBackend replay", () => {
     const init = messages.find((message) => message.type === "system");
     const again = init === undefined ? [] : [{ ...init, model: "claude-haiku-4-5" }];
     const { queryFn } = replaying([...messages.slice(0, 2), ...again, ...messages.slice(2)]);
-    const backend = new ClaudeAgentBackend({ queryFn, sessionExists: () => Promise.resolve(true) });
+    const backend = new ClaudeAgentBackend({ queryFn });
     const result = await backend.runTurn(request);
 
     expect(result.events.filter((e) => e.type === "turn_started")).toHaveLength(1);
@@ -151,7 +134,7 @@ describe("ClaudeAgentBackend replay", () => {
   it("maps a recorded SDK stream onto board events and the status object", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const { queryFn, calls } = replaying(messages);
-    const backend = new ClaudeAgentBackend({ queryFn, sessionExists: () => Promise.resolve(true) });
+    const backend = new ClaudeAgentBackend({ queryFn });
     const result = await backend.runTurn(request);
 
     expect(result.exitReason).toBe("completed");
@@ -197,18 +180,15 @@ describe("ClaudeAgentBackend replay", () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const resumed = new ClaudeAgentBackend({
       queryFn: replaying(messages).queryFn,
-      sessionExists: () => Promise.resolve(true),
     });
     const result = await resumed.runTurn({ ...request, costSoFarUsd: 0.1 });
     expect(result.costUsd).toBeCloseTo(0.0922);
     expect(result.sessionCostUsd).toBeCloseTo(0.1922);
 
-    // A session that does not exist yet starts from nothing, whatever the runner last recorded.
-    const created = new ClaudeAgentBackend({
-      queryFn: replaying(messages).queryFn,
-      sessionExists: () => Promise.resolve(false),
-    });
-    expect((await created.runTurn({ ...request, costSoFarUsd: 0.1 })).costUsd).toBeCloseTo(0.1922);
+    // A new session starts from nothing, whatever the runner last recorded.
+    const created = new ClaudeAgentBackend({ queryFn: replaying(messages).queryFn });
+    const fresh = await created.runTurn({ ...request, newSession: true, costSoFarUsd: 0.1 });
+    expect(fresh.costUsd).toBeCloseTo(0.1922);
   });
 
   it("runs with the citizen's effort over the runner's, and the CLI's default without either", async () => {
@@ -244,51 +224,110 @@ describe("ClaudeAgentBackend replay", () => {
     expect(unlimited.calls[0]?.options).not.toHaveProperty("maxTurns");
   });
 
-  it("creates the session under the recorded id when it does not exist yet", async () => {
+  it("creates a new conversation's session under the id the runner chose", async () => {
     const messages = await recorded("sdk-synthetic.jsonl");
     const { queryFn, calls } = replaying(messages);
-    const backend = new ClaudeAgentBackend({
-      queryFn,
-      sessionExists: () => Promise.resolve(false),
+    const result = await new ClaudeAgentBackend({ queryFn }).runTurn({
+      ...request,
+      newSession: true,
     });
-    await backend.runTurn(request);
     const options = calls[0]?.options;
-    expect(options?.sessionId).toBe("92132dad-48ca-450a-a7e7-82f8b2ab9b24");
+    expect(options?.sessionId).toBe(request.session);
     expect(options?.resume).toBeUndefined();
+    expect(result.session).toBeUndefined();
+    expect(result.resumeFailed).toBeUndefined();
   });
 
-  it("creates a fresh session in place of a recorded id the CLI cannot take, and reports it", async () => {
-    const messages = await recorded("sdk-synthetic.jsonl");
-    const { queryFn, calls } = replaying(messages);
-    const asked: string[] = [];
-    const backend = new ClaudeAgentBackend({
-      queryFn: checkingIds(queryFn),
-      sessionExists: (session) => {
-        asked.push(session);
-        return Promise.resolve(false);
-      },
-    });
-    // What runners before 0.3.24 recorded for a conversation whose first turn never started its CLI.
-    const result = await backend.runTurn({ ...request, session: "unstarted", costSoFarUsd: 0.1 });
-    expect(result.error).toBeUndefined();
-    expect(result.exitReason).toBe("completed");
-    const fresh = calls[0]?.options?.sessionId;
-    expect(fresh).toMatch(UUID);
-    expect(calls[0]?.options?.resume).toBeUndefined();
-    // The runner records the new id, so the conversation's next turn resumes it.
-    expect(result.session).toBe(fresh);
-    // Nothing of a session that never existed is counted.
-    expect(result.costUsd).toBeCloseTo(0.1922);
-    expect(asked).toEqual([]);
+  it("fails a saved session whose id is not a UUID as lost, without starting the CLI", async () => {
+    // What runners before 0.3.24 saved for a conversation whose first turn never started its CLI,
+    // and the placeholder a Codex session goes by until its thread opens.
+    for (const session of ["unstarted", "pending-0b9a3c55-6f8e-4d3e-9a51-2a6f0c7d1e42", "abc"]) {
+      const { queryFn, calls } = replaying(await recorded("sdk-synthetic.jsonl"));
+      const result = await new ClaudeAgentBackend({ queryFn }).runTurn({
+        ...request,
+        session,
+        costSoFarUsd: 0.1,
+      });
+      expect(calls).toEqual([]);
+      expect(result.exitReason).toBe("error");
+      expect(result.resumeFailed).toBe("lost");
+      expect(result.error).toBe(
+        `the saved session id "${session}" is not a UUID, so Claude Code cannot resume it`,
+      );
+      // No session is started in its place, and nothing ran.
+      expect(result.session).toBeUndefined();
+      expect(result.costUsd).toBe(0);
+      expect(result.events.map((event) => event.type)).toEqual(["error", "turn_completed"]);
+    }
+  });
 
-    // A recorded UUID that names no session yet stays its id: the session is created under it.
-    const kept = replaying(messages);
-    const created = await new ClaudeAgentBackend({
-      queryFn: checkingIds(kept.queryFn),
-      sessionExists: () => Promise.resolve(false),
-    }).runTurn(request);
-    expect(kept.calls[0]?.options?.sessionId).toBe(request.session);
-    expect(created.session).toBeUndefined();
+  it("fails a resume the CLI cannot make, lost on its words for a missing session and retry otherwise, and starts no other", async () => {
+    // Claude Code 2.1.283 asked to resume an id with no transcript, or one it cannot read: a result
+    // before any init message, then the SDK's throw, and no model call.
+    const missing = `No conversation found with session ID: ${request.session}`;
+    const unresumed: unknown[] = [
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        duration_ms: 0,
+        is_error: true,
+        num_turns: 0,
+        session_id: request.session,
+        total_cost_usd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        errors: [missing],
+      },
+    ];
+    const sdkWords = `Claude Code returned an error result: ${missing}`;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const notFound = exitingAfter(unresumed as SDKMessage[], sdkWords);
+    const calls: Array<Options | undefined> = [];
+    const lost = await new ClaudeAgentBackend({
+      queryFn: (params) => {
+        calls.push(params.options);
+        return notFound(params);
+      },
+    }).runTurn({ ...request, costSoFarUsd: 0.1 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.resume).toBe(request.session);
+    expect(calls[0]?.sessionId).toBeUndefined();
+    expect(lost.exitReason).toBe("error");
+    expect(lost.error).toBe(sdkWords);
+    expect(lost.resumeFailed).toBe("lost");
+    expect(lost.session).toBeUndefined();
+    expect(lost.costUsd).toBe(0);
+
+    // Created over a file it cannot read, as the adapter once asked it to.
+    const inUse = `Claude Code process exited with code 1. stderr: Error: Session ID ${request.session} is already in use.`;
+    expect((await coldTurn(exitingAfter([], inUse))).resumeFailed).toBe("lost");
+
+    // A CLI that ended before it opened the session for anything else may resume it next time.
+    for (const queryFn of [exitingAfter([]), replaying([]).queryFn]) {
+      const ended = await coldTurn(queryFn);
+      expect(ended.exitReason).toBe("error");
+      expect(ended.resumeFailed).toBe("retry");
+    }
+
+    // Not a resume: the same end for a new session, an API error once the CLI opened the session,
+    // and a stop.
+    const unstarted = await new ClaudeAgentBackend({ queryFn: notFound }).runTurn({
+      ...request,
+      newSession: true,
+    });
+    expect(unstarted.exitReason).toBe("error");
+    expect(unstarted.resumeFailed).toBeUndefined();
+    const refused = await coldTurn(replaying(refusedTurn()).queryFn);
+    expect(refused.exitReason).toBe("error");
+    expect(refused.resumeFailed).toBeUndefined();
+    const control = new TurnControl();
+    control.stop();
+    const stopped = await new ClaudeAgentBackend({ queryFn: notFound }).runTurn(
+      request,
+      undefined,
+      control,
+    );
+    expect(stopped.exitReason).toBe("stopped");
+    expect(stopped.resumeFailed).toBeUndefined();
   });
 
   it("fails a turn the API refused with the API's words, not the exit that follows them", async () => {
@@ -372,7 +411,6 @@ describe("ClaudeAgentBackend replay", () => {
     const { queryFn } = replaying(messages);
     const result = await new ClaudeAgentBackend({
       queryFn,
-      sessionExists: () => Promise.resolve(true),
     }).runTurn(request);
     expect(result.exitReason).toBe("error");
     expect(result.error).toContain("without a result message");

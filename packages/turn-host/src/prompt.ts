@@ -482,6 +482,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "## Your previous turn did not finish",
       "",
       `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`,
+      ...(last.sessionDropped === true
+        ? [
+            "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one: nothing of your earlier turns here carries over but what is on the board and in your home.",
+          ]
+        : []),
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
     );
   }

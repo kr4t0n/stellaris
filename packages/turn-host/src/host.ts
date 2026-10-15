@@ -110,6 +110,8 @@ interface OpenTurn {
   stopRequestedBy: Name | null;
   readonly held: readonly Ulid[];
   readonly costSoFarUsd: number;
+  /** How many turns in a row before this one could not resume the job's session for a `retry`. */
+  readonly resumeRetries: number;
   readonly configuredModel: string | null;
   readonly transcript: TranscriptEntry[];
   /** The turn's own token, revoked when the turn ends; a warm session's lives on with the session. */
@@ -134,6 +136,11 @@ const DEFAULT_RESIDENT_IDLE_MS = 10 * 60_000;
 const LEASE_RENEW_MS = 10 * 60_000;
 const USER_POST_TRIGGER = "user_post";
 const OPS_TRIGGER = "ops_event";
+/**
+ * How many turns in a row may fail to resume a conversation's session for a `retry` before it is
+ * dropped as `lost`, so a resume that never works costs a few failed turns rather than every one.
+ */
+export const RESUME_RETRIES = 3;
 
 /** What a task's thread is told of commits its branch cannot take. */
 function stuckNotice(stuck: StuckWork): string {
@@ -255,6 +262,11 @@ export class TurnHost {
     const costSoFarUsd =
       !newSession && lastTurn?.session === recorded
         ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
+        : 0;
+    // Failed resumes of this session counted so far, while they come one after another.
+    const resumeRetries =
+      !newSession && lastTurn?.session === recorded && lastTurn.resumeFailed === "retry"
+        ? (lastTurn.resumeRetries ?? 1)
         : 0;
 
     // The digest of this turn's conversation only: a citizen's turns in its other conversations
@@ -477,6 +489,7 @@ export class TurnHost {
       stopRequestedBy: null,
       held: held.map((each) => each.id),
       costSoFarUsd,
+      resumeRetries,
       configuredModel: agent.model ?? null,
       transcript: [],
       coldToken: residentKey === null ? token : null,
@@ -680,6 +693,12 @@ export class TurnHost {
     }
     const { job } = turn;
     const part = conversationPart(job);
+    // A session the CLI found nothing of is dropped at once, and one it failed to resume too often
+    // in a row as well, so the conversation's next turn starts a new one and is told why.
+    const resumeRetries = outcome.resumeFailed === "retry" ? turn.resumeRetries + 1 : undefined;
+    const dropSession =
+      job.session !== null &&
+      (outcome.resumeFailed === "lost" || (resumeRetries ?? 0) >= RESUME_RETRIES);
     const finished: TurnRecord = {
       ...turn.record,
       session: outcome.session,
@@ -694,13 +713,30 @@ export class TurnHost {
       model: outcome.model ?? turn.configuredModel,
       ...(outcome.work === null ? {} : { work: outcome.work }),
       ...(outcome.exitReason === "stopped" ? { stoppedBy: turn.stopRequestedBy ?? USER_NAME } : {}),
+      ...(outcome.resumeFailed === undefined ? {} : { resumeFailed: outcome.resumeFailed }),
+      ...(resumeRetries === undefined ? {} : { resumeRetries }),
+      ...(dropSession ? { sessionDropped: true } : {}),
     };
     const ended = await this.conversationEnded(job);
     const closing = turn.record.trigger.kind === "closing";
     // A closing turn decided about what its workspace held, unless it failed before deciding.
     const decided = closing && outcome.exitReason !== "error" && outcome.exitReason !== "timeout";
     const recorded = await this.recorded(turn, async () => {
-      if (outcome.session !== null && outcome.session !== job.session) {
+      if (dropSession && job.session !== null) {
+        await this.board.dropSession(job.agent, job.scope, job.cli, job.session, part);
+        this.log.warn(
+          {
+            agent: job.agent,
+            project: job.scope,
+            thread: job.thread,
+            channel: job.channel,
+            session: job.session,
+            resumeFailed: outcome.resumeFailed,
+            resumeRetries,
+          },
+          "dropped a session its CLI could not resume",
+        );
+      } else if (outcome.session !== null && outcome.session !== job.session) {
         // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.
         await this.board.writeSession(
           job.agent,

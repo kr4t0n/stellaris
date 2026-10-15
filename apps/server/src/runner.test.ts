@@ -440,6 +440,7 @@ describe("turns on a runner over the runner protocol", () => {
     let fluxStarted = Promise.withResolvers<void>();
     let fluxRelease = Promise.withResolvers<void>();
     let loomWork: ((cwd: string) => Promise<void>) | null = null;
+    let fluxWork: ((cwd: string) => Promise<void>) | null = null;
     const seen = new Map<string, { branch: string; prompt: string }>();
     const backend: AgentBackend = {
       kind: "claude",
@@ -453,6 +454,7 @@ describe("turns on a runner over the runner protocol", () => {
           prompt: request.prompt,
         });
         if (actor?.name === "flux") {
+          await fluxWork?.(cwd);
           fluxStarted.resolve();
           await fluxRelease.promise;
         } else {
@@ -567,6 +569,26 @@ describe("turns on a runner over the runner protocol", () => {
         })
       ).stdout,
     ).toBe(reviewed);
+
+    // A participant's commits made beside the holder's turn follow the branch too, but only from
+    // its own hand-back: the holder's leaves the worktree of a turn still running alone.
+    const beside = await board.createTask(USER, { project: "demo", title: "beside" });
+    await board.claimTask(loom, { task_id: beside.id });
+    let note = "";
+    fluxWork = async (cwd) => {
+      note = await commitEmpty(cwd, "flux", "flux note");
+    };
+    loomWork = null;
+    const fourth = await overlap(beside.id);
+    // The participant's turn has committed beside the branch by now, which stays where it was.
+    const from = await tip(beside.id);
+    expect(from).not.toBe(note);
+    await turn("loom", beside.id);
+    expect(seen.get(`loom/${beside.id}`)?.branch).toBe(`task/${beside.id}`);
+    expect(await tip(beside.id)).toBe(from);
+    await fourth.release();
+    expect(await tip(beside.id)).toBe(note);
+    expect(await notices(beside.id)).toEqual([]);
   });
 
   it("gives a task's branch to any turn once its holder's lease has run out", async () => {

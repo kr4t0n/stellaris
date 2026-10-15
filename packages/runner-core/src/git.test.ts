@@ -279,10 +279,13 @@ describe("ExecaGit", () => {
     });
     expect(await rev(repoDir, branch)).toBe(tip);
 
-    // Once the branch takes one of them, the other has left its line, checked out or not.
+    // Once the branch takes one of them, the other has left its line, checked out or not, while
+    // a third's commits that build on the tip of the checked-out branch wait for its hand-back.
     await execa("git", ["update-ref", `refs/heads/${branch}`, fluxHead], { cwd: repoDir });
     await execa("git", ["switch", "--quiet", branch], { cwd: flux });
-    expect(await settle()).toEqual({
+    const sage = await git.ensureTaskWorktree(repoDir, place("sage"), branch, false);
+    await commit(sage, "sage", "sage-work");
+    expect(await git.settleTaskBranch(repoDir, branch, [flux, loom, sage])).toEqual({
       moved: null,
       stuck: [
         {
@@ -292,6 +295,7 @@ describe("ExecaGit", () => {
         },
       ],
     });
+    await git.removeWorktree(repoDir, sage);
     await execa("git", ["switch", "--quiet", "--detach"], { cwd: flux });
     expect((await settle()).stuck.map((each) => each.worktree)).toEqual([loom]);
     // Work that builds on the tip still moves the branch, while the other stays stuck beside it.

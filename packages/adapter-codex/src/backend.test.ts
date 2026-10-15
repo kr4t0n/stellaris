@@ -460,6 +460,16 @@ describe("CodexBackend cold turns", () => {
     ]);
     expect(fresh.exitReason).toBe("completed");
     expect(fresh.session).toBe("thread-7");
+
+    // Runners once recorded `unstarted` for a conversation whose first turn never reached its CLI;
+    // the app server refuses to resume it (0.162.0: "invalid session id"), so a thread starts too.
+    const unstarted = fakeAppServer();
+    const recovered = await new CodexBackend({ spawn: unstarted.spawn }).runTurn(
+      request({ session: "unstarted", newSession: false }),
+    );
+    expect(paramsOf(unstarted.received, "thread/resume")).toMatchObject({ threadId: "unstarted" });
+    expect(unstarted.received.some((m) => m.method === "thread/start")).toBe(true);
+    expect(recovered.session).toBe("thread-7");
   });
 
   it("reports a web search when it completes, with what it looked for", async () => {

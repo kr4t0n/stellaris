@@ -25,6 +25,7 @@ import {
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
   RunnerModelsSchema,
+  TurnDispatchSchema,
   type AgentEvent,
   type GitIdentityPart,
   type RunnerHello,
@@ -519,6 +520,73 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
     await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
+  });
+
+  it("keeps no session from a turn whose CLI never started, so the conversation's next turn starts one", async () => {
+    const { board } = await Board.init(dir, { name: "unstarted" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const first = await board.openThread(USER, { channel: "general", title: "a question" });
+    const second = await board.openThread(USER, { channel: "general", title: "another" });
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    let home = "";
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        home = request.spec.configHome;
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const inFirst = { ...deskPost, thread: { id: first.id, task: false } };
+    const inSecond = { ...deskPost, thread: { id: second.id, task: false } };
+
+    // The board's copy never arrives, as when a proxy closes the connection: the CLI never starts.
+    dropping = true;
+    const lost = await society.run(inFirst);
+    dropping = false;
+    expect(lost.error).toMatch(/^the runner could not run the turn: .*other side closed/);
+    expect(handed).toEqual([]);
+    expect(await board.readSessions("desk", "society", first.id)).toEqual({});
+    expect(lost.session).toBeNull();
+    // So the conversation's next turn starts a session, which is kept for the one after.
+    await society.run(inFirst);
+    await society.run(inFirst);
+    expect(handed).toEqual([
+      { session: "session-1", newSession: true },
+      { session: "session-1", newSession: false },
+    ]);
+
+    // Nor from one whose workspace could not be prepared: a file stands where its folder goes.
+    const blocked = path.join(home, "scratch", ".threads", second.id);
+    await writeFile(blocked, "", "utf8");
+    const unprepared = await society.run(inSecond);
+    expect(unprepared.error).toMatch(/^could not prepare the workspace/);
+    expect(await board.readSessions("desk", "society", second.id)).toEqual({});
+    expect(unprepared.session).toBeNull();
+    await rm(blocked);
+    await society.run(inSecond);
+    expect(handed.at(-1)).toEqual({ session: "session-2", newSession: true });
+
+    // Nor from one its runner has no adapter for, which the hub places there only by hand.
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "codex" });
+    const dispatch = TurnDispatchSchema.parse({
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    const unadapted = await society.hub.runTurn(dispatch, { runner: "pod" });
+    expect(unadapted.error).toBe("no backend registered for codex");
+    expect(await board.readSessions("stew", "society")).toEqual({});
+    expect(unadapted.session).toBeNull();
   });
 
   it("starts a warm session afresh when the citizen's model or effort changes", async () => {

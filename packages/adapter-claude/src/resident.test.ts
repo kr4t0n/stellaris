@@ -1,5 +1,5 @@
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentSpec, ResidentStart } from "@stellaris/runner-core";
+import { ResumeError, type AgentSpec, type ResidentStart } from "@stellaris/runner-core";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
 
@@ -75,6 +75,29 @@ function refusedFrames(): SDKMessage[] {
   return [assistant, result] as unknown as SDKMessage[];
 }
 
+/** A warm query that sends nothing but its init message, if it `opens`, and takes no interrupt. */
+function hanging(opens: boolean): QueryFn {
+  return () => {
+    const ended = Promise.withResolvers<void>();
+    const stream = (async function* () {
+      if (opens) {
+        yield {
+          type: "system",
+          subtype: "init",
+          session_id: start.session,
+          model: "claude-test-model",
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        } as unknown as SDKMessage;
+      }
+      await ended.promise;
+    })();
+    return Object.assign(stream, {
+      interrupt: () => Promise.resolve(),
+      close: () => ended.resolve(),
+    });
+  };
+}
+
 /**
  * A scripted SDK: reads user messages from the streamed prompt and answers each with the frames
  * for that turn, the way a real query does in streaming-input mode. Records interrupts and closes.
@@ -127,33 +150,145 @@ function scripted(stallOn: number | null = null, savedCost = 0, refuseOn: number
 }
 
 describe("Claude resident sessions", () => {
-  it("starts afresh in place of a recorded id the CLI cannot take, under an id it reports", async () => {
-    const { queryFn } = scripted();
-    const options: Array<Options | undefined> = [];
-    const asked: string[] = [];
+  it("fails a saved session whose id is not a UUID as lost, without starting the CLI", async () => {
+    const asked: Array<Options | undefined> = [];
     const backend = new ClaudeAgentBackend({
       queryFn: (params) => {
-        options.push(params.options);
-        return queryFn(params);
-      },
-      sessionExists: (session) => {
-        asked.push(session);
-        return Promise.resolve(false);
+        asked.push(params.options);
+        return scripted().queryFn(params);
       },
     });
-    // What runners before 0.3.24 recorded for a conversation whose first turn never started its CLI.
-    const session = await backend.startResident(spec, {
+    // What runners before 0.3.24 saved for a conversation whose first turn never started its CLI.
+    const refused = backend.startResident(spec, {
       ...start,
       session: "unstarted",
       newSession: false,
-      costSoFarUsd: 4,
     });
-    const fresh = options[0]?.sessionId;
-    expect(fresh).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(options[0]?.resume).toBeUndefined();
-    expect(session.session).toBe(fresh);
+    await expect(refused).rejects.toBeInstanceOf(ResumeError);
+    await expect(refused).rejects.toMatchObject({
+      failure: "lost",
+      message: 'the saved session id "unstarted" is not a UUID, so Claude Code cannot resume it',
+    });
     expect(asked).toEqual([]);
-    expect((await session.runTurn("hello")).costUsd).toBeCloseTo(0.1);
+  });
+
+  it("fails a resume the CLI cannot make, whether it ends before the first turn or during it", async () => {
+    const saved = { ...start, newSession: false };
+    const missing = `No conversation found with session ID: ${start.session}`;
+    const sdkWords = `Claude Code returned an error result: ${missing}`;
+    const asked: Array<Options | undefined> = [];
+    // Claude Code 2.1.283 answers a resume it cannot make with a result and no init message, and
+    // the SDK then throws; `waits` holds that back until the first prompt arrives.
+    const unresumed =
+      (waits: boolean, said: string | null): QueryFn =>
+      (params) => {
+        asked.push(params.options);
+        const prompts = params.prompt;
+        return (async function* () {
+          if (waits && typeof prompts !== "string") {
+            await prompts[Symbol.asyncIterator]().next();
+          }
+          if (said !== null) {
+            yield {
+              type: "result",
+              subtype: "error_during_execution",
+              is_error: true,
+              session_id: start.session,
+              total_cost_usd: 0,
+              usage: { input_tokens: 0, output_tokens: 0 },
+              errors: [missing],
+              // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+            } as unknown as SDKMessage;
+          }
+          throw new Error(said ?? "Claude Code process exited with code 1");
+        })();
+      };
+
+    // During the first turn: the turn fails with the CLI's words.
+    const during = await new ClaudeAgentBackend({
+      queryFn: unresumed(true, sdkWords),
+    }).startResident(spec, saved);
+    const failed = await during.runTurn("hello");
+    expect(failed.exitReason).toBe("error");
+    expect(failed.error).toBe(sdkWords);
+    expect(failed.resumeFailed).toBe("lost");
+    await during.close();
+
+    // Before it: the turn throws, as on any session that has ended, but says it could not resume.
+    const before = await new ClaudeAgentBackend({
+      queryFn: unresumed(false, sdkWords),
+    }).startResident(spec, saved);
+    await vi.waitFor(async () => {
+      await expect(before.runTurn("hello")).rejects.toMatchObject({
+        name: "ResumeError",
+        failure: "lost",
+        message: sdkWords,
+      });
+    });
+    await before.close();
+
+    // A CLI that ended before it opened the session for anything else may resume it next time.
+    const died = await new ClaudeAgentBackend({
+      queryFn: unresumed(true, null),
+    }).startResident(spec, saved);
+    expect((await died.runTurn("hello")).resumeFailed).toBe("retry");
+    await died.close();
+    expect(asked.map((options) => [options?.resume, options?.sessionId])).toEqual([
+      [start.session, undefined],
+      [start.session, undefined],
+      [start.session, undefined],
+    ]);
+
+    // A new session's CLI that ends so did not fail a resume.
+    const fresh = await new ClaudeAgentBackend({ queryFn: unresumed(true, null) }).startResident(
+      spec,
+      start,
+    );
+    const ended = await fresh.runTurn("hello");
+    expect(ended.exitReason).toBe("error");
+    expect(ended.resumeFailed).toBeUndefined();
+    await fresh.close();
+  });
+
+  it("counts a resume the CLI never answers before the turn's limit as retry, and no limit after it opened the session", async () => {
+    // Claude Code 2.1.283 on a transcript it never finishes reading sends nothing and takes no
+    // interrupt, so the turn ends at its limit and the grace after it, 30 s for a limit of 15 s.
+    vi.useFakeTimers();
+    try {
+      for (const [opens, failed] of [
+        [false, "retry"],
+        [true, undefined],
+      ] as const) {
+        const session = await new ClaudeAgentBackend({ queryFn: hanging(opens) }).startResident(
+          spec,
+          {
+            ...start,
+            newSession: false,
+          },
+        );
+        const turn = session.runTurn("hello");
+        await vi.advanceTimersByTimeAsync(500 + 15_000);
+        const result = await turn;
+        expect(result.exitReason).toBe("timeout");
+        expect(result.error).toBe("turn exceeded 500 ms");
+        expect(result.resumeFailed).toBe(failed);
+        await session.close();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails no later turn as a resume once the CLI opened the session", async () => {
+    const script = scripted(null, 0, 2);
+    const session = await new ClaudeAgentBackend({ queryFn: script.queryFn }).startResident(spec, {
+      ...start,
+      newSession: false,
+    });
+    expect((await session.runTurn("hello")).exitReason).toBe("completed");
+    const refused = await session.runTurn("again");
+    expect(refused.exitReason).toBe("error");
+    expect(refused.resumeFailed).toBeUndefined();
     await session.close();
   });
 
@@ -161,7 +296,6 @@ describe("Claude resident sessions", () => {
     const script = scripted(null, 4.2);
     const backend = new ClaudeAgentBackend({
       queryFn: script.queryFn,
-      sessionExists: () => Promise.resolve(true),
     });
     const session = await backend.startResident(spec, {
       ...start,

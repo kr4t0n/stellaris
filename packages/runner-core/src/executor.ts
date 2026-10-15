@@ -46,6 +46,7 @@ import { ExecaGit, taskBranch, type GitOps, type RemoteSync } from "./git.js";
 import { readTurnImage, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
+  ResumeError,
   ZERO_USAGE,
   type AgentBackend,
   type AgentSpec,
@@ -266,10 +267,14 @@ export class TurnExecutor {
       roots: [workspace.cwd, home, tmpdir()],
     });
     let result: TurnResult;
+    // Whether the CLI may have started the session, which the outcome then reports for the next
+    // turn; one it never started is not recorded, so the next turn starts its own.
+    let started = true;
     try {
       if (control.stopped) {
         // Stopped while its workspace was being prepared: the CLI never starts.
-        result = { ...stoppedResult(events), session };
+        started = false;
+        result = stoppedResult(events);
       } else if (job.resident !== undefined && backend.startResident !== undefined) {
         result = await this.runResident(backend, spec, job, {
           session,
@@ -299,6 +304,8 @@ export class TurnExecutor {
         );
       }
     } catch (error) {
+      // An adapter throws when its CLI could not open the session, or had ended before the turn.
+      started = false;
       result = {
         events,
         finalText: "",
@@ -307,6 +314,7 @@ export class TurnExecutor {
         status: null,
         exitReason: "error",
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ResumeError ? { resumeFailed: error.failure } : {}),
       };
     }
     this.imagePlaces.delete(job.turnId);
@@ -322,6 +330,20 @@ export class TurnExecutor {
           warm.stale = true;
         }
       }
+    }
+    if (result.resumeFailed !== undefined) {
+      this.log.warn(
+        {
+          agent: job.agent,
+          scope: job.scope,
+          thread: job.thread,
+          channel: job.channel,
+          session,
+          resumeFailed: result.resumeFailed,
+          error: result.error,
+        },
+        "the CLI could not resume the session",
+      );
     }
     const { work, stuck } = await this.handBack(job, workspace);
     const leftovers = workspace.own && (await this.leftoversIn(workspace.cwd));
@@ -342,7 +364,8 @@ export class TurnExecutor {
       usage: result.usage,
       costUsd: result.costUsd,
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
-      session: result.session ?? session,
+      session: result.session ?? (started ? session : job.session),
+      ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
       model: result.model ?? null,
       work,
       leftovers,

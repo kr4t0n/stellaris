@@ -3,7 +3,6 @@ import { appendFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  getSessionInfo,
   query,
   type EffortLevel,
   type ModelInfo,
@@ -16,6 +15,7 @@ import {
 import {
   CLI_ENV,
   parseTurnStatus,
+  ResumeError,
   ZERO_USAGE,
   type AgentBackend,
   type AgentSpec,
@@ -34,6 +34,7 @@ import {
   type AgentEvent,
   type CliQuota,
   type ModelOption,
+  type ResumeFailure,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
@@ -126,7 +127,6 @@ export interface ClaudeBackendOptions {
   /** Directory to append raw SDK message streams to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
   readonly queryFn?: QueryFn | undefined;
-  readonly sessionExists?: ((session: SessionId, cwd: string) => Promise<boolean>) | undefined;
   /** The clock quota reports are stamped by; tests inject one. */
   readonly now?: (() => Date) | undefined;
 }
@@ -246,14 +246,6 @@ export function subprocessEnv(
   Object.assign(env, CLI_ENV);
   env[AGENT_TOKEN_ENV] = token;
   return env;
-}
-
-async function defaultSessionExists(session: SessionId, cwd: string): Promise<boolean> {
-  try {
-    return (await getSessionInfo(session, { dir: cwd })) !== undefined;
-  } catch {
-    return false;
-  }
 }
 
 /** Maps one SDK message onto board events and the turn's state. Shared by cold and resident turns. */
@@ -478,12 +470,36 @@ function isUuid(id: string): id is UUID {
 }
 
 /**
- * The id a session goes by: the one recorded, or a fresh one in place of an id the CLI cannot
- * create a session under, such as `unstarted`, which runners once recorded for a conversation whose
- * first turn never reached its CLI. Such an id names no session, so starting afresh loses nothing.
+ * What Claude Code says when it cannot resume a session, before it announces the session and before
+ * any model call, as 2.1.283 says it for an id with no transcript, or one it cannot read: `No
+ * conversation found with session ID: <id>`. Its other refusals of an id cannot come up here: the
+ * adapter hands it no id that is not a UUID, and creates a session only under a fresh one.
  */
-function usableSession(recorded: SessionId): SessionId {
-  return isUuid(recorded) ? recorded : randomUUID();
+const LOST_SESSION = /No conversation found with session ID/;
+
+/** Why the CLI could not resume a session, from its words: nothing there to resume, or try again. */
+function resumeFailureOf(error: string | undefined): ResumeFailure {
+  return error !== undefined && LOST_SESSION.test(error) ? "lost" : "retry";
+}
+
+/**
+ * A turn on a saved session that ended before the CLI opened it could not resume it: one that
+ * failed, and one held up to the turn's limit, as on a transcript the CLI never finishes reading. A
+ * stop is the user's decision, not the session's.
+ */
+function withResumeFailure(result: TurnResult): TurnResult {
+  return result.exitReason === "error" || result.exitReason === "timeout"
+    ? { ...result, resumeFailed: resumeFailureOf(result.error) }
+    : result;
+}
+
+/**
+ * Claude Code takes a session id only as a UUID, and resumes any other value as a session's title,
+ * so an id saved as anything else, such as the `unstarted` runners once saved for a conversation
+ * whose first turn never reached its CLI, is never handed to it.
+ */
+function notUuid(session: SessionId): string {
+  return `the saved session id ${JSON.stringify(session)} is not a UUID, so Claude Code cannot resume it`;
 }
 
 /**
@@ -541,11 +557,15 @@ class ClaudeResident implements ResidentSession {
   private endedWith: string | undefined;
   private lastTotalCostUsd: number;
   private model: string | undefined;
+  /** Whether the CLI has announced the session, which it does once it has opened it. */
+  private opened = false;
 
   constructor(
     private readonly context: HandlerContext,
     private readonly limits: { timeoutMs: number | null },
     session: SessionId,
+    /** Whether the session is a saved one to resume, which the CLI may fail to do. */
+    private readonly resuming: boolean,
     costSoFarUsd: number,
     queryFn: QueryFn,
     options: Options,
@@ -567,6 +587,7 @@ class ClaudeResident implements ResidentSession {
         if (message.type === "system" && "subtype" in message && message.subtype === "init") {
           this.session = message.session_id;
           this.model = message.model;
+          this.opened = true;
         }
         const turn = this.active;
         if (turn === null) {
@@ -612,7 +633,11 @@ class ClaudeResident implements ResidentSession {
     control?: TurnControl,
   ): Promise<TurnResult> {
     if (this.ended) {
-      throw new Error(this.endedWith ?? "the resident session has ended");
+      const said = this.endedWith ?? "the resident session has ended";
+      // A CLI that ended before it opened a saved session could not resume it.
+      throw this.resuming && !this.opened
+        ? new ResumeError(resumeFailureOf(this.endedWith), said)
+        : new Error(said);
     }
     if (this.active !== null) {
       throw new Error("a turn is already running on this resident session");
@@ -703,7 +728,8 @@ class ClaudeResident implements ResidentSession {
     if (state.sawResult) {
       this.lastTotalCostUsd = state.totalCostUsd;
     }
-    return finishTurn(state, costUsd, events, emit);
+    const result = finishTurn(state, costUsd, events, emit);
+    return this.resuming && !this.opened ? withResumeFailure(result) : result;
   }
 
   async close(): Promise<void> {
@@ -728,12 +754,10 @@ export class ClaudeAgentBackend implements AgentBackend {
   readonly steers = true;
   readonly stops = true;
   private readonly queryFn: QueryFn;
-  private readonly sessionExists: (session: SessionId, cwd: string) => Promise<boolean>;
   private readonly now: () => Date;
 
   constructor(private readonly options: ClaudeBackendOptions = {}) {
     this.queryFn = options.queryFn ?? ((params) => query(params));
-    this.sessionExists = options.sessionExists ?? defaultSessionExists;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -805,6 +829,14 @@ export class ClaudeAgentBackend implements AgentBackend {
       events.push(event);
       onEvent?.(event);
     };
+    // A saved session is resumed or the turn fails: the server built the prompt for that session,
+    // and only it decides that a conversation starts afresh.
+    const resuming = !request.newSession;
+    if (resuming && !isUuid(request.session)) {
+      const refused = freshState();
+      refused.error = notUuid(request.session);
+      return { ...finishTurn(refused, 0, events, emit), resumeFailed: "lost" };
+    }
     const abort = new AbortController();
     const limit = request.limits.timeoutMs;
     let timedOut = false;
@@ -826,14 +858,6 @@ export class ClaudeAgentBackend implements AgentBackend {
       now: this.now,
     };
 
-    // The runner picks the session id before the first turn and records it however the turn ends,
-    // so a crash cannot lose it. If that turn died before the CLI wrote anything, the id names no
-    // session yet: create it now.
-    const session = usableSession(request.session);
-    const replaced = session !== request.session;
-    const resumable =
-      !request.newSession && !replaced && (await this.sessionExists(session, request.spec.cwd));
-
     const source = new PushSource<SDKUserMessage>();
     const promptId = randomUUID();
     source.push(userMessage(request.prompt, promptId));
@@ -845,7 +869,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     let stopped = false;
     const stream = this.queryFn({
       prompt: source,
-      options: this.buildOptions({ ...request, session }, abort, resumable),
+      options: this.buildOptions(request, abort, resuming),
     });
     const detach = control?.attach({
       steer: (steer) => {
@@ -924,24 +948,22 @@ export class ClaudeAgentBackend implements AgentBackend {
       state.error = "the session ended without a result message";
     }
     // A resumed session's total starts from what its transcript saved: the earlier turns' cost.
-    const costSoFarUsd = resumable ? (request.costSoFarUsd ?? 0) : 0;
+    const costSoFarUsd = resuming ? (request.costSoFarUsd ?? 0) : 0;
     const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
     const result = finishTurn(state, costUsd, events, emit);
-    // A replacement is the conversation's session from now on, which the runner records.
-    return replaced ? { ...result, session } : result;
+    // The CLI announces a session once it has opened it, and says first why it could not.
+    return resuming && !state.initialized ? withResumeFailure(result) : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */
-  async startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
-    // The runner records the id the session goes by, a replacement included, after each turn.
-    const session = usableSession(start.session);
-    const resumable =
-      !start.newSession &&
-      session === start.session &&
-      (await this.sessionExists(session, spec.cwd));
+  startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
+    const resuming = !start.newSession;
+    if (resuming && !isUuid(start.session)) {
+      return Promise.reject(new ResumeError("lost", notUuid(start.session)));
+    }
     const request: TurnRequest = {
       spec,
-      session,
+      session: start.session,
       newSession: start.newSession,
       prompt: "",
       instructions: start.instructions,
@@ -959,14 +981,17 @@ export class ClaudeAgentBackend implements AgentBackend {
       this.options.recordDir === undefined
         ? null
         : (lines: readonly string[]) => this.record(spec.agent, lines);
-    return new ClaudeResident(
-      context,
-      { timeoutMs: start.limits.timeoutMs },
-      session,
-      resumable ? (start.costSoFarUsd ?? 0) : 0,
-      this.queryFn,
-      this.buildOptions(request, new AbortController(), resumable),
-      record,
+    return Promise.resolve(
+      new ClaudeResident(
+        context,
+        { timeoutMs: start.limits.timeoutMs },
+        start.session,
+        resuming,
+        resuming ? (start.costSoFarUsd ?? 0) : 0,
+        this.queryFn,
+        this.buildOptions(request, new AbortController(), resuming),
+        record,
+      ),
     );
   }
 
@@ -981,7 +1006,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     );
   }
 
-  private buildOptions(request: TurnRequest, abort: AbortController, resumable: boolean): Options {
+  private buildOptions(request: TurnRequest, abort: AbortController, resuming: boolean): Options {
     const model = request.spec.model ?? this.options.model;
     const effort = claudeEffort(request.spec.effort) ?? this.options.effort;
     const permissionMode = this.options.permissionMode ?? "bypassPermissions";
@@ -989,7 +1014,7 @@ export class ClaudeAgentBackend implements AgentBackend {
       cwd: request.spec.cwd,
       // The home holds memory and skills the agent authors; the board projection is what it searches.
       additionalDirectories: [request.spec.configHome, request.spec.boardDir],
-      ...(resumable ? { resume: request.session } : { sessionId: request.session }),
+      ...(resuming ? { resume: request.session } : { sessionId: request.session }),
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

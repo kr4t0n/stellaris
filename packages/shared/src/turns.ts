@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { CliKindSchema, SOCIETY_SCOPE } from "./board.js";
-import { TurnExitReasonSchema, TurnStatusSchema, UsageSchema } from "./events.js";
+import {
+  ResumeFailureSchema,
+  TurnExitReasonSchema,
+  TurnStatusSchema,
+  UsageSchema,
+} from "./events.js";
 import { ChannelRefSchema, IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import { TurnWorkSchema } from "./runner.js";
 
@@ -149,6 +154,12 @@ export const TurnRecordSchema = z.object({
   work: TurnWorkSchema.optional(),
   /** Who stopped the turn, for one that ended `stopped`. */
   stoppedBy: NameSchema.optional(),
+  /** Why the CLI could not resume the turn's session, for a turn that failed so. */
+  resumeFailed: ResumeFailureSchema.optional(),
+  /** How many turns in a row, this one included, could not resume the session for a `retry`. */
+  resumeRetries: z.number().int().positive().optional(),
+  /** Whether the server dropped the conversation's session after this turn, which the next starts anew. */
+  sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),
 });

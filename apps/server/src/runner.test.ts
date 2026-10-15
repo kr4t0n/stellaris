@@ -8,6 +8,7 @@ import {
   GitIdentityCheck,
   enrollRunner,
   readCredentials,
+  ResumeError,
   RunnerLayout,
   saveCredentials,
   ZERO_USAGE,
@@ -775,10 +776,16 @@ describe("turns on a runner over the runner protocol", () => {
     const handed: Array<{ session: string; newSession: boolean }> = [];
     let home = "";
     let made = 0;
+    let throwing = false;
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve(`session-${(made += 1)}`),
       runTurn: (request) => {
+        if (throwing) {
+          return Promise.reject(
+            new Error("codex app-server did not answer thread/start within 60000 ms"),
+          );
+        }
         handed.push({ session: request.session, newSession: request.newSession });
         home = request.spec.configHome;
         return Promise.resolve(completed("cold turn"));
@@ -832,59 +839,225 @@ describe("turns on a runner over the runner protocol", () => {
     expect(unadapted.error).toBe("no backend registered for codex");
     expect(await board.readSessions("stew", "society")).toEqual({});
     expect(unadapted.session).toBeNull();
+
+    // Nor from one whose CLI could not open the new session, as when Codex's server never answered
+    // `thread/start`: the adapter throws.
+    const third = await board.openThread(USER, { channel: "general", title: "a third" });
+    const inThird = { ...deskPost, thread: { id: third.id, task: false } };
+    throwing = true;
+    const unopened = await society.run(inThird);
+    throwing = false;
+    expect(unopened.error).toBe("codex app-server did not answer thread/start within 60000 ms");
+    expect(await board.readSessions("desk", "society", third.id)).toEqual({});
+    expect(unopened.session).toBeNull();
+    await society.run(inThird);
+    expect(handed.at(-1)).toEqual({ session: "session-4", newSession: true });
   });
 
-  it("records the session an adapter starts in place of a recorded one, cold and warm, and hands it to the next turn", async () => {
-    const { board } = await Board.init(dir, { name: "replaced" });
+  it("keeps no session from a turn stopped before its CLI started", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-early" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
     const thread = await board.openThread(USER, { channel: "general", title: "a question" });
-    // What a turn that never reached its CLI recorded before 0.3.24, in a thread and at home.
-    await board.writeSession("desk", "society", "claude", "unstarted", "pod", thread.id);
-    await board.writeSession("desk", "society", "claude", "unstarted", "pod");
     const handed: Array<{ session: string; newSession: boolean }> = [];
-    const started: string[] = [];
-    // As the Claude adapter does, a recorded id that names no session gives way to a fresh one.
+    const chosen = Promise.withResolvers<void>();
+    let asked = 0;
+    let made = 0;
     const backend: AgentBackend = {
       kind: "claude",
-      newSession: () => Promise.resolve("fresh"),
+      stops: true,
+      // The runner asks for a new session's id after preparing the workspace and before it checks
+      // for a stop, so the first one waits while the test stops the turn.
+      newSession: async () => {
+        asked += 1;
+        if (asked === 1) {
+          await chosen.promise;
+        }
+        return `session-${(made += 1)}`;
+      },
       runTurn: (request) => {
         handed.push({ session: request.session, newSession: request.newSession });
-        const result = completed("cold turn");
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    const { run, hub } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    const running = run(inThread);
+    await vi.waitFor(() => expect(asked).toBe(1));
+    const turnId = hub.liveTurns()[0]?.turnId ?? "";
+    expect(await hub.stop(turnId, "user")).toBe(true);
+    chosen.resolve();
+    const stopped = await running;
+    expect(stopped.exitReason).toBe("stopped");
+    expect(handed).toEqual([]);
+    expect(stopped.session).toBeNull();
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({});
+    // So the conversation's next turn starts a session of its own, with the whole thread.
+    await run(inThread);
+    expect(handed).toEqual([{ session: "session-2", newSession: true }]);
+  });
+
+  it("drops a session its CLI found nothing of, so the next turn starts anew and is told why, cold and warm", async () => {
+    const { board } = await Board.init(dir, { name: "lost" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    await board.postMessage(USER, {
+      channel: "general",
+      thread_id: thread.id,
+      body: "Where are we?",
+    });
+    // A session saved before, which the CLI no longer has, in a thread and at home.
+    await board.writeSession("desk", "society", "claude", "s-gone", "pod", thread.id);
+    await board.writeSession("desk", "society", "claude", "s-gone", "pod");
+    const words =
+      "Claude Code returned an error result: No conversation found with session ID: s-gone";
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    const started: Array<{ session: string; newSession: boolean }> = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-new-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        prompts.push(request.prompt);
         return Promise.resolve(
-          request.session === "unstarted" ? { ...result, session: "replaced-cold" } : result,
+          request.session === "s-gone"
+            ? {
+                ...completed("unresumed"),
+                status: null,
+                exitReason: "error" as const,
+                error: words,
+                resumeFailed: "lost" as const,
+              }
+            : completed("cold turn"),
         );
       },
       startResident: (_spec, resident) => {
-        started.push(resident.session);
+        started.push({ session: resident.session, newSession: resident.newSession });
+        if (resident.session === "s-gone") {
+          return Promise.reject(new ResumeError("lost", words));
+        }
         return Promise.resolve({
-          session: resident.session === "unstarted" ? "replaced-warm" : resident.session,
-          // A changed memory lets the session go, so the next turn starts from the record.
-          runTurn: () => Promise.resolve(completed("warm turn", true)),
+          session: resident.session,
+          runTurn: (prompt) => {
+            prompts.push(prompt);
+            return Promise.resolve(completed("warm turn"));
+          },
           close: () => Promise.resolve(),
         });
       },
     };
     const { run } = await start(board, backend);
+    const note = "Its CLI could not resume this conversation's session, so the session was dropped";
 
     const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
-    await run(inThread);
-    expect(await board.readSessions("desk", "society", thread.id)).toEqual({
-      claude: "replaced-cold",
-      runner: "pod",
+    const lost = await run(inThread);
+    expect(lost).toMatchObject({
+      exitReason: "error",
+      error: words,
+      resumeFailed: "lost",
+      sessionDropped: true,
     });
+    // A lost session is no retry: nothing counts toward the three a retry gets.
+    expect(lost.resumeRetries).toBeUndefined();
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({ runner: "pod" });
+    // The next turn starts a session, with the whole thread and the reason in its prompt.
     await run(inThread);
-    expect(handed).toEqual([
-      { session: "unstarted", newSession: false },
-      { session: "replaced-cold", newSession: false },
-    ]);
+    expect(handed.at(-1)).toEqual({ session: "s-new-1", newSession: true });
+    expect(prompts.at(-1)).toContain("## The thread so far");
+    expect(prompts.at(-1)).toContain("Where are we?");
+    expect(prompts.at(-1)).toContain(`It ended with error: ${words}.`);
+    expect(prompts.at(-1)).toContain(note);
+    // And the one after resumes it, told nothing more.
+    await run(inThread);
+    expect(handed.at(-1)).toEqual({ session: "s-new-1", newSession: false });
+    expect(prompts.at(-1)).not.toContain(note);
 
+    // At home, a warm session that cannot be resumed fails as it starts, and the next one is new
+    // and gets the first-turn notes.
+    const home = await run(deskPost);
+    expect(home).toMatchObject({ exitReason: "error", resumeFailed: "lost", sessionDropped: true });
+    expect(await board.readSessions("desk", "society")).toEqual({ runner: "pod" });
     await run(deskPost);
-    expect(await board.readSessions("desk", "society")).toEqual({
-      claude: "replaced-warm",
+    expect(started).toEqual([
+      { session: "s-gone", newSession: false },
+      { session: "s-new-2", newSession: true },
+    ]);
+    expect(prompts.at(-1)).toContain("## First turn");
+    expect(prompts.at(-1)).toContain(note);
+    const failed = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(failed.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
+      expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
+    ]);
+  });
+
+  it("keeps a session its CLI may resume next time, and drops it after three such turns in a row", async () => {
+    const { board } = await Board.init(dir, { name: "retry" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    await board.writeSession("desk", "society", "claude", "s-slow", "pod", thread.id);
+    const words = "codex app-server did not answer thread/resume within 60000 ms";
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    // How each turn of the old session goes: a resume that fails for now, or one that works.
+    const plan = ["retry", "retry", "resumed", "retry", "retry", "retry"];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-new"),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        prompts.push(request.prompt);
+        if (request.session === "s-slow" && plan.shift() === "retry") {
+          return Promise.reject(new ResumeError("retry", words));
+        }
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    const records = [];
+    for (let turn = 0; turn < 7; turn += 1) {
+      records.push(await run(inThread));
+    }
+    expect(
+      records.map((record) => [
+        record.exitReason,
+        record.resumeFailed ?? null,
+        record.resumeRetries ?? null,
+        record.sessionDropped ?? false,
+      ]),
+    ).toEqual([
+      ["error", "retry", 1, false],
+      ["error", "retry", 2, false],
+      // A turn that resumed ends the run of failures.
+      ["completed", null, null, false],
+      ["error", "retry", 1, false],
+      ["error", "retry", 2, false],
+      ["error", "retry", 3, true],
+      ["completed", null, null, false],
+    ]);
+    expect(handed.map((each) => each.session)).toEqual([
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-new",
+    ]);
+    expect(handed.at(-1)?.newSession).toBe(true);
+    // A turn after a failure that kept the session is told the failure, not that it was dropped.
+    const note = "Its CLI could not resume this conversation's session, so the session was dropped";
+    expect(prompts[1]).toContain(`It ended with error: ${words}.`);
+    expect(prompts[1]).not.toContain(note);
+    expect(prompts.at(-1)).toContain(note);
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({
+      claude: "s-new",
       runner: "pod",
     });
-    await run(deskPost);
-    expect(started).toEqual(["unstarted", "replaced-warm"]);
   });
 
   // What each adapter's session does once its CLI ended between turns: Claude's throws, with the

@@ -4625,6 +4625,32 @@ export class Board {
     });
   }
 
+  /**
+   * Drops a conversation's session for a CLI, so its next turn starts a new one, when the record
+   * still names `sessionId`; returns whether it did.
+   */
+  async dropSession(
+    agent: Name,
+    project: Name,
+    cli: CliKind,
+    sessionId: string,
+    part?: string,
+  ): Promise<boolean> {
+    return this.mutex.run(async () => {
+      const file = path.join(this.sessionDir(agent, project, part), "sessions.json");
+      if (!(await exists(file))) {
+        return false;
+      }
+      const current = await readJson(file, SessionsFileSchema);
+      if (current[cli] !== sessionId) {
+        return false;
+      }
+      const { [cli]: _dropped, ...kept } = current;
+      await writeJson(file, kept);
+      return true;
+    });
+  }
+
   /** The last turn of one conversation: the scope's home, a channel's, or a thread's. */
   async readLastTurn(agent: Name, project: Name, part?: string): Promise<TurnRecord | null> {
     const file = path.join(this.sessionDir(agent, project, part), "last-turn.json");
@@ -4709,6 +4735,8 @@ export class Board {
         summary: parsed.status?.summary ?? null,
         needsUserDecision: parsed.status?.needsUserDecision ?? false,
         error: parsed.error,
+        ...(parsed.resumeFailed === undefined ? {} : { resumeFailed: parsed.resumeFailed }),
+        ...(parsed.sessionDropped === true ? { sessionDropped: true } : {}),
       });
     });
   }

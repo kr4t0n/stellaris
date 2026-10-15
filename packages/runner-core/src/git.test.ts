@@ -186,56 +186,56 @@ describe("ExecaGit", () => {
     };
     const handBack = (worktree: string, agent: string) =>
       git.handBack(worktree, null, { name: agent, email: `${agent}@x` });
-    const settle = () => git.settleTaskBranch(repoDir, branch, [place("flux"), place("loom")]);
+    const settle = () => git.settleTaskBranch(repoDir, branch, [place("ref"), place("eng-1")]);
 
     // A turn that leaves the branch to the stage's holder works detached even while it is free.
-    const flux = await git.ensureTaskWorktree(repoDir, place("flux"), branch, false);
-    expect(await onBranch(flux)).toBeNull();
-    expect(await rev(flux, "HEAD")).toBe(tip);
+    const ref = await git.ensureTaskWorktree(repoDir, place("ref"), branch, false);
+    expect(await onBranch(ref)).toBeNull();
+    expect(await rev(ref, "HEAD")).toBe(tip);
     // A participant's turn took the branch first, so the holder's works detached at its tip.
-    expect(await git.ensureTaskWorktree(repoDir, flux, branch)).toBe(flux);
-    expect(await onBranch(flux)).toBe(branch);
-    const loom = await git.ensureTaskWorktree(repoDir, place("loom"), branch);
-    expect(await onBranch(loom)).toBeNull();
-    const reviewed = await commit(loom, "loom", "review");
+    expect(await git.ensureTaskWorktree(repoDir, ref, branch)).toBe(ref);
+    expect(await onBranch(ref)).toBe(branch);
+    const eng = await git.ensureTaskWorktree(repoDir, place("eng-1"), branch);
+    expect(await onBranch(eng)).toBeNull();
+    const reviewed = await commit(eng, "eng-1", "review");
     // The holder's turn ends first: the hand-back has no branch to give up, and the branch, still
     // checked out, cannot move yet; the commits build on its tip, so they wait rather than stick.
-    expect(await handBack(loom, "loom")).toBeNull();
+    expect(await handBack(eng, "eng-1")).toBeNull();
     expect(await settle()).toEqual({ moved: null, stuck: [] });
     expect(await rev(repoDir, branch)).toBe(tip);
     // The participant's hand-back frees the branch, which moves on to the holder's commits.
-    await handBack(flux, "flux");
+    await handBack(ref, "ref");
     expect(await settle()).toEqual({ moved: reviewed, stuck: [] });
     expect(await rev(repoDir, branch)).toBe(reviewed);
-    expect((await git.worktreeState(loom)).onNoBranch.total).toBe(0);
+    expect((await git.worktreeState(eng)).onNoBranch.total).toBe(0);
     expect(await settle()).toEqual({ moved: null, stuck: [] });
 
     // In the other order, the holder's own hand-back moves it, once the branch is free.
-    await git.ensureTaskWorktree(repoDir, flux, branch);
-    await git.ensureTaskWorktree(repoDir, loom, branch, false);
-    const second = await commit(loom, "loom", "second");
-    await handBack(flux, "flux");
+    await git.ensureTaskWorktree(repoDir, ref, branch);
+    await git.ensureTaskWorktree(repoDir, eng, branch, false);
+    const second = await commit(eng, "eng-1", "second");
+    await handBack(ref, "ref");
     expect(await settle()).toEqual({ moved: second, stuck: [] });
 
     // Mid-turn, as its workspace note says, a detached turn fast-forwards the branch itself with a
     // push into the clone, which git refuses while another worktree has the branch, past the
     // default branch's guard.
     expect(await git.guardDefaultBranch(repoDir, "main")).toMatchObject({ ok: true });
-    await git.ensureTaskWorktree(repoDir, flux, branch);
-    await git.ensureTaskWorktree(repoDir, loom, branch, false);
-    const third = await commit(loom, "loom", "third");
+    await git.ensureTaskWorktree(repoDir, ref, branch);
+    await git.ensureTaskWorktree(repoDir, eng, branch, false);
+    const third = await commit(eng, "eng-1", "third");
     const push = () =>
-      execa("git", ["push", "--quiet", ".", `HEAD:${branch}`], { cwd: loom, reject: false });
+      execa("git", ["push", "--quiet", ".", `HEAD:${branch}`], { cwd: eng, reject: false });
     expect((await push()).stderr).toContain("branch is currently checked out");
-    await handBack(flux, "flux");
+    await handBack(ref, "ref");
     expect((await push()).exitCode).toBe(0);
     expect(await rev(repoDir, branch)).toBe(third);
 
     // Commits on one line from the tip, one worktree's built on another's, move it to the furthest.
-    await git.ensureTaskWorktree(repoDir, flux, branch, false);
-    const first = await commit(flux, "flux", "first");
-    await execa("git", ["switch", "--quiet", "--detach", first], { cwd: loom });
-    const further = await commit(loom, "loom", "further");
+    await git.ensureTaskWorktree(repoDir, ref, branch, false);
+    const first = await commit(ref, "ref", "first");
+    await execa("git", ["switch", "--quiet", "--detach", first], { cwd: eng });
+    const further = await commit(eng, "eng-1", "further");
     expect(await settle()).toEqual({ moved: further, stuck: [] });
     expect(await rev(repoDir, branch)).toBe(further);
   });
@@ -255,25 +255,25 @@ describe("ExecaGit", () => {
       });
       return rev(worktree, "HEAD");
     };
-    const settle = () => git.settleTaskBranch(repoDir, branch, [place("flux"), place("loom")]);
+    const settle = () => git.settleTaskBranch(repoDir, branch, [place("ref"), place("eng-1")]);
 
     // Two worktrees' commits each build on the tip: only a merge takes both, so neither moves it.
-    const flux = await git.ensureTaskWorktree(repoDir, place("flux"), branch, false);
-    const loom = await git.ensureTaskWorktree(repoDir, place("loom"), branch, false);
-    const fluxHead = await commit(flux, "flux", "flux-work");
-    const loomHead = await commit(loom, "loom", "loom-work");
+    const ref = await git.ensureTaskWorktree(repoDir, place("ref"), branch, false);
+    const eng = await git.ensureTaskWorktree(repoDir, place("eng-1"), branch, false);
+    const refHead = await commit(ref, "ref", "ref-work");
+    const engHead = await commit(eng, "eng-1", "eng-work");
     expect(await settle()).toEqual({
       moved: null,
       stuck: [
         {
-          worktree: flux,
-          head: fluxHead,
-          commits: { items: [expect.stringContaining("flux-work")], total: 1 },
+          worktree: ref,
+          head: refHead,
+          commits: { items: [expect.stringContaining("ref-work")], total: 1 },
         },
         {
-          worktree: loom,
-          head: loomHead,
-          commits: { items: [expect.stringContaining("loom-work")], total: 1 },
+          worktree: eng,
+          head: engHead,
+          commits: { items: [expect.stringContaining("eng-work")], total: 1 },
         },
       ],
     });
@@ -281,39 +281,39 @@ describe("ExecaGit", () => {
 
     // Once the branch takes one of them, the other has left its line, checked out or not, while
     // a third's commits that build on the tip of the checked-out branch wait for its hand-back.
-    await execa("git", ["update-ref", `refs/heads/${branch}`, fluxHead], { cwd: repoDir });
-    await execa("git", ["switch", "--quiet", branch], { cwd: flux });
-    const sage = await git.ensureTaskWorktree(repoDir, place("sage"), branch, false);
-    await commit(sage, "sage", "sage-work");
-    expect(await git.settleTaskBranch(repoDir, branch, [flux, loom, sage])).toEqual({
+    await execa("git", ["update-ref", `refs/heads/${branch}`, refHead], { cwd: repoDir });
+    await execa("git", ["switch", "--quiet", branch], { cwd: ref });
+    const other = await git.ensureTaskWorktree(repoDir, place("eng-2"), branch, false);
+    await commit(other, "eng-2", "other-work");
+    expect(await git.settleTaskBranch(repoDir, branch, [ref, eng, other])).toEqual({
       moved: null,
       stuck: [
         {
-          worktree: loom,
-          head: loomHead,
-          commits: { items: [expect.stringContaining("loom-work")], total: 1 },
+          worktree: eng,
+          head: engHead,
+          commits: { items: [expect.stringContaining("eng-work")], total: 1 },
         },
       ],
     });
-    await git.removeWorktree(repoDir, sage);
-    await execa("git", ["switch", "--quiet", "--detach"], { cwd: flux });
-    expect((await settle()).stuck.map((each) => each.worktree)).toEqual([loom]);
+    await git.removeWorktree(repoDir, other);
+    await execa("git", ["switch", "--quiet", "--detach"], { cwd: ref });
+    expect((await settle()).stuck.map((each) => each.worktree)).toEqual([eng]);
     // Work that builds on the tip still moves the branch, while the other stays stuck beside it.
-    const fluxMore = await commit(flux, "flux", "flux-more");
+    const refMore = await commit(ref, "ref", "ref-more");
     expect(await settle()).toEqual({
-      moved: fluxMore,
+      moved: refMore,
       stuck: [
         {
-          worktree: loom,
-          head: loomHead,
-          commits: { items: [expect.stringContaining("loom-work")], total: 1 },
+          worktree: eng,
+          head: engHead,
+          commits: { items: [expect.stringContaining("eng-work")], total: 1 },
         },
       ],
     });
     // A worktree left where it is keeps them, and is not switched to the branch.
-    expect(await git.ensureTaskWorktree(repoDir, loom, branch)).toBe(loom);
-    expect(await rev(loom, "HEAD")).toBe(loomHead);
-    expect(await rev(repoDir, branch)).toBe(fluxMore);
+    expect(await git.ensureTaskWorktree(repoDir, eng, branch)).toBe(eng);
+    expect(await rev(eng, "HEAD")).toBe(engHead);
+    expect(await rev(repoDir, branch)).toBe(refMore);
   });
 
   it("reads a file or a folder on a branch as its newest commit has it, byte for byte", async () => {

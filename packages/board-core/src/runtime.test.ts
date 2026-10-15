@@ -288,6 +288,17 @@ describe("Board runtime support", () => {
       codex: "thread-2",
       runner: "laptop",
     });
+    // A session its CLI could not resume is dropped for that CLI alone, and only while the record
+    // still names it; a conversation without a record has nothing to drop.
+    await board.writeSession("eng-1", "demo", "claude", "s-claude", "laptop");
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-other")).toBe(false);
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude")).toBe(true);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      codex: "thread-2",
+      runner: "laptop",
+    });
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude")).toBe(false);
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude", "#dev")).toBe(false);
 
     expect(await board.readLastTurn("eng-1", "demo")).toBeNull();
     const record = {

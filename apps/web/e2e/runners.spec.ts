@@ -265,13 +265,20 @@ test("every row's windows share columns, so bars start together whatever the CLI
     await expect(rows.nth(1)).toContainText("codex");
     await expect(rows.nth(1).getByRole("listitem")).toHaveText([/^7d\s*2%/]);
     // Each window's name, bar, percent, and reset, where they start and the percent where it ends,
-    // and whether they sit side by side on one line, in that order.
+    // whether they sit side by side on one line, in that order, and whether the name starts under
+    // the runner's name rather than under the CLI's mark.
     const cells = await rows.getByRole("listitem").evaluateAll((windows) =>
       windows.map((window) => {
         const boxes = [...window.children].map((cell) => cell.getBoundingClientRect());
         const [name, bar, percent, reset] = boxes;
         const middles = boxes.map((box) => box.top + box.height / 2);
+        const mark = window.parentElement?.closest("li")?.querySelector("svg");
         return {
+          indented:
+            name !== undefined &&
+            mark !== null &&
+            mark !== undefined &&
+            name.left > mark.getBoundingClientRect().right,
           text: window.textContent,
           cut: [...window.children].some((cell) => cell.scrollWidth > cell.clientWidth),
           inLine:
@@ -288,7 +295,7 @@ test("every row's windows share columns, so bars start together whatever the CLI
     );
     // pod and laptop's Claude, pod's Codex, and studio's Claude: seven windows in three rows.
     expect(cells).toHaveLength(7);
-    expect(cells.filter((cell) => !cell.inLine)).toEqual([]);
+    expect(cells.filter((cell) => !cell.inLine || !cell.indented)).toEqual([]);
     for (const key of ["name", "bar", "barWidth", "percent", "reset"] as const) {
       const at = cells.map((cell) => cell[key]);
       expect(at, key).toEqual(at.map(() => at[0]));

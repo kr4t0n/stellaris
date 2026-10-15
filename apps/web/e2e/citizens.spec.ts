@@ -117,23 +117,78 @@ function isWhole(element: Locator): Promise<boolean> {
   });
 }
 
-/** What a citizen's row shows for its tokens: words, such as "no turns", or its in and out counts. */
-type Tokens = string | { readonly input: string; readonly output: string };
+/**
+ * Where a row's counts are drawn, from their text: the in count's right edge, the separator after
+ * it, and the out count, leaving out what only screen readers get.
+ */
+function countsOf(cell: Locator) {
+  return cell.evaluate((node) => {
+    const texts: Text[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+      if (text instanceof Text && text.parentElement?.closest(".sr-only") === null) {
+        texts.push(text);
+      }
+    }
+    const input = texts.find((text) => text.data.includes(" in ·"));
+    const output = texts.findLast((text) => text.data.includes(" out"));
+    if (input === undefined || output === undefined) {
+      throw new Error("no counts are drawn");
+    }
+    const range = document.createRange();
+    const box = (text: Text, from: number, to: number) => {
+      range.setStart(text, from);
+      range.setEnd(text, to);
+      return range.getBoundingClientRect();
+    };
+    const dot = input.data.indexOf("·");
+    const inBox = box(input, 0, input.data.indexOf(" in") + 3);
+    const dotBox = box(input, dot, dot + 1);
+    const from = output === input ? input.data.indexOf("· ") + 2 : 0;
+    const outBox = box(output, from, output.data.indexOf(" out") + 4);
+    // Generated content drawn anywhere in the cell, which only its own text should be.
+    const drawn = [node, ...node.querySelectorAll("*")].filter((each) => {
+      const before = getComputedStyle(each, "::before");
+      return before.visibility === "visible" && !["none", "normal"].includes(before.content);
+    }).length;
+    return {
+      drawn,
+      height: node.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(getComputedStyle(node).lineHeight),
+      top: inBox.top,
+      inRight: inBox.right,
+      dotLeft: dotBox.left,
+      dotRight: dotBox.right,
+      outTop: outBox.top,
+      outLeft: outBox.left,
+      outRight: outBox.right,
+    };
+  });
+}
+
+/** How far apart the furthest of some values are. */
+function spread(values: number[]): number {
+  return Math.max(...values) - Math.min(...values);
+}
 
 /**
- * Where a row's tokens are drawn: the words, or the in count with the separator after it and the
- * out count, each a cell of its own, the out count followed by what only screen readers get.
+ * Checks that counted rows' in counts end at one x, and their out counts too, and that the widest
+ * out count starts a space after the separator, as wide a space as the one before it, while the
+ * others start further on; and that each row's counts are one line of their own text.
  */
-function tokensIn(row: Locator, tokens: Tokens): { first: Locator; last: Locator } {
-  if (typeof tokens === "string") {
-    const words = row.getByText(tokens);
-    return { first: words, last: words };
+async function expectAligned(cells: readonly Locator[]) {
+  const counts = await Promise.all(cells.map((cell) => countsOf(cell)));
+  expect(spread(counts.map((each) => each.inRight)), "in counts' right edges").toBeLessThan(1);
+  expect(spread(counts.map((each) => each.outRight)), "out counts' right edges").toBeLessThan(1);
+  for (const each of counts) {
+    expect(Math.abs(each.top - each.outTop)).toBeLessThanOrEqual(1);
+    expect(each.height).toBeLessThanOrEqual(each.lineHeight + 1);
+    expect(each.drawn).toBe(0);
   }
-  const output = tokens.output.replaceAll(".", "\\.");
-  return {
-    first: row.getByText(`${tokens.input} ·`, { exact: true }),
-    last: row.getByText(new RegExp(`^${output}(,|$)`)),
-  };
+  const before = counts.map((each) => each.dotLeft - each.inRight);
+  const after = counts.map((each) => each.outLeft - each.dotRight);
+  expect(spread(before)).toBeLessThan(0.5);
+  expect(Math.abs(Math.min(...after) - (before[0] ?? Number.NaN))).toBeLessThan(0.5);
 }
 
 test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
@@ -559,13 +614,10 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
 
   // The last day by default: desk's one counted turn, as its Turns tab adds it up.
   await expect(window.getByRole("link", { name: "24h" })).toHaveAttribute("aria-current", "page");
-  const deskCounts = tokensIn(row("desk"), { input: "151K in", output: "1.5K out" });
-  for (const cell of [deskCounts.first, deskCounts.last]) {
-    await expect(cell).toHaveAttribute(
-      "title",
-      /^151,361 input tokens: 146,048 read from the cache.*; over 1 finished turn in the last 24 hours$/,
-    );
-  }
+  await expect(row("desk")).toContainText("151K in · 1.5K out");
+  await expect(
+    row("desk").getByTitle(/^151,361 input tokens: 146,048 read from the cache/),
+  ).toHaveAttribute("title", /; over 1 finished turn in the last 24 hours$/);
   await expect(row("stew")).toContainText("no turns");
   const retired = view.getByRole("region", { name: "Retired" });
   await expect(retired.getByRole("heading", { name: "Retired" })).toBeVisible();
@@ -575,26 +627,17 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
 
   // The island is 420 px wide, too narrow for the counts beside the rest: they take a line under
   // the row, ending under its state, with no separator, and nothing is cut or runs out of the list.
-  for (const [name, tokens, word] of [
-    ["desk", { input: "151K in", output: "1.5K out" }, "resting"],
+  for (const [name, label, word] of [
+    ["desk", "151K in · 1.5K out", "resting"],
     ["stew", "no turns", "resting"],
     ["ada", "no turns", "retired"],
   ] as const) {
-    const { first, last } = tokensIn(row(name), tokens);
+    const counts = row(name).getByText(label);
     const state = row(name).getByText(word, { exact: true });
-    const [firstBox, countsBox, stateBox] = await Promise.all([
-      textBoxOf(first),
-      textBoxOf(last),
-      textBoxOf(state),
-    ]);
+    const [countsBox, stateBox] = await Promise.all([textBoxOf(counts), textBoxOf(state)]);
     expect(Math.abs(countsBox.x + countsBox.width - stateBox.x - stateBox.width)).toBeLessThan(1);
     expect(countsBox.y).toBeGreaterThanOrEqual(stateBox.y + stateBox.height - 1);
-    expect(Math.abs(firstBox.y - countsBox.y)).toBeLessThanOrEqual(1);
-    if (typeof tokens !== "string") {
-      expect(firstBox.x + firstBox.width).toBeLessThanOrEqual(countsBox.x);
-    }
-    expect(await isWhole(first)).toBe(true);
-    expect(await isWhole(last)).toBe(true);
+    expect(await isWhole(counts)).toBe(true);
     expect(await isWhole(state)).toBe(true);
     await expect(row(name).getByText("·", { exact: true })).toBeHidden();
   }
@@ -605,15 +648,12 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
   await window.getByRole("link", { name: "7d" }).click();
   await expect(page).toHaveURL(/\/citizens\?window=7d$/);
   await expect(window.getByRole("link", { name: "7d" })).toHaveAttribute("aria-current", "page");
-  const partial = tokensIn(row("desk"), { input: "151K in", output: "1.5K out" });
-  await expect(partial.last).toHaveText("1.5K out, over 1 of 3 finished turns in the last 7 days");
-  await expect(partial.first).toBeVisible();
+  await expect(row("desk")).toContainText("151K in · 1.5K out");
+  await expect(row("desk")).not.toContainText("≥");
   await expect(row("desk").getByRole("link")).toHaveAccessibleName(
-    /151K in · 1\.5K out\b.*, over 1 of 3 finished turns in the last 7 days/,
+    /over 1 of 3 finished turns in the last 7 days/,
   );
-  for (const cell of [partial.first, partial.last]) {
-    await expect(cell).toHaveAttribute("title", /The other 2 have no count/);
-  }
+  await expect(row("desk").getByTitle(/The other 2 have no count/)).toBeVisible();
   await expect(row("stew")).toContainText("tokens unknown");
   await expect(
     row("stew").getByTitle(/^2 finished turns in the last 7 days, none with a token count/),
@@ -621,15 +661,9 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
 
   await window.getByRole("link", { name: "All" }).click();
   await expect(page).toHaveURL(/\/citizens\?window=all$/);
-  for (const [name, input, output] of [
-    ["desk", "7.4M in", "42K out"],
-    ["stew", "7.2M in", "40K out"],
-    ["ada", "88K in", "900 out"],
-  ] as const) {
-    const { first, last } = tokensIn(row(name), { input, output });
-    await expect(first).toBeVisible();
-    await expect(last).toBeVisible();
-  }
+  await expect(row("desk")).toContainText("7.4M in · 42K out");
+  await expect(row("stew")).toContainText("7.2M in · 40K out");
+  await expect(row("ada")).toContainText("88K in · 900 out");
   await expect(view.getByText(/≥/)).toHaveCount(0);
 });
 
@@ -651,47 +685,39 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
     view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
 
   // Each row's counts and state share a line, neither cut nor able to wrap, a space's width apart
-  // around the separators, and the counts end where the other rows' do, the in counts too, and the
-  // states start where theirs do.
-  const oneLine = async (rows: ReadonlyArray<readonly [string, Tokens, string]>) => {
-    const ins: number[] = [];
-    const gaps: number[] = [];
+  // around the separator, and the counts end where the other rows' do, and the states start where
+  // theirs do.
+  const oneLine = async (rows: ReadonlyArray<readonly [string, string | RegExp, string]>) => {
     const ends: number[] = [];
     const starts: number[] = [];
-    for (const [name, tokens, word] of rows) {
-      const { first, last } = tokensIn(row(name), tokens);
+    const withCounts: Locator[] = [];
+    for (const [name, label, word] of rows) {
+      const counts = row(name).getByText(label);
       const separator = row(name).getByText("·", { exact: true });
       const state = row(name).getByText(word, { exact: true });
       await expect(separator).toBeVisible();
-      const [firstBox, countsBox, dotBox, stateBox] = await Promise.all([
-        textBoxOf(first),
-        textBoxOf(last),
+      const [countsBox, dotBox, stateBox] = await Promise.all([
+        textBoxOf(counts),
         textBoxOf(separator),
         textBoxOf(state),
       ]);
-      expect(Math.abs(firstBox.y - stateBox.y)).toBeLessThanOrEqual(1);
       expect(Math.abs(countsBox.y - stateBox.y)).toBeLessThanOrEqual(1);
       expect(dotBox.x - countsBox.x - countsBox.width).toBeGreaterThanOrEqual(0);
       expect(dotBox.x - countsBox.x - countsBox.width).toBeLessThan(8);
       expect(stateBox.x).toBeGreaterThanOrEqual(dotBox.x + dotBox.width);
-      for (const each of [first, last, state]) {
-        expect(await isWhole(each)).toBe(true);
-        expect(await isUnbreakable(each)).toBe(true);
-      }
-      if (typeof tokens !== "string") {
-        ins.push(firstBox.x + firstBox.width);
-        gaps.push(countsBox.x - firstBox.x - firstBox.width);
-      }
+      expect(await isWhole(counts)).toBe(true);
+      expect(await isWhole(state)).toBe(true);
+      expect(await isUnbreakable(state)).toBe(true);
       ends.push(countsBox.x + countsBox.width);
       starts.push(stateBox.x);
+      if (/ in · /.test(String(label))) {
+        withCounts.push(counts);
+      }
     }
     expect(Math.max(...ends) - Math.min(...ends)).toBeLessThan(1);
     expect(Math.max(...starts) - Math.min(...starts)).toBeLessThan(1);
-    if (ins.length > 0) {
-      expect(Math.max(...ins) - Math.min(...ins)).toBeLessThan(1);
-      // The widest out count starts a space after the in count's separator, the others further.
-      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(0);
-      expect(Math.min(...gaps)).toBeLessThan(8);
+    if (withCounts.length > 0) {
+      await expectAligned(withCounts);
     }
   };
 
@@ -703,10 +729,9 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
     ["ada", "counting…", "retired"],
   ]);
   count();
-  const deskCounts = { input: "151K in", output: "1.5K out" };
-  await expect(tokensIn(row("desk"), deskCounts).first).toBeVisible();
+  await expect(row("desk")).toContainText("151K in · 1.5K out");
   await oneLine([
-    ["desk", deskCounts, "working"],
+    ["desk", "151K in · 1.5K out", "working"],
     ["stew", "no turns", "resting"],
     ["ada", "no turns", "retired"],
   ]);
@@ -714,12 +739,10 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   const working = row("desk").getByText("working", { exact: true });
   await expect(working).toHaveClass(/text-emerald-300/);
   await expect(working).toHaveAttribute("title", "in a turn at the society");
-  for (const cell of Object.values(tokensIn(row("desk"), deskCounts))) {
-    await expect(cell).toHaveAttribute(
-      "title",
-      /^151,361 input tokens: 146,048 read from the cache/,
-    );
-  }
+  await expect(row("desk").getByText("151K in · 1.5K out")).toHaveAttribute(
+    "title",
+    /^151,361 input tokens: 146,048 read from the cache/,
+  );
   // The separator is not read out: the row's name is as it was.
   await expect(row("desk").getByRole("link")).toHaveAccessibleName(/151K in · 1\.5K out working$/);
 
@@ -747,7 +770,7 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   await window.getByRole("link", { name: "7d" }).click();
   await expect(row("stew")).toContainText("tokens unknown");
   await oneLine([
-    ["desk", deskCounts, "working"],
+    ["desk", /^151K in · 1\.5K out/, "working"],
     ["stew", "tokens unknown", "resting"],
     ["ada", "no turns", "retired"],
   ]);
@@ -755,14 +778,14 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
     /over 1 of 3 finished turns in the last 7 days/,
   );
   await window.getByRole("link", { name: "All" }).click();
-  const deskAll = { input: "7.4M in", output: "42K out" };
+  await expect(row("desk")).toContainText("7.4M in · 42K out");
+  // Every count differs in width from row to row, in and out, and hal's out count is the widest.
   const allTime = [
-    ["desk", deskAll, "working"],
-    ["hal", { input: "950K in", output: "1.5M out" }, "resting"],
-    ["stew", { input: "7.2M in", output: "40K out" }, "resting"],
-    ["ada", { input: "88K in", output: "900 out" }, "retired"],
+    ["desk", /^7\.4M in · 42K out/, "working"],
+    ["hal", "950K in · 1.5M out", "resting"],
+    ["stew", /^7\.2M in · 40K out/, "resting"],
+    ["ada", "88K in · 900 out", "retired"],
   ] as const;
-  await expect(tokensIn(row("desk"), deskAll).first).toBeVisible();
   await oneLine(allTime);
   expect(await sidewaysOf(view)).toBe(0);
 
@@ -774,7 +797,7 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   const separator = row("desk").getByText("·", { exact: true });
   await expect(separator).toBeHidden();
   const [under, beside] = await Promise.all([
-    textBoxOf(tokensIn(row("desk"), deskAll).last),
+    textBoxOf(row("desk").getByText(/^7\.4M in · 42K out/)),
     textBoxOf(row("desk").getByText("working", { exact: true })),
   ]);
   expect(under.y).toBeGreaterThanOrEqual(beside.y + beside.height - 1);
@@ -787,18 +810,18 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
 test("each citizen's in and out counts line up down the list, beside the state and under the row", async ({
   page,
 }) => {
-  // Over all time each count's width differs from row to row, in and out, and hal's out count is
-  // the widest.
   await fakeBoard(page, { retired: true, crowded: true });
   const view = page.getByRole("region", { name: "Board content" });
   const row = (name: string) =>
     view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
   const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  // Over all time each count's width differs from row to row, in and out, and hal's out count is
+  // the widest.
   const counted = [
-    ["desk", { input: "7.4M in", output: "42K out" }],
-    ["hal", { input: "950K in", output: "1.5M out" }],
-    ["stew", { input: "7.2M in", output: "40K out" }],
-    ["ada", { input: "88K in", output: "900 out" }],
+    ["desk", "7.4M in · 42K out"],
+    ["hal", "950K in · 1.5M out"],
+    ["stew", "7.2M in · 40K out"],
+    ["ada", "88K in · 900 out"],
   ] as const;
   for (const [width, island] of [
     [1440, 576],
@@ -809,23 +832,38 @@ test("each citizen's in and out counts line up down the list, beside the state a
     await expect(handle).toHaveAccessibleName(
       new RegExp(`^Width of the board's content, ${island} of`),
     );
-    const ins: number[] = [];
-    const outs: number[] = [];
-    for (const [name, tokens] of counted) {
-      const { first, last } = tokensIn(row(name), tokens);
-      await expect(first).toBeVisible();
-      const [input, output] = await Promise.all([textBoxOf(first), textBoxOf(last)]);
-      expect(Math.abs(input.y - output.y)).toBeLessThanOrEqual(1);
-      expect(output.x).toBeGreaterThanOrEqual(input.x + input.width);
-      ins.push(input.x + input.width);
-      outs.push(output.x + output.width);
+    const cells = counted.map(([name, label]) => row(name).getByText(label));
+    for (const cell of cells) {
+      await expect(cell).toBeVisible();
+      await expect(cell).toHaveCSS("font-variant-numeric", "tabular-nums");
     }
-    expect(Math.max(...ins) - Math.min(...ins), `in counts at ${island} px`).toBeLessThan(1);
-    expect(Math.max(...outs) - Math.min(...outs), `out counts at ${island} px`).toBeLessThan(1);
-    // Turns without a count leave the counts as they are, with no mark.
+    await expectAligned(cells);
+    // What sizes the out counts adds nothing a reader or a copy picks up, and no mark is shown.
+    await expect(row("hal").getByText("950K in · 1.5M out")).toHaveText("950K in · 1.5M out");
+    await expect(row("hal").getByRole("link")).toHaveAccessibleName(
+      /investigator .* 950K in · 1\.5M out resting$/,
+    );
     await expect(view.getByText(/≥/)).toHaveCount(0);
     expect(await sidewaysOf(view)).toBe(0);
   }
+});
+
+test("under the row, the counts take no room from the row above them", async ({ page }) => {
+  // At a 490 px island hal's runner, chart-named, just fits on one line beside the rest of its row.
+  // desk's out count is wider than any state's word, and laid out in the state's column it would
+  // widen that column and push hal's runner to two lines.
+  await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "490"));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page, { retired: true, crowded: true });
+  await page.goto("/citizens?window=24h");
+  const view = page.getByRole("region", { name: "Board content" });
+  const hal = view.getByRole("listitem").filter({ has: page.getByText("hal", { exact: true }) });
+  await expect(
+    page.getByRole("button", { name: /^Width of the board's content/ }),
+  ).toHaveAccessibleName(/^Width of the board's content, 490 of/);
+  await expect(view.getByText("151K in · 1.5K out")).toBeVisible();
+  await expect(hal).toContainText("no turns");
+  expect(await lineCountOf(hal.getByTitle("outside projects: stellaris-runner-1"))).toBe(1);
 });
 
 test("the counts move beside the state at a 576 px island, to the pixel", async ({ page }) => {
@@ -838,7 +876,7 @@ test("the counts move beside the state at a 576 px island, to the pixel", async 
   const handle = page.getByRole("button", { name: /^Width of the board's content/ });
   const separator = desk.getByText("·", { exact: true });
   await expect(handle).toHaveAccessibleName(/^Width of the board's content, 575 of/);
-  await expect(tokensIn(desk, { input: "151K in", output: "1.5K out" }).first).toBeVisible();
+  await expect(desk).toContainText("151K in · 1.5K out");
   await expect(separator).toBeHidden();
 
   await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "576"));

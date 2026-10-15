@@ -66,6 +66,7 @@ function CitizenRow({
   member,
   state,
   tokens,
+  outputs,
   runners,
   placed,
   now,
@@ -73,6 +74,8 @@ function CitizenRow({
   member: Member;
   state: RowState;
   tokens: RowTokens;
+  /** Every out count the list shows, which the row's own is drawn as wide as. */
+  outputs: readonly string[];
   runners: readonly Runner[];
   placed: ReadonlyMap<string, string>;
   now: number;
@@ -115,37 +118,36 @@ function CitizenRow({
           {projects}
         </span>
         {/*
-          The counts, in and out each right-aligned in a column of its own, so both line up from
-          row to row: columns before the state where the list is wide enough, else a line of their
-          own under the row, the out count in the state's column. The in count's cell reaches into
-          the column gap, so the out count sits a space after its separator, as the state does
-          after its own. Words in place of counts span both.
+          The counts, right-aligned so they line up from row to row: a column of their own before
+          the state where the list is wide enough, else a line of their own under the row, ending
+          at its right edge. The out count sits in a box as wide as the widest in the list, so the
+          in counts end at one place too; the box takes its width from every out count in the list,
+          laid in it as generated content of hidden boxes, which neither screen readers nor a copy
+          pick up.
         */}
-        {tokens.counts === null ? (
-          <span
-            className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted @min-[560px]:col-span-2 @min-[560px]:row-auto"
-            title={tokens.detail}
-          >
-            {tokens.label}
-            {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
-          </span>
-        ) : (
-          <>
-            <span
-              className="col-[2/-2] row-start-2 -mr-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
-              title={tokens.detail}
-            >
-              {tokens.counts.input} ·
-            </span>
-            <span
-              className="col-[-2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
-              title={tokens.detail}
-            >
-              {tokens.counts.output}
-              {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
-            </span>
-          </>
-        )}
+        <span
+          className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
+          title={tokens.detail}
+        >
+          {tokens.counts === null ? (
+            tokens.label
+          ) : (
+            <>
+              {`${tokens.counts.input} · `}
+              <span className="inline-grid justify-items-end">
+                <span className="[grid-area:1/1]">{tokens.counts.output}</span>
+                {outputs.map((output) => (
+                  <span
+                    key={output}
+                    data-width={output}
+                    className="invisible [grid-area:1/1] before:content-[attr(data-width)]"
+                  />
+                ))}
+              </span>
+            </>
+          )}
+          {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
+        </span>
         {/*
           On one line, the state's cell reaches into the column gap, so its separator sits a space
           after the counts, as the separators inside them do.
@@ -233,12 +235,18 @@ export function CitizensView() {
       : { label: "tokens unknown", counts: null, detail: tokenUse.error.message, spoken: null };
   };
 
+  // Every out count the list shows, so each row's is drawn as wide as the widest.
+  const outputs = [
+    ...new Set([...active, ...retired].flatMap((member) => tokens(member).counts?.output ?? [])),
+  ];
+
   const row = (member: Member) => (
     <CitizenRow
       key={member.name}
       member={member}
       state={state(member)}
       tokens={tokens(member)}
+      outputs={outputs}
       runners={runners.data ?? []}
       placed={placed}
       now={clock}
@@ -284,13 +292,12 @@ export function CitizensView() {
         ) : null}
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
-          cell. From a 576 px island, a list 560 px wide inside its padding, the in and out counts
-          are two columns before the state, and the model and projects share what the other columns
-          leave, the only cells that cut. In a narrower island the counts would push the row past
-          its edge, so they take a line under it, and the model cuts before the projects go under
-          3rem.
+          cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
+          before the state, and the model and projects share what the other columns leave, the only
+          cells that cut. In a narrower island the counts would push the row past its edge, so they
+          take a line under it, and the model cuts before the projects go under 3rem.
         */}
-        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto_auto]">
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
           {retired.length === 0 ? null : (
             <section

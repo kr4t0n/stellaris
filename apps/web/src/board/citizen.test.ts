@@ -4,6 +4,7 @@ import {
   endingOf,
   historyTotals,
   runnersOf,
+  tokenCounts,
   tokensDetail,
   tokensLabel,
   tokenUseCell,
@@ -83,7 +84,7 @@ describe("citizen", () => {
     expect(historyTotals([entry()])).toMatchObject({ usage: null, withUsage: 0 });
   });
 
-  it("words a citizen's tokens over a window, a lower bound when some turns have no count", () => {
+  it("words a citizen's tokens over a window, the sum of the turns that counted them", () => {
     const usage = {
       inputTokens: 5_313,
       outputTokens: 1_540,
@@ -93,13 +94,17 @@ describe("citizen", () => {
     const row = { agent: "desk", turns: 3, withUsage: 3, usage };
     expect(tokenUseCell(row, "24h")).toEqual({
       label: "151K in · 1.5K out",
+      counts: { input: "151K in", output: "1.5K out" },
       detail: `${tokensDetail(usage)}; over 3 finished turns in the last 24 hours`,
       spoken: null,
     });
     // As the Turns tab adds up the same turns.
     expect(tokenUseCell(row, "24h").label).toBe(tokensLabel(usage));
+    // Turns without a count add nothing: the counts read as they would without them, and the hover
+    // and screen readers say how many turns they cover.
     expect(tokenUseCell({ ...row, turns: 5 }, "7d")).toEqual({
-      label: "≥151K in · ≥1.5K out",
+      label: "151K in · 1.5K out",
+      counts: { input: "151K in", output: "1.5K out" },
       detail:
         `${tokensDetail(usage)}; over 3 of 5 finished turns in the last 7 days. The other 2 have ` +
         "no count: logged before turns counted tokens, or ended without their runner's report.",
@@ -111,6 +116,7 @@ describe("citizen", () => {
     // Unknown, never zero, when no turn counted; and a citizen with no turn in the window.
     expect(tokenUseCell({ ...row, turns: 1, withUsage: 0, usage: null }, "24h")).toEqual({
       label: "tokens unknown",
+      counts: null,
       detail:
         "1 finished turn in the last 24 hours, none with a token count: logged before turns " +
         "counted tokens, or ended without their runner's report",
@@ -118,6 +124,7 @@ describe("citizen", () => {
     });
     expect(tokenUseCell(undefined, "7d")).toEqual({
       label: "no turns",
+      counts: null,
       detail: "no finished turn in the last 7 days",
       spoken: null,
     });
@@ -135,6 +142,11 @@ describe("citizen", () => {
       "12 in · 940 out",
     );
     expect(tokensLabel({ ...usage, cacheReadTokens: 1_234_567 })).toBe("1.2M in · 1.5K out");
+    // Its halves, for a list that lines up each.
+    expect(tokenCounts({ ...usage, cacheReadTokens: 1_234_567 })).toEqual({
+      input: "1.2M in",
+      output: "1.5K out",
+    });
     expect(tokensDetail(usage)).toBe(
       "151,361 input tokens: 146,048 read from the cache, 0 written to it, 5,313 neither; 1,540 output tokens",
     );

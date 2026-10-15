@@ -57,6 +57,7 @@ interface RowState {
 /** A row's tokens over the window: as `tokenUseCell` words them, or why they are not shown. */
 interface RowTokens {
   readonly label: string;
+  readonly counts: { readonly input: string; readonly output: string } | null;
   readonly detail: string | undefined;
   readonly spoken: string | null;
 }
@@ -114,17 +115,37 @@ function CitizenRow({
           {projects}
         </span>
         {/*
-          The counts, right-aligned so they line up from row to row: a column of their own before
-          the state where the list is wide enough, else a line of their own under the row, ending
-          at its right edge.
+          The counts, in and out each right-aligned in a column of its own, so both line up from
+          row to row: columns before the state where the list is wide enough, else a line of their
+          own under the row, the out count in the state's column. The in count's cell reaches into
+          the column gap, so the out count sits a space after its separator, as the state does
+          after its own. Words in place of counts span both.
         */}
-        <span
-          className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
-          title={tokens.detail}
-        >
-          {tokens.label}
-          {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
-        </span>
+        {tokens.counts === null ? (
+          <span
+            className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted @min-[560px]:col-span-2 @min-[560px]:row-auto"
+            title={tokens.detail}
+          >
+            {tokens.label}
+            {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
+          </span>
+        ) : (
+          <>
+            <span
+              className="col-[2/-2] row-start-2 -mr-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
+              title={tokens.detail}
+            >
+              {tokens.counts.input} ·
+            </span>
+            <span
+              className="col-[-2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
+              title={tokens.detail}
+            >
+              {tokens.counts.output}
+              {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
+            </span>
+          </>
+        )}
         {/*
           On one line, the state's cell reaches into the column gap, so its separator sits a space
           after the counts, as the separators inside them do.
@@ -208,8 +229,8 @@ export function CitizensView() {
       return tokenUseCell(counted.get(member.name), window);
     }
     return tokenUse.error === null
-      ? { label: "counting…", detail: undefined, spoken: null }
-      : { label: "tokens unknown", detail: tokenUse.error.message, spoken: null };
+      ? { label: "counting…", counts: null, detail: undefined, spoken: null }
+      : { label: "tokens unknown", counts: null, detail: tokenUse.error.message, spoken: null };
   };
 
   const row = (member: Member) => (
@@ -263,12 +284,13 @@ export function CitizensView() {
         ) : null}
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
-          cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
-          before the state, and the model and projects share what the other columns leave, the only
-          cells that cut. In a narrower island the counts would push the row past its edge, so they
-          take a line under it, and the model cuts before the projects go under 3rem.
+          cell. From a 576 px island, a list 560 px wide inside its padding, the in and out counts
+          are two columns before the state, and the model and projects share what the other columns
+          leave, the only cells that cut. In a narrower island the counts would push the row past
+          its edge, so they take a line under it, and the model cuts before the projects go under
+          3rem.
         */}
-        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
           {retired.length === 0 ? null : (
             <section

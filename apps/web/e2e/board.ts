@@ -735,9 +735,9 @@ function askFixtures(): Map<string, AskFixture> {
 /**
  * Each citizen's tokens over a window: desk's one counted turn in the last day, as its Turns tab
  * lists it; over the week two more of its turns without a count, and stew's two with none; over
- * the whole log a second counted turn of each.
+ * the whole log a second counted turn of each, and in a crowded society hal's two.
  */
-function tokens(window: string) {
+function tokens(window: string, crowded: boolean) {
   const counted = DESK_TURN.usage;
   const more = {
     inputTokens: 2_000,
@@ -762,6 +762,22 @@ function tokens(window: string) {
         : [
             { agent: "desk", turns: 4, withUsage: 2, usage: sum(counted, more) },
             { agent: "stew", turns: 3, withUsage: 1, usage: more },
+            // hal writes more than the others, so its out count is the widest.
+            ...(crowded
+              ? [
+                  {
+                    agent: "hal",
+                    turns: 2,
+                    withUsage: 2,
+                    usage: {
+                      inputTokens: 10_000,
+                      outputTokens: 1_500_000,
+                      cacheReadTokens: 940_000,
+                      cacheWriteTokens: 0,
+                    },
+                  },
+                ]
+              : []),
           ];
   return {
     window,
@@ -911,7 +927,10 @@ function minutesFromNow(minutes: number): string {
   return new Date(Date.now() + minutes * 60_000).toISOString();
 }
 
-/** Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much. */
+/**
+ * Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much, and the weekly
+ * window of one model, which the CLI names.
+ */
 function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
   const observedAt = minutesFromNow(-observedAgo);
   return {
@@ -933,6 +952,14 @@ function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
         key: "seven_day",
         minutes: 10_080,
         usedPercent: 12,
+        resetsAt: minutesFromNow(8_620),
+        observedAt,
+      },
+      {
+        key: "model:Fable",
+        label: "Fable",
+        minutes: 10_080,
+        usedPercent: 9,
         resetsAt: minutesFromNow(8_620),
         observedAt,
       },
@@ -1031,7 +1058,8 @@ export async function fakeBoard(
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
-     * investigator, on the other, so rows in the Citizens list run out of room.
+     * investigator, on the other, whose counts over all time are the widest out, so rows in the
+     * Citizens list run out of room.
      */
     crowded?: boolean;
   } = {},
@@ -1053,6 +1081,8 @@ export async function fakeBoard(
         : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
   // studio's own login, with numbers of its own, reported as fresh as pod's.
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
+  // laptop's, taken with pod's, so their resets match to the minute whenever the view asks.
+  const laptopQuotas = { claude: claudeQuota(120, 35) };
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1451,7 +1481,7 @@ export async function fakeBoard(
       );
     }
     if (pathname === "/api/tokens") {
-      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h");
+      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h", crowded);
       return json(
         route,
         options.retired === true && use.window === "all"
@@ -1556,7 +1586,7 @@ export async function fakeBoard(
             capabilities: ["gpu"],
             version: "0.3.10",
             status: "disconnected",
-            quotas: { claude: claudeQuota(120, 35) },
+            quotas: laptopQuotas,
           },
         ]);
       case "/api/agents/desk/models":

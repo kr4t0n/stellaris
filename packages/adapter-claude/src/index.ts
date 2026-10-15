@@ -471,17 +471,26 @@ function isUuid(id: string): id is UUID {
 
 /**
  * What Claude Code says when it cannot resume a session, before it announces the session and before
- * any model call. As 2.1.283 says it: `No conversation found with session ID: <id>` for an id with
- * no transcript, or one it cannot read; `Session ID <id> is already in use` when asked to create a
- * session over such a file; and, for an id that is not a UUID, `Invalid session ID` or that the id
- * `is not a UUID`.
+ * any model call, as 2.1.283 says it for an id with no transcript, or one it cannot read: `No
+ * conversation found with session ID: <id>`. Its other refusals of an id cannot come up here: the
+ * adapter hands it no id that is not a UUID, and creates a session only under a fresh one.
  */
-const LOST_SESSION =
-  /No conversation found with session ID|is already in use|Invalid session ID|is not a UUID/;
+const LOST_SESSION = /No conversation found with session ID/;
 
 /** Why the CLI could not resume a session, from its words: nothing there to resume, or try again. */
 function resumeFailureOf(error: string | undefined): ResumeFailure {
   return error !== undefined && LOST_SESSION.test(error) ? "lost" : "retry";
+}
+
+/**
+ * A turn on a saved session that ended before the CLI opened it could not resume it: one that
+ * failed, and one held up to the turn's limit, as on a transcript the CLI never finishes reading. A
+ * stop is the user's decision, not the session's.
+ */
+function withResumeFailure(result: TurnResult): TurnResult {
+  return result.exitReason === "error" || result.exitReason === "timeout"
+    ? { ...result, resumeFailed: resumeFailureOf(result.error) }
+    : result;
 }
 
 /**
@@ -720,10 +729,7 @@ class ClaudeResident implements ResidentSession {
       this.lastTotalCostUsd = state.totalCostUsd;
     }
     const result = finishTurn(state, costUsd, events, emit);
-    // A CLI that failed before it opened a saved session could not resume it.
-    return this.resuming && !this.opened && result.exitReason === "error"
-      ? { ...result, resumeFailed: resumeFailureOf(result.error) }
-      : result;
+    return this.resuming && !this.opened ? withResumeFailure(result) : result;
   }
 
   async close(): Promise<void> {
@@ -946,9 +952,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
     const result = finishTurn(state, costUsd, events, emit);
     // The CLI announces a session once it has opened it, and says first why it could not.
-    return resuming && !state.initialized && result.exitReason === "error"
-      ? { ...result, resumeFailed: resumeFailureOf(result.error) }
-      : result;
+    return resuming && !state.initialized ? withResumeFailure(result) : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */

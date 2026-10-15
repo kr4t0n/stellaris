@@ -75,6 +75,29 @@ function refusedFrames(): SDKMessage[] {
   return [assistant, result] as unknown as SDKMessage[];
 }
 
+/** A warm query that sends nothing but its init message, if it `opens`, and takes no interrupt. */
+function hanging(opens: boolean): QueryFn {
+  return () => {
+    const ended = Promise.withResolvers<void>();
+    const stream = (async function* () {
+      if (opens) {
+        yield {
+          type: "system",
+          subtype: "init",
+          session_id: start.session,
+          model: "claude-test-model",
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        } as unknown as SDKMessage;
+      }
+      await ended.promise;
+    })();
+    return Object.assign(stream, {
+      interrupt: () => Promise.resolve(),
+      close: () => ended.resolve(),
+    });
+  };
+}
+
 /**
  * A scripted SDK: reads user messages from the streamed prompt and answers each with the frames
  * for that turn, the way a real query does in streaming-input mode. Records interrupts and closes.
@@ -225,6 +248,35 @@ describe("Claude resident sessions", () => {
     expect(ended.exitReason).toBe("error");
     expect(ended.resumeFailed).toBeUndefined();
     await fresh.close();
+  });
+
+  it("counts a resume the CLI never answers before the turn's limit as retry, and no limit after it opened the session", async () => {
+    // Claude Code 2.1.283 on a transcript it never finishes reading sends nothing and takes no
+    // interrupt, so the turn ends at its limit and the grace after it, 30 s for a limit of 15 s.
+    vi.useFakeTimers();
+    try {
+      for (const [opens, failed] of [
+        [false, "retry"],
+        [true, undefined],
+      ] as const) {
+        const session = await new ClaudeAgentBackend({ queryFn: hanging(opens) }).startResident(
+          spec,
+          {
+            ...start,
+            newSession: false,
+          },
+        );
+        const turn = session.runTurn("hello");
+        await vi.advanceTimersByTimeAsync(500 + 15_000);
+        const result = await turn;
+        expect(result.exitReason).toBe("timeout");
+        expect(result.error).toBe("turn exceeded 500 ms");
+        expect(result.resumeFailed).toBe(failed);
+        await session.close();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails no later turn as a resume once the CLI opened the session", async () => {

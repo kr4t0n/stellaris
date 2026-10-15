@@ -93,6 +93,19 @@ function exitingAfter(
     })();
 }
 
+/** A cold run whose CLI sends these frames and then nothing, until the turn's limit aborts it. */
+function hangingAfter(frames: readonly SDKMessage[]): QueryFn {
+  return (params) =>
+    (async function* () {
+      yield* frames;
+      const signal = params.options?.abortController?.signal;
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("Claude Code process aborted by user");
+    })();
+}
+
 const request: TurnRequest = {
   spec: {
     agent: "eng-1",
@@ -297,10 +310,6 @@ describe("ClaudeAgentBackend replay", () => {
     expect(lost.session).toBeUndefined();
     expect(lost.costUsd).toBe(0);
 
-    // Created over a file it cannot read, as the adapter once asked it to.
-    const inUse = `Claude Code process exited with code 1. stderr: Error: Session ID ${request.session} is already in use.`;
-    expect((await coldTurn(exitingAfter([], inUse))).resumeFailed).toBe("lost");
-
     // A CLI that ended before it opened the session for anything else may resume it next time.
     for (const queryFn of [exitingAfter([]), replaying([]).queryFn]) {
       const ended = await coldTurn(queryFn);
@@ -328,6 +337,35 @@ describe("ClaudeAgentBackend replay", () => {
     );
     expect(stopped.exitReason).toBe("stopped");
     expect(stopped.resumeFailed).toBeUndefined();
+  });
+
+  it("counts a resume the CLI never answers before the turn's limit as retry, and no limit after it opened the session", async () => {
+    // Claude Code 2.1.283 on a transcript it never finishes reading, such as a named pipe: nothing
+    // at all, no init message and no model call, until the turn's limit aborts it.
+    const limits = { timeoutMs: 50, maxTurns: 10 };
+    const never = await new ClaudeAgentBackend({ queryFn: hangingAfter([]) }).runTurn({
+      ...request,
+      limits,
+    });
+    expect(never.exitReason).toBe("timeout");
+    expect(never.error).toBe("turn exceeded 50 ms");
+    expect(never.resumeFailed).toBe("retry");
+
+    // Not a resume: a new session's CLI that hangs so, and a saved session's once the CLI opened it.
+    const fresh = await new ClaudeAgentBackend({ queryFn: hangingAfter([]) }).runTurn({
+      ...request,
+      newSession: true,
+      limits,
+    });
+    expect(fresh.exitReason).toBe("timeout");
+    expect(fresh.resumeFailed).toBeUndefined();
+    const init = (await recorded("sdk-synthetic.jsonl")).filter((frame) => frame.type === "system");
+    const opened = await new ClaudeAgentBackend({ queryFn: hangingAfter(init) }).runTurn({
+      ...request,
+      limits,
+    });
+    expect(opened.exitReason).toBe("timeout");
+    expect(opened.resumeFailed).toBeUndefined();
   });
 
   it("fails a turn the API refused with the API's words, not the exit that follows them", async () => {

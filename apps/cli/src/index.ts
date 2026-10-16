@@ -858,6 +858,7 @@ function describeCron(cron: Cron, timeZone: string): string {
     cron.scope,
     cron.thread,
     cron.channel === undefined ? undefined : `#${cron.channel}`,
+    cron.place === undefined ? undefined : `~${cron.place}`,
   ]
     .filter((part) => part !== undefined)
     .join("/");

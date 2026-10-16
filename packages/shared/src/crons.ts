@@ -97,7 +97,7 @@ export type CronRun = z.infer<typeof CronRunSchema>;
 
 /**
  * A wake on a clock: one citizen, in one conversation of a scope (a thread's, a channel's other
- * than general, or neither, the home), on a schedule. The note, what to do when it fires, is the
+ * than general, a project's channels' in the society scope, or none, the home), on a schedule. The note, what to do when it fires, is the
  * body of its file and is quoted in the prompt of every turn it starts.
  */
 export const CronFrontmatterSchema = z.object({
@@ -107,6 +107,7 @@ export const CronFrontmatterSchema = z.object({
   scope: NameSchema,
   thread: UlidSchema.optional(),
   channel: NameSchema.optional(),
+  place: NameSchema.optional(),
   schedule: CronScheduleSchema,
   createdBy: NameSchema,
   createdAt: IsoDateTimeSchema,

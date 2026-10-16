@@ -251,6 +251,7 @@ export class TurnExecutor {
         scope: job.scope,
         thread: job.thread,
         channel: job.channel,
+        place: job.place,
         session,
         newSession,
       },
@@ -338,6 +339,7 @@ export class TurnExecutor {
           scope: job.scope,
           thread: job.thread,
           channel: job.channel,
+          place: job.place,
           session,
           resumeFailed: result.resumeFailed,
           error: result.error,
@@ -353,6 +355,7 @@ export class TurnExecutor {
         scope: job.scope,
         thread: job.thread,
         channel: job.channel,
+        place: job.place,
         exitReason: result.exitReason,
       },
       "turn finished",
@@ -429,7 +432,8 @@ export class TurnExecutor {
 
   /**
    * Every conversation's own workspace here: tasks', threads', and channels' worktrees, and the
-   * folders of threads and channels outside projects in the homes' scratch folders.
+   * folders of threads, channels, and projects' channels outside projects in the homes' scratch
+   * folders.
    */
   private async findHeld(): Promise<Found[]> {
     const found: Found[] = [];
@@ -480,6 +484,13 @@ export class TurnExecutor {
             conversation: { kind: "channel", scope: SOCIETY_SCOPE, name },
           },
           path.join(scratch, ".channels", name),
+          null,
+        );
+      }
+      for (const project of await dirs(path.join(scratch, ".places"))) {
+        add(
+          { agent, scope: SOCIETY_SCOPE, conversation: { kind: "place", project } },
+          path.join(scratch, ".places", project),
           null,
         );
       }
@@ -569,9 +580,9 @@ export class TurnExecutor {
   }
 
   /**
-   * A conversation's own workspace goes once its task or thread has ended or its channel was
-   * archived: a task's work is on its branch, and a thread's or a channel's was told to go
-   * somewhere that lasts.
+   * A conversation's own workspace goes once its task or thread has ended or its channel or its
+   * project was archived: a task's work is on its branch, and a thread's, a channel's, or a
+   * project's channels' was told to go somewhere that lasts.
    */
   async dropWorkspace(job: TurnJob): Promise<void> {
     const { workspace } = job;
@@ -581,6 +592,7 @@ export class TurnExecutor {
         scope: job.scope,
         thread: job.thread,
         channel: job.channel,
+        place: job.place,
         by: "turn end",
       };
       if (workspace.kind === "home") {
@@ -603,27 +615,39 @@ export class TurnExecutor {
       }
     } catch (error) {
       this.log.warn(
-        { agent: job.agent, thread: job.thread, channel: job.channel, error: String(error) },
+        {
+          agent: job.agent,
+          thread: job.thread,
+          channel: job.channel,
+          place: job.place,
+          error: String(error),
+        },
         "could not remove an ended conversation's workspace",
       );
     }
   }
 
   /**
-   * The folder of a thread's or a channel's conversation outside projects, under the home's
-   * scratch folder, or null for the home conversation, which works in the scratch folder itself.
+   * The folder of a thread's, a channel's, or a project's channels' conversation outside projects,
+   * under the home's scratch folder, or null for the home conversation, which works in the scratch
+   * folder itself.
    */
   private ownScratch(
     agent: Name,
-    workspace: { thread?: string | undefined; channel?: Name | undefined },
+    workspace: {
+      thread?: string | undefined;
+      channel?: Name | undefined;
+      place?: Name | undefined;
+    },
   ): string | null {
     const scratch = path.join(this.layout.agent(agent), HOME_SCRATCH);
     if (workspace.thread !== undefined) {
       return path.join(scratch, ".threads", workspace.thread);
     }
-    return workspace.channel === undefined
-      ? null
-      : path.join(scratch, ".channels", workspace.channel);
+    if (workspace.channel !== undefined) {
+      return path.join(scratch, ".channels", workspace.channel);
+    }
+    return workspace.place === undefined ? null : path.join(scratch, ".places", workspace.place);
   }
 
   /** The worktree of a thread's or a channel's conversation in a project, or null for the home's. */
@@ -864,8 +888,8 @@ export class TurnExecutor {
    * Makes sure of the project's repository and the worktree a turn runs in: the pair's own for its
    * home conversation; for a task's conversation, one of its own on the task's branch; for a
    * proposal's, a topic's, or a channel's, one of its own detached at the pair's branch. A
-   * society-scope turn runs in the scratch folder of the agent's home, a thread's or a channel's
-   * in a folder of its own there.
+   * society-scope turn runs in the scratch folder of the agent's home, a thread's, a channel's, or
+   * a project's channels' in a folder of its own there.
    */
   private async prepare(job: TurnJob, home: string): Promise<Workspace> {
     const { workspace } = job;

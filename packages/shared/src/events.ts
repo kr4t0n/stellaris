@@ -206,6 +206,8 @@ export const LiveTurnEventSchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn is in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn is in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   event: AgentEventSchema,
 });
 export type LiveTurnEvent = z.infer<typeof LiveTurnEventSchema>;

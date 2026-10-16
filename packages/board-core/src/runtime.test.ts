@@ -127,6 +127,7 @@ describe("Board runtime support", () => {
       ["projects/demo/sessions.json", "{}"],
       ["projects/demo/threads/01M3S000000000000000000AAA/last-turn.json", "{}"],
       ["projects/demo/channels/release/sessions.json", "{}"],
+      ["projects/society/places/lab/last-turn.json", "{}"],
       [".gitignore", "*.md\n"],
     ] as const) {
       await git(copy, "reset", "--quiet", "--hard", "origin/main");
@@ -143,6 +144,7 @@ describe("Board runtime support", () => {
     // Tools' byproducts and the scratch folder are never tracked, wherever they appear.
     for (const ignored of [
       "scratch/data.csv",
+      "projects/society/places/lab/sessions.json",
       "skills/x/node_modules/a.js",
       "memory/.venv/bin/py",
     ]) {

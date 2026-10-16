@@ -193,6 +193,38 @@ describe("steering and stopping a turn in flight", () => {
     });
   });
 
+  it("delivers a post in a project's channels into the turn of that project's conversation outside it", async () => {
+    const { board, backend, scheduler, settle } = await setup(true);
+    // eng-1 is in demo alone, so lab's channels are one conversation of its own outside projects.
+    await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
+    await board.postMessage(USER, {
+      channel: "lab/general",
+      body: "@eng-1 hold on, a lab question",
+    });
+    await scheduler.tick();
+    await backend.whenHeld();
+
+    const followUp = await board.postMessage(USER, {
+      channel: "lab/dev",
+      body: "@eng-1 and lab's dev",
+    });
+    await scheduler.tick();
+    await vi.waitFor(() => expect(backend.delivered).toHaveLength(1));
+    expect(backend.delivered[0]).toContain("and lab's dev");
+    await vi.waitFor(async () =>
+      expect((await eventsOf(board, "turn.steered")).map((event) => event.payload)).toEqual([
+        expect.objectContaining({ project: "society", place: "lab", messages: [followUp.id] }),
+      ]),
+    );
+    backend.release();
+    await scheduler.drain();
+    await settle();
+    await settle();
+    expect(backend.prompts).toHaveLength(2);
+    expect(await board.digestCursor("eng-1", "society", "~lab")).toBe(followUp.id);
+    expect(await board.digestCursor("eng-1", "society")).toBeNull();
+  });
+
   it("leaves a post its runner cannot steer to a turn of its own once the running one ends", async () => {
     const { board, backend, scheduler, settle } = await setup(false);
     await board.postMessage(USER, {

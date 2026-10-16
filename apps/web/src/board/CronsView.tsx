@@ -61,6 +61,13 @@ function Place({ cron }: { cron: CronRecord }) {
       </Link>
     );
   }
+  if (place.kind === "place") {
+    return (
+      <Link to="/p/$slug" params={{ slug: place.project }} className="hover:text-fg-primary">
+        {place.project}'s channels
+      </Link>
+    );
+  }
   return <span>home at {scopeName(place.scope)}</span>;
 }
 

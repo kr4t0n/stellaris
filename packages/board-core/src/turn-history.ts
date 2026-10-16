@@ -19,6 +19,7 @@ export const TurnHistoryPayloadSchema = z.object({
   project: NameSchema,
   thread: UlidSchema.optional(),
   channel: NameSchema.optional(),
+  place: NameSchema.optional(),
   trigger: z.string().default("manual"),
   exitReason: z.string().nullable().default(null),
   costUsd: z.number().default(0),

@@ -969,12 +969,13 @@ export type Dashboard = z.infer<typeof DashboardSchema>;
 
 /**
  * The conversation a proposal was filed from, which its decision wakes the proposer in: a thread's,
- * a channel's beside general, or neither, the scope's home.
+ * a channel's beside general, a project's channels' in the society scope, or none, the scope's home.
  */
 export const ProposalOriginSchema = z.object({
   scope: NameSchema,
   thread: UlidSchema.optional(),
   channel: NameSchema.optional(),
+  place: NameSchema.optional(),
 });
 export type ProposalOrigin = z.infer<typeof ProposalOriginSchema>;
 

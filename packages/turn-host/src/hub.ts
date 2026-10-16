@@ -427,10 +427,12 @@ export class RunnerHub implements TurnRunner {
     project: Name;
     thread?: Ulid;
     channel?: Name;
+    place?: Name;
   }): Promise<SteerOutcome> {
     const turn = this.host.turnIn(conversation.agent, conversation.project, {
       thread: conversation.thread,
       channel: conversation.channel,
+      place: conversation.place,
     });
     const seat = turn === null ? undefined : this.seats.get(turn.runner);
     if (turn === null || seat === undefined || seat.send === null) {
@@ -748,7 +750,8 @@ export class RunnerHub implements TurnRunner {
           each.agent === actor.name &&
           each.scope === actor.scope &&
           each.thread === actor.thread &&
-          each.channel === actor.channel,
+          each.channel === actor.channel &&
+          each.place === actor.place,
       );
     if (turn === undefined) {
       throw new BoardError(

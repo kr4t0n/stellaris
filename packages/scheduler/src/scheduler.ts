@@ -2,6 +2,7 @@ import { SYSTEM_ACTOR, type Board, type UnreadConversation } from "@stellaris/bo
 import {
   channelConversation,
   conversationPart,
+  placeConversation,
   CRON_FAILING_RUNS,
   currentStage,
   nextFire,
@@ -39,24 +40,49 @@ import {
 import { z } from "zod";
 import { decideWake } from "./wake.js";
 
-/** A conversation beside a scope's home: a thread's, or a channel's other than general. */
-type Beside = { readonly thread: TurnThread } | { readonly channel: Name };
+/**
+ * A conversation beside a scope's home: a thread's, a channel's other than general, or, in the
+ * society scope, a project's channels'.
+ */
+type Beside =
+  | { readonly thread: TurnThread }
+  | { readonly channel: Name }
+  | { readonly place: Name };
 
 /** A dispatch's fields naming the conversation beside its scope's home. */
-function besideFields(beside: Beside | undefined): { thread?: TurnThread; channel?: Name } {
+function besideFields(beside: Beside | undefined): {
+  thread?: TurnThread;
+  channel?: Name;
+  place?: Name;
+} {
   if (beside === undefined) {
     return {};
   }
-  return "thread" in beside ? { thread: beside.thread } : { channel: beside.channel };
+  if ("thread" in beside) {
+    return { thread: beside.thread };
+  }
+  return "channel" in beside ? { channel: beside.channel } : { place: beside.place };
 }
 
-/** The queue's key for a conversation: `agent/scope`, `agent/scope/thread`, or `agent/scope/#channel`. */
+/** A dispatch's conversation as the board names it: its thread's id, its channel, or its project. */
+function namedIn(dispatch: TurnDispatch): { thread?: Ulid; channel?: Name; place?: Name } {
+  return {
+    ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
+    ...(dispatch.channel === undefined ? {} : { channel: dispatch.channel }),
+    ...(dispatch.place === undefined ? {} : { place: dispatch.place }),
+  };
+}
+
+/**
+ * The queue's key for a conversation: `agent/scope`, `agent/scope/thread`, `agent/scope/#channel`,
+ * or `agent/society/~project`.
+ */
 function conversationKey(agent: Name, scope: Name, beside: Beside | undefined): string {
   const fields = besideFields(beside);
   return sessionKey(
     agent,
     scope,
-    conversationPart({ thread: fields.thread?.id, channel: fields.channel }),
+    conversationPart({ thread: fields.thread?.id, channel: fields.channel, place: fields.place }),
   );
 }
 
@@ -80,6 +106,7 @@ export interface TurnRunner {
     project: Name;
     thread?: Ulid;
     channel?: Name;
+    place?: Name;
   }): Promise<SteerOutcome>;
   runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord>;
   /**
@@ -713,6 +740,26 @@ export class Scheduler {
         }
         return;
       }
+      case "project.archived": {
+        // Every citizen's conversation of the project's channels in the society scope has ended;
+        // what woke it is read at home from now on.
+        const slug = stringOf(payload["slug"]);
+        if (slug === null) {
+          return;
+        }
+        this.sweep({ kind: "place", project: slug });
+        for (const [key, item] of this.pending) {
+          const { dispatch } = item;
+          if (dispatch.place === slug) {
+            this.pending.delete(key);
+            this.log.info(
+              { agent: dispatch.agent, project: dispatch.project, place: slug },
+              "dropping project wake, the project is archived",
+            );
+          }
+        }
+        return;
+      }
       case "agent.left": {
         const name = stringOf(payload["name"]);
         const project = stringOf(payload["project"]);
@@ -1110,6 +1157,7 @@ export class Scheduler {
     const scope = stringOf(payload["project"]);
     const thread = stringOf(payload["thread"]);
     const channel = stringOf(payload["channel"]);
+    const place = stringOf(payload["place"]);
     const agent = name === null ? null : await this.tryReadAgent(name);
     if (agent === null || scope === null) {
       return;
@@ -1119,7 +1167,9 @@ export class Scheduler {
         ? { thread: await this.conversationOf(thread, scope) }
         : channel !== null
           ? { channel }
-          : null;
+          : place !== null
+            ? { place }
+            : null;
     if (beside === null) {
       return;
     }
@@ -1193,7 +1243,9 @@ export class Scheduler {
       beside:
         conversation.kind === "thread"
           ? { thread: await this.conversationOf(conversation.id, scope) }
-          : { channel: conversation.name },
+          : conversation.kind === "channel"
+            ? { channel: conversation.name }
+            : { place: conversation.project },
     };
   }
 
@@ -1214,7 +1266,9 @@ export class Scheduler {
 
   /**
    * The conversation a post wakes a citizen in, for a turn in `scope`: its thread's, else its
-   * channel's when that is a channel of the scope other than general, else the scope's home.
+   * channel's when that is a channel of the scope other than general, else, for a turn in the
+   * society scope, its project's when it is a project's channel, general included, else the
+   * scope's home.
    */
   private async postedIn(
     scope: Name,
@@ -1224,8 +1278,15 @@ export class Scheduler {
     if (threadId !== undefined) {
       return { thread: await this.conversationOf(threadId, scope) };
     }
-    const name = channel === null ? undefined : channelConversation(scope, channel);
-    return name === undefined ? undefined : { channel: name };
+    if (channel === null) {
+      return undefined;
+    }
+    const name = channelConversation(scope, channel);
+    if (name !== undefined) {
+      return { channel: name };
+    }
+    const place = placeConversation(scope, channel);
+    return place === undefined ? undefined : { place };
   }
 
   private async tryReadAgent(name: Name): Promise<Agent | null> {
@@ -1395,7 +1456,9 @@ export class Scheduler {
                 ? { thread: await this.conversationOf(entry.thread, project) }
                 : entry.channel !== null
                   ? { channel: entry.channel }
-                  : undefined;
+                  : entry.place !== null
+                    ? { place: entry.place }
+                    : undefined;
             reasonsIn(beside).digestSize += entry.count;
           }
         }
@@ -1498,7 +1561,10 @@ export class Scheduler {
     if (cron.thread !== undefined) {
       return { thread: await this.conversationOf(cron.thread, cron.scope) };
     }
-    return cron.channel === undefined ? undefined : { channel: cron.channel };
+    if (cron.channel !== undefined) {
+      return { channel: cron.channel };
+    }
+    return cron.place === undefined ? undefined : { place: cron.place };
   }
 
   /** Whether a cron's wake waits in the queue or its turn is running. */
@@ -1956,8 +2022,7 @@ export class Scheduler {
       const attempt = steer({
         agent: dispatch.agent,
         project: dispatch.project,
-        ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
-        ...(dispatch.channel === undefined ? {} : { channel: dispatch.channel }),
+        ...namedIn(dispatch),
       })
         .then((outcome) => {
           // A busy turn has a steer it has not taken yet; the next pass tries again.
@@ -1986,7 +2051,7 @@ export class Scheduler {
     const cursor = await this.board.digestCursor(
       dispatch.agent,
       dispatch.project,
-      conversationPart({ thread: dispatch.thread?.id, channel: dispatch.channel }),
+      conversationPart(namedIn(dispatch)),
     );
     return cursor !== null && cursor >= item.newestMessage;
   }
@@ -2048,6 +2113,7 @@ export class Scheduler {
           project: dispatch.project,
           thread: dispatch.thread?.id,
           channel: dispatch.channel,
+          place: dispatch.place,
           trigger: dispatch.trigger.kind,
         },
         "dispatching turn",

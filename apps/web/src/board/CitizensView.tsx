@@ -1,6 +1,6 @@
 import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/shared";
 import { Link, useSearch } from "@tanstack/react-router";
-import { Fragment, useId } from "react";
+import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -102,17 +102,11 @@ function CitizenRow({
           {model}
         </span>
         {/*
-          On one line each runner's name stays whole: a hostname's hyphens would otherwise break it
-          in every row while the model and projects still had room. A citizen's runners wrap
-          between names when the row has no room for them all.
+          One line, cut like the model and projects when the row has no room for every runner; the
+          hover says which work runs on each, and screen readers read the whole line.
         */}
-        <span className="text-xs text-fg-muted" title={runner.detail}>
-          {runner.parts.map((part, index) => (
-            <Fragment key={part}>
-              {index === 0 ? null : " "}
-              <span className="@min-[560px]:whitespace-nowrap">{part}</span>
-            </Fragment>
-          ))}
+        <span className="truncate text-xs text-fg-muted" title={runner.detail}>
+          {runner.label}
         </span>
         <span className="truncate text-xs text-fg-muted" title={projects}>
           {projects}
@@ -293,11 +287,12 @@ export function CitizensView() {
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
           cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
-          before the state, and the model and projects share what the other columns leave, the only
-          cells that cut. In a narrower island the counts would push the row past its edge, so they
-          take a line under it, and the model cuts before the projects go under 3rem.
+          before the state, and the model, runners, and projects share what the other columns leave,
+          the only cells that cut, each growing at the same rate up to its widest. In a narrower
+          island the counts would push the row past its edge, so they take a line under it, and the
+          model and runners cut before the projects go under 3rem.
         */}
-        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,max-content)_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
           {retired.length === 0 ? null : (
             <section

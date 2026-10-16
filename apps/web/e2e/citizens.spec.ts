@@ -667,7 +667,7 @@ test("the citizens list shows each citizen's tokens over a window, retired ones 
   await expect(view.getByText(/≥/)).toHaveCount(0);
 });
 
-test("from a 576 px island, each citizen's tokens sit beside its state, and the model and projects cut first", async ({
+test("from a 576 px island, each citizen's tokens sit beside its state, and the model, runners, and projects share what is left", async ({
   page,
 }) => {
   // 1440 px gives the island 576 px. desk is in a turn, its model and projects run long, and its
@@ -746,24 +746,26 @@ test("from a 576 px island, each citizen's tokens sit beside its state, and the 
   // The separator is not read out: the row's name is as it was.
   await expect(row("desk").getByRole("link")).toHaveAccessibleName(/151K in · 1\.5K out working$/);
 
-  // The model and projects give way first, sharing what is left, and nothing runs out of the list.
+  // The model, runners, and projects give way, sharing what is left alike, each cut on one line,
+  // and nothing runs out of the list.
   const model = row("desk").getByTitle("claude-opus-5-5 · set to opus · xhigh");
+  const runners = row("desk").getByTitle(/^outside projects: stellaris-runner-0; lab:/);
   const projects = row("desk").getByTitle("lab, atlas, beacon, comet");
-  expect(await cutOf(model)).toBeGreaterThan(0);
-  expect(await cutOf(projects)).toBeGreaterThan(0);
-  const [modelBox, projectsBox] = await Promise.all([boxOf(model), boxOf(projects)]);
-  expect(modelBox.width).toBeGreaterThanOrEqual(12);
-  expect(projectsBox.width).toBeGreaterThanOrEqual(12);
-  expect(await sidewaysOf(view)).toBe(0);
-  // A runner's name stays whole, hyphens and all, so stew's row keeps to one line. desk's two
-  // runners have no room side by side, and they wrap between names, never inside one.
-  await expect(row("desk").getByTitle(/^outside projects: stellaris-runner-0; lab:/)).toHaveText(
-    "on stellaris-runner-0, stellaris-runner-1",
-  );
-  expect(await lineCountOf(row("stew").getByTitle("outside projects: stellaris-runner-0"))).toBe(1);
-  for (const part of ["on stellaris-runner-0,", "stellaris-runner-1"]) {
-    expect(await lineCountOf(row("desk").getByText(part, { exact: true }))).toBe(1);
+  const widths: number[] = [];
+  for (const cell of [model, runners, projects]) {
+    expect(await cutOf(cell)).toBeGreaterThan(0);
+    expect(await lineCountOf(cell)).toBe(1);
+    widths.push((await boxOf(cell)).width);
   }
+  expect(Math.min(...widths)).toBeGreaterThanOrEqual(12);
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
+  expect(await sidewaysOf(view)).toBe(0);
+  // Every runner is read out whole, and named on hover with the work that runs on it.
+  await expect(runners).toHaveText("on stellaris-runner-0, stellaris-runner-1");
+  await expect(runners).toHaveAttribute(
+    "title",
+    "outside projects: stellaris-runner-0; lab: stellaris-runner-1; atlas: placed on its first turn; beacon: placed on its first turn; comet: placed on its first turn",
+  );
 
   // Some turns without a count, a count unknown, and the widest counts still fit beside the state.
   const window = view.getByRole("navigation", { name: "Tokens" });
@@ -849,21 +851,79 @@ test("each citizen's in and out counts line up down the list, beside the state a
 });
 
 test("under the row, the counts take no room from the row above them", async ({ page }) => {
-  // At a 490 px island hal's runner, chart-named, just fits on one line beside the rest of its row.
-  // desk's out count is wider than any state's word, and laid out in the state's column it would
-  // widen that column and push hal's runner to two lines.
+  // Under the row the counts span it from the name's column on, so no column above them grows to
+  // hold them: desk's out count is wider than any state's word, and laid out in the state's column
+  // it would widen that column and take room from the model and runners.
   await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "490"));
   await page.setViewportSize({ width: 1440, height: 900 });
   await fakeBoard(page, { retired: true, crowded: true });
   await page.goto("/citizens?window=24h");
   const view = page.getByRole("region", { name: "Board content" });
-  const hal = view.getByRole("listitem").filter({ has: page.getByText("hal", { exact: true }) });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
   await expect(
     page.getByRole("button", { name: /^Width of the board's content/ }),
   ).toHaveAccessibleName(/^Width of the board's content, 490 of/);
-  await expect(view.getByText("151K in · 1.5K out")).toBeVisible();
-  await expect(hal).toContainText("no turns");
-  expect(await lineCountOf(hal.getByTitle("outside projects: stellaris-runner-1"))).toBe(1);
+  const counts = row("desk").getByText("151K in · 1.5K out");
+  await expect(counts).toBeVisible();
+  const [countsBox, nameBox] = await Promise.all([
+    boxOf(counts),
+    boxOf(row("desk").getByText("desk", { exact: true })),
+  ]);
+  expect(Math.abs(countsBox.x - nameBox.x)).toBeLessThan(1);
+  // The state's column is as wide as its widest word.
+  const states = [
+    row("desk").getByText("resting", { exact: true }),
+    row("hal").getByText("resting", { exact: true }),
+    row("stew").getByText("resting", { exact: true }),
+    row("ada").getByText("retired", { exact: true }),
+  ];
+  const words = await Promise.all(states.map((state) => textBoxOf(state)));
+  const column = await states[0]?.evaluate(
+    (node) => node.closest("a > *")?.getBoundingClientRect().width ?? Number.NaN,
+  );
+  expect((column ?? Number.NaN) - Math.max(...words.map((word) => word.width))).toBeLessThan(1);
+});
+
+test("each row's runners keep to one line, cut where the row has no room for them all", async ({
+  page,
+}) => {
+  // desk's turns run on two runners named as the chart names its pods.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page, { retired: true, crowded: true });
+  const view = page.getByRole("region", { name: "Board content" });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+  const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  for (const island of [420, 490]) {
+    await page.addInitScript((width) => {
+      localStorage.setItem("stellaris.contentWidth", String(width));
+    }, island);
+    await page.goto("/citizens?window=all");
+    await expect(handle).toHaveAccessibleName(
+      new RegExp(`^Width of the board's content, ${island} of`),
+    );
+    const runners = row("desk").getByTitle(/^outside projects: stellaris-runner-0; lab:/);
+    await expect(runners).toHaveText("on stellaris-runner-0, stellaris-runner-1");
+    expect(await lineCountOf(runners), `lines at ${island} px`).toBe(1);
+    expect(await cutOf(runners), `cut at ${island} px`).toBeGreaterThan(0);
+    await expect(runners).toHaveCSS("text-overflow", "ellipsis");
+    // The runners keep as much room as the model beside them, and every row is as tall as the
+    // others: one line, and the counts' line under it.
+    const model = row("desk").getByTitle("claude-opus-5-5 · set to opus · xhigh");
+    const [runnersBox, modelBox] = await Promise.all([boxOf(runners), boxOf(model)]);
+    expect(runnersBox.width).toBeGreaterThanOrEqual(modelBox.width - 1);
+    const heights = await view
+      .getByRole("listitem")
+      .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height));
+    expect(heights).toHaveLength(4);
+    expect(Math.max(...heights) - Math.min(...heights), `rows at ${island} px`).toBeLessThan(1);
+    // Screen readers still hear every runner.
+    await expect(row("desk").getByRole("link")).toHaveAccessibleName(
+      /on stellaris-runner-0, stellaris-runner-1/,
+    );
+    expect(await sidewaysOf(view)).toBe(0);
+  }
 });
 
 test("the counts move beside the state at a 576 px island, to the pixel", async ({ page }) => {

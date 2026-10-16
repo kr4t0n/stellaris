@@ -178,13 +178,15 @@ export function projectRepo(project: Project): ProjectRepo {
  * task's conversation, on `task/<id>`. With `thread`, a proposal's or a topic's conversation works
  * in a place of its own instead, and with `channel` a channel's conversation other than general,
  * so it runs beside the citizen's other conversations: a folder under the home's scratch folder,
- * or a worktree detached at the tip of the project's default branch.
+ * or a worktree detached at the tip of the project's default branch. With `place`, a society-scope
+ * turn in a project's channels' conversation works in a folder of its own under the scratch folder.
  */
 export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("home"),
     thread: UlidSchema.optional(),
     channel: NameSchema.optional(),
+    place: NameSchema.optional(),
   }),
   z.object({
     kind: z.literal("project"),
@@ -221,6 +223,8 @@ export const TurnJobSchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn is in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn is in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   /**
    * The session to resume, or null to start one: the CLI's adapter picks a fresh session's id, and
    * the outcome reports it.
@@ -520,11 +524,13 @@ export type TurnImage = z.infer<typeof TurnImageSchema>;
 
 /**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
- * task's thread takes its id, or a channel's beside general in a scope.
+ * task's thread takes its id, a channel's beside general in a scope, or a project's channels' in
+ * the society scope, which ends when the project is archived.
  */
 export const WorkspaceConversationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("thread"), id: UlidSchema }),
   z.object({ kind: z.literal("channel"), scope: NameSchema, name: NameSchema }),
+  z.object({ kind: z.literal("place"), project: NameSchema }),
 ]);
 export type WorkspaceConversation = z.infer<typeof WorkspaceConversationSchema>;
 
@@ -533,19 +539,25 @@ export function workspaceConversationOf(turn: {
   readonly scope: string;
   readonly thread?: string | undefined;
   readonly channel?: string | undefined;
+  readonly place?: string | undefined;
 }): WorkspaceConversation | null {
   if (turn.thread !== undefined) {
     return { kind: "thread", id: turn.thread };
   }
-  return turn.channel === undefined
-    ? null
-    : { kind: "channel", scope: turn.scope, name: turn.channel };
+  if (turn.channel !== undefined) {
+    return { kind: "channel", scope: turn.scope, name: turn.channel };
+  }
+  return turn.place === undefined ? null : { kind: "place", project: turn.place };
 }
 
 export function sameConversation(a: WorkspaceConversation, b: WorkspaceConversation): boolean {
-  return a.kind === "thread"
-    ? b.kind === "thread" && a.id === b.id
-    : b.kind === "channel" && a.scope === b.scope && a.name === b.name;
+  if (a.kind === "thread") {
+    return b.kind === "thread" && a.id === b.id;
+  }
+  if (a.kind === "channel") {
+    return b.kind === "channel" && a.scope === b.scope && a.name === b.name;
+  }
+  return b.kind === "place" && a.project === b.project;
 }
 
 /** One citizen's workspace for a conversation on a runner, in the scope its turns ran in. */

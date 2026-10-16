@@ -47,6 +47,10 @@ describe("crons in the view", () => {
       ref: "ops",
     });
     expect(cronPlace(cron(A, { thread: B }))).toEqual({ kind: "thread", id: B });
+    expect(cronPlace(cron(A, { scope: "society", place: "lab" }))).toEqual({
+      kind: "place",
+      project: "lab",
+    });
     expect(cronPlace(cron(A))).toEqual({ kind: "home", scope: "lab" });
     expect(failingCron(cron(A, { failures: 3 }))).toBe(true);
     expect(failingCron(cron(A, { failures: 2 }))).toBe(false);

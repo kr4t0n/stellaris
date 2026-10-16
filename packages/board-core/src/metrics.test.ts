@@ -49,6 +49,10 @@ function inChannel(ts: string, agent: string, channel: string, trigger: string):
   return event(ts, "turn.started", agent, { project: "lab", channel, trigger });
 }
 
+function inPlace(ts: string, agent: string, place: string, trigger: string): BoardEvent {
+  return event(ts, "turn.started", agent, { project: "society", place, trigger });
+}
+
 function task(id: string, title: string): Task {
   return {
     ...TaskFrontmatterSchema.parse({
@@ -216,6 +220,31 @@ describe("metrics", () => {
     expect(metrics.latency.byAgent).toEqual([
       { agent: "eng-1", mentions: 1, medianMs: 30_000, slowestMs: 30_000 },
       { agent: "rev-1", mentions: 1, medianMs: 20_000, slowestMs: 20_000 },
+    ]);
+  });
+
+  it("times a mention outside the citizen's projects to that project's turn, not another's or home's", () => {
+    const metrics = computeMetrics(
+      input(
+        [
+          // concierge-1 is in no project: a mention in lab's channels is lab's conversation's to answer.
+          mention("10-01T10:00:00", "concierge-1", "lab/release"),
+          start("10-01T10:00:05", "concierge-1", "society", undefined, "heartbeat"),
+          inPlace("10-01T10:00:10", "concierge-1", "other", "mention"),
+          inPlace("10-01T10:00:40", "concierge-1", "lab", "user_post"),
+          // A mention in the society's general is the home's, which a project's turn does not answer.
+          mention("10-01T11:00:00", "concierge-1", "general"),
+          inPlace("10-01T11:00:05", "concierge-1", "lab", "mention"),
+          start("10-01T11:00:20", "concierge-1", "society", undefined, "user_post"),
+        ],
+        {
+          citizens: [{ name: "concierge-1", role: "concierge", memberships: [] }],
+        },
+      ),
+    );
+    expect(metrics.latency).toMatchObject({ mentions: 2, unanswered: 0, slowestMs: 40_000 });
+    expect(metrics.latency.byAgent).toEqual([
+      { agent: "concierge-1", mentions: 2, medianMs: 30_000, slowestMs: 40_000 },
     ]);
   });
 

@@ -55,6 +55,7 @@ class FakeRunner implements TurnRunner {
     project: Name;
     thread?: Ulid;
     channel?: Name;
+    place?: Name;
   }): Promise<SteerOutcome> {
     this.steered.push(
       sessionKey(conversation.agent, conversation.project, conversationPart(conversation)),
@@ -1607,6 +1608,153 @@ describe("Scheduler", () => {
     advance(3_600_000 + 5 * 60_000);
     await scheduler.tick();
     expect((await board.listAgents()).map((a) => a.name)).not.toContain("eng-3");
+  });
+
+  it("wakes a citizen outside a project in one conversation per project for that project's channels", async () => {
+    const { board, runner, scheduler } = await setup({
+      concurrency: 6,
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      advance(1_000);
+      await scheduler.tick();
+    };
+    await settle();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    runner.hold = true;
+
+    // A user post in each of two projects' channels wakes the front desk, a society role, in a
+    // conversation of its own per project, and the two run at once.
+    await board.postMessage(USER, { channel: "demo/general", body: "how is demo?" });
+    await board.postMessage(USER, { channel: "lab/dev", body: "and lab's release?" });
+    await settle();
+    expect(scheduler.runningPairs).toEqual([
+      sessionKey("concierge-1", "society", "~demo"),
+      sessionKey("concierge-1", "society", "~lab"),
+    ]);
+    expect(
+      runner.dispatches.map((d) => [d.agent, d.project, d.place ?? null, d.channel ?? null]),
+    ).toEqual([
+      ["concierge-1", "society", "demo", null],
+      ["concierge-1", "society", "lab", null],
+    ]);
+
+    // A project's general and its workstreams share the one conversation: a post in lab's general
+    // goes into the turn running for lab's dev.
+    await board.postMessage(USER, { channel: "lab/general", body: "one more for lab" });
+    await settle();
+    expect(runner.steered).toEqual([sessionKey("concierge-1", "society", "~lab")]);
+
+    // The society's general still wakes the society's home, beside both.
+    await board.postMessage(USER, { channel: "general", body: "and the society?" });
+    await settle();
+    expect(scheduler.runningPairs).toContain(sessionKey("concierge-1", "society"));
+
+    // A post in a project's thread still wakes that thread's conversation.
+    const topic = await board.openThread(REV, { channel: "demo/general", title: "the logo" });
+    await board.postMessage(USER, { thread_id: topic.id, body: "which logo?" });
+    await settle();
+    expect(scheduler.runningPairs).toContain(sessionKey("concierge-1", "society", topic.id));
+
+    // A citizen mentioned in a project it is not in follows the same rule: eng-1 is in demo, so
+    // lab's channels are a conversation of their own for it outside projects.
+    await board.postMessage(REV, { channel: "lab/dev", body: "@eng-1 could you look?" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 and here?" });
+    await settle();
+    expect(scheduler.runningPairs).toEqual(
+      [
+        sessionKey("concierge-1", "society"),
+        sessionKey("concierge-1", "society", "~demo"),
+        sessionKey("concierge-1", "society", "~lab"),
+        sessionKey("concierge-1", "society", topic.id),
+        sessionKey("eng-1", "demo", "#dev"),
+        sessionKey("eng-1", "society", "~lab"),
+      ].toSorted(),
+    );
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+  });
+
+  it("ends a citizen's conversation of a project's channels when the project is archived", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    // The front desk follows lab's general from outside the project: a post there that asks
+    // nothing of it counts toward its heartbeat in lab's conversation, not its home.
+    await board.subscribe({ name: "concierge-1", role: "concierge" }, { channel: "lab/general" });
+    await board.postMessage(REV, { channel: "lab/general", body: "lab's build is green" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(
+      runner.dispatches.map((d) => [d.agent, d.project, d.place ?? null, d.trigger.kind]),
+    ).toEqual([["concierge-1", "society", "lab", "heartbeat"]]);
+    runner.dispatches.length = 0;
+
+    // A wake queued there when the project is archived goes, and so does its workspace.
+    await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 a last look?" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "society", "~lab")]);
+    await board.archiveProject(USER, { project: "lab", reason: "done" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual([]);
+    expect(runner.sweeps).toContainEqual({ kind: "place", project: "lab" });
+  });
+
+  it("fires a cron, a decision, and a closing in a citizen's conversation of a project's channels", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const inLab: Actor = { name: "concierge-1", role: "concierge", scope: "society", place: "lab" };
+    const where = () =>
+      runner.dispatches.map((d) => [d.agent, d.project, d.place ?? null, d.trigger.kind]);
+
+    // A cron set from lab's conversation fires there.
+    await board.createCron(inLab, { title: "Check lab", note: "Read lab.", cron: "*/15 * * * *" });
+    advance(15 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(where()).toEqual([["concierge-1", "society", "lab", "cron"]]);
+    runner.dispatches.length = 0;
+
+    // A proposal filed there is decided back into it.
+    const proposal = await board.propose(inLab, {
+      kind: "channel",
+      charter: { project: "lab", name: "ideas", purpose: "Loose ideas." },
+    });
+    expect((await board.readProposal(proposal.id)).filedFrom).toEqual({
+      scope: "society",
+      place: "lab",
+    });
+    await board.approve(USER, { proposal_id: proposal.id });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(where()).toEqual([["concierge-1", "society", "lab", "proposal_decided"]]);
+    runner.dispatches.length = 0;
+
+    // A workspace there left holding work gets its closing turn there.
+    await board.recordLeftovers({
+      agent: "concierge-1",
+      scope: "society",
+      conversation: { kind: "place", project: "lab" },
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(where()).toEqual([["concierge-1", "society", "lab", "closing"]]);
   });
 
   it("wakes the front desk, a society role, on every user post, outside projects", async () => {

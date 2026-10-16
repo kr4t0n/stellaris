@@ -230,7 +230,7 @@ describe("Board", () => {
     // The review waits for the reviewer, which is now in the thread and reads the handover; the
     // step itself does not count toward a heartbeat, the talk before it does.
     expect(await board.unreadByConversation(REV)).toEqual([
-      { scope: "demo", thread: task.id, channel: null, count: 1 },
+      { scope: "demo", thread: task.id, channel: null, place: null, count: 1 },
     ]);
     expect((await board.readDigest(REV, { advance: false })).messages.map((m) => m.id)).toEqual([
       threadMessage.id,
@@ -359,7 +359,7 @@ describe("Board", () => {
     await board.postMessage(REV, { channel: "general", body: "one more thing" });
     expect(await board.unreadByConversation(ENG)).toEqual([]);
     expect(await board.unreadByConversation({ name: "desk", role: "concierge" })).toEqual([
-      { scope: "society", thread: null, channel: null, count: 4 },
+      { scope: "society", thread: null, channel: null, place: null, count: 4 },
     ]);
   });
 
@@ -377,9 +377,11 @@ describe("Board", () => {
     // The post did not wait for the heartbeat's scan of five hundred messages.
     expect(scanned).toBe(false);
     // The scan took its mark before the post, so it counts the five hundred alone; the next sees it.
-    expect(await scan).toEqual([{ scope: "demo", thread: null, channel: null, count: 500 }]);
+    expect(await scan).toEqual([
+      { scope: "demo", thread: null, channel: null, place: null, count: 500 },
+    ]);
     expect(await board.unreadByConversation(ENG)).toEqual([
-      { scope: "demo", thread: null, channel: null, count: 501 },
+      { scope: "demo", thread: null, channel: null, place: null, count: 501 },
     ]);
   });
 
@@ -515,9 +517,9 @@ describe("Board", () => {
     expect(await ids(task.id)).toEqual([inTask.id]);
     expect(await ids(topic.id)).toEqual([inTopic.id]);
     expect(await board.unreadByConversation(ENG)).toEqual([
-      { scope: "demo", thread: null, channel: null, count: 1 },
-      { scope: "demo", thread: task.id, channel: null, count: 1 },
-      { scope: "demo", thread: topic.id, channel: null, count: 1 },
+      { scope: "demo", thread: null, channel: null, place: null, count: 1 },
+      { scope: "demo", thread: task.id, channel: null, place: null, count: 1 },
+      { scope: "demo", thread: topic.id, channel: null, place: null, count: 1 },
     ]);
 
     // A turn in one thread moves that thread's cursor alone, and a thread token reads its thread.
@@ -598,9 +600,13 @@ describe("Board", () => {
     // General's posts are the home conversation's; each other channel's are its own.
     expect(await ids()).toEqual([inGeneral.id]);
     expect(await ids("dev")).toEqual([inDev.id, asked.id]);
+    // The society's news is a general conversation's to read, never a channel's.
+    const news = await board.postMessage(REV, { channel: "general", body: "the build is green" });
+    expect(await ids("dev")).toEqual([inDev.id, asked.id]);
+    expect(await ids()).toEqual([inGeneral.id, news.id]);
     expect(await board.unreadByConversation(ENG)).toEqual([
-      { scope: "demo", thread: null, channel: null, count: 1 },
-      { scope: "demo", thread: null, channel: "dev", count: 2 },
+      { scope: "demo", thread: null, channel: null, place: null, count: 1 },
+      { scope: "demo", thread: null, channel: "dev", place: null, count: 2 },
     ]);
 
     // A channel token reads its channel, and its turn moves that conversation's cursor alone.
@@ -610,7 +616,7 @@ describe("Board", () => {
     expect(actor).toEqual({ ...ENG, scope: "demo", channel: "dev" });
     await board.setDigestCursor("eng-1", "demo", inDev.id, "#dev");
     expect(await ids("dev")).toEqual([asked.id]);
-    expect(await ids()).toEqual([inGeneral.id]);
+    expect(await ids()).toEqual([inGeneral.id, news.id]);
 
     // Sessions and last turns are kept beside the home's, and count toward the scope's latest.
     await board.writeSession("eng-1", "demo", "claude", "dev-session", "pod", "#dev");
@@ -640,6 +646,149 @@ describe("Board", () => {
     expect(await ids()).toContain(asked.id);
     expect(await board.channelOpen("demo/dev")).toBe(false);
     expect(await board.channelOpen("demo/general")).toBe(true);
+  });
+
+  it("files a project's channels in a conversation of their own for a citizen outside it, until it is archived", async () => {
+    const { board } = await society();
+    await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
+    // The front desk, a society role, reads every post by the user, in every project's channels.
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const FRONT: Actor = { name: "concierge-1", role: "concierge" };
+    const demoGeneral = await board.postMessage(USER, { channel: "demo/general", body: "demo?" });
+    const demoDev = await board.postMessage(USER, { channel: "demo/dev", body: "demo's dev?" });
+    const labDev = await board.postMessage(USER, { channel: "lab/dev", body: "lab's dev?" });
+    const inSociety = await board.postMessage(USER, { channel: "general", body: "the society?" });
+    const topic = await board.openThread(REV, { channel: "lab/general", title: "the logo" });
+    const inTopic = await board.postMessage(USER, { thread_id: topic.id, body: "which logo?" });
+    const ids = async (actor: Actor, where: { place?: string; thread?: Ulid } = {}) =>
+      (
+        await board.readDigest({ ...actor, scope: "society", ...where }, { advance: false })
+      ).messages.map((m) => m.id);
+
+    // Each project's channels, general and workstreams alike, are one conversation; no project's
+    // posts reach another's, the society's home, or a thread.
+    expect(await ids(FRONT, { place: "demo" })).toEqual([demoGeneral.id, demoDev.id]);
+    expect(await ids(FRONT, { place: "lab" })).toEqual([labDev.id]);
+    expect(await ids(FRONT)).toEqual([inSociety.id]);
+    expect(await ids(FRONT, { thread: topic.id })).toEqual([inTopic.id]);
+    expect(await board.unreadByConversation(FRONT)).toEqual(
+      expect.arrayContaining([
+        { scope: "society", thread: null, channel: null, place: null, count: 1 },
+        { scope: "society", thread: null, channel: null, place: "demo", count: 2 },
+        { scope: "society", thread: null, channel: null, place: "lab", count: 1 },
+        { scope: "society", thread: topic.id, channel: null, place: null, count: 1 },
+      ]),
+    );
+
+    // A citizen mentioned in a project it is not in reads that project's post there, and the news
+    // of the society's channels it follows only in a general conversation.
+    const news = await board.postMessage(REV, { channel: "general", body: "the build is green" });
+    const asked = await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 a look?" });
+    expect(await ids(ENG, { place: "lab" })).toEqual([asked.id]);
+    expect(await ids(ENG)).toEqual([inSociety.id, news.id]);
+
+    // The conversation's token reads it, and its turn moves its cursor alone.
+    const actor = board.resolveToken(
+      board.issueTurnToken("concierge-1", "concierge", 60_000, "society", "~demo"),
+    );
+    expect(actor).toEqual({ ...FRONT, scope: "society", place: "demo" });
+    await board.setDigestCursor("concierge-1", "society", demoGeneral.id, "~demo");
+    expect(await ids(FRONT, { place: "demo" })).toEqual([demoDev.id]);
+    expect(await ids(FRONT, { place: "lab" })).toEqual([labDev.id]);
+    expect(await ids(FRONT)).toEqual([inSociety.id, news.id]);
+
+    // Sessions and last turns are kept beside the home's, and count toward the scope's latest.
+    await board.writeSession("concierge-1", "society", "claude", "lab-session", "runner-1", "~lab");
+    expect(await board.readSessions("concierge-1", "society", "~lab")).toEqual({
+      claude: "lab-session",
+      runner: "runner-1",
+    });
+    expect(await board.readSessions("concierge-1", "society")).toEqual({});
+    await expect(
+      stat(
+        path.join(
+          dir,
+          "agents",
+          "concierge-1",
+          "projects",
+          "society",
+          "places",
+          "lab",
+          "sessions.json",
+        ),
+      ),
+    ).resolves.toBeDefined();
+    const turn = await board.beginTurn({
+      ...turnIn(undefined, "2026-09-28T10:01:00.000Z"),
+      agent: "concierge-1",
+      project: "society",
+      place: "lab",
+      session: "lab-session",
+    });
+    await board.finishTurn({
+      ...turn,
+      endedAt: "2026-09-28T10:02:00.000Z",
+      exitReason: "completed",
+    });
+    expect((await board.readLastTurn("concierge-1", "society", "~lab"))?.session).toBe(
+      "lab-session",
+    );
+    expect(await board.readLastTurn("concierge-1", "society")).toBeNull();
+    expect((await board.readLatestTurn("concierge-1", "society"))?.place).toBe("lab");
+    expect((await board.listTurns("concierge-1")).map((entry) => entry.place)).toEqual(["lab"]);
+
+    // A cron set from that conversation fires there, and the archive ends it.
+    const cron = await board.createCron(
+      { ...FRONT, scope: "society", place: "lab" },
+      { title: "Check lab", note: "Read lab's channels.", cron: "*/30 * * * *" },
+    );
+    expect(cron).toMatchObject({ agent: "concierge-1", scope: "society", place: "lab" });
+    expect(cron.channel).toBeUndefined();
+
+    // Archived, the project's conversation has ended: what it left unread is the home's.
+    expect(await board.conversationEnded({ kind: "place", project: "lab" })).toBe(false);
+    await board.closeThread(REV, { thread_id: topic.id, summary: "The round one." });
+    await board.archiveProject(USER, { project: "lab", reason: "done" });
+    expect(await board.conversationEnded({ kind: "place", project: "lab" })).toBe(true);
+    expect((await board.readCron(cron.id)).ended?.reason).toBe("project lab was archived");
+    expect(await ids(FRONT, { place: "lab" })).toEqual([]);
+    // The board's notice of the archive, in the society's general, is the home's too.
+    const home = await ids(FRONT);
+    expect(home).toEqual(expect.arrayContaining([labDev.id, inSociety.id, news.id]));
+    expect(home).not.toContain(demoDev.id);
+    expect(await ids(FRONT, { place: "demo" })).toEqual([demoDev.id]);
+  });
+
+  it("starts a citizen's conversation of a project's channels outside it where its society home had read", async () => {
+    const { board } = await society();
+    await board.addProject(USER, { slug: "lab" });
+    const read = await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 seen" });
+    const unread = await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 not yet" });
+    // As a build from before kept it: the society's home read lab's posts, up to the first.
+    await writeFile(
+      board.paths.agentCursors("eng-1"),
+      JSON.stringify({ digest: null, scopes: { society: read.id } }),
+      "utf8",
+    );
+    const reopened = await Board.open(dir, { now });
+    const digest = await reopened.readDigest(
+      { ...ENG, scope: "society", place: "lab" },
+      { advance: false },
+    );
+    expect(digest.messages.map((message) => message.id)).toEqual([unread.id]);
+  });
+
+  it("refuses to archive a project under a turn in a citizen's conversation of its channels", async () => {
+    const { board } = await society();
+    await board.addProject(USER, { slug: "lab" });
+    let inFlight: TurnInFlight[] = [{ agent: "concierge-1", scope: "society", place: "lab" }];
+    board.watchTurns(() => inFlight);
+    await expect(
+      board.archiveProject(USER, { project: "lab", reason: "done" }),
+    ).rejects.toMatchObject(cut("concierge-1"));
+    // A turn in the conversation of another project's channels is no cut.
+    inFlight = [{ agent: "concierge-1", scope: "society", place: "demo" }];
+    await board.archiveProject(USER, { project: "lab", reason: "done" });
   });
 
   it("refuses to end a conversation under another citizen's turn, but not under the caller's own", async () => {
@@ -1946,7 +2095,7 @@ describe("Board", () => {
     await board.subscribe(USER, { channel: "demo/general" });
     const reopened = await Board.open(dir);
     // Threads and channels, once read in each scope's single conversation, start where that
-    // conversation was.
+    // conversation was, and so do projects' channels seen from the society scope.
     expect(Cursor.parse(JSON.parse(await readFile(cursorFile, "utf8")))).toEqual({
       digest: cursor,
     });
@@ -1955,6 +2104,7 @@ describe("Board", () => {
       scopes: {},
       threadsFrom: { demo: cursor, society: cursor },
       channelsFrom: { demo: cursor, society: cursor },
+      placesFrom: { society: cursor },
     });
     expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
     expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);

@@ -106,12 +106,12 @@ const SchedulerViewSchema = z.object({
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
 /**
- * Sessions as the scheduler lists them: a citizen, a scope, and, for a thread's or a channel's
- * conversation, its thread or channel.
+ * Sessions as the scheduler lists them: a citizen, a scope, and, for a thread's, a channel's, or a
+ * project's channels' conversation, its thread, channel, or project.
  */
 export function pairsOf(
   list: readonly string[],
-): Array<{ agent: string; scope: string; thread?: string; channel?: string }> {
+): Array<{ agent: string; scope: string; thread?: string; channel?: string; place?: string }> {
   return list.flatMap((key) => {
     const parsed = parseSessionKey(key);
     return parsed === null ? [] : [parsed];

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -744,6 +745,23 @@ describe("turns on a runner over the runner protocol", () => {
     const asked = (await board.listThreads()).filter((thread) => thread.openedBy === "stew");
     expect(asked.map((thread) => thread.channel)).toEqual(["general", "governance"]);
     expect(await board.listRequests()).toHaveLength(2);
+    // A turn in a project's conversation outside it asks on the project's channel it was asked
+    // from, else on the project's general.
+    proposeRole = false;
+    await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
+    await run({
+      ...dispatch,
+      place: "lab",
+      trigger: { ...dispatch.trigger, channel: "lab/dev" },
+    });
+    await run({ ...dispatch, place: "lab" });
+    const inLab = (await board.listThreads()).filter((thread) => thread.openedBy === "stew");
+    expect(inLab.map((thread) => thread.channel)).toEqual([
+      "general",
+      "governance",
+      "lab/dev",
+      "lab/general",
+    ]);
   });
 
   it("hands a resumed session the running total its last turn reported", async () => {
@@ -1531,6 +1549,97 @@ describe("turns on a runner over the runner protocol", () => {
     await expect(stat(release)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(home)).resolves.toBeDefined();
+  });
+
+  it("gives a citizen outside a project one workspace per project for its channels, until the project is archived", async () => {
+    const { board } = await Board.init(dir, { name: "places" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const inDemo = await board.postMessage(USER, { channel: "demo/release", body: "demo's date?" });
+    await board.postMessage(USER, { channel: "lab/general", body: "lab's budget?" });
+    await board.postMessage(USER, { channel: "general", body: "the society's plan?" });
+
+    // Each turn waits until all three are in flight, so they can only finish by running together.
+    const cwds = new Set<string>();
+    const prompts = new Map<string, string>();
+    let refusal: unknown = null;
+    let started = 0;
+    // The turn in flight in each conversation, as a post into it would find it.
+    const found: Array<string | undefined> = [];
+    const { promise: together, resolve: allStarted } = Promise.withResolvers<void>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(randomUUID()),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        cwds.add(cwd);
+        prompts.set(cwd, request.prompt);
+        started += 1;
+        if (started === 3) {
+          for (const place of [undefined, "demo", "lab"]) {
+            found.push(host.turnIn("concierge-1", "society", { place })?.turnId);
+          }
+          allStarted();
+        }
+        await together;
+        if (cwd.endsWith(path.join(".places", "lab"))) {
+          // Archiving under the concierge's turn in lab's conversation is refused until that turn ends.
+          refusal = await board.archiveProject(USER, { project: "lab", reason: "Done." }).then(
+            () => null,
+            (error: unknown) => error,
+          );
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner, hub, host } = await start(board, backend);
+    const turn = (place?: string) =>
+      run({
+        agent: "concierge-1",
+        project: "society",
+        ...(place === undefined ? {} : { place }),
+        trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+        priority: 1,
+      });
+    const ended = await Promise.all([turn(), turn("demo"), turn("lab")]);
+    expect(ended.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
+    expect(ended.map((each) => each.place)).toEqual([undefined, "demo", "lab"]);
+    expect(found).toEqual(ended.map((each) => each.id));
+
+    const scratch = path.join(runner.paths.agent("concierge-1"), "scratch");
+    const demo = path.join(scratch, ".places", "demo");
+    const lab = path.join(scratch, ".places", "lab");
+    expect([...cwds].toSorted()).toEqual([scratch, demo, lab].toSorted());
+    // Each project's turn read that project's posts alone, and the home the society's.
+    expect(prompts.get(demo)).toContain("conversation of project demo's channels");
+    expect(prompts.get(demo)).toContain("demo's date?");
+    expect(prompts.get(demo)).not.toContain("lab's budget?");
+    expect(prompts.get(lab)).toContain("lab's budget?");
+    expect(prompts.get(lab)).not.toContain("demo's date?");
+    expect(prompts.get(scratch)).toContain("the society's plan?");
+    expect(prompts.get(scratch)).not.toContain("demo's date?");
+    expect(prompts.get(scratch)).not.toContain("lab's budget?");
+    expect(await board.digestCursor("concierge-1", "society", "~demo")).toBe(inDemo.id);
+    // Each conversation has a session of its own.
+    const sessions = await Promise.all(
+      [undefined, "~demo", "~lab"].map(
+        async (part) => (await board.readSessions("concierge-1", "society", part)).claude,
+      ),
+    );
+    expect(new Set(sessions).size).toBe(3);
+    expect(refusal).toMatchObject({ code: "INVALID_STATE" });
+    // Archived once the turns have ended, lab's workspace goes with the sweep the scheduler asks
+    // for on the archive, and demo's and the home's stay.
+    await board.archiveProject(USER, { project: "lab", reason: "Done." });
+    await hub.sweep({ kind: "place", project: "lab" });
+    await expect(stat(lab)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(demo)).resolves.toBeDefined();
+    await expect(stat(scratch)).resolves.toBeDefined();
+    // A turn there that a sweep could not take its workspace from, as one dispatched just before
+    // the archive, leaves none behind once the server answers its outcome.
+    expect((await turn("lab")).exitReason).toBe("completed");
+    await vi.waitFor(() => expect(stat(lab)).rejects.toMatchObject({ code: "ENOENT" }));
   });
 
   it("keeps a project's code current with its remote: the clone, the home, and branches nobody has worked on", async () => {
@@ -3175,10 +3284,11 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.get("rev-1")).not.toContain(PIXEL.toString("base64").slice(0, 16));
   });
 
-  it("reads an upload from the very turn that asked, among one citizen's turns in two projects and a channel", async () => {
+  it("reads an upload from the very turn that asked, among one citizen's turns in two projects, a channel, and outside projects", async () => {
     const { board } = await Board.init(dir, { name: "image-turns" });
     await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
     await board.addProject(USER, { slug: "lab" });
+    await board.addProject(USER, { slug: "ops" });
     await board.setRoleCharter(USER, {
       name: "engineer",
       purpose: "Builds.",
@@ -3192,7 +3302,7 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo", "lab"],
     });
     // Each turn writes a file only its own worktree has, and uploads it by a relative path once all
-    // three are in flight, so a turn matched by fewer than all its parts reads another's worktree.
+    // five are in flight, so a turn matched by fewer than all its parts reads another's worktree.
     const statuses = new Map<string, number>();
     const written = Promise.withResolvers<void>();
     const uploaded = Promise.withResolvers<void>();
@@ -3203,11 +3313,13 @@ describe("turns on a runner over the runner protocol", () => {
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
         const actor = board.resolveToken(request.mcp.token);
-        const key = `${actor?.scope ?? ""}${actor?.channel === undefined ? "" : `#${actor.channel}`}`;
+        const key = `${actor?.scope ?? ""}${actor?.channel === undefined ? "" : `#${actor.channel}`}${
+          actor?.place === undefined ? "" : `~${actor.place}`
+        }`;
         await mkdir(path.join(request.spec.cwd, "shots"), { recursive: true });
         await writeFile(path.join(request.spec.cwd, "shots", `${key}.png`), PIXEL);
         writers += 1;
-        if (writers === 3) {
+        if (writers === 5) {
           written.resolve();
         }
         await written.promise;
@@ -3221,7 +3333,7 @@ describe("turns on a runner over the runner protocol", () => {
         });
         statuses.set(key, response?.status ?? 0);
         uploaders += 1;
-        if (uploaders === 3) {
+        if (uploaders === 5) {
           uploaded.resolve();
         }
         await uploaded.promise;
@@ -3229,17 +3341,30 @@ describe("turns on a runner over the runner protocol", () => {
       },
     };
     const { run } = await start(board, backend);
-    const turn = (project: string, channel?: string) =>
+    const turn = (project: string, channel?: string, place?: string) =>
       run({
         agent: "eng-1",
         project,
         ...(channel === undefined ? {} : { channel }),
+        ...(place === undefined ? {} : { place }),
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
       });
-    const turns = await Promise.all([turn("demo"), turn("demo", "release"), turn("lab")]);
-    expect(turns.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
-    expect(Object.fromEntries(statuses)).toEqual({ demo: 200, "demo#release": 200, lab: 200 });
+    const turns = await Promise.all([
+      turn("demo"),
+      turn("demo", "release"),
+      turn("lab"),
+      turn("society"),
+      turn("society", undefined, "ops"),
+    ]);
+    expect(turns.map((each) => each.exitReason)).toEqual(Array(5).fill("completed"));
+    expect(Object.fromEntries(statuses)).toEqual({
+      demo: 200,
+      "demo#release": 200,
+      lab: 200,
+      society: 200,
+      "society~ops": 200,
+    });
   });
 
   it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {

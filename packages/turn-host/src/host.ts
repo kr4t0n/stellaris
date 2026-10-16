@@ -81,10 +81,23 @@ export interface TurnHostOptions {
     | undefined;
 }
 
-/** A turn's conversation beside its scope's home: a thread's, or a channel's; neither for home. */
+/**
+ * A turn's conversation beside its scope's home: a thread's, a channel's, or, in the society scope,
+ * a project's channels'; none for home.
+ */
 export interface TurnConversation {
   readonly thread?: Ulid | undefined;
   readonly channel?: Name | undefined;
+  readonly place?: Name | undefined;
+}
+
+/** A job's conversation beside its scope's home, as the board names it. */
+function conversationOfJob(job: TurnJob): TurnConversation {
+  return {
+    ...(job.thread === undefined ? {} : { thread: job.thread }),
+    ...(job.channel === undefined ? {} : { channel: job.channel }),
+    ...(job.place === undefined ? {} : { place: job.place }),
+  };
 }
 
 /** A steer sent into a turn: the newest message it delivers, and what it delivers. */
@@ -211,13 +224,19 @@ export class TurnHost {
     const actor: Actor = { name: agent.name, role: agent.role };
     const thread = dispatch.thread;
     const channel = thread === undefined ? dispatch.channel : undefined;
-    const part = conversationPart({ thread: thread?.id, channel });
+    // A project's channels have a conversation of their own only for a turn in the society scope.
+    const place =
+      thread === undefined && channel === undefined && dispatch.project === SOCIETY_SCOPE
+        ? dispatch.place
+        : undefined;
+    const part = conversationPart({ thread: thread?.id, channel, place });
     const startedAt = this.now().toISOString();
     const base: TurnRecord = {
       agent: agent.name,
       project: dispatch.project,
       ...(thread === undefined ? {} : { thread: thread.id }),
       ...(channel === undefined ? {} : { channel }),
+      ...(place === undefined ? {} : { place }),
       runner: runner.name,
       cli: agent.cli,
       session: null,
@@ -251,7 +270,7 @@ export class TurnHost {
             .then((found) => found.task)
             .catch(() => null);
     const project = societyScope ? null : await this.board.readProject(dispatch.project);
-    const workspace = await this.workspaceOf(project, thread, channel, task);
+    const workspace = await this.workspaceOf(project, thread, channel, place, task);
     const sessions = await this.board.readSessions(agent.name, dispatch.project, part);
     // A session lives on the runner it began on; anywhere else the conversation starts afresh.
     const recorded = sessions.runner === runner.name ? sessions[agent.cli] : undefined;
@@ -278,6 +297,7 @@ export class TurnHost {
         scope: dispatch.project,
         ...(thread === undefined ? {} : { thread: thread.id }),
         ...(channel === undefined ? {} : { channel }),
+        ...(place === undefined ? {} : { place }),
       },
       { advance: false, limit: thread === undefined ? 50 : 100 },
     );
@@ -389,7 +409,7 @@ export class TurnHost {
           };
     const ending =
       dispatch.trigger.kind === "closing"
-        ? await this.endingOf(dispatch.project, threadRecord, task, channel)
+        ? await this.endingOf(dispatch.project, threadRecord, task, channel, place)
         : null;
     const society = await this.board.society();
     const crons: Cron[] = [];
@@ -452,6 +472,7 @@ export class TurnHost {
       scope: dispatch.project,
       ...(thread === undefined ? {} : { thread: thread.id }),
       ...(channel === undefined ? {} : { channel }),
+      ...(place === undefined ? {} : { place }),
       session: recorded ?? null,
       costSoFarUsd,
       instructions,
@@ -504,6 +525,7 @@ export class TurnHost {
         project: dispatch.project,
         thread: thread?.id,
         channel,
+        place,
         runner: runner.name,
         session: recorded,
         newSession,
@@ -544,8 +566,7 @@ export class TurnHost {
               turnId,
               agent: turn.job.agent,
               project: turn.job.scope,
-              thread: turn.job.thread,
-              channel: turn.job.channel,
+              ...conversationOfJob(turn.job),
               messages: sent.messages,
             })
             .catch((error: unknown) => {
@@ -554,10 +575,7 @@ export class TurnHost {
         }
       }
       turn.transcript.push(entry);
-      this.onEvent?.(turn.job.agent, turn.job.scope, entry.event, {
-        thread: turn.job.thread,
-        channel: turn.job.channel,
-      });
+      this.onEvent?.(turn.job.agent, turn.job.scope, entry.event, conversationOfJob(turn.job));
     }
   }
 
@@ -573,7 +591,8 @@ export class TurnHost {
         job.agent === agent &&
         job.scope === scope &&
         job.thread === conversation.thread &&
-        job.channel === conversation.channel
+        job.channel === conversation.channel &&
+        job.place === conversation.place
       ) {
         return { turnId: job.turnId, runner: turn.runner, cli: job.cli };
       }
@@ -586,8 +605,7 @@ export class TurnHost {
     return [...this.open.values()].map(({ job }) => ({
       agent: job.agent,
       scope: job.scope,
-      ...(job.thread === undefined ? {} : { thread: job.thread }),
-      ...(job.channel === undefined ? {} : { channel: job.channel }),
+      ...conversationOfJob(job),
     }));
   }
 
@@ -597,8 +615,7 @@ export class TurnHost {
       turnId: turn.job.turnId,
       agent: turn.job.agent,
       scope: turn.job.scope,
-      ...(turn.job.thread === undefined ? {} : { thread: turn.job.thread }),
-      ...(turn.job.channel === undefined ? {} : { channel: turn.job.channel }),
+      ...conversationOfJob(turn.job),
       cli: turn.job.cli,
       ...(turn.record.trigger.channel === undefined
         ? {}
@@ -622,12 +639,7 @@ export class TurnHost {
     }
     const { job } = turn;
     const digest = await this.board.readDigest(
-      {
-        ...turn.actor,
-        scope: job.scope,
-        ...(job.thread === undefined ? {} : { thread: job.thread }),
-        ...(job.channel === undefined ? {} : { channel: job.channel }),
-      },
+      { ...turn.actor, scope: job.scope, ...conversationOfJob(job) },
       {
         ...(turn.delivered === null ? {} : { since_cursor: turn.delivered }),
         advance: false,
@@ -730,6 +742,7 @@ export class TurnHost {
             project: job.scope,
             thread: job.thread,
             channel: job.channel,
+            place: job.place,
             session: job.session,
             resumeFailed: outcome.resumeFailed,
             resumeRetries,
@@ -759,7 +772,13 @@ export class TurnHost {
         await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, part);
         await this.renewLeases(turn.actor, turn.held);
         if (outcome.status?.needsUserDecision === true) {
-          await this.askUser(turn.actor, job, turn.record.startedAt, outcome.status.summary);
+          await this.askUser(
+            turn.actor,
+            job,
+            turn.record.trigger.channel,
+            turn.record.startedAt,
+            outcome.status.summary,
+          );
         }
       }
       await this.board.finishTurn(finished, turn.transcript);
@@ -776,7 +795,9 @@ export class TurnHost {
           const where =
             conversation.kind === "thread"
               ? `thread ${conversation.id}`
-              : `channel ${conversation.name}`;
+              : conversation.kind === "channel"
+                ? `channel ${conversation.name}`
+                : `project ${conversation.project}'s channels`;
           await this.board.publishSignal({
             kind: "stuck_workspace",
             key: `stuck_workspace:${job.agent}:${job.scope}:${conversationPart(job) ?? ""}`,
@@ -817,6 +838,7 @@ export class TurnHost {
           project: job.scope,
           thread: job.thread,
           channel: job.channel,
+          place: job.place,
           exitReason: finished.exitReason,
         },
         "turn finished",
@@ -898,6 +920,12 @@ export class TurnHost {
         ...(dispatch.thread !== undefined || dispatch.channel === undefined
           ? {}
           : { channel: dispatch.channel }),
+        ...(dispatch.thread !== undefined ||
+        dispatch.channel !== undefined ||
+        dispatch.project !== SOCIETY_SCOPE ||
+        dispatch.place === undefined
+          ? {}
+          : { place: dispatch.place }),
         runner,
         cli: agent?.cli ?? null,
         session: null,
@@ -950,12 +978,14 @@ export class TurnHost {
 
   /**
    * Where a conversation works: a task's on its branch, which its stage's holder has to itself,
-   * any other thread's and a channel's in a place of its own, and the home in the citizen's own.
+   * any other thread's, a channel's, and a project's channels' seen from the society scope in a
+   * place of its own, and the home in the citizen's own.
    */
   private async workspaceOf(
     project: Project | null,
     thread: TurnDispatch["thread"],
     channel: Name | undefined,
+    place: Name | undefined,
     task: Task | null,
   ): Promise<TurnWorkspace> {
     const own =
@@ -967,7 +997,7 @@ export class TurnHost {
           ? {}
           : { channel };
     if (project === null) {
-      return { kind: "home", ...own };
+      return { kind: "home", ...own, ...(place === undefined ? {} : { place }) };
     }
     const repo = projectRepo(project);
     if (thread?.task === true) {
@@ -991,8 +1021,8 @@ export class TurnHost {
   }
 
   /**
-   * Whether a thread conversation's task or thread has ended, or a channel conversation's channel
-   * was archived, which frees its workspace.
+   * Whether a thread conversation's task or thread has ended, a channel conversation's channel was
+   * archived, or a project conversation's project was, which frees its workspace.
    */
   private async conversationEnded(job: TurnJob): Promise<boolean> {
     const conversation = workspaceConversationOf(job);
@@ -1015,6 +1045,7 @@ export class TurnHost {
     thread: Thread | undefined,
     task: Task | null,
     channel: Name | undefined,
+    project: Name | undefined,
   ): Promise<Ending | null> {
     const place = scope === SOCIETY_SCOPE ? null : scope;
     if (thread !== undefined) {
@@ -1024,7 +1055,9 @@ export class TurnHost {
       return { how: closed, askIn: await this.replyIn(thread) };
     }
     if (channel === undefined) {
-      return null;
+      return project === undefined
+        ? null
+        : { how: `project ${project} was archived`, askIn: channelRef(place, "general") };
     }
     const ref = channelRef(place, channel);
     const archived = (await this.board.listChannels()).find((each) => each.ref === ref)?.archived;
@@ -1042,13 +1075,26 @@ export class TurnHost {
    * the user, which is what puts it before them. One that mentioned the user nowhere asks in its
    * own thread when it was in one that is still open, so the answer comes back to the same
    * conversation, and otherwise in a thread of its own on its conversation's channel, or its scope's
-   * general for the home, opened as the citizen with its summary. One that proposed something the
-   * user decides has put its decision before the user already, where deciding it clears it; a
-   * mention would stay until the user posted beside it.
+   * general for the home, opened as the citizen with its summary; a project's conversation in the
+   * society scope asks on the channel of the project its wake came from, else the project's general.
+   * One that proposed something the user decides has put its decision before the user already,
+   * where deciding it clears it; a mention would stay until the user posted beside it.
    */
-  private async askUser(actor: Actor, job: TurnJob, since: string, summary: string): Promise<void> {
+  private async askUser(
+    actor: Actor,
+    job: TurnJob,
+    askedIn: string | undefined,
+    since: string,
+    summary: string,
+  ): Promise<void> {
     const threadId = job.thread;
     const place = job.scope === SOCIETY_SCOPE ? null : job.scope;
+    const channel =
+      job.place === undefined
+        ? channelRef(place, job.channel ?? "general")
+        : askedIn !== undefined && parseChannelRef(askedIn).project === job.place
+          ? askedIn
+          : channelRef(job.place, "general");
     try {
       if (await this.board.hasMentioned(actor.name, USER_NAME, since)) {
         return;
@@ -1072,7 +1118,7 @@ export class TurnHost {
         return;
       }
       const thread = await this.board.openThread(actor, {
-        channel: channelRef(place, job.channel ?? "general"),
+        channel,
         title: `${actor.name} asks for a decision: ${summary}`.slice(0, 200),
       });
       await this.board.postMessage(actor, {

@@ -71,9 +71,18 @@ export function inputTokens(usage: Usage): number {
   return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
 
+/** The two halves of `tokensLabel`, "152K in" and "1.5K out", for a list that lines each up. */
+export function tokenCounts(usage: Usage): { readonly input: string; readonly output: string } {
+  return {
+    input: `${compact.format(inputTokens(usage))} in`,
+    output: `${compact.format(usage.outputTokens)} out`,
+  };
+}
+
 /** "152K in · 1.5K out". */
 export function tokensLabel(usage: Usage): string {
-  return `${compact.format(inputTokens(usage))} in · ${compact.format(usage.outputTokens)} out`;
+  const { input, output } = tokenCounts(usage);
+  return `${input} · ${output}`;
 }
 
 /** The counts behind `tokensLabel`, in full. */
@@ -116,38 +125,46 @@ function turnsOf(count: number): string {
 
 /**
  * A citizen's tokens over a window as the Citizens list shows them: "in · out" as on its Turns
- * tab, marked as a lower bound when some of its turns have no count, unknown when none has, and
- * the counts in full with the turns they cover on hover, which `spoken` says to screen readers
- * when the label alone would mislead. A turn has no count when it was logged before turns counted
- * tokens, or ended without its runner's report, as when the runner went away during it.
+ * tab, with `counts` its two halves, the sum of every turn that counted them, unknown when none
+ * has, and the counts in full with the turns they cover on hover, which `spoken` says to screen
+ * readers when the label alone would mislead: when some turns have no count, and the sum is less
+ * than they used. A turn has no count when it was logged before turns counted tokens, or ended
+ * without its runner's report, as when the runner went away during it.
  */
 export function tokenUseCell(
   row: CitizenTokens | undefined,
   window: MetricsWindow,
-): { label: string; detail: string; spoken: string | null } {
+): {
+  label: string;
+  counts: { readonly input: string; readonly output: string } | null;
+  detail: string;
+  spoken: string | null;
+} {
   const period = PERIODS[window];
   if (row === undefined || row.turns === 0) {
-    return { label: "no turns", detail: `no finished turn ${period}`, spoken: null };
+    return { label: "no turns", counts: null, detail: `no finished turn ${period}`, spoken: null };
   }
   const missing = row.turns - row.withUsage;
   const why = "logged before turns counted tokens, or ended without their runner's report";
   if (row.usage === null) {
     return {
       label: "tokens unknown",
+      counts: null,
       detail: `${turnsOf(row.turns)} ${period}, none with a token count: ${why}`,
       spoken: `${turnsOf(row.turns)} ${period}, none counted`,
     };
   }
+  const counted = { label: tokensLabel(row.usage), counts: tokenCounts(row.usage) };
   if (missing === 0) {
     return {
-      label: tokensLabel(row.usage),
+      ...counted,
       detail: `${tokensDetail(row.usage)}; over ${turnsOf(row.turns)} ${period}`,
       spoken: null,
     };
   }
   const over = `over ${row.withUsage} of ${turnsOf(row.turns)} ${period}`;
   return {
-    label: `≥${compact.format(inputTokens(row.usage))} in · ≥${compact.format(row.usage.outputTokens)} out`,
+    ...counted,
     detail: [
       `${tokensDetail(row.usage)}; ${over}.`,
       `The other ${missing === 1 ? "one has" : `${missing} have`} no count: ${why}.`,
@@ -178,13 +195,12 @@ export function turnRunners(member: Member, placed: ReadonlyMap<string, string>)
 /**
  * Where a citizen's turns run: its work outside projects on the runner it is pinned to, and its
  * work in each project on the runner that project lives on. Either is set by the first such turn.
- * `parts` is the label in the pieces a line may break between, one runner each, so a list can wrap
- * between runners while each name, whose hyphens a hostname's would otherwise break at, stays whole.
+ * `label` names every runner once, and `detail` says which work runs on each.
  */
 export function runnersOf(
   member: Member,
   placed: ReadonlyMap<string, string>,
-): { label: string; parts: string[]; detail: string } {
+): { label: string; detail: string } {
   const places = [
     ...(member.homeRunner === undefined
       ? []
@@ -195,16 +211,8 @@ export function runnersOf(
   const detail = places
     .map((place) => `${place.what}: ${place.runner ?? "placed on its first turn"}`)
     .join("; ");
-  const parts =
-    runners.length === 0
-      ? ["no runner yet"]
-      : runners.map(
-          (name, index) =>
-            `${index === 0 ? "on " : ""}${name}${index < runners.length - 1 ? "," : ""}`,
-        );
   return {
-    label: parts.join(" "),
-    parts,
+    label: runners.length === 0 ? "no runner yet" : `on ${runners.join(", ")}`,
     detail: detail === "" ? "pinned to a runner on its first turn" : detail,
   };
 }

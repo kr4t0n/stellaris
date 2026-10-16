@@ -227,6 +227,7 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
   await expect(claude.getByRole("listitem")).toHaveText([
     /^5h\s*35%\s*resets in 4h (49|50)m$/,
     /^7d\s*12%\s*resets in 5d 23h$/,
+    /^7d fable\s*9%\s*resets in 5d 23h$/,
   ]);
   await expect(claude).toContainText("Same numbers on pod and laptop, so most likely one login.");
 
@@ -239,6 +240,68 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
   await expect(rows.nth(2).getByRole("listitem").first()).toContainText("20%");
   // Every number is fresh, so opening the view read nothing.
   expect(board.writes).toEqual([]);
+});
+
+test("every row's windows share columns, so bars start together whatever the CLI calls them", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/runners");
+  const rows = page
+    .getByRole("region", { name: "Plan quota" })
+    .locator('[aria-label="Quota by runner"] > li');
+  const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  // The narrowest island and the widest.
+  for (const [width, island] of [
+    [1024, 420],
+    [1920, 680],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(handle).toHaveAccessibleName(
+      new RegExp(`^Width of the board's content, ${island} of`),
+    );
+    // Claude names a model's weekly window, wider than any of Codex's.
+    await expect(rows.nth(0).getByRole("listitem").nth(2)).toHaveText(/^7d fable/);
+    await expect(rows.nth(1)).toContainText("codex");
+    await expect(rows.nth(1).getByRole("listitem")).toHaveText([/^7d\s*2%/]);
+    // Each window's name, bar, percent, and reset, where they start and the percent where it ends,
+    // whether they sit side by side on one line, in that order, and whether the name starts under
+    // the runner's name rather than under the CLI's mark.
+    const cells = await rows.getByRole("listitem").evaluateAll((windows) =>
+      windows.map((window) => {
+        const boxes = [...window.children].map((cell) => cell.getBoundingClientRect());
+        const [name, bar, percent, reset] = boxes;
+        const middles = boxes.map((box) => box.top + box.height / 2);
+        const mark = window.parentElement?.closest("li")?.querySelector("svg");
+        return {
+          indented:
+            name !== undefined &&
+            mark !== null &&
+            mark !== undefined &&
+            name.left > mark.getBoundingClientRect().right,
+          text: window.textContent,
+          cut: [...window.children].some((cell) => cell.scrollWidth > cell.clientWidth),
+          inLine:
+            boxes.length === 4 &&
+            Math.max(...middles) - Math.min(...middles) < 1 &&
+            boxes.every((box, at) => at === 0 || box.left >= (boxes[at - 1]?.right ?? 0)),
+          name: name?.left,
+          bar: bar?.left,
+          barWidth: bar?.width,
+          percent: percent?.right,
+          reset: reset?.left,
+        };
+      }),
+    );
+    // pod and laptop's Claude, pod's Codex, and studio's Claude: seven windows in three rows.
+    expect(cells).toHaveLength(7);
+    expect(cells.filter((cell) => !cell.inLine || !cell.indented)).toEqual([]);
+    for (const key of ["name", "bar", "barWidth", "percent", "reset"] as const) {
+      const at = cells.map((cell) => cell[key]);
+      expect(at, key).toEqual(at.map(() => at[0]));
+    }
+    expect(cells.filter((cell) => cell.cut)).toEqual([]);
+  }
 });
 
 test("the runners view reads numbers missing or old once on opening, and again on request", async ({

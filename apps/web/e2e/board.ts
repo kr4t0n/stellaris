@@ -602,7 +602,7 @@ const SOCIETY_TOPIC = {
   body: "Comment only what the code cannot say.",
 };
 
-/** A skill promoted to the society, which opens from the society's overview and is removed there. */
+/** A skill promoted to the society, which opens from the society's overview and is removed from its pane. */
 const SOCIETY_SKILL = {
   name: "uv-setup",
   summary: "Set up a uv project with locked dependencies",

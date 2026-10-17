@@ -103,7 +103,7 @@ export function SocietyView() {
   );
 }
 
-/** The society's skills, each with its whole summary, a link to its whole folder. */
+/** The society's skills, each with two lines of its summary, a link to its whole folder. */
 function SkillList({ skills }: { skills: readonly Skill[] }) {
   return (
     <ul className="-mx-2">
@@ -116,7 +116,7 @@ function SkillList({ skills }: { skills: readonly Skill[] }) {
           >
             <span className="block text-sm text-fg-primary">{skill.name}</span>
             {skill.summary === "" ? null : (
-              <span className="mt-0.5 block text-sm leading-relaxed text-fg-secondary">
+              <span className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">
                 {skill.summary}
               </span>
             )}

@@ -114,7 +114,7 @@ export function TopicList({
                   by {topic.updatedBy} {ago(topic.updatedAt, now)}
                 </span>
               </span>
-              <span className="mt-0.5 line-clamp-2 block text-sm leading-relaxed text-fg-secondary">
+              <span className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-fg-secondary">
                 <LinkedText text={firstParagraph(topic.body, 240)} links={false} />
               </span>
             </Link>

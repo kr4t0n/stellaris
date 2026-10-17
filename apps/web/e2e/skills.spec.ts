@@ -1,5 +1,30 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fakeBoard } from "./board.js";
+
+const CREATED = "2026-10-01T09:00:00.000Z";
+const LONG =
+  "Applies to every repository the society works in: how a change is cut into commits, what each commit message says, which checks run before a push, where the evidence for a change goes, and what the reviewer reruns before it passes, with the reasons for each rule so that a new citizen can follow it without asking.";
+
+/** The lines a box shows, from its height and its line height. */
+async function linesOf(box: Locator): Promise<{ shown: number; cut: boolean }> {
+  return box.evaluate((element) => {
+    const height = element.getBoundingClientRect().height;
+    const line = Number.parseFloat(getComputedStyle(element).lineHeight);
+    return {
+      shown: Math.round(height / line),
+      cut: element.scrollHeight > element.clientHeight + 1,
+    };
+  });
+}
+
+/** Each row's preview under its name: a topic's first paragraph or a skill's summary. */
+function previewOf(page: Page, name: RegExp): Locator {
+  return page
+    .getByRole("region", { name: "Board content" })
+    .getByRole("link", { name })
+    .locator(":scope > span")
+    .nth(1);
+}
 
 test("a society skill opens from the society's overview with its SKILL.md and each file beside it", async ({
   page,
@@ -18,8 +43,9 @@ test("a society skill opens from the society's overview with its SKILL.md and ea
 
   await expect(page).toHaveURL(/\/skills\/uv-setup$/);
   await expect(view.getByRole("heading", { name: "uv-setup" })).toBeVisible();
-  // The summary may be cut in the header, so hovering it shows it whole.
-  await expect(view.locator("header span[title]")).toHaveAttribute(
+  // The name and the summary may be cut in the header, so hovering each shows it whole.
+  await expect(view.locator("header h2 span[title]")).toHaveAttribute("title", "uv-setup");
+  await expect(view.locator("header p span[title]")).toHaveAttribute(
     "title",
     "Set up a uv project with locked dependencies",
   );
@@ -65,6 +91,16 @@ test("a society skill is removed from its page with a reason, and the society li
   page,
 }) => {
   const board = await fakeBoard(page);
+  // The skill's files are gone with it, so nothing asks for them once it is removed.
+  let removed = false;
+  let filesAfter = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/verbs/remove_skill")) {
+      removed = true;
+    } else if (removed && request.url().endsWith("/api/skills/uv-setup/files")) {
+      filesAfter += 1;
+    }
+  });
   await page.goto("/society");
   const view = page.getByRole("region", { name: "Board content" });
   await view.getByRole("link", { name: /^uv-setup/ }).click();
@@ -96,4 +132,92 @@ test("a society skill is removed from its page with a reason, and the society li
       body: { name: "uv-setup", reason: "Superseded by uv-project" },
     },
   ]);
+  expect(filesAfter).toBe(0);
+});
+
+test("a skill whose files fail to load says so under its header, and a 404 is not asked again", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  let status = 500;
+  let asked = 0;
+  await page.route("**/api/skills/uv-setup/files", async (route) => {
+    asked += 1;
+    await route.fulfill({ status, json: { error: "INTERNAL", message: "the disk is gone" } });
+  });
+  const view = page.getByRole("region", { name: "Board content" });
+  await page.goto("/skills/uv-setup");
+  await expect(view).toContainText("Could not read its files.");
+  await expect(view.getByRole("heading", { name: "uv-setup" })).toBeVisible();
+  await expect(view.getByRole("button", { name: "Remove…" })).toBeVisible();
+
+  // A skill gone since the list was read answers 404 once; the error shows after that one ask.
+  status = 404;
+  asked = 0;
+  await page.goto("/skills/uv-setup");
+  await expect(view).toContainText("Could not read its files.");
+  expect(asked).toBe(1);
+});
+
+test("the society's knowledge and skill previews stop at two lines, at a wide and a narrow window", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.route("**/api/society/knowledge", (route) =>
+    route.fulfill({
+      json: [
+        {
+          topic: "commit-rules",
+          project: null,
+          revision: 1,
+          updatedBy: "stew",
+          updatedAt: CREATED,
+          body: `# Commit rules\n\n${LONG}`,
+        },
+        {
+          topic: "short-note",
+          project: null,
+          revision: 1,
+          updatedBy: "stew",
+          updatedAt: CREATED,
+          body: "One line.",
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/skills", (route) =>
+    route.fulfill({
+      json: [
+        {
+          name: "long-summary",
+          summary: LONG,
+          scope: "society",
+          path: "/data/society/skills/long-summary/SKILL.md",
+        },
+        {
+          name: "short-summary",
+          summary: "One line.",
+          scope: "society",
+          path: "/data/society/skills/short-summary/SKILL.md",
+        },
+      ],
+    }),
+  );
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/society");
+    for (const name of [/^commit-rules/, /^long-summary/]) {
+      await expect(previewOf(page, name)).toBeVisible();
+      expect(await linesOf(previewOf(page, name)), `${name} at ${width}`).toEqual({
+        shown: 2,
+        cut: true,
+      });
+    }
+    for (const name of [/^short-note/, /^short-summary/]) {
+      expect(await linesOf(previewOf(page, name)), `${name} at ${width}`).toEqual({
+        shown: 1,
+        cut: false,
+      });
+    }
+  }
 });

@@ -46,7 +46,7 @@ export function SkillView() {
             }
           />
         }
-        title={skill.name}
+        title={<span title={skill.name}>{skill.name}</span>}
         subtitle={
           skill.summary === "" ? undefined : <span title={skill.summary}>{skill.summary}</span>
         }

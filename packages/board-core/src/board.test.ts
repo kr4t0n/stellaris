@@ -578,6 +578,31 @@ describe("Board", () => {
       [task.id, "2026-09-28T10:02:00.000Z", usage],
       [undefined, "2026-09-28T10:01:00.000Z", undefined],
     ]);
+    // The roster's line names the conversation of the citizen's latest turn beside its scope.
+    const outcome = async () =>
+      (await board.listMembers()).find((m) => m.name === "eng-1")?.lastTurnOutcome;
+    expect(await outcome()).toBe(`manual on demo in thread ${task.id}: completed`);
+    const elsewhere = [
+      ["10:05", { channel: "dev" }, "manual on demo in #dev: completed"],
+      [
+        "10:06",
+        { project: "society", place: "lab" },
+        "manual on society in lab's channels: completed",
+      ],
+      ["10:07", {}, "manual on demo: completed"],
+    ] as const;
+    for (const [at, where, line] of elsewhere) {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, `2026-09-28T${at}:00.000Z`),
+        ...where,
+      });
+      await board.finishTurn({
+        ...turn,
+        endedAt: `2026-09-28T${at}:30.000Z`,
+        exitReason: "completed",
+      });
+      expect(await outcome()).toBe(line);
+    }
   });
 
   it("counts a closed thread's posts toward no heartbeat, while its conversation still reads them", async () => {

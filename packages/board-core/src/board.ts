@@ -504,6 +504,18 @@ function byId(a: { message: Message }, b: { message: Message }): number {
 function turnTime(record: TurnRecord): string {
   return record.endedAt ?? record.startedAt;
 }
+
+/** Which conversation of its scope a turn ran in, for the roster's line: none for the home. */
+function turnConversation(record: TurnRecord): string {
+  return record.thread !== undefined
+    ? ` in thread ${record.thread}`
+    : record.channel !== undefined
+      ? ` in #${record.channel}`
+      : record.place !== undefined
+        ? ` in ${record.place}'s channels`
+        : "";
+}
+
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
@@ -5538,7 +5550,7 @@ export class Board {
       const at = turn?.endedAt ?? turn?.startedAt;
       if (turn !== null && at !== undefined && (lastTurnAt === undefined || at > lastTurnAt)) {
         lastTurnAt = at;
-        lastTurnOutcome = `${turn.trigger.kind} on ${scope}: ${turn.exitReason ?? "running"}${
+        lastTurnOutcome = `${turn.trigger.kind} on ${scope}${turnConversation(turn)}: ${turn.exitReason ?? "running"}${
           turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
         }`;
         lastModel = turn.model ?? undefined;

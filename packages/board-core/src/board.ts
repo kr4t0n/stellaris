@@ -2334,11 +2334,14 @@ export class Board {
    * scope; a project member reads them at its next turn. Two kinds of post are in the digest but not
    * counted, and are read when the member wakes for something else: a task step's, which wakes
    * whoever it hands work to, and the board's own, operations signals and landing announcements,
-   * whose signals that call for action wake their readers directly.
+   * whose signals that call for action wake their readers directly. A closed thread counts for
+   * nothing: its conversation has ended, and a turn there could only read its posts and be refused
+   * a reply, while a wake queued before it closed, as for a mention, still runs there.
    */
   async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
     const counts = new Map<string, UnreadConversation>();
+    const closed = new Map<Ulid, boolean>();
     const unscoped = { name: actor.name, role: actor.role };
     for (const { scope, part, message, news } of await this.digestSince(unscoped, cursors, upto)) {
       // News waits for the citizen's next turn; it is never a reason for one.
@@ -2349,10 +2352,21 @@ export class Board {
       if (posted !== scope && scope !== SOCIETY_SCOPE) {
         continue;
       }
+      const thread = threadOfPart(part);
+      if (thread !== undefined) {
+        let ended = closed.get(thread);
+        if (ended === undefined) {
+          ended = (await this.tryFindThread(thread))?.thread.state === "closed";
+          closed.set(thread, ended);
+        }
+        if (ended) {
+          continue;
+        }
+      }
       const key = conversationKey(scope, part);
       const entry = counts.get(key) ?? {
         scope,
-        thread: threadOfPart(part) ?? null,
+        thread: thread ?? null,
         channel: channelOfPart(part) ?? null,
         place: placeOfPart(part) ?? null,
         count: 0,

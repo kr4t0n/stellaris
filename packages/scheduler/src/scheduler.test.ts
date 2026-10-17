@@ -930,6 +930,33 @@ describe("Scheduler", () => {
     expect(woken()).toEqual([]);
   });
 
+  it("wakes a thread on heartbeat while it is open, and not once it has closed", async () => {
+    const { board, runner, scheduler } = await setup();
+    const woken = () => runner.dispatches.map((d) => [d.agent, d.thread?.id, d.trigger.kind]);
+    const beat = async (): Promise<void> => {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    // A topic eng-1 opened, on a channel it does not follow, so the summary that closes it is
+    // nothing for its home either.
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
+    // The fake runner moves no cursor, as a turn that fails leaves it: each heartbeat wakes the
+    // thread again while it is open.
+    await beat();
+    expect(woken()).toEqual([["eng-1", topic.id, "heartbeat"]]);
+    runner.dispatches.length = 0;
+    await beat();
+    expect(woken()).toEqual([["eng-1", topic.id, "heartbeat"]]);
+    runner.dispatches.length = 0;
+    // Its conversation ends with it, and the post it never read wakes it no more.
+    await board.closeThread(REV, { thread_id: topic.id, summary: "zod it is." });
+    await beat();
+    await beat();
+    expect(woken()).toEqual([]);
+  });
+
   it("wakes on heartbeat only when there is something to read or hold", async () => {
     const { board, runner, scheduler } = await setup();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

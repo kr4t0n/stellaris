@@ -578,6 +578,72 @@ describe("Board", () => {
       [task.id, "2026-09-28T10:02:00.000Z", usage],
       [undefined, "2026-09-28T10:01:00.000Z", undefined],
     ]);
+    // The roster's line names the conversation of the citizen's latest turn beside its scope.
+    const outcome = async () =>
+      (await board.listMembers()).find((m) => m.name === "eng-1")?.lastTurnOutcome;
+    expect(await outcome()).toBe(`manual on demo in thread ${task.id}: completed`);
+    const elsewhere = [
+      ["10:05", { channel: "dev" }, "manual on demo in #dev: completed"],
+      [
+        "10:06",
+        { project: "society", place: "lab" },
+        "manual on society in lab's channels: completed",
+      ],
+      ["10:07", {}, "manual on demo: completed"],
+    ] as const;
+    for (const [at, where, line] of elsewhere) {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, `2026-09-28T${at}:00.000Z`),
+        ...where,
+      });
+      await board.finishTurn({
+        ...turn,
+        endedAt: `2026-09-28T${at}:30.000Z`,
+        exitReason: "completed",
+      });
+      expect(await outcome()).toBe(line);
+    }
+  });
+
+  it("counts a closed thread's posts toward no heartbeat, while its conversation still reads them", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
+    const open = await board.openThread(ENG, { channel: "demo/dev", title: "and the date?" });
+    // A front desk, in no project, takes part in the task's thread from the society scope.
+    const FRONT: Actor = { name: "concierge-1", role: "concierge" };
+    await board.addAgent(USER, { name: FRONT.name, role: FRONT.role, cli: "claude" });
+    await board.postMessage(FRONT, { thread_id: task.id, body: "who takes this?" });
+    const inTask = await board.postMessage(REV, { thread_id: task.id, body: "the spec" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
+    await board.postMessage(REV, { thread_id: open.id, body: "next week" });
+    await board.postMessage(REV, { thread_id: open.id, body: "or the week after" });
+    const stillOpen = { scope: "demo", thread: open.id, channel: null, place: null, count: 2 };
+    expect(await board.unreadByConversation(ENG)).toEqual([
+      { scope: "demo", thread: task.id, channel: null, place: null, count: 2 },
+      { scope: "demo", thread: topic.id, channel: null, place: null, count: 1 },
+      stillOpen,
+    ]);
+    expect(await board.unreadByConversation(FRONT)).toEqual([
+      { scope: "society", thread: task.id, channel: null, place: null, count: 1 },
+    ]);
+
+    // A task's thread closes with its task, a topic's when someone closes it; only the thread
+    // still open asks for a turn, in a project and outside it.
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    await board.closeThread(REV, { thread_id: topic.id, summary: "zod it is." });
+    expect(await board.unreadByConversation(ENG)).toEqual([stillOpen]);
+    expect(await board.unreadByConversation(FRONT)).toEqual([]);
+    // A wake queued before the close still runs there and reads what it missed.
+    expect(
+      (
+        await board.readDigest({ ...ENG, scope: "demo", thread: task.id }, { advance: false })
+      ).messages.map((m) => m.id),
+    ).toContain(inTask.id);
   });
 
   it("files a channel's posts beside general in a conversation of its own, until it is archived", async () => {

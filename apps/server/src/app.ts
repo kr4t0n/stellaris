@@ -280,6 +280,10 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // The shared memory tiers: the society's knowledge topics and its promoted skills.
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
+  // A society skill's folder as it is published, with each file's text.
+  api.get("/skills/:name/files", async (c) =>
+    c.json(await board.readSocietySkillFiles(NameSchema.parse(c.req.param("name")))),
+  );
 
   // Governance the user does directly: retirement, charters, channels.
   api.post("/agents/:name/retire", async (c) => {

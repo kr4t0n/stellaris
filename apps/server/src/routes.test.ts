@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -466,6 +466,28 @@ describe("board server routes", () => {
       .parse(await (await app.request("/api/skills", { headers })).json());
     expect(skills).toMatchObject([{ name: "release", summary: "Cut a release", scope: "society" }]);
     expect(stewToken).toMatch(/^stl_/);
+
+    // A society skill's folder is read as it is published, and never through a link out of it.
+    const published = board.paths.societySkill("release");
+    await writeFile(path.join(dir, "secret.txt"), "the secret\n");
+    await symlink(path.join(dir, "secret.txt"), path.join(published, "leak.md"));
+    await symlink(dir, path.join(published, "data"));
+    const release = await app.request("/api/skills/release/files", { headers });
+    expect(release.status).toBe(200);
+    expect(await release.json()).toEqual([
+      {
+        path: "SKILL.md",
+        size: expect.any(Number),
+        executable: false,
+        text: expect.stringContaining("Tag, build, publish."),
+        truncated: false,
+      },
+    ]);
+    // A folder that is itself a link is no skill of the society, whatever it holds.
+    await symlink(published, path.join(board.paths.societySkills(), "linked"));
+    expect((await app.request("/api/skills/linked/files", { headers })).status).toBe(404);
+    expect((await app.request("/api/skills/nothing/files", { headers })).status).toBe(404);
+    expect((await app.request("/api/skills/..%2Fproposals/files", { headers })).status).toBe(400);
 
     // A skill proposed as a folder of its proposer's home is read with each file's text.
     const home = board.paths.agent("eng-1");

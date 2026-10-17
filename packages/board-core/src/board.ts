@@ -172,6 +172,7 @@ import {
 } from "./fs.js";
 import { Mutex } from "./mutex.js";
 import { BoardPaths } from "./paths.js";
+import { readSkillFolder, skillFileText } from "./skill-folder.js";
 import { hashToken, mintToken } from "./tokens.js";
 
 /** Who is acting. Resolved by the caller from a bearer token, never taken from verb arguments. */
@@ -527,9 +528,6 @@ const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 function withoutMentions(text: string): string {
   return text.replaceAll(MENTION_PATTERN, "$1$2");
 }
-
-/** The most of a proposed skill's file the proposal's view shows. */
-const SKILL_TEXT_LIMIT_CHARS = 100_000;
 
 /** The skill a proposal publishes from its proposer's home, or null for any other proposal. */
 function skillFolderOf(proposal: Proposal): Name | null {
@@ -6015,12 +6013,22 @@ export class Board {
         continue;
       }
       const bytes = await readFile(path.join(dir, ...entry.path.split("/"))).catch(() => null);
-      const text = bytes === null || bytes.includes(0) ? null : bytes.toString("utf8");
       files.push({
         ...entry,
-        text: text === null ? null : text.slice(0, SKILL_TEXT_LIMIT_CHARS),
-        truncated: text !== null && text.length > SKILL_TEXT_LIMIT_CHARS,
+        ...(bytes === null ? { text: null, truncated: false } : skillFileText(bytes)),
       });
+    }
+    return files;
+  }
+
+  /**
+   * A society skill's folder as it is published, with each file's text, for the skill's view; an
+   * unknown skill, or a folder without a SKILL.md, is not found.
+   */
+  async readSocietySkillFiles(name: Name): Promise<SkillFileContent[]> {
+    const files = await readSkillFolder(this.paths.societySkill(NameSchema.parse(name)));
+    if (files === null) {
+      throw new BoardError("NOT_FOUND", `the society has no skill ${name}`);
     }
     return files;
   }

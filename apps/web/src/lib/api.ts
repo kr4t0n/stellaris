@@ -334,6 +334,9 @@ export function createApi(token: string) {
     proposalFiles: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}/files`, token, SkillFileContentSchema.array()),
     skills: () => get("/api/skills", token, SkillSchema.array()),
+    /** A society skill's folder as it is published, each file with its text. */
+    skillFiles: (name: string) =>
+      get(`/api/skills/${encodeURIComponent(name)}/files`, token, SkillFileContentSchema.array()),
     turns: (name: string, limit: number) =>
       get(
         `/api/agents/${encodeURIComponent(name)}/turns?limit=${limit}`,

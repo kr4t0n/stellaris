@@ -42,6 +42,7 @@ describe("the trail", () => {
     expect(placeName("/p/lab/tasks", names)).toBe("the tasks of Lab");
     expect(placeName("/p/lab", names)).toBe("Lab");
     expect(placeName("/knowledge/lab/seeds", names)).toBe("seeds");
+    expect(placeName("/skills/uv-setup", names)).toBe("uv-setup");
     expect(placeName("/citizen/ada?tab=turns", names)).toBe("ada");
     expect(placeName("/needs-you", names)).toBe("what needs you");
     expect(placeName(`/crons?cron=${CRON}`, names)).toBe("Check the deploy");

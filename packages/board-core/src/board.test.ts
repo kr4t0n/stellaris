@@ -2965,6 +2965,22 @@ describe("Board", () => {
     expect((await board.listSocietySkills()).map((s) => [s.name, s.summary])).toEqual([
       ["uv-setup", "Set up a uv project"],
     ]);
+    // The skill's view reads the folder as it is published, frontmatter and all.
+    const files = await board.readSocietySkillFiles("uv-setup");
+    expect(files.map((file) => [file.path, file.executable])).toEqual([
+      ["SKILL.md", false],
+      ["references/flags.md", false],
+      ["scripts/check.sh", true],
+    ]);
+    expect(files[0]?.text).toContain("description: Set up a uv project");
+    expect(files[2]?.text).toBe("#!/bin/sh\nuv sync --locked\n");
+    await expect(board.readSocietySkillFiles("uv-project")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "the society has no skill uv-project",
+    });
+    await expect(board.readSocietySkillFiles("../uv-setup")).rejects.toThrow(
+      "expected 1-32 lowercase letters",
+    );
 
     // A replacement is the whole skill: a file the new version dropped goes with the old one.
     await rm(path.join(skill, "references"), { recursive: true });

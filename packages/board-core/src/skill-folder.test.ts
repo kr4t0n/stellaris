@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SKILL_FILES_LIMIT } from "@stellaris/shared";
@@ -106,6 +106,49 @@ describe("readSkillFolder", () => {
 
     expect(await readSkillFolder(path.join(dir, "skills", "missing"))).toBeNull();
     expect(await readSkillFolder(path.join(skill, "SKILL.md"))).toBeNull();
+  });
+
+  it("reads nothing outside while a file and a folder are swapped for links under the read", async () => {
+    const outside = path.join(dir, "outside");
+    await mkdir(outside);
+    await writeFile(path.join(outside, "notes.md"), "the secret\n");
+    const kept = path.join(dir, "docs-kept");
+    await mkdir(kept);
+    await writeFile(path.join(kept, "notes.md"), "safe\n");
+    const file = path.join(skill, "notes.md");
+    const folder = path.join(skill, "docs");
+    const done = new AbortController();
+    // Each loop puts a link where the walk may have seen a regular file or a real folder, so only
+    // the read's own checks, after the walk, stand between it and the file outside.
+    const swapFile = (async () => {
+      while (!done.signal.aborted) {
+        await writeFile(`${file}.new`, "safe\n");
+        await rename(`${file}.new`, file);
+        await symlink(path.join(outside, "notes.md"), `${file}.link`);
+        await rename(`${file}.link`, file);
+      }
+    })();
+    const swapFolder = (async () => {
+      while (!done.signal.aborted) {
+        await rename(kept, folder);
+        await rename(folder, kept);
+        await symlink(outside, folder);
+        await rm(folder);
+      }
+    })();
+    let leaks = 0;
+    try {
+      for (let read = 0; read < 400; read += 1) {
+        const files = (await readSkillFolder(skill)) ?? [];
+        if (files.some((entry) => entry.text?.includes("the secret") === true)) {
+          leaks += 1;
+        }
+      }
+    } finally {
+      done.abort();
+      await Promise.all([swapFile, swapFolder]);
+    }
+    expect(leaks).toBe(0);
   });
 
   it(`lists at most ${SKILL_FILES_LIMIT} files, and no atomic write's temporary file`, async () => {

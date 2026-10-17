@@ -614,22 +614,30 @@ describe("Board", () => {
     });
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
     const open = await board.openThread(ENG, { channel: "demo/dev", title: "and the date?" });
+    // A front desk, in no project, takes part in the task's thread from the society scope.
+    const FRONT: Actor = { name: "concierge-1", role: "concierge" };
+    await board.addAgent(USER, { name: FRONT.name, role: FRONT.role, cli: "claude" });
+    await board.postMessage(FRONT, { thread_id: task.id, body: "who takes this?" });
     const inTask = await board.postMessage(REV, { thread_id: task.id, body: "the spec" });
     await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
     await board.postMessage(REV, { thread_id: open.id, body: "next week" });
     await board.postMessage(REV, { thread_id: open.id, body: "or the week after" });
     const stillOpen = { scope: "demo", thread: open.id, channel: null, place: null, count: 2 };
     expect(await board.unreadByConversation(ENG)).toEqual([
-      { scope: "demo", thread: task.id, channel: null, place: null, count: 1 },
+      { scope: "demo", thread: task.id, channel: null, place: null, count: 2 },
       { scope: "demo", thread: topic.id, channel: null, place: null, count: 1 },
       stillOpen,
     ]);
+    expect(await board.unreadByConversation(FRONT)).toEqual([
+      { scope: "society", thread: task.id, channel: null, place: null, count: 1 },
+    ]);
 
     // A task's thread closes with its task, a topic's when someone closes it; only the thread
-    // still open asks for a turn.
+    // still open asks for a turn, in a project and outside it.
     await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
     await board.closeThread(REV, { thread_id: topic.id, summary: "zod it is." });
     expect(await board.unreadByConversation(ENG)).toEqual([stillOpen]);
+    expect(await board.unreadByConversation(FRONT)).toEqual([]);
     // A wake queued before the close still runs there and reads what it missed.
     expect(
       (

@@ -86,6 +86,9 @@ export function placeName(href: string, names: PlaceNames): string {
   if (first === "knowledge") {
     return segment(pathname, 3);
   }
+  if (first === "skills") {
+    return segment(pathname, 2);
+  }
   if (first === "citizen") {
     return decodeURIComponent(second);
   }

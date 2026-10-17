@@ -602,13 +602,38 @@ const SOCIETY_TOPIC = {
   body: "Comment only what the code cannot say.",
 };
 
-/** A skill promoted to the society, which the user may remove from the society's overview. */
+/** A skill promoted to the society, which opens from the society's overview and is removed there. */
 const SOCIETY_SKILL = {
   name: "uv-setup",
   summary: "Set up a uv project with locked dependencies",
   scope: "society",
   path: "/data/society/skills/uv-setup/SKILL.md",
 };
+
+/** The society skill's folder as it is published: its SKILL.md, a reference, and a script. */
+const SOCIETY_SKILL_FILES = [
+  {
+    path: "SKILL.md",
+    size: 140,
+    executable: false,
+    text: "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n\n# uv setup\n\nRun scripts/check.sh before the first commit.\n",
+    truncated: false,
+  },
+  {
+    path: "references/flags.md",
+    size: 18,
+    executable: false,
+    text: "# Flags\n\n--locked\n",
+    truncated: false,
+  },
+  {
+    path: "scripts/check.sh",
+    size: 27,
+    executable: true,
+    text: "#!/bin/sh\nuv sync --locked\n",
+    truncated: false,
+  },
+];
 
 /** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
 const SIGNALS = [
@@ -1687,6 +1712,10 @@ export async function fakeBoard(
         return json(route, { thread: TASK_THREAD, messages: threadMessages });
       case "/api/skills":
         return json(route, societySkills);
+      case `/api/skills/${SOCIETY_SKILL.name}/files`:
+        return societySkills.some((skill) => skill.name === SOCIETY_SKILL.name)
+          ? json(route, SOCIETY_SKILL_FILES)
+          : json(route, { error: "NOT_FOUND", message: "the society has no skill uv-setup" }, 404);
       case "/api/channels/general":
       case "/api/channels/governance":
       case "/api/channels/asks":

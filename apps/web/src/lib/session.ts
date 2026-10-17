@@ -242,6 +242,21 @@ export function useSkills() {
   return useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 60_000 });
 }
 
+/**
+ * A society skill's folder, under the list's key so the events that refresh the list refresh it;
+ * a skill that is gone is not asked for again at once.
+ */
+export function useSkillFiles(name: string) {
+  const { api } = useSession();
+  return useQuery({
+    queryKey: ["skills", name, "files"],
+    queryFn: () => api.skillFiles(name),
+    staleTime: 60_000,
+    retry: (failures, error) =>
+      failures < 1 && !(error instanceof ApiError && error.status === 404),
+  });
+}
+
 /** A citizen's finished turns, oldest first, from the event log. */
 export function useTurnHistory(name: string, limit: number) {
   const { api } = useSession();

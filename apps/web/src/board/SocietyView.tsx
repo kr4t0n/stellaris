@@ -1,6 +1,6 @@
 import { SOCIETY_SCOPE, USER_ROLE, type Skill } from "@stellaris/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { Button } from "../components/Button.js";
 import {
   useChannels,
@@ -9,18 +9,16 @@ import {
   useNow,
   useProjects,
   useRoles,
-  useSession,
   useSkills,
   useSociety,
 } from "../lib/session.js";
 import { ChannelList, NewChannelForm } from "./ChannelForms.js";
 import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { Failure, FIELD } from "./ThreadForms.js";
 
 /**
  * The society at a glance: its citizens, its channels, the roles they fill, and what it knows and
- * can do; a channel of the society is opened here, and a skill it no longer needs removed.
+ * can do; a channel of the society is opened here, and each topic and skill opens in full.
  */
 export function SocietyView() {
   const society = useSociety();
@@ -105,78 +103,26 @@ export function SocietyView() {
   );
 }
 
-/** The society's skills, each removable with a reason. */
+/** The society's skills, each with its whole summary, a link to its whole folder. */
 function SkillList({ skills }: { skills: readonly Skill[] }) {
-  const [removing, setRemoving] = useState<string | null>(null);
   return (
-    <ul className="space-y-1.5">
+    <ul className="-mx-2">
       {skills.map((skill) => (
         <li key={skill.name}>
-          <div className="flex items-baseline gap-2">
-            <p className="min-w-0 flex-1 text-sm">
-              <span className="text-fg-primary">{skill.name}</span>
-              {skill.summary === "" ? null : (
-                <span className="text-fg-secondary"> · {skill.summary}</span>
-              )}
-            </p>
-            {removing === skill.name ? null : (
-              <Button aria-label={`Remove ${skill.name}…`} onClick={() => setRemoving(skill.name)}>
-                Remove…
-              </Button>
+          <Link
+            to="/skills/$name"
+            params={{ name: skill.name }}
+            className="block rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-2/50"
+          >
+            <span className="block text-sm text-fg-primary">{skill.name}</span>
+            {skill.summary === "" ? null : (
+              <span className="mt-0.5 block text-sm leading-relaxed text-fg-secondary">
+                {skill.summary}
+              </span>
             )}
-          </div>
-          {removing === skill.name ? (
-            <RemoveSkillForm name={skill.name} onDone={() => setRemoving(null)} />
-          ) : null}
+          </Link>
         </li>
       ))}
     </ul>
-  );
-}
-
-/** Removes a society skill with the reason, which the board's notice in general quotes. */
-function RemoveSkillForm({ name, onDone }: { name: string; onDone: () => void }) {
-  const { api } = useSession();
-  const client = useQueryClient();
-  const [reason, setReason] = useState("");
-  const reasonField = useRef<HTMLInputElement>(null);
-  useEffect(() => reasonField.current?.focus(), []);
-  const remove = useMutation({
-    mutationFn: () => api.removeSkill({ name, reason: reason.trim() }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ["skills"] });
-      onDone();
-    },
-  });
-  return (
-    <form
-      aria-label={`Remove ${name}`}
-      className="mt-2 space-y-2 rounded-lg bg-surface-2/20 p-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        remove.mutate();
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <input
-          ref={reasonField}
-          value={reason}
-          aria-label="Reason"
-          placeholder="Why it is wrong, superseded, or unused"
-          onChange={(event) => setReason(event.target.value)}
-          className={`${FIELD} min-w-0 flex-1`}
-        />
-        <Button onClick={onDone}>Cancel</Button>
-        <Button variant="primary" type="submit" disabled={remove.isPending || reason.trim() === ""}>
-          {remove.isPending ? "Removing…" : "Remove skill"}
-        </Button>
-      </div>
-      <p className="text-meta">
-        No citizen's skills index lists {name} from its next turn, and a notice in #general says so
-        with your reason, waking nobody. Its proposer keeps its own copy, and the server keeps the
-        text aside.
-      </p>
-      <Failure error={remove.error} />
-    </form>
   );
 }

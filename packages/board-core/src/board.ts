@@ -505,6 +505,18 @@ function byId(a: { message: Message }, b: { message: Message }): number {
 function turnTime(record: TurnRecord): string {
   return record.endedAt ?? record.startedAt;
 }
+
+/** Which conversation of its scope a turn ran in, for the roster's line: none for the home. */
+function turnConversation(record: TurnRecord): string {
+  return record.thread !== undefined
+    ? ` in thread ${record.thread}`
+    : record.channel !== undefined
+      ? ` in #${record.channel}`
+      : record.place !== undefined
+        ? ` in ${record.place}'s channels`
+        : "";
+}
+
 const PausedSchema = z.object({ paused: z.boolean() });
 
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
@@ -2332,11 +2344,14 @@ export class Board {
    * scope; a project member reads them at its next turn. Two kinds of post are in the digest but not
    * counted, and are read when the member wakes for something else: a task step's, which wakes
    * whoever it hands work to, and the board's own, operations signals and landing announcements,
-   * whose signals that call for action wake their readers directly.
+   * whose signals that call for action wake their readers directly. A closed thread counts for
+   * nothing: its conversation has ended, and a turn there could only read its posts and be refused
+   * a reply, while a wake queued before it closed, as for a mention, still runs there.
    */
   async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
     const counts = new Map<string, UnreadConversation>();
+    const closed = new Map<Ulid, boolean>();
     const unscoped = { name: actor.name, role: actor.role };
     for (const { scope, part, message, news } of await this.digestSince(unscoped, cursors, upto)) {
       // News waits for the citizen's next turn; it is never a reason for one.
@@ -2347,10 +2362,21 @@ export class Board {
       if (posted !== scope && scope !== SOCIETY_SCOPE) {
         continue;
       }
+      const thread = threadOfPart(part);
+      if (thread !== undefined) {
+        let ended = closed.get(thread);
+        if (ended === undefined) {
+          ended = (await this.tryFindThread(thread))?.thread.state === "closed";
+          closed.set(thread, ended);
+        }
+        if (ended) {
+          continue;
+        }
+      }
       const key = conversationKey(scope, part);
       const entry = counts.get(key) ?? {
         scope,
-        thread: threadOfPart(part) ?? null,
+        thread: thread ?? null,
         channel: channelOfPart(part) ?? null,
         place: placeOfPart(part) ?? null,
         count: 0,
@@ -5522,7 +5548,7 @@ export class Board {
       const at = turn?.endedAt ?? turn?.startedAt;
       if (turn !== null && at !== undefined && (lastTurnAt === undefined || at > lastTurnAt)) {
         lastTurnAt = at;
-        lastTurnOutcome = `${turn.trigger.kind} on ${scope}: ${turn.exitReason ?? "running"}${
+        lastTurnOutcome = `${turn.trigger.kind} on ${scope}${turnConversation(turn)}: ${turn.exitReason ?? "running"}${
           turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
         }`;
         lastModel = turn.model ?? undefined;

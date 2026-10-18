@@ -1,18 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   capOutput,
+  channelConversation,
   channelRef,
+  conversationPart,
   IsoDateTimeSchema,
   isSafeRelativePath,
   loadRunnerConfig,
   loadServerConfig,
   mayHoldStage,
   parseChannelRef,
+  parseSessionKey,
+  placeConversation,
   PlanStageSchema,
   RUNNER_PROTOCOL,
   RunnerHelloSchema,
   RunnerSchema,
   SEED_ROLES,
+  sessionKey,
   TaskFrontmatterSchema,
   turnStatusJsonSchema,
   VerbInputs,
@@ -34,6 +39,50 @@ describe("channel references", () => {
     expect(parseChannelRef("demo/dev")).toEqual({ project: "demo", channel: "dev" });
     expect(channelRef(null, "ops")).toBe("ops");
     expect(channelRef("demo", "general")).toBe("demo/general");
+  });
+});
+
+describe("conversations", () => {
+  it("files a top-level post in the society scope in its project's conversation, any channel of it", () => {
+    for (const channel of ["demo/general", "demo/dev"]) {
+      expect(channelConversation("society", channel)).toBeUndefined();
+      expect(placeConversation("society", channel)).toBe("demo");
+    }
+    // A member's turn is in the project's scope, where its channels keep their own conversations.
+    expect(channelConversation("demo", "demo/dev")).toBe("dev");
+    expect(placeConversation("demo", "demo/dev")).toBeUndefined();
+    expect(placeConversation("demo", "demo/general")).toBeUndefined();
+    // The society's own channels are no project's.
+    expect(placeConversation("society", "general")).toBeUndefined();
+    expect(channelConversation("society", "asks")).toBe("asks");
+  });
+
+  it("keys a project's conversation apart from a society channel of the same name, and a thread", () => {
+    const place = sessionKey("concierge-1", "society", conversationPart({ place: "asks" }));
+    const channel = sessionKey("concierge-1", "society", conversationPart({ channel: "asks" }));
+    const thread = sessionKey(
+      "concierge-1",
+      "society",
+      conversationPart({ thread: "01M3S000000000000000000AAA" }),
+    );
+    expect(place).toBe("concierge-1/society/~asks");
+    expect(channel).toBe("concierge-1/society/#asks");
+    expect(new Set([place, channel, thread, sessionKey("concierge-1", "society")]).size).toBe(4);
+    expect(parseSessionKey(place)).toEqual({
+      agent: "concierge-1",
+      scope: "society",
+      place: "asks",
+    });
+    expect(parseSessionKey(channel)).toEqual({
+      agent: "concierge-1",
+      scope: "society",
+      channel: "asks",
+    });
+    expect(parseSessionKey(thread)).toEqual({
+      agent: "concierge-1",
+      scope: "society",
+      thread: "01M3S000000000000000000AAA",
+    });
   });
 });
 

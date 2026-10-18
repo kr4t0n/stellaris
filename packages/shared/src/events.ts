@@ -125,6 +125,14 @@ export const TurnExitReasonSchema = z.enum([
 ]);
 export type TurnExitReason = z.infer<typeof TurnExitReasonSchema>;
 
+/**
+ * Why a turn's CLI could not resume the conversation's saved session, which fails the turn before
+ * any model call: `lost` when there is nothing to resume, as an id that names no session or a file
+ * the CLI cannot read, and `retry` when a later turn may resume it, as after a timeout.
+ */
+export const ResumeFailureSchema = z.enum(["lost", "retry"]);
+export type ResumeFailure = z.infer<typeof ResumeFailureSchema>;
+
 /** One event vocabulary for every CLI. Adapters map their native streams onto this union. */
 export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({
@@ -198,6 +206,8 @@ export const LiveTurnEventSchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn is in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn is in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   event: AgentEventSchema,
 });
 export type LiveTurnEvent = z.infer<typeof LiveTurnEventSchema>;

@@ -1,6 +1,6 @@
 import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/shared";
 import { Link, useSearch } from "@tanstack/react-router";
-import { Fragment, useId } from "react";
+import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { pairsOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -57,6 +57,7 @@ interface RowState {
 /** A row's tokens over the window: as `tokenUseCell` words them, or why they are not shown. */
 interface RowTokens {
   readonly label: string;
+  readonly counts: { readonly input: string; readonly output: string } | null;
   readonly detail: string | undefined;
   readonly spoken: string | null;
 }
@@ -65,6 +66,7 @@ function CitizenRow({
   member,
   state,
   tokens,
+  outputs,
   runners,
   placed,
   now,
@@ -72,6 +74,8 @@ function CitizenRow({
   member: Member;
   state: RowState;
   tokens: RowTokens;
+  /** Every out count the list shows, which the row's own is drawn as wide as. */
+  outputs: readonly string[];
   runners: readonly Runner[];
   placed: ReadonlyMap<string, string>;
   now: number;
@@ -98,17 +102,11 @@ function CitizenRow({
           {model}
         </span>
         {/*
-          On one line each runner's name stays whole: a hostname's hyphens would otherwise break it
-          in every row while the model and projects still had room. A citizen's runners wrap
-          between names when the row has no room for them all.
+          One line, cut like the model and projects when the row has no room for every runner; the
+          hover says which work runs on each, and screen readers read the whole line.
         */}
-        <span className="text-xs text-fg-muted" title={runner.detail}>
-          {runner.parts.map((part, index) => (
-            <Fragment key={part}>
-              {index === 0 ? null : " "}
-              <span className="@min-[560px]:whitespace-nowrap">{part}</span>
-            </Fragment>
-          ))}
+        <span className="truncate text-xs text-fg-muted" title={runner.detail}>
+          {runner.label}
         </span>
         <span className="truncate text-xs text-fg-muted" title={projects}>
           {projects}
@@ -116,13 +114,32 @@ function CitizenRow({
         {/*
           The counts, right-aligned so they line up from row to row: a column of their own before
           the state where the list is wide enough, else a line of their own under the row, ending
-          at its right edge.
+          at its right edge. The out count sits in a box as wide as the widest in the list, so the
+          in counts end at one place too; the box takes its width from every out count in the list,
+          laid in it as generated content of hidden boxes, which neither screen readers nor a copy
+          pick up.
         */}
         <span
           className="col-[2/-1] row-start-2 text-right text-xs whitespace-nowrap text-fg-muted tabular-nums @min-[560px]:col-auto @min-[560px]:row-auto"
           title={tokens.detail}
         >
-          {tokens.label}
+          {tokens.counts === null ? (
+            tokens.label
+          ) : (
+            <>
+              {`${tokens.counts.input} · `}
+              <span className="inline-grid justify-items-end">
+                <span className="[grid-area:1/1]">{tokens.counts.output}</span>
+                {outputs.map((output) => (
+                  <span
+                    key={output}
+                    data-width={output}
+                    className="invisible [grid-area:1/1] before:content-[attr(data-width)]"
+                  />
+                ))}
+              </span>
+            </>
+          )}
           {tokens.spoken === null ? null : <span className="sr-only">, {tokens.spoken}</span>}
         </span>
         {/*
@@ -208,9 +225,14 @@ export function CitizensView() {
       return tokenUseCell(counted.get(member.name), window);
     }
     return tokenUse.error === null
-      ? { label: "counting…", detail: undefined, spoken: null }
-      : { label: "tokens unknown", detail: tokenUse.error.message, spoken: null };
+      ? { label: "counting…", counts: null, detail: undefined, spoken: null }
+      : { label: "tokens unknown", counts: null, detail: tokenUse.error.message, spoken: null };
   };
+
+  // Every out count the list shows, so each row's is drawn as wide as the widest.
+  const outputs = [
+    ...new Set([...active, ...retired].flatMap((member) => tokens(member).counts?.output ?? [])),
+  ];
 
   const row = (member: Member) => (
     <CitizenRow
@@ -218,6 +240,7 @@ export function CitizensView() {
       member={member}
       state={state(member)}
       tokens={tokens(member)}
+      outputs={outputs}
       runners={runners.data ?? []}
       placed={placed}
       now={clock}
@@ -264,11 +287,12 @@ export function CitizensView() {
         {/*
           Rows are subgrids of one grid, retired ones too, so each column is as wide as its widest
           cell. From a 576 px island, a list 560 px wide inside its padding, the counts are a column
-          before the state, and the model and projects share what the other columns leave, the only
-          cells that cut. In a narrower island the counts would push the row past its edge, so they
-          take a line under it, and the model cuts before the projects go under 3rem.
+          before the state, and the model, runners, and projects share what the other columns leave,
+          the only cells that cut, each growing at the same rate up to its widest. In a narrower
+          island the counts would push the row past its edge, so they take a line under it, and the
+          model and runners cut before the projects go under 3rem.
         */}
-        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_auto_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
+        <div className="grid grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3 @min-[560px]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,max-content)_minmax(0,max-content)_minmax(max-content,1fr)_auto]">
           <ul className="col-span-full grid grid-cols-subgrid">{active.map(row)}</ul>
           {retired.length === 0 ? null : (
             <section

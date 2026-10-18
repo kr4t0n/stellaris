@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { CliKindSchema, SOCIETY_SCOPE } from "./board.js";
-import { TurnExitReasonSchema, TurnStatusSchema, UsageSchema } from "./events.js";
+import {
+  ResumeFailureSchema,
+  TurnExitReasonSchema,
+  TurnStatusSchema,
+  UsageSchema,
+} from "./events.js";
 import { ChannelRefSchema, IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import { TurnWorkSchema } from "./runner.js";
 
@@ -50,7 +55,8 @@ export type TurnThread = z.infer<typeof TurnThreadSchema>;
 /**
  * What the scheduler hands a runner: one agent, one project, one conversation, one reason. With
  * `thread` the turn is in that thread's conversation, with `channel` in the conversation of that
- * channel of the place, never its general, and without either in the agent's home conversation for
+ * channel of the place, never its general, with `place`, in the society scope alone, in the
+ * conversation of that project's channels, and without any in the agent's home conversation for
  * the scope, which general's posts and work tied to no channel or thread go to.
  */
 export const TurnDispatchSchema = z.object({
@@ -58,6 +64,7 @@ export const TurnDispatchSchema = z.object({
   project: NameSchema,
   thread: TurnThreadSchema.optional(),
   channel: NameSchema.optional(),
+  place: NameSchema.optional(),
   trigger: TriggerSchema,
   priority: z.number().int().min(0).max(2),
   onboarding: z.boolean().default(false),
@@ -68,21 +75,29 @@ export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 
 /**
  * Which conversation of a scope: a thread's by its id, a channel's other than general as
- * `#channel`, or the home conversation as undefined. The `#` keeps a channel apart from a thread.
+ * `#channel`, a project's channels seen from the society scope as `~project`, or the home
+ * conversation as undefined. A thread's id is a ULID and a channel's or a project's name starts
+ * with a lowercase letter or a digit, so the `#` and the `~` keep the three apart: a project's
+ * conversation can never take the key of a society channel's of the same name.
  */
 export function conversationPart(conversation: {
   readonly thread?: string | undefined;
   readonly channel?: string | undefined;
+  readonly place?: string | undefined;
 }): string | undefined {
-  return (
-    conversation.thread ??
-    (conversation.channel === undefined ? undefined : `#${conversation.channel}`)
-  );
+  if (conversation.thread !== undefined) {
+    return conversation.thread;
+  }
+  if (conversation.channel !== undefined) {
+    return `#${conversation.channel}`;
+  }
+  return conversation.place === undefined ? undefined : `~${conversation.place}`;
 }
 
 /**
  * A session's key: `agent/scope` for the home conversation, `agent/scope/thread` for a thread's,
- * and `agent/scope/#channel` for a channel's; `part` is what `conversationPart` gives.
+ * `agent/scope/#channel` for a channel's, and `agent/society/~project` for a project's channels
+ * seen from the society scope; `part` is what `conversationPart` gives.
  */
 export function sessionKey(agent: string, scope: string, part?: string): string {
   return part === undefined ? `${agent}/${scope}` : `${agent}/${scope}/${part}`;
@@ -91,7 +106,7 @@ export function sessionKey(agent: string, scope: string, part?: string): string 
 /** The parts of a session key, or null for anything else. */
 export function parseSessionKey(
   key: string,
-): { agent: string; scope: string; thread?: string; channel?: string } | null {
+): { agent: string; scope: string; thread?: string; channel?: string; place?: string } | null {
   const [agent, scope, part, rest] = key.split("/");
   if (agent === undefined || scope === undefined || rest !== undefined) {
     return null;
@@ -99,21 +114,37 @@ export function parseSessionKey(
   if (part === undefined) {
     return { agent, scope };
   }
-  return part.startsWith("#")
-    ? { agent, scope, channel: part.slice(1) }
+  if (part.startsWith("#")) {
+    return { agent, scope, channel: part.slice(1) };
+  }
+  return part.startsWith("~")
+    ? { agent, scope, place: part.slice(1) }
     : { agent, scope, thread: part };
 }
 
 /**
  * The channel conversation a top-level post in `channel` is filed in for a citizen woken in
  * `scope`: the channel's name when it belongs to that scope's place and is not its general, else
- * undefined for the scope's home, as for a post in a project the citizen is not in.
+ * undefined, for the scope's home or, from the society scope, the project's conversation
+ * (`placeConversation`).
  */
 export function channelConversation(scope: string, channel: string): string | undefined {
   const at = channel.indexOf("/");
   const place = at < 0 ? SOCIETY_SCOPE : channel.slice(0, at);
   const name = at < 0 ? channel : channel.slice(at + 1);
   return place === scope && name !== "general" ? name : undefined;
+}
+
+/**
+ * The project whose conversation a top-level post in `channel` is filed in for a citizen woken in
+ * `scope`: for a turn in the society scope, the project of a project's channel, general and its
+ * workstreams alike, so each project's channels have one conversation of their own beside the
+ * society's home; else undefined. A post in a project the citizen is a member of wakes it in that
+ * project's scope instead (`wakeScope`), where this gives nothing.
+ */
+export function placeConversation(scope: string, channel: string): string | undefined {
+  const at = channel.indexOf("/");
+  return scope === SOCIETY_SCOPE && at >= 0 ? channel.slice(0, at) : undefined;
 }
 
 /** The record a runner writes for every turn. The last one is what the next turn opens with. */
@@ -126,6 +157,8 @@ export const TurnRecordSchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn was in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn was in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   runner: NameSchema,
   cli: CliKindSchema.nullable(),
   session: z.string().nullable(),
@@ -149,6 +182,12 @@ export const TurnRecordSchema = z.object({
   work: TurnWorkSchema.optional(),
   /** Who stopped the turn, for one that ended `stopped`. */
   stoppedBy: NameSchema.optional(),
+  /** Why the CLI could not resume the turn's session, for a turn that failed so. */
+  resumeFailed: ResumeFailureSchema.optional(),
+  /** How many turns in a row, this one included, could not resume the session for a `retry`. */
+  resumeRetries: z.number().int().positive().optional(),
+  /** Whether the server dropped the conversation's session after this turn, which the next starts anew. */
+  sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),
 });
@@ -157,7 +196,7 @@ export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 /**
  * A turn in flight as the interface sees it: its conversation, and whether its runner can deliver
  * a post into it or stop it. `askedIn` is the channel its wake came from, where a mention reaches
- * a home conversation's turn.
+ * a home conversation's turn or a project's conversation's.
  */
 export const RunningTurnSchema = z.object({
   turnId: UlidSchema,
@@ -165,6 +204,7 @@ export const RunningTurnSchema = z.object({
   scope: NameSchema,
   thread: UlidSchema.optional(),
   channel: NameSchema.optional(),
+  place: NameSchema.optional(),
   cli: CliKindSchema,
   askedIn: ChannelRefSchema.optional(),
   steerable: z.boolean(),
@@ -215,6 +255,8 @@ export const TurnHistoryEntrySchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn was in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn was in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   trigger: z.string(),
   exitReason: z.string().nullable(),
   costUsd: z.number(),

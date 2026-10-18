@@ -317,13 +317,16 @@ function NowTab({
     earliest(turns.filter(isRunning)) ??
     turns[0] ??
     stored.turn;
-  // Where a turn was: its scope, and the thread's title or the channel for a conversation of its own.
+  // Where a turn was: its scope, and the thread's title, the channel, or the project for a
+  // conversation of its own.
   const placeOf = (candidate: LiveTurn): string =>
     candidate.thread !== undefined
       ? `${scopeName(candidate.scope)} · ${entities.get(candidate.thread)?.title ?? "a thread"}`
-      : candidate.channel === undefined
-        ? scopeName(candidate.scope)
-        : `${scopeName(candidate.scope)} · #${candidate.channel}`;
+      : candidate.channel !== undefined
+        ? `${scopeName(candidate.scope)} · #${candidate.channel}`
+        : candidate.place !== undefined
+          ? `${scopeName(candidate.scope)} · ${candidate.place}'s channels`
+          : scopeName(candidate.scope);
   const turnRunning = turn !== undefined && isRunning(turn);
   const scope = turn?.scope ?? runningScopes[0] ?? queuedScope;
   // The controls are for the turn shown, else for the citizen's first turn in flight, which may
@@ -335,7 +338,8 @@ function NowTab({
           (candidate) =>
             candidate.scope === turn.scope &&
             candidate.thread === turn.thread &&
-            candidate.channel === turn.channel,
+            candidate.channel === turn.channel &&
+            candidate.place === turn.place,
         )) ?? (turnRunning ? undefined : runningTurns[0]);
 
   return (

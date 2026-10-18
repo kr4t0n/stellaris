@@ -8,7 +8,7 @@ export type {
   TurnRequest,
   TurnResult,
 } from "./types.js";
-export { ZERO_USAGE } from "./types.js";
+export { ResumeError, ZERO_USAGE } from "./types.js";
 export { TurnControl } from "./control.js";
 export type { TurnHandlers } from "./control.js";
 export { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";

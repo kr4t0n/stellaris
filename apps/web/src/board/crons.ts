@@ -46,10 +46,14 @@ export function cronGroups<T extends CronFrontmatter>(
   };
 }
 
-/** Where a cron fires, as a place the board names: a thread, a channel, or the scope's home. */
+/**
+ * Where a cron fires, as a place the board names: a thread, a channel, a project's channels seen
+ * from the society scope, or the scope's home.
+ */
 export type CronPlace =
   | { readonly kind: "thread"; readonly id: string }
   | { readonly kind: "channel"; readonly ref: string }
+  | { readonly kind: "place"; readonly project: string }
   | { readonly kind: "home"; readonly scope: string };
 
 export function cronPlace(cron: CronFrontmatter): CronPlace {
@@ -61,6 +65,9 @@ export function cronPlace(cron: CronFrontmatter): CronPlace {
       kind: "channel",
       ref: cron.scope === SOCIETY_SCOPE ? cron.channel : `${cron.scope}/${cron.channel}`,
     };
+  }
+  if (cron.place !== undefined) {
+    return { kind: "place", project: cron.place };
   }
   return { kind: "home", scope: cron.scope };
 }

@@ -187,7 +187,7 @@ export function Playground() {
   const enrolling = useEnrollments().data?.length ?? 0;
   const failingCrons = cronList.data?.filter(failingCron).length ?? 0;
   const activeOverview =
-    pathname === "/society"
+    pathname === "/society" || pathname.startsWith("/skills/")
       ? SOCIETY_SCOPE
       : (/^\/p\/([^/]+)$/.exec(pathname)?.[1] ??
         /^\/knowledge\/([^/]+)\//.exec(pathname)?.[1] ??
@@ -200,6 +200,10 @@ export function Playground() {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Tab") {
         pointerFocus.current = false;
+      }
+      // A modal dialog, such as an enlarged image, owns the keyboard: Escape closes it alone.
+      if (document.querySelector(":modal") !== null) {
+        return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
       const typing = target?.closest("input, textarea, select, [contenteditable]") != null;

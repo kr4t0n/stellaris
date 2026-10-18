@@ -1,4 +1,4 @@
-import { channelRef, SOCIETY_SCOPE, type RunningTurn } from "@stellaris/shared";
+import { channelRef, parseChannelRef, SOCIETY_SCOPE, type RunningTurn } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -7,9 +7,10 @@ import { Composer, type Target } from "./Composer.js";
 import { Failure } from "./ThreadForms.js";
 
 /**
- * Where a post reaches a turn: its thread, its channel for a channel's conversation, or for a home
- * turn the channel it was asked from, else its scope's general channel, where a mention wakes that
- * same home conversation.
+ * Where a post reaches a turn: its thread, its channel for a channel's conversation, for a project's
+ * channels' conversation the channel of that project it was asked from, else the project's general,
+ * or for a home turn the channel it was asked from, else its scope's general channel, where a
+ * mention wakes that same conversation.
  */
 export function turnTarget(turn: RunningTurn): Target {
   if (turn.thread !== undefined) {
@@ -18,6 +19,14 @@ export function turnTarget(turn: RunningTurn): Target {
   const place = turn.scope === SOCIETY_SCOPE ? null : turn.scope;
   if (turn.channel !== undefined) {
     return { channel: channelRef(place, turn.channel) };
+  }
+  if (turn.place !== undefined) {
+    return {
+      channel:
+        turn.askedIn !== undefined && parseChannelRef(turn.askedIn).project === turn.place
+          ? turn.askedIn
+          : channelRef(turn.place, "general"),
+    };
   }
   return { channel: turn.askedIn ?? channelRef(place, "general") };
 }

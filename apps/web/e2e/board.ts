@@ -1,3 +1,4 @@
+import { crc32, deflateSync } from "node:zlib";
 import type { Page, Route } from "@playwright/test";
 
 export const TOKEN = "stl_e2e_fixture";
@@ -266,7 +267,51 @@ const HANDOVER = {
 export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
 export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
 
-/** ada's screenshots in the task's thread, with `uploads`: one the board has, one it does not. */
+/** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
+function pngChunk(type: string, data: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, "latin1");
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+
+/** A PNG of the given size, a gradient under a grid, so it reads as a picture once enlarged. */
+function png(width: number, height: number): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  // Eight bits a channel, truecolor, the standard compression, filter, and no interlace.
+  header.set([8, 2, 0, 0, 0], 8);
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    for (let x = 0; x < width; x++) {
+      const grid = x % 100 < 2 || y % 100 < 2;
+      rows.set(
+        grid ? [70, 80, 110] : [20 + (x * 60) / width, 30 + (y * 60) / height, 60],
+        row + 1 + x * 3,
+      );
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(rows)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** The sizes of the screenshot ada uploaded, a window's, and of the one on the web, a phone's. */
+export const SCREENSHOT_SIZE = { width: 1600, height: 1000 };
+export const PHONE_SIZE = { width: 600, height: 1400 };
+export const PHONE_URL = "https://images.example.test/survey-phone.png";
+
+/**
+ * ada's screenshots in the task's thread, with `uploads`: one the board has, one it does not, and
+ * one on the web.
+ */
 const SCREENSHOTS = {
   id: "01M3Q2AAAAAAAAAAAAAAAAAAB2",
   author: "ada",
@@ -274,8 +319,35 @@ const SCREENSHOTS = {
   thread: STAGE_TASK,
   ts: CREATED,
   mentions: [],
-  body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})`,
+  body: `The survey page before the change: ![The survey page, before](image:${UPLOADED_IMAGE})\n\nAnd after: ![The survey page, after](image:${MISSING_IMAGE})\n\nOn a phone: ![The survey page on a phone](${PHONE_URL})`,
 };
+
+/** Where the web images of ada's other post live: a vector with no size of its own, and nothing. */
+export const VECTOR_URL = "https://images.example.test/shape.svg";
+export const BROKEN_URL = "https://images.example.test/gone.png";
+export const BADGE_TARGET = "https://ci.example.test/runs";
+
+/**
+ * ada's other images in the task's thread, with `uploads`: one inside a link, as a README's badge
+ * is, a vector, one that fails to load, one with no description, and two inside links to a
+ * proposal and to a file on the task's branch.
+ */
+const IMAGE_EDGES = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAB3",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  ts: CREATED,
+  mentions: [],
+  body: `Badge: [![The badge](${PHONE_URL})](${BADGE_TARGET})\n\nVector: ![The vector picture](${VECTOR_URL})\n\nBroken: ![The broken picture](${BROKEN_URL})\n\nUnnamed: ![](${PHONE_URL})\n\nOn the board: [![The proposal's mark](${VECTOR_URL})](/proposal/${SKILL_PROPOSAL}) and [![The report's mark](${VECTOR_URL})](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md)`,
+};
+
+/** The same screenshot in lab's general, with `uploads`. */
+const CHANNEL_SCREENSHOT = labPost(
+  7,
+  "ada",
+  `The survey page as it ships: ![The survey page in lab](image:${UPLOADED_IMAGE})`,
+);
 
 /** The branch's newest commit, as the task's runner reports it with every read. */
 const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATED, author: "ada" };
@@ -530,13 +602,38 @@ const SOCIETY_TOPIC = {
   body: "Comment only what the code cannot say.",
 };
 
-/** A skill promoted to the society, which the user may remove from the society's overview. */
+/** A skill promoted to the society, which opens from the society's overview and is removed from its pane. */
 const SOCIETY_SKILL = {
   name: "uv-setup",
   summary: "Set up a uv project with locked dependencies",
   scope: "society",
   path: "/data/society/skills/uv-setup/SKILL.md",
 };
+
+/** The society skill's folder as it is published: its SKILL.md, a reference, and a script. */
+const SOCIETY_SKILL_FILES = [
+  {
+    path: "SKILL.md",
+    size: 140,
+    executable: false,
+    text: "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n\n# uv setup\n\nRun scripts/check.sh before the first commit.\n",
+    truncated: false,
+  },
+  {
+    path: "references/flags.md",
+    size: 18,
+    executable: false,
+    text: "# Flags\n\n--locked\n",
+    truncated: false,
+  },
+  {
+    path: "scripts/check.sh",
+    size: 27,
+    executable: true,
+    text: "#!/bin/sh\nuv sync --locked\n",
+    truncated: false,
+  },
+];
 
 /** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
 const SIGNALS = [
@@ -663,9 +760,9 @@ function askFixtures(): Map<string, AskFixture> {
 /**
  * Each citizen's tokens over a window: desk's one counted turn in the last day, as its Turns tab
  * lists it; over the week two more of its turns without a count, and stew's two with none; over
- * the whole log a second counted turn of each.
+ * the whole log a second counted turn of each, and in a crowded society hal's two.
  */
-function tokens(window: string) {
+function tokens(window: string, crowded: boolean) {
   const counted = DESK_TURN.usage;
   const more = {
     inputTokens: 2_000,
@@ -690,6 +787,22 @@ function tokens(window: string) {
         : [
             { agent: "desk", turns: 4, withUsage: 2, usage: sum(counted, more) },
             { agent: "stew", turns: 3, withUsage: 1, usage: more },
+            // hal writes more than the others, so its out count is the widest.
+            ...(crowded
+              ? [
+                  {
+                    agent: "hal",
+                    turns: 2,
+                    withUsage: 2,
+                    usage: {
+                      inputTokens: 10_000,
+                      outputTokens: 1_500_000,
+                      cacheReadTokens: 940_000,
+                      cacheWriteTokens: 0,
+                    },
+                  },
+                ]
+              : []),
           ];
   return {
     window,
@@ -839,7 +952,10 @@ function minutesFromNow(minutes: number): string {
   return new Date(Date.now() + minutes * 60_000).toISOString();
 }
 
-/** Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much. */
+/**
+ * Claude's quota as a turn reported it: 5-hour and 7-day windows, used this much, and the weekly
+ * window of one model, which the CLI names.
+ */
 function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
   const observedAt = minutesFromNow(-observedAgo);
   return {
@@ -861,6 +977,14 @@ function claudeQuota(observedAgo: number, fiveHour: number, limited = false) {
         key: "seven_day",
         minutes: 10_080,
         usedPercent: 12,
+        resetsAt: minutesFromNow(8_620),
+        observedAt,
+      },
+      {
+        key: "model:Fable",
+        label: "Fable",
+        minutes: 10_080,
+        usedPercent: 9,
         resetsAt: minutesFromNow(8_620),
         observedAt,
       },
@@ -936,8 +1060,10 @@ const CLAUDE_MODELS = [
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
- * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows two
- * screenshots in the task's thread, one of them an image the board does not have.
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows three
+ * screenshots in the task's thread, one of them an image the board does not have and one on the
+ * web, a post of web images in shapes that stay plain or size themselves, and the screenshot the
+ * board has in lab's general.
  */
 export async function fakeBoard(
   page: Page,
@@ -957,7 +1083,8 @@ export async function fakeBoard(
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
-     * investigator, on the other, so rows in the Citizens list run out of room.
+     * investigator, on the other, whose counts over all time are the widest out, so rows in the
+     * Citizens list run out of room.
      */
     crowded?: boolean;
   } = {},
@@ -979,6 +1106,8 @@ export async function fakeBoard(
         : { claude: claudeQuota(3, 35), codex: codexQuota(3) };
   // studio's own login, with numbers of its own, reported as fresh as pod's.
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
+  // laptop's, taken with pod's, so their resets match to the minute whenever the view asks.
+  const laptopQuotas = { claude: claudeQuota(120, 35) };
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1002,9 +1131,11 @@ export async function fakeBoard(
   }> = [];
   // With `asked`, ada's question waits in the task's thread until the user writes there.
   let waitingAsk = options.asked === true;
+  const screenshot =
+    options.uploads === true ? png(SCREENSHOT_SIZE.width, SCREENSHOT_SIZE.height) : Buffer.alloc(0);
   const threadMessages: Array<Record<string, unknown>> = [
     HANDOVER,
-    ...(options.uploads === true ? [SCREENSHOTS] : []),
+    ...(options.uploads === true ? [SCREENSHOTS, IMAGE_EDGES] : []),
     ...(waitingAsk ? [ASK] : []),
   ];
   const proposalMessages: Array<Record<string, unknown>> = [PITCH];
@@ -1107,6 +1238,19 @@ export async function fakeBoard(
   await page.route("https://avatars.githubusercontent.com/**", (route) =>
     route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") }),
   );
+  if (options.uploads === true) {
+    const phone = png(PHONE_SIZE.width, PHONE_SIZE.height);
+    await page.route(PHONE_URL, (route) =>
+      route.fulfill({ contentType: "image/png", body: phone }),
+    );
+    await page.route(VECTOR_URL, (route) =>
+      route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect width="40" height="20" fill="teal"/></svg>',
+      }),
+    );
+    await page.route(BROKEN_URL, (route) => route.fulfill({ status: 404, body: "" }));
+  }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
@@ -1362,7 +1506,7 @@ export async function fakeBoard(
       );
     }
     if (pathname === "/api/tokens") {
-      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h");
+      const use = tokens(new URL(request.url()).searchParams.get("window") ?? "24h", crowded);
       return json(
         route,
         options.retired === true && use.window === "all"
@@ -1375,7 +1519,7 @@ export async function fakeBoard(
     }
     if (pathname.startsWith("/api/images/")) {
       return pathname === `/api/images/${UPLOADED_IMAGE}`
-        ? route.fulfill({ contentType: "image/png", body: Buffer.from(PLOT_PNG, "base64") })
+        ? route.fulfill({ contentType: "image/png", body: screenshot })
         : json(route, { error: "NOT_FOUND", message: "image not found" }, 404);
     }
     const files = `/api/tasks/${STAGE_TASK}/files`;
@@ -1467,7 +1611,7 @@ export async function fakeBoard(
             capabilities: ["gpu"],
             version: "0.3.10",
             status: "disconnected",
-            quotas: { claude: claudeQuota(120, 35) },
+            quotas: laptopQuotas,
           },
         ]);
       case "/api/agents/desk/models":
@@ -1526,7 +1670,10 @@ export async function fakeBoard(
       case "/api/projects/iphone/knowledge":
         return json(route, []);
       case "/api/channels/lab/general":
-        return json(route, LAB_GENERAL);
+        return json(
+          route,
+          options.uploads === true ? [...LAB_GENERAL, CHANNEL_SCREENSHOT] : LAB_GENERAL,
+        );
       case "/api/projects/iphone/dashboard":
         return json(route, { project: "iphone", revision: 0, body: "" });
       case "/api/channels/iphone/general":
@@ -1565,6 +1712,10 @@ export async function fakeBoard(
         return json(route, { thread: TASK_THREAD, messages: threadMessages });
       case "/api/skills":
         return json(route, societySkills);
+      case `/api/skills/${SOCIETY_SKILL.name}/files`:
+        return societySkills.some((skill) => skill.name === SOCIETY_SKILL.name)
+          ? json(route, SOCIETY_SKILL_FILES)
+          : json(route, { error: "NOT_FOUND", message: "the society has no skill uv-setup" }, 404);
       case "/api/channels/general":
       case "/api/channels/governance":
       case "/api/channels/asks":

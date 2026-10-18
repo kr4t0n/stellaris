@@ -368,7 +368,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "stage") {
     lines.push(
-      "A stage is waiting for you: claim it with claim_task unless you hold it already, do the work in your worktree, which is on the task's branch, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
+      "A stage is waiting for you: claim it with claim_task unless you hold it already, do the work in your worktree, which is on the task's branch unless Your workspace says otherwise, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
     );
   }
   if (dispatch.trigger.kind === "task_done") {
@@ -398,9 +398,17 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     lines.push(
       `This turn is in your conversation of ${ref}, a workstream with turns of its own: its posts, and the work it asks for. Your home conversation for ${dispatch.project} carries its general channel, and each other channel and each thread you take part in is a conversation of its own; read one when you need it, and leave its work to its turn. Post here with post_message and channel ${ref}.`,
     );
-  } else if (conversation === null) {
+  } else if (conversation === null && dispatch.place !== undefined) {
     lines.push(
-      `This turn is in your home conversation for ${dispatch.project}: its general channel, and work tied to no other channel and no thread. Each other channel, a workstream, and each thread you take part in, a task's, a proposal's, or a topic's, is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn.`,
+      `This turn is in your conversation of project ${dispatch.place}'s channels, from outside the project: the posts in its general and its other channels that concern you, and the work they ask for. Your home conversation for ${dispatch.project} carries its general channel, and each other project's channels, each other channel, and each thread you take part in is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn. Answer in the channel a post came from with post_message.`,
+    );
+  } else if (conversation === null) {
+    const besides =
+      dispatch.project === SOCIETY_SCOPE
+        ? "Each other channel, each project's channels you are asked in from outside the project, and each thread you take part in, a task's, a proposal's, or a topic's,"
+        : "Each other channel, a workstream, and each thread you take part in, a task's, a proposal's, or a topic's,";
+    lines.push(
+      `This turn is in your home conversation for ${dispatch.project}: its general channel, and work tied to no other channel and no thread. ${besides} is a conversation of its own with turns of its own; read one when you need it, and leave its work to its turn.`,
     );
   } else {
     const { thread, task } = conversation;
@@ -482,6 +490,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "## Your previous turn did not finish",
       "",
       `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`,
+      ...(last.sessionDropped === true
+        ? [
+            "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one: nothing of your earlier turns here carries over but what is on the board and in your home.",
+          ]
+        : []),
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
     );
   }

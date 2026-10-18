@@ -223,6 +223,42 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("Nothing new.");
   });
 
+  it("says a dropped session's turn starts anew, and why, and says nothing of it otherwise", () => {
+    const words = "Claude Code returned an error result: No conversation found with session ID: s";
+    const failed = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "server",
+      cli: "claude" as const,
+      session: "s",
+      trigger: TriggerSchema.parse({ kind: "heartbeat" }),
+      startedAt: "2026-09-28T09:00:00.000Z",
+      endedAt: "2026-09-28T09:00:01.000Z",
+      exitReason: "error" as const,
+      status: null,
+      error: words,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+      resumeFailed: "lost" as const,
+    };
+    const prompt = (lastTurn: typeof failed & { sessionDropped?: boolean }) =>
+      buildTurnPrompt({
+        dispatch: cronlessDispatch,
+        messages: [],
+        heldClaims: [],
+        lastTurn,
+        onboarding: null,
+      });
+    const note =
+      "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one: nothing of your earlier turns here carries over but what is on the board and in your home.";
+    const dropped = prompt({ ...failed, sessionDropped: true });
+    expect(dropped).toContain(`It ended with error: ${words}.\n${note}\n`);
+    expect(prompt(failed)).toContain(`It ended with error: ${words}.\nThe worktree`);
+    expect(prompt(failed)).not.toContain(note);
+  });
+
   it("gives the front desk the roster and the project list, and frames a user post as routing", () => {
     const prompt = buildTurnPrompt({
       dispatch: {

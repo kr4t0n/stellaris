@@ -106,12 +106,12 @@ const SchedulerViewSchema = z.object({
 export type SchedulerView = z.infer<typeof SchedulerViewSchema>;
 
 /**
- * Sessions as the scheduler lists them: a citizen, a scope, and, for a thread's or a channel's
- * conversation, its thread or channel.
+ * Sessions as the scheduler lists them: a citizen, a scope, and, for a thread's, a channel's, or a
+ * project's channels' conversation, its thread, channel, or project.
  */
 export function pairsOf(
   list: readonly string[],
-): Array<{ agent: string; scope: string; thread?: string; channel?: string }> {
+): Array<{ agent: string; scope: string; thread?: string; channel?: string; place?: string }> {
   return list.flatMap((key) => {
     const parsed = parseSessionKey(key);
     return parsed === null ? [] : [parsed];
@@ -334,6 +334,9 @@ export function createApi(token: string) {
     proposalFiles: (id: string) =>
       get(`/api/proposals/${encodeURIComponent(id)}/files`, token, SkillFileContentSchema.array()),
     skills: () => get("/api/skills", token, SkillSchema.array()),
+    /** A society skill's folder as it is published, each file with its text. */
+    skillFiles: (name: string) =>
+      get(`/api/skills/${encodeURIComponent(name)}/files`, token, SkillFileContentSchema.array()),
     turns: (name: string, limit: number) =>
       get(
         `/api/agents/${encodeURIComponent(name)}/turns?limit=${limit}`,

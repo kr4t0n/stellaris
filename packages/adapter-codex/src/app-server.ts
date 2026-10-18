@@ -7,6 +7,7 @@ import { execa } from "execa";
 import {
   CLI_ENV,
   parseTurnStatus,
+  ResumeError,
   type AgentSpec,
   type ResidentSession,
   type ResidentStart,
@@ -23,6 +24,7 @@ import {
   type CliQuota,
   type EffortOption,
   type ModelOption,
+  type ResumeFailure,
   type TurnExitReason,
   type Usage,
 } from "@stellaris/shared";
@@ -104,6 +106,19 @@ function searchInput(item: Dict): Record<string, string> {
 
 /** Sessions Codex has not named yet start with this prefix; a thread id replaces it on start. */
 export const PENDING_THREAD_PREFIX = "pending-";
+
+/**
+ * What the app server says when there is no thread to resume, as 0.162.0 says it: `invalid session
+ * id` for an id that is not a thread's, a `pending-` placeholder included; `no rollout found` for
+ * one whose rollout file is gone, or was never written, since a thread writes it only once a turn
+ * starts; and `failed to read thread` for a rollout it cannot read, empty, garbled, or unreadable.
+ */
+const LOST_THREAD = /invalid session id|no rollout found|failed to read thread/;
+
+/** Why the app server could not resume a thread, from its words: nothing there to resume, or try again. */
+function resumeFailureOf(error: string): ResumeFailure {
+  return LOST_THREAD.test(error) ? "lost" : "retry";
+}
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const STDERR_TAIL = 20;
@@ -587,25 +602,28 @@ export class CodexAppServerSession implements ResidentSession {
     };
   }
 
+  /**
+   * Starts a new conversation's thread, or resumes a saved one. A saved thread is resumed or the
+   * session fails before any model call, never replaced: the server built the prompt for that
+   * thread, and only it decides that a conversation starts afresh.
+   */
   private async openThread(): Promise<string> {
-    const known = !this.start.newSession && !this.start.session.startsWith(PENDING_THREAD_PREFIX);
-    if (known) {
-      try {
-        const resumed = await this.client.request("thread/resume", {
-          threadId: this.start.session,
-          // Without it the response carries the thread's whole history, which nothing here reads.
-          excludeTurns: true,
-          ...this.threadParams(),
-        });
-        return this.threadIdOf(resumed);
-      } catch (error) {
-        this.options.stderr?.(
-          `thread ${this.start.session} could not be resumed, starting a new one: ${String(error)}`,
-        );
-      }
+    if (this.start.newSession) {
+      return this.threadIdOf(await this.client.request("thread/start", this.threadParams()));
     }
-    const started = await this.client.request("thread/start", this.threadParams());
-    return this.threadIdOf(started);
+    let resumed: unknown;
+    try {
+      resumed = await this.client.request("thread/resume", {
+        threadId: this.start.session,
+        // Without it the response carries the thread's whole history, which nothing here reads.
+        excludeTurns: true,
+        ...this.threadParams(),
+      });
+    } catch (error) {
+      const said = error instanceof Error ? error.message : String(error);
+      throw new ResumeError(resumeFailureOf(said), said);
+    }
+    return this.threadIdOf(resumed);
   }
 
   private threadIdOf(response: unknown): string {

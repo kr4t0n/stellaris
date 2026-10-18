@@ -194,12 +194,15 @@ export class BoardPaths {
     return path.join(this.agentProjects(name), slug);
   }
   /**
-   * A thread's or a channel's conversation's session and last turn, beside the scope's home
-   * conversation; `part` is a thread's id or `#channel`.
+   * A thread's, a channel's, or, in the society scope, a project's conversation's session and last
+   * turn, beside the scope's home conversation; `part` is a thread's id, `#channel`, or `~project`.
    */
   agentConversation(name: Name, slug: Name, part: string): string {
-    return part.startsWith("#")
-      ? path.join(this.agentProject(name, slug), "channels", part.slice(1))
+    if (part.startsWith("#")) {
+      return path.join(this.agentProject(name, slug), "channels", part.slice(1));
+    }
+    return part.startsWith("~")
+      ? path.join(this.agentProject(name, slug), "places", part.slice(1))
       : path.join(this.agentProject(name, slug), "threads", part);
   }
   agentCursors(name: Name): string {

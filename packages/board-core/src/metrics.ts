@@ -2,6 +2,7 @@ import {
   METRICS_WINDOW_MS,
   channelConversation,
   parseChannelRef,
+  placeConversation,
   USER_NAME,
   wakeScope,
   type BoardEvent,
@@ -32,12 +33,14 @@ export interface MetricsInput {
   readonly now: Date;
 }
 
-// A turn's events carry its thread as the thread's id and its channel by name, both absent for a home turn.
+// A turn's events carry its thread as the thread's id, its channel by name, and a project's channels'
+// conversation by the project, all absent for a home turn.
 const TurnPayload = z.object({
   turnId: z.string().optional(),
   project: z.string(),
   thread: z.string().optional(),
   channel: z.string().optional(),
+  place: z.string().optional(),
   trigger: z.string(),
 });
 const TaskPayload = z.object({
@@ -98,9 +101,10 @@ interface Mention {
 
 /**
  * Whether a turn is the one a mention woke: in the mention's thread, or for a top-level mention
- * the conversation of its channel in the scope it wakes, the home for general. Before threads and
- * channels had conversations of their own, a mention in one woke the home of the scope, so a home
- * turn woken by a mention answers one.
+ * the conversation of its channel in the scope it wakes, the home for general, and in the society
+ * scope that of its project's channels for a project's channel. Before threads, channels, and
+ * projects seen from the society had conversations of their own, a mention in one woke the home
+ * of the scope, so a home turn woken by a mention answers one.
  */
 function answers(
   mention: Mention,
@@ -109,6 +113,7 @@ function answers(
     at: number;
     thread: string | null;
     channel: string | null;
+    place: string | null;
     project: string;
     trigger: string;
   },
@@ -122,12 +127,16 @@ function answers(
   if (!mention.scopes.includes(turn.project)) {
     return false;
   }
-  const own =
-    mention.thread === null ? channelConversation(turn.project, mention.channel) : undefined;
+  const topLevel = mention.thread === null;
+  const own = topLevel ? channelConversation(turn.project, mention.channel) : undefined;
+  const place = topLevel ? placeConversation(turn.project, mention.channel) : undefined;
   if (turn.channel !== null) {
-    return mention.thread === null && own === turn.channel;
+    return topLevel && own === turn.channel;
   }
-  return (mention.thread === null && own === undefined) || turn.trigger === "mention";
+  if (turn.place !== null) {
+    return topLevel && place === turn.place;
+  }
+  return (topLevel && own === undefined && place === undefined) || turn.trigger === "mention";
 }
 
 /**
@@ -209,6 +218,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
           at,
           thread: turn.data.thread ?? null,
           channel: turn.data.channel ?? null,
+          place: turn.data.place ?? null,
           project: turn.data.project,
           trigger: turn.data.trigger,
         };

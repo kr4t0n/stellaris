@@ -31,7 +31,6 @@ describe("recorded Claude stream", () => {
       })();
     const result = await new ClaudeAgentBackend({
       queryFn,
-      sessionExists: () => Promise.resolve(true),
     }).runTurn({
       spec: {
         agent: "rev-1",
@@ -43,7 +42,7 @@ describe("recorded Claude stream", () => {
         configHome: "/tmp/home",
         boardDir: "/tmp/board",
       },
-      session: "recorded",
+      session: "638006b0-5c1c-4f49-acfd-0a49a0d046ea",
       newSession: false,
       prompt: "Digest.",
       instructions: "# rev-1",
@@ -116,7 +115,7 @@ describe("recorded Claude stream", () => {
         configHome: "/tmp/home",
         boardDir: "/tmp/board",
       },
-      session: "recorded",
+      session: "ebc537d1-4cad-4360-9bbb-212f728f4442",
       newSession: false,
       prompt: "Digest.",
       instructions: "# cc",
@@ -128,7 +127,6 @@ describe("recorded Claude stream", () => {
     const events: AgentEvent[] = [];
     const running = new ClaudeAgentBackend({
       queryFn,
-      sessionExists: () => Promise.resolve(true),
     }).runTurn(request, (event) => events.push(event), control);
     await vi.waitFor(async () =>
       expect(await control.steer({ id: steerId, text: "end your post with PINEAPPLE" })).toBe(true),

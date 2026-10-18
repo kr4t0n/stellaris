@@ -127,6 +127,7 @@ describe("Board runtime support", () => {
       ["projects/demo/sessions.json", "{}"],
       ["projects/demo/threads/01M3S000000000000000000AAA/last-turn.json", "{}"],
       ["projects/demo/channels/release/sessions.json", "{}"],
+      ["projects/society/places/lab/last-turn.json", "{}"],
       [".gitignore", "*.md\n"],
     ] as const) {
       await git(copy, "reset", "--quiet", "--hard", "origin/main");
@@ -143,6 +144,7 @@ describe("Board runtime support", () => {
     // Tools' byproducts and the scratch folder are never tracked, wherever they appear.
     for (const ignored of [
       "scratch/data.csv",
+      "projects/society/places/lab/sessions.json",
       "skills/x/node_modules/a.js",
       "memory/.venv/bin/py",
     ]) {
@@ -288,6 +290,17 @@ describe("Board runtime support", () => {
       codex: "thread-2",
       runner: "laptop",
     });
+    // A session its CLI could not resume is dropped for that CLI alone, and only while the record
+    // still names it; a conversation without a record has nothing to drop.
+    await board.writeSession("eng-1", "demo", "claude", "s-claude", "laptop");
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-other")).toBe(false);
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude")).toBe(true);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      codex: "thread-2",
+      runner: "laptop",
+    });
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude")).toBe(false);
+    expect(await board.dropSession("eng-1", "demo", "claude", "s-claude", "#dev")).toBe(false);
 
     expect(await board.readLastTurn("eng-1", "demo")).toBeNull();
     const record = {

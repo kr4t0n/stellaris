@@ -40,12 +40,13 @@ function balance(quota: CliQuota): string | null {
 
 /**
  * Each window of a CLI's quota as a meter: how full, and when it starts afresh. A window used up,
- * or the one a limit names while it holds, is red; one near full is amber.
+ * or the one a limit names while it holds, is red; one near full is amber. Its columns are the
+ * panel's, so every row's bars start where the others' do, whatever its windows are called.
  */
 function Windows({ cli, quota, now }: { cli: CliKind; quota: CliQuota; now: number }) {
   const binding = quotaWords(quota, now).level === "limited" ? quota.limitedBy : null;
   return (
-    <ul className="mt-1 grid grid-cols-[auto_minmax(3rem,7rem)_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 pl-6">
+    <ul className="col-span-full mt-1 grid grid-cols-subgrid gap-y-0.5 pl-6">
       {quota.windows.map((window) => {
         const reading = windowReading(window, now);
         const fill =
@@ -199,7 +200,15 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
           {reading.size > 0 ? "Reading…" : "Read again"}
         </Button>
       </div>
-      <ul aria-label="Quota by runner" className="mt-1.5 space-y-1">
+      {/*
+        Rows are subgrids of one grid, so a window's name, bar, percent, and reset each take one
+        column across every runner and CLI, as wide as its widest cell: a model's weekly window,
+        named by the CLI, widens the names' column for Codex's rows too.
+      */}
+      <ul
+        aria-label="Quota by runner"
+        className="mt-1.5 grid grid-cols-[auto_minmax(3rem,7rem)_auto_minmax(0,1fr)] gap-x-2 gap-y-1"
+      >
         {rows.map((row) => {
           const first = row.runners[0] ?? "";
           const key = `${first}/${row.cli}`;
@@ -207,8 +216,11 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
           const plan = row.quota?.plan;
           const money = row.quota === undefined ? null : balance(row.quota);
           return (
-            <li key={`${row.cli}/${first}`} className="rounded-lg px-2 py-1.5">
-              <div className="flex items-center gap-2 text-sm">
+            <li
+              key={`${row.cli}/${first}`}
+              className="col-span-full grid grid-cols-subgrid rounded-lg px-2 py-1.5"
+            >
+              <div className="col-span-full flex items-center gap-2 text-sm">
                 <CliIcon cli={row.cli} size={13} />
                 <span className="text-fg-primary">{row.runners.join(" · ")}</span>
                 <span className="text-xs text-fg-muted">
@@ -225,7 +237,7 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
                 <Windows cli={row.cli} quota={row.quota} now={now} />
               )}
               {row.runners.length > 1 ? (
-                <p className="pt-0.5 pl-6 text-meta">
+                <p className="col-span-full pt-0.5 pl-6 text-meta">
                   Same numbers on {row.runners.join(" and ")}, so most likely one login.
                 </p>
               ) : null}

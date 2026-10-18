@@ -1,7 +1,8 @@
 import { isBoardChannel, type Message } from "@stellaris/shared";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useSearch } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { ApiError, type ThreadSummary } from "../lib/api.js";
 import { ago } from "../lib/format.js";
@@ -23,6 +24,9 @@ import { PaneHeader, PaneNote } from "./Pane.js";
 import { StickyList } from "./StickyList.js";
 import { ThreadItem } from "./ThreadItem.js";
 import { NewThreadForm } from "./ThreadForms.js";
+
+const BACK =
+  "grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary";
 
 type Item =
   | { kind: "message"; at: string; id: string; message: Message }
@@ -88,10 +92,21 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
   const mayArchive =
     !archived && !isBoardChannel(second === undefined ? null : (first ?? null), name);
   const open = items.filter((item) => item.kind === "thread" && item.thread.state === "open");
+  const parent =
+    second === undefined || first === undefined ? (
+      <Link to="/society" aria-label="Back to the society" className={BACK}>
+        ←
+      </Link>
+    ) : (
+      <Link to="/p/$slug" params={{ slug: first }} aria-label={`Back to ${place}`} className={BACK}>
+        ←
+      </Link>
+    );
 
   return (
     <>
       <PaneHeader
+        leading={<BackLink fallback={parent} />}
         title={`# ${name}`}
         subtitle={`${place} · ${messages.data?.length ?? 0} messages${
           open.length > 0 ? ` · ${open.length} open threads` : ""
@@ -143,8 +158,7 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
       </StickyList>
       {messages.data === undefined ? null : ended !== undefined ? (
         <p className="border-t border-line px-4 py-3 text-meta">
-          Archived {ago(ended.at, now)} by {ended.by}: {ended.reason}. Its posts, threads, and tasks
-          stay readable; nothing more is posted or filed here.
+          Archived {ago(ended.at, now)} by {ended.by}: {ended.reason}.
         </p>
       ) : archived ? (
         <p className="border-t border-line px-4 py-3 text-meta">

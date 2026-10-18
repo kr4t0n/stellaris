@@ -63,6 +63,8 @@ export interface LiveTurn {
   readonly thread?: string | undefined;
   /** The channel, never general, whose conversation the turn is in. */
   readonly channel?: string | undefined;
+  /** The project whose channels' conversation the turn is in, for a turn in the society scope. */
+  readonly place?: string | undefined;
   /** When the turn started, or its first step still held when the start is not. */
   readonly startedAt: string;
   /** False when the server's buffer or the step cap has dropped the turn's first steps. */
@@ -79,10 +81,14 @@ export interface LiveTurn {
  */
 export type LiveTurns = ReadonlyMap<string, LiveTurn>;
 
-/** Which conversation of a scope: a thread's, a channel's, or, with neither, the home. */
+/**
+ * Which conversation of a scope: a thread's, a channel's, a project's channels' in the society
+ * scope, or, with none, the home.
+ */
 export interface ConversationIn {
   readonly thread?: string | undefined;
   readonly channel?: string | undefined;
+  readonly place?: string | undefined;
 }
 
 export function pairKey(agent: string, scope: string, conversation: ConversationIn = {}): string {
@@ -91,7 +97,7 @@ export function pairKey(agent: string, scope: string, conversation: Conversation
 
 /**
  * A turn's conversation as the citizen view's `scope` search names it: the scope, `scope/thread`,
- * or `scope/#channel`.
+ * `scope/#channel`, or `society/~project`.
  */
 export function conversationOf(turn: { scope: string } & ConversationIn): string {
   const part = conversationPart(turn);
@@ -247,6 +253,7 @@ export function applyLive(
     scope: item.project,
     ...(item.thread === undefined ? {} : { thread: item.thread }),
     ...(item.channel === undefined ? {} : { channel: item.channel }),
+    ...(item.place === undefined ? {} : { place: item.place }),
   };
   if (event.type === "turn_started") {
     next.set(key, {
@@ -377,6 +384,7 @@ export function transcriptTurn(
         project: scope,
         ...(conversation.thread === undefined ? {} : { thread: conversation.thread }),
         ...(conversation.channel === undefined ? {} : { channel: conversation.channel }),
+        ...(conversation.place === undefined ? {} : { place: conversation.place }),
         event: entry.event,
       },
       { maxSteps: Number.POSITIVE_INFINITY },

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import {
   GitIdentityCheck,
   enrollRunner,
   readCredentials,
+  ResumeError,
   RunnerLayout,
   saveCredentials,
   ZERO_USAGE,
@@ -25,6 +27,7 @@ import {
   MEMBER_VERBS,
   RUNNER_PROTOCOL,
   RunnerModelsSchema,
+  TurnDispatchSchema,
   type AgentEvent,
   type GitIdentityPart,
   type RunnerHello,
@@ -176,6 +179,26 @@ async function commitHome(board: Board, agent: string, message: string): Promise
     ],
     { cwd: board.paths.agent(agent) },
   );
+}
+
+/** Commits nothing, as `agent`, in a worktree; returns the commit. */
+async function commitEmpty(cwd: string, agent: string, message: string): Promise<string> {
+  await execa(
+    "git",
+    [
+      "-c",
+      `user.name=${agent}`,
+      "-c",
+      `user.email=${agent}@x`,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      message,
+    ],
+    { cwd },
+  );
+  return (await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
 }
 
 /** A verb's answer or refusal, as a JSON object. */
@@ -402,6 +425,231 @@ describe("turns on a runner over the runner protocol", () => {
     expect((await board.listProjects()).map((project) => project.runner)).toEqual(["pod", "pod"]);
   });
 
+  it("keeps a task's branch for its stage's holder, and puts commits made beside it on it or says why not", async () => {
+    const { board } = await Board.init(dir, { name: "beside" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["ref", "eng-1"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const holder = { name: "eng-1", role: "engineer" } as const;
+
+    // ref, a participant, is in a turn in the task's thread while eng-1, its stage's holder, works.
+    let refStarted = Promise.withResolvers<void>();
+    let refRelease = Promise.withResolvers<void>();
+    let engWork: ((cwd: string) => Promise<void>) | null = null;
+    let refWork: ((cwd: string) => Promise<void>) | null = null;
+    const seen = new Map<string, { branch: string; prompt: string }>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const actor = board.resolveToken(request.mcp.token);
+        const { cwd } = request.spec;
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+        seen.set(`${actor?.name}/${actor?.thread}`, {
+          branch: head.stdout.trim(),
+          prompt: request.prompt,
+        });
+        if (actor?.name === "ref") {
+          await refWork?.(cwd);
+          refStarted.resolve();
+          await refRelease.promise;
+        } else {
+          await engWork?.(cwd);
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner } = await start(board, backend);
+    const turn = (agent: string, task: string) =>
+      run({
+        agent,
+        project: "demo",
+        thread: { id: task, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    const tip = async (task: string) =>
+      (
+        await execa("git", ["rev-parse", `task/${task}`], { cwd: runner.paths.repo("demo") })
+      ).stdout.trim();
+    const notices = async (task: string) =>
+      (await board.listThread(task)).filter((message) => message.author === "board");
+    const overlap = async (task: string) => {
+      refStarted = Promise.withResolvers<void>();
+      refRelease = Promise.withResolvers<void>();
+      const participant = turn("ref", task);
+      await refStarted.promise;
+      return {
+        participant,
+        release: async () => {
+          refRelease.resolve();
+          await participant;
+        },
+      };
+    };
+
+    // The holder's turn has the branch though the participant's started first, which works beside it.
+    const held = await board.createTask(USER, { project: "demo", title: "held" });
+    await board.claimTask(holder, { task_id: held.id });
+    let reviewed = "";
+    engWork = async (cwd) => {
+      reviewed = await commitEmpty(cwd, "eng-1", "review");
+    };
+    const first = await overlap(held.id);
+    await turn("eng-1", held.id);
+    expect(seen.get(`eng-1/${held.id}`)?.branch).toBe(`task/${held.id}`);
+    expect(seen.get(`ref/${held.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`ref/${held.id}`)?.prompt).toContain(
+      `eng-1 holds the task's stage, and its turns have task/${held.id} to themselves`,
+    );
+    expect(await tip(held.id)).toBe(reviewed);
+    await first.release();
+    expect(await tip(held.id)).toBe(reviewed);
+
+    // The user takes no turns, so a stage it holds keeps the branch from nobody.
+    const approval = await board.createTask(USER, {
+      project: "demo",
+      title: "approval",
+      stages: [{ name: "approve", agent: "user" }],
+    });
+    await board.claimTask(USER, { task_id: approval.id });
+    // Released above, so this turn of ref's runs straight through.
+    await turn("ref", approval.id);
+    expect(seen.get(`ref/${approval.id}`)?.branch).toBe(`task/${approval.id}`);
+
+    // Taken before anyone held the stage, the branch stays the participant's: the holder works
+    // beside it, and its commits go on the branch once the participant's turn lets it go.
+    const open = await board.createTask(USER, { project: "demo", title: "open" });
+    const second = await overlap(open.id);
+    const before = await tip(open.id);
+    await board.claimTask(holder, { task_id: open.id });
+    await turn("eng-1", open.id);
+    expect(seen.get(`eng-1/${open.id}`)?.branch).toBe("HEAD");
+    expect(seen.get(`eng-1/${open.id}`)?.prompt).toContain(
+      `another turn in this task has task/${open.id} checked out`,
+    );
+    expect(await tip(open.id)).toBe(before);
+    await second.release();
+    expect(await tip(open.id)).toBe(reviewed);
+    expect(await notices(open.id)).toEqual([]);
+
+    // When the participant's turn commits on the branch meanwhile, the holder's commits are left
+    // where they are, and the task's thread is told once.
+    const split = await board.createTask(USER, { project: "demo", title: "split" });
+    const third = await overlap(split.id);
+    await board.claimTask(holder, { task_id: split.id });
+    let refHead = "";
+    engWork = async (cwd) => {
+      refHead = await commitEmpty(runner.paths.taskWorktree("ref", split.id), "ref", "ref work");
+      // Backticks in a subject end the notice's code span early, which would leave the name awake.
+      reviewed = await commitEmpty(cwd, "eng-1", "eng-1 review of `x` for @ref");
+      // A branch of its own holds the commit too, which leaves it no less beside the task's.
+      await execa("git", ["branch", "fix/review"], { cwd });
+    };
+    await turn("eng-1", split.id);
+    expect(await tip(split.id)).toBe(refHead);
+    const told = await notices(split.id);
+    expect(told).toHaveLength(1);
+    expect(told[0]?.body).toContain(
+      `eng-1's worktree for this task holds commits that \`task/${split.id}\` lacks`,
+    );
+    expect(told[0]?.body).toContain(`\`${reviewed.slice(0, 7)} eng-1 review of \`x\` for ref\``);
+    expect(told[0]?.mentions).toEqual([]);
+    await third.release();
+    expect(await tip(split.id)).toBe(refHead);
+    expect(await notices(split.id)).toHaveLength(1);
+    expect(
+      (
+        await execa("git", ["rev-parse", "HEAD"], {
+          cwd: runner.paths.taskWorktree("eng-1", split.id),
+        })
+      ).stdout,
+    ).toBe(reviewed);
+
+    // The holder's next turn there is left where its commits are and told so; once it commits
+    // again, the thread is told of the new head too.
+    let again = "";
+    engWork = async (cwd) => {
+      expect((await execa("git", ["rev-parse", "HEAD"], { cwd })).stdout).toBe(reviewed);
+      again = await commitEmpty(cwd, "eng-1", "eng-1 second look");
+    };
+    await turn("eng-1", split.id);
+    expect(seen.get(`eng-1/${split.id}`)?.prompt).toContain(
+      `This worktree holds commits that task/${split.id} lacks, so it was left where it is`,
+    );
+    const toldAgain = await notices(split.id);
+    expect(toldAgain).toHaveLength(2);
+    expect(toldAgain[1]?.body).toContain(`\`${again.slice(0, 7)} eng-1 second look\``);
+    expect(await tip(split.id)).toBe(refHead);
+
+    // A participant's commits made beside the holder's turn follow the branch too, but only from
+    // its own hand-back: the holder's leaves the worktree of a turn still running alone.
+    const beside = await board.createTask(USER, { project: "demo", title: "beside" });
+    await board.claimTask(holder, { task_id: beside.id });
+    let note = "";
+    refWork = async (cwd) => {
+      note = await commitEmpty(cwd, "ref", "ref note");
+    };
+    engWork = null;
+    const fourth = await overlap(beside.id);
+    // The participant's turn has committed beside the branch by now, which stays where it was.
+    const from = await tip(beside.id);
+    expect(from).not.toBe(note);
+    await turn("eng-1", beside.id);
+    expect(seen.get(`eng-1/${beside.id}`)?.branch).toBe(`task/${beside.id}`);
+    expect(await tip(beside.id)).toBe(from);
+    await fourth.release();
+    expect(await tip(beside.id)).toBe(note);
+    expect(await notices(beside.id)).toEqual([]);
+  });
+
+  it("gives a task's branch to any turn once its holder's lease has run out", async () => {
+    // Every claim's lease runs out at once, as a holder's does that no turn renews.
+    const { board } = await Board.init(dir, { name: "lapsed" }, { leaseMs: 1 });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["ref", "eng-1"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const task = await board.createTask(USER, { project: "demo", title: "lapsed" });
+    await board.claimTask({ name: "eng-1", role: "engineer" }, { task_id: task.id });
+    let branch = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        const head = await execa("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: request.spec.cwd,
+        });
+        branch = head.stdout.trim();
+        return completed("done");
+      },
+    };
+    const { run } = await start(board, backend);
+    const turn = (id: string) =>
+      run({
+        agent: "ref",
+        project: "demo",
+        thread: { id, task: true },
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+    await turn(task.id);
+    expect(branch).toBe(`task/${task.id}`);
+  });
+
   it("lists the signals logged since a reader's last turn in its prompt, and none again", async () => {
     const { board } = await Board.init(dir, { name: "signals" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -497,6 +745,23 @@ describe("turns on a runner over the runner protocol", () => {
     const asked = (await board.listThreads()).filter((thread) => thread.openedBy === "stew");
     expect(asked.map((thread) => thread.channel)).toEqual(["general", "governance"]);
     expect(await board.listRequests()).toHaveLength(2);
+    // A turn in a project's conversation outside it asks on the project's channel it was asked
+    // from, else on the project's general.
+    proposeRole = false;
+    await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
+    await run({
+      ...dispatch,
+      place: "lab",
+      trigger: { ...dispatch.trigger, channel: "lab/dev" },
+    });
+    await run({ ...dispatch, place: "lab" });
+    const inLab = (await board.listThreads()).filter((thread) => thread.openedBy === "stew");
+    expect(inLab.map((thread) => thread.channel)).toEqual([
+      "general",
+      "governance",
+      "lab/dev",
+      "lab/general",
+    ]);
   });
 
   it("hands a resumed session the running total its last turn reported", async () => {
@@ -520,6 +785,379 @@ describe("turns on a runner over the runner protocol", () => {
     await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
   });
+
+  it("keeps no session from a turn whose CLI never started, so the conversation's next turn starts one", async () => {
+    const { board } = await Board.init(dir, { name: "unstarted" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const first = await board.openThread(USER, { channel: "general", title: "a question" });
+    const second = await board.openThread(USER, { channel: "general", title: "another" });
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    let home = "";
+    let made = 0;
+    let throwing = false;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${(made += 1)}`),
+      runTurn: (request) => {
+        if (throwing) {
+          return Promise.reject(
+            new Error("codex app-server did not answer thread/start within 60000 ms"),
+          );
+        }
+        handed.push({ session: request.session, newSession: request.newSession });
+        home = request.spec.configHome;
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const inFirst = { ...deskPost, thread: { id: first.id, task: false } };
+    const inSecond = { ...deskPost, thread: { id: second.id, task: false } };
+
+    // The board's copy never arrives, as when a proxy closes the connection: the CLI never starts.
+    dropping = true;
+    const lost = await society.run(inFirst);
+    dropping = false;
+    expect(lost.error).toMatch(/^the runner could not run the turn: .*other side closed/);
+    expect(handed).toEqual([]);
+    expect(await board.readSessions("desk", "society", first.id)).toEqual({});
+    expect(lost.session).toBeNull();
+    // So the conversation's next turn starts a session, which is kept for the one after.
+    await society.run(inFirst);
+    await society.run(inFirst);
+    expect(handed).toEqual([
+      { session: "session-1", newSession: true },
+      { session: "session-1", newSession: false },
+    ]);
+
+    // Nor from one whose workspace could not be prepared: a file stands where its folder goes.
+    const blocked = path.join(home, "scratch", ".threads", second.id);
+    await writeFile(blocked, "", "utf8");
+    const unprepared = await society.run(inSecond);
+    expect(unprepared.error).toMatch(/^could not prepare the workspace/);
+    expect(await board.readSessions("desk", "society", second.id)).toEqual({});
+    expect(unprepared.session).toBeNull();
+    await rm(blocked);
+    await society.run(inSecond);
+    expect(handed.at(-1)).toEqual({ session: "session-2", newSession: true });
+
+    // Nor from one its runner has no adapter for, which the hub places there only by hand.
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "codex" });
+    const dispatch = TurnDispatchSchema.parse({
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    const unadapted = await society.hub.runTurn(dispatch, { runner: "pod" });
+    expect(unadapted.error).toBe("no backend registered for codex");
+    expect(await board.readSessions("stew", "society")).toEqual({});
+    expect(unadapted.session).toBeNull();
+
+    // Nor from one whose CLI could not open the new session, as when Codex's server never answered
+    // `thread/start`: the adapter throws.
+    const third = await board.openThread(USER, { channel: "general", title: "a third" });
+    const inThird = { ...deskPost, thread: { id: third.id, task: false } };
+    throwing = true;
+    const unopened = await society.run(inThird);
+    throwing = false;
+    expect(unopened.error).toBe("codex app-server did not answer thread/start within 60000 ms");
+    expect(await board.readSessions("desk", "society", third.id)).toEqual({});
+    expect(unopened.session).toBeNull();
+    await society.run(inThird);
+    expect(handed.at(-1)).toEqual({ session: "session-4", newSession: true });
+  });
+
+  it("keeps no session from a turn stopped before its CLI started", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-early" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const chosen = Promise.withResolvers<void>();
+    let asked = 0;
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      stops: true,
+      // The runner asks for a new session's id after preparing the workspace and before it checks
+      // for a stop, so the first one waits while the test stops the turn.
+      newSession: async () => {
+        asked += 1;
+        if (asked === 1) {
+          await chosen.promise;
+        }
+        return `session-${(made += 1)}`;
+      },
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    const { run, hub } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    const running = run(inThread);
+    await vi.waitFor(() => expect(asked).toBe(1));
+    const turnId = hub.liveTurns()[0]?.turnId ?? "";
+    expect(await hub.stop(turnId, "user")).toBe(true);
+    chosen.resolve();
+    const stopped = await running;
+    expect(stopped.exitReason).toBe("stopped");
+    expect(handed).toEqual([]);
+    expect(stopped.session).toBeNull();
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({});
+    // So the conversation's next turn starts a session of its own, with the whole thread.
+    await run(inThread);
+    expect(handed).toEqual([{ session: "session-2", newSession: true }]);
+  });
+
+  it("drops a session its CLI found nothing of, so the next turn starts anew and is told why, cold and warm", async () => {
+    const { board } = await Board.init(dir, { name: "lost" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    await board.postMessage(USER, {
+      channel: "general",
+      thread_id: thread.id,
+      body: "Where are we?",
+    });
+    // A session saved before, which the CLI no longer has, in a thread and at home.
+    await board.writeSession("desk", "society", "claude", "s-gone", "pod", thread.id);
+    await board.writeSession("desk", "society", "claude", "s-gone", "pod");
+    const words =
+      "Claude Code returned an error result: No conversation found with session ID: s-gone";
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    const started: Array<{ session: string; newSession: boolean }> = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-new-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        prompts.push(request.prompt);
+        return Promise.resolve(
+          request.session === "s-gone"
+            ? {
+                ...completed("unresumed"),
+                status: null,
+                exitReason: "error" as const,
+                error: words,
+                resumeFailed: "lost" as const,
+              }
+            : completed("cold turn"),
+        );
+      },
+      startResident: (_spec, resident) => {
+        started.push({ session: resident.session, newSession: resident.newSession });
+        if (resident.session === "s-gone") {
+          return Promise.reject(new ResumeError("lost", words));
+        }
+        return Promise.resolve({
+          session: resident.session,
+          runTurn: (prompt) => {
+            prompts.push(prompt);
+            return Promise.resolve(completed("warm turn"));
+          },
+          close: () => Promise.resolve(),
+        });
+      },
+    };
+    const { run } = await start(board, backend);
+    const note = "Its CLI could not resume this conversation's session, so the session was dropped";
+
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    const lost = await run(inThread);
+    expect(lost).toMatchObject({
+      exitReason: "error",
+      error: words,
+      resumeFailed: "lost",
+      sessionDropped: true,
+    });
+    // A lost session is no retry: nothing counts toward the three a retry gets.
+    expect(lost.resumeRetries).toBeUndefined();
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({ runner: "pod" });
+    // The next turn starts a session, with the whole thread and the reason in its prompt.
+    await run(inThread);
+    expect(handed.at(-1)).toEqual({ session: "s-new-1", newSession: true });
+    expect(prompts.at(-1)).toContain("## The thread so far");
+    expect(prompts.at(-1)).toContain("Where are we?");
+    expect(prompts.at(-1)).toContain(`It ended with error: ${words}.`);
+    expect(prompts.at(-1)).toContain(note);
+    // And the one after resumes it, told nothing more.
+    await run(inThread);
+    expect(handed.at(-1)).toEqual({ session: "s-new-1", newSession: false });
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // At home, a warm session that cannot be resumed fails as it starts, and the next one is new
+    // and gets the first-turn notes.
+    const home = await run(deskPost);
+    expect(home).toMatchObject({ exitReason: "error", resumeFailed: "lost", sessionDropped: true });
+    expect(await board.readSessions("desk", "society")).toEqual({ runner: "pod" });
+    await run(deskPost);
+    expect(started).toEqual([
+      { session: "s-gone", newSession: false },
+      { session: "s-new-2", newSession: true },
+    ]);
+    expect(prompts.at(-1)).toContain("## First turn");
+    expect(prompts.at(-1)).toContain(note);
+    const failed = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(failed.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
+      expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
+    ]);
+  });
+
+  it("keeps a session its CLI may resume next time, and drops it after three such turns in a row", async () => {
+    const { board } = await Board.init(dir, { name: "retry" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    await board.writeSession("desk", "society", "claude", "s-slow", "pod", thread.id);
+    const words = "codex app-server did not answer thread/resume within 60000 ms";
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    // How each turn of the old session goes: a resume that fails for now, or one that works.
+    const plan = ["retry", "retry", "resumed", "retry", "retry", "retry"];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-new"),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        prompts.push(request.prompt);
+        if (request.session === "s-slow" && plan.shift() === "retry") {
+          return Promise.reject(new ResumeError("retry", words));
+        }
+        return Promise.resolve(completed("cold turn"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    const records = [];
+    for (let turn = 0; turn < 7; turn += 1) {
+      records.push(await run(inThread));
+    }
+    expect(
+      records.map((record) => [
+        record.exitReason,
+        record.resumeFailed ?? null,
+        record.resumeRetries ?? null,
+        record.sessionDropped ?? false,
+      ]),
+    ).toEqual([
+      ["error", "retry", 1, false],
+      ["error", "retry", 2, false],
+      // A turn that resumed ends the run of failures.
+      ["completed", null, null, false],
+      ["error", "retry", 1, false],
+      ["error", "retry", 2, false],
+      ["error", "retry", 3, true],
+      ["completed", null, null, false],
+    ]);
+    expect(handed.map((each) => each.session)).toEqual([
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-slow",
+      "s-new",
+    ]);
+    expect(handed.at(-1)?.newSession).toBe(true);
+    // A turn after a failure that kept the session is told the failure, not that it was dropped.
+    const note = "Its CLI could not resume this conversation's session, so the session was dropped";
+    expect(prompts[1]).toContain(`It ended with error: ${words}.`);
+    expect(prompts[1]).not.toContain(note);
+    expect(prompts.at(-1)).toContain(note);
+    expect(await board.readSessions("desk", "society", thread.id)).toEqual({
+      claude: "s-new",
+      runner: "pod",
+    });
+  });
+
+  // What each adapter's session does once its CLI ended between turns: Claude's throws, with the
+  // SDK's words after a crash and its own after a clean end, and Codex's returns the failure.
+  const deadSessions = [
+    {
+      shape: "throws after a crash, as Claude's does",
+      error: "Claude Code process terminated by signal SIGKILL",
+      throws: true,
+    },
+    {
+      shape: "throws after a clean end, as Claude's does",
+      error: "the resident session has ended",
+      throws: true,
+    },
+    {
+      shape: "returns the failure, as Codex's does",
+      error: "codex app-server is closed",
+      throws: false,
+    },
+  ];
+  for (const { shape, error, throws } of deadSessions) {
+    it(`lets a warm session go once its CLI has ended, when the turn on it ${shape}`, async () => {
+      const { board } = await Board.init(dir, { name: "dead" });
+      await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+      const started: string[] = [];
+      let closes = 0;
+      let alive = true;
+      const backend: AgentBackend = {
+        kind: "claude",
+        newSession: () => Promise.resolve("s1"),
+        runTurn: () => Promise.resolve(completed("cold")),
+        startResident: (_spec, resident) => {
+          started.push(resident.session);
+          alive = true;
+          return Promise.resolve({
+            session: resident.session,
+            runTurn: () => {
+              if (alive) {
+                return Promise.resolve(completed("warm"));
+              }
+              if (throws) {
+                return Promise.reject(new Error(error));
+              }
+              return Promise.resolve({
+                ...completed("closed"),
+                status: null,
+                exitReason: "error" as const,
+                error,
+              });
+            },
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          });
+        },
+      };
+      const { run, hub } = await start(board, backend);
+      const records = [await run(deskPost)];
+      expect(hub.residentPairs).toEqual(["desk/society"]);
+      alive = false;
+      // The failed turn lets the session go at once, so the runner no longer reports it warm.
+      records.push(await run(deskPost));
+      expect(hub.residentPairs).toEqual([]);
+      for (let i = 0; i < 2; i += 1) {
+        records.push(await run(deskPost));
+      }
+      // The failed turn is recorded with the adapter's words, and the next one starts a new
+      // process on the saved session.
+      expect(hub.residentPairs).toEqual(["desk/society"]);
+      expect(records.map((record) => [record.exitReason, record.error ?? null])).toEqual([
+        ["completed", null],
+        ["error", error],
+        ["completed", null],
+        ["completed", null],
+      ]);
+      expect(started).toEqual(["s1", "s1"]);
+      expect(closes).toBe(1);
+      expect(await board.readSessions("desk", "society")).toEqual({ claude: "s1", runner: "pod" });
+    });
+  }
 
   it("starts a warm session afresh when the citizen's model or effort changes", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
@@ -911,6 +1549,97 @@ describe("turns on a runner over the runner protocol", () => {
     await expect(stat(release)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(lounge)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(home)).resolves.toBeDefined();
+  });
+
+  it("gives a citizen outside a project one workspace per project for its channels, until the project is archived", async () => {
+    const { board } = await Board.init(dir, { name: "places" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const inDemo = await board.postMessage(USER, { channel: "demo/release", body: "demo's date?" });
+    await board.postMessage(USER, { channel: "lab/general", body: "lab's budget?" });
+    await board.postMessage(USER, { channel: "general", body: "the society's plan?" });
+
+    // Each turn waits until all three are in flight, so they can only finish by running together.
+    const cwds = new Set<string>();
+    const prompts = new Map<string, string>();
+    let refusal: unknown = null;
+    let started = 0;
+    // The turn in flight in each conversation, as a post into it would find it.
+    const found: Array<string | undefined> = [];
+    const { promise: together, resolve: allStarted } = Promise.withResolvers<void>();
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(randomUUID()),
+      runTurn: async (request) => {
+        const { cwd } = request.spec;
+        cwds.add(cwd);
+        prompts.set(cwd, request.prompt);
+        started += 1;
+        if (started === 3) {
+          for (const place of [undefined, "demo", "lab"]) {
+            found.push(host.turnIn("concierge-1", "society", { place })?.turnId);
+          }
+          allStarted();
+        }
+        await together;
+        if (cwd.endsWith(path.join(".places", "lab"))) {
+          // Archiving under the concierge's turn in lab's conversation is refused until that turn ends.
+          refusal = await board.archiveProject(USER, { project: "lab", reason: "Done." }).then(
+            () => null,
+            (error: unknown) => error,
+          );
+        }
+        return completed("done");
+      },
+    };
+    const { run, runner, hub, host } = await start(board, backend);
+    const turn = (place?: string) =>
+      run({
+        agent: "concierge-1",
+        project: "society",
+        ...(place === undefined ? {} : { place }),
+        trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+        priority: 1,
+      });
+    const ended = await Promise.all([turn(), turn("demo"), turn("lab")]);
+    expect(ended.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
+    expect(ended.map((each) => each.place)).toEqual([undefined, "demo", "lab"]);
+    expect(found).toEqual(ended.map((each) => each.id));
+
+    const scratch = path.join(runner.paths.agent("concierge-1"), "scratch");
+    const demo = path.join(scratch, ".places", "demo");
+    const lab = path.join(scratch, ".places", "lab");
+    expect([...cwds].toSorted()).toEqual([scratch, demo, lab].toSorted());
+    // Each project's turn read that project's posts alone, and the home the society's.
+    expect(prompts.get(demo)).toContain("conversation of project demo's channels");
+    expect(prompts.get(demo)).toContain("demo's date?");
+    expect(prompts.get(demo)).not.toContain("lab's budget?");
+    expect(prompts.get(lab)).toContain("lab's budget?");
+    expect(prompts.get(lab)).not.toContain("demo's date?");
+    expect(prompts.get(scratch)).toContain("the society's plan?");
+    expect(prompts.get(scratch)).not.toContain("demo's date?");
+    expect(prompts.get(scratch)).not.toContain("lab's budget?");
+    expect(await board.digestCursor("concierge-1", "society", "~demo")).toBe(inDemo.id);
+    // Each conversation has a session of its own.
+    const sessions = await Promise.all(
+      [undefined, "~demo", "~lab"].map(
+        async (part) => (await board.readSessions("concierge-1", "society", part)).claude,
+      ),
+    );
+    expect(new Set(sessions).size).toBe(3);
+    expect(refusal).toMatchObject({ code: "INVALID_STATE" });
+    // Archived once the turns have ended, lab's workspace goes with the sweep the scheduler asks
+    // for on the archive, and demo's and the home's stay.
+    await board.archiveProject(USER, { project: "lab", reason: "Done." });
+    await hub.sweep({ kind: "place", project: "lab" });
+    await expect(stat(lab)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(demo)).resolves.toBeDefined();
+    await expect(stat(scratch)).resolves.toBeDefined();
+    // A turn there that a sweep could not take its workspace from, as one dispatched just before
+    // the archive, leaves none behind once the server answers its outcome.
+    expect((await turn("lab")).exitReason).toBe("completed");
+    await vi.waitFor(() => expect(stat(lab)).rejects.toMatchObject({ code: "ENOENT" }));
   });
 
   it("keeps a project's code current with its remote: the clone, the home, and branches nobody has worked on", async () => {
@@ -2555,10 +3284,11 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.get("rev-1")).not.toContain(PIXEL.toString("base64").slice(0, 16));
   });
 
-  it("reads an upload from the very turn that asked, among one citizen's turns in two projects and a channel", async () => {
+  it("reads an upload from the very turn that asked, among one citizen's turns in two projects, a channel, and outside projects", async () => {
     const { board } = await Board.init(dir, { name: "image-turns" });
     await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
     await board.addProject(USER, { slug: "lab" });
+    await board.addProject(USER, { slug: "ops" });
     await board.setRoleCharter(USER, {
       name: "engineer",
       purpose: "Builds.",
@@ -2572,7 +3302,7 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo", "lab"],
     });
     // Each turn writes a file only its own worktree has, and uploads it by a relative path once all
-    // three are in flight, so a turn matched by fewer than all its parts reads another's worktree.
+    // five are in flight, so a turn matched by fewer than all its parts reads another's worktree.
     const statuses = new Map<string, number>();
     const written = Promise.withResolvers<void>();
     const uploaded = Promise.withResolvers<void>();
@@ -2583,11 +3313,13 @@ describe("turns on a runner over the runner protocol", () => {
       newSession: () => Promise.resolve("session-1"),
       runTurn: async (request) => {
         const actor = board.resolveToken(request.mcp.token);
-        const key = `${actor?.scope ?? ""}${actor?.channel === undefined ? "" : `#${actor.channel}`}`;
+        const key = `${actor?.scope ?? ""}${actor?.channel === undefined ? "" : `#${actor.channel}`}${
+          actor?.place === undefined ? "" : `~${actor.place}`
+        }`;
         await mkdir(path.join(request.spec.cwd, "shots"), { recursive: true });
         await writeFile(path.join(request.spec.cwd, "shots", `${key}.png`), PIXEL);
         writers += 1;
-        if (writers === 3) {
+        if (writers === 5) {
           written.resolve();
         }
         await written.promise;
@@ -2601,7 +3333,7 @@ describe("turns on a runner over the runner protocol", () => {
         });
         statuses.set(key, response?.status ?? 0);
         uploaders += 1;
-        if (uploaders === 3) {
+        if (uploaders === 5) {
           uploaded.resolve();
         }
         await uploaded.promise;
@@ -2609,17 +3341,30 @@ describe("turns on a runner over the runner protocol", () => {
       },
     };
     const { run } = await start(board, backend);
-    const turn = (project: string, channel?: string) =>
+    const turn = (project: string, channel?: string, place?: string) =>
       run({
         agent: "eng-1",
         project,
         ...(channel === undefined ? {} : { channel }),
+        ...(place === undefined ? {} : { place }),
         trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
         priority: 2,
       });
-    const turns = await Promise.all([turn("demo"), turn("demo", "release"), turn("lab")]);
-    expect(turns.map((each) => each.exitReason)).toEqual(["completed", "completed", "completed"]);
-    expect(Object.fromEntries(statuses)).toEqual({ demo: 200, "demo#release": 200, lab: 200 });
+    const turns = await Promise.all([
+      turn("demo"),
+      turn("demo", "release"),
+      turn("lab"),
+      turn("society"),
+      turn("society", undefined, "ops"),
+    ]);
+    expect(turns.map((each) => each.exitReason)).toEqual(Array(5).fill("completed"));
+    expect(Object.fromEntries(statuses)).toEqual({
+      demo: 200,
+      "demo#release": 200,
+      lab: 200,
+      society: 200,
+      "society~ops": 200,
+    });
   });
 
   it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {

@@ -115,12 +115,12 @@ export function WorkingNow({
             <p className="px-2 py-1 text-xs text-fg-muted">Nobody is in a turn.</p>
           ) : (
             <ul>
-              {running.map(({ agent, scope, thread, channel }) => {
-                const turn = live.get(pairKey(agent, scope, { thread, channel }));
+              {running.map(({ agent, scope, thread, channel, place }) => {
+                const turn = live.get(pairKey(agent, scope, { thread, channel, place }));
                 const current = turn !== undefined && turn.end === null;
                 const cli = members.data?.find((member) => member.name === agent)?.cli ?? null;
                 const line = current ? lastLine(turn) : null;
-                const conversation = conversationOf({ scope, thread, channel });
+                const conversation = conversationOf({ scope, thread, channel, place });
                 const active =
                   agent === activeCitizen &&
                   (activeScope === null || activeScope === conversation || activeScope === scope);
@@ -128,9 +128,11 @@ export function WorkingNow({
                 const about =
                   thread !== undefined
                     ? (entities.get(thread)?.title ?? "a thread")
-                    : channel === undefined
-                      ? null
-                      : `#${channel}`;
+                    : channel !== undefined
+                      ? `#${channel}`
+                      : place !== undefined
+                        ? `${place}'s channels`
+                        : null;
                 return (
                   <li
                     key={conversation === scope ? `${agent}/${scope}` : `${agent}/${conversation}`}

@@ -7,6 +7,7 @@ import {
   type Project,
 } from "./board.js";
 import {
+  ResumeFailureSchema,
   TranscriptEntrySchema,
   TurnExitReasonSchema,
   TurnStatusSchema,
@@ -177,13 +178,15 @@ export function projectRepo(project: Project): ProjectRepo {
  * task's conversation, on `task/<id>`. With `thread`, a proposal's or a topic's conversation works
  * in a place of its own instead, and with `channel` a channel's conversation other than general,
  * so it runs beside the citizen's other conversations: a folder under the home's scratch folder,
- * or a worktree detached at the tip of the project's default branch.
+ * or a worktree detached at the tip of the project's default branch. With `place`, a society-scope
+ * turn in a project's channels' conversation works in a folder of its own under the scratch folder.
  */
 export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("home"),
     thread: UlidSchema.optional(),
     channel: NameSchema.optional(),
+    place: NameSchema.optional(),
   }),
   z.object({
     kind: z.literal("project"),
@@ -192,7 +195,16 @@ export const TurnWorkspaceSchema = z.discriminatedUnion("kind", [
     thread: UlidSchema.optional(),
     channel: NameSchema.optional(),
   }),
-  z.object({ kind: z.literal("task"), repo: ProjectRepoSchema, taskId: UlidSchema }),
+  z.object({
+    kind: z.literal("task"),
+    repo: ProjectRepoSchema,
+    taskId: UlidSchema,
+    /**
+     * The citizen holding the task's current stage, when someone does: a turn of anyone else
+     * works detached at the branch's tip, so the holder's turns find the branch free.
+     */
+    holder: NameSchema.optional(),
+  }),
 ]);
 export type TurnWorkspace = z.infer<typeof TurnWorkspaceSchema>;
 
@@ -211,6 +223,8 @@ export const TurnJobSchema = z.object({
   thread: UlidSchema.optional(),
   /** The channel, never general, whose conversation the turn is in. */
   channel: NameSchema.optional(),
+  /** The project whose channels' conversation the turn is in, for a turn in the society scope. */
+  place: NameSchema.optional(),
   /**
    * The session to resume, or null to start one: the CLI's adapter picks a fresh session's id, and
    * the outcome reports it.
@@ -236,6 +250,18 @@ export type TurnJob = z.infer<typeof TurnJobSchema>;
 export const TurnWorkSchema = z.object({ branch: z.string().min(1), head: z.string().min(1) });
 export type TurnWork = z.infer<typeof TurnWorkSchema>;
 
+/**
+ * Commits a task's worktree holds that the task's branch lacks and that the hand-back could not
+ * put on it by a fast-forward, whose worktree belongs to `agent`: the first of them and how many.
+ */
+export const StuckWorkSchema = z.object({
+  branch: z.string().min(1),
+  agent: NameSchema,
+  commits: z.array(z.string()),
+  total: z.number().int().positive(),
+});
+export type StuckWork = z.infer<typeof StuckWorkSchema>;
+
 export const TurnEventsSchema = z.object({ entries: z.array(TranscriptEntrySchema) });
 export type TurnEvents = z.infer<typeof TurnEventsSchema>;
 
@@ -247,8 +273,18 @@ export const TurnOutcomeSchema = z.object({
   costUsd: z.number().nonnegative(),
   /** The session's running total after this turn, for CLIs that report one. */
   sessionCostUsd: z.number().nonnegative().optional(),
-  /** The session the CLI used, which differs from the job's for CLIs that assign their own ids. */
-  session: z.string().min(1),
+  /**
+   * The session the CLI used, which differs from the job's for CLIs that assign their own ids. A
+   * turn whose CLI never started, because it failed or was stopped first, reports the job's own,
+   * null in a conversation's first turn, so a session never started is not recorded.
+   */
+  session: z.string().min(1).nullable(),
+  /**
+   * Set when the CLI could not resume the job's session, which failed the turn before any model
+   * call; the server then drops a `lost` session, and one that failed `retry` too often in a row. A
+   * runner from before never sends it.
+   */
+  resumeFailed: ResumeFailureSchema.optional(),
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),
@@ -257,6 +293,11 @@ export const TurnOutcomeSchema = z.object({
    * branch after the hand-back: uncommitted changes, or commits no branch contains.
    */
   leftovers: z.boolean().default(false),
+  /**
+   * Commits the hand-back found its task's worktrees holding that no fast-forward of the task's
+   * branch can take, each told once; a runner from before never sends it.
+   */
+  stuck: z.array(StuckWorkSchema).optional(),
   /**
    * The CLI's plan quota as the turn's stream last reported it, when it reported any; a runner from
    * before never sends it.
@@ -483,11 +524,13 @@ export type TurnImage = z.infer<typeof TurnImageSchema>;
 
 /**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
- * task's thread takes its id, or a channel's beside general in a scope.
+ * task's thread takes its id, a channel's beside general in a scope, or a project's channels' in
+ * the society scope, which ends when the project is archived.
  */
 export const WorkspaceConversationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("thread"), id: UlidSchema }),
   z.object({ kind: z.literal("channel"), scope: NameSchema, name: NameSchema }),
+  z.object({ kind: z.literal("place"), project: NameSchema }),
 ]);
 export type WorkspaceConversation = z.infer<typeof WorkspaceConversationSchema>;
 
@@ -496,19 +539,25 @@ export function workspaceConversationOf(turn: {
   readonly scope: string;
   readonly thread?: string | undefined;
   readonly channel?: string | undefined;
+  readonly place?: string | undefined;
 }): WorkspaceConversation | null {
   if (turn.thread !== undefined) {
     return { kind: "thread", id: turn.thread };
   }
-  return turn.channel === undefined
-    ? null
-    : { kind: "channel", scope: turn.scope, name: turn.channel };
+  if (turn.channel !== undefined) {
+    return { kind: "channel", scope: turn.scope, name: turn.channel };
+  }
+  return turn.place === undefined ? null : { kind: "place", project: turn.place };
 }
 
 export function sameConversation(a: WorkspaceConversation, b: WorkspaceConversation): boolean {
-  return a.kind === "thread"
-    ? b.kind === "thread" && a.id === b.id
-    : b.kind === "channel" && a.scope === b.scope && a.name === b.name;
+  if (a.kind === "thread") {
+    return b.kind === "thread" && a.id === b.id;
+  }
+  if (a.kind === "channel") {
+    return b.kind === "channel" && a.scope === b.scope && a.name === b.name;
+  }
+  return b.kind === "place" && a.project === b.project;
 }
 
 /** One citizen's workspace for a conversation on a runner, in the scope its turns ran in. */

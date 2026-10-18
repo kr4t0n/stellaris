@@ -40,6 +40,11 @@ export interface TestSocietyOptions {
   readonly capabilities?: readonly string[] | undefined;
   /** Routes only a test has, added before the server answers anything. */
   readonly routes?: ((app: TestApp) => void) | undefined;
+  /**
+   * Whether to close a request's connection unanswered, as a proxy between a runner and the server
+   * may; asked before the app sees the request.
+   */
+  readonly drop?: ((request: Request) => boolean) | undefined;
   /** How long a runner may be away before the hub moves or fails its work. */
   readonly graceMs?: number | undefined;
   /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
@@ -80,6 +85,10 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   let fetcher: Hono["fetch"] | null = null;
   const server = serve({
     fetch: (request, env) => {
+      if (options.drop?.(request) === true) {
+        env.incoming.socket.destroy();
+        return new Response(null, { status: 502 });
+      }
       if (fetcher === null) {
         return new Response("starting", { status: 503 });
       }

@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+# `check` is the job the branch rules require. The other three build what a release ships, the
+# images, the npm packages, and the chart, the way publish.yml, npm-publish.yml, and helm-publish.yml
+# do, and run them; they push and publish nothing, and run beside `check` rather than after it.
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -55,3 +58,67 @@ jobs:
       # test against a board server of scripted citizens, which needs the server's build above.
       - run: pnpm --filter @stellaris/web exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+
+  images:
+    # amd64 only. The server image's build stage runs on the builder's platform for every target, so
+    # its arm64 build differs only in the base image's; the runner image's build stage runs on the
+    # target, so an arm64-only failure, such as the Agent SDK's per-platform binary package, first
+    # shows in publish.yml's build on the next push to main.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Both at once, into the runner's own Docker, where the smoke test runs them as built. No layer
+      # cache: reading publish.yml's takes a BuildKit container whose images must then be exported
+      # into Docker, and its layers seldom match a build days later, once the base images have moved.
+      - name: Build the server and runner images
+        run: |
+          set -uo pipefail
+          docker build --progress=plain -f apps/server/Dockerfile -t stellaris-server:ci . > "$RUNNER_TEMP/server.log" 2>&1 &
+          server=$!
+          docker build --progress=plain -f apps/runner/Dockerfile -t stellaris-runner:ci . > "$RUNNER_TEMP/runner.log" 2>&1 &
+          runner=$!
+          status=0
+          wait "$server" || { status=1; echo "::error::The server image did not build."; }
+          wait "$runner" || { status=1; echo "::error::The runner image did not build."; }
+          for image in server runner; do
+            echo "::group::The $image image's build"
+            cat "$RUNNER_TEMP/$image.log"
+            echo "::endgroup::"
+          done
+          exit "$status"
+      - run: docker image ls stellaris-server:ci && docker image ls stellaris-runner:ci
+      - run: scripts/docker/smoke.sh stellaris-server:ci stellaris-runner:ci
+
+  npm:
+    runs-on: ubuntu-24.04
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 12.6.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm build:web
+      - run: pnpm pack:npm
+      # As npm-publish.yml does before it publishes: installed from the tarballs, the CLI creates a
+      # society, the server serves the interface, and the runner enrolls and connects.
+      - name: Pack and smoke-test the packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          npm pack ./release/stellaris ./release/stellaris-runner --pack-destination "$RUNNER_TEMP/tarballs"
+          scripts/npm/smoke.sh "$RUNNER_TEMP/tarballs"
+
+  chart:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+      - run: scripts/helm/check.sh

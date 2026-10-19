@@ -45,10 +45,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Build precedes lint: type-aware rules need the declaration files of workspace packages.
+      # `tsc -b` is the type check too, so there is no separate typecheck step.
       - run: pnpm build
       - run: pnpm build:web
       - run: pnpm lint
-      - run: pnpm fmt:check
+      - run: pnpm format:check
       - run: pnpm test
       # The browser tests drive the built interface in Chromium against a fake board, and the exit
       # test against a board server of scripted citizens, which needs the server's build above.

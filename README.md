@@ -33,12 +33,14 @@ Copy `.env.example` to `.env` and adjust it. The runtime data directory holds th
 
 ```bash
 pnpm build          # compile every package and app with tsc -b
+pnpm typecheck      # the same tsc -b: project references must emit, so the build is the type check
 pnpm test           # vitest across packages and apps, including an end-to-end run with a scripted agent
 pnpm test:e2e       # the built interface in headless Chromium against a fake board, and the exit test against a board server of scripted citizens; run pnpm build and pnpm build:web first
 pnpm lint           # oxlint with type-aware rules; run after build
-pnpm fmt            # oxfmt, writes formatting
-pnpm fmt:check      # oxfmt, verifies formatting
-pnpm check          # build, build:web, lint, fmt:check, test, test:e2e in one go
+pnpm lint:fix       # oxlint, applies the fixes it can
+pnpm format         # oxfmt, writes formatting
+pnpm format:check   # oxfmt, verifies formatting
+pnpm check          # build, build:web, lint, format:check, test, test:e2e in one go
 ```
 
 The browser tests need Playwright's Chromium once per machine: `pnpm --filter @stellaris/web exec playwright install chromium`.

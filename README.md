@@ -299,6 +299,8 @@ packages/
   adapter-codex/   Codex through `codex app-server`, JSON-RPC over stdio
 helm/stellaris/    the Helm chart for the board server and runners in the cluster, published to GitHub Pages
 scripts/npm/       the npm packages' build, their READMEs, and the smoke test of what they install
+scripts/docker/    the smoke test of the built images, run as a deployment runs them
+scripts/helm/      the chart's lint and render check with the values deployments set
 data/              runtime data, ignored by git
 ```
 
@@ -325,11 +327,11 @@ npm install --global @kubitnodes/stellaris-runner
 STELLARIS_SERVER_URL=http://<server>:4700 stellaris-runner
 ```
 
-The runner brings Claude Code's runtime with it, through the Claude Agent SDK, and uses Claude Code's login, from the `claude` CLI or `ANTHROPIC_API_KEY`; Codex is installed and signed in on its own. `npm-publish.yml` packs and smoke-tests both packages on every push to `main`, and publishes them on a `v*` tag that matches `STELLARIS_VERSION` in `packages/shared/src/version.ts`, through npm's trusted publishing, leaving a version already on npm alone. `pnpm pack:npm` builds them into `release/` after `pnpm build` and `pnpm build:web`, and `scripts/npm/smoke.sh <dir of tarballs>` installs packed tarballs in a scratch prefix and checks that a society starts, the server serves the interface, and a runner connects.
+The runner brings Claude Code's runtime with it, through the Claude Agent SDK, and uses Claude Code's login, from the `claude` CLI or `ANTHROPIC_API_KEY`; Codex is installed and signed in on its own. `npm-publish.yml` packs and smoke-tests both packages on every push to `main`, as `ci.yml` does on every pull request, and publishes them on a `v*` tag that matches `STELLARIS_VERSION` in `packages/shared/src/version.ts`, through npm's trusted publishing, leaving a version already on npm alone. `pnpm pack:npm` builds them into `release/` after `pnpm build` and `pnpm build:web`, and `scripts/npm/smoke.sh <dir of tarballs>` installs packed tarballs in a scratch prefix and checks that a society starts, the server serves the interface, and a runner connects.
 
 ### The board server's image
 
-The `publish` workflow pushes `kr4t0n/stellaris-server` to Docker Hub for `linux/amd64` and `linux/arm64`, each built on a native runner of its platform: `latest`, `main`, and `sha-<commit>` from every push to `main`, the version from a `v*` tag, and `manual-<run id>` from a manual run. It runs beside `ci` and does not wait for its checks. To build it yourself, run `docker build -f apps/server/Dockerfile -t stellaris-server .` from the repository root. The image holds the server, the built interface, and the admin CLI as `stellaris`, and carries no agent CLI, since runners connect to it from wherever the CLIs are. It runs as `node` (uid 1000), listens on `0.0.0.0:4700`, and keeps the society in `/data`:
+The `publish` workflow pushes `kr4t0n/stellaris-server` to Docker Hub for `linux/amd64` and `linux/arm64`, each built on a native runner of its platform: `latest`, `main`, and `sha-<commit>` from every push to `main`, the version from a `v*` tag, and `manual-<run id>` from a manual run. It runs beside `ci` and does not wait for its checks. To build it yourself, run `docker build -f apps/server/Dockerfile -t stellaris-server .` from the repository root. `ci.yml` builds it and the runner's image for `linux/amd64` on every pull request, pushing nothing, and `scripts/docker/smoke.sh <server image> <runner image>`, run from the repository root, starts both as a deployment would and checks that the runner enrolls with the server and connects. The image holds the server, the built interface, and the admin CLI as `stellaris`, and carries no agent CLI, since runners connect to it from wherever the CLIs are. It runs as `node` (uid 1000), listens on `0.0.0.0:4700`, and keeps the society in `/data`:
 
 ```bash
 IMAGE=kr4t0n/stellaris-server
@@ -360,7 +362,7 @@ docker logs stellaris-runner   # the enrollment code and link to approve on the 
 
 ### The Helm chart
 
-`helm/stellaris` deploys the board server's image on Kubernetes, and `helm-publish.yml` publishes it to the `helm/` folder of the `gh-pages` branch whenever its `version` changes:
+`helm/stellaris` deploys the board server's image on Kubernetes, and `helm-publish.yml` publishes it to the `helm/` folder of the `gh-pages` branch whenever its `version` changes. `scripts/helm/check.sh`, which `ci.yml` runs on every pull request, lints and renders it with its defaults and with the runners, the Ingress, and GitHub sign-in turned on, and checks the values it refuses:
 
 ```bash
 helm repo add stellaris https://kr4t0n.github.io/stellaris/helm

@@ -1,9 +1,28 @@
-import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import type * as FsPromises from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SKILL_FILES_LIMIT } from "@stellaris/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readSkillFolder, SKILL_TEXT_LIMIT_CHARS } from "./skill-folder.js";
+
+// What runs right before each `open`, so a test can change the folder between the read's check of
+// a path and its open of it.
+const seam = vi.hoisted(() => {
+  const state: { beforeOpen?: ((file: string) => Promise<void>) | undefined } = {};
+  return state;
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      await seam.beforeOpen?.(String(args[0]));
+      return actual.open(...args);
+    },
+  };
+});
 
 describe("readSkillFolder", () => {
   let dir: string;
@@ -22,6 +41,7 @@ describe("readSkillFolder", () => {
   });
 
   afterEach(async () => {
+    seam.beforeOpen = undefined;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -107,6 +127,31 @@ describe("readSkillFolder", () => {
     expect(await readSkillFolder(path.join(dir, "skills", "missing"))).toBeNull();
     expect(await readSkillFolder(path.join(skill, "SKILL.md"))).toBeNull();
   });
+
+  it.skipIf(process.platform !== "linux")(
+    "reads nothing outside when a parent folder becomes a link between its check and the open",
+    async () => {
+      const outside = path.join(dir, "outside");
+      await mkdir(outside);
+      await writeFile(path.join(outside, "notes.md"), "the secret\n");
+      await write("docs/notes.md", "safe\n");
+      const folder = path.join(await realpath(skill), "docs");
+      let swapped = false;
+      seam.beforeOpen = async (file) => {
+        if (file === path.join(folder, "notes.md") && !swapped) {
+          swapped = true;
+          await rename(folder, path.join(dir, "docs-kept"));
+          await symlink(outside, folder);
+        }
+      };
+
+      const files = await readSkillFolder(skill);
+      expect(swapped).toBe(true);
+      expect(files?.map((file) => ({ path: file.path, text: file.text }))).toEqual([
+        { path: "SKILL.md", text: "---\nname: uv-setup\n---\n# uv setup\n" },
+      ]);
+    },
+  );
 
   it("reads nothing outside while a file and a folder are swapped for links under the read", async () => {
     const outside = path.join(dir, "outside");

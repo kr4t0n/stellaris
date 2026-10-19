@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { type FileHandle, lstat, open, readdir, readlink, realpath } from "node:fs/promises";
 import path from "node:path";
 import { isSafeRelativePath, SKILL_FILES_LIMIT, type SkillFileContent } from "@stellaris/shared";
 
@@ -21,6 +21,21 @@ export function skillFileText(bytes: Buffer): Pick<SkillFileContent, "text" | "t
 function inside(root: string, file: string): boolean {
   const relative = path.relative(root, file);
   return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/**
+ * Whether an open file lies inside the folder, by the path the kernel gives its handle. A path
+ * checked before the open cannot tell: `O_NOFOLLOW` guards only its last part, so a parent folder
+ * swapped for a link in between leads the open outside. Only Linux names a handle's file
+ * (`/proc/self/fd`, a file unlinked since keeping its path with ` (deleted)` after it); elsewhere
+ * the check before the open stands alone.
+ */
+async function handleInside(root: string, handle: FileHandle): Promise<boolean> {
+  if (process.platform !== "linux") {
+    return true;
+  }
+  const file = await readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
+  return file !== null && inside(root, file);
 }
 
 /** The relative paths of a folder's regular files, by name at each level, never through a link. */
@@ -65,6 +80,9 @@ async function readEntry(root: string, relative: string): Promise<SkillFileConte
     return null;
   }
   try {
+    if (!(await handleInside(root, handle))) {
+      return null;
+    }
     const stats = await handle.stat();
     if (!stats.isFile()) {
       return null;

@@ -13,6 +13,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 - Node 24 or newer. The version is pinned in `.node-version`.
 - pnpm 12, pinned in `package.json` under `packageManager`. If `corepack enable` cannot write to the system bin directory, run `corepack enable --install-directory ~/.local/bin` and put that directory on your PATH. Root scripts such as `check` call `pnpm` by name, so it must be resolvable.
 - Git 2.27 or newer, on the board server's machine, which keeps every agent's home as a repository, and on every machine that runs turns.
+- To commit to this repository, [gitleaks](https://github.com/gitleaks/gitleaks/releases) on your PATH, the standalone binary (CI uses 8.30.1). The commit hook that `pnpm install` sets up runs it on what is staged and refuses the commit on a secret, or when gitleaks is missing.
 - A Claude Code login on the machine that runs turns. The Agent SDK bundles its own CLI binary and uses the machine's existing credentials or `ANTHROPIC_API_KEY`. Real turns cost real money; observed turns ran between a tenth and a third of a dollar each.
 - The `codex` CLI, logged in, on the machine that runs Codex agents. Codex uses the machine's own configuration and model choice.
 - A machine you trust the society with. Agents run with every permission granted and no sandbox on both CLIs, because nobody is at the terminal to approve anything; an agent can do whatever the account running the server can do. A machine that must not be trusted that far belongs to a different society.
@@ -22,7 +23,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 
 ```bash
 corepack enable                 # or prefix commands with `corepack pnpm`
-pnpm install
+pnpm install                    # also installs the commit hook, through husky
 pnpm build                      # TypeScript project references; also the type check
 ```
 
@@ -32,12 +33,14 @@ Copy `.env.example` to `.env` and adjust it. The runtime data directory holds th
 
 ```bash
 pnpm build          # compile every package and app with tsc -b
+pnpm typecheck      # the same tsc -b: project references must emit, so the build is the type check
 pnpm test           # vitest across packages and apps, including an end-to-end run with a scripted agent
 pnpm test:e2e       # the built interface in headless Chromium against a fake board, and the exit test against a board server of scripted citizens; run pnpm build and pnpm build:web first
 pnpm lint           # oxlint with type-aware rules; run after build
-pnpm fmt            # oxfmt, writes formatting
-pnpm fmt:check      # oxfmt, verifies formatting
-pnpm check          # build, build:web, lint, fmt:check, test, test:e2e in one go
+pnpm lint:fix       # oxlint, applies the fixes it can
+pnpm format         # oxfmt, writes formatting
+pnpm format:check   # oxfmt, verifies formatting
+pnpm check          # build, build:web, lint, format:check, test, test:e2e in one go
 ```
 
 The browser tests need Playwright's Chromium once per machine: `pnpm --filter @stellaris/web exec playwright install chromium`.

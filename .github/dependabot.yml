@@ -1,0 +1,17 @@
+# The workflows pin every action to a commit SHA with its release tag in a comment. Once a month,
+# Dependabot moves both together in one pull request into dev, where the work integrates. npm
+# version updates stay off: `pnpm audit` and Dependabot alerts report the dependencies' advisories.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+    # Conventional Commit titles: ci(deps).
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]

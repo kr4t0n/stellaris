@@ -2,8 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -12,7 +15,7 @@ jobs:
       # CI makes no commits, so the commit hook that `prepare` installs is left out.
       HUSKY: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whole history, so the secret scan reads every commit and not only the tip.
           fetch-depth: 0
@@ -33,10 +36,10 @@ jobs:
           echo "${GITLEAKS_SHA256}  $dir/gitleaks.tar.gz" | sha256sum --check --strict
           tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
           "$dir/gitleaks" git --redact --verbose --no-banner
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 12.6.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: pnpm

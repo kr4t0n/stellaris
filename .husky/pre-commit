@@ -1,0 +1,8 @@
+# Scans what is staged for secrets before every commit. CI runs the same scan over the whole
+# history.
+if ! command -v gitleaks > /dev/null 2>&1; then
+  echo "Commit blocked: gitleaks is not on PATH. Install it as README.md's setup steps say." >&2
+  exit 1
+fi
+
+gitleaks git --pre-commit --staged --redact --no-banner

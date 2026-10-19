@@ -13,6 +13,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 - Node 24 or newer. The version is pinned in `.node-version`.
 - pnpm 12, pinned in `package.json` under `packageManager`. If `corepack enable` cannot write to the system bin directory, run `corepack enable --install-directory ~/.local/bin` and put that directory on your PATH. Root scripts such as `check` call `pnpm` by name, so it must be resolvable.
 - Git 2.27 or newer, on the board server's machine, which keeps every agent's home as a repository, and on every machine that runs turns.
+- To commit to this repository, [gitleaks](https://github.com/gitleaks/gitleaks/releases) on your PATH, the standalone binary (CI uses 8.30.1). The commit hook that `pnpm install` sets up runs it on what is staged and refuses the commit on a secret, or when gitleaks is missing.
 - A Claude Code login on the machine that runs turns. The Agent SDK bundles its own CLI binary and uses the machine's existing credentials or `ANTHROPIC_API_KEY`. Real turns cost real money; observed turns ran between a tenth and a third of a dollar each.
 - The `codex` CLI, logged in, on the machine that runs Codex agents. Codex uses the machine's own configuration and model choice.
 - A machine you trust the society with. Agents run with every permission granted and no sandbox on both CLIs, because nobody is at the terminal to approve anything; an agent can do whatever the account running the server can do. A machine that must not be trusted that far belongs to a different society.
@@ -22,7 +23,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 
 ```bash
 corepack enable                 # or prefix commands with `corepack pnpm`
-pnpm install
+pnpm install                    # also installs the commit hook, through husky
 pnpm build                      # TypeScript project references; also the type check
 ```
 

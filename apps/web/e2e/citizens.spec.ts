@@ -277,7 +277,9 @@ test("a turn in flight takes a post into its conversation, and stops on a second
 
   // The first click asks again; only the second stops.
   await view.getByRole("button", { name: "Stop…" }).click();
-  await expect(view.getByRole("button", { name: "Keep it running" })).toBeVisible();
+  await expect(view.getByRole("button", { name: "Keep it running" }).locator("..")).toHaveText(
+    /^\s*Stop desk's turn\?\s*Keep it running\s*Stop the turn\s*$/,
+  );
   expect(board.writes.some((write) => write.path.endsWith("/stop"))).toBe(false);
   await view.getByRole("button", { name: "Stop the turn" }).click();
   await expect

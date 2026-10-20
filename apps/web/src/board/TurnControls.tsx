@@ -63,7 +63,7 @@ export function TurnControls({ name, turn }: { name: string; turn: RunningTurn }
         <div className="flex items-center gap-2 px-3 pb-3">
           <p className="min-w-0 flex-1 text-[11px] leading-snug text-fg-muted">
             {confirming
-              ? null
+              ? `Stop ${name}'s turn?`
               : turn.steerable
                 ? "Posts reach the turn at its next step."
                 : "This runner delivers posts after the turn ends."}

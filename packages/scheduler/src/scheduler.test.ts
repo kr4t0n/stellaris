@@ -716,17 +716,17 @@ describe("Scheduler", () => {
     // Its first turn, at home, claims the stage it found and leaves the work to the task's
     // conversation, which starts once the debounce is over.
     await board.addAgent(USER, {
-      name: "sage",
+      name: "res-1",
       role: "researcher",
       cli: "claude",
       memberships: ["demo"],
     });
     runner.hold = true;
     await scheduler.tick();
-    expect(scheduler.runningPairs).toEqual(["sage/demo"]);
-    expect(scheduler.pendingPairs).toEqual([sessionKey("sage", "demo", task.id)]);
+    expect(scheduler.runningPairs).toEqual(["res-1/demo"]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("res-1", "demo", task.id)]);
     await board.claimTask(
-      { name: "sage", role: "researcher", scope: "demo" },
+      { name: "res-1", role: "researcher", scope: "demo" },
       { task_id: task.id },
     );
     await scheduler.tick();
@@ -737,8 +737,8 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.thread?.id ?? null, d.trigger.kind])).toEqual([
-      ["sage", null, "onboarding"],
-      ["sage", task.id, "stage"],
+      ["res-1", null, "onboarding"],
+      ["res-1", task.id, "stage"],
     ]);
   });
 

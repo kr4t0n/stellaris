@@ -2181,14 +2181,14 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "researcher",
       cli: "claude",
       memberships: ["lab"],
     });
-    const core = path.join(board.paths.agent("sage"), "memory", "core.md");
+    const core = path.join(board.paths.agent("eng-1"), "memory", "core.md");
     await writeFile(core, "# Core memory\n\n- one\n- two\n- three\n- four\n- five\n", "utf8");
-    await commitHome(board, "sage", "an earlier turn wrote the core");
+    await commitHome(board, "eng-1", "an earlier turn wrote the core");
     let arrived = 0;
     const { promise: both, resolve: together } = Promise.withResolvers<void>();
     const backendOn = ([line, changed]: [string, string]): AgentBackend => ({
@@ -2215,13 +2215,13 @@ describe("turns on a runner over the runner protocol", () => {
       extraRunners: [{ name: "b", backends: () => ({ claude: backendOn(edits.b) }) }],
     });
     // Its work outside projects runs on a, and the lab lives on b.
-    await board.setAgentRunner(USER, "sage", "a");
+    await board.setAgentRunner(USER, "eng-1", "a");
     await board.placeProject("lab", "b");
     const { run } = society;
     const [home, lab] = await Promise.all(
       (["society", "lab"] as const).map((project) =>
         run({
-          agent: "sage",
+          agent: "eng-1",
           project,
           trigger: { kind: "manual", fromUser: true, reason: "test" },
           priority: 1,
@@ -2240,10 +2240,12 @@ describe("turns on a runner over the runner protocol", () => {
     const merged = await readFile(core, "utf8");
     expect(merged).toContain("- one, from the society's work");
     expect(merged).toContain("- five, from the lab");
-    expect(await board.listHomeConflicts("sage")).toEqual([]);
-    const authors = await execa("git", ["log", "--format=%an"], { cwd: board.paths.agent("sage") });
+    expect(await board.listHomeConflicts("eng-1")).toEqual([]);
+    const authors = await execa("git", ["log", "--format=%an"], {
+      cwd: board.paths.agent("eng-1"),
+    });
     expect(
-      authors.stdout.split("\n").filter((name) => name === "sage").length,
+      authors.stdout.split("\n").filter((name) => name === "eng-1").length,
     ).toBeGreaterThanOrEqual(2);
   });
 
@@ -2257,21 +2259,21 @@ describe("turns on a runner over the runner protocol", () => {
       prompts,
     );
     const kept = await readFile(core, "utf8");
-    const [conflict, ...more] = await board.listHomeConflicts("sage");
+    const [conflict, ...more] = await board.listHomeConflicts("eng-1");
     expect(more).toEqual([]);
     expect(conflict?.path).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
     expect(conflict?.file).toBe("memory/core.md");
     // The copy's age is the commit that brought it, made moments ago on a runner.
     expect(Date.now() - Date.parse(conflict?.since ?? "")).toBeLessThan(60_000);
     const other = await readFile(
-      path.join(board.paths.agent("sage"), conflict?.path ?? ""),
+      path.join(board.paths.agent("eng-1"), conflict?.path ?? ""),
       "utf8",
     );
     // One version is in place and the other beside it; neither is lost.
     expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
     expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
     // The history shows both turns' edits and the merge that kept the copy, with that alone.
-    const { changes } = await board.homeHistory("sage", 30);
+    const { changes } = await board.homeHistory("eng-1", 30);
     const turns = changes.filter((change) => change.turnId !== undefined);
     expect(turns.map((change) => change.kind)).toEqual(["turn", "turn"]);
     expect(
@@ -2281,7 +2283,7 @@ describe("turns on a runner over the runner protocol", () => {
       changes.filter((change) => change.kind === "merge").map((change) => change.files),
     ).toEqual([[{ path: conflict?.path, status: "added", added: 7, removed: 0 }]]);
     await run({
-      agent: "sage",
+      agent: "eng-1",
       project: "society",
       trigger: { kind: "manual", fromUser: true, reason: "test" },
       priority: 1,
@@ -2494,12 +2496,12 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
     });
-    const SAGE = { name: "sage", role: "engineer" };
+    const ENG = { name: "eng-1", role: "engineer" };
     const refused: string[] = [];
     const backend: AgentBackend = {
       kind: "claude",
@@ -2510,7 +2512,7 @@ describe("turns on a runner over the runner protocol", () => {
         await execa("git", ["add", "notes.md"], { cwd });
         await execa(
           "git",
-          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "notes"],
           {
             cwd,
           },
@@ -2532,7 +2534,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { run, runner, hub } = await start(board, backend);
     const turnOn = (taskId: string) =>
       run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: taskId, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2548,8 +2550,8 @@ describe("turns on a runner over the runner protocol", () => {
     const repo = runner.paths.repo("demo");
     const log = async (ref: string) =>
       (await execa("git", ["log", "--oneline", ref], { cwd: repo })).stdout;
-    await board.claimTask(SAGE, { task_id: second.id });
-    expect(await board.advanceTask(SAGE, { task_id: second.id })).toMatchObject({
+    await board.claimTask(ENG, { task_id: second.id });
+    expect(await board.advanceTask(ENG, { task_id: second.id })).toMatchObject({
       completing: true,
     });
     expect(await hub.completeTask("demo", second.id)).toBe("done");
@@ -2570,7 +2572,7 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
@@ -2595,7 +2597,7 @@ describe("turns on a runner over the runner protocol", () => {
         await execa("git", ["add", "notes.md"], { cwd });
         await execa(
           "git",
-          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "notes"],
           {
             cwd,
           },
@@ -2612,7 +2614,7 @@ describe("turns on a runner over the runner protocol", () => {
     const task = await board.createTask(USER, { project: "demo", title: "notes" });
     const turn = () =>
       run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: task.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2716,12 +2718,12 @@ describe("turns on a runner over the runner protocol", () => {
         wakeTriggers: ["heartbeat"],
       });
       await board.addAgent(USER, {
-        name: "sage",
+        name: "eng-1",
         role: "engineer",
         cli: "claude",
         memberships: ["demo"],
       });
-      const SAGE = { name: "sage", role: "engineer" };
+      const ENG = { name: "eng-1", role: "engineer" };
       // The agent opens its pull request from a branch named for what it does, as gh would show it.
       const opened: Array<{ number: number; branch: string; content: string }> = [];
       const backend: AgentBackend = {
@@ -2735,7 +2737,7 @@ describe("turns on a runner over the runner protocol", () => {
             await execa("git", ["add", "feature.md"], { cwd });
             await execa(
               "git",
-              ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "feat: add"],
+              ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "feat: add"],
               { cwd },
             );
             await execa("git", ["push", "origin", `HEAD:${next.branch}`], { cwd });
@@ -2759,7 +2761,7 @@ describe("turns on a runner over the runner protocol", () => {
         expect(
           (
             await run({
-              agent: "sage",
+              agent: "eng-1",
               project: "demo",
               thread: { id: taskId, task: true },
               trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2767,16 +2769,16 @@ describe("turns on a runner over the runner protocol", () => {
             })
           ).exitReason,
         ).toBe("completed");
-        await board.updateTask(SAGE, {
+        await board.updateTask(ENG, {
           task_id: taskId,
           pull_request: {
             url: `https://github.com/acme/demo/pull/${pull}`,
             merge_subject: "feat: add the readable feature",
-            merge_body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+            merge_body: "Adds it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
           },
         });
-        await board.claimTask(SAGE, { task_id: taskId });
-        await board.advanceTask(SAGE, { task_id: taskId });
+        await board.claimTask(ENG, { task_id: taskId });
+        await board.advanceTask(ENG, { task_id: taskId });
         return hub.completeTask("demo", taskId);
       };
 
@@ -2786,7 +2788,7 @@ describe("turns on a runner over the runner protocol", () => {
       expect(merges).toEqual([
         {
           subject: "feat: add the readable feature",
-          body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+          body: "Adds it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
         },
       ]);
       const landed = await rev("main");
@@ -2794,7 +2796,7 @@ describe("turns on a runner over the runner protocol", () => {
         (
           await execa("git", ["log", "-1", "--format=%B", landed], { cwd: origin })
         ).stdout.trimEnd(),
-      ).toBe("feat: add the readable feature\n\nAdds it.\n\nCo-Authored-By: sage <sage@x>");
+      ).toBe("feat: add the readable feature\n\nAdds it.\n\nCo-Authored-By: eng-1 <eng-1@x>");
       // The merged branch is gone, and the runner's clone follows the remote at once.
       expect(deleted).toEqual(["feat/readable-1"]);
       const clone = runner.paths.repo("demo");
@@ -2810,7 +2812,7 @@ describe("turns on a runner over the runner protocol", () => {
       const second = await board.createTask(USER, { project: "demo", title: "drifted" });
       opened.push({ number: 2, branch: "feat/drifted", content: "2\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: second.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2824,12 +2826,12 @@ describe("turns on a runner over the runner protocol", () => {
       );
       await execa("git", ["update-ref", "refs/pull/2/head", drifted], { cwd: origin });
       pulls.set(2, { branch: "feat/drifted", head: drifted, merged: null });
-      await board.updateTask(SAGE, {
+      await board.updateTask(ENG, {
         task_id: second.id,
         pull_request: { url: "https://github.com/acme/demo/pull/2" },
       });
-      await board.claimTask(SAGE, { task_id: second.id });
-      await board.advanceTask(SAGE, { task_id: second.id });
+      await board.claimTask(ENG, { task_id: second.id });
+      await board.advanceTask(ENG, { task_id: second.id });
       expect(await hub.completeTask("demo", second.id)).toBe("done");
       expect(await board.getTask(USER, { task_id: second.id })).toMatchObject({
         status: "open",
@@ -2845,7 +2847,7 @@ describe("turns on a runner over the runner protocol", () => {
       const third = await board.createTask(USER, { project: "demo", title: "merged by hand" });
       opened.push({ number: 3, branch: "feat/by-hand", content: "3\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: third.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2853,9 +2855,9 @@ describe("turns on a runner over the runner protocol", () => {
       });
       const byHand = "https://github.com/acme/demo/pull/3";
       await github.merge(byHand, pulls.get(3)?.head ?? "", { subject: "by hand", body: "" });
-      await board.updateTask(SAGE, { task_id: third.id, pull_request: { url: byHand } });
-      await board.claimTask(SAGE, { task_id: third.id });
-      await board.advanceTask(SAGE, { task_id: third.id });
+      await board.updateTask(ENG, { task_id: third.id, pull_request: { url: byHand } });
+      await board.claimTask(ENG, { task_id: third.id });
+      await board.advanceTask(ENG, { task_id: third.id });
       expect(await hub.completeTask("demo", third.id)).toBe("done");
       expect((await board.getTask(USER, { task_id: third.id })).status).toBe("done");
       expect((await board.listThread(third.id)).at(-1)?.body).toContain("was merged already");
@@ -2871,13 +2873,13 @@ describe("turns on a runner over the runner protocol", () => {
       const fourth = await board.createTask(USER, { project: "demo", title: "given up" });
       opened.push({ number: 4, branch: "feat/given-up", content: "4\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: fourth.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
         priority: 2,
       });
-      await board.updateTask(SAGE, {
+      await board.updateTask(ENG, {
         task_id: fourth.id,
         pull_request: { url: "https://github.com/acme/demo/pull/4" },
       });
@@ -2909,14 +2911,14 @@ describe("turns on a runner over the runner protocol", () => {
       const fifth = await board.createTask(USER, { project: "demo", title: "closed by hand" });
       opened.push({ number: 5, branch: "feat/by-hand-closed", content: "5\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: fifth.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
         priority: 2,
       });
       const closedByHand = "https://github.com/acme/demo/pull/5";
-      await board.updateTask(SAGE, { task_id: fifth.id, pull_request: { url: closedByHand } });
+      await board.updateTask(ENG, { task_id: fifth.id, pull_request: { url: closedByHand } });
       await github.close(closedByHand, "by hand");
       await board.updateTask(USER, { task_id: fifth.id, status: "abandoned" });
       expect(await hub.closePullRequest("demo", fifth.id)).toBe("done");
@@ -2945,7 +2947,7 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
@@ -2969,7 +2971,7 @@ describe("turns on a runner over the runner protocol", () => {
     };
     const { app, run, runner, hub } = await start(board, backend);
     await run({
-      agent: "sage",
+      agent: "eng-1",
       project: "demo",
       thread: { id: task.id, task: true },
       trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2985,14 +2987,14 @@ describe("turns on a runner over the runner protocol", () => {
     expect(Buffer.from(file.kind === "file" ? (file.content ?? "") : "", "base64").toString()).toBe(
       "# Report\n",
     );
-    expect(file.commit.author).toBe("sage");
+    expect(file.commit.author).toBe("eng-1");
     // The runner commits what the turn left as the citizen, author and committer alike.
     const tip = await execa(
       "git",
       ["log", "-1", "--format=%an <%ae> | %cn <%ce>", `task/${task.id}`],
       { cwd: repoDir },
     );
-    expect(tip.stdout).toBe("sage <sage@stellaris.local> | sage <sage@stellaris.local>");
+    expect(tip.stdout).toBe("eng-1 <eng-1@stellaris.local> | eng-1 <eng-1@stellaris.local>");
     const root = BranchFileSchema.parse(await (await read(`${task.id}/files`)).json());
     expect(root.kind === "dir" ? root.entries.map((entry) => entry.name) : null).toEqual([
       "evidence",
@@ -3004,21 +3006,21 @@ describe("turns on a runner over the runner protocol", () => {
 
     // The task's view lists what its branch changed, each file with the citizen whose turn wrote it.
     const changes = BranchChangesSchema.parse(await (await read(`${task.id}/changes`)).json());
-    expect(changes).toMatchObject({ total: 2, head: { author: "sage" } });
+    expect(changes).toMatchObject({ total: 2, head: { author: "eng-1" } });
     expect(changes.files).toEqual([
       {
         path: "evidence/plot.png",
         status: "added",
         added: null,
         removed: null,
-        lastChange: { author: "sage", at: changes.head.at },
+        lastChange: { author: "eng-1", at: changes.head.at },
       },
       {
         path: "report.md",
         status: "added",
         added: 1,
         removed: 0,
-        lastChange: { author: "sage", at: changes.head.at },
+        lastChange: { author: "eng-1", at: changes.head.at },
       },
     ]);
     expect((await read(`${waiting.id}/changes`)).status).toBe(404);

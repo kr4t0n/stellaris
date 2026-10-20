@@ -159,7 +159,7 @@ describe("citizen", () => {
 
   it("names the runners a citizen's turns run on, its pin and its projects' places", () => {
     const base = MemberSchema.parse({
-      name: "sage",
+      name: "eng-1",
       role: "researcher",
       cli: "claude",
       status: "active",
@@ -167,15 +167,15 @@ describe("citizen", () => {
       subscriptions: [],
       createdAt: "2026-10-01T12:48:00.000Z",
     });
-    const sage = { ...base, profile: "" };
+    const member = { ...base, profile: "" };
     // A project member that works outside no project has no pin, yet runs where its projects live.
-    expect(runnersOf(sage, new Map([["model-research", "pod"]]))).toEqual({
+    expect(runnersOf(member, new Map([["model-research", "pod"]]))).toEqual({
       label: "on pod",
       detail: "model-research: pod; lab: placed on its first turn",
     });
     expect(
       runnersOf(
-        { ...sage, homeRunner: "laptop" },
+        { ...member, homeRunner: "laptop" },
         new Map([
           ["model-research", "pod"],
           ["lab", "pod"],
@@ -185,7 +185,7 @@ describe("citizen", () => {
       label: "on laptop, pod",
       detail: "outside projects: laptop; model-research: pod; lab: pod",
     });
-    expect(runnersOf({ ...sage, memberships: [] }, new Map())).toEqual({
+    expect(runnersOf({ ...member, memberships: [] }, new Map())).toEqual({
       label: "no runner yet",
       detail: "pinned to a runner on its first turn",
     });

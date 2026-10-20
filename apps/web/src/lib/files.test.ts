@@ -24,21 +24,21 @@ function text(value: string): Uint8Array {
 describe("linkTarget", () => {
   it("reads a path through any runner's task worktree as that task's file", () => {
     for (const href of [
-      `/home/tiger/runner-data/worktrees/sage/.tasks/${TASK}/report.md`,
+      `/home/tiger/runner-data/worktrees/eng-1/.tasks/${TASK}/report.md`,
       `/home/stellaris/stellaris-runner/worktrees/ada/.tasks/${TASK}/report.md`,
-      `worktrees/sage/.tasks/${TASK}/./report.md`,
-      `/data/worktrees/sage/.tasks/${TASK}/report.md?raw=1#top`,
+      `worktrees/eng-1/.tasks/${TASK}/./report.md`,
+      `/data/worktrees/eng-1/.tasks/${TASK}/report.md?raw=1#top`,
     ]) {
       expect(linkTarget(href)).toEqual({ kind: "task-file", taskId: TASK, path: "report.md" });
     }
     expect(
-      linkTarget(`/r/worktrees/sage/.tasks/${TASK}/evidence/analysis/policy%20diagnostics.png`),
+      linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}/evidence/analysis/policy%20diagnostics.png`),
     ).toEqual({
       kind: "task-file",
       taskId: TASK,
       path: "evidence/analysis/policy diagnostics.png",
     });
-    expect(linkTarget(`/r/worktrees/sage/.tasks/${TASK}`)).toEqual({
+    expect(linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}`)).toEqual({
       kind: "task-file",
       taskId: TASK,
       path: "",
@@ -46,7 +46,7 @@ describe("linkTarget", () => {
   });
 
   it("splits off the line a link cites, as both CLIs and GitHub write one", () => {
-    const at = `/home/tiger/runner-data/worktrees/sage/.tasks/${TASK}`;
+    const at = `/home/tiger/runner-data/worktrees/eng-1/.tasks/${TASK}`;
     for (const [href, path, line] of [
       [`${at}/report.md:67`, "report.md", 67],
       [`${at}/src/run.py:12:5`, "src/run.py", 12],
@@ -83,13 +83,13 @@ describe("linkTarget", () => {
   });
 
   it("reads every other path on a machine as one the board cannot open", () => {
-    expect(linkTarget("/home/tiger/runner-data/worktrees/sage/demo/report.md")).toEqual({
+    expect(linkTarget("/home/tiger/runner-data/worktrees/eng-1/demo/report.md")).toEqual({
       kind: "local",
     });
     expect(linkTarget("/tmp/out.txt")).toEqual({ kind: "local" });
     expect(linkTarget("report.md")).toEqual({ kind: "local" });
     expect(linkTarget("/abs/report.md", { taskId: TASK, dir: "" })).toEqual({ kind: "local" });
-    expect(linkTarget(`/r/worktrees/sage/.tasks/${TASK}/../../x`)).toEqual({ kind: "local" });
+    expect(linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}/../../x`)).toEqual({ kind: "local" });
     expect(linkTarget("")).toEqual({ kind: "local" });
   });
 
@@ -167,7 +167,7 @@ describe("rehypeLineTarget", () => {
 });
 
 /** A file a branch added, last touched by `author` at `at`. */
-function change(path: string, author = "sage", at = "2026-10-08T09:00:00.000Z") {
+function change(path: string, author = "eng-1", at = "2026-10-08T09:00:00.000Z") {
   return { path, status: "added" as const, added: 1, removed: 0, lastChange: { author, at } };
 }
 

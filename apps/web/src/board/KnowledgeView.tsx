@@ -72,7 +72,8 @@ export function KnowledgeView() {
             remove.mutate();
           }}
         >
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-meta">Remove {entry.topic}?</p>
             <Button onClick={() => setConfirming(false)}>Cancel</Button>
             <Button variant="primary" type="submit" disabled={remove.isPending}>
               {remove.isPending ? "Removing…" : "Remove topic"}

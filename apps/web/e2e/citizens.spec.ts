@@ -503,7 +503,7 @@ test("a society knowledge topic is removed from its page after a second click", 
   // The first click asks again; only the second removes.
   await view.getByRole("button", { name: "Remove…" }).click();
   const form = page.getByRole("form", { name: "Remove the topic" });
-  await expect(form).toHaveText(/^\s*Cancel\s*Remove topic\s*$/);
+  await expect(form).toHaveText(/^\s*Remove code-comments\?\s*Cancel\s*Remove topic\s*$/);
   expect(board.writes).toEqual([]);
   await form.getByRole("button", { name: "Remove topic" }).click();
 

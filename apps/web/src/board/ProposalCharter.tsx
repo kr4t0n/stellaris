@@ -248,14 +248,10 @@ function ArchiveCharterView({
             ? "reading…"
             : open === 0
               ? "none"
-              : `${open}: approval is refused until they are done, abandoned, or filed elsewhere`}
+              : `${open}: approval is refused`}
         </Field>
       ) : null}
       <Field label="Reason">{reason}</Field>
-      <Field label="After">
-        Its open threads close and nothing more is posted, filed, or joined there; its channels,
-        tasks, repository, and history stay readable.
-      </Field>
     </Fields>
   );
 }
@@ -264,14 +260,14 @@ function ArchiveCharterView({
  * A skill proposed as a folder of its proposer's home: its SKILL.md, then every file beside it,
  * each opening to its text. Until the proposer's turn ends, the board has not taken it yet.
  */
-function SkillFolder({ proposal, name }: { proposal: Proposal; name: string }) {
+function SkillFolder({ proposal }: { proposal: Proposal }) {
   const taken = proposal.skillFiles;
   const files = useProposalFiles(proposal.id, taken !== undefined);
   if (taken === undefined) {
     return (
       <p className="mt-2 text-sm text-fg-secondary">
         {proposal.status === "proposed"
-          ? `The board takes skills/${name}/ from ${proposal.proposedBy}'s home when the turn that proposed it ends.`
+          ? "Files not taken yet."
           : "The board took no files for it."}
       </p>
     );
@@ -373,7 +369,7 @@ export function ProposalCharter({
             <Field label="Skill">{parsed.data.name}</Field>
             <Field label="Summary">{parsed.data.summary}</Field>
           </Fields>
-          <SkillFolder proposal={proposal} name={parsed.data.name} />
+          <SkillFolder proposal={proposal} />
         </>
       );
     }

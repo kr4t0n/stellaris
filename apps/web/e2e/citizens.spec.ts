@@ -275,9 +275,11 @@ test("a turn in flight takes a post into its conversation, and stops on a second
     .toEqual({ channel: "general", body: "@desk also check the runners" });
   await expect(box).toHaveValue("@desk ");
 
-  // The first click says what stopping does; only the second stops.
+  // The first click asks again; only the second stops.
   await view.getByRole("button", { name: "Stop…" }).click();
-  await expect(view).toContainText("What it was shown counts as read");
+  await expect(view.getByRole("button", { name: "Keep it running" }).locator("..")).toHaveText(
+    /^\s*Stop desk's turn\?\s*Keep it running\s*Stop the turn\s*$/,
+  );
   expect(board.writes.some((write) => write.path.endsWith("/stop"))).toBe(false);
   await view.getByRole("button", { name: "Stop the turn" }).click();
   await expect
@@ -310,7 +312,7 @@ test("a citizen's model is chosen from its CLI's list and shows until its next t
   const picker = form.getByRole("button", { name: /^Model: / });
   await expect(picker).toHaveAccessibleName("Model: CLI default · Opus 5.5");
   // The choices are the CLI's on the runner desk's turns run on, which the form names.
-  await expect(form).toContainText("As claude on pod lists them, where this citizen's turns run.");
+  await expect(form).toContainText("Listed by claude on pod");
   await expect(form.getByRole("button", { name: "Save" })).toBeDisabled();
 
   await picker.click();
@@ -376,7 +378,6 @@ test("a citizen's work outside projects is moved to another runner, or left to b
   const picker = form.getByRole("button", { name: /^Runner: / });
   await expect(picker).toHaveAccessibleName("Runner: pod · linux");
   await expect(form.getByRole("button", { name: "Run here" })).toBeDisabled();
-  await expect(form).toContainText("memory and skills follow it");
 
   await picker.click();
   await expect(form).toContainText("disconnected · claude · gpu");
@@ -399,9 +400,7 @@ test("a citizen's work outside projects is moved to another runner, or left to b
   ]);
 });
 
-test("waking a citizen says what it does and sends the wake the scheduler takes", async ({
-  page,
-}) => {
+test("waking a citizen sends the wake the scheduler takes", async ({ page }) => {
   const board = await fakeBoard(page);
   await page.goto("/citizen/desk");
 
@@ -412,7 +411,6 @@ test("waking a citizen says what it does and sends the wake the scheduler takes"
   await form.getByRole("button", { name: "Where: lab" }).click();
   await form.getByRole("button", { name: /^the society/ }).click();
   await expect(form.locator("select")).toHaveCount(0);
-  await expect(form).toContainText("Asks desk to reflect at the society");
   await form.getByLabel("Reason").fill("the routing lesson from today");
   await form.getByRole("button", { name: "Ask for a reflection" }).click();
 
@@ -504,11 +502,10 @@ test("a society knowledge topic is removed from its page after a second click", 
   await expect(page).toHaveURL(/\/knowledge\/society\/code-comments$/);
   await expect(view).toContainText("Comment only what the code cannot say.");
 
-  // The first click says what removing does; only the second removes.
+  // The first click asks again; only the second removes.
   await view.getByRole("button", { name: "Remove…" }).click();
   const form = page.getByRole("form", { name: "Remove the topic" });
-  await expect(form).toContainText("No turn or search finds code-comments again");
-  await expect(form).toContainText("The server keeps its text aside.");
+  await expect(form).toHaveText(/^\s*Remove code-comments\?\s*Cancel\s*Remove topic\s*$/);
   expect(board.writes).toEqual([]);
   await form.getByRole("button", { name: "Remove topic" }).click();
 
@@ -528,7 +525,6 @@ test("a project's name and default branch are edited from its page, and its slug
   const view = page.getByRole("region", { name: "Board content" });
   await view.getByRole("button", { name: "Edit…" }).click();
   const form = page.getByRole("form", { name: "Edit lab" });
-  await expect(form).toContainText("lab stays in its addresses, channels, and branches");
   const name = form.getByRole("textbox", { name: "Project name" });
   const branch = form.getByRole("textbox", { name: "Default branch" });
   await expect(name).toHaveValue("Lab");

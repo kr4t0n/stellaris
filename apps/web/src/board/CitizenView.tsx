@@ -369,7 +369,7 @@ function NowTab({
                 ? "Reading the last turn…"
                 : lastTurnAt === undefined
                   ? `${name} has not taken a turn yet.`
-                  : `${name}'s last turn kept no steps; Turns lists every finished one.`}
+                  : `${name}'s last turn kept no steps.`}
           </PaneNote>
         ) : (
           <>
@@ -403,12 +403,6 @@ function NowTab({
               {turnRunning ? "This turn" : "Last turn"} · {placeOf(turn)} · started{" "}
               {turn.fromStart ? time(turn.startedAt) : "before the earliest step shown"}
             </p>
-            {turn.fromStart ? null : (
-              <p className="mt-1 text-meta">
-                Earlier steps of this turn are no longer in the server's live buffer
-                {turnRunning ? "" : "; Turns has the whole turn"}.
-              </p>
-            )}
             <TranscriptSteps steps={turn.steps} />
             <TurnFooter turn={turn} running={turnRunning} now={now} />
           </>

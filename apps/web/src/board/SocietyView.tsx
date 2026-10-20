@@ -93,7 +93,7 @@ export function SocietyView() {
           {skills.data === undefined ? (
             <p className="text-meta">Reading…</p>
           ) : skills.data.length === 0 ? (
-            <p className="text-meta">None yet. A citizen's skill joins the society by proposal.</p>
+            <p className="text-meta">None yet.</p>
           ) : (
             <SkillList skills={skills.data} />
           )}

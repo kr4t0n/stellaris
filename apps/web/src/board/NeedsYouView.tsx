@@ -46,10 +46,7 @@ export function NeedsYouView() {
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {items.length === 0 ? (
-          <PaneNote>
-            Nothing waits on you. Proposals you may decide, stages that name you, and questions
-            citizens ask you with @user appear here until you answer where they asked.
-          </PaneNote>
+          <PaneNote>Nothing waits on you.</PaneNote>
         ) : (
           SECTIONS.map(({ kind, label }) => {
             const shown = items.filter((item) => item.kind === kind);

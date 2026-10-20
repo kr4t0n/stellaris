@@ -112,11 +112,6 @@ function RemoveSkillForm({ name, onCancel }: { name: string; onCancel: () => voi
           {remove.isPending ? "Removing…" : "Remove skill"}
         </Button>
       </div>
-      <p className="text-meta">
-        No citizen's skills index lists {name} from its next turn, and a notice in #general says so
-        with your reason, waking nobody. Its proposer keeps its own copy, and the server keeps the
-        text aside.
-      </p>
       <Failure error={remove.error} />
     </form>
   );

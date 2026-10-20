@@ -15,7 +15,7 @@ test("the metrics open from the top bar, and the window is part of the address",
   await expect(view.getByRole("heading", { name: "Metrics" })).toBeVisible();
 
   // Each measure leads with its headline and breaks it down.
-  await expect(view).toContainText("3 of 12 turns changed nothing on the board 25%");
+  await expect(view).toContainText("3 of 12 working turns changed nothing on the board 25%");
   await expect(view).toContainText("1 turn kept no transcript and could not be counted.");
   const woken = view.getByRole("table", { name: "By what woke them" });
   await expect(woken.getByRole("row", { name: /a heartbeat/ })).toContainText("4375%");
@@ -71,13 +71,13 @@ test("the header keeps its height while another window is counted", async ({ pag
   });
   await page.goto("/metrics");
   const view = page.getByRole("region", { name: "Board content" });
-  await expect(view).toContainText("3 of 12 turns changed nothing on the board");
+  await expect(view).toContainText("3 of 12 working turns changed nothing on the board");
   const header = view.locator("header").first();
   const height = (await header.boundingBox())?.height;
 
   await view.getByRole("link", { name: "All time" }).click();
   await expect(view).toContainText("Counting the event log…");
-  await expect(header).toContainText("How the society works, counted from its event log");
+  await expect(header).toContainText("Metrics");
   expect((await header.boundingBox())?.height).toBe(height);
   count();
   await expect(view).toContainText("5 decisions, about 2.5 a day");

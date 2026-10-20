@@ -163,13 +163,7 @@ export function MetricsView() {
   );
 
   // The same header while a window loads, so switching windows never changes its height.
-  const header = (
-    <PaneHeader
-      title="Metrics"
-      subtitle="How the society works, counted from its event log"
-      trailing={switcher}
-    />
-  );
+  const header = <PaneHeader title="Metrics" trailing={switcher} />;
   if (metrics.data === undefined) {
     return (
       <>
@@ -192,17 +186,16 @@ export function MetricsView() {
             <Note>No finished turns in this window.</Note>
           ) : (
             <Headline>
-              {idle.idle} of {idle.turns} turns changed nothing on the board{" "}
+              {idle.idle} of {idle.turns} working turns changed nothing on the board{" "}
               <span className="text-fg-muted">{share(idle.idle, idle.turns)}</span>
             </Headline>
           )}
-          <Note>
-            A turn that took no board action: no post, claim, handover, plan, proposal, decision, or
-            knowledge. Reflections are left out, since they write memory.
-            {idle.unknown > 0
-              ? ` ${idle.unknown} ${idle.unknown === 1 ? "turn" : "turns"} kept no transcript and could not be counted.`
-              : ""}
-          </Note>
+          {idle.unknown > 0 ? (
+            <Note>
+              {idle.unknown} {idle.unknown === 1 ? "turn" : "turns"} kept no transcript and could
+              not be counted.
+            </Note>
+          ) : null}
           <Table
             label="By what woke them"
             columns={["Woken by", "Turns", "Did nothing"]}
@@ -259,9 +252,6 @@ export function MetricsView() {
               {messages.finished} finished {messages.finished === 1 ? "task" : "tasks"}
             </Headline>
           )}
-          <Note>
-            Posts in each finished task's thread, handovers included, the board's own left out.
-          </Note>
           <Table
             label="By project"
             columns={["Project", "Tasks", "Posts a task"]}
@@ -292,13 +282,12 @@ export function MetricsView() {
               {span(latency.slowestMs)}
             </Headline>
           )}
-          <Note>
-            From a post that mentions a citizen to the start of its turn in the same conversation,
-            debounce included.
-            {latency.unanswered > 0
-              ? ` ${latency.unanswered} ${latency.unanswered === 1 ? "mention has" : "mentions have"} no turn yet.`
-              : ""}
-          </Note>
+          {latency.unanswered > 0 ? (
+            <Note>
+              {latency.unanswered} {latency.unanswered === 1 ? "mention has" : "mentions have"} no
+              turn yet.
+            </Note>
+          ) : null}
           <Table
             label="By citizen"
             columns={["Citizen", "Mentions", "Median", "Slowest"]}
@@ -320,10 +309,6 @@ export function MetricsView() {
               {decimal(decisions.total / days)} a day
             </Headline>
           )}
-          <Note>
-            Proposals you decided, questions to you that you answered, and stages you passed or sent
-            back.
-          </Note>
           <Table
             label="By day"
             columns={["Day", "Proposals", "Answers", "Stages"]}

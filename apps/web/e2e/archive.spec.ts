@@ -37,9 +37,9 @@ test("an archive proposal says who leaves and that a task in play holds the proj
 
   await expect(page.getByText("If approved: Archives lab: its members leave")).toBeVisible();
   await expect(page.getByText("Members who leave").locator("..")).toContainText("desk");
-  await expect(
-    page.getByText("1: approval is refused until they are done, abandoned, or filed elsewhere"),
-  ).toBeVisible();
+  await expect(page.getByText("Tasks in play").locator("..")).toContainText(
+    "1: approval is refused",
+  );
 });
 
 test("a channel is opened for a workstream from its project's page and archived from its own", async ({
@@ -50,9 +50,6 @@ test("a channel is opened for a workstream from its project's page and archived 
   const view = page.getByRole("region", { name: "Board content" });
   await view.getByRole("button", { name: "New channel…" }).click();
   const form = page.getByRole("form", { name: "New channel" });
-  await expect(form).toContainText(
-    "Announced in lab's general, where its members choose to follow it;",
-  );
   await form.getByRole("textbox", { name: "Channel name" }).fill("release-1");
   await form.getByRole("textbox", { name: "Purpose" }).fill("Release 0.1.0");
   await form.getByRole("button", { name: "Open" }).click();

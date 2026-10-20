@@ -21,14 +21,8 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
       className="top-[72px] right-4 z-20 max-h-[min(70vh,640px)]"
       style={{ width: 400 }}
     >
-      <header className="flex items-start gap-3 border-b border-line px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-heading">Operations log</h2>
-          <p className="mt-0.5 text-meta">
-            What the scheduler measured. Only kinds that wake the steward start a turn; it reads the
-            rest at its next one.
-          </p>
-        </div>
+      <header className="flex items-center gap-3 border-b border-line px-4 py-3">
+        <h2 className="min-w-0 flex-1 text-heading">Operations log</h2>
         <button
           type="button"
           aria-label="Close the log"

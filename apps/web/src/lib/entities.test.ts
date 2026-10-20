@@ -155,7 +155,7 @@ describe("entities", () => {
         { id: BY_USER, author: "user", channel: "asks", ts: "2026-10-12T05:33:10.757Z" },
         {
           id: ELSEWHERE,
-          author: "sage",
+          author: "eng-1",
           channel: "lab/general",
           thread: UNKNOWN,
           ts: "2026-10-12T05:33:30.894Z",
@@ -177,7 +177,7 @@ describe("entities", () => {
       "[message:your post in #asks]",
       ".",
     ]);
-    expect(withMessages.get(ELSEWHERE)?.title).toBe("sage's post in a thread in #lab/general");
+    expect(withMessages.get(ELSEWHERE)?.title).toBe("eng-1's post in a thread in #lab/general");
     // Whose it is goes too, since the title names who posted it.
     expect(
       withTitles(

@@ -79,11 +79,6 @@ export function Hud({
           aria-pressed={paused}
           disabled={pauseBusy}
           onClick={onTogglePause}
-          title={
-            paused
-              ? "Nobody takes a turn until you resume; wakes wait in the queue."
-              : "Stop dispatching turns. Running turns finish; new wakes wait."
-          }
           className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50 ${
             paused
               ? "text-amber-300 hover:text-amber-200"

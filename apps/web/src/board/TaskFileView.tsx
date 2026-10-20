@@ -115,7 +115,7 @@ function Table({ rows }: { rows: string[][] }) {
       </table>
       {body.length > shown.length ? (
         <p className="mt-2 text-meta">
-          The first {TABLE_ROWS} of {body.length} rows; download the file for the rest.
+          The first {TABLE_ROWS} of {body.length} rows
         </p>
       ) : null}
     </div>
@@ -167,7 +167,7 @@ function Content({
     return (
       <p className="mt-3 text-sm text-fg-secondary">
         {name} is {sizeLabel(file.size)}, more than the {sizeLabel(BRANCH_FILE_LIMIT_BYTES)} the
-        board shows. Its runner still has it on the task's branch.
+        board shows.
       </p>
     );
   }
@@ -191,7 +191,7 @@ function Content({
   }
   return (
     <p className="mt-3 text-sm text-fg-secondary">
-      {name} is not text ({sizeLabel(file.size)}). Download it to open it.
+      {name} is not text ({sizeLabel(file.size)}).
     </p>
   );
 }
@@ -233,8 +233,7 @@ export function TaskFileView() {
   } else if (file.error instanceof ApiError && file.error.status === 404) {
     body = (
       <p className="mt-3 text-sm text-fg-secondary">
-        {path === "" ? "Nothing" : path} is not on task/{taskId} yet. What a turn writes reaches the
-        branch when the turn ends.
+        {path === "" ? "Nothing" : path} is not on task/{taskId} yet.
       </p>
     );
   } else if (file.error instanceof ApiError && file.error.status === 503) {

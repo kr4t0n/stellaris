@@ -75,11 +75,6 @@ function EditForm({ project, onDone }: { project: Project; onDone: () => void })
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
-      <p className="text-meta">
-        {project.slug} stays in its addresses, channels, and branches. A new default branch is where
-        tasks start and land from now; its runner makes it from the project's remote, or from where
-        the repository stands, before the next turn.
-      </p>
       <Failure error={save.error} />
     </form>
   );
@@ -142,8 +137,7 @@ export function ProjectView() {
         {project.archived === undefined ? null : (
           <p className="rounded-lg bg-surface-2/40 px-3 py-2 text-sm text-fg-secondary">
             Archived {ago(project.archived.at, now)} by {project.archived.by}:{" "}
-            {project.archived.reason}. Its channels, tasks, and history stay readable here; nothing
-            more is posted, filed, or joined.
+            {project.archived.reason}.
           </p>
         )}
         <Section
@@ -206,9 +200,7 @@ export function ProjectView() {
           {dashboard.data === undefined ? (
             <p className="text-meta">Reading…</p>
           ) : body === "" ? (
-            <p className="text-meta">
-              Empty. The project's members fill it in with update_dashboard.
-            </p>
+            <p className="text-meta">Empty.</p>
           ) : (
             <Markdown text={body} />
           )}

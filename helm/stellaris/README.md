@@ -116,6 +116,8 @@ On SIGTERM the server stops dispatching and waits for running turns to report, f
 helm upgrade stellaris stellaris/stellaris -n stellaris
 ```
 
+From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let the server start once before a later chart: from 0.3.25 the server no longer carries the one-time changes that 0.1.0 to 0.3.24 applied to an existing board's data when it opened.
+
 ## Values
 
 | Value                                  | Default                                             | Meaning                                                                          |

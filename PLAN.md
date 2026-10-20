@@ -185,7 +185,7 @@ data/
 Messages      post_message(channel?, body, thread_id?)   # in a thread, the thread's channel
               read_inbox(since_cursor, limit)   # the digest again, or past its first page
               search(query, project?, channel?)
-Threads       open_thread(proposal_id? | channel + title, channel?, title?)   # task_id for a task older than its thread
+Threads       open_thread(channel, title)     # a topic; a task's and a proposal's open with them
               close_thread(thread_id, summary)            # the summary is posted to the thread's channel; not a task's
 Tasks         create_task(project, title, body, parent_id?, stages?)   # opens the task's thread
               plan_task(task_id, stages)      # reshape the stages ahead; gates: user, steward, concierge

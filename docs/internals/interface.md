@@ -118,6 +118,10 @@ The runners view's **Plan quota** section (`PlanQuota` in `board/Quota.tsx`) lis
 
 ## The composer and the look
 
+### Views carry no intro lines
+
+A view explains itself through its headings, labels, values, and states, never through an intro line, an explanatory paragraph, or a how-to hint, and an empty, loading, or error state names the state in a few words. A line of text stays only where it is the one place a state shows: under a running turn, the line beside **Stop…** says whether posts reach the turn at its next step or after it ends, and an approval of a `ghpr` task's last stage says when no pull request is linked yet. The views built before this rule lost their intro lines on 2026-10-20.
+
 ### The composer is one row
 
 Every `Composer`, in a channel, a thread, a task, a proposal, under a running turn, and in the ask box, is the box with Send beside it and nothing under it. It once had a second row naming whom sending wakes and whom it reaches in a turn under way; every post wakes the front desk, so "Sending wakes <its name>: a turn each." stood under every message typed, and the composer under a running turn has `TurnControls`' own line saying where its posts go. The new-thread form still names whom its first message wakes, through `wakesFor` in `board/wakes.ts`, which restates the scheduler's rule for a user post (every active member of a role charted for `user_post`, and every active citizen mentioned); change it together with the scheduler's rule.

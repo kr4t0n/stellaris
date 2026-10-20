@@ -7,7 +7,7 @@ How to set up and run a society once the repository is built, as the [README](..
 Setup creates records; only triggers start turns. All of this goes through the admin CLI, which is `pnpm stellaris` at the repository root after a build. It reads `--data <dir>` or `STELLARIS_DATA_DIR`, and `--json` switches every command to JSON output.
 
 ```bash
-export STELLARIS_DATA_DIR=./data
+export STELLARIS_DATA_DIR="$PWD/data"                       # absolute, since the server starts in apps/server
 pnpm stellaris init --name my-society                      # prints the user token once; keep it out of git
 pnpm stellaris role add engineer --purpose "Builds what a stage asks for and commits it on the task's branch."
 pnpm stellaris role add reviewer --purpose "Checks work at gated stages and sends it back when it is unfinished."
@@ -18,7 +18,7 @@ pnpm build:web                                             # the interface, whic
 pnpm --filter @stellaris/server start                      # the board server; STELLARIS_PORT defaults to 4700
 
 # In another shell, on this machine or any other that reaches the server:
-STELLARIS_SERVER_URL=http://127.0.0.1:4700 STELLARIS_RUNNER_DIR=./runner-data \
+STELLARIS_SERVER_URL=http://127.0.0.1:4700 STELLARIS_RUNNER_DIR=~/stellaris-runner \
   pnpm --filter @stellaris/runner start                    # prints a code to approve on the board
 ```
 

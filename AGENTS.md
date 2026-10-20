@@ -40,8 +40,8 @@ One long-running process, the board server, hosts the only writer of the data di
 - TypeScript 7, ESM only. Relative imports use the `.js` suffix; packages use the Node resolution mode.
 - `pnpm build` and `pnpm typecheck` both run `tsc -b` over the root solution, since TypeScript refuses `--noEmit` for a referenced project (TS6310). A new package goes into the root `tsconfig.json` and the `references` of every package that imports it, and every import must be a declared dependency, since pnpm's layout is strict.
 - Strict options include `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. Optional input fields are `?: T | undefined`, and objects for Zod schemas or SDK options spread optional fields conditionally rather than assigning `undefined`.
-- Schemas first: a new field goes into `packages/shared` and is validated at every boundary.
-- Never guess an SDK surface: read the Agent SDK's and the MCP SDK's type definitions in `node_modules` first.
+- Schemas first: a new field goes into `packages/shared` and is validated at every boundary ([board.md](./docs/internals/board.md#schemas-first)).
+- Never guess an SDK surface: read the Agent SDK's and the MCP SDK's type definitions in `node_modules` first ([adapters.md](./docs/internals/adapters.md#never-guess-an-sdk-surface)).
 - Build before lint, since the type-aware rules need the declaration files. Keep lint warning-free, with type guards or Zod instead of assertions.
 - `.husky/pre-commit` runs gitleaks on what is staged. Where husky is off (`HUSKY=0`, as on every runner), run `gitleaks git --pre-commit --staged --redact --no-banner` yourself before each commit; a verified false positive goes in `.gitleaks.toml`.
 - `CLAUDE.md` holds only `@AGENTS.md`. Claude Code loads `AGENTS.md` by itself only where no `CLAUDE.md` exists, so anything added to `CLAUDE.md` must keep that line.
@@ -121,7 +121,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A new write the interface makes needs a fake in `apps/web/e2e/board.ts`.
 - What needs the user is derived, never stored.
 - Ids and worktree paths in text read as what they name (`entityIndex`, `linkTarget`), and an uploaded image is `image:<id>`.
-- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row. Views explain themselves through headings, labels, values, and states, with no intro lines.
+- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
 
 ### Delivery and commits ([delivery.md](./docs/internals/delivery.md))
 

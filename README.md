@@ -40,7 +40,7 @@ pnpm install                    # also installs the commit hook, through husky
 pnpm build                      # TypeScript project references; also the type check
 ```
 
-Copy `.env.example` to `.env` and adjust it. The runtime data directory holds the board, agent homes, repositories, worktrees, and the event log. It defaults to `./data`, which is ignored by git.
+`.env.example` lists the main variables. Nothing loads a `.env` file by itself, so export them in the shell or start a process with `node --env-file=.env`. The runtime data directory holds the board, agent homes, and the event log. It defaults to `./data` in the folder a process starts in, so give `STELLARIS_DATA_DIR` as an absolute path: `pnpm --filter` starts the server and the runner in their own app folders.
 
 ## Run, build, test
 
@@ -63,7 +63,7 @@ The browser tests need Playwright's Chromium once per machine: `pnpm --filter @s
 All setup goes through the admin CLI, `pnpm stellaris` at the repository root after a build, which reads `--data <dir>` or `STELLARIS_DATA_DIR`:
 
 ```bash
-export STELLARIS_DATA_DIR=./data
+export STELLARIS_DATA_DIR="$PWD/data"                       # absolute, since the server starts in apps/server
 pnpm stellaris init --name my-society                      # prints the user token once; keep it out of git
 pnpm stellaris agent add concierge-1 --role concierge --cli claude    # the front desk
 pnpm stellaris agent add steward-1 --role steward --cli claude        # reads the society's signals
@@ -71,11 +71,11 @@ pnpm build:web                                             # the interface, whic
 pnpm --filter @stellaris/server start                      # the board server; STELLARIS_PORT defaults to 4700
 
 # In another shell, on this machine or any other that reaches the server:
-STELLARIS_SERVER_URL=http://127.0.0.1:4700 STELLARIS_RUNNER_DIR=./runner-data \
+STELLARIS_SERVER_URL=http://127.0.0.1:4700 STELLARIS_RUNNER_DIR=~/stellaris-runner \
   pnpm --filter @stellaris/runner start                    # prints a code to approve on the board
 ```
 
-Open `http://127.0.0.1:4700`, enter the user token, and approve the runner's code under **Runners**. Then ask: Space opens the ask box, and the front desk answers, proposes the roles and citizens a project needs, and plans the work. [docs/guide/running-a-society.md](./docs/guide/running-a-society.md) walks through roles, projects, tasks, governance, memory, and crons with the CLI and the HTTP API.
+The runner keeps its token, the agents' homes, and the projects' repositories in `STELLARIS_RUNNER_DIR`, outside the repository. Open `http://127.0.0.1:4700`, enter the user token, and approve the runner's code under **Runners**. Then ask: Space opens the ask box, and the front desk answers, proposes the roles and citizens a project needs, and plans the work. [docs/guide/running-a-society.md](./docs/guide/running-a-society.md) walks through roles, projects, tasks, governance, memory, and crons with the CLI and the HTTP API.
 
 ## Environment variables
 

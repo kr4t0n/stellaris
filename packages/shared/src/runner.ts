@@ -18,9 +18,9 @@ import { ImagePathSchema, ImageTypeSchema } from "./images.js";
 import { CliQuotaSchema } from "./quota.js";
 
 /**
- * The runner protocol of PLAN.md section 7.1. A runner registers, holds one event stream open for
- * what the server sends it, and posts everything it sends back; the server refuses a runner that
- * speaks another protocol version.
+ * The runner protocol of docs/plan.md section 7.1. A runner registers, holds one event stream open
+ * for what the server sends it, and posts everything it sends back; the server refuses a runner
+ * that speaks another protocol version.
  */
 export const RUNNER_PROTOCOL = 1;
 

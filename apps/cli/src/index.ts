@@ -746,27 +746,19 @@ task
 const thread = program.command("thread").description("Manage threads");
 
 thread
-  .command("open [taskId]")
-  .description("Open a thread on a task, on a proposal, or on a channel with a title")
-  .option("--proposal <id>", "open the proposal's thread")
-  .option("--channel <ref>", "the channel it hangs off; required for a topic")
-  .option("--title <text>", "the thread's title; required for a topic")
+  .command("open")
+  .description("Open a thread on a channel with a title; a task's or a proposal's opens with it")
+  .requiredOption("--channel <ref>", "the channel it hangs off")
+  .requiredOption("--title <text>", "the thread's title")
   .option("--as <agent>", "act as this agent instead of the user")
-  .action(
-    async (
-      taskId: string | undefined,
-      opts: { proposal?: string; channel?: string; title?: string; as?: string },
-    ) => {
-      const board = await open();
-      const opened = await board.openThread(await actorFor(board, opts.as), {
-        ...(taskId === undefined ? {} : { task_id: taskId }),
-        ...(opts.proposal === undefined ? {} : { proposal_id: opts.proposal }),
-        ...(opts.channel === undefined ? {} : { channel: opts.channel }),
-        ...(opts.title === undefined ? {} : { title: opts.title }),
-      });
-      print(opened, () => `Thread ${opened.id} opened on ${opened.channel}: ${opened.title}`);
-    },
-  );
+  .action(async (opts: { channel: string; title: string; as?: string }) => {
+    const board = await open();
+    const opened = await board.openThread(await actorFor(board, opts.as), {
+      channel: opts.channel,
+      title: opts.title,
+    });
+    print(opened, () => `Thread ${opened.id} opened on ${opened.channel}: ${opened.title}`);
+  });
 
 thread
   .command("close <threadId>")

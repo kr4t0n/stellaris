@@ -453,11 +453,25 @@ describe("board server routes", () => {
       topics.parse(await (await app.request("/api/society/knowledge", { headers })).json()),
     ).toMatchObject([{ topic: "norms", project: null }]);
 
-    const proposal = await board.propose(USER, {
-      kind: "skill",
-      charter: { name: "release", summary: "Cut a release", body: "Tag, build, publish." },
-      rationale: "Every project releases the same way.",
-    });
+    // A skill is the folder its proposer's home holds, as a runner's push after a turn leaves it.
+    const home = board.paths.agent("eng-1");
+    const commitHome = async (): Promise<void> => {
+      await execa("git", ["add", "--all"], { cwd: home });
+      await execa("git", ["-c", "user.name=e", "-c", "user.email=e@x", "commit", "-qm", "t"], {
+        cwd: home,
+      });
+    };
+    await mkdir(path.join(home, "skills", "release"), { recursive: true });
+    await writeFile(path.join(home, "skills", "release", "SKILL.md"), "Tag, build, publish.\n");
+    await commitHome();
+    const proposal = await board.propose(
+      { name: "eng-1", role: "engineer" },
+      {
+        kind: "skill",
+        charter: { name: "release", summary: "Cut a release" },
+        rationale: "Every project releases the same way.",
+      },
+    );
     const stewToken = (await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" }))
       .token;
     await board.approve({ name: "stew", role: "steward" }, { proposal_id: proposal.id });
@@ -490,7 +504,6 @@ describe("board server routes", () => {
     expect((await app.request("/api/skills/..%2Fproposals/files", { headers })).status).toBe(400);
 
     // A skill proposed as a folder of its proposer's home is read with each file's text.
-    const home = board.paths.agent("eng-1");
     await mkdir(path.join(home, "skills", "triage", "scripts"), { recursive: true });
     await writeFile(
       path.join(home, "skills", "triage", "SKILL.md"),
@@ -499,10 +512,7 @@ describe("board server routes", () => {
     await writeFile(path.join(home, "skills", "triage", "scripts", "go.sh"), "#!/bin/sh\n", {
       mode: 0o755,
     });
-    await execa("git", ["add", "--all"], { cwd: home });
-    await execa("git", ["-c", "user.name=e", "-c", "user.email=e@x", "commit", "-qm", "t"], {
-      cwd: home,
-    });
+    await commitHome();
     const folder = await board.propose(
       { name: "eng-1", role: "engineer" },
       { kind: "skill", charter: { name: "triage", summary: "Triage" }, rationale: "x" },
@@ -520,7 +530,15 @@ describe("board server routes", () => {
     ]);
     expect(
       await (await app.request(`/api/proposals/${proposal.id}/files`, { headers })).json(),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        path: "SKILL.md",
+        size: 21,
+        executable: false,
+        text: "Tag, build, publish.\n",
+        truncated: false,
+      },
+    ]);
     expect((await app.request("/api/proposals/..%2Fx/files", { headers })).status).toBe(400);
 
     const wake = await app.request("/api/wake", {

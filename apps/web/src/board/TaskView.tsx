@@ -27,7 +27,6 @@ import { TaskFiles } from "./TaskFiles.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 import {
   assigneeOf,
-  inPlay,
   isCurrent,
   PHASE_STYLE,
   PHASES,
@@ -217,30 +216,6 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
   );
 }
 
-/** Opens a thread for a task from before tasks opened their own. */
-function OpenTaskThread({ taskId }: { taskId: string }) {
-  const { api } = useSession();
-  const client = useQueryClient();
-  const open = useMutation({
-    mutationFn: () => api.openThread({ task_id: taskId }),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ["threads"] });
-    },
-  });
-  return (
-    <div className="mt-2 flex items-center gap-3">
-      <Button variant="primary" disabled={open.isPending} onClick={() => open.mutate()}>
-        {open.isPending ? "Opening…" : "Open its thread"}
-      </Button>
-      <p className="text-meta">
-        {open.error === null
-          ? "This task is older than task threads. It closes when the task ends."
-          : open.error.message}
-      </p>
-    </div>
-  );
-}
-
 /** One task: where it stands, its plan as a timeline, its brief, and its thread with a composer. */
 export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
@@ -358,11 +333,7 @@ export function TaskView() {
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-section">Thread</h3>
           {threads.data === undefined ? null : thread === undefined ? (
-            inPlay(current) ? (
-              <OpenTaskThread taskId={current.id} />
-            ) : (
-              <p className="mt-2 text-meta">No thread on this task.</p>
-            )
+            <p className="mt-2 text-meta">No thread on this task.</p>
           ) : (
             <SubjectThread
               thread={thread}

@@ -3,7 +3,6 @@ import {
   ChannelProposalSchema,
   channelRef,
   describeCharter,
-  LegacyReallocationSchema,
   MemberProposalSchema,
   ReallocationProposalSchema,
   RetirementProposalSchema,
@@ -201,7 +200,7 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
       const parsed = SkillProposalSchema.safeParse(proposal.charter);
       if (!parsed.success) break;
       return board.skills.some((skill) => skill.name === parsed.data.name)
-        ? `Replaces the society's ${parsed.data.name} skill with ${parsed.data.body === undefined ? "these files" : "this text"}.`
+        ? `Replaces the society's ${parsed.data.name} skill with these files.`
         : `Publishes ${parsed.data.name} to the society's skills, which every citizen's instructions list.`;
     }
     case "archive": {
@@ -211,10 +210,7 @@ export function consequenceOf(proposal: Proposal, board: BoardNow): string {
     }
     case "reallocation": {
       const parsed = ReallocationProposalSchema.safeParse(proposal.charter);
-      if (!parsed.success) {
-        if (!LegacyReallocationSchema.safeParse(proposal.charter).success) break;
-        return "Records the decision; a reallocation from before reallocations changed roles applies nothing.";
-      }
+      if (!parsed.success) break;
       const role = board.roles.find((candidate) => candidate.name === parsed.data.role);
       if (role === undefined) {
         return `No role ${parsed.data.role} exists; approving it will fail.`;

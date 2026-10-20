@@ -383,12 +383,8 @@ export function createApi(token: string) {
       ),
     sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
       invoke("post_message", token, input, MessageSchema),
-    openThread: (input: {
-      task_id?: string;
-      proposal_id?: string;
-      channel?: string;
-      title?: string;
-    }) => invoke("open_thread", token, input, ThreadRecordSchema),
+    openThread: (input: { channel: string; title: string }) =>
+      invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>
       invoke("close_thread", token, input, MessageSchema),
     approve: (input: { proposal_id: string; reason?: string }) =>

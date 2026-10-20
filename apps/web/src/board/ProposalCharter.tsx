@@ -3,7 +3,6 @@ import {
   ArchiveProposalSchema,
   ChannelProposalSchema,
   channelRef,
-  LegacyReallocationSchema,
   MemberProposalSchema,
   ReallocationProposalSchema,
   RetirementProposalSchema,
@@ -374,13 +373,7 @@ export function ProposalCharter({
             <Field label="Skill">{parsed.data.name}</Field>
             <Field label="Summary">{parsed.data.summary}</Field>
           </Fields>
-          {parsed.data.body === undefined ? (
-            <SkillFolder proposal={proposal} name={parsed.data.name} />
-          ) : (
-            <Block>
-              <Markdown text={skillText(parsed.data.body)} />
-            </Block>
-          )}
+          <SkillFolder proposal={proposal} name={parsed.data.name} />
         </>
       );
     }
@@ -429,15 +422,7 @@ export function ProposalCharter({
     }
     case "reallocation": {
       const parsed = ReallocationProposalSchema.safeParse(charter);
-      if (!parsed.success) {
-        const legacy = LegacyReallocationSchema.safeParse(charter);
-        if (!legacy.success) break;
-        return (
-          <Fields>
-            <Field label="Reallocation">{legacy.data.description}</Field>
-          </Fields>
-        );
-      }
+      if (!parsed.success) break;
       return (
         <ReallocationView
           proposal={proposal}

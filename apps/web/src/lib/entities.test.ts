@@ -23,7 +23,7 @@ const proposal: Proposal = {
   proposedBy: "stew",
   status: "proposed",
   createdAt: "2026-09-30T06:00:00.000Z",
-  charter: { name: "refereed-research", summary: "Plan a refereed study.", body: "x" },
+  charter: { name: "refereed-research", summary: "Plan a refereed study." },
   body: "",
 };
 

@@ -51,7 +51,6 @@ import {
   isSafeRelativePath,
   proposalApprovers,
   ReallocationProposalSchema,
-  LegacyReallocationSchema,
   applyRoleChanges,
   roleChangeLines,
   type ReallocationProposal,
@@ -311,7 +310,7 @@ const SignInsSchema = z.object({
       z.object({
         tokenHash: z.string().min(1),
         login: z.string().min(1),
-        /** The account's picture at the identity provider; sign-ins from before it have none. */
+        /** The account's picture, when GitHub gave one on its own avatar host. */
         avatarUrl: z.url().optional(),
         createdAt: IsoDateTimeSchema,
         expiresAt: IsoDateTimeSchema,
@@ -321,7 +320,7 @@ const SignInsSchema = z.object({
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
-const TurnStartPayloadSchema = z.object({ project: NameSchema, turnId: UlidSchema.optional() });
+const TurnStartPayloadSchema = z.object({ turnId: UlidSchema });
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -374,16 +373,15 @@ export type TaskWithThread = Task & { readonly messages: readonly Message[] };
 /**
  * A member's digest cursors, one per conversation a turn has read in: a scope's home conversation
  * under the scope's name, a thread's under `scope/thread`, a channel's under `scope/#channel`, and
- * a project's channels' in the society scope under `society/~project`. `digest` is the single
- * cursor from before digests were filed by scope, where every home conversation starts;
- * `threadsFrom`, `channelsFrom`, and `placesFrom` are each scope's cursor when conversations came
- * to threads, to channels, and to projects' channels seen from the society scope, where every
- * such conversation of it starts, so what the member had read before is not unread again.
+ * a project's channels' in the society scope under `society/~project`. `digest` is where a
+ * conversation without a cursor of its own starts: null for a member's stored cursors, the read's
+ * own `since_cursor` otherwise. `channelsFrom` and `placesFrom` are each scope's cursor when
+ * conversations came to channels and to projects' channels seen from the society scope, where
+ * every such conversation of it starts, so what the member had read before is not unread again.
  */
 const CursorsSchema = z.object({
   digest: z.string().nullable(),
   scopes: z.record(z.string(), z.string()).default({}),
-  threadsFrom: z.record(z.string(), z.string().nullable()).default({}),
   channelsFrom: z.record(z.string(), z.string().nullable()).default({}),
   placesFrom: z.record(z.string(), z.string().nullable()).default({}),
   /** How far a work role has read news, which goes to whichever of its general conversations reads first. */
@@ -394,7 +392,6 @@ type Cursors = z.infer<typeof CursorsSchema>;
 const NO_CURSORS: Cursors = {
   digest: null,
   scopes: {},
-  threadsFrom: {},
   channelsFrom: {},
   placesFrom: {},
 };
@@ -457,12 +454,6 @@ function placeStart(cursors: Cursors, scope: string): Ulid | null {
   return from === undefined ? cursors.digest : from;
 }
 
-/** Where a thread of a scope starts when it has no cursor of its own. */
-function threadStart(cursors: Cursors, scope: string): Ulid | null {
-  const from = cursors.threadsFrom[scope];
-  return from === undefined ? cursors.digest : from;
-}
-
 /**
  * Where a citizen's news resumes: its own cursor, else as far as its general conversations have
  * read, which is where news was filed before it had a cursor of its own.
@@ -492,7 +483,7 @@ function cursorOf(cursors: Cursors, scope: string, part: string | null = null): 
       ? channelStart(cursors, scope)
       : part.startsWith("~")
         ? placeStart(cursors, scope)
-        : threadStart(cursors, scope))
+        : cursors.digest)
   );
 }
 
@@ -535,7 +526,7 @@ function skillFolderOf(proposal: Proposal): Name | null {
     return null;
   }
   const parsed = SkillProposalSchema.safeParse(proposal.charter);
-  return parsed.success && parsed.data.body === undefined ? parsed.data.name : null;
+  return parsed.success ? parsed.data.name : null;
 }
 
 /** Whether a proposal was filed from a conversation: its scope, and its thread, channel, or project. */
@@ -571,36 +562,10 @@ const OPS_CHANNELS: readonly ChannelRef[] = ["governance"];
 /** Where the front desk follows the user's asks, whose closing summaries nobody else reads. */
 const FRONT_DESK_CHANNELS: readonly ChannelRef[] = [ASK_CHANNEL];
 
-/** One-time changes an existing society receives on open, by name, remembered once applied. */
+/** The one-time alignments a society has had, by name, kept in `state/alignments.json`. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
-const FOLLOW_DECISIONS = "ops-readers-follow-decisions";
-const THREAD_RECORDS = "threads-as-records";
-const DIGEST_CURSORS = "digest-replaces-inbox";
-const TASK_RETURNS = "task-returns-recorded";
-const OPS_CHANNEL_RETIRED = "ops-channel-retired";
-const DECISIONS_CHANNEL_RETIRED = "decisions-channel-retired";
-const THREAD_CONVERSATIONS = "thread-conversations";
-const ASKS_CHANNEL_OPENED = "asks-channel-opened";
-const KNOWLEDGE_REMOVAL = "knowledge-removal-granted";
-const CHANNEL_CONVERSATIONS = "channel-conversations";
-const PLACE_CONVERSATIONS = "place-conversations";
-const DASHBOARD_UPDATES = "dashboard-updates-granted";
-const CRON_VERBS = "cron-verbs-granted";
-const KNOWLEDGE_NOTICES = "knowledge-notices";
-const IMAGE_UPLOADS = "image-uploads-granted";
 
-/** What a knowledge verb's event says, which a note from before notices takes its notice from. */
-const KnowledgeEventSchema = z.object({
-  topic: NameSchema,
-  project: NameSchema.nullable(),
-  replaced: z.boolean().optional(),
-});
-
-/** The verbs a citizen sets, changes, and ends its crons with. */
-const CRON_VERB_NAMES: readonly VerbName[] = ["create_cron", "update_cron", "remove_cron"];
-
-/** The line a project's dashboard began with, and the one it begins with since dashboards have a verb. */
-const OLD_DASHBOARD_LINE = "Agents may edit this file. It is rendered by the board UI.";
+/** The line a project's dashboard begins with. */
 const DASHBOARD_LINE = "The project's members keep this page current with update_dashboard.";
 
 /** Roles that may change gates and completion effects, move work back, and release or abandon it for others. */
@@ -626,11 +591,11 @@ function sentence(summary: string): string {
   return summary.trim().replace(/\.+$/, "");
 }
 
-/** A skill's one-line summary: `description`, else a legacy `summary`, else the body's first plain line. */
+/** A skill's one-line summary: its `description`, else the body's first plain line. */
 function skillSummary(data: Record<string, unknown>, body: string): string {
-  const fromFrontmatter = data["description"] ?? data["summary"];
-  if (typeof fromFrontmatter === "string" && fromFrontmatter.trim().length > 0) {
-    return fromFrontmatter.trim();
+  const description = data["description"];
+  if (typeof description === "string" && description.trim().length > 0) {
+    return description.trim();
   }
   return (
     body
@@ -831,459 +796,24 @@ export class Board {
   }
 
   /**
-   * Applies each one-time alignment an existing society has not had yet. Once applied it is not
-   * repeated, so a member that later chooses otherwise keeps its choice.
+   * Applies each one-time alignment an existing society has not had yet, and remembers it, so a
+   * member that later chooses otherwise keeps its choice. A new alignment is a name and a method in
+   * this list; once every board has applied it, both are deleted. None is pending.
    */
   private async applyAlignments(): Promise<void> {
+    const alignments: readonly { name: string; apply: () => Promise<void> }[] = [];
     const file = path.join(this.paths.state(), "alignments.json");
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
       : { applied: [] };
-    const pending = [
-      FOLLOW_DECISIONS,
-      THREAD_RECORDS,
-      DIGEST_CURSORS,
-      TASK_RETURNS,
-      OPS_CHANNEL_RETIRED,
-      DECISIONS_CHANNEL_RETIRED,
-      THREAD_CONVERSATIONS,
-      ASKS_CHANNEL_OPENED,
-      KNOWLEDGE_REMOVAL,
-      CHANNEL_CONVERSATIONS,
-      DASHBOARD_UPDATES,
-      CRON_VERBS,
-      KNOWLEDGE_NOTICES,
-      IMAGE_UPLOADS,
-      PLACE_CONVERSATIONS,
-    ].filter((name) => !applied.includes(name));
+    const pending = alignments.filter(({ name }) => !applied.includes(name));
     if (pending.length === 0) {
       return;
     }
-    if (pending.includes(FOLLOW_DECISIONS)) {
-      await this.followDecisions();
+    for (const { apply } of pending) {
+      await apply();
     }
-    if (pending.includes(THREAD_RECORDS)) {
-      await this.recordTaskThreads();
-    }
-    if (pending.includes(DIGEST_CURSORS)) {
-      await this.renameInboxCursors();
-    }
-    if (pending.includes(TASK_RETURNS)) {
-      await this.recordTaskReturns();
-    }
-    if (pending.includes(OPS_CHANNEL_RETIRED)) {
-      await this.retireSocietyChannel("ops");
-    }
-    if (pending.includes(DECISIONS_CHANNEL_RETIRED)) {
-      await this.retireSocietyChannel("decisions");
-    }
-    if (pending.includes(THREAD_CONVERSATIONS)) {
-      await this.startThreadCursors();
-    }
-    if (pending.includes(ASKS_CHANNEL_OPENED)) {
-      await this.openAsksChannel();
-    }
-    if (pending.includes(KNOWLEDGE_REMOVAL)) {
-      // Whoever may write a scope's knowledge may remove it.
-      await this.grantBeside("write_knowledge", "remove_knowledge");
-    }
-    if (pending.includes(CHANNEL_CONVERSATIONS)) {
-      await this.startChannelCursors();
-    }
-    if (pending.includes(DASHBOARD_UPDATES)) {
-      await this.grantBeside("write_knowledge", "update_dashboard");
-      await this.rewordDashboards();
-    }
-    if (pending.includes(CRON_VERBS)) {
-      await this.grantToEveryRole(CRON_VERB_NAMES);
-    }
-    if (pending.includes(KNOWLEDGE_NOTICES)) {
-      await this.noticeKnowledgeNotes();
-    }
-    if (pending.includes(IMAGE_UPLOADS)) {
-      // Whoever may post may show an image in the post.
-      await this.grantBeside("post_message", "upload_image");
-    }
-    if (pending.includes(PLACE_CONVERSATIONS)) {
-      await this.startPlaceCursors();
-    }
-    await writeJson(file, { applied: [...applied, ...pending] });
-  }
-
-  /**
-   * Gives each knowledge note from before notes carried their notice the notice it would carry
-   * now. The event log, not the note's words, says which post is one: a knowledge verb appends
-   * its event and then its note under the mutex, so a note is the post right after such an event,
-   * by the same actor, at the top of the general channel of the topic's place. A post written to
-   * look like a note follows no such event and is left as it is.
-   */
-  private async noticeKnowledgeNotes(): Promise<void> {
-    let before: BoardEvent | undefined;
-    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
-      const verb = before;
-      before = event;
-      if (
-        event.type !== "message.posted" ||
-        verb === undefined ||
-        verb.actor !== event.actor ||
-        (verb.type !== "knowledge.written" && verb.type !== "knowledge.removed")
-      ) {
-        continue;
-      }
-      const knowledge = KnowledgeEventSchema.safeParse(verb.payload);
-      const id = UlidSchema.safeParse(event.payload["id"]);
-      if (
-        !knowledge.success ||
-        !id.success ||
-        (event.payload["thread"] ?? null) !== null ||
-        event.payload["channel"] !== channelRef(knowledge.data.project, "general")
-      ) {
-        continue;
-      }
-      const { topic, project, replaced } = knowledge.data;
-      const file = this.paths.messageFile(
-        this.paths.channelDir(channelRef(project, "general")),
-        id.data,
-        event.actor,
-      );
-      if (!(await exists(file))) {
-        continue;
-      }
-      const { data, body, error } = await readLooseMarkdown(file);
-      if (error !== null || data["notice"] !== undefined) {
-        continue;
-      }
-      const notice: MessageNotice = {
-        kind: "knowledge",
-        action:
-          verb.type === "knowledge.removed" ? "removed" : replaced === true ? "updated" : "written",
-        topic,
-        project,
-      };
-      await writeMarkdown(file, { ...data, notice }, body);
-    }
-  }
-
-  /**
-   * Grants `verb` once to every charter granting `beside`, the work roles' charters in practice;
-   * seed roles have it from their seed.
-   */
-  private async grantBeside(beside: VerbName, verb: VerbName): Promise<void> {
-    for (const charter of await this.listRoles()) {
-      if (charter.verbs.includes(beside) && !charter.verbs.includes(verb)) {
-        await this.writeRoleUnlocked(
-          USER_NAME,
-          { ...charter, verbs: [...charter.verbs, verb] },
-          { verbsAdded: [verb] },
-        );
-      }
-    }
-  }
-
-  /** Grants verbs once to every charter but the user's, which holds every verb already. */
-  private async grantToEveryRole(verbs: readonly VerbName[]): Promise<void> {
-    for (const charter of await this.listRoles()) {
-      const missing = verbs.filter((verb) => !charter.verbs.includes(verb));
-      if (charter.name !== USER_ROLE && missing.length > 0) {
-        await this.writeRoleUnlocked(
-          USER_NAME,
-          { ...charter, verbs: [...charter.verbs, ...missing] },
-          { verbsAdded: missing },
-        );
-      }
-    }
-  }
-
-  /** A dashboard still saying agents may edit its file says how it changes now. */
-  private async rewordDashboards(): Promise<void> {
-    for (const slug of await listDirs(this.paths.projects())) {
-      const file = this.paths.dashboard(slug);
-      if (!(await exists(file))) {
-        continue;
-      }
-      const { data, body } = await readLooseMarkdown(file);
-      if (body.includes(OLD_DASHBOARD_LINE)) {
-        await writeMarkdown(file, data, body.replace(OLD_DASHBOARD_LINE, DASHBOARD_LINE));
-      }
-    }
-  }
-
-  /**
-   * A task sent back before tasks recorded it kept no trace outside the event log. A task still
-   * short of the stage its latest `task.moved` came from is in that rework, and records it.
-   */
-  private async recordTaskReturns(): Promise<void> {
-    const moves = new Map<string, BoardEvent>();
-    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
-      const taskId = event.payload["taskId"];
-      if (event.type === "task.moved" && typeof taskId === "string") {
-        moves.set(taskId, event);
-      }
-    }
-    for (const slug of await listDirs(this.paths.projects())) {
-      for (const task of await this.listTasks(slug)) {
-        const move = moves.get(task.id);
-        const from = move?.payload["from"];
-        if (
-          move === undefined ||
-          typeof from !== "string" ||
-          task.returned !== undefined ||
-          task.completing ||
-          (task.status !== "open" && task.status !== "claimed")
-        ) {
-          continue;
-        }
-        const back = stageIndex(task, from);
-        if (back > stageIndex(task, task.stage)) {
-          await this.writeTask(slug, {
-            ...task,
-            returned: { from, by: move.actor, at: move.ts },
-          });
-        }
-      }
-    }
-  }
-
-  /**
-   * A society channel the board no longer uses leaves the society's list and every member's
-   * subscriptions; its old posts stay on disk. `ops` carried operations signals, which are only
-   * logged now; `decisions` carried proposals' outcomes, which are posts in their threads now, and
-   * requests to the user, which are mentions of the user wherever the question belongs.
-   */
-  private async retireSocietyChannel(name: Name): Promise<void> {
-    const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
-    if (doc.data.channels.includes(name)) {
-      await writeMarkdown(
-        this.paths.societyFile(),
-        { ...doc.data, channels: doc.data.channels.filter((channel) => channel !== name) },
-        doc.body,
-      );
-    }
-    for (const agent of await this.listAgents()) {
-      if (agent.subscriptions.includes(name)) {
-        await this.updateAgent(agent.name, (a) => ({
-          ...a,
-          subscriptions: a.subscriptions.filter((ref) => ref !== name),
-        }));
-        await this.refreshMember(agent.name);
-      }
-    }
-  }
-
-  /**
-   * Asks once opened their threads in general, where closing one posted its summary to every
-   * citizen and woke the steward's heartbeat for it. The society gains the asks channel, and the
-   * front desk follows it.
-   */
-  private async openAsksChannel(): Promise<void> {
-    const doc = await readMarkdown(this.paths.societyFile(), SocietySchema);
-    if (!doc.data.channels.includes(ASK_CHANNEL)) {
-      await writeMarkdown(
-        this.paths.societyFile(),
-        { ...doc.data, channels: [...doc.data.channels, ASK_CHANNEL] },
-        doc.body,
-      );
-    }
-    await ensureDir(this.paths.societyChannel(ASK_CHANNEL));
-    for (const agent of await this.listAgents()) {
-      if (agent.status !== "active" || agent.subscriptions.includes(ASK_CHANNEL)) {
-        continue;
-      }
-      if (!(await this.readRole(agent.role)).wakeTriggers.includes(FRONT_DESK_TRIGGER)) {
-        continue;
-      }
-      await this.updateAgent(agent.name, (a) => ({
-        ...a,
-        subscriptions: [...a.subscriptions, ASK_CHANNEL],
-      }));
-      await this.refreshMember(agent.name);
-      await this.events.append("subscription.changed", agent.name, {
-        channel: ASK_CHANNEL,
-        subscribed: true,
-        aligned: true,
-      });
-    }
-  }
-
-  /** Members that predate `decisions` among the ops channels read proposals without their outcome. */
-  private async followDecisions(): Promise<void> {
-    if (!(await this.society()).channels.includes("decisions")) {
-      return;
-    }
-    for (const agent of await this.listAgents()) {
-      if (agent.status !== "active" || agent.subscriptions.includes("decisions")) {
-        continue;
-      }
-      if (!(await this.readRole(agent.role)).wakeTriggers.includes(OPS_WAKE_TRIGGER)) {
-        continue;
-      }
-      await this.updateAgent(agent.name, (a) => ({
-        ...a,
-        subscriptions: [...a.subscriptions, "decisions"],
-      }));
-      await this.refreshMember(agent.name);
-      await this.events.append("subscription.changed", agent.name, {
-        channel: "decisions",
-        subscribed: true,
-        aligned: true,
-      });
-    }
-  }
-
-  /**
-   * Threads were once a state field on their task. Each becomes a record under the task's project,
-   * on its general channel, closed if its task has ended, and the field leaves the task file.
-   */
-  private async recordTaskThreads(): Promise<void> {
-    const opened = new Map<string, BoardEvent>();
-    const closed = new Map<string, BoardEvent>();
-    for (const event of await this.events.readSince(null, Number.POSITIVE_INFINITY)) {
-      const taskId = event.payload["taskId"];
-      if (typeof taskId !== "string") {
-        continue;
-      }
-      if (event.type === "thread.opened") {
-        opened.set(taskId, event);
-      } else if (event.type === "thread.closed") {
-        closed.set(taskId, event);
-      }
-    }
-    for (const slug of await listDirs(this.paths.projects())) {
-      const threads = this.paths.threads(slug);
-      const summaries = new Map<string, string>();
-      for (const message of await this.readMessagesIn(
-        this.paths.projectChannel(slug, "general"),
-        null,
-      )) {
-        if (message.task !== undefined) {
-          summaries.set(message.task, message.body.replace(/^Thread closed[^\n]*\n\n/, ""));
-        }
-      }
-      for (const file of await listFiles(this.paths.tasks(slug))) {
-        const raw = await readMarkdown(
-          path.join(this.paths.tasks(slug), file),
-          z.record(z.string(), z.unknown()),
-        );
-        const legacy = raw.data["thread"];
-        if (legacy === undefined) {
-          continue;
-        }
-        const task: Task = { ...TaskFrontmatterSchema.parse(raw.data), body: raw.body };
-        if (
-          (legacy === "open" || legacy === "closed") &&
-          !(await exists(this.paths.threadFile(threads, task.id)))
-        ) {
-          const ended = task.status === "done" || task.status === "abandoned";
-          const open = legacy === "open" && !ended;
-          const openedBy = opened.get(task.id);
-          const closedBy = closed.get(task.id);
-          await this.writeThread(threads, {
-            id: task.id,
-            channel: channelRef(slug, "general"),
-            title: task.title,
-            subject: { kind: "task", id: task.id },
-            state: open ? "open" : "closed",
-            openedBy: openedBy?.actor ?? task.createdBy,
-            openedAt: openedBy?.ts ?? task.createdAt,
-            ...(open
-              ? {}
-              : {
-                  closedBy: closedBy?.actor ?? SYSTEM_ACTOR.name,
-                  closedAt: closedBy?.ts ?? this.now().toISOString(),
-                }),
-            body: summaries.get(task.id) ?? "",
-          });
-        }
-        await this.writeTask(slug, task);
-      }
-    }
-  }
-
-  /**
-   * Every channel of a scope was once read in its home conversation, so a member had read each up
-   * to its scope's cursor. Each channel beside general starts from that cursor now, as each takes a
-   * conversation of its own.
-   */
-  private async startChannelCursors(): Promise<void> {
-    for (const agent of await this.listAgents()) {
-      const file = this.paths.agentCursors(agent.name);
-      if (!(await exists(file))) {
-        continue;
-      }
-      const cursors = await readJson(file, CursorsSchema);
-      const scopes = new Set([
-        ...Object.keys(cursors.scopes).filter((key) => !key.includes("/")),
-        ...agent.memberships,
-        SOCIETY_SCOPE,
-      ]);
-      const channelsFrom = Object.fromEntries(
-        [...scopes].map((scope) => [scope, cursorOf(cursors, scope)] as const),
-      );
-      await writeJson(file, { ...cursors, channelsFrom });
-    }
-  }
-
-  /**
-   * A project's channels were once read, from the society scope, in the society's home
-   * conversation, so a member had read each up to that cursor. Each project's conversation in the
-   * society scope starts from it now, as each takes a conversation of its own.
-   */
-  private async startPlaceCursors(): Promise<void> {
-    for (const agent of await this.listAgents()) {
-      const file = this.paths.agentCursors(agent.name);
-      if (!(await exists(file))) {
-        continue;
-      }
-      const cursors = await readJson(file, CursorsSchema);
-      await writeJson(file, {
-        ...cursors,
-        placesFrom: { [SOCIETY_SCOPE]: cursorOf(cursors, SOCIETY_SCOPE) },
-      });
-    }
-  }
-
-  /**
-   * Threads were once read in the scope's single conversation, so a member had read every thread
-   * up to its scope's cursor. Each scope's threads start from that cursor now, as each thread's
-   * conversation takes a cursor of its own.
-   */
-  private async startThreadCursors(): Promise<void> {
-    for (const agent of await this.listAgents()) {
-      const file = this.paths.agentCursors(agent.name);
-      if (!(await exists(file))) {
-        continue;
-      }
-      const cursors = await readJson(file, CursorsSchema);
-      const scopes = new Set([
-        ...Object.keys(cursors.scopes).filter((key) => !key.includes("/")),
-        ...agent.memberships,
-        SOCIETY_SCOPE,
-      ]);
-      const threadsFrom = Object.fromEntries(
-        [...scopes].map((scope) => [scope, cursorOf(cursors, scope)] as const),
-      );
-      await writeJson(file, { ...cursors, threadsFrom });
-    }
-  }
-
-  /**
-   * The digest was once called the inbox: each cursor file keyed its cursor `inbox`, and the user
-   * followed every society channel and project general channel to read one. The user takes no
-   * turns, so it follows nothing now.
-   */
-  private async renameInboxCursors(): Promise<void> {
-    const Legacy = z.object({ inbox: z.string().nullable() });
-    for (const agent of await this.listAgents()) {
-      const file = this.paths.agentCursors(agent.name);
-      if (await exists(file)) {
-        const legacy = Legacy.safeParse(JSON.parse(await readFile(file, "utf8")));
-        if (legacy.success) {
-          await writeJson(file, { digest: legacy.data.inbox });
-        }
-      }
-    }
-    await this.updateAgent(USER_NAME, (user) => ({ ...user, subscriptions: [] }));
-    await this.refreshMember(USER_NAME);
+    await writeJson(file, { applied: [...applied, ...pending.map(({ name }) => name)] });
   }
 
   /** Writes every missing seed charter and aligns the existing ones with their seed. */
@@ -2195,8 +1725,7 @@ export class Board {
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     const entries: TurnHistoryEntry[] = [];
-    // A turn's start pairs with its end by the turn's id. Turns from before ids were logged pair
-    // by scope, since a citizen then ran at most one turn per scope at a time.
+    // A turn's start pairs with its end by the turn's id.
     const starts = new Map<string, string>();
     for (const event of events) {
       if (event.actor !== agent) {
@@ -2204,7 +1733,7 @@ export class Board {
       }
       if (event.type === "turn.started") {
         const start = TurnStartPayloadSchema.safeParse(event.payload);
-        if (start.success) starts.set(start.data.turnId ?? start.data.project, event.ts);
+        if (start.success) starts.set(start.data.turnId, event.ts);
         continue;
       }
       if (event.type !== "turn.completed" && event.type !== "turn.failed") {
@@ -2212,9 +1741,11 @@ export class Board {
       }
       const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
       if (parsed.success) {
-        const key = parsed.data.turnId ?? parsed.data.project;
-        const startedAt = starts.get(key);
-        starts.delete(key);
+        const { turnId } = parsed.data;
+        const startedAt = turnId === undefined ? undefined : starts.get(turnId);
+        if (turnId !== undefined) {
+          starts.delete(turnId);
+        }
         entries.push({
           id: event.id,
           ts: event.ts,
@@ -2487,7 +2018,7 @@ export class Board {
         conversation === undefined
           ? [
               cursorOf(cursors, each),
-              threadStart(cursors, each),
+              cursors.digest,
               channelStart(cursors, each),
               placeStart(cursors, each),
             ]
@@ -3280,14 +2811,12 @@ export class Board {
     const args = VerbInputs.open_thread.parse(input);
     await this.authorize(actor, "open_thread");
     return this.mutex.run(async () => {
-      const opening = await this.threadToOpen(args);
-      if ((await this.tryFindThread(opening.id)) !== null) {
-        throw new BoardError(
-          "INVALID_STATE",
-          `${opening.subject?.kind ?? "thread"} ${opening.id} already has a thread`,
-        );
-      }
-      return this.openThreadUnlocked(actor.name, opening);
+      await this.assertChannelOpen(args.channel);
+      return this.openThreadUnlocked(actor.name, {
+        id: this.newId(),
+        channel: args.channel,
+        title: args.title,
+      });
     });
   }
 
@@ -3333,28 +2862,13 @@ export class Board {
     };
   }
 
-  /**
-   * The open thread of a proposal being decided. A proposal from before proposals opened their
-   * threads gets one now, opened as its proposer, and a thread closed before the decision opens
-   * again.
-   */
-  private async proposalThreadUnlocked(by: Name, proposal: Proposal): Promise<Thread> {
+  /** The open thread of a proposal being decided, which `propose` opened with it. */
+  private async proposalThreadUnlocked(proposal: Proposal): Promise<Thread> {
     const found = await this.tryFindThread(proposal.id);
-    if (found?.thread.state === "open") {
-      return found.thread;
+    if (found?.thread.state !== "open") {
+      throw new BoardError("INVALID_STATE", `proposal ${proposal.id} has no open thread`);
     }
-    if (found === null) {
-      return this.openThreadUnlocked(proposal.proposedBy, this.proposalThreadOpening(proposal));
-    }
-    const { closedBy: _by, closedAt: _at, ...kept } = found.thread;
-    const reopened = await this.writeThread(found.threads, { ...kept, state: "open" });
-    await this.events.append("thread.opened", by, {
-      threadId: proposal.id,
-      channel: reopened.channel,
-      subject: reopened.subject ?? null,
-      reopened: true,
-    });
-    return reopened;
+    return found.thread;
   }
 
   /** Where a task's thread hangs, what it is called, and what it is about. */
@@ -3373,33 +2887,20 @@ export class Board {
   }
 
   /**
-   * The open thread of a task in play, for a verb about to post into it. A task from before tasks
-   * opened their threads gets one now, and a thread closed early while its task is in play opens
-   * again; an ended task's thread stays closed.
+   * The open thread of a task in play, for a verb about to post into it, which `createTask` opened
+   * with the task; an ended task's thread closed with it.
    */
-  private async taskThreadUnlocked(by: Name, task: Task): Promise<Thread> {
+  private async taskThreadUnlocked(task: Task): Promise<Thread> {
     const found = await this.tryFindThread(task.id);
     if (found?.thread.state === "open") {
       return found.thread;
     }
-    if (task.status === "done" || task.status === "abandoned") {
-      throw new BoardError(
-        "INVALID_STATE",
-        `task ${task.id} is ${task.status} and its thread closed with it`,
-      );
-    }
-    if (found === null) {
-      return this.openThreadUnlocked(by, this.taskThreadOpening(task));
-    }
-    const { closedBy: _by, closedAt: _at, ...kept } = found.thread;
-    const reopened = await this.writeThread(found.threads, { ...kept, state: "open" });
-    await this.events.append("thread.opened", by, {
-      threadId: task.id,
-      channel: reopened.channel,
-      subject: reopened.subject ?? null,
-      reopened: true,
-    });
-    return reopened;
+    throw new BoardError(
+      "INVALID_STATE",
+      task.status === "done" || task.status === "abandoned"
+        ? `task ${task.id} is ${task.status} and its thread closed with it`
+        : `task ${task.id} has no open thread`,
+    );
   }
 
   /** Posts what a task verb was told to say into the task's thread, as its author, with the step it recorded. */
@@ -3409,63 +2910,8 @@ export class Board {
     body: string,
     step?: TaskStep,
   ): Promise<Message> {
-    const thread = await this.taskThreadUnlocked(author, task);
+    const thread = await this.taskThreadUnlocked(task);
     return this.appendThreadMessage(author, thread.id, body, step === undefined ? {} : { step });
-  }
-
-  /** Where a new thread hangs, what it is called, and what it is about. */
-  private async threadToOpen(
-    args: VerbArgs<"open_thread">,
-  ): Promise<{ id: Ulid; channel: ChannelRef; title: string; subject?: ThreadSubject }> {
-    if (args.task_id !== undefined && args.proposal_id !== undefined) {
-      throw new BoardError("VALIDATION", "a thread is about one task or one proposal, not both");
-    }
-    if (args.task_id !== undefined) {
-      const { task, project } = await this.findTask(args.task_id);
-      if (task.status === "done" || task.status === "abandoned") {
-        throw new BoardError("INVALID_STATE", `task ${task.id} is ${task.status}`);
-      }
-      const channel = args.channel ?? channelRef(project, task.channel);
-      if (parseChannelRef(channel).project !== project) {
-        throw new BoardError(
-          "VALIDATION",
-          `a task's thread hangs off a channel of its project, ${project}`,
-        );
-      }
-      await this.assertChannelOpen(channel);
-      return {
-        id: task.id,
-        channel,
-        title: args.title ?? task.title,
-        subject: { kind: "task", id: task.id },
-      };
-    }
-    if (args.proposal_id !== undefined) {
-      const proposal = await this.readProposal(args.proposal_id);
-      if (proposal.status !== "proposed") {
-        throw new BoardError(
-          "INVALID_STATE",
-          `proposal ${proposal.id} is already ${proposal.status}`,
-        );
-      }
-      const channel = args.channel ?? "governance";
-      await this.assertChannelOpen(channel);
-      const described = `${proposal.kind} proposal: ${describeCharter(proposal.kind, proposal.charter)}`;
-      return {
-        id: proposal.id,
-        channel,
-        title: args.title ?? described.slice(0, 200),
-        subject: { kind: "proposal", id: proposal.id },
-      };
-    }
-    if (args.channel === undefined || args.title === undefined) {
-      throw new BoardError(
-        "VALIDATION",
-        "a thread needs a task_id, a proposal_id, or a channel and a title",
-      );
-    }
-    await this.assertChannelOpen(args.channel);
-    return { id: this.newId(), channel: args.channel, title: args.title };
   }
 
   /**
@@ -5700,15 +5146,9 @@ export class Board {
       case "archive":
         await this.validateArchive(ArchiveProposalSchema.parse(charter).project);
         return;
-      case "reallocation": {
-        const parsed = ReallocationProposalSchema.safeParse(charter);
-        if (parsed.success) {
-          await this.reallocatedRole(parsed.data);
-        } else {
-          LegacyReallocationSchema.parse(charter);
-        }
+      case "reallocation":
+        await this.reallocatedRole(ReallocationProposalSchema.parse(charter));
         return;
-      }
       default:
         return;
     }
@@ -5793,12 +5233,9 @@ export class Board {
         return { project: input.project, members };
       }
       case "reallocation": {
-        const parsed = ReallocationProposalSchema.safeParse(proposal.charter);
-        // One filed before reallocations changed anything has nothing to apply.
-        if (!parsed.success) {
-          return undefined;
-        }
-        const { next, changed } = await this.reallocatedRole(parsed.data);
+        const { next, changed } = await this.reallocatedRole(
+          ReallocationProposalSchema.parse(proposal.charter),
+        );
         await this.writeRoleUnlocked(by, next, meta);
         return { role: next.name, changed };
       }
@@ -5809,8 +5246,8 @@ export class Board {
 
   /**
    * Publishes a promoted skill under the society's skills, where every citizen's skills index lists
-   * it: the folder the board took from its proposer's home, or the text proposed alone. A
-   * replacement is the whole skill, so files the new version dropped go with the old one.
+   * it: the folder the board took from its proposer's home. A replacement is the whole skill, so
+   * files the new version dropped go with the old one.
    */
   private async promoteSkillUnlocked(
     by: Name,
@@ -5823,16 +5260,12 @@ export class Board {
     const replaced = await exists(file);
     const taken = proposal.skillFiles;
     const staged = path.join(this.paths.proposalFiles(proposal.id), "SKILL.md");
-    if (skill.body === undefined && (taken === undefined || !(await exists(staged)))) {
+    if (taken === undefined || !(await exists(staged))) {
       throw new BoardError("INVALID_STATE", `proposal ${proposal.id} holds no skill files`);
     }
     await rm(dir, { recursive: true, force: true });
-    if (skill.body === undefined) {
-      await cp(this.paths.proposalFiles(proposal.id), dir, { recursive: true });
-    } else {
-      await ensureDir(dir);
-    }
-    const body = skill.body ?? (await readLooseMarkdown(file)).body;
+    await cp(this.paths.proposalFiles(proposal.id), dir, { recursive: true });
+    const { body } = await readLooseMarkdown(file);
     // The SKILL.md frontmatter the CLIs' validators accept: name, description, and a metadata map.
     await writeMarkdown(
       file,
@@ -5843,7 +5276,7 @@ export class Board {
           proposedBy: proposal.proposedBy,
           promotedBy: by,
           promotedAt: this.now().toISOString(),
-          ...(taken === undefined ? {} : { commit: taken.commit }),
+          commit: taken.commit,
         },
       },
       body,
@@ -5853,7 +5286,7 @@ export class Board {
       summary: skill.summary,
       proposedBy: proposal.proposedBy,
       replaced,
-      ...(taken === undefined ? {} : { files: taken.files.length }),
+      files: taken.files.length,
       ...meta,
     });
     await this.appendMessage(
@@ -6787,6 +6220,8 @@ export class Board {
       `proposal ${proposalId} cannot be decided`,
       (turn) => turn.thread === proposalId,
     );
+    // The decision is posted there, so a proposal without its thread is refused before any write.
+    const thread = await this.proposalThreadUnlocked(filed);
     if (outcome === "approved" && filed.kind === "archive") {
       await this.assertProjectQuiet(actor, ArchiveProposalSchema.parse(filed.charter).project);
     }
@@ -6837,7 +6272,6 @@ export class Board {
             .join(", ")}.`;
     // The decision is the proposal's last post, a step that wakes no front desk, and it ends
     // the thread; the scheduler wakes the proposer from the event.
-    const thread = await this.proposalThreadUnlocked(actor.name, proposal);
     const post = `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`;
     // The board's own decision quotes the proposer's words, whose mentions would wake as the board's.
     await this.appendThreadMessage(

@@ -153,7 +153,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.use("*", authenticate);
 
   // Identity and society. A GitHub sign-in also says who signed in, with the account's picture,
-  // which a sign-in from before the board kept it takes from the login.
+  // which a sign-in whose picture GitHub did not give on its own avatar host takes from the login.
   api.get("/me", (c) => {
     const signIn = board.signInOf(bearer(c) ?? "");
     return c.json(

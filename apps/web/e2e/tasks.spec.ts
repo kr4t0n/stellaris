@@ -73,3 +73,15 @@ test("the approval of a ghpr task's last stage says when no pull request is link
   await expect(approval).toContainText("Sign off waits on you. No pull request linked yet.");
   await expect(view.getByRole("region", { name: "Pull request" })).toHaveCount(0);
 });
+
+test("an approval before a ghpr task's last stage says nothing of its pull request", async ({
+  page,
+}) => {
+  await fakeBoard(page, { earlyApproval: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = page.getByRole("region", { name: "Board content" });
+  const approval = view.getByRole("form", { name: "Approve Check" });
+  await expect(approval).toContainText("Check waits on you.");
+  await expect(approval).not.toContainText("No pull request linked yet.");
+});

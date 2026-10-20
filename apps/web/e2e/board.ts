@@ -249,6 +249,16 @@ function unlinkedTask(): FakeTask {
   return task;
 }
 
+/** The same, with a check that names the user before Sign off, waiting on the user now. */
+function earlyApprovalTask(): FakeTask {
+  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate: true, holders: [] };
+  return {
+    ...unlinkedTask(),
+    stages: [...TASK_STAGES.slice(0, 1), check, ...TASK_STAGES.slice(1)],
+    stage: "s3",
+  };
+}
+
 /** The task's thread, opened with it, where ada's handover of the survey stage landed. */
 const TASK_THREAD = {
   id: STAGE_TASK,
@@ -1088,6 +1098,8 @@ export async function fakeBoard(
     uploads?: boolean;
     /** Links no pull request to the study whose sign-off names the user. */
     unlinked?: boolean;
+    /** Links none either, and puts a check naming the user before Sign off, current. */
+    earlyApproval?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /**
@@ -1133,7 +1145,12 @@ export async function fakeBoard(
   // Renaming changes the name the board shows, never the slug.
   let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
-  let task: FakeTask = options.unlinked === true ? unlinkedTask() : TASK;
+  let task: FakeTask =
+    options.earlyApproval === true
+      ? earlyApprovalTask()
+      : options.unlinked === true
+        ? unlinkedTask()
+        : TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
   const labChannels: Array<{
     name: string;

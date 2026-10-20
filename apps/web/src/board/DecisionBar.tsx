@@ -2,25 +2,18 @@ import type { Proposal } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
-import { useMembers, useSession } from "../lib/session.js";
+import { useSession } from "../lib/session.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 type Choice = "approve" | "reject";
 
 /**
- * Approve or reject, through the same verbs the steward uses. The first click opens the reason
- * and says what deciding does; only the second decides. A rejection needs a reason, as the verb does.
+ * Approve or reject, through the same verbs the steward uses. The first click opens the reason;
+ * only the second decides. A rejection needs a reason, as the verb does.
  */
-export function DecisionBar({
-  proposal,
-  consequence,
-}: {
-  proposal: Proposal;
-  consequence: string;
-}) {
+export function DecisionBar({ proposal }: { proposal: Proposal }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const members = useMembers();
   const [choice, setChoice] = useState<Choice | null>(null);
   const [reason, setReason] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
@@ -51,16 +44,6 @@ export function DecisionBar({
     },
   });
 
-  // The decision is the proposal thread's last post; it wakes the proposer and no front desk.
-  const proposer = (members.data ?? []).find(
-    (member) =>
-      member.name === proposal.proposedBy && member.status === "active" && member.cli !== null,
-  );
-  const posted =
-    proposer === undefined
-      ? "Your decision is posted in the proposal's thread, which closes."
-      : `Your decision is posted in the proposal's thread, which closes, and wakes ${proposer.name}, who proposed it.`;
-
   if (choice === null) {
     return (
       <div className="flex items-center gap-2 border-t border-line px-4 py-3">
@@ -86,16 +69,11 @@ export function DecisionBar({
         ref={field}
         value={reason}
         rows={2}
-        placeholder={
-          approving ? "Why approve? Optional." : "Why not? It is posted with the decision."
-        }
+        placeholder={approving ? "Why approve? Optional." : "Why not?"}
         aria-label={approving ? "Reason for approving" : "Reason for rejecting"}
         onChange={(event) => setReason(event.target.value)}
         className={`${FIELD} resize-none`}
       />
-      <p className="text-[11px] leading-relaxed text-fg-muted">
-        {approving ? consequence : "Nothing is created, and the proposal's thread closes."} {posted}
-      </p>
       <div className="flex items-center justify-end gap-2">
         <Button
           onClick={() => {

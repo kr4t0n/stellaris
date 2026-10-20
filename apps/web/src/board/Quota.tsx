@@ -238,7 +238,7 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
               )}
               {row.runners.length > 1 ? (
                 <p className="col-span-full pt-0.5 pl-6 text-meta">
-                  Same numbers on {row.runners.join(" and ")}, so most likely one login.
+                  Same numbers on {row.runners.join(" and ")}
                 </p>
               ) : null}
             </li>

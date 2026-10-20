@@ -34,11 +34,7 @@ export function CitizenMemory({
     <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
       {conflicts.data === undefined || conflicts.data.length === 0 ? null : (
         <Section title="Edits to reconcile">
-          <p className="text-sm text-fg-secondary">
-            Two turns on different runners changed these files at once. Each file kept one version;
-            the other waits beside it until {member.name} merges it in and deletes the copy.
-          </p>
-          <ul className="mt-2 space-y-1.5">
+          <ul className="space-y-1.5">
             {conflicts.data.map((conflict) => (
               <li key={conflict.path} className="text-sm">
                 <span className="text-fg-primary">{conflict.file}</span>
@@ -54,7 +50,7 @@ export function CitizenMemory({
       )}
       <Section title="Profile">
         {member.profile.trim() === "" ? (
-          <p className="text-meta">No profile yet. The citizen writes its own profile.md.</p>
+          <p className="text-meta">No profile yet.</p>
         ) : (
           <Markdown text={withoutTitle(member.profile, "Profile")} />
         )}
@@ -63,7 +59,7 @@ export function CitizenMemory({
         {memory.data === undefined ? (
           <p className="text-meta">Reading…</p>
         ) : memory.data.body.trim() === "" ? (
-          <p className="text-meta">Empty. Every turn loads this file in full.</p>
+          <p className="text-meta">Empty.</p>
         ) : (
           <Markdown text={withoutTitle(memory.data.body, "Core memory")} />
         )}

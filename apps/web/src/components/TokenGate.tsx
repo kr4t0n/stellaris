@@ -7,7 +7,7 @@ function explain(error: unknown): string {
     return "This board does not recognize that token.";
   }
   if (error instanceof ApiError && error.status === 0) {
-    return "The board server is not reachable. Is it running?";
+    return "The board server is not reachable.";
   }
   return "The board server answered unexpectedly.";
 }

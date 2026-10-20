@@ -39,12 +39,12 @@ describe("identityGap", () => {
     expect(identityGap({ gitIdentityMissing: ["name"] })).toEqual({
       label: "no git user.name",
       detail:
-        "Its account has no git user.name, so git refuses the commits citizens make themselves on it. Set it with git config --global there; the mark goes once the runner connects with it set.",
+        "Its account has no git user.name, so git refuses the commits citizens make themselves on it.",
     });
     expect(identityGap({ gitIdentityMissing: ["email"] })).toEqual({
       label: "no git user.email",
       detail:
-        "Its account has no git user.email, so the commits citizens make themselves on it carry an empty address or one git made up. Set it with git config --global there; the mark goes once the runner connects with it set.",
+        "Its account has no git user.email, so the commits citizens make themselves on it carry an empty address or one git made up.",
     });
     expect(identityGap({ gitIdentityMissing: ["name", "email"] })).toMatchObject({
       label: "no git identity",

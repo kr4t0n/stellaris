@@ -260,9 +260,7 @@ export function TaskFiles({ task, now }: { task: Task; now: number }) {
     const { files, total, head } = changes.data;
     body =
       files.length === 0 ? (
-        <p className="mt-2 text-meta">
-          Nothing changed on {branch} yet. What a turn writes reaches the branch when the turn ends.
-        </p>
+        <p className="mt-2 text-meta">Nothing changed on {branch} yet.</p>
       ) : (
         <>
           <p className="mt-2 text-meta">
@@ -272,17 +270,13 @@ export function TaskFiles({ task, now }: { task: Task; now: number }) {
           <ChangeTree taskId={task.id} changes={files} now={now} />
           {total > files.length ? (
             <p className="mt-2 text-meta">
-              The first {files.length} of {total}; browse the branch for the rest.
+              The first {files.length} of {total}
             </p>
           ) : null}
         </>
       );
   } else if (changes.error instanceof ApiError && changes.error.status === 404) {
-    body = (
-      <p className="mt-2 text-meta">
-        Nothing on {branch} yet. What a turn writes reaches the branch when the turn ends.
-      </p>
-    );
+    body = <p className="mt-2 text-meta">Nothing on {branch} yet.</p>;
   } else if (changes.error instanceof ApiError && changes.error.status === 503) {
     const project = projects.data?.find((each) => each.slug === task.project);
     body = (

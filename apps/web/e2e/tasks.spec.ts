@@ -49,9 +49,8 @@ test("the user approves a stage that names them, and a ghpr task shows the pull 
   await expect(pull).toContainText("Co-Authored-By: ada <ada@x>");
 
   const approval = view.getByRole("form", { name: "Approve Sign off" });
-  await expect(approval).toContainText(
-    "Approving lands it: the board merges pull request #7 on GitHub.",
-  );
+  await expect(approval).toContainText("Sign off waits on you.");
+  await expect(approval).not.toContainText("No pull request linked yet.");
   await approval.getByRole("textbox", { name: "Note for the task's thread" }).fill("LGTM");
   await approval.getByRole("button", { name: "Approve" }).click();
   expect(board.writes.at(-1)).toEqual({
@@ -61,4 +60,16 @@ test("the user approves a stage that names them, and a ghpr task shows the pull 
   // Landing, the task no longer waits on the user.
   await expect(approval).toHaveCount(0);
   await expect(view).toContainText("landing");
+});
+
+test("the approval of a ghpr task's last stage says when no pull request is linked yet", async ({
+  page,
+}) => {
+  await fakeBoard(page, { unlinked: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = page.getByRole("region", { name: "Board content" });
+  const approval = view.getByRole("form", { name: "Approve Sign off" });
+  await expect(approval).toContainText("Sign off waits on you. No pull request linked yet.");
+  await expect(view.getByRole("region", { name: "Pull request" })).toHaveCount(0);
 });

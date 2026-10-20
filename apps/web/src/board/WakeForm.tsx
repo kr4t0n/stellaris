@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { Picker } from "../components/Picker.js";
 import { useSession } from "../lib/session.js";
-import { scopeChoices, scopeName } from "./citizen.js";
+import { scopeChoices } from "./citizen.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 type Kind = "manual" | "reflection";
@@ -53,16 +53,11 @@ export function WakeForm({
     },
   });
 
-  const where = scopeName(scope);
-  const what =
-    kind === "reflection"
-      ? `Asks ${member.name} to reflect at ${where}: consolidate its memory, skills, and profile, and take no new work. It restarts the reflection clock.`
-      : `Starts a turn for ${member.name} at ${where} as soon as the scheduler takes it.`;
-  const after = paused
-    ? " The society is paused, so it waits until you resume."
+  const state = paused
+    ? "The society is paused."
     : running.includes(scope)
-      ? ` ${member.name} is in a turn there now; this one follows it.`
-      : "";
+      ? `${member.name} is in a turn there now.`
+      : null;
 
   return (
     <form
@@ -107,18 +102,13 @@ export function WakeForm({
         value={reason}
         rows={2}
         placeholder={
-          kind === "reflection"
-            ? "Anything to reflect on in particular? Optional."
-            : "What should it look at? It reads this as the reason it was woken."
+          kind === "reflection" ? "What to reflect on, optional" : "What it should look at"
         }
         aria-label="Reason"
         onChange={(event) => setReason(event.target.value)}
         className={`${FIELD} resize-none`}
       />
-      <p className="text-[11px] leading-relaxed text-fg-muted">
-        {what}
-        {after} Each turn costs money.
-      </p>
+      {state === null ? null : <p className="text-[11px] leading-relaxed text-fg-muted">{state}</p>}
       <div className="flex items-center justify-end gap-2">
         <Button onClick={onDone}>Cancel</Button>
         <Button variant="primary" type="submit" disabled={wake.isPending || scope === ""}>

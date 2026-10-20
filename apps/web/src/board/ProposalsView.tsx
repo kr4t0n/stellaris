@@ -75,9 +75,7 @@ export function ProposalsView() {
         {proposals.data === undefined ? (
           <PaneNote>Reading the proposals…</PaneNote>
         ) : groups.length === 0 ? (
-          <PaneNote>
-            No proposals yet. Citizens propose roles, members, channels, and skills.
-          </PaneNote>
+          <PaneNote>No proposals yet.</PaneNote>
         ) : (
           groups.map((group) => {
             const folded = group.group === "decided" && !unfolded;

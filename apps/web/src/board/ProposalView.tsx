@@ -207,23 +207,17 @@ export function ProposalView() {
           <h3 className="text-section">Thread</h3>
           {thread === undefined ? (
             <p className="mt-2 text-meta">
-              {threads.data === undefined
-                ? "Reading the thread…"
-                : "This proposal is older than proposal threads; its thread opens when it is decided."}
+              {threads.data === undefined ? "Reading the thread…" : "No thread on this proposal."}
             </p>
           ) : (
-            <SubjectThread
-              thread={thread}
-              now={now}
-              empty="Nothing said yet. The pitch and the decision are posted here."
-            />
+            <SubjectThread thread={thread} now={now} empty="Nothing said yet." />
           )}
         </section>
       </StickyList>
       {thread?.state === "open" ? (
         <Composer target={{ threadId: current.id }} placeholder="Write in the proposal's thread" />
       ) : null}
-      {waitingOnYou(current) ? <DecisionBar proposal={current} consequence={consequence} /> : null}
+      {waitingOnYou(current) ? <DecisionBar proposal={current} /> : null}
     </>
   );
 }

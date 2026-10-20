@@ -1,0 +1,129 @@
+# The Claude Code and Codex adapters
+
+The two `AgentBackend`s, `packages/adapter-claude` (Claude Code through the Agent SDK) and `packages/adapter-codex` (Codex over `codex app-server`): how each runs, resumes, and steers a session, and how it reads what its CLI reports. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail and the incidents behind it. What the runner and the server do with a turn's outcome is on [runners.md](runners.md).
+
+## Permissions
+
+### Full autonomy
+
+Adapters grant every permission by default and never route a decision to a human prompt. A sandbox or a permission mode is an option on the adapter for a runner that needs it, never a society setting, and never the default.
+
+### Agents run with every permission granted
+
+Claude Code runs in `bypassPermissions`, which the SDK accepts only together with `allowDangerouslySkipPermissions: true`; Codex runs with sandbox `danger-full-access` and approval policy `never`. This is the decision in [docs/plan.md section 5.2](../plan.md#52-sessions-worktrees-permissions): the society is the trust boundary, and nothing may stop to ask a human. `STELLARIS_CODEX_SANDBOX=read-only` or `workspace-write` and the adapters' `permissionMode` and `allowedTools` options put a CLI sandbox or a permission mode back for a runner that needs one. Codex's Linux sandbox needs user namespaces, which this container lacks, so every sandboxed shell command fails here with a bubblewrap namespace error.
+
+### There is no command allowlist, and it must not come back as a default
+
+The first build had one, per command prefix, and it denied compound shell such as loops and `$variable` expansions as well as any test runner the list did not name. The Phase 4 live run showed the cost: a reviewer that could read a diff but not run the tests, and agents burning turns asking the user for permissions the board could not grant. A runner that must restrict its agents is a different runner, or a different society.
+
+## Writing an adapter
+
+### Never guess an SDK surface
+
+The Agent SDK and MCP SDK type definitions live in `node_modules`; read them before using an option. The adapters were written against `sdk.d.ts` and the MCP server transport types, not from memory.
+
+## Sessions
+
+### Only the server starts a conversation's session afresh
+
+A new conversation's session id is chosen before its first turn: the runner asks the adapter for it before the CLI starts (Claude Code takes the UUID it is given; Codex's is a `pending-` placeholder its app server replaces with the thread's own id), and the outcome reports it however the turn ends, so the board records it for the next turn and a CLI that dies mid-turn leaves the session it wrote to be resumed. A turn whose CLI never started reports the job's own session, null in a conversation's first turn, and the host records nothing: one the runner could not pull the board's projection or the citizen's home for or prepare a workspace for, one the user stopped first, and one whose adapter threw, as Codex's does when `thread/start` never answers.
+
+A saved session is resumed or the turn fails before any model call, with the CLI's words and `resumeFailed` on the outcome (`ResumeError` where an adapter throws): neither adapter starts another session in its place, since the host built the prompt for the saved one, a digest of the unread messages rather than the whole thread. `lost` means nothing is there to resume. Claude Code answers a `resume` it cannot make, an id with no transcript or one it cannot read, with an `error_during_execution` result, `No conversation found with session ID`, before its init message, and the adapter refuses an id that is not a UUID without starting the CLI, since Claude Code would look such a value up as a session's title. Codex's app server refuses `thread/resume` with `invalid session id` (a `pending-` placeholder included), `no rollout found` (a thread that never ran a turn has no rollout either), or `failed to read thread`. `retry` is anything else: a `thread/resume` that never answers or a server that dies during it, and a Claude Code that ends before its init message for any other reason, or sends none before the turn's limit, as on a transcript it never finishes reading such as a named pipe. The adapter cannot tell such an end from one that died loading the session, so on a runner whose Claude Code cannot start at all, three turns of a conversation drop its session.
+
+The host drops a `lost` session at once (`Board.dropSession`, only while the record still names it) and a `retry` one after `RESUME_RETRIES` (three) such turns in a row, counted on the turn records (`resumeRetries`), and marks the turn `sessionDropped`. The conversation's next turn is then new in the host's eyes, with the whole thread in a thread and the first-turn notes at home, and its "Your previous turn did not finish" says the session was dropped and why. So a lost session costs one failed turn with no model call, and the conversation goes on at its next wake. `turn.failed` carries `resumeFailed` and `sessionDropped`, and the runner logs each failed resume at warn.
+
+Until 0.3.24 a turn that never reached its CLI reported `unstarted`, which the host recorded, and Claude Code creates a session only under a UUID (`Invalid session ID. Must be a valid UUID.`), so every later turn of that conversation failed before it began, while the unread messages its failed turns never moved past kept its heartbeat waking it: on the live board, one dropped connection to the server left a conversation failing every quarter hour for a day. The adapters then started afresh by themselves: Claude's in place of an id that was not a UUID or a UUID with no transcript it could find, and Codex's in place of any thread it could not resume, said only in a debug log. The prompt, built for a resumed session, still held only the digest, and nothing told the citizen its earlier context was gone. And a transcript Claude Code could not read failed every later turn with `Session ID … is already in use`, since the adapter asked it to create the session over the file.
+
+## Claude Code
+
+### The CLI's structured-output validator rejects the 2020-12 JSON Schema dialect
+
+`turnStatusJsonSchema` emits the draft-7 target and deletes the `$schema` key. A schema with the 2020-12 reference makes every Claude Code process exit before the first message.
+
+### Nested-session markers are stripped from the subprocess environment
+
+`CLAUDECODE` and every `CLAUDE_CODE_*` variable are removed before spawning, because the board server may itself be started from inside a Claude Code session. The SDK's `env` option replaces the environment entirely, so `process.env` is spread first. Both adapters then set `CLI_ENV` from `runner-core`, `HUSKY=0`, over whatever the runner's environment holds (see [the default-branch guard](workspaces.md#a-merge-projects-default-branch-moves-only-by-the-runner)).
+
+### A warm Claude turn the API refused once counted as completed, and a warm session whose CLI had ended stayed
+
+Claude Code ends a turn whose API call failed with a `success` result marked `is_error`, its text the API's words (`API Error: 400 …`), and the adapter read only the `subtype`. A cold turn still failed, since its process then exits with code 1, though with only `Claude Code process exited with code 1` for a reason; a warm session's process stays up, so its turn was recorded as completed without a status object, and the host moved the cursor past messages nobody had answered. The adapter now fails such a turn with the API's words, warm or cold, and keeps them over the exit that follows; only a `success` marked `is_error` counts, since the CLI marks its other error results `is_error` too. A turn can hold several runs, a resumed session's background task before the prompt or a steer's continuation, and the latest decides how it ended: a run that completes clears what an earlier run said. Separately, a warm session whose CLI had ended between turns made its next turn throw, `the resident session has ended` after a clean end or the SDK's `… terminated by signal SIGKILL` after a crash, and the runner let a session go only when its turn returned a failure; a thrown one had already cleared the idle timer, so every later turn of that home within the idle timeout failed the same way. The runner now lets the session go however its turn fails, and the next turn starts a new process on the saved session. Both were found on 2026-10-15 with the CLI the SDK ships, against a local server answering 400 and by killing the CLI between turns.
+
+### A Claude session reports a running total, and a resumed one starts from its saved total
+
+The SDK's `total_cost_usd` is cumulative within a query and, on resume, continues from the total the session's transcript saved. Until this was handled, every cold turn that resumed a session recorded the session's total as its own cost: a citizen's turns on one project recorded $0.73, $0.78, $1.98, and on up to $7.20, where an eleven-second heartbeat really cost about $0.16. The runner now keeps `sessionCostUsd` on each turn record and hands it to the next turn as `costSoFarUsd`, and the adapter reports the difference, for cold turns and for the first turn of a resident session that resumed a transcript. Costs recorded before 2026-09-29's fix, and the dollar figures from earlier live runs quoted in these notes, are running totals for resumed Claude turns and overstate the turn; spend reports over that period do too. Usage is per turn already.
+
+### A resumed Claude session can run a turn of its own before the prompt
+
+A background task left running when an earlier turn ended is reported when the session resumes, and the CLI runs a turn for it, with its own result, before it takes the prompt. In the first live steering run the adapter took that result for the end of the turn, closed its input, and refused the steer, so a follow-up turn delivered the post again. A turn now ends only at a result after the CLI echoed the prompt's id, which is why every fake that streams Claude input must echo the user messages it takes, as the real CLI does with `--replay-user-messages`.
+
+### An unset priority may hold a Claude steer until the turn ends
+
+The bundled CLI defaults a streamed message's priority to `later` unless a feature flag says `next`, and `now` interrupts the step in flight, so the adapter sets `next` on every steer. Codex refuses a steer for a turn that has ended ("no active turn to steer"), and for review and compaction turns.
+
+### The Agent SDK can send more than one init message in one query
+
+A Claude turn that used subagents produced three extra `system/init` messages within fifty seconds, and the adapter announced `turn_started` and took the model from each, so the live transcript restarted mid-turn and the model could be a subagent's. It now announces once and keeps the first model.
+
+### Claude's model list has a `default` entry that is not a model
+
+`supportedModels()` begins with `default`, the CLI's own choice, resolving to a real model; `modelOptions` drops it and marks the first model it resolves to as the default, since the interface offers "CLI default" as clearing the setting rather than pinning `default`.
+
+## Codex
+
+### The Codex app server speaks newline-delimited JSON-RPC over stdio
+
+The Codex app server speaks newline-delimited JSON-RPC over stdio, with `initialize` then the `initialized` notification before anything else, `thread/start` or `thread/resume`, and `turn/start` with the status schema as `outputSchema`; items arrive as `item/started` and `item/completed` notifications with camelCase types, usage as `thread/tokenUsage/updated`, and the end as `turn/completed`; an `error` notification carries its message under `error` and fails the turn only when `willRetry` is false. Server-initiated requests such as approvals are answered with a method-not-found error; with approval policy `never` none should arrive. A resume asks for `excludeTurns: true`; without it the response carries the thread's whole history, which the server calls deprecated for long threads and nothing here reads. The bindings under `codex app-server generate-ts` are the reference and are not committed.
+
+### Every Codex turn runs over the app server
+
+A cold turn starts `codex app-server`, opens or resumes the pair's thread, runs one turn, and stops the server; a resident session keeps both between turns. `codex exec` was the cold path until 2026-09-29 and is not used anywhere. A server that exits mid-turn never sends `turn/completed`, so the session ends the running turn with an error carrying the server's last stderr lines; without that, a turn with no time limit would wait forever.
+
+### Codex assigns thread ids itself
+
+`newSession` returns a placeholder with the pending prefix; the response to `thread/start` carries the real id, which the adapter returns in `TurnResult.session` and the runner records. A `thread/resume` the app server refuses, as with "no rollout found" for an unknown id, fails the turn with its words, and the adapter starts no other thread in its place (see "Only the server starts a conversation's session afresh").
+
+### Codex MCP calls need explicit approval config
+
+The app server runs with approval policy `never`, which rejects every MCP call unless the server carries `default_tools_approval_mode = "approve"`. The adapter passes it as a config override on the app server's command line.
+
+### Codex worktrees need the canonical clone writable
+
+A linked worktree keeps its index and objects under the repository's `.git`, so under a sandbox the adapter lists the repository directory among the writable roots of the turn's sandbox policy, alongside the agent home and the board projection.
+
+### Codex is not isolated from the account's own configuration
+
+It reads `~/.codex/config.toml` and its login from the default home; the model comes from there unless the agent record sets one. It also loads the account's global `~/.codex/AGENTS.md` as instructions: in the Phase 8 live run the Codex referee of a research study required a uv project, Ruff, pre-commit hooks, a README, and an AGENTS.md, citing them as the user's requirements, because they were the account owner's personal coding rules. The Claude adapter loads project settings only, so its agents do not see `~/.claude/CLAUDE.md`. The rendered instructions travel as the thread's developer instructions, set again on every start and resume.
+
+### The Codex app-server bindings are generated on demand
+
+The Codex app-server bindings are generated on demand, with `codex app-server generate-ts --out packages/adapter-codex/src/generated --experimental`, and are not committed: the adapter reads the few fields it needs by hand, and the recorded turns in `packages/adapter-codex/fixtures` fail when a release changes them.
+
+### A Codex web search fills in as it runs
+
+Its `item.started` carries an empty `query`, and a search opened by URL or run from code keeps it empty, with what it did in `action` (a search with `queries`, `open_page` with a `url`, `find_in_page` with a `pattern`). The adapter reports the call when the item completes and describes it from the query or the action; reported at start, every search in the live transcript was blank.
+
+## Usage, cost, and models
+
+### Token counts are a turn's own, and both CLIs report them as something else
+
+Codex's `thread/tokenUsage/updated` carries the thread's running `total` and the `last` request alone; the adapter once kept `last`, so a turn of five requests recorded only the fifth, about a fifth of what it used (30,630 input tokens of 151,361 in the recorded steered turn). The session now keeps the thread's latest total from every update, and a turn counts what the total grew by from where it stood before the turn: a resumed thread reports its saved total, about its previous turn, before the turn starts, and an update about another turn, or before the turn has an id, which `turn/started` gives it in stream order, sets that starting point. Codex also counts cached input inside `inputTokens`, while Claude Code counts it apart, so the Codex adapter subtracts it and `Usage` means the same on both CLIs: `inputTokens` is the input neither read from the cache nor written to it. A Claude result counts only its own run, and a cold turn can run more than once in one process, for a steer the CLI took after its result or for a background task a resumed session reports first, so the adapter adds the results up; until then such a turn kept the last run's alone. Claude's results leave out the CLI's own small-model calls, which only the session-wide `modelUsage` counts. `turn.completed` and `turn.failed` carry `usage` from then on; turns logged before have none, and the Codex counts kept before in turn records and transcripts are the last request's.
+
+### The model is observed, not assumed
+
+Turn records carry the model the CLI reported: Claude Code names it on the session's init message, the Codex app server on the response that opens the thread. Until every Codex turn ran over the app server, cold Codex turns through `codex exec`, whose stream never names it, fell back to the configured model and showed "cli default" when there was none. The roster keeps both the configured `model` and the `lastModel` observed, and the front desk's digest prefers the observed one.
+
+### Costs
+
+With the default model, observed Claude turns cost between a tenth and a third of a dollar; a full two-agent task with review ran about one dollar. Codex reports tokens but no price, so its turns are recorded at zero cost until a price table exists, which the tokens each turn records are enough for; they are not free, only unmetered, so a wasted Codex turn is a real cost. Set `STELLARIS_LOG_LEVEL=debug` to see every tool call and the CLI's stderr in the server log.
+
+## Recorded streams
+
+### Recorded streams are fixtures
+
+`STELLARIS_RECORD_DIR` makes both adapters append each turn's raw stream to a file. Scan a recording for token-like strings before committing it under `packages/*/fixtures`; the streams carry tool outputs, not credentials, but check anyway.
+
+## History
+
+### A turn the plan's limit refused once said nothing of the limit
+
+On 2026-10-12 a runner's Claude login met its 5-hour limit, and between 10:13 and 10:57 UTC thirteen turns of the front desk, the reviewer, and the developer each got only Claude Code's synthetic message, "You've hit your session limit · resets 11am (UTC)", with no status object, as the CLI's transcripts show; the adapter read no limit from it, so each turn ended as one without a report would, and nothing on the board named the limit or when it lifted. Such a turn now fails with the CLI's words and reports the limit (see [plan quota](runners.md#a-clis-quota-is-what-its-login-reported-kept-on-its-runners-record)). The two CLIs' numbers come in different units: Claude's stream gives each window's `utilization` as a fraction of one, its usage read as a percentage, and Codex's both as percentages; a live turn and a read a minute apart on that runner gave 0.15 and 15 for the same window.

@@ -6220,6 +6220,8 @@ export class Board {
       `proposal ${proposalId} cannot be decided`,
       (turn) => turn.thread === proposalId,
     );
+    // The decision is posted there, so a proposal without its thread is refused before any write.
+    const thread = await this.proposalThreadUnlocked(filed);
     if (outcome === "approved" && filed.kind === "archive") {
       await this.assertProjectQuiet(actor, ArchiveProposalSchema.parse(filed.charter).project);
     }
@@ -6270,7 +6272,6 @@ export class Board {
             .join(", ")}.`;
     // The decision is the proposal's last post, a step that wakes no front desk, and it ends
     // the thread; the scheduler wakes the proposer from the event.
-    const thread = await this.proposalThreadUnlocked(proposal);
     const post = `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`;
     // The board's own decision quotes the proposer's words, whose mentions would wake as the board's.
     await this.appendThreadMessage(

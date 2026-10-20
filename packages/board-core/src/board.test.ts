@@ -1464,6 +1464,49 @@ describe("Board", () => {
     ]);
   });
 
+  it.each(["approved", "rejected"] as const)(
+    "refuses to decide a proposal whose thread is gone before writing anything (%s)",
+    async (outcome) => {
+      const { board } = await society();
+      const decisions = async () => (await readdir(board.paths.decisions()).catch(() => [])).length;
+      const proposal = await board.propose(ENG, {
+        kind: "channel",
+        charter: { project: "demo", name: "rel", purpose: "Releases." },
+      });
+      await rm(board.paths.threadFile(board.paths.threadsOf("governance"), proposal.id));
+      const before = await decisions();
+      const decided =
+        outcome === "approved"
+          ? board.approve(USER, { proposal_id: proposal.id })
+          : board.reject(USER, { proposal_id: proposal.id, reason: "Not now." });
+      await expect(decided).rejects.toMatchObject({
+        code: "INVALID_STATE",
+        message: `proposal ${proposal.id} has no open thread`,
+      });
+      expect((await board.readProposal(proposal.id)).status).toBe("proposed");
+      expect(await decisions()).toBe(before);
+      expect((await board.readProject("demo")).channels).not.toContain("rel");
+    },
+  );
+
+  it("refuses a task's note whose thread is gone before the task moves", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, { project: "demo", title: "ship it" });
+    await board.claimTask(ENG, { task_id: task.id });
+    await rm(board.paths.threadFile(board.paths.threadsOf("demo/general"), task.id));
+    await expect(
+      board.advanceTask(ENG, { task_id: task.id, note: "Shipped." }),
+    ).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: `task ${task.id} has no open thread`,
+    });
+    expect((await board.listTasks("demo")).find((each) => each.id === task.id)).toMatchObject({
+      status: "claimed",
+      stage: "s1",
+      claimedBy: "eng-1",
+    });
+  });
+
   it("opens threads on a channel and on a proposal, each reaching only its participants", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

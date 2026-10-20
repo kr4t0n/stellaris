@@ -48,9 +48,7 @@ export function SkillFileList({ files }: { files: readonly SkillFileContent[] })
             </button>
             {open ? (
               file.text === null ? (
-                <p className="mt-1 mb-2 ml-[18px] text-meta">
-                  A binary file; it is published as it is.
-                </p>
+                <p className="mt-1 mb-2 ml-[18px] text-meta">A binary file.</p>
               ) : (
                 <pre className="mt-1 mb-2 ml-[18px] max-h-96 overflow-auto rounded-lg bg-surface-2/40 p-3 font-mono text-[11px] leading-relaxed text-fg-secondary">
                   {file.text}

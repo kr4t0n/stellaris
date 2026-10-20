@@ -115,7 +115,7 @@ function Table({ rows }: { rows: string[][] }) {
       </table>
       {body.length > shown.length ? (
         <p className="mt-2 text-meta">
-          The first {TABLE_ROWS} of {body.length} rows; download the file for the rest.
+          The first {TABLE_ROWS} of {body.length} rows
         </p>
       ) : null}
     </div>

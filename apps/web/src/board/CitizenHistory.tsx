@@ -76,7 +76,7 @@ function ChangeBody({ name, change }: { name: string; change: HomeChange }) {
     <div className="space-y-3 px-4 pt-1 pb-3">
       <p className="text-xs text-fg-secondary">
         {change.kind === "merge" ? (
-          "Two turns on different runners changed the same lines at once. The file kept one turn's version, and this copy holds the other's until the citizen reconciles them."
+          KIND_TITLE.merge
         ) : change.kind === "board" ? (
           `Written by the board: ${change.subject.replace(/^home: /, "")}.`
         ) : change.turnId === undefined ? (

@@ -369,7 +369,7 @@ function NowTab({
                 ? "Reading the last turn…"
                 : lastTurnAt === undefined
                   ? `${name} has not taken a turn yet.`
-                  : `${name}'s last turn kept no steps; Turns lists every finished one.`}
+                  : `${name}'s last turn kept no steps.`}
           </PaneNote>
         ) : (
           <>

@@ -153,8 +153,7 @@ export function RunnersView() {
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {code !== undefined && enrollments.data !== undefined && followed === undefined ? (
           <output className="block px-2 pb-2 text-meta">
-            No runner waits with the code {code}. It may have been approved, denied, or expired; a
-            runner whose code expired asks again with a new one.
+            No runner waits with the code {code}.
           </output>
         ) : null}
         {ordered.length === 0 ? null : (

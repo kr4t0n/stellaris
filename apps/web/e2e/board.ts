@@ -70,6 +70,7 @@ interface Proposal {
   reason?: string;
   provisionedAt?: string;
   provision?: Record<string, unknown>;
+  skillFiles?: Record<string, unknown>;
 }
 
 export interface Write {
@@ -1054,8 +1055,8 @@ const CLAUDE_MODELS = [
  * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
  * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
  * starts with no token. With `inFlight`,
- * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
- * is a folder the board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
+ * desk is in a turn at the society until the user stops it. The skill proposal is a folder the
+ * board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
  * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's and studio's
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
@@ -1075,7 +1076,6 @@ export async function fakeBoard(
     github?: boolean;
     signedOut?: boolean;
     inFlight?: boolean;
-    skillFolder?: boolean;
     quotas?: "reads" | "limited";
     uploads?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
@@ -1148,21 +1148,12 @@ export async function fakeBoard(
     charter: {
       name: "refereed-research",
       summary: "Plan a research task with a gated referee.",
-      ...(options.skillFolder === true
-        ? {}
-        : {
-            body: "---\nname: refereed-research\ndescription: Plan a research task.\n---\n\n# Refereed research\n\nUse this for any study.",
-          }),
     },
-    ...(options.skillFolder === true
-      ? {
-          skillFiles: {
-            commit: "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
-            takenAt: CREATED,
-            files: SKILL_FILES.map(({ text: _text, truncated: _cut, ...file }) => file),
-          },
-        }
-      : {}),
+    skillFiles: {
+      commit: "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+      takenAt: CREATED,
+      files: SKILL_FILES.map(({ text: _text, truncated: _cut, ...file }) => file),
+    },
     body: "The plan has run on four tasks.",
   };
 
@@ -1770,7 +1761,7 @@ export async function fakeBoard(
       case `/api/proposals/${SKILL_PROPOSAL}`:
         return json(route, proposal);
       case `/api/proposals/${SKILL_PROPOSAL}/files`:
-        return json(route, options.skillFolder === true ? SKILL_FILES : []);
+        return json(route, SKILL_FILES);
       default:
         return json(route, { message: `no fake for ${pathname}` }, 404);
     }

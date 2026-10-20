@@ -1,21 +1,10 @@
-import {
-  appendFile,
-  chmod,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 import { Board, BoardError, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
@@ -28,6 +17,21 @@ const result = (name: string, ok: boolean) => ({
   ts: "2026-09-28T10:00:30.000Z",
   event: { type: "tool_result" as const, name, ok },
 });
+
+/** A skill's SKILL.md in a citizen's home, committed as a runner's push after a turn leaves it. */
+async function homeSkill(board: Board, agent: string, name: string, text: string): Promise<void> {
+  await mkdir(board.paths.agentSkill(agent, name), { recursive: true });
+  await writeFile(board.paths.agentSkillFile(agent, name), text, "utf8");
+  const home = board.paths.agent(agent);
+  await execa("git", ["add", "--all"], { cwd: home });
+  await execa(
+    "git",
+    ["-c", `user.name=${agent}`, "-c", "user.email=e@x", "commit", "-qm", "turn"],
+    {
+      cwd: home,
+    },
+  );
+}
 
 const turnIn = (thread: Ulid | undefined, at: string) => ({
   agent: "eng-1",
@@ -204,9 +208,6 @@ describe("Board", () => {
       state: "open",
       openedBy: "user",
       subject: { kind: "task", id: task.id },
-    });
-    await expect(board.openThread(ENG, { task_id: task.id })).rejects.toMatchObject({
-      code: "INVALID_STATE",
     });
     const threadMessage = await board.postMessage(ENG, {
       body: "Working on it.",
@@ -823,25 +824,6 @@ describe("Board", () => {
     expect(home).toEqual(expect.arrayContaining([labDev.id, inSociety.id, news.id]));
     expect(home).not.toContain(demoDev.id);
     expect(await ids(FRONT, { place: "demo" })).toEqual([demoDev.id]);
-  });
-
-  it("starts a citizen's conversation of a project's channels outside it where its society home had read", async () => {
-    const { board } = await society();
-    await board.addProject(USER, { slug: "lab" });
-    const read = await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 seen" });
-    const unread = await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 not yet" });
-    // As a build from before kept it: the society's home read lab's posts, up to the first.
-    await writeFile(
-      board.paths.agentCursors("eng-1"),
-      JSON.stringify({ digest: null, scopes: { society: read.id } }),
-      "utf8",
-    );
-    const reopened = await Board.open(dir, { now });
-    const digest = await reopened.readDigest(
-      { ...ENG, scope: "society", place: "lab" },
-      { advance: false },
-    );
-    expect(digest.messages.map((message) => message.id)).toEqual([unread.id]);
   });
 
   it("refuses to archive a project under a turn in a citizen's conversation of its channels", async () => {
@@ -1470,9 +1452,6 @@ describe("Board", () => {
     });
     expect(await state(dropped)).toBe("closed");
     expect(await lastStep(dropped)).toEqual({ action: "abandoned", stage: "s1", to: null });
-    await expect(board.openThread(ENG, { task_id: dropped })).rejects.toMatchObject({
-      code: "INVALID_STATE",
-    });
 
     await expect(
       board.postMessage(ENG, { channel: "demo/general", body: "late", thread_id: finished }),
@@ -1493,9 +1472,9 @@ describe("Board", () => {
       (await board.readDigest(actor)).messages.map((m) => m.id);
 
     // A topic on a channel: the thread records its channel, and every message carries it.
-    await expect(board.openThread(ENG, { channel: "demo/general" })).rejects.toMatchObject({
-      code: "VALIDATION",
-    });
+    await expect(board.openThread(ENG, { channel: "demo/general", title: "" })).rejects.toThrow(
+      /title/,
+    );
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "Which runner?" });
     expect(topic).toMatchObject({ channel: "demo/dev", state: "open", openedBy: "eng-1" });
     expect(topic.subject).toBeUndefined();
@@ -1539,9 +1518,6 @@ describe("Board", () => {
     const [pitch] = await board.listThread(proposal.id);
     expect(pitch?.body).toContain("Ideas keep landing in general.");
     expect(await board.listChannel("governance")).toEqual([]);
-    await expect(board.openThread(ENG, { proposal_id: proposal.id })).rejects.toMatchObject({
-      code: "INVALID_STATE",
-    });
     await expect(
       board.closeThread(STEW, { thread_id: proposal.id, summary: "never mind" }),
     ).rejects.toMatchObject({ code: "INVALID_STATE" });
@@ -1759,34 +1735,6 @@ describe("Board", () => {
       `maxReplicas ${before.maxReplicas} → 3`,
       "verbs +create_channel −search",
     ]);
-  });
-
-  it("approves a reallocation filed before reallocations changed roles, and applies nothing", async () => {
-    const { board } = await society();
-    const id = ulid();
-    await writeFile(
-      board.paths.proposal(id),
-      [
-        "---",
-        `id: ${id}`,
-        "kind: reallocation",
-        "proposedBy: rev-1",
-        "status: proposed",
-        `createdAt: '${now().toISOString()}'`,
-        "charter:",
-        "  description: Move rev-1 to the api project.",
-        "---",
-        "Filed before reallocations named a role.",
-        "",
-      ].join("\n"),
-    );
-    const before = await board.listRoles();
-    await board.approve(USER, { proposal_id: id });
-    expect((await board.readProposal(id)).status).toBe("approved");
-    expect(await board.listRoles()).toEqual(before);
-    expect((await board.listThread(id)).at(-1)?.body).toContain(
-      "Approved: reallocation: Move rev-1 to the api project.",
-    );
   });
 
   it("archives a project by the user alone, once no task there is in play, and keeps what it holds", async () => {
@@ -2056,156 +2004,6 @@ describe("Board", () => {
     });
   });
 
-  it("opens the asks channel in an older society once, for the front desk to follow", async () => {
-    const { board } = await society();
-    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
-    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
-    const DESK: Actor = { name: "desk", role: "concierge" };
-    expect((await board.readAgent("desk")).subscriptions).toEqual(["general", "asks"]);
-
-    // An older society had no asks channel: the user's asks opened their threads in general.
-    await board.unsubscribe(DESK, { channel: "asks" });
-    const file = board.paths.societyFile();
-    await writeFile(file, (await readFile(file, "utf8")).replace("\n  - asks", ""), "utf8");
-    expect((await board.society()).channels).toEqual(["general", "governance"]);
-    const reopened = await Board.open(dir);
-    expect((await reopened.society()).channels).toEqual(["general", "governance", "asks"]);
-    expect((await reopened.readAgent("desk")).subscriptions).toEqual(["general", "asks"]);
-    expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
-    expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("asks");
-
-    // Applied once: a front desk that leaves the channel afterwards keeps its choice.
-    await reopened.unsubscribe(DESK, { channel: "asks" });
-    await Board.open(dir);
-    expect((await reopened.readAgent("desk")).subscriptions).toEqual(["general"]);
-  });
-
-  it("aligns an older society once: decisions for ops readers, thread records, the digest cursor", async () => {
-    const { board, eng } = await society();
-    const STEW: Actor = { name: "stew", role: "steward" };
-    const { agent } = await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
-    expect(agent.subscriptions).toEqual(["general", "governance"]);
-    expect(eng.agent.subscriptions).not.toContain("decisions");
-
-    // An older society had ops and decisions channels: signals were posted to ops, which ops
-    // readers followed, and proposals were decided in decisions, which a steward from before that
-    // did not follow. Both channels are retired on the next open, after the steward was aligned
-    // to follow decisions; threads kept as a state on their task, as older builds wrote them,
-    // become records.
-    await board.addChannel(USER, { project: null, name: "ops", purpose: "operations signals" });
-    await board.addChannel(USER, { project: null, name: "decisions", purpose: "decisions" });
-    await board.subscribe(STEW, { channel: "ops" });
-    const legacyThread = async (title: string, end: boolean): Promise<Ulid> => {
-      const task = await board.createTask(USER, { project: "demo", title });
-      await board.postMessage(ENG, { body: "old news", thread_id: task.id });
-      if (end) {
-        await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
-      }
-      await rm(board.paths.threadFile(board.paths.threads("demo"), task.id));
-      const file = board.paths.task("demo", task.id);
-      await writeFile(
-        file,
-        (await readFile(file, "utf8")).replace("status: ", "thread: open\nstatus: "),
-        "utf8",
-      );
-      return task.id;
-    };
-    const live = await legacyThread("live", false);
-    const ended = await legacyThread("ended", true);
-    // Older builds logged thread events by task id; the record takes its opener from them.
-    const legacyEvent = {
-      id: ulid(),
-      ts: clock.toISOString(),
-      type: "thread.opened",
-      actor: "rev-1",
-      payload: { taskId: live, project: "demo" },
-    };
-    await appendFile(board.paths.eventLog(), `${JSON.stringify(legacyEvent)}\n`, "utf8");
-    const untouched = await board.createTask(USER, { project: "demo", title: "no thread" });
-    await rm(board.paths.threadFile(board.paths.threads("demo"), untouched.id));
-    const untouchedFile = board.paths.task("demo", untouched.id);
-    await writeFile(
-      untouchedFile,
-      (await readFile(untouchedFile, "utf8")).replace("status: ", "thread: none\nstatus: "),
-      "utf8",
-    );
-    await expect(board.readThread(live)).rejects.toMatchObject({ code: "NOT_FOUND" });
-    // A send-back was once only an event: a task still in its rework records it.
-    const legacyReturn = async (resubmit: boolean): Promise<Ulid> => {
-      const task = await board.createTask(USER, {
-        project: "demo",
-        title: resubmit ? "resubmitted" : "returned",
-        stages: [{ name: "draft" }, { name: "check" }],
-      });
-      await board.advanceTask(USER, { task_id: task.id });
-      await board.updateTask(USER, { task_id: task.id, stage: "s1" });
-      if (resubmit) {
-        await board.advanceTask(USER, { task_id: task.id });
-      }
-      const file = board.paths.task("demo", task.id);
-      await writeFile(
-        file,
-        (await readFile(file, "utf8")).replace(/returned:\n(?: {2}.*\n)+/, ""),
-        "utf8",
-      );
-      return task.id;
-    };
-    const returned = await legacyReturn(false);
-    const resubmitted = await legacyReturn(true);
-    expect(await readFile(board.paths.task("demo", returned), "utf8")).not.toContain("returned:");
-    // The digest was once the inbox: cursor files keyed it `inbox`, and the user followed channels.
-    const Cursor = z.object({ digest: z.string().nullable() });
-    const cursor = ulid();
-    const cursorFile = board.paths.agentCursors("eng-1");
-    await writeFile(cursorFile, JSON.stringify({ inbox: cursor }), "utf8");
-    await board.subscribe(USER, { channel: "demo/general" });
-    const reopened = await Board.open(dir);
-    // Threads and channels, once read in each scope's single conversation, start where that
-    // conversation was, and so do projects' channels seen from the society scope.
-    expect(Cursor.parse(JSON.parse(await readFile(cursorFile, "utf8")))).toEqual({
-      digest: cursor,
-    });
-    expect(JSON.parse(await readFile(cursorFile, "utf8"))).toEqual({
-      digest: cursor,
-      scopes: {},
-      threadsFrom: { demo: cursor, society: cursor },
-      channelsFrom: { demo: cursor, society: cursor },
-      placesFrom: { society: cursor },
-    });
-    expect((await reopened.readAgent("user")).subscriptions).toEqual([]);
-    expect((await reopened.readAgent("stew")).subscriptions).toEqual(["general", "governance"]);
-    expect((await reopened.society()).channels).toEqual(["general", "governance", "asks"]);
-    expect((await reopened.readAgent("eng-1")).subscriptions).not.toContain("decisions");
-    expect(await reopened.readThread(live)).toMatchObject({
-      channel: "demo/general",
-      title: "live",
-      subject: { kind: "task", id: live },
-      state: "open",
-      openedBy: "rev-1",
-    });
-    expect(await reopened.readThread(ended)).toMatchObject({ state: "closed", openedBy: "user" });
-    expect((await reopened.listThread(live)).map((m) => m.body.trim())).toEqual(["old news"]);
-    await expect(reopened.readThread(untouched.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect((await reopened.getTask(USER, { task_id: returned })).returned).toEqual({
-      from: "s2",
-      by: "user",
-      at: expect.any(String),
-    });
-    expect((await reopened.getTask(USER, { task_id: resubmitted })).returned).toBeUndefined();
-    for (const id of [live, ended, untouched.id]) {
-      expect(await readFile(reopened.paths.task("demo", id), "utf8")).not.toContain("thread:");
-    }
-
-    // Only once: a later choice to leave the channel stands.
-    await reopened.unsubscribe(STEW, { channel: "decisions" });
-    const again = await Board.open(dir);
-    expect((await again.readAgent("stew")).subscriptions).not.toContain("decisions");
-    const aligned = (await again.readEvents(null)).filter(
-      (e) => e.type === "subscription.changed" && e.payload["aligned"] === true,
-    );
-    expect(aligned.map((e) => e.actor)).toEqual(["stew"]);
-  });
-
   it("runs the front desk: projects and membership as verbs, and a roster that dispatch can read", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
@@ -2378,9 +2176,10 @@ describe("Board", () => {
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const STEW: Actor = { name: "stew", role: "steward" };
     for (const name of ["uv-setup", "old-plan"]) {
+      await homeSkill(board, "eng-1", name, `Steps for ${name}.\n`);
       const proposal = await board.propose(ENG, {
         kind: "skill",
-        charter: { name, summary: `The ${name} procedure`, body: `Steps for ${name}.` },
+        charter: { name, summary: `The ${name} procedure` },
       });
       await board.approve(STEW, { proposal_id: proposal.id });
     }
@@ -2451,114 +2250,6 @@ describe("Board", () => {
     expect((await (await Board.open(dir, { now })).readRole("steward")).verbs).toContain(
       "remove_skill",
     );
-  });
-
-  it("grants remove_knowledge once to every charter that grants write_knowledge", async () => {
-    const { board } = await society();
-    await board.setRoleCharter(USER, {
-      name: "engineer",
-      purpose: "Builds.",
-      verbs: MEMBER_VERBS.filter((verb) => verb !== "remove_knowledge"),
-    });
-    await board.setRoleCharter(USER, {
-      name: "reviewer",
-      purpose: "Reviews.",
-      verbs: ["post_message", "read_inbox"],
-    });
-    const reopened = await Board.open(dir, { now });
-    expect((await reopened.readRole("engineer")).verbs).toContain("remove_knowledge");
-    expect((await reopened.readRole("reviewer")).verbs).not.toContain("remove_knowledge");
-    const granted = (await reopened.readEvents(null)).filter(
-      (event) =>
-        event.type === "role.added" &&
-        JSON.stringify(event.payload["verbsAdded"]) === JSON.stringify(["remove_knowledge"]),
-    );
-    expect(granted.map((event) => event.payload["name"])).toEqual(["engineer"]);
-    // A member's own role file follows its charter.
-    expect(await reopened.readAgentRoleBody("eng-1")).toContain("# eng-1, engineer");
-    // Once applied, it is not applied again, so a charter that later drops the verb keeps that.
-    await reopened.setRoleCharter(USER, {
-      name: "engineer",
-      purpose: "Builds.",
-      verbs: MEMBER_VERBS.filter((verb) => verb !== "remove_knowledge"),
-    });
-    await Board.open(dir, { now });
-    expect((await reopened.readRole("engineer")).verbs).not.toContain("remove_knowledge");
-  });
-
-  it("gives knowledge notes from before notices their notice once, by the event log rather than their words", async () => {
-    const { board } = await society();
-    const STEW: Actor = { name: "stew", role: "steward" };
-    await board.writeKnowledge(ENG, {
-      project: "demo",
-      topic: "testing",
-      body: "Run the tests.",
-      revision: 0,
-    });
-    await board.writeKnowledge(ENG, {
-      project: "demo",
-      topic: "testing",
-      body: "Run them twice.",
-      revision: 1,
-    });
-    await board.writeKnowledge(STEW, {
-      project: null,
-      topic: "norms",
-      body: "Be brief.",
-      revision: 0,
-    });
-    await board.removeKnowledge(STEW, { project: null, topic: "norms" });
-    // A post worded like a note follows no knowledge verb, so it is talk.
-    await board.postMessage(ENG, {
-      channel: "demo/general",
-      body: "Knowledge updated: testing. It is under knowledge/testing.md.",
-    });
-    // As older builds wrote them: the same notes, with no notice.
-    const notes = [
-      ...(await board.listChannel("demo/general")),
-      ...(await board.listChannel("general")),
-    ].filter((message) => message.notice !== undefined);
-    expect(notes).toHaveLength(4);
-    for (const note of notes) {
-      const file = board.paths.messageFile(
-        board.paths.channelDir(note.channel),
-        note.id,
-        note.author,
-      );
-      const text = await readFile(file, "utf8");
-      await writeFile(file, text.replace(/^notice:\n(?: {2}.*\n)+/m, ""));
-    }
-    expect((await board.listChannel("demo/general")).map((message) => message.notice)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-    ]);
-
-    const reopened = await Board.open(dir, { now });
-    const demo = await reopened.listChannel("demo/general");
-    expect(demo.map((message) => [message.author, message.notice?.action])).toEqual([
-      ["eng-1", "written"],
-      ["eng-1", "updated"],
-      ["eng-1", undefined],
-    ]);
-    expect(demo[0]?.notice).toEqual({
-      kind: "knowledge",
-      action: "written",
-      topic: "testing",
-      project: "demo",
-    });
-    expect(demo[0]?.body).toBe(notes[0]?.body);
-    expect(
-      (await reopened.listChannel("general")).flatMap((message) =>
-        message.notice === undefined ? [] : [[message.notice.action, message.notice.project]],
-      ),
-    ).toEqual([
-      ["written", null],
-      ["removed", null],
-    ]);
-    // Once applied, it is recorded and not applied again.
-    const alignments = await readFile(path.join(board.paths.state(), "alignments.json"), "utf8");
-    expect(alignments).toContain("knowledge-notices");
   });
 
   it("lands a ghpr task through the pull request linked to it, on its project's GitHub repository", async () => {
@@ -2714,31 +2405,6 @@ describe("Board", () => {
     ).rejects.toMatchObject({ code: "INVALID_STATE" });
   });
 
-  it("grants update_dashboard once to every charter that grants write_knowledge, and rewords old dashboards", async () => {
-    const { board } = await society();
-    await board.setRoleCharter(USER, {
-      name: "engineer",
-      purpose: "Builds.",
-      verbs: MEMBER_VERBS.filter((verb) => verb !== "update_dashboard"),
-    });
-    await board.setRoleCharter(USER, {
-      name: "reviewer",
-      purpose: "Reviews.",
-      verbs: ["post_message", "read_inbox"],
-    });
-    await writeFile(
-      board.paths.dashboard("demo"),
-      "---\nproject: demo\nupdatedAt: '2026-09-30T05:19:26.611Z'\n---\n# Demo dashboard\n\nAgents may edit this file. It is rendered by the board UI.\n",
-    );
-    const reopened = await Board.open(dir, { now });
-    expect((await reopened.readRole("engineer")).verbs).toContain("update_dashboard");
-    expect((await reopened.readRole("reviewer")).verbs).not.toContain("update_dashboard");
-    const dashboard = await reopened.readDashboard("demo");
-    expect(dashboard).toMatchObject({ revision: 0, updatedAt: "2026-09-30T05:19:26.611Z" });
-    expect(dashboard.body).toContain("keep this page current with update_dashboard");
-    expect(dashboard.body).not.toContain("Agents may edit");
-  });
-
   it("shares knowledge and skills: write_knowledge, skill promotion, and search over the archive", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -2836,13 +2502,15 @@ describe("Board", () => {
     ]);
 
     // Promotion: a skill proposal the steward approves lands under the society's skills, for everyone.
+    await homeSkill(
+      board,
+      "eng-1",
+      "uv-setup",
+      "---\nname: uv-setup\ndescription: Set up a uv project with locked dependencies\n---\n# uv setup\n\nRun uv sync --locked before the tests.\n",
+    );
     const proposal = await board.propose(ENG, {
       kind: "skill",
-      charter: {
-        name: "uv-setup",
-        summary: "Set up a uv project with locked dependencies",
-        body: "Run uv sync --locked before the tests.",
-      },
+      charter: { name: "uv-setup", summary: "Set up a uv project with locked dependencies" },
       rationale: "Every Python project here needs it.",
     });
     await board.approve(STEW, { proposal_id: proposal.id });
@@ -3089,6 +2757,20 @@ describe("Board", () => {
     );
   });
 
+  it("takes a skill from its proposer's home alone, never from text in its charter", async () => {
+    const { board } = await society();
+    await expect(
+      board.propose(ENG, {
+        kind: "skill",
+        charter: { name: "texted", summary: "Something", body: "# Texted\n\nSteps.\n" },
+        rationale: "x",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: expect.stringContaining("no skills/texted/SKILL.md in eng-1's home"),
+    });
+  });
+
   it("refuses to approve a skill whose folder its proposer's home does not give", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -3203,6 +2885,19 @@ describe("Board", () => {
       revision: 0,
     });
     expect(norms).toMatchObject({ revision: 1, updatedBy: "user" });
+  });
+
+  it("reads a skill's index line from its description, else from its body, never from another key", async () => {
+    const { board } = await society();
+    await mkdir(board.paths.agentSkill("eng-1", "old-keys"), { recursive: true });
+    await writeFile(
+      board.paths.agentSkillFile("eng-1", "old-keys"),
+      "---\nname: old-keys\nsummary: Not an index line\n---\n# Old keys\n\nRead the body.\n",
+      "utf8",
+    );
+    expect((await board.listAgentSkills("eng-1")).map((s) => [s.name, s.summary])).toEqual([
+      ["old-keys", "Read the body."],
+    ]);
   });
 
   it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {
@@ -3700,49 +3395,5 @@ describe("Board", () => {
       code: "FORBIDDEN",
       message: "role engineer may not upload_image",
     });
-  });
-
-  it("grants upload_image once to every charter that may post", async () => {
-    const { board } = await society();
-    const without = MEMBER_VERBS.filter((verb) => verb !== "upload_image");
-    await board.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
-    await board.setRoleCharter(USER, {
-      name: "reviewer",
-      purpose: "Reviews.",
-      verbs: ["post_message", "read_inbox"],
-    });
-    await board.setRoleCharter(USER, {
-      name: "reader",
-      purpose: "Reads.",
-      verbs: ["read_inbox", "search"],
-    });
-    const reopened = await Board.open(dir, { now });
-    for (const role of ["engineer", "reviewer", "steward", "concierge", "user"]) {
-      expect((await reopened.readRole(role)).verbs).toContain("upload_image");
-    }
-    expect((await reopened.readRole("reader")).verbs).not.toContain("upload_image");
-    await reopened.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
-    await Board.open(dir, { now });
-    expect((await reopened.readRole("engineer")).verbs).not.toContain("upload_image");
-  });
-
-  it("grants the cron verbs once to every charter but the user's", async () => {
-    const { board } = await society();
-    const without = MEMBER_VERBS.filter((verb) => !verb.endsWith("_cron"));
-    await board.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
-    await board.setRoleCharter(USER, {
-      name: "reviewer",
-      purpose: "Reviews.",
-      verbs: ["post_message", "read_inbox"],
-    });
-    const reopened = await Board.open(dir, { now });
-    for (const role of ["engineer", "reviewer", "steward", "concierge"]) {
-      expect((await reopened.readRole(role)).verbs).toEqual(
-        expect.arrayContaining(["create_cron", "update_cron", "remove_cron"]),
-      );
-    }
-    await reopened.setRoleCharter(USER, { name: "engineer", purpose: "Builds.", verbs: without });
-    await Board.open(dir, { now });
-    expect((await reopened.readRole("engineer")).verbs).not.toContain("create_cron");
   });
 });

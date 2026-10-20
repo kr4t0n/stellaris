@@ -595,14 +595,6 @@ export class Scheduler {
           await this.wakeCreator(taskId, project, creator, event.actor, now);
         }
         await this.wakeDependents(taskId, event.actor, now);
-        // A task's thread closes with it and is swept then; one from before threads has none.
-        const threaded = await this.board.readThread(taskId).then(
-          () => true,
-          () => false,
-        );
-        if (!threaded) {
-          this.sweep({ kind: "thread", id: taskId });
-        }
         return;
       }
       case "thread.closed": {

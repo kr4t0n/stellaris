@@ -32,10 +32,10 @@ function bearer(c: Context<RunnerEnv>): string | null {
 }
 
 /**
- * The runner protocol of PLAN.md section 7.1 over HTTP, under `/runner`, authenticated with runner
- * tokens: registration, the event stream jobs and requests go down, and the posts that come back,
- * turn events and outcomes, answers, and warm sessions; the board's projection as files; and each
- * agent's home as a git repository.
+ * The runner protocol of docs/plan.md section 7.1 over HTTP, under `/runner`, authenticated with
+ * runner tokens: registration, the event stream jobs and requests go down, and the posts that come
+ * back, turn events and outcomes, answers, and warm sessions; the board's projection as files; and
+ * each agent's home as a git repository.
  */
 export function runnerRoutes(
   board: Board,

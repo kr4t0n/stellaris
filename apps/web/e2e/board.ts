@@ -374,12 +374,12 @@ const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATE
 const PLOT_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-function taskFile(path: string, content: string) {
+function taskFile(path: string, content: string, commit = TASK_COMMIT) {
   const bytes = Buffer.from(content, path.endsWith(".png") ? "base64" : "utf8");
   return {
     kind: "file",
     path,
-    commit: TASK_COMMIT,
+    commit,
     size: bytes.length,
     content: bytes.toString("base64"),
   };
@@ -475,6 +475,34 @@ const TASK_FILES: Readonly<Record<string, unknown>> = {
   "docs/plot.png": taskFile("docs/plot.png", PLOT_PNG),
   "docs/run.log": taskFile("docs/run.log", "first line\nsecond line\nthird line\n"),
   "results.csv": taskFile("results.csv", 'method,runtime\nDijkstra,1.2\n"A*, tuned",0.9\n'),
+};
+
+/** lab's default branch as the clone on its runner has it, before the survey lands. */
+const LAB_COMMIT = { id: "9b1d3e7a5c4f2e1d0c9b8a7f6e5d4c3b2a1f0e9d", at: CREATED, author: "ref" };
+const LAB_README = "# Lab\n\nHow each run is set up is in [the methods](docs/methods.md).\n";
+const LAB_METHODS = "# Methods\n\nSeeds are fixed; [the list](../seeds.csv) has each one.\n";
+const LAB_SEEDS = "seed,model\n42,small\n";
+
+const LAB_FILES: Readonly<Record<string, unknown>> = {
+  "": {
+    kind: "dir",
+    path: "",
+    commit: LAB_COMMIT,
+    entries: [
+      { name: "seeds.csv", kind: "file", size: LAB_SEEDS.length },
+      { name: "README.md", kind: "file", size: LAB_README.length },
+      { name: "docs", kind: "dir", size: null },
+    ],
+  },
+  docs: {
+    kind: "dir",
+    path: "docs",
+    commit: LAB_COMMIT,
+    entries: [{ name: "methods.md", kind: "file", size: LAB_METHODS.length }],
+  },
+  "README.md": taskFile("README.md", LAB_README, LAB_COMMIT),
+  "docs/methods.md": taskFile("docs/methods.md", LAB_METHODS, LAB_COMMIT),
+  "seeds.csv": taskFile("seeds.csv", LAB_SEEDS, LAB_COMMIT),
 };
 
 /** desk's one finished turn, as the event log pairs its start and end. */
@@ -1543,6 +1571,13 @@ export async function fakeBoard(
     const files = `/api/tasks/${STAGE_TASK}/files`;
     if (pathname === files || pathname.startsWith(`${files}/`)) {
       const file = TASK_FILES[decodeURIComponent(pathname.slice(files.length + 1))];
+      return file === undefined
+        ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
+        : json(route, file);
+    }
+    const labFiles = "/api/projects/lab/files";
+    if (pathname === labFiles || pathname.startsWith(`${labFiles}/`)) {
+      const file = LAB_FILES[decodeURIComponent(pathname.slice(labFiles.length + 1))];
       return file === undefined
         ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
         : json(route, file);

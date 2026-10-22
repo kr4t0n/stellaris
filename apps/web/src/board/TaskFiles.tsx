@@ -1,7 +1,7 @@
 import type { BranchFileChange, Task } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { TaskFileLink } from "../components/TaskFile.js";
+import { FileLink } from "../components/BranchFile.js";
 import { ApiError } from "../lib/api.js";
 import {
   changeLabel,
@@ -101,13 +101,13 @@ function FileDiff({ taskId, change }: { taskId: string; change: BranchFileChange
   return (
     <div className="mb-2 ml-[18px]">
       {change.status === "deleted" ? null : (
-        <TaskFileLink
-          taskId={taskId}
+        <FileLink
+          source={{ kind: "task", taskId }}
           path={change.path}
           className="text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
         >
           Open the whole file
-        </TaskFileLink>
+        </FileLink>
       )}
       {body}
     </div>
@@ -296,13 +296,13 @@ export function TaskFiles({ task, now }: { task: Task; now: number }) {
     <section aria-label="Files" className="mt-5 border-t border-line pt-4">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-section">Files</h3>
-        <TaskFileLink
-          taskId={task.id}
+        <FileLink
+          source={{ kind: "task", taskId: task.id }}
           path=""
           className="text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
         >
           Browse the branch
-        </TaskFileLink>
+        </FileLink>
       </div>
       {body}
     </section>

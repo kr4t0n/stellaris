@@ -164,3 +164,90 @@ test("the back arrow returns to the view it came from, named, and to the parent 
     .click();
   await expect(fresh).toHaveURL(`/task/${STAGE_TASK}`);
 });
+
+test("a project's view lists the top of its default branch, each entry opening in the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+
+  await expect(files).toContainText("main · committed by ref");
+  await expect(files).toContainText("9b1d3e7");
+  // Folders first, then files, each by name; a file with its size.
+  await expect(files.getByRole("link")).toHaveText([
+    "Browse the branch",
+    "docs/",
+    "README.md",
+    "seeds.csv",
+  ]);
+  await expect(files.getByRole("listitem").nth(2)).toHaveText(/^seeds\.csv\s*\d+ B$/);
+
+  // A file opens in the files view, its relative links staying on the project's branch.
+  await files.getByRole("link", { name: "README.md" }).click();
+  await expect(page).toHaveURL("/p/lab/files/README.md");
+  await expect(view.getByRole("heading", { name: "README.md" })).toBeVisible();
+  await expect(view).toContainText("Lab · main · committed by ref");
+  const methods = view.getByRole("link", { name: "the methods" });
+  await expect(methods).toHaveAttribute("href", "/p/lab/files/docs/methods.md");
+  await methods.click();
+  await expect(view.getByRole("heading", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("link", { name: "the list" }).click();
+  await expect(page).toHaveURL("/p/lab/files/seeds.csv");
+  await expect(view.getByRole("cell", { name: "small" })).toBeVisible();
+
+  // A folder opens there too, and the arrow returns to the project, named.
+  await page.goto("/p/lab");
+  await files.getByRole("link", { name: "docs/" }).click();
+  await expect(page).toHaveURL("/p/lab/files/docs");
+  await expect(view.getByRole("link", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("button", { name: "Back to Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab");
+  await files.getByRole("link", { name: "Browse the branch" }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await expect(view.getByRole("link", { name: "README.md" })).toBeVisible();
+
+  // Opened as a tab's first view, a path the branch lacks says so, and the arrow goes up.
+  await page.goto("/p/lab/files/notes.md");
+  await expect(view).toContainText("notes.md is not on main.");
+  await view.getByRole("link", { name: "Back to the project Lab" }).click();
+  await expect(page).toHaveURL("/p/lab");
+});
+
+test("a project's files say when its runner is away and when its branch holds nothing", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  let answer: { status: number; json: unknown } = {
+    status: 503,
+    json: { error: "RUNNER_AWAY", message: "runner laptop, where lab lives, is not connected" },
+  };
+  // Registered after the fake board, so it answers first.
+  await page.route("**/api/projects/lab/files", (route) => route.fulfill(answer));
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  await expect(files).toContainText(
+    "laptop, the runner Lab lives on, is not connected, so the project's files cannot be listed now.",
+  );
+
+  const commit = {
+    id: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    at: new Date().toISOString(),
+    author: "ref",
+  };
+  answer = { status: 200, json: { kind: "dir", path: "", commit, entries: [] } };
+  await page.reload();
+  await expect(files).toContainText("main · committed by ref");
+  await expect(files).toContainText("Nothing on main yet.");
+
+  answer = { status: 404, json: { error: "NOT_FOUND", message: "lab has no repository yet" } };
+  await page.reload();
+  await expect(files).toContainText("Nothing on main yet.");
+  await expect(files).not.toContainText("committed by");
+});

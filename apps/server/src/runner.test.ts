@@ -3077,6 +3077,110 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await away.json()).toMatchObject({ error: "RUNNER_AWAY" });
   });
 
+  it("reads a project's default branch on the project's runner, not its tasks' work", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "project-files" });
+    for (const slug of ["demo", "idle"]) {
+      await board.addProject(USER, { slug });
+    }
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const task = await board.createTask(USER, { project: "demo", title: "guide" });
+    let repoDir = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        repoDir = request.spec.repoDir;
+        await mkdir(path.join(request.spec.cwd, "docs"), { recursive: true });
+        await writeFile(path.join(request.spec.cwd, "docs", "guide.md"), "# Guide\n");
+        await writeFile(path.join(request.spec.cwd, "README.md"), "# Demo\n");
+        return completed("wrote the guide");
+      },
+    };
+    const { app, run, runner, hub } = await start(board, backend);
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      thread: { id: task.id, task: true },
+      trigger: { kind: "manual", fromUser: true, reason: "test" },
+      priority: 2,
+    });
+    const read = (route: string) =>
+      app.request(`/api/projects/${route}`, { headers: { authorization: `Bearer ${userToken}` } });
+
+    // The default branch holds the clone's first commit alone; the task's work is on its own branch.
+    const listed = await read("demo/files");
+    expect(listed.status).toBe(200);
+    const empty = BranchFileSchema.parse(await listed.json());
+    expect(empty).toMatchObject({ kind: "dir", path: "", entries: [] });
+    const initial = await execa("git", ["rev-parse", "main"], { cwd: repoDir });
+    expect(empty.commit.id).toBe(initial.stdout);
+    expect((await read("demo/files/README.md")).status).toBe(404);
+
+    // Whatever branch the project names as its default is the one read.
+    await execa("git", ["branch", "site", `task/${task.id}`], { cwd: repoDir });
+    await board.configureProject(USER, { project: "demo", default_branch: "site" });
+    const root = BranchFileSchema.parse(await (await read("demo/files")).json());
+    expect(root.kind === "dir" ? root.entries : null).toEqual([
+      { name: "README.md", kind: "file", size: 7 },
+      { name: "docs", kind: "dir", size: null },
+    ]);
+    expect(root.commit.author).toBe("eng-1");
+    const guide = BranchFileSchema.parse(await (await read("demo/files/docs/guide.md")).json());
+    expect(guide).toMatchObject({ kind: "file", path: "docs/guide.md", size: 8 });
+    expect(
+      Buffer.from(guide.kind === "file" ? (guide.content ?? "") : "", "base64").toString(),
+    ).toBe("# Guide\n");
+    expect(BranchFileSchema.parse(await (await read("demo/files/docs")).json())).toMatchObject({
+      kind: "dir",
+      entries: [{ name: "guide.md", kind: "file", size: 8 }],
+    });
+
+    expect((await read("demo/files/draft.md")).status).toBe(404);
+    expect((await read("demo/files/docs%2F..%2FREADME.md")).status).toBe(400);
+    expect((await read("nothing/files")).status).toBe(404);
+    expect((await read("..%2Fdemo/files")).status).toBe(400);
+    // A project no turn has run in has no repository on any runner yet.
+    expect((await read("idle/files")).status).toBe(404);
+
+    // A runner from before file reads is refused at once rather than left to time out.
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.1",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: false,
+      branchChanges: false,
+      quotaReads: false,
+      imageReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    const old = await read("demo/files");
+    expect(old.status).toBe(409);
+    expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });
+
+    await runner.stop();
+    await vi.waitFor(() => expect(hub.connected).toEqual([]));
+    const away = await read("demo/files/README.md");
+    expect(away.status).toBe(503);
+    expect(await away.json()).toMatchObject({ error: "RUNNER_AWAY" });
+  });
+
   it("keeps an image a turn names on its runner and shows it by id, refusing what is out of reach or no image", async () => {
     const { board, userToken } = await Board.init(dir, { name: "images" });
     await board.addProject(USER, { slug: "demo" });

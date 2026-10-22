@@ -1577,7 +1577,11 @@ export async function fakeBoard(
     }
     const labFiles = "/api/projects/lab/files";
     if (pathname === labFiles || pathname.startsWith(`${labFiles}/`)) {
-      const file = LAB_FILES[decodeURIComponent(pathname.slice(labFiles.length + 1))];
+      // The clone holds main alone; a branch named default since has nothing until a turn there.
+      const file =
+        lab.defaultBranch === "main"
+          ? LAB_FILES[decodeURIComponent(pathname.slice(labFiles.length + 1))]
+          : undefined;
       return file === undefined
         ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
         : json(route, file);

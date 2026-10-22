@@ -88,7 +88,9 @@ export function FolderList({
           >
             {entry.kind === "dir" ? `${entry.name}/` : entry.name}
           </FileLink>
-          {entry.size === null ? null : <span className="text-meta">{sizeLabel(entry.size)}</span>}
+          {entry.size === null ? null : (
+            <span className="shrink-0 text-meta whitespace-nowrap">{sizeLabel(entry.size)}</span>
+          )}
         </li>
       ))}
     </ul>

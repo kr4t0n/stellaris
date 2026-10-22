@@ -215,6 +215,31 @@ test("a project's view lists the top of its default branch, each entry opening i
   await expect(view).toContainText("notes.md is not on main.");
   await view.getByRole("link", { name: "Back to the project Lab" }).click();
   await expect(page).toHaveURL("/p/lab");
+  await page.goto("/p/nothing/files/README.md");
+  await expect(view).toContainText("There is no project nothing.");
+});
+
+test("a project's files follow a change of its default branch, in the section and the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
+
+  await view.getByRole("button", { name: "Edit…" }).click();
+  await view.getByRole("textbox", { name: "Default branch" }).fill("trunk");
+  await view.getByRole("button", { name: "Save" }).click();
+  // The clone has no trunk until a turn there, so nothing of main's shows under trunk's name.
+  await expect(files).toContainText("Nothing on trunk yet.");
+  await expect(files.getByRole("link", { name: "README.md" })).toHaveCount(0);
+  await files.getByRole("link", { name: "Browse the branch" }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await expect(view).toContainText("Nothing on trunk yet.");
+  await expect(view.getByRole("link", { name: "README.md" })).toHaveCount(0);
 });
 
 test("a project's files say when its runner is away and when its branch holds nothing", async ({

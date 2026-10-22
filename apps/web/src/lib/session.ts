@@ -161,18 +161,26 @@ export function useThread(id: string | null) {
  * One path on a task's branch or a project's default branch. A path not on the branch, or a runner
  * that is away, is not asked again at once; a finished turn refreshes it, since the hand-back is
  * what commits a turn's files and the turn's start is when the runner follows the project's remote.
+ * A project's is keyed by the branch the board names as its default, so a new one is read afresh,
+ * and waits until the project is known.
  */
 export function useBranchFile(source: FileSource, path: string) {
   const { api } = useSession();
+  const projects = useProjects();
+  const branch =
+    source.kind === "project"
+      ? projects.data?.find((project) => project.slug === source.slug)?.defaultBranch
+      : undefined;
   return useQuery({
     queryKey:
       source.kind === "task"
         ? ["task-file", source.taskId, path]
-        : ["project-file", source.slug, path],
+        : ["project-file", source.slug, branch, path],
     queryFn: () =>
       source.kind === "task"
         ? api.taskFile(source.taskId, path)
         : api.projectFile(source.slug, path),
+    enabled: source.kind === "task" || branch !== undefined,
     staleTime: 30_000,
     retry: (failures, error) =>
       failures < 1 &&

@@ -300,6 +300,9 @@ export function ProjectFileView() {
   const project = projects.data?.find((each) => each.slug === slug);
   const name = project?.name ?? slug;
   const branch = project?.defaultBranch;
+  if (projects.data !== undefined && project === undefined) {
+    return <PaneNote>There is no project {slug}.</PaneNote>;
+  }
   return (
     <BranchFileView
       source={{ kind: "project", slug }}

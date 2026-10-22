@@ -84,8 +84,8 @@ function EditForm({ project, onDone }: { project: Project; onDone: () => void })
 /**
  * A project at a glance: who works in it, its channels, where its tasks stand, how they end, its
  * dashboard, what it knows, and the files on its default branch; an archived one also says when
- * and why. Its name and default
- * branch are edited here, and a channel is opened here for a workstream such as a release.
+ * and why. Its name and default branch are edited here, and a channel is opened here for a
+ * workstream such as a release.
  */
 export function ProjectView() {
   const { slug } = useParams({ from: "/p/$slug" });

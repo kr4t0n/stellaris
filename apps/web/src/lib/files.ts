@@ -1,20 +1,25 @@
 import { uploadedImageId, type BranchFileChange } from "@stellaris/shared";
 
-/** Where relative links in a task's file resolve: the file's folder on the task's branch. */
+/** Whose files a view reads: a task's branch, or the project's default branch. */
+export type FileSource =
+  | { readonly kind: "task"; readonly taskId: string }
+  | { readonly kind: "project"; readonly slug: string };
+
+/** Where relative links in a file resolve: the file's folder in its source. */
 export interface FileBase {
-  readonly taskId: string;
+  readonly source: FileSource;
   readonly dir: string;
 }
 
 /**
- * What a link or an image in the board's text points at: a file on a task's branch, an image a
- * citizen uploaded, some other place on a machine that nothing on the board can open, or, as null,
- * an address the browser opens.
+ * What a link or an image in the board's text points at: a file on a task's branch or a project's
+ * default branch, an image a citizen uploaded, some other place on a machine that nothing on the
+ * board can open, or, as null, an address the browser opens.
  */
 export type LinkTarget =
   | {
-      readonly kind: "task-file";
-      readonly taskId: string;
+      readonly kind: "file";
+      readonly source: FileSource;
       readonly path: string;
       /** The line the link cites, as `report.md:67` or `#L67` name it. */
       readonly line?: number;
@@ -88,8 +93,8 @@ function decoded(href: string): string {
 
 /**
  * Where a link goes. Agents name their work by the paths their tools used, on a runner's disk; one
- * through a task's worktree is that task's file, and so is a relative one in a task's file, beside
- * it. Any other path names a place the board cannot open. `image:<id>` is an image a citizen
+ * through a task's worktree is that task's file, and a relative one in a file is the file beside
+ * it in the same source. Any other path names a place the board cannot open. `image:<id>` is an image a citizen
  * uploaded. Any other address with a scheme, `//`, or only a fragment is the browser's.
  */
 export function linkTarget(href: string | undefined, base?: FileBase): LinkTarget | null {
@@ -114,13 +119,11 @@ export function linkTarget(href: string | undefined, base?: FileBase): LinkTarge
     const inside = normalizePath(worktree[2] ?? "");
     return inside === null
       ? LOCAL
-      : { kind: "task-file", taskId: worktree[1], path: inside, ...at };
+      : { kind: "file", source: { kind: "task", taskId: worktree[1] }, path: inside, ...at };
   }
   if (base !== undefined && !path.startsWith("/")) {
     const inside = normalizePath(`${base.dir}/${path}`);
-    return inside === null
-      ? LOCAL
-      : { kind: "task-file", taskId: base.taskId, path: inside, ...at };
+    return inside === null ? LOCAL : { kind: "file", source: base.source, path: inside, ...at };
   }
   return LOCAL;
 }
@@ -446,6 +449,23 @@ export function openFolders(root: TreeFolder, rows = 24): Set<string> {
     queue.push(...folder.children.filter((child): child is TreeFolder => child.kind === "dir"));
   }
   return open;
+}
+
+/** A folder's entries as a listing shows them: folders first, then files, each by name. */
+export function entriesInOrder<T extends { readonly name: string; readonly kind: "file" | "dir" }>(
+  entries: readonly T[],
+): T[] {
+  return entries.toSorted((a, b) =>
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1,
+  );
+}
+
+/** The runner a project lives on, named for a view to say it is away: "pod, the runner Lab lives on". */
+export function runnerOf(
+  project: { readonly runner?: string | undefined; readonly name: string } | undefined,
+): string {
+  const runner = project?.runner === undefined ? "The runner" : `${project.runner}, the runner`;
+  return `${runner} ${project?.name ?? "the project"} lives on`;
 }
 
 /** A size as "812 B", "4.2 KB", or "3.1 MB". */

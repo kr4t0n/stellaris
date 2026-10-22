@@ -290,6 +290,13 @@ export function createApi(token: string) {
     /** One path on a task's branch, read from its project's runner: a file, base64, or a folder. */
     taskFile: (id: string, path: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/files${branchPath(path)}`, token, BranchFileSchema),
+    /** One path on a project's default branch, read as a task's files are. */
+    projectFile: (slug: string, path: string) =>
+      get(
+        `/api/projects/${encodeURIComponent(slug)}/files${branchPath(path)}`,
+        token,
+        BranchFileSchema,
+      ),
     /** An image a citizen uploaded, as a data URL. */
     image: (id: string) => getImage(`/api/images/${encodeURIComponent(id)}`, token),
     /** What a task's branch changed since it left the default branch, file by file. */

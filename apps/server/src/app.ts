@@ -375,17 +375,26 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/projects/:slug/knowledge", async (c) =>
     c.json(await board.listKnowledge(c.req.param("slug"))),
   );
+  // One path on a branch of a project's repository, read on the runner the project lives on.
+  const branchFile = async (c: Context<Env>, project: string, branch: string, file: string) => {
+    if (deps.runners === undefined) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to read files from");
+    }
+    return c.json(await deps.runners.readBranch(project, branch, BranchPathSchema.parse(file)));
+  };
+  // The project's code as its default branch has it in the clone on its runner.
+  const projectFile = async (c: Context<Env>, file: string) => {
+    const project = await board.readProject(NameSchema.parse(c.req.param("slug")));
+    return branchFile(c, project.slug, project.defaultBranch, file);
+  };
+  api.get("/projects/:slug/files", (c) => projectFile(c, ""));
+  api.get("/projects/:slug/files/:path{.+}", (c) => projectFile(c, c.req.param("path")));
   api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
   api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));
-  // What a task's work left: one path on its branch, read on the runner its project lives on.
+  // What a task's work left: one path on its branch.
   const taskFile = async (c: Context<Env>, file: string) => {
     const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
-    if (deps.runners === undefined) {
-      throw new BoardError("NOT_FOUND", "this board has no runners to read a task's files from");
-    }
-    return c.json(
-      await deps.runners.readBranch(task.project, `task/${task.id}`, BranchPathSchema.parse(file)),
-    );
+    return branchFile(c, task.project, `task/${task.id}`, file);
   };
   api.get("/tasks/:id/files", (c) => taskFile(c, ""));
   // What a task's branch changed since it left the default branch, file by file.

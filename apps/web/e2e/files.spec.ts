@@ -164,3 +164,166 @@ test("the back arrow returns to the view it came from, named, and to the parent 
     .click();
   await expect(fresh).toHaveURL(`/task/${STAGE_TASK}`);
 });
+
+test("a project's view lists the top of its default branch, each file opening in the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+
+  await expect(files).toContainText("main · committed by ref");
+  await expect(files).toContainText("9b1d3e7");
+  // Folders first, then files, each by name; a file with its size.
+  await expect(files.getByRole("listitem")).toHaveText([
+    /docs\/$/,
+    /^README\.md\s*\d+ B$/,
+    /^seeds\.csv\s*\d+ B$/,
+  ]);
+
+  // A file opens in the files view, its relative links staying on the project's branch.
+  await files.getByRole("link", { name: "README.md" }).click();
+  await expect(page).toHaveURL("/p/lab/files/README.md");
+  await expect(view.getByRole("heading", { name: "README.md" })).toBeVisible();
+  await expect(view).toContainText("Lab · main · committed by ref");
+  const methods = view.getByRole("link", { name: "the methods" });
+  await expect(methods).toHaveAttribute("href", "/p/lab/files/docs/methods.md");
+  await methods.click();
+  await expect(view.getByRole("heading", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("link", { name: "the list" }).click();
+  await expect(page).toHaveURL("/p/lab/files/seeds.csv");
+  await expect(view.getByRole("cell", { name: "small" })).toBeVisible();
+
+  // In the files view a folder is a page of its own, and the arrows return the way they came.
+  await page.goto("/p/lab");
+  await files.getByRole("link", { name: "Browse the branch" }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await view.getByRole("link", { name: "docs/" }).click();
+  await expect(page).toHaveURL("/p/lab/files/docs");
+  await expect(view.getByRole("link", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("button", { name: "Back to the files of Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await view.getByRole("button", { name: "Back to Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab");
+
+  // Opened as a tab's first view, a path the branch lacks says so, and the arrow goes up.
+  await page.goto("/p/lab/files/notes.md");
+  await expect(view).toContainText("notes.md is not on main.");
+  await view.getByRole("link", { name: "Back to the project Lab" }).click();
+  await expect(page).toHaveURL("/p/lab");
+  await page.goto("/p/nothing/files/README.md");
+  await expect(view).toContainText("There is no project nothing.");
+});
+
+test("a project's folders open in place, as a task's tree does, and its files open in the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  const docs = files.getByRole("button", { name: "docs/" });
+  const methods = files.getByRole("link", { name: "methods.md" });
+  await expect(docs).toHaveAttribute("aria-expanded", "false");
+  await expect(methods).toHaveCount(0);
+
+  // A folder unfolds under itself, its folders first, and the page stays where it is.
+  await docs.click();
+  await expect(docs).toHaveAttribute("aria-expanded", "true");
+  await expect(methods).toBeVisible();
+  await expect(page).toHaveURL("/p/lab");
+  const archive = files.getByRole("button", { name: "archive/" });
+  await expect(archive).toHaveAttribute("aria-expanded", "false");
+  // A folder inside opens the same way, read when it first opens.
+  await archive.click();
+  await expect(files.getByRole("link", { name: "pilot.md" })).toBeVisible();
+
+  // Folding a folder hides what is under it, and opening it again shows what was open there.
+  await docs.click();
+  await expect(docs).toHaveAttribute("aria-expanded", "false");
+  await expect(methods).toHaveCount(0);
+  await expect(files.getByRole("link", { name: "pilot.md" })).toHaveCount(0);
+  await docs.click();
+  await expect(files.getByRole("link", { name: "pilot.md" })).toBeVisible();
+
+  // A file opens in the files view.
+  await methods.click();
+  await expect(page).toHaveURL("/p/lab/files/docs/methods.md");
+  await expect(view.getByRole("heading", { name: "methods.md" })).toBeVisible();
+});
+
+test("a project's files follow a change of its default branch, in the section and the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
+
+  // An open folder reads the new branch too.
+  const docs = files.getByRole("button", { name: "docs/" });
+  await docs.click();
+  await expect(files.getByRole("link", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("button", { name: "Edit…" }).click();
+  await view.getByRole("textbox", { name: "Default branch" }).fill("next");
+  await view.getByRole("button", { name: "Save" }).click();
+  await expect(files).toContainText("next · committed by ref");
+  await expect(files).toContainText("5e6f7a8");
+  await expect(docs).toHaveAttribute("aria-expanded", "true");
+  await expect(files.getByRole("link", { name: "plan.md" })).toBeVisible();
+  await expect(files.getByRole("link", { name: "methods.md" })).toHaveCount(0);
+
+  await view.getByRole("button", { name: "Edit…" }).click();
+  await view.getByRole("textbox", { name: "Default branch" }).fill("trunk");
+  await view.getByRole("button", { name: "Save" }).click();
+  // The clone has no trunk until a turn there, so nothing of main's shows under trunk's name.
+  await expect(files).toContainText("Nothing on trunk yet.");
+  await expect(files.getByRole("link", { name: "README.md" })).toHaveCount(0);
+  await files.getByRole("link", { name: "Browse the branch" }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await expect(view).toContainText("Nothing on trunk yet.");
+  await expect(view.getByRole("link", { name: "README.md" })).toHaveCount(0);
+});
+
+test("a project's files say when its runner is away and when its branch holds nothing", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  let answer: { status: number; json: unknown } = {
+    status: 503,
+    json: { error: "RUNNER_AWAY", message: "runner laptop, where lab lives, is not connected" },
+  };
+  // Registered after the fake board, so it answers first.
+  await page.route("**/api/projects/lab/files", (route) => route.fulfill(answer));
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  await expect(files).toContainText(
+    "laptop, the runner Lab lives on, is not connected, so the project's files cannot be listed now.",
+  );
+
+  const commit = {
+    id: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    at: new Date().toISOString(),
+    author: "ref",
+  };
+  answer = { status: 200, json: { kind: "dir", path: "", commit, entries: [] } };
+  await page.reload();
+  await expect(files).toContainText("main · committed by ref");
+  await expect(files).toContainText("Nothing on main yet.");
+
+  answer = { status: 404, json: { error: "NOT_FOUND", message: "lab has no repository yet" } };
+  await page.reload();
+  await expect(files).toContainText("Nothing on main yet.");
+  await expect(files).not.toContainText("committed by");
+});

@@ -1,7 +1,7 @@
 import type { BranchFileChange, Task } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { TaskFileLink } from "../components/TaskFile.js";
+import { FileLink } from "../components/BranchFile.js";
 import { ApiError } from "../lib/api.js";
 import {
   changeLabel,
@@ -14,6 +14,7 @@ import {
 } from "../lib/files.js";
 import { ago } from "../lib/format.js";
 import { useProjects, useTaskChanges, useTaskDiff } from "../lib/session.js";
+import { FileIndent, FolderRow, TREE_ROW, TreeLevel } from "./FileTree.js";
 
 const ROW_TONE: Readonly<Record<PatchRow["kind"], string>> = {
   hunk: "text-fg-muted",
@@ -101,13 +102,13 @@ function FileDiff({ taskId, change }: { taskId: string; change: BranchFileChange
   return (
     <div className="mb-2 ml-[18px]">
       {change.status === "deleted" ? null : (
-        <TaskFileLink
-          taskId={taskId}
+        <FileLink
+          source={{ kind: "task", taskId }}
           path={change.path}
           className="text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
         >
           Open the whole file
-        </TaskFileLink>
+        </FileLink>
       )}
       {body}
     </div>
@@ -141,30 +142,18 @@ function Level({
 }) {
   const { isOpen, toggle, shown, toggleFile } = openings;
   return (
-    <ul className={nested ? "ml-[5px] border-l border-line-strong pl-2" : "mt-2"}>
+    <TreeLevel nested={nested}>
       {nodes.map((node) => {
         if (node.kind === "dir") {
           const open = isOpen(node);
           return (
             <li key={`dir:${node.path}`}>
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => toggle(node)}
-                className="flex w-full items-baseline gap-2 rounded-md py-0.5 text-left text-sm hover:bg-surface-2/40"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`inline-block w-2.5 shrink-0 text-[10px] text-fg-muted transition-transform ${open ? "rotate-90" : ""}`}
-                >
-                  ▸
-                </span>
-                <span className="min-w-0 truncate text-fg-primary">{node.name}/</span>
+              <FolderRow name={node.name} open={open} onToggle={() => toggle(node)}>
                 <span className="shrink-0 text-meta">
                   {node.files === 1 ? "1 file" : `${node.files} files`}
                 </span>
                 <Touched last={node.lastChange} now={now} />
-              </button>
+              </FolderRow>
               {open ? (
                 <Level taskId={taskId} nodes={node.children} nested openings={openings} now={now} />
               ) : null}
@@ -186,9 +175,9 @@ function Level({
               aria-expanded={open}
               title={change.path}
               onClick={() => toggleFile(change.path)}
-              className={`group flex w-full items-baseline gap-2 rounded-md py-0.5 text-left text-sm hover:bg-surface-2/40 ${open ? "bg-surface-2/30" : ""}`}
+              className={`group ${TREE_ROW} ${open ? "bg-surface-2/30" : ""}`}
             >
-              <span aria-hidden="true" className="w-2.5 shrink-0" />
+              <FileIndent />
               <span className={`min-w-0 truncate ${name}`}>{node.name}</span>
               <span className="shrink-0 text-meta">{changeLabel(change)}</span>
               <Touched last={change.lastChange} now={now} />
@@ -197,7 +186,7 @@ function Level({
           </li>
         );
       })}
-    </ul>
+    </TreeLevel>
   );
 }
 
@@ -296,13 +285,13 @@ export function TaskFiles({ task, now }: { task: Task; now: number }) {
     <section aria-label="Files" className="mt-5 border-t border-line pt-4">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-section">Files</h3>
-        <TaskFileLink
-          taskId={task.id}
+        <FileLink
+          source={{ kind: "task", taskId: task.id }}
           path=""
           className="text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
         >
           Browse the branch
-        </TaskFileLink>
+        </FileLink>
       </div>
       {body}
     </section>

@@ -18,6 +18,7 @@ import {
 import { ChannelList, NewChannelForm } from "./ChannelForms.js";
 import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { ProjectFiles } from "./ProjectFiles.js";
 import { groupTasks, PHASES } from "./tasks.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
@@ -82,8 +83,9 @@ function EditForm({ project, onDone }: { project: Project; onDone: () => void })
 
 /**
  * A project at a glance: who works in it, its channels, where its tasks stand, how they end, its
- * dashboard, and what it knows; an archived one also says when and why. Its name and default
- * branch are edited here, and a channel is opened here for a workstream such as a release.
+ * dashboard, what it knows, and the files on its default branch; an archived one also says when
+ * and why. Its name and default branch are edited here, and a channel is opened here for a
+ * workstream such as a release.
  */
 export function ProjectView() {
   const { slug } = useParams({ from: "/p/$slug" });
@@ -208,6 +210,8 @@ export function ProjectView() {
         <Section title="Knowledge">
           <TopicList scope={slug} topics={knowledge.data} now={now} />
         </Section>
+        {/* Keyed by the project, since the view stays mounted when only the slug changes. */}
+        <ProjectFiles key={slug} project={project} now={now} />
       </div>
     </>
   );

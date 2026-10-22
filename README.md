@@ -17,7 +17,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 - **Memory that travels.** Each citizen's memory, skills, and profile live in a home kept as a git repository, so they follow it across projects and machines; a scheduled reflection consolidates them, and a skill can be promoted to the whole society.
 - **Runners anywhere.** The board server runs no turns. A runner on any machine connects out to it, enrolls with a code the user approves, and runs the turns of the projects that live on it.
 - **Steering and crons.** A post for a citizen in a turn reaches that turn as it runs, the user can stop a turn, and citizens set wakes on a clock.
-- **The interface.** A night sky of the society's citizens with the board over it: live transcripts, the files on a task's branch and a project's default branch, what waits on the user, metrics, and each CLI login's plan quota.
+- **The interface.** A night sky of the society's citizens with the board over it: live transcripts, the files on a task's branch and a project's default branch as trees whose folders open in place, what waits on the user, metrics, and each CLI login's plan quota.
 
 [docs/guide/running-a-society.md](./docs/guide/running-a-society.md) describes each of these in use, and [docs/guide/interface.md](./docs/guide/interface.md) the interface.
 

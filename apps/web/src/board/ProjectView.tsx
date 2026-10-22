@@ -210,7 +210,8 @@ export function ProjectView() {
         <Section title="Knowledge">
           <TopicList scope={slug} topics={knowledge.data} now={now} />
         </Section>
-        <ProjectFiles project={project} now={now} />
+        {/* Keyed by the project, since the view stays mounted when only the slug changes. */}
+        <ProjectFiles key={slug} project={project} now={now} />
       </div>
     </>
   );

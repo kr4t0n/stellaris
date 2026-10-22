@@ -1,7 +1,13 @@
 import type { BranchFile } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { createContext, useMemo, type ReactNode } from "react";
-import { imageType, sizeLabel, type FileBase, type FileSource } from "../lib/files.js";
+import {
+  entriesInOrder,
+  imageType,
+  sizeLabel,
+  type FileBase,
+  type FileSource,
+} from "../lib/files.js";
 import { useBranchFile } from "../lib/session.js";
 
 const LINK =
@@ -74,12 +80,9 @@ export function FolderList({
   file: Extract<BranchFile, { kind: "dir" }>;
   className: string;
 }) {
-  const entries = file.entries.toSorted((a, b) =>
-    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1,
-  );
   return (
     <ul className={className}>
-      {entries.map((entry) => (
+      {entriesInOrder(file.entries).map((entry) => (
         <li key={entry.name} className="flex items-baseline gap-2">
           <FileLink
             source={source}

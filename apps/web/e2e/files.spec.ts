@@ -165,7 +165,7 @@ test("the back arrow returns to the view it came from, named, and to the parent 
   await expect(fresh).toHaveURL(`/task/${STAGE_TASK}`);
 });
 
-test("a project's view lists the top of its default branch, each entry opening in the files view", async ({
+test("a project's view lists the top of its default branch, each file opening in the files view", async ({
   page,
 }) => {
   await fakeBoard(page);
@@ -178,13 +178,11 @@ test("a project's view lists the top of its default branch, each entry opening i
   await expect(files).toContainText("main · committed by ref");
   await expect(files).toContainText("9b1d3e7");
   // Folders first, then files, each by name; a file with its size.
-  await expect(files.getByRole("link")).toHaveText([
-    "Browse the branch",
-    "docs/",
-    "README.md",
-    "seeds.csv",
+  await expect(files.getByRole("listitem")).toHaveText([
+    /docs\/$/,
+    /^README\.md\s*\d+ B$/,
+    /^seeds\.csv\s*\d+ B$/,
   ]);
-  await expect(files.getByRole("listitem").nth(2)).toHaveText(/^seeds\.csv\s*\d+ B$/);
 
   // A file opens in the files view, its relative links staying on the project's branch.
   await files.getByRole("link", { name: "README.md" }).click();
@@ -199,16 +197,17 @@ test("a project's view lists the top of its default branch, each entry opening i
   await expect(page).toHaveURL("/p/lab/files/seeds.csv");
   await expect(view.getByRole("cell", { name: "small" })).toBeVisible();
 
-  // A folder opens there too, and the arrow returns to the project, named.
+  // In the files view a folder is a page of its own, and the arrows return the way they came.
   await page.goto("/p/lab");
-  await files.getByRole("link", { name: "docs/" }).click();
-  await expect(page).toHaveURL("/p/lab/files/docs");
-  await expect(view.getByRole("link", { name: "methods.md" })).toBeVisible();
-  await view.getByRole("button", { name: "Back to Lab", exact: true }).click();
-  await expect(page).toHaveURL("/p/lab");
   await files.getByRole("link", { name: "Browse the branch" }).click();
   await expect(page).toHaveURL("/p/lab/files");
-  await expect(view.getByRole("link", { name: "README.md" })).toBeVisible();
+  await view.getByRole("link", { name: "docs/" }).click();
+  await expect(page).toHaveURL("/p/lab/files/docs");
+  await expect(view.getByRole("link", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("button", { name: "Back to the files of Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab/files");
+  await view.getByRole("button", { name: "Back to Lab", exact: true }).click();
+  await expect(page).toHaveURL("/p/lab");
 
   // Opened as a tab's first view, a path the branch lacks says so, and the arrow goes up.
   await page.goto("/p/lab/files/notes.md");
@@ -217,6 +216,45 @@ test("a project's view lists the top of its default branch, each entry opening i
   await expect(page).toHaveURL("/p/lab");
   await page.goto("/p/nothing/files/README.md");
   await expect(view).toContainText("There is no project nothing.");
+});
+
+test("a project's folders open in place, as a task's tree does, and its files open in the files view", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  const files = view
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
+  const docs = files.getByRole("button", { name: "docs/" });
+  const methods = files.getByRole("link", { name: "methods.md" });
+  await expect(docs).toHaveAttribute("aria-expanded", "false");
+  await expect(methods).toHaveCount(0);
+
+  // A folder unfolds under itself, its folders first, and the page stays where it is.
+  await docs.click();
+  await expect(docs).toHaveAttribute("aria-expanded", "true");
+  await expect(methods).toBeVisible();
+  await expect(page).toHaveURL("/p/lab");
+  const archive = files.getByRole("button", { name: "archive/" });
+  await expect(archive).toHaveAttribute("aria-expanded", "false");
+  // A folder inside opens the same way, read when it first opens.
+  await archive.click();
+  await expect(files.getByRole("link", { name: "pilot.md" })).toBeVisible();
+
+  // Folding a folder hides what is under it, and opening it again shows what was open there.
+  await docs.click();
+  await expect(docs).toHaveAttribute("aria-expanded", "false");
+  await expect(methods).toHaveCount(0);
+  await expect(files.getByRole("link", { name: "pilot.md" })).toHaveCount(0);
+  await docs.click();
+  await expect(files.getByRole("link", { name: "pilot.md" })).toBeVisible();
+
+  // A file opens in the files view.
+  await methods.click();
+  await expect(page).toHaveURL("/p/lab/files/docs/methods.md");
+  await expect(view.getByRole("heading", { name: "methods.md" })).toBeVisible();
 });
 
 test("a project's files follow a change of its default branch, in the section and the files view", async ({
@@ -229,6 +267,19 @@ test("a project's files follow a change of its default branch, in the section an
     .locator("section")
     .filter({ has: page.getByRole("heading", { name: /^Files/ }) });
   await expect(files.getByRole("link", { name: "README.md" })).toBeVisible();
+
+  // An open folder reads the new branch too.
+  const docs = files.getByRole("button", { name: "docs/" });
+  await docs.click();
+  await expect(files.getByRole("link", { name: "methods.md" })).toBeVisible();
+  await view.getByRole("button", { name: "Edit…" }).click();
+  await view.getByRole("textbox", { name: "Default branch" }).fill("next");
+  await view.getByRole("button", { name: "Save" }).click();
+  await expect(files).toContainText("next · committed by ref");
+  await expect(files).toContainText("5e6f7a8");
+  await expect(docs).toHaveAttribute("aria-expanded", "true");
+  await expect(files.getByRole("link", { name: "plan.md" })).toBeVisible();
+  await expect(files.getByRole("link", { name: "methods.md" })).toHaveCount(0);
 
   await view.getByRole("button", { name: "Edit…" }).click();
   await view.getByRole("textbox", { name: "Default branch" }).fill("trunk");

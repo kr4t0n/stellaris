@@ -451,6 +451,15 @@ export function openFolders(root: TreeFolder, rows = 24): Set<string> {
   return open;
 }
 
+/** A folder's entries as a listing shows them: folders first, then files, each by name. */
+export function entriesInOrder<T extends { readonly name: string; readonly kind: "file" | "dir" }>(
+  entries: readonly T[],
+): T[] {
+  return entries.toSorted((a, b) =>
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1,
+  );
+}
+
 /** The runner a project lives on, named for a view to say it is away: "pod, the runner Lab lives on". */
 export function runnerOf(
   project: { readonly runner?: string | undefined; readonly name: string } | undefined,

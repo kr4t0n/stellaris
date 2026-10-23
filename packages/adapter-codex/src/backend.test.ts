@@ -535,8 +535,8 @@ describe("CodexBackend cold turns", () => {
       message: "Selected model is at capacity. Please try a different model.",
       codexErrorInfo: "serverOverloaded",
     };
-    // With the thread's totals reported on resuming, and without them, as on the live 0.158.0.
-    for (const noReplay of [false, true]) {
+    // Without the thread's totals reported on resuming, as on the live 0.158.0, and with them.
+    for (const noReplay of [true, false]) {
       const fake = fakeAppServer({
         known: ["thread-3"],
         noReplay,

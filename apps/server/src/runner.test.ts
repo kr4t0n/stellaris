@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
+import { Scheduler } from "@stellaris/scheduler";
 import {
   createRunner,
   EnrollmentDeniedError,
@@ -216,6 +217,64 @@ const deskPost = {
   trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
   priority: 2,
 };
+
+/** A signal reader's backend that keeps each prompt's signal lines, the runner's connection left out. */
+function signalReader(): { backend: AgentBackend; listed: string[][] } {
+  const listed: string[][] = [];
+  const backend: AgentBackend = {
+    kind: "claude",
+    newSession: () => Promise.resolve("session-1"),
+    runTurn: (request) => {
+      listed.push(
+        request.prompt
+          .split("\n")
+          .filter(
+            (line) => /^- \[[^\]]+\] [a-z_]+: /.test(line) && !/^- \[[^\]]+\] runner: /.test(line),
+          ),
+      );
+      return Promise.resolve(completed("read the signals"));
+    },
+  };
+  return { backend, listed };
+}
+
+const stewardTurn = {
+  agent: "steward-1",
+  project: "society",
+  trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
+  priority: 0,
+};
+
+/** Logs a spend report worded as the scheduler's `reportCost` words it. */
+async function spendReport(board: Board, turns: number, cost: number): Promise<void> {
+  await board.publishSignal({
+    kind: "turn_cost",
+    key: "turn_cost",
+    summary: `${turns} turn(s) completed for $${cost.toFixed(2)} since the last report`,
+    value: cost,
+  });
+}
+
+/** Logs one idle member's condition `count` times, to fill the newest signals a prompt reads. */
+async function idleRepeats(board: Board, count: number): Promise<void> {
+  for (let days = 1; days <= count; days += 1) {
+    await board.publishSignal({
+      kind: "idle_member",
+      key: "idle_member:eng-1",
+      summary: `eng-1 (engineer) has not completed a turn for ${days}d`,
+      value: days,
+      agent: "eng-1",
+      wakes: false,
+    });
+  }
+}
+
+/** When each spend report was logged, oldest first. */
+async function spendTimes(board: Board): Promise<string[]> {
+  return (await board.listSignals(10_000))
+    .filter((record) => record.signal.kind === "turn_cost")
+    .map((record) => record.ts);
+}
 
 describe("turns on a runner over the runner protocol", () => {
   let dir: string;
@@ -734,7 +793,135 @@ describe("turns on a runner over the runner protocol", () => {
     expect(listed).toEqual([
       "role_gap: a stage waits on the referee role, which nobody fills",
       "idle_member: eng-1 (engineer) has not completed a turn for 4d",
-      "turn_cost: 1 turn(s) completed for $2.00 since the last report",
+      expect.stringMatching(
+        /^turn_cost: 2 turn\(s\) completed for \$3\.00 in 2 hourly report\(s\) /,
+      ),
+    ]);
+  });
+
+  it("sums the spend reports logged since a reader's last turn into one line", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // Logged before the reader's last turn, so left out of the next one's sum.
+    await spendReport(board, 9, 9);
+    await run(stewardTurn);
+    await spendReport(board, 2, 1.25);
+    await spendReport(board, 5, 4.5);
+    // More conditions than the prompt lists: the oldest goes, while the sum around them stays.
+    for (let gap = 0; gap < 30; gap += 1) {
+      await board.publishSignal({
+        kind: "role_gap",
+        key: `role_gap:lab:role-${gap}`,
+        summary: `a stage waits on the role-${gap} role, which nobody fills`,
+        value: 1,
+      });
+    }
+    await spendReport(board, 1, 0.75);
+    await run(stewardTurn);
+    await spendReport(board, 3, 2);
+    await run(stewardTurn);
+    await spendReport(board, 3, 2);
+    await board.publishSignal({
+      kind: "turn_cost",
+      key: "turn_cost",
+      summary: "spend in the last hour: $1.20",
+      value: 1.2,
+    });
+    await run(stewardTurn);
+    const at = await spendTimes(board);
+    expect(listed[1]).toHaveLength(30);
+    expect(listed[1]?.[0]).toMatch(/ role_gap: a stage waits on the role-1 role, /);
+    expect(listed[1]?.at(-1)).toBe(
+      `- [${at[3]}] turn_cost: 8 turn(s) completed for $6.50 in 3 hourly report(s) logged from ${at[1]} to ${at[3]}; the dearest, logged at ${at[2]}, was $4.50 (value 6.5)`,
+    );
+    // One report since the last turn reads as the scheduler wrote it.
+    expect(listed[2]).toEqual([
+      `- [${at[4]}] turn_cost: 3 turn(s) completed for $2.00 since the last report (value 2)`,
+    ]);
+    // A report whose summary gives no turn count leaves the turns uncounted, never short.
+    expect(listed[3]).toEqual([
+      `- [${at[6]}] turn_cost: turns completed for $3.20 in 2 hourly report(s) logged from ${at[5]} to ${at[6]}; the dearest, logged at ${at[5]}, was $2.00 (value 3.2)`,
+    ]);
+  });
+
+  it("calls the spend a lower bound only when the signals read may stop short of the last turn", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // No last turn and a full read: the first report falls out of the newest 500 signals.
+    await spendReport(board, 4, 3);
+    await idleRepeats(board, 499);
+    await spendReport(board, 2, 1);
+    await run(stewardTurn);
+    // A full read whose oldest signal is older than the last turn holds every report since it.
+    await spendReport(board, 1, 0.5);
+    await spendReport(board, 3, 2);
+    expect((await board.listSignals(1000)).length).toBeGreaterThan(500);
+    await run(stewardTurn);
+    // A full read whose oldest signal is newer than the last turn may have cut some.
+    await spendReport(board, 4, 3);
+    await idleRepeats(board, 499);
+    await spendReport(board, 2, 1);
+    await spendReport(board, 1, 0.5);
+    await run(stewardTurn);
+    const at = await spendTimes(board);
+    const idle = expect.stringMatching(/ idle_member: eng-1 \(engineer\) .* for 499d /);
+    expect(listed[0]).toEqual([
+      idle,
+      `- [${at[1]}] turn_cost: 2 turn(s) completed for $1.00 in 1 hourly report(s) logged at ${at[1]}; the read holds the newest 500 signals, so these are lower bounds (value 1)`,
+    ]);
+    expect(listed[1]).toEqual([
+      `- [${at[3]}] turn_cost: 4 turn(s) completed for $2.50 in 2 hourly report(s) logged from ${at[2]} to ${at[3]}; the dearest, logged at ${at[3]}, was $2.00 (value 2.5)`,
+    ]);
+    expect(listed[2]).toEqual([
+      idle,
+      `- [${at[6]}] turn_cost: 3 turn(s) completed for $1.50 in 2 hourly report(s) logged from ${at[5]} to ${at[6]}; the dearest, logged at ${at[5]}, was $1.00; the read holds the newest 500 signals, so these are lower bounds (value 1.5)`,
+    ]);
+  });
+
+  it("counts the turns of the spend reports the scheduler writes", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // The scheduler keeps a clock of its own and runs no turn: it only reports what turns cost.
+    let clock = Date.parse("2026-10-01T00:00:00.000Z");
+    const scheduler = new Scheduler({
+      board,
+      runner: {
+        assign: () => Promise.resolve(null),
+        runTurn: () => Promise.reject(new Error("no turns from this scheduler")),
+        completeTask: () => Promise.resolve("deferred"),
+      },
+      now: () => new Date(clock),
+    });
+    const conciergeTurn = {
+      agent: "concierge-1",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    await run(stewardTurn);
+    await scheduler.tick();
+    await run(conciergeTurn);
+    await run(conciergeTurn);
+    clock += 3_600_000;
+    await scheduler.tick();
+    await run(stewardTurn);
+    const reports = (await board.listSignals(1000)).filter(
+      (record) => record.signal.kind === "turn_cost",
+    );
+    const at = reports.map((record) => record.ts);
+    const [one = 0, two = 0] = reports.map((record) => record.signal.value);
+    expect(reports).toHaveLength(2);
+    expect(two).toBeGreaterThan(one);
+    // The concierge's turns are in the list too, with no signals in their prompts.
+    expect(listed.at(-1)?.filter((line) => line.includes("] turn_cost: "))).toEqual([
+      `- [${at[1]}] turn_cost: 3 turn(s) completed for $${(one + two).toFixed(2)} in 2 hourly report(s) logged from ${at[0]} to ${at[1]}; the dearest, logged at ${at[1]}, was $${two.toFixed(2)} (value ${one + two})`,
     ]);
   });
 

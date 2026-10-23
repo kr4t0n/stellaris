@@ -170,6 +170,50 @@ function stuckNotice(stuck: StuckWork): string {
 
 /** How many signals a reader's prompt lists at most, newest kept. */
 const MAX_SIGNALS = 30;
+/** How many of the log's newest signal records a reader's prompt is drawn from. */
+const SIGNAL_READ = 500;
+/** The turn count that leads the summary of the scheduler's spend report (`reportCost`). */
+const REPORT_TURNS = /^(\d+) turn\(s\) completed /;
+
+/**
+ * The hourly spend reports among signal records summed into one record at the latest of them, so
+ * a reader learns what was spent since its last turn, not in the last hour alone, and the dearest
+ * report stays in sight. A report whose summary names no turn count leaves the total uncounted.
+ * `partial` says the read may stop short of the reader's last turn, so the sums are lower bounds.
+ */
+function sumSpend(records: readonly SignalRecord[], partial: boolean): SignalRecord[] {
+  const reports = records.filter((record) => record.signal.kind === "turn_cost");
+  const last = reports.at(-1);
+  if (last === undefined || (reports.length === 1 && !partial)) {
+    return [...records];
+  }
+  let cost = 0;
+  let turns: number | null = 0;
+  let dearest = last;
+  for (const report of reports) {
+    cost += report.signal.value;
+    const counted = REPORT_TURNS.exec(report.signal.summary)?.[1];
+    turns = turns === null || counted === undefined ? null : turns + Number(counted);
+    if (report.signal.value > dearest.signal.value) {
+      dearest = report;
+    }
+  }
+  const first = reports[0] ?? last;
+  const one = reports.length === 1;
+  const summary = [
+    `${turns === null ? "turns" : `${turns} turn(s)`} completed for $${cost.toFixed(2)} in ${reports.length} hourly report(s) logged ${one ? `at ${last.ts}` : `from ${first.ts} to ${last.ts}`}`,
+    ...(one
+      ? []
+      : [`the dearest, logged at ${dearest.ts}, was $${dearest.signal.value.toFixed(2)}`]),
+    ...(partial
+      ? [`the read holds the newest ${SIGNAL_READ} signals, so these are lower bounds`]
+      : []),
+  ].join("; ");
+  const summed: SignalRecord = { ...last, signal: { ...last.signal, summary, value: cost } };
+  return records.flatMap((record) =>
+    record === last ? [summed] : record.signal.kind === "turn_cost" ? [] : [record],
+  );
+}
 
 /**
  * Each condition's latest log among signal records, oldest first by that log, so the repeats of
@@ -389,16 +433,10 @@ export class TurnHost {
           topics: await this.board.listKnowledge(dispatch.project),
         };
     // Readers of operations signals get those logged for this scope since their last home turn
-    // here, each condition once.
+    // here, each condition once and the spend reports summed.
     const signals =
       part === undefined && charter.wakeTriggers.includes(OPS_TRIGGER)
-        ? latestPerKey(
-            (await this.board.listSignals(500)).filter(
-              (record) =>
-                wakeScope(agent, record.signal.project ?? null) === dispatch.project &&
-                (lastTurn === null || record.ts > lastTurn.startedAt),
-            ),
-          ).slice(-MAX_SIGNALS)
+        ? await this.signalsSince(agent, dispatch.project, lastTurn)
         : null;
     const waiting =
       task !== null && task.status === "open" && !task.completing && mayHoldStage(actor, task)
@@ -995,6 +1033,30 @@ export class TurnHost {
     const token = this.board.issueTurnToken(actor.name, actor.role, ttl, scope);
     this.residentTokens.set(slot, token);
     return token;
+  }
+
+  /**
+   * The signals a reader's prompt lists: those logged for its scope since its last turn there,
+   * the spend reports summed, then each condition once at its latest log, the newest kept.
+   */
+  private async signalsSince(
+    agent: { readonly memberships: readonly string[] },
+    scope: Name,
+    lastTurn: TurnRecord | null,
+  ): Promise<SignalRecord[]> {
+    const read = await this.board.listSignals(SIGNAL_READ);
+    // A full read that begins after the last turn may have cut reports logged since it.
+    const oldest = read[0];
+    const partial =
+      read.length === SIGNAL_READ &&
+      oldest !== undefined &&
+      (lastTurn === null || oldest.ts > lastTurn.startedAt);
+    const since = read.filter(
+      (record) =>
+        wakeScope(agent, record.signal.project ?? null) === scope &&
+        (lastTurn === null || record.ts > lastTurn.startedAt),
+    );
+    return latestPerKey(sumSpend(since, partial)).slice(-MAX_SIGNALS);
   }
 
   /**

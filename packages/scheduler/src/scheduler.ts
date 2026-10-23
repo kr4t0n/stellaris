@@ -2071,6 +2071,7 @@ export class Scheduler {
       return;
     }
     const { turnsSinceReport: turns, costSinceReport: cost } = this.state;
+    // A reader's prompt sums these reports and reads the turn count from the summary's start.
     await this.board.publishSignal({
       kind: "turn_cost",
       key: "turn_cost",

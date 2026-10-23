@@ -69,10 +69,11 @@ interface TurnContext {
   complete(status: string, error?: string): void;
   error(message: string, willRetry: boolean): void;
   /**
-   * The turn fails before any model request finished: the thread's totals as they stood, which
-   * Codex 0.162.1 sends for the turn when the refusal carries rate limits, then the error and the
-   * end, both with the error as the server gives it.
+   * The thread's totals as they stand, for this turn with no request finished, as Codex sends them
+   * when a refusal carries rate limits or a compaction starts.
    */
+  report(): void;
+  /** The turn fails with no further request finished: the totals, then the error and the end. */
   refuse(error: Record<string, unknown>): void;
   exit(stderr: string): void;
 }
@@ -296,6 +297,8 @@ function fakeAppServer(
                 method: "error",
                 params: { threadId, turnId, willRetry, error: { message: said } },
               }),
+            report: () =>
+              usage(turnId, { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 }),
             refuse: (error) => {
               running = null;
               usage(turnId, { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
@@ -506,6 +509,89 @@ describe("CodexBackend cold turns", () => {
       cacheWriteTokens: 0,
     });
     expect(fake.received.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+  });
+
+  it("counts a request whose only item is a command still running when a refusal follows", async () => {
+    // A command that outlives its yield starts before its request's update and completes later, or
+    // never within the turn, as codex-cli 0.158.0 and 0.162.1 ran one against a stub.
+    const command = {
+      type: "commandExecution",
+      id: "c1",
+      command: "sleep 20",
+      status: "inProgress",
+    };
+    const overloaded = {
+      message: "Selected model is at capacity.",
+      codexErrorInfo: "serverOverloaded",
+    };
+    const refusedAfter = fakeAppServer({
+      turn: (turn) => {
+        turn.item("item/started", command);
+        turn.request();
+        turn.refuse(overloaded);
+      },
+    });
+    const refused = await new CodexBackend({ spawn: refusedAfter.spawn }).runTurn(request());
+    expect(refused).toMatchObject({ exitReason: "error", transient: true });
+    expect(refused.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 40,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts a resumed turn's first request when its only item is a command still running and no totals came", async () => {
+    const command = {
+      type: "commandExecution",
+      id: "c1",
+      command: "sleep 6",
+      status: "inProgress",
+    };
+    const noTotals = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        turn.item("item/started", command);
+        turn.request();
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+        turn.complete("completed");
+      },
+    });
+    const resumed = await new CodexBackend({ spawn: noTotals.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts no compaction as an answer, since Codex starts it before its own request", async () => {
+    // As codex-cli 0.158.0 and 0.162.1 compact before a turn's first request: the compaction starts,
+    // the totals come as they stand, it completes, and then the turn's one request.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        turn.item("item/started", { type: "contextCompaction", id: "cc1" });
+        turn.report();
+        turn.item("item/completed", { type: "contextCompaction", id: "cc1" });
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+        turn.complete("completed");
+      },
+    });
+    const compacted = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(compacted.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 40,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    });
   });
 
   it("counts nothing for a turn the model never answered, whatever the thread's totals say", async () => {

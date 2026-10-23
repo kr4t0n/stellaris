@@ -558,11 +558,23 @@ interface TurnCollector {
   /** Whether Codex ended the turn on a failure the model service may not repeat in a minute. */
   transient: boolean;
   /**
-   * Whether the model answered at all: an item other than a user message completed. A turn it
+   * Whether the model answered at all: an item its answer made started or completed. A turn it
    * never answered used no tokens, whatever the thread's totals say about the turns before it.
    */
   answered: boolean;
 }
+
+/**
+ * The items Codex or the user makes rather than the model's answer: the prompt and steers, a hook's
+ * prompt, review mode, and a compaction, which Codex starts before its own request, refused or not.
+ */
+const NOT_ANSWERS = new Set([
+  "userMessage",
+  "hookPrompt",
+  "enteredReviewMode",
+  "exitedReviewMode",
+  "contextCompaction",
+]);
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
 const STOP_GRACE_MS = 15_000;
@@ -814,7 +826,8 @@ export class CodexAppServerSession implements ResidentSession {
           }
           return;
         }
-        if (method === "item/completed") {
+        // A command can run past its request's update, or past the turn, so an answer counts as it starts.
+        if (!NOT_ANSWERS.has(String(item["type"]))) {
           turn.answered = true;
         }
         if (item["type"] === "agentMessage") {

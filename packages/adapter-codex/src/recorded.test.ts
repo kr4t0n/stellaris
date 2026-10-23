@@ -10,6 +10,11 @@ import { CodexBackend } from "./backend.js";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
+/** Where the recorded turn starts: an update before it is about the thread's earlier turns. */
+function turnStart(lines: readonly string[]): number {
+  return lines.findIndex((each) => each.includes('"method":"turn/started"'));
+}
+
 function isResponse(line: string): boolean {
   return /^\{"id":\d+,"result"/.test(line);
 }
@@ -128,10 +133,7 @@ describe("recorded Codex app-server turns", () => {
     const { spawn } = await replay(
       "app-server-resume-recorded.jsonl",
       (line, index, lines) =>
-        !(
-          line.includes('"method":"thread/tokenUsage/updated"') &&
-          index < lines.findIndex((each) => each.includes('"method":"turn/started"'))
-        ),
+        !(line.includes('"method":"thread/tokenUsage/updated"') && index < turnStart(lines)),
     );
     const result = await new CodexBackend({ spawn }).runTurn(
       request({ session: "01a0edff-8584-7ee1-91f8-6e8d4549a794", newSession: false }),
@@ -183,6 +185,37 @@ describe("recorded Codex app-server turns", () => {
     expect(steps.slice(steered)).toContain("tool_call:mcp__board__post_message");
     expect(result.finalText).toContain("PINEAPPLE");
     // Five requests, where the last alone holds 30,630 input tokens.
+    expect(result.usage).toEqual({
+      inputTokens: 5_313,
+      outputTokens: 307,
+      cacheReadTokens: 146_048,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts a request whose only item is a command still running when its update comes", async () => {
+    // The same turn resumed with no totals before it, and without its opening message, so the
+    // first request answers with a command alone: it starts, the request's update follows, and it
+    // completes requests later.
+    const { spawn } = await replay("app-server-steered-recorded.jsonl", (line, index, lines) => {
+      if (line.includes('"method":"thread/tokenUsage/updated"') && index < turnStart(lines)) {
+        return false;
+      }
+      return !line.includes("msg_0b5fa85dcceaa350016ac65406efbc87d0b522610d734f7034");
+    });
+    const control = new TurnControl();
+    const running = new CodexBackend({ spawn }).runTurn(
+      request({ session: "01a116b8-0838-7542-905b-d37618ba329e", newSession: false }),
+      undefined,
+      control,
+    );
+    await vi.waitFor(async () =>
+      expect(await control.steer({ id: "ca202c2d-eb92-4f42-8eb3-78bd25d482bb", text: "" })).toBe(
+        true,
+      ),
+    );
+    const result = await running;
+    expect(result.exitReason).toBe("completed");
     expect(result.usage).toEqual({
       inputTokens: 5_313,
       outputTokens: 307,

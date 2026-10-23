@@ -184,6 +184,8 @@ export const TurnRecordSchema = z.object({
   stoppedBy: NameSchema.optional(),
   /** Why the CLI could not resume the turn's session, for a turn that failed so. */
   resumeFailed: ResumeFailureSchema.optional(),
+  /** Whether the model service turned the turn away for now: overloaded, or failing on its side. */
+  transient: z.boolean().optional(),
   /** How many turns in a row, this one included, could not resume the session for a `retry`. */
   resumeRetries: z.number().int().positive().optional(),
   /** Whether the server dropped the conversation's session after this turn, which the next starts anew. */

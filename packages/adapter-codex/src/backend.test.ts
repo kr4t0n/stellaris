@@ -11,7 +11,7 @@ import {
 } from "@stellaris/runner-core";
 import type { AgentEvent } from "@stellaris/shared";
 import { describe, expect, it, vi } from "vitest";
-import type { AppServerProcess, SpawnAppServer } from "./app-server.js";
+import { isTransient, type AppServerProcess, type SpawnAppServer } from "./app-server.js";
 import { CodexBackend } from "./backend.js";
 
 const spec: AgentSpec = {
@@ -68,6 +68,12 @@ interface TurnContext {
   request(): void;
   complete(status: string, error?: string): void;
   error(message: string, willRetry: boolean): void;
+  /**
+   * The turn fails before any model request finished: the thread's totals as they stood, which
+   * Codex 0.162.1 sends for the turn when the refusal carries rate limits, then the error and the
+   * end, both with the error as the server gives it.
+   */
+  refuse(error: Record<string, unknown>): void;
   exit(stderr: string): void;
 }
 
@@ -118,6 +124,11 @@ function fakeAppServer(
     refuseResume?: string;
     /** Ends the process at the handshake, before anything is resumed. */
     dieAtStart?: boolean;
+    /**
+     * How the known threads keep their history. Codex 0.162.1 reports a `legacy` thread's totals
+     * only to a resume that takes its turns, and a `paginated` one's to any resume.
+     */
+    history?: "legacy" | "paginated";
   } = {},
 ): {
   spawn: SpawnAppServer;
@@ -202,9 +213,21 @@ function fakeAppServer(
             });
             return;
           }
-          send({ id: message.id, result: { thread: { id }, model: "gpt-5" } });
-          // A resumed thread reports where it stood, about the turn it last ran.
+          send({
+            id: message.id,
+            result: {
+              thread: {
+                id,
+                ...(script.history === undefined ? {} : { historyMode: script.history }),
+              },
+              model: "gpt-5",
+            },
+          });
           total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
+          if (script.history === "legacy" && message.params?.["excludeTurns"] === true) {
+            return;
+          }
+          // A resumed thread reports where it stood, about the turn it last ran.
           usage("turn-0", { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
           return;
         }
@@ -282,6 +305,15 @@ function fakeAppServer(
                 method: "error",
                 params: { threadId, turnId, willRetry, error: { message: said } },
               }),
+            refuse: (error) => {
+              running = null;
+              usage(turnId, { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
+              send({ method: "error", params: { threadId, turnId, willRetry: false, error } });
+              send({
+                method: "turn/completed",
+                params: { threadId, turn: { id: turnId, items: [], status: "failed", error } },
+              });
+            },
             exit: (said) => {
               stderr.write(`${said}\n`);
               setTimeout(() => exit(1), 5);
@@ -468,6 +500,77 @@ describe("CodexBackend cold turns", () => {
       developerInstructions: start.instructions,
     });
     expect(fake.received.some((m) => m.method === "thread/start")).toBe(false);
+  });
+
+  it("resumes a legacy thread again with its turns, so a turn counts only its own requests", async () => {
+    const fake = fakeAppServer({ known: ["thread-3"], history: "legacy" });
+    const backend = new CodexBackend({ spawn: fake.spawn });
+    const resumed = await backend.runTurn(request({ session: "thread-3", newSession: false }));
+    expect(resumed.exitReason).toBe("completed");
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+    const resumes = fake.received.filter((m) => m.method === "thread/resume");
+    expect(resumes.map((m) => m.params?.["excludeTurns"])).toEqual([true, undefined]);
+    expect(resumes[1]?.params).toMatchObject({
+      threadId: "thread-3",
+      developerInstructions: start.instructions,
+    });
+
+    // A paginated thread reports its totals to the first resume, which is all it gets.
+    const paginated = fakeAppServer({ known: ["thread-3"], history: "paginated" });
+    await new CodexBackend({ spawn: paginated.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(paginated.received.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+  });
+
+  it("counts nothing for a resumed thread's turn the model service turned away, and says it may pass", async () => {
+    const overloaded = {
+      message: "Selected model is at capacity. Please try a different model.",
+      codexErrorInfo: "serverOverloaded",
+    };
+    for (const history of ["legacy", "paginated"] as const) {
+      const fake = fakeAppServer({
+        known: ["thread-3"],
+        history,
+        turn: (turn) => turn.refuse(overloaded),
+      });
+      const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+        request({ session: "thread-3", newSession: false }),
+      );
+      expect(refused.exitReason).toBe("error");
+      expect(refused.error).toBe(overloaded.message);
+      expect(refused.usage).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+      expect(refused.transient).toBe(true);
+    }
+
+    // The plan's usage limit is held off until it resets instead, and other failures are final.
+    const limited = fakeAppServer({
+      turn: (turn) =>
+        turn.refuse({
+          message: "You've hit your usage limit.",
+          codexErrorInfo: "usageLimitExceeded",
+        }),
+    });
+    const stopped = await new CodexBackend({ spawn: limited.spawn }).runTurn(request());
+    expect(stopped.error).toMatch(/^usage limit reached/);
+    expect(stopped.transient).toBeUndefined();
+    const full = fakeAppServer({
+      turn: (turn) =>
+        turn.refuse({ message: "Codex ran out of room.", codexErrorInfo: "contextWindowExceeded" }),
+    });
+    expect(
+      (await new CodexBackend({ spawn: full.spawn }).runTurn(request())).transient,
+    ).toBeUndefined();
   });
 
   it("fails a thread it cannot resume before any turn, lost or retry, and starts no other", async () => {
@@ -847,5 +950,33 @@ describe("steering and stopping a Codex turn", () => {
     expect(result.exitReason).toBe("stopped");
     expect(result.error).toBeUndefined();
     expect(result.events.at(-1)).toMatchObject({ type: "turn_completed", exitReason: "stopped" });
+  });
+});
+
+/**
+ * The codes codex-cli 0.162.1 ends a turn with. The first five rows are what its app server sent
+ * when a stub model service answered so; the rest are from its error enum.
+ */
+describe("isTransient", () => {
+  it.each([
+    ["a 503 or a failed stream saying the server is overloaded", "serverOverloaded", true],
+    ["a 500 after its stream retries", "internalServerError", true],
+    ["a 429 rate limit", { responseTooManyFailedAttempts: { httpStatusCode: 429 } }, true],
+    ["the plan's usage limit", "usageLimitExceeded", false],
+    ["a rate limit Codex gave up on", "rateLimitExceeded", true],
+    ["flex capacity", "flexUnavailable", true],
+    ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
+    ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
+    ["a dropped stream", { responseStreamDisconnected: {} }, true],
+    ["a 401", { httpConnectionFailed: { httpStatusCode: 401 } }, false],
+    ["a 400", { responseTooManyFailedAttempts: { httpStatusCode: 400 } }, false],
+    ["the context window", "contextWindowExceeded", false],
+    ["a policy", "cyberPolicy", false],
+    ["a sign-in", "unauthorized", false],
+    ["a bad request", "badRequest", false],
+    ["anything else", "other", false],
+    ["no code", undefined, false],
+  ])("%s", (_case, codexErrorInfo, transient) => {
+    expect(isTransient({ message: "failed", codexErrorInfo })).toBe(transient);
   });
 });

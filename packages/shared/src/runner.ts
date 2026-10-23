@@ -285,6 +285,12 @@ export const TurnOutcomeSchema = z.object({
    * runner from before never sends it.
    */
   resumeFailed: ResumeFailureSchema.optional(),
+  /**
+   * Set when the model service turned the turn away for now, as when it was overloaded or failed
+   * on its side, which the scheduler answers by sending the same wake again within minutes. A
+   * runner from before never sends it.
+   */
+  transient: z.boolean().optional(),
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),

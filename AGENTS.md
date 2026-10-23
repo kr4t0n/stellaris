@@ -69,6 +69,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - User posts wake the front desk only (`user_post`), at user priority with no debounce. Mentions, stage, finished-task, and signal wakes are debounced; onboarding, manual, heartbeat, and reflection wakes dispatch at once.
 - No conversation ends under another citizen's turn: `assertNoTurnCut` refuses closing, archiving, abandoning, deciding, and the last advance of a `none` task while someone else is in a turn there.
 - A mention or a user post for a running conversation is steered into its turn. The user may stop a turn, which counts as a decision, not a failure.
+- A turn whose record is `transient`, turned away by the model service for now, goes again as the same queued wake after each delay of `transientRetryMs` (1, 3, then 10 minutes), unless a wake is queued there already; then the heartbeat takes over and a `turn_refused` signal, which wakes nobody, says so. Nothing switches a member's model.
 - Reflection runs per member on a cadence, in its latest working turn's scope, skips a member that has not worked since, and holds the member's other turns while it runs.
 - A question to the user is an `@user` where it belongs. A turn reporting `needsUserDecision` that asked nowhere gets its summary posted as the question.
 
@@ -99,6 +100,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Residency is a runner mechanism: one warm session per home conversation for `resident` charters, started afresh when the citizen's memory, model, or effort changes, when a turn fails, or when the server no longer knows its token.
 - A citizen's model and effort are settings, chosen from the list the CLI gives on the citizen's runner.
 - A CLI's quota is what its login reported, kept on the runner's record (`CliQuota`) and built field by field, so nothing else a CLI sends leaves the adapter. A report outside the schema is dropped, never the turn, and nothing may trigger Claude Code's billed `quota_check`.
+- An adapter marks a turn `transient` only for a failure on the model service's side once the CLI's own retries ran out: Codex's `codexErrorInfo` by `isTransient`, Claude's `api_error_status` 5xx or 529. A plan's usage limit, the context window, a policy, a sign-in, or another 4xx is not ([refusals](./docs/internals/adapters.md#a-turn-the-model-service-turned-away-for-now-is-transient)).
 - Both adapters strip `CLAUDECODE` and every `CLAUDE_CODE_*` variable from the CLI's environment and set `HUSKY=0`. Every Codex turn runs over `codex app-server`, with `default_tools_approval_mode = "approve"` so MCP calls pass.
 - A fake that streams Claude input must echo the user messages it takes, as the CLI does with `--replay-user-messages`: a turn ends only at a result after the prompt's echo.
 
@@ -166,6 +168,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - The core's first seat is at the center of the sky, so a click at the canvas's center opens a citizen, not the society.
 - The Codex app-server bindings are generated on demand and never committed; the recorded turns in `packages/adapter-codex/fixtures` catch a release that changes the fields read. Scan a recorded stream for token-like strings before committing it.
 - Codex reads the runner account's own `~/.codex/config.toml` and global `AGENTS.md`; the Claude adapter loads project settings only.
+- A turn's Codex usage is what the thread's totals grew by, from the totals the app server reports right after `thread/resume`. With `excludeTurns`, Codex 0.162.1 reports them only for a `paginated` thread, so the adapter resumes a `legacy` thread a second time with its turns.
 - A Codex thread id is a `pending-` placeholder until `thread/start` answers. Claude's model list starts with a `default` entry that is not a model, and the Agent SDK can send several init messages in one query, of which the adapter keeps the first.
 - Claude Code refuses a foreground `sleep`; a live test that needs a busy turn waits another way. A steer with no priority may wait for the turn's end, so the adapter sets `next`.
 - With `STELLARIS_TURN_TIMEOUT_MS=unlimited` a turn has no time limit, so nothing may assume one, and Node fires a `setTimeout` of `Infinity` at once.

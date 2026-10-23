@@ -104,6 +104,12 @@ function searchInput(item: Dict): Record<string, string> {
   };
 }
 
+/** How a thread keeps its history, as a resume's response says: `legacy` or `paginated`. */
+function historyModeOf(response: unknown): string | undefined {
+  const thread = isDict(response) ? response["thread"] : undefined;
+  return isDict(thread) ? str(thread["historyMode"]) : undefined;
+}
+
 /** Sessions Codex has not named yet start with this prefix; a thread id replaces it on start. */
 export const PENDING_THREAD_PREFIX = "pending-";
 
@@ -118,6 +124,49 @@ const LOST_THREAD = /invalid session id|no rollout found|failed to read thread/;
 /** Why the app server could not resume a thread, from its words: nothing there to resume, or try again. */
 function resumeFailureOf(error: string): ResumeFailure {
   return LOST_THREAD.test(error) ? "lost" : "retry";
+}
+
+/**
+ * The `codexErrorInfo` codes 0.162.1 gives a failure on the model service's side, after its own
+ * retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity", and
+ * `usageLimitExceeded`, the plan's limit, is not among them.
+ */
+const TRANSIENT_ERRORS = new Set([
+  "serverOverloaded",
+  "internalServerError",
+  "rateLimitExceeded",
+  "flexUnavailable",
+]);
+
+/** The codes that carry the HTTP status the request failed with, if it got one. */
+const HTTP_FAILURES = [
+  "httpConnectionFailed",
+  "responseStreamConnectionFailed",
+  "responseStreamDisconnected",
+  "responseTooManyFailedAttempts",
+];
+
+/**
+ * Whether an app-server error says the model service turned the turn away for now: one of the
+ * codes above, or a request that failed with no answer, a 429, or a 5xx. Any other 4xx, a policy,
+ * the context window, or a sign-in is not worth sending again.
+ */
+export function isTransient(error: unknown): boolean {
+  const info = isDict(error) ? error["codexErrorInfo"] : undefined;
+  if (typeof info === "string") {
+    return TRANSIENT_ERRORS.has(info);
+  }
+  if (!isDict(info)) {
+    return false;
+  }
+  for (const kind of HTTP_FAILURES) {
+    const failure = info[kind];
+    if (isDict(failure)) {
+      const status = failure["httpStatusCode"];
+      return typeof status !== "number" || status === 429 || status >= 500;
+    }
+  }
+  return false;
 }
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -499,6 +548,8 @@ interface TurnCollector {
   stopped: boolean;
   /** Whether Codex ended the turn for the plan's usage limit. */
   limited: boolean;
+  /** Whether Codex ended the turn on a failure the model service may not repeat in a minute. */
+  transient: boolean;
 }
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
@@ -606,6 +657,11 @@ export class CodexAppServerSession implements ResidentSession {
    * Starts a new conversation's thread, or resumes a saved one. A saved thread is resumed or the
    * session fails before any model call, never replaced: the server built the prompt for that
    * thread, and only it decides that a conversation starts afresh.
+   *
+   * A turn counts what the thread's totals grew by, so it needs where they stood: the app server
+   * reports them right after the resume, but for a `legacy` thread, which a Codex from before
+   * paginated history started, only to a resume that takes the thread's turns. Such a thread is
+   * resumed again with them.
    */
   private async openThread(): Promise<string> {
     if (this.start.newSession) {
@@ -619,6 +675,12 @@ export class CodexAppServerSession implements ResidentSession {
         excludeTurns: true,
         ...this.threadParams(),
       });
+      if (historyModeOf(resumed) === "legacy") {
+        resumed = await this.client.request("thread/resume", {
+          threadId: this.start.session,
+          ...this.threadParams(),
+        });
+      }
     } catch (error) {
       const said = error instanceof Error ? error.message : String(error);
       throw new ResumeError(resumeFailureOf(said), said);
@@ -781,6 +843,7 @@ export class CodexAppServerSession implements ResidentSession {
         if (isDict(error)) {
           turn.error = str(error["message"]) ?? "turn failed";
           turn.limited ||= isUsageLimit(error);
+          turn.transient ||= isTransient(error);
         }
         turn.settle();
         return;
@@ -796,6 +859,7 @@ export class CodexAppServerSession implements ResidentSession {
         }
         turn.error = message;
         turn.limited ||= isUsageLimit(error);
+        turn.transient ||= isTransient(error);
         return;
       }
       default:
@@ -836,6 +900,7 @@ export class CodexAppServerSession implements ResidentSession {
       outstanding: new Set(),
       stopped: false,
       limited: false,
+      transient: false,
     };
     this.active = turn;
     emit({
@@ -929,6 +994,7 @@ export class CodexAppServerSession implements ResidentSession {
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(quota === undefined ? {} : { quota }),
+      ...(turn.transient && !turn.limited && exitReason === "error" ? { transient: true } : {}),
     };
   }
 

@@ -369,6 +369,7 @@ export class TurnExecutor {
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
       session: result.session ?? (started ? session : job.session),
       ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
+      ...(result.transient === true && result.exitReason === "error" ? { transient: true } : {}),
       model: result.model ?? null,
       work,
       leftovers,

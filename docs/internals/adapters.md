@@ -108,6 +108,10 @@ Its `item.started` carries an empty `query`, and a search opened by URL or run f
 
 Codex's `thread/tokenUsage/updated` carries the thread's running `total` and the `last` request alone; the adapter once kept `last`, so a turn of five requests recorded only the fifth, about a fifth of what it used (30,630 input tokens of 151,361 in the recorded steered turn). The session now keeps the thread's latest total from every update, and a turn counts what the total grew by from where it stood before the turn: a resumed thread reports its saved total, about its previous turn, before the turn starts, and an update about another turn, or before the turn has an id, which `turn/started` gives it in stream order, sets that starting point. Codex also counts cached input inside `inputTokens`, while Claude Code counts it apart, so the Codex adapter subtracts it and `Usage` means the same on both CLIs: `inputTokens` is the input neither read from the cache nor written to it. A Claude result counts only its own run, and a cold turn can run more than once in one process, for a steer the CLI took after its result or for a background task a resumed session reports first, so the adapter adds the results up; until then such a turn kept the last run's alone. Claude's results leave out the CLI's own small-model calls, which only the session-wide `modelUsage` counts. `turn.completed` and `turn.failed` carry `usage` from then on; turns logged before have none, and the Codex counts kept before in turn records and transcripts are the last request's.
 
+### Codex reports a legacy thread's totals only to a resume that takes its turns
+
+The starting point comes from Codex: right after `thread/resume`, its app server sends a `thread/tokenUsage/updated` about the thread's previous turn with the saved total. Codex 0.162.1 sends it to a resume with `excludeTurns`, which the adapter asks for to keep the thread's history out of the response, only for a `paginated` thread, the history mode a new thread gets since 0.151.0; a `legacy` thread, which an older Codex started, gets it only from a resume that takes its turns (`token_usage_turn_id` in `thread_processor.rs`). Without it the starting point stayed at zero, so every turn of a resumed legacy thread counted the thread's whole history as its own, and a turn the model service refused before any request counted it too, since Codex sends the thread's total for the failing turn when the refusal carries rate limits. The response to a resume names the thread's `historyMode`, and the adapter resumes a `legacy` thread a second time, with its turns, which Codex answers with the update; a `paginated` thread keeps the one resume. Measured against a local stub of the model service: a legacy thread whose history held 2,000 input and 100 output tokens, 800 of the input cached, recorded a turn of one 1,000-token request as 1,200 input, 100 output and 800 cached before, and 600, 50 and 400 after.
+
 ### The model is observed, not assumed
 
 Turn records carry the model the CLI reported: Claude Code names it on the session's init message, the Codex app server on the response that opens the thread. Until every Codex turn ran over the app server, cold Codex turns through `codex exec`, whose stream never names it, fell back to the configured model and showed "cli default" when there was none. The roster keeps both the configured `model` and the `lastModel` observed, and the front desk's digest prefers the observed one.
@@ -116,6 +120,16 @@ Turn records carry the model the CLI reported: Claude Code names it on the sessi
 
 With the default model, observed Claude turns cost between a tenth and a third of a dollar; a full two-agent task with review ran about one dollar. Codex reports tokens but no price, so its turns are recorded at zero cost until a price table exists, which the tokens each turn records are enough for; they are not free, only unmetered, so a wasted Codex turn is a real cost. Set `STELLARIS_LOG_LEVEL=debug` to see every tool call and the CLI's stderr in the server log.
 
+## Refusals
+
+### A turn the model service turned away for now is transient
+
+Each adapter marks a turn `transient` when it failed on the model service's side after the CLI's own retries ran out, and the scheduler sends its wake again within minutes (see [wakes](conversations.md#a-turn-the-model-service-turned-away-goes-again-within-minutes)). A plan's usage limit is not transient: the CLI is held off until the window resets (see [plan quota](runners.md#a-clis-quota-is-what-its-login-reported-kept-on-its-runners-record)). Nor is a refusal for the context window, a policy, a sign-in, or any other 4xx, which a minute does not cure. The runner keeps the mark only on a turn that ended `error`, and the turn record and `turn.failed` carry it.
+
+Codex names the failure in `codexErrorInfo`, on the `error` notification it sends without `willRetry` and on `turn/completed`. "Selected model is at capacity. Please try a different model." is Codex's own words for `serverOverloaded`, which it gives a 503 or a failed stream with the code `server_is_overloaded`; it retries that only at the HTTP layer, four times by default, unless the service sent `Retry-After`. Transient are `serverOverloaded`, `internalServerError`, `rateLimitExceeded`, `flexUnavailable`, and the four codes that carry `httpStatusCode` when it is absent, 429, or 5xx (`isTransient`). Against a stub on codex-cli 0.162.1: a 503 overload failed the turn after five requests in 3 s, a 500 after thirty in 25 s as `internalServerError`, and a 429 at once as `responseTooManyFailedAttempts` with its status.
+
+Claude Code ends a turn the API refused as a `success` result marked `is_error`, with `api_error_status`; the adapter marks a 5xx or a 529 transient, or, with no status, an assistant message whose `error` is `server_error` or `overloaded`. Claude Code 2.1.283 gives up on a 529 after three requests in about 2 s, saying "Repeated 529 Overloaded errors", and on a 500 after eleven over three minutes, both with `error: "server_error"`; a 429 it retries as long and then reports as `rate_limit`, which the adapter reads as the plan's limit.
+
 ## Recorded streams
 
 ### Recorded streams are fixtures
@@ -123,6 +137,10 @@ With the default model, observed Claude turns cost between a tenth and a third o
 `STELLARIS_RECORD_DIR` makes both adapters append each turn's raw stream to a file. Scan a recording for token-like strings before committing it under `packages/*/fixtures`; the streams carry tool outputs, not credentials, but check anyway.
 
 ## History
+
+### A Codex turn the model service refused once waited a quarter hour and counted a whole conversation
+
+On 2026-10-23 a Codex citizen's turn on a mention failed in 7 s with "Selected model is at capacity", and so did its heartbeat a minute later, while another citizen on the same runner and model completed a turn: nothing ran the mention again until the user asked seven minutes later, where otherwise the next heartbeat would have, up to a quarter hour after the first failure. The failed turn was recorded with 361,546 input and 54,377 output tokens, the sum of the eight turns before it in that conversation, which is what a turn records when its thread reported no starting point (see [legacy threads](#codex-reports-a-legacy-threads-totals-only-to-a-resume-that-takes-its-turns)). Such a turn is now [transient](#a-turn-the-model-service-turned-away-for-now-is-transient), goes again after a minute, and counts nothing.
 
 ### A turn the plan's limit refused once said nothing of the limit
 

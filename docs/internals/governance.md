@@ -60,7 +60,7 @@ Approvers are always read through `proposalApprovers`, which narrows a kind's li
 
 ### Not every signal wakes
 
-`waiting_stage`, `turn_cost`, `runner`, `home_conflict`, `stuck_workspace`, and `cron_failing` only inform: the steward reads them in its prompt at its next wake for something else. Backlog, role gaps, churn, stale threads, idle members, missing capabilities, and replicas added wake `ops_event` roles, debounced like mentions so a burst becomes one turn.
+`waiting_stage`, `turn_cost`, `runner`, `home_conflict`, `stuck_workspace`, `cron_failing`, and `turn_refused` only inform: the steward reads them in its prompt at its next wake for something else. Backlog, role gaps, churn, stale threads, idle members, missing capabilities, and replicas added wake `ops_event` roles, debounced like mentions so a burst becomes one turn.
 
 ### The operations pass runs on the first tick after start
 

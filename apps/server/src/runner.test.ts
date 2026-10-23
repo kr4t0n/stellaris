@@ -1012,6 +1012,36 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
   });
 
+  it("records a turn the model service turned away as transient, and only a failed one", async () => {
+    const { board } = await Board.init(dir, { name: "refused" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const post = { ...deskPost, agent: "concierge-1" };
+    const words = "API Error: Repeated 529 Overloaded errors.";
+    const plan: TurnResult[] = [
+      { ...completed("refused"), status: null, exitReason: "error", error: words, transient: true },
+      // A CLI that says so of a turn that completed is not believed.
+      { ...completed("ran"), transient: true },
+    ];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.resolve(plan.shift() ?? completed("ran")),
+    };
+    const { run } = await start(board, backend);
+    const refused = await run(post);
+    expect(refused).toMatchObject({ exitReason: "error", error: words, transient: true });
+    const ran = await run(post);
+    expect(ran.exitReason).toBe("completed");
+    expect(ran.transient).toBeUndefined();
+    const ended = (await board.readEvents(null, 1_000)).filter((event) =>
+      ["turn.failed", "turn.completed"].includes(event.type),
+    );
+    expect(ended.map((event) => [event.type, event.payload["transient"] ?? null])).toEqual([
+      ["turn.failed", true],
+      ["turn.completed", null],
+    ]);
+  });
+
   it("keeps a session its CLI may resume next time, and drops it after three such turns in a row", async () => {
     const { board } = await Board.init(dir, { name: "retry" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

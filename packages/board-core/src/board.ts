@@ -4308,6 +4308,7 @@ export class Board {
         needsUserDecision: parsed.status?.needsUserDecision ?? false,
         error: parsed.error,
         ...(parsed.resumeFailed === undefined ? {} : { resumeFailed: parsed.resumeFailed }),
+        ...(parsed.transient === true ? { transient: true } : {}),
         ...(parsed.sessionDropped === true ? { sessionDropped: true } : {}),
       });
     });

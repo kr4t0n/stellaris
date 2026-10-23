@@ -161,6 +161,10 @@ interface TurnState {
   limitText: string | undefined;
   /** Whether the latest result ended its run on an API error: a success marked `is_error`. */
   apiError: boolean;
+  /** Whether the CLI's own message about an API error said the service was overloaded or failing. */
+  serverError: boolean;
+  /** Whether that API error was the service's to fix, a 5xx or a 529, so a minute may cure it. */
+  transient: boolean;
 }
 
 interface HandlerContext {
@@ -185,6 +189,8 @@ function freshState(model?: string): TurnState {
     quota: undefined,
     limitText: undefined,
     apiError: false,
+    serverError: false,
+    transient: false,
   };
 }
 
@@ -285,6 +291,10 @@ function handleMessage(
         state.limitText = said.length > 0 ? said : "the plan's usage limit";
         state.quota = limitedQuota(state.quota, context.now());
       }
+      // After its own retries, Claude Code says `server_error` for a 5xx or a 529.
+      if (message.error === "server_error" || message.error === "overloaded") {
+        state.serverError = true;
+      }
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
           emit({ type: "text", delta: block.text });
@@ -333,6 +343,10 @@ function handleMessage(
       state.usage = addUsage(state.usage, usageOf(message.usage));
       state.totalCostUsd = message.total_cost_usd;
       state.apiError = message.subtype === "success" && message.is_error;
+      // Like the error, the latest run decides whether the turn is worth sending again.
+      const serverError = state.serverError;
+      state.serverError = false;
+      state.transient = false;
       if (message.subtype === "success") {
         state.finalText = message.result;
         state.structured = message.structured_output ?? null;
@@ -340,6 +354,8 @@ function handleMessage(
         if (state.apiError) {
           state.exitReason = "error";
           state.error = message.result || "the turn ended on an API error";
+          const status = message.api_error_status;
+          state.transient = typeof status === "number" ? status >= 500 : serverError;
         } else {
           // The latest run decides how the turn ended, so an earlier run's error goes with it.
           state.exitReason = "completed";
@@ -415,6 +431,9 @@ function finishTurn(
     ...(state.model === undefined ? {} : { model: state.model }),
     ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
     ...(state.quota === undefined ? {} : { quota: state.quota }),
+    ...(state.transient && state.limitText === undefined && state.exitReason === "error"
+      ? { transient: true }
+      : {}),
   };
 }
 

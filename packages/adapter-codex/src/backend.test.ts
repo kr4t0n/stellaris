@@ -11,7 +11,7 @@ import {
 } from "@stellaris/runner-core";
 import type { AgentEvent } from "@stellaris/shared";
 import { describe, expect, it, vi } from "vitest";
-import type { AppServerProcess, SpawnAppServer } from "./app-server.js";
+import { isTransient, type AppServerProcess, type SpawnAppServer } from "./app-server.js";
 import { CodexBackend } from "./backend.js";
 
 const spec: AgentSpec = {
@@ -68,6 +68,13 @@ interface TurnContext {
   request(): void;
   complete(status: string, error?: string): void;
   error(message: string, willRetry: boolean): void;
+  /**
+   * The thread's totals as they stand, for this turn with no request finished, as Codex sends them
+   * when a refusal carries rate limits or a compaction starts.
+   */
+  report(): void;
+  /** The turn fails with no further request finished: the totals, then the error and the end. */
+  refuse(error: Record<string, unknown>): void;
   exit(stderr: string): void;
 }
 
@@ -118,6 +125,11 @@ function fakeAppServer(
     refuseResume?: string;
     /** Ends the process at the handshake, before anything is resumed. */
     dieAtStart?: boolean;
+    /**
+     * Sends no totals on resuming, as codex-cli 0.162.1 does for a `legacy` thread resumed without
+     * its turns, and as a live 0.158.0 did once for a `paginated` one.
+     */
+    noReplay?: boolean;
   } = {},
 ): {
   spawn: SpawnAppServer;
@@ -203,8 +215,11 @@ function fakeAppServer(
             return;
           }
           send({ id: message.id, result: { thread: { id }, model: "gpt-5" } });
-          // A resumed thread reports where it stood, about the turn it last ran.
           total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
+          if (script.noReplay === true) {
+            return;
+          }
+          // A resumed thread reports where it stood, about the turn it last ran.
           usage("turn-0", { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
           return;
         }
@@ -282,6 +297,17 @@ function fakeAppServer(
                 method: "error",
                 params: { threadId, turnId, willRetry, error: { message: said } },
               }),
+            report: () =>
+              usage(turnId, { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 }),
+            refuse: (error) => {
+              running = null;
+              usage(turnId, { inputTokens: 1_000, cachedInputTokens: 800, outputTokens: 50 });
+              send({ method: "error", params: { threadId, turnId, willRetry: false, error } });
+              send({
+                method: "turn/completed",
+                params: { threadId, turn: { id: turnId, items: [], status: "failed", error } },
+              });
+            },
             exit: (said) => {
               stderr.write(`${said}\n`);
               setTimeout(() => exit(1), 5);
@@ -468,6 +494,187 @@ describe("CodexBackend cold turns", () => {
       developerInstructions: start.instructions,
     });
     expect(fake.received.some((m) => m.method === "thread/start")).toBe(false);
+  });
+
+  it("counts only a resumed turn's own requests when the thread's totals never came", async () => {
+    const fake = fakeAppServer({ known: ["thread-3"], noReplay: true });
+    const backend = new CodexBackend({ spawn: fake.spawn });
+    const resumed = await backend.runTurn(request({ session: "thread-3", newSession: false }));
+    expect(resumed.exitReason).toBe("completed");
+    // As when the thread reports its totals on resuming: two requests, none of the earlier turns.
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+    expect(fake.received.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+  });
+
+  it("counts a request whose only item is a command still running when a refusal follows", async () => {
+    // A command that outlives its yield starts before its request's update and completes later, or
+    // never within the turn, as codex-cli 0.158.0 and 0.162.1 ran one against a stub.
+    const command = {
+      type: "commandExecution",
+      id: "c1",
+      command: "sleep 20",
+      status: "inProgress",
+    };
+    const overloaded = {
+      message: "Selected model is at capacity.",
+      codexErrorInfo: "serverOverloaded",
+    };
+    const refusedAfter = fakeAppServer({
+      turn: (turn) => {
+        turn.item("item/started", command);
+        turn.request();
+        turn.refuse(overloaded);
+      },
+    });
+    const refused = await new CodexBackend({ spawn: refusedAfter.spawn }).runTurn(request());
+    expect(refused).toMatchObject({ exitReason: "error", transient: true });
+    expect(refused.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 40,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts a resumed turn's first request when its only item is a command still running and no totals came", async () => {
+    const command = {
+      type: "commandExecution",
+      id: "c1",
+      command: "sleep 6",
+      status: "inProgress",
+    };
+    const noTotals = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        turn.item("item/started", command);
+        turn.request();
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+        turn.complete("completed");
+      },
+    });
+    const resumed = await new CodexBackend({ spawn: noTotals.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts no compaction as an answer, since Codex starts it before its own request", async () => {
+    // As codex-cli 0.158.0 and 0.162.1 compact before a turn's first request: the compaction starts,
+    // the totals come as they stand, it completes, and then the turn's one request.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        turn.item("item/started", { type: "contextCompaction", id: "cc1" });
+        turn.report();
+        turn.item("item/completed", { type: "contextCompaction", id: "cc1" });
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+        turn.complete("completed");
+      },
+    });
+    const compacted = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(compacted.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 40,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts nothing for a turn the model never answered, whatever the thread's totals say", async () => {
+    // Codex moves the totals without an answer when a turn runs out of context, which it fills.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      turn: (turn) => {
+        turn.request();
+        turn.refuse({ message: "Codex ran out of room.", codexErrorInfo: "contextWindowExceeded" });
+      },
+    });
+    const full = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(full.exitReason).toBe("error");
+    expect(full.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(full.transient).toBeUndefined();
+  });
+
+  it("counts nothing for a resumed thread's turn the model service turned away, and says it may pass", async () => {
+    const overloaded = {
+      message: "Selected model is at capacity. Please try a different model.",
+      codexErrorInfo: "serverOverloaded",
+    };
+    // Without the thread's totals reported on resuming, as on the live 0.158.0, and with them.
+    for (const noReplay of [true, false]) {
+      const fake = fakeAppServer({
+        known: ["thread-3"],
+        noReplay,
+        turn: (turn) => turn.refuse(overloaded),
+      });
+      const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+        request({ session: "thread-3", newSession: false }),
+      );
+      expect(refused.exitReason).toBe("error");
+      expect(refused.error).toBe(overloaded.message);
+      expect(refused.usage).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+      expect(refused.transient).toBe(true);
+    }
+
+    // Refused at the compaction before the turn's first request, as 0.158.0 and 0.162.1 word it.
+    const compacting = {
+      message: `Error running remote compact task: ${overloaded.message}`,
+      codexErrorInfo: "serverOverloaded",
+    };
+    const compaction = fakeAppServer({
+      known: ["thread-3"],
+      turn: (turn) => turn.refuse(compacting),
+    });
+    const notCompacted = await new CodexBackend({ spawn: compaction.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(notCompacted).toMatchObject({ error: compacting.message, transient: true });
+    expect(notCompacted.usage.inputTokens + notCompacted.usage.cacheReadTokens).toBe(0);
+
+    // The plan's usage limit is held off until it resets instead, and other failures are final.
+    const limited = fakeAppServer({
+      turn: (turn) =>
+        turn.refuse({
+          message: "You've hit your usage limit.",
+          codexErrorInfo: "usageLimitExceeded",
+        }),
+    });
+    const stopped = await new CodexBackend({ spawn: limited.spawn }).runTurn(request());
+    expect(stopped.error).toMatch(/^usage limit reached/);
+    expect(stopped.transient).toBeUndefined();
+    const full = fakeAppServer({
+      turn: (turn) =>
+        turn.refuse({ message: "Codex ran out of room.", codexErrorInfo: "contextWindowExceeded" }),
+    });
+    expect(
+      (await new CodexBackend({ spawn: full.spawn }).runTurn(request())).transient,
+    ).toBeUndefined();
   });
 
   it("fails a thread it cannot resume before any turn, lost or retry, and starts no other", async () => {
@@ -847,5 +1054,33 @@ describe("steering and stopping a Codex turn", () => {
     expect(result.exitReason).toBe("stopped");
     expect(result.error).toBeUndefined();
     expect(result.events.at(-1)).toMatchObject({ type: "turn_completed", exitReason: "stopped" });
+  });
+});
+
+/**
+ * The codes codex-cli 0.162.1 ends a turn with. The first five rows are what its app server sent
+ * when a stub model service answered so; the rest are from its error enum.
+ */
+describe("isTransient", () => {
+  it.each([
+    ["a 503 or a failed stream saying the server is overloaded", "serverOverloaded", true],
+    ["a 500 after its stream retries", "internalServerError", true],
+    ["a 429 rate limit", { responseTooManyFailedAttempts: { httpStatusCode: 429 } }, true],
+    ["the plan's usage limit", "usageLimitExceeded", false],
+    ["a rate limit Codex gave up on", "rateLimitExceeded", true],
+    ["flex capacity", "flexUnavailable", true],
+    ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
+    ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
+    ["a dropped stream", { responseStreamDisconnected: {} }, true],
+    ["a 401", { httpConnectionFailed: { httpStatusCode: 401 } }, false],
+    ["a 400", { responseTooManyFailedAttempts: { httpStatusCode: 400 } }, false],
+    ["the context window", "contextWindowExceeded", false],
+    ["a policy", "cyberPolicy", false],
+    ["a sign-in", "unauthorized", false],
+    ["a bad request", "badRequest", false],
+    ["anything else", "other", false],
+    ["no code", undefined, false],
+  ])("%s", (_case, codexErrorInfo, transient) => {
+    expect(isTransient({ message: "failed", codexErrorInfo })).toBe(transient);
   });
 });

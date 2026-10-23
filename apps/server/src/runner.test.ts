@@ -846,26 +846,32 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
   });
 
-  it("calls the spend a lower bound only when the signals read may stop short of the last turn", async () => {
+  it("calls the spend a lower bound only when the signals read cut some logged since the last turn", async () => {
     const { board } = await Board.init(dir, { name: "signals" });
     await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
     const { backend, listed } = signalReader();
     const { run } = await start(board, backend);
-    // No last turn and a full read: the first report falls out of the newest 500 signals.
+    // No last turn, and more than 500 signals: the first report falls out of the newest 500.
     await spendReport(board, 4, 3);
     await idleRepeats(board, 499);
     await spendReport(board, 2, 1);
     await run(stewardTurn);
-    // A full read whose oldest signal is older than the last turn holds every report since it.
+    // More than 500 signals, but the one past the newest 500 is older than the last turn.
     await spendReport(board, 1, 0.5);
     await spendReport(board, 3, 2);
     expect((await board.listSignals(1000)).length).toBeGreaterThan(500);
     await run(stewardTurn);
-    // A full read whose oldest signal is newer than the last turn may have cut some.
+    // 502 signals since the last turn: the newest 500 leave out two, a report among them.
     await spendReport(board, 4, 3);
     await idleRepeats(board, 499);
     await spendReport(board, 2, 1);
     await spendReport(board, 1, 0.5);
+    await run(stewardTurn);
+    // Exactly 500 signals since the last turn: the newest 500 leave out none.
+    await spendReport(board, 2, 1);
+    await idleRepeats(board, 497);
+    await spendReport(board, 1, 0.5);
+    await spendReport(board, 3, 2);
     await run(stewardTurn);
     const at = await spendTimes(board);
     const idle = expect.stringMatching(/ idle_member: eng-1 \(engineer\) .* for 499d /);
@@ -879,6 +885,10 @@ describe("turns on a runner over the runner protocol", () => {
     expect(listed[2]).toEqual([
       idle,
       `- [${at[6]}] turn_cost: 3 turn(s) completed for $1.50 in 2 hourly report(s) logged from ${at[5]} to ${at[6]}; the dearest, logged at ${at[5]}, was $1.00; the read holds the newest 500 signals, so these are lower bounds (value 1.5)`,
+    ]);
+    expect(listed[3]).toEqual([
+      expect.stringMatching(/ idle_member: eng-1 \(engineer\) .* for 497d /),
+      `- [${at[9]}] turn_cost: 6 turn(s) completed for $3.50 in 3 hourly report(s) logged from ${at[7]} to ${at[9]}; the dearest, logged at ${at[9]}, was $2.00 (value 3.5)`,
     ]);
   });
 

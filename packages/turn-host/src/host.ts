@@ -177,9 +177,11 @@ const REPORT_TURNS = /^(\d+) turn\(s\) completed /;
 
 /**
  * The hourly spend reports among signal records summed into one record at the latest of them, so
- * a reader learns what was spent since its last turn, not in the last hour alone, and the dearest
- * report stays in sight. A report whose summary names no turn count leaves the total uncounted.
- * `partial` says the read may stop short of the reader's last turn, so the sums are lower bounds.
+ * a reader learns the spend reported since its last turn, not the last hour's alone, and the
+ * dearest report stays in sight. The first of those reports can count turns from before the
+ * reader's last turn, and turns since the newest are not reported yet. A report whose summary
+ * names no turn count leaves the total uncounted. `partial` says the read cut signals logged since
+ * the reader's last turn, so the sums are lower bounds.
  */
 function sumSpend(records: readonly SignalRecord[], partial: boolean): SignalRecord[] {
   const reports = records.filter((record) => record.signal.kind === "turn_cost");
@@ -217,7 +219,8 @@ function sumSpend(records: readonly SignalRecord[], partial: boolean): SignalRec
 
 /**
  * Each condition's latest log among signal records, oldest first by that log, so the repeats of
- * a persisting condition, or hourly spend reports, cannot push other conditions past the cap.
+ * a persisting condition cannot push other conditions past the cap; `sumSpend` has already
+ * folded the hourly spend reports into one.
  */
 function latestPerKey(records: readonly SignalRecord[]): SignalRecord[] {
   const latest = new Map<string, SignalRecord>();
@@ -1044,18 +1047,17 @@ export class TurnHost {
     scope: Name,
     lastTurn: TurnRecord | null,
   ): Promise<SignalRecord[]> {
-    const read = await this.board.listSignals(SIGNAL_READ);
-    // A full read that begins after the last turn may have cut reports logged since it.
-    const oldest = read[0];
-    const partial =
-      read.length === SIGNAL_READ &&
-      oldest !== undefined &&
-      (lastTurn === null || oldest.ts > lastTurn.startedAt);
-    const since = read.filter(
-      (record) =>
-        wakeScope(agent, record.signal.project ?? null) === scope &&
-        (lastTurn === null || record.ts > lastTurn.startedAt),
-    );
+    // One record past the newest SIGNAL_READ tells whether they cut any logged since the last turn.
+    const read = await this.board.listSignals(SIGNAL_READ + 1);
+    const past = read.length > SIGNAL_READ ? read[0] : undefined;
+    const partial = past !== undefined && (lastTurn === null || past.ts > lastTurn.startedAt);
+    const since = read
+      .slice(-SIGNAL_READ)
+      .filter(
+        (record) =>
+          wakeScope(agent, record.signal.project ?? null) === scope &&
+          (lastTurn === null || record.ts > lastTurn.startedAt),
+      );
     return latestPerKey(sumSpend(since, partial)).slice(-MAX_SIGNALS);
   }
 

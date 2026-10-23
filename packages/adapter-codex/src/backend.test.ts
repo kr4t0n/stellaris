@@ -563,6 +563,22 @@ describe("CodexBackend cold turns", () => {
       expect(refused.transient).toBe(true);
     }
 
+    // Refused at the compaction before the turn's first request, as 0.158.0 and 0.162.1 word it.
+    const compacting = {
+      message: `Error running remote compact task: ${overloaded.message}`,
+      codexErrorInfo: "serverOverloaded",
+    };
+    const compaction = fakeAppServer({
+      known: ["thread-3"],
+      history: "paginated",
+      turn: (turn) => turn.refuse(compacting),
+    });
+    const notCompacted = await new CodexBackend({ spawn: compaction.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(notCompacted).toMatchObject({ error: compacting.message, transient: true });
+    expect(notCompacted.usage.inputTokens + notCompacted.usage.cacheReadTokens).toBe(0);
+
     // The plan's usage limit is held off until it resets instead, and other failures are final.
     const limited = fakeAppServer({
       turn: (turn) =>

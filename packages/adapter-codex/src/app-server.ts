@@ -105,12 +105,6 @@ function searchInput(item: Dict): Record<string, string> {
   };
 }
 
-/** How a thread keeps its history, as a resume's response says: `legacy` or `paginated`. */
-function historyModeOf(response: unknown): string | undefined {
-  const thread = isDict(response) ? response["thread"] : undefined;
-  return isDict(thread) ? str(thread["historyMode"]) : undefined;
-}
-
 /** Sessions Codex has not named yet start with this prefix; a thread id replaces it on start. */
 export const PENDING_THREAD_PREFIX = "pending-";
 
@@ -518,6 +512,16 @@ function threadTokensOf(raw: unknown): ThreadTokens {
   };
 }
 
+/** The totals less one request's, never below zero. */
+function lessTokens(total: ThreadTokens, request: ThreadTokens): ThreadTokens {
+  return {
+    input: Math.max(0, total.input - request.input),
+    cached: Math.max(0, total.cached - request.cached),
+    cacheWrite: Math.max(0, total.cacheWrite - request.cacheWrite),
+    output: Math.max(0, total.output - request.output),
+  };
+}
+
 /**
  * What a turn used, from the thread's totals before and after it. The board counts input outside
  * the cache apart from the input read from or written to it, as Claude Code does.
@@ -539,6 +543,8 @@ interface TurnCollector {
   finalText: string;
   /** The thread's totals before the turn's first request. */
   baseline: ThreadTokens;
+  /** Whether `baseline` is where the thread stood, or a zero that waits for the turn's first update. */
+  baselineKnown: boolean;
   status: string | null;
   error: string | undefined;
   readonly started: Set<string>;
@@ -569,6 +575,8 @@ export class CodexAppServerSession implements ResidentSession {
   private active: TurnCollector | null = null;
   /** The thread's totals as last reported, which a resumed thread reports before its first turn. */
   private threadTotal: ThreadTokens = NO_TOKENS;
+  /** Whether `threadTotal` is where the thread stands: a new thread's zero, or a total reported. */
+  private totalsKnown = false;
   private closed = false;
   private readonly stderrTail: string[] = [];
   private readonly recorded: string[] = [];
@@ -663,14 +671,10 @@ export class CodexAppServerSession implements ResidentSession {
    * Starts a new conversation's thread, or resumes a saved one. A saved thread is resumed or the
    * session fails before any model call, never replaced: the server built the prompt for that
    * thread, and only it decides that a conversation starts afresh.
-   *
-   * A turn counts what the thread's totals grew by, so it needs where they stood: the app server
-   * reports them right after the resume, but for a `legacy` thread, which a Codex from before
-   * paginated history started, only to a resume that takes the thread's turns. Such a thread is
-   * resumed again with them.
    */
   private async openThread(): Promise<string> {
     if (this.start.newSession) {
+      this.totalsKnown = true;
       return this.threadIdOf(await this.client.request("thread/start", this.threadParams()));
     }
     let resumed: unknown;
@@ -681,12 +685,6 @@ export class CodexAppServerSession implements ResidentSession {
         excludeTurns: true,
         ...this.threadParams(),
       });
-      if (historyModeOf(resumed) === "legacy") {
-        resumed = await this.client.request("thread/resume", {
-          threadId: this.start.session,
-          ...this.threadParams(),
-        });
-      }
     } catch (error) {
       const said = error instanceof Error ? error.message : String(error);
       throw new ResumeError(resumeFailureOf(said), said);
@@ -772,14 +770,23 @@ export class CodexAppServerSession implements ResidentSession {
         return;
       }
       this.threadTotal = threadTokensOf(usage["total"]);
+      this.totalsKnown = true;
       // `last` is only the latest request. An update about another turn, such as the one a resumed
       // thread sends about its previous turn, says where the thread stood before this one.
       const owner = str(params["turnId"]);
-      if (
-        turn !== null &&
-        (turn.turnId === null || (owner !== undefined && owner !== turn.turnId))
-      ) {
+      if (turn === null) {
+        return;
+      }
+      if (turn.turnId === null || (owner !== undefined && owner !== turn.turnId)) {
         turn.baseline = this.threadTotal;
+        turn.baselineKnown = true;
+      } else if (!turn.baselineKnown) {
+        // A resumed thread whose totals never came: the turn's first update of its own says where
+        // the thread stood, less the request it reports if the model answered one, and as it is if not.
+        turn.baseline = turn.answered
+          ? lessTokens(this.threadTotal, threadTokensOf(usage["last"]))
+          : this.threadTotal;
+        turn.baselineKnown = true;
       }
       return;
     }
@@ -901,6 +908,7 @@ export class CodexAppServerSession implements ResidentSession {
       turnId: null,
       finalText: "",
       baseline: this.threadTotal,
+      baselineKnown: this.totalsKnown,
       status: null,
       error: undefined,
       started: new Set(),

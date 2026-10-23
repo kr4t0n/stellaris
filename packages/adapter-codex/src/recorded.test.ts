@@ -19,8 +19,14 @@ function isResponse(line: string): boolean {
  * id, followed by the notifications recorded after it. The client numbers its requests the same
  * way on every run, so the ids line up.
  */
-async function replay(fixture: string): Promise<{ spawn: SpawnAppServer; methods: string[] }> {
-  const lines = (await readFile(path.join(fixtures, fixture), "utf8")).trim().split("\n");
+async function replay(
+  fixture: string,
+  keep: (line: string, index: number, lines: readonly string[]) => boolean = () => true,
+): Promise<{ spawn: SpawnAppServer; methods: string[] }> {
+  const lines = (await readFile(path.join(fixtures, fixture), "utf8"))
+    .trim()
+    .split("\n")
+    .filter(keep);
   const methods: string[] = [];
   const spawn: SpawnAppServer = () => {
     const stdin = new PassThrough();
@@ -108,6 +114,29 @@ describe("recorded Codex app-server turns", () => {
     expect(result.status?.summary).toBe("stellaris-fixture");
     expect(result.events.map((e) => e.type)).toEqual(["turn_started", "text", "turn_completed"]);
     // The thread reports its totals on resuming; only what grew after counts for this turn.
+    expect(result.usage).toEqual({
+      inputTokens: 252,
+      outputTokens: 85,
+      cacheReadTokens: 18_304,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("replays a resumed turn whose thread's totals never came, counting the same", async () => {
+    // Without the update the server sends right after `thread/resume` about the thread's last turn,
+    // as a live 0.158.0 once sent none, the turn's own first update says where the thread stood.
+    const { spawn } = await replay(
+      "app-server-resume-recorded.jsonl",
+      (line, index, lines) =>
+        !(
+          line.includes('"method":"thread/tokenUsage/updated"') &&
+          index < lines.findIndex((each) => each.includes('"method":"turn/started"'))
+        ),
+    );
+    const result = await new CodexBackend({ spawn }).runTurn(
+      request({ session: "01a0edff-8584-7ee1-91f8-6e8d4549a794", newSession: false }),
+    );
+    expect(result.exitReason).toBe("completed");
     expect(result.usage).toEqual({
       inputTokens: 252,
       outputTokens: 85,

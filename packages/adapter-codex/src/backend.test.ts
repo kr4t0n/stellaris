@@ -125,11 +125,9 @@ function fakeAppServer(
     /** Ends the process at the handshake, before anything is resumed. */
     dieAtStart?: boolean;
     /**
-     * How the known threads keep their history. Codex 0.162.1 reports a `legacy` thread's totals
-     * only to a resume that takes its turns, and a `paginated` one's to any resume.
+     * Sends no totals on resuming, as codex-cli 0.162.1 does for a `legacy` thread resumed without
+     * its turns, and as a live 0.158.0 did once for a `paginated` one.
      */
-    history?: "legacy" | "paginated";
-    /** Sends no totals on any resume, as when Codex cannot tell which turn its saved totals belong to. */
     noReplay?: boolean;
   } = {},
 ): {
@@ -215,21 +213,9 @@ function fakeAppServer(
             });
             return;
           }
-          send({
-            id: message.id,
-            result: {
-              thread: {
-                id,
-                ...(script.history === undefined ? {} : { historyMode: script.history }),
-              },
-              model: "gpt-5",
-            },
-          });
+          send({ id: message.id, result: { thread: { id }, model: "gpt-5" } });
           total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
-          if (
-            script.noReplay === true ||
-            (script.history === "legacy" && message.params?.["excludeTurns"] === true)
-          ) {
+          if (script.noReplay === true) {
             return;
           }
           // A resumed thread reports where it stood, about the turn it last ran.
@@ -507,30 +493,41 @@ describe("CodexBackend cold turns", () => {
     expect(fake.received.some((m) => m.method === "thread/start")).toBe(false);
   });
 
-  it("resumes a legacy thread again with its turns, so a turn counts only its own requests", async () => {
-    const fake = fakeAppServer({ known: ["thread-3"], history: "legacy" });
+  it("counts only a resumed turn's own requests when the thread's totals never came", async () => {
+    const fake = fakeAppServer({ known: ["thread-3"], noReplay: true });
     const backend = new CodexBackend({ spawn: fake.spawn });
     const resumed = await backend.runTurn(request({ session: "thread-3", newSession: false }));
     expect(resumed.exitReason).toBe("completed");
+    // As when the thread reports its totals on resuming: two requests, none of the earlier turns.
     expect(resumed.usage).toEqual({
       inputTokens: 600,
       outputTokens: 80,
       cacheReadTokens: 200,
       cacheWriteTokens: 0,
     });
-    const resumes = fake.received.filter((m) => m.method === "thread/resume");
-    expect(resumes.map((m) => m.params?.["excludeTurns"])).toEqual([true, undefined]);
-    expect(resumes[1]?.params).toMatchObject({
-      threadId: "thread-3",
-      developerInstructions: start.instructions,
-    });
+    expect(fake.received.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+  });
 
-    // A paginated thread reports its totals to the first resume, which is all it gets.
-    const paginated = fakeAppServer({ known: ["thread-3"], history: "paginated" });
-    await new CodexBackend({ spawn: paginated.spawn }).runTurn(
+  it("counts nothing for a turn the model never answered, whatever the thread's totals say", async () => {
+    // Codex moves the totals without an answer when a turn runs out of context, which it fills.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      turn: (turn) => {
+        turn.request();
+        turn.refuse({ message: "Codex ran out of room.", codexErrorInfo: "contextWindowExceeded" });
+      },
+    });
+    const full = await new CodexBackend({ spawn: fake.spawn }).runTurn(
       request({ session: "thread-3", newSession: false }),
     );
-    expect(paginated.received.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+    expect(full.exitReason).toBe("error");
+    expect(full.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(full.transient).toBeUndefined();
   });
 
   it("counts nothing for a resumed thread's turn the model service turned away, and says it may pass", async () => {
@@ -538,15 +535,11 @@ describe("CodexBackend cold turns", () => {
       message: "Selected model is at capacity. Please try a different model.",
       codexErrorInfo: "serverOverloaded",
     };
-    for (const script of [
-      { history: "legacy" as const },
-      { history: "paginated" as const },
-      // Without the thread's totals before the turn, a turn the model never answered still used none.
-      { history: "paginated" as const, noReplay: true },
-    ]) {
+    // With the thread's totals reported on resuming, and without them, as on the live 0.158.0.
+    for (const noReplay of [false, true]) {
       const fake = fakeAppServer({
         known: ["thread-3"],
-        ...script,
+        noReplay,
         turn: (turn) => turn.refuse(overloaded),
       });
       const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(
@@ -570,7 +563,6 @@ describe("CodexBackend cold turns", () => {
     };
     const compaction = fakeAppServer({
       known: ["thread-3"],
-      history: "paginated",
       turn: (turn) => turn.refuse(compacting),
     });
     const notCompacted = await new CodexBackend({ spawn: compaction.spawn }).runTurn(

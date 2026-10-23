@@ -16,7 +16,14 @@ import {
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Scheduler, type SteerOutcome, type TurnAssignment, type TurnRunner } from "./scheduler.js";
+import {
+  parseTimings,
+  Scheduler,
+  type SchedulerTimings,
+  type SteerOutcome,
+  type TurnAssignment,
+  type TurnRunner,
+} from "./scheduler.js";
 
 const run = promisify(execFile);
 
@@ -67,6 +74,9 @@ class FakeRunner implements TurnRunner {
     return this.away ? null : { runner: "test" };
   }
 
+  /** How the next turns end, one entry per turn, over a turn that completed. */
+  readonly outcomes: Array<Partial<TurnRecord>> = [];
+
   async runTurn(dispatch: TurnDispatch): Promise<TurnRecord> {
     this.dispatches.push(dispatch);
     if (this.hold) {
@@ -90,6 +100,7 @@ class FakeRunner implements TurnRunner {
       costUsd: 0,
       toolCalls: 0,
       model: null,
+      ...this.outcomes.shift(),
     };
     if (this.board !== null) {
       await this.board.beginTurn(record);
@@ -179,7 +190,7 @@ describe("Scheduler", () => {
   });
 
   async function setup(
-    options: { concurrency?: number; timings?: Record<string, number>; record?: boolean } = {},
+    options: { concurrency?: number; timings?: Partial<SchedulerTimings>; record?: boolean } = {},
   ) {
     const { board } = await Board.init(dir, { name: "sched" }, { now, leaseMs: 60_000 });
     // A second channel, beside the default general, which members do not follow until they choose to.
@@ -2335,5 +2346,173 @@ describe("Scheduler", () => {
       expect.objectContaining({ key: `cron_failing:${cron.id}`, agent: "eng-1", value: 3 }),
     ]);
     expect(runner.dispatches.filter((d) => d.trigger.kind === "ops_event")).toEqual([]);
+  });
+
+  const DAY_MS = 24 * 3_600_000;
+
+  /** A turn the model service turned away, as the runner reports one. */
+  const REFUSED: Partial<TurnRecord> = {
+    exitReason: "error",
+    error: "Selected model is at capacity. Please try a different model.",
+    model: "gpt-test",
+    transient: true,
+  };
+
+  /** Advances the clock to just before `ms` from now, then to it, and says how many turns each step dispatched. */
+  async function dispatchedAround(
+    runner: FakeRunner,
+    scheduler: Scheduler,
+    ms: number,
+  ): Promise<[number, number]> {
+    const start = runner.dispatches.length;
+    advance(ms - 1);
+    await scheduler.tick();
+    await scheduler.drain();
+    const before = runner.dispatches.length - start;
+    advance(1);
+    await scheduler.tick();
+    await scheduler.drain();
+    return [before, runner.dispatches.length - start - before];
+  }
+
+  it("sends a turn the model service turned away again after 1, 3 and 10 minutes, then leaves it to the heartbeat with a signal that wakes nobody", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: 3_600_000 } });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    runner.outcomes.push(REFUSED, REFUSED, REFUSED, REFUSED);
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toHaveLength(1);
+
+    expect(await dispatchedAround(runner, scheduler, 60_000)).toEqual([0, 1]);
+    expect(await dispatchedAround(runner, scheduler, 180_000)).toEqual([0, 1]);
+    expect(await dispatchedAround(runner, scheduler, 600_000)).toEqual([0, 1]);
+    // The same wake each time, in the same conversation.
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.priority])).toEqual(
+      Array.from({ length: 4 }, () => ["eng-1", "demo", "mention", 2]),
+    );
+    expect(scheduler.pendingPairs).toEqual([]);
+    const refused = (await board.listSignals()).filter((s) => s.signal.kind === "turn_refused");
+    expect(refused.map((s) => s.signal)).toEqual([
+      expect.objectContaining({
+        key: "turn_refused:eng-1/demo",
+        agent: "eng-1",
+        role: "engineer",
+        project: "demo",
+        value: 4,
+      }),
+    ]);
+    expect(refused[0]?.signal.summary).toContain("gpt-test");
+    advance(30 * 60_000);
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.filter((d) => d.agent === "steward-1")).toEqual([]);
+
+    // A turn that ran ends the run, so the next refusal starts the delays over.
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 again" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.outcomes.push(REFUSED);
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and again" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await dispatchedAround(runner, scheduler, 60_000)).toEqual([0, 1]);
+  });
+
+  it("sends no turn again that the plan's usage limit or any other error ended", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: DAY_MS } });
+    runner.outcomes.push(
+      { exitReason: "error", error: "usage limit reached: You've hit your limit" },
+      { exitReason: "error", error: "Codex ran out of room in the model's context window." },
+      { exitReason: "timeout", error: "turn exceeded 60000 ms" },
+    );
+    for (const body of ["@eng-1 one", "@eng-1 two", "@eng-1 three"]) {
+      await board.postMessage(USER, { channel: "demo/general", body });
+      await scheduler.tick();
+      await scheduler.drain();
+      expect(await dispatchedAround(runner, scheduler, 20 * 60_000)).toEqual([0, 0]);
+    }
+    expect(runner.dispatches).toHaveLength(3);
+    expect(scheduler.pendingPairs).toEqual([]);
+  });
+
+  it("sends a refused turn's wake no more when a post queued behind the turn runs the conversation", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: DAY_MS } });
+    runner.outcomes.push(REFUSED);
+    runner.hold = true;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    expect(scheduler.runningPairs).toEqual(["eng-1/demo"]);
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 one more thing" });
+    await scheduler.tick();
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await scheduler.drain();
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).toEqual(["mention", "mention"]);
+    expect(await dispatchedAround(runner, scheduler, 60_000)).toEqual([0, 0]);
+    expect(scheduler.pendingPairs).toEqual([]);
+  });
+
+  it("sends a refused turn's wake once when the heartbeat comes due while it waits", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: 30_000 } });
+    const engineer = () => runner.dispatches.filter((d) => d.agent === "eng-1");
+    runner.outcomes.push(REFUSED);
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(engineer()).toHaveLength(1);
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
+    // The heartbeat comes due with the mention still unread, and finds the wake queued.
+    advance(30_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(engineer()).toHaveLength(1);
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
+    advance(30_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(engineer().map((d) => d.trigger.kind)).toEqual(["mention", "mention"]);
+  });
+
+  it("drops a refused stage wake once its stage no longer waits for the agent", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { heartbeatMs: 3_600_000 } });
+    runner.outcomes.push(REFUSED);
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "t",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-1", "stage"]]);
+    expect(scheduler.pendingPairs).toEqual([sessionKey("eng-1", "demo", task.id)]);
+    await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await dispatchedAround(runner, scheduler, 60_000)).toEqual([0, 0]);
+    expect(scheduler.pendingPairs).toEqual([]);
+  });
+
+  it("reads the delays from the timings, and sends nothing again when they are empty", async () => {
+    expect(parseTimings({ transientRetryMs: [5_000] })).toEqual({ transientRetryMs: [5_000] });
+    expect(() => parseTimings({ transientRetryMs: [0] })).toThrow(/too_small/);
+    const { board, runner, scheduler } = await setup({
+      timings: { heartbeatMs: 3_600_000, ...parseTimings({ transientRetryMs: [] }) },
+    });
+    runner.outcomes.push(REFUSED);
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches).toHaveLength(1);
+    expect(await dispatchedAround(runner, scheduler, 60_000)).toEqual([0, 0]);
+    const refused = (await board.listSignals()).filter((s) => s.signal.kind === "turn_refused");
+    expect(refused.map((s) => s.signal.value)).toEqual([1]);
   });
 });

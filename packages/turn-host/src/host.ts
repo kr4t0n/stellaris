@@ -746,6 +746,7 @@ export class TurnHost {
       ...(outcome.work === null ? {} : { work: outcome.work }),
       ...(outcome.exitReason === "stopped" ? { stoppedBy: turn.stopRequestedBy ?? USER_NAME } : {}),
       ...(outcome.resumeFailed === undefined ? {} : { resumeFailed: outcome.resumeFailed }),
+      ...(outcome.transient === true ? { transient: true } : {}),
       ...(resumeRetries === undefined ? {} : { resumeRetries }),
       ...(dropSession ? { sessionDropped: true } : {}),
     };

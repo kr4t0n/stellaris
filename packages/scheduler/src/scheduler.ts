@@ -162,6 +162,11 @@ export interface SchedulerTimings {
   readonly scaleCooldownMs: number;
   /** Cadence of reflection turns for roles that reflect, counted from the scheduler's first sight of the member. */
   readonly reflectionMs: number;
+  /**
+   * After a turn the model service turned away for now, the same wake goes again after each of
+   * these delays in turn, one per refusal in a row; once they are spent, the heartbeat takes over.
+   */
+  readonly transientRetryMs: readonly number[];
 }
 
 export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
@@ -180,6 +185,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   homeConflictMs: 24 * 3_600_000,
   scaleCooldownMs: 3_600_000,
   reflectionMs: 24 * 3_600_000,
+  transientRetryMs: [60_000, 3 * 60_000, 10 * 60_000],
 });
 
 /** Partial timings as configuration, for example from an environment variable holding JSON. */
@@ -200,6 +206,7 @@ export const SchedulerTimingsSchema = z
     homeConflictMs: z.number().positive(),
     scaleCooldownMs: z.number().positive(),
     reflectionMs: z.number().positive(),
+    transientRetryMs: z.array(z.number().positive()),
   })
   .partial();
 
@@ -208,7 +215,7 @@ export function parseTimings(input: unknown): Partial<SchedulerTimings> {
   const parsed = SchedulerTimingsSchema.parse(input);
   const overrides: Partial<SchedulerTimings> = {};
   for (const [key, value] of Object.entries(parsed)) {
-    if (typeof value === "number") {
+    if (value !== undefined) {
       Object.assign(overrides, { [key]: value });
     }
   }
@@ -399,6 +406,8 @@ export class Scheduler {
   private readonly sweeping = new Set<Promise<void>>();
   /** Crons whose fire's turn is running; a cron's next time passes while one is. */
   private readonly cronsInFlight = new Set<Ulid>();
+  /** Turns in a row the model service turned away, by session key, which `retryRefused` counts. */
+  private readonly refused = new Map<string, number>();
   private state: State = StateSchema.parse({
     cursor: null,
     lastHeartbeat: {},
@@ -2210,6 +2219,7 @@ export class Scheduler {
             },
             "turn finished",
           );
+          await this.retryRefused(key, { ...item, dispatch }, record);
         } catch (error) {
           this.log.error(
             { agent: dispatch.agent, project: dispatch.project, error: String(error) },
@@ -2230,6 +2240,60 @@ export class Scheduler {
         this.exclusive.set(key, "reflection");
       }
     }
+  }
+
+  /**
+   * A turn the model service turned away for now, overloaded or failing on its side, is sent again:
+   * the same wake in the same conversation, after the next delay of `transientRetryMs`, with every
+   * check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a new
+   * post's, runs the conversation instead. Once the delays are spent the heartbeat takes over, and
+   * a `turn_refused` signal, which wakes nobody, says so. A turn that ends any other way ends the run.
+   */
+  private async retryRefused(key: string, item: PendingTurn, record: TurnRecord): Promise<void> {
+    if (record.transient !== true || record.exitReason !== "error") {
+      this.refused.delete(key);
+      return;
+    }
+    const refused = (this.refused.get(key) ?? 0) + 1;
+    this.refused.set(key, refused);
+    const { dispatch } = item;
+    const delay = this.timings.transientRetryMs[refused - 1];
+    if (delay !== undefined) {
+      if (this.pending.has(key)) {
+        return;
+      }
+      // What was steered into the refused turn was never read there, so it may be steered again.
+      const { steeredThrough: _steered, ...retry } = item;
+      this.pending.set(key, { ...retry, readyAt: this.now().getTime() + delay });
+      this.log.info(
+        { agent: dispatch.agent, project: dispatch.project, refused, delayMs: delay },
+        "the model service turned the turn away, sending its wake again",
+      );
+      return;
+    }
+    if (refused !== this.timings.transientRetryMs.length + 1) {
+      return;
+    }
+    const agent = await this.tryReadAgent(dispatch.agent);
+    const where =
+      dispatch.thread !== undefined
+        ? `thread ${dispatch.thread.id}`
+        : dispatch.channel !== undefined
+          ? `channel ${dispatch.channel}`
+          : dispatch.place !== undefined
+            ? `project ${dispatch.place}'s channels`
+            : "its home";
+    await this.board.publishSignal({
+      kind: "turn_refused",
+      key: `turn_refused:${key}`,
+      summary: `${dispatch.agent}'s turns in ${where} were turned away by the model service ${refused} times in a row${record.model === null ? "" : ` on ${record.model}`}, the last with "${record.error ?? "no error"}"; its heartbeat takes over`,
+      value: refused,
+      threshold: refused,
+      agent: dispatch.agent,
+      ...(agent === null ? {} : { role: agent.role }),
+      ...(dispatch.project === SOCIETY_SCOPE ? {} : { project: dispatch.project }),
+      ...(dispatch.thread?.task === true ? { taskId: dispatch.thread.id } : {}),
+    });
   }
 
   /**

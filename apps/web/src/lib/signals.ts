@@ -16,6 +16,7 @@ export const SIGNAL_LABEL: Readonly<Record<OpsSignalKind, string>> = {
   home_conflict: "edits to reconcile",
   stuck_workspace: "work left on no branch",
   cron_failing: "cron failing",
+  turn_refused: "model refusing turns",
 };
 
 /**

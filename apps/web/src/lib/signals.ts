@@ -1,7 +1,5 @@
-import { WAKING_SIGNAL_KINDS, type OpsSignal, type OpsSignalKind } from "@stellaris/shared";
+import { signalWakes, type OpsSignal, type OpsSignalKind } from "@stellaris/shared";
 import type { SignalRecord } from "./api.js";
-
-const WAKING = new Set<OpsSignalKind>(WAKING_SIGNAL_KINDS);
 
 /** What each kind measures, as the log names it. */
 export const SIGNAL_LABEL: Readonly<Record<OpsSignalKind, string>> = {
@@ -19,11 +17,6 @@ export const SIGNAL_LABEL: Readonly<Record<OpsSignalKind, string>> = {
   stuck_workspace: "work left on no branch",
   cron_failing: "cron failing",
 };
-
-/** Whether a signal of this kind wakes the roles that read signals, the steward among them. */
-export function wakesReaders(kind: OpsSignalKind): boolean {
-  return WAKING.has(kind);
-}
 
 /**
  * The entries whose condition still holds: for each key the scheduler found at its last pass, the
@@ -44,14 +37,15 @@ export function holdingNow(
 }
 
 /**
- * What a signal concerns and whether it wakes the steward, for the line under its summary. Its
- * value and threshold are left out: the summary already says them in words and units.
+ * What a signal concerns and whether this log of it wakes the steward, for the line under its
+ * summary; a persisting condition's repeats mostly only log it. Its value and threshold are left
+ * out: the summary already says them in words and units.
  */
 export function signalFacts(signal: OpsSignal): string[] {
   return [
     signal.project ?? "",
     signal.agent ?? "",
     signal.role === undefined ? "" : `role ${signal.role}`,
-    wakesReaders(signal.kind) ? "wakes the steward" : "",
+    signalWakes(signal) ? "wakes the steward" : "",
   ].filter((fact) => fact.length > 0);
 }

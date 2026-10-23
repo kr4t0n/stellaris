@@ -11,6 +11,7 @@ import {
   OpsSignalSchema,
   ProposalOriginSchema,
   sessionKey,
+  signalWakes,
   USER_NAME,
   USER_ROLE,
   parseChannelRef,
@@ -144,6 +145,11 @@ export interface SchedulerTimings {
   readonly opsIntervalMs: number;
   /** A condition that persists is logged again after this long; one that clears and returns is logged at once. */
   readonly signalRepeatMs: number;
+  /**
+   * A persisting condition of a waking kind with no steps of its own, such as a backlog, wakes the
+   * readers of signals again once its last wake is this old; repeats in between only log it.
+   */
+  readonly signalWakeMs: number;
   /** Cadence of the spend summary, a `turn_cost` signal. */
   readonly costReportMs: number;
   /** A thread with several participants and no message for this long is stale. */
@@ -167,6 +173,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   leaseSweepMs: 60_000,
   opsIntervalMs: 5 * 60_000,
   signalRepeatMs: 6 * 3_600_000,
+  signalWakeMs: 24 * 3_600_000,
   costReportMs: 3_600_000,
   staleThreadMs: 24 * 3_600_000,
   idleMemberMs: 3 * 24 * 3_600_000,
@@ -186,6 +193,7 @@ export const SchedulerTimingsSchema = z
     leaseSweepMs: z.number().positive(),
     opsIntervalMs: z.number().positive(),
     signalRepeatMs: z.number().positive(),
+    signalWakeMs: z.number().positive(),
     costReportMs: z.number().positive(),
     staleThreadMs: z.number().positive(),
     idleMemberMs: z.number().positive(),
@@ -236,6 +244,13 @@ const StateSchema = z.object({
   /** Queued dispatches survive a restart; the cursor has already moved past the events that made them. */
   pending: z.record(z.string(), PendingSchema).default({}),
   opsReported: z.record(z.string(), z.string()).default({}),
+  /**
+   * When each condition of a waking kind that still holds last woke the readers of signals, and
+   * the level it woke at for the kinds that have one (`wakeLevel`); forgotten with the condition.
+   */
+  opsWoken: z
+    .record(z.string(), z.object({ at: z.string(), level: z.number().optional() }))
+    .default({}),
   releaseCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
   lastOps: z.string().nullable().default(null),
   lastScaled: z.record(z.string(), z.string()).default({}),
@@ -278,6 +293,35 @@ function later(a: Ulid | undefined, b: Ulid | undefined): Ulid | undefined {
 const SILENT_LOG: SchedulerLog = { info() {}, warn() {}, error() {} };
 
 const WAKING_SIGNALS: ReadonlySet<OpsSignalKind> = new Set(WAKING_SIGNAL_KINDS);
+
+const DAY_MS = 24 * 3_600_000;
+
+/**
+ * An idle member wakes the readers of signals when it goes idle and again as its idle time crosses
+ * each of these, then never again while it stays idle. A finished turn clears it, and the steps
+ * start over.
+ */
+const IDLE_WAKE_STEPS_MS: readonly number[] = [7 * DAY_MS, 14 * DAY_MS, 30 * DAY_MS];
+
+/**
+ * How far a persisting condition has risen, for the kinds that wake again on a rise rather than on
+ * `signalWakeMs`: an idle member by the steps its idle time has crossed, churn by its releases.
+ */
+function wakeLevel(signal: OpsSignal): number | undefined {
+  switch (signal.kind) {
+    case "idle_member":
+      return IDLE_WAKE_STEPS_MS.filter((step) => signal.value >= step).length;
+    case "churn":
+      return signal.value;
+    default:
+      return undefined;
+  }
+}
+
+function wokenAt(signal: OpsSignal, now: number): { at: string; level?: number } {
+  const level = wakeLevel(signal);
+  return { at: iso(now), ...(level === undefined ? {} : { level }) };
+}
 
 const HEARTBEAT_TRIGGER = "heartbeat";
 
@@ -783,7 +827,7 @@ export class Scheduler {
       }
       case "ops.signal": {
         const parsed = OpsSignalSchema.safeParse(payload);
-        if (!parsed.success || !WAKING_SIGNALS.has(parsed.data.kind)) {
+        if (!parsed.success || !signalWakes(parsed.data)) {
           return;
         }
         await this.wakeSignalReaders(parsed.data, event.actor, now);
@@ -1705,24 +1749,64 @@ export class Scheduler {
   // Operations: signals from state, the scaling rule, and the spend report
   // ---------------------------------------------------------------------------------------------
 
+  /**
+   * Logs each condition when it is new and again every `signalRepeatMs` while it holds, and marks
+   * each log with whether it wakes the readers of signals (`wakesNow`), so a repeat only logs.
+   */
   private async runOperations(now: number): Promise<void> {
     const signals = await this.collectSignals(now);
     const current = new Set(signals.map((signal) => signal.key));
-    for (const key of Object.keys(this.state.opsReported)) {
-      if (!current.has(key)) {
-        delete this.state.opsReported[key];
+    for (const record of [this.state.opsReported, this.state.opsWoken]) {
+      for (const key of Object.keys(record)) {
+        if (!current.has(key)) {
+          delete record[key];
+        }
       }
     }
     for (const signal of signals) {
       const reported = this.state.opsReported[signal.key];
-      if (reported !== undefined && now - Date.parse(reported) < this.timings.signalRepeatMs) {
+      const wakes = this.wakesNow(signal, reported !== undefined, now);
+      if (
+        !wakes &&
+        reported !== undefined &&
+        now - Date.parse(reported) < this.timings.signalRepeatMs
+      ) {
         continue;
       }
-      await this.board.publishSignal(signal);
+      await this.board.publishSignal({ ...signal, wakes });
       this.state.opsReported[signal.key] = iso(now);
+      if (wakes) {
+        this.state.opsWoken[signal.key] = wokenAt(signal, now);
+      }
     }
     await this.scaleRoles(now);
     await this.reportCost(now);
+  }
+
+  /**
+   * Whether a condition wakes the readers of signals at this pass, which only a waking kind does:
+   * when it is new; for an idle member or churn, when it has risen past the level it last woke at
+   * (`wakeLevel`); for the other kinds, once its last wake is `signalWakeMs` old. Checked on every
+   * pass, so a step wakes when it is crossed, between repeats.
+   */
+  private wakesNow(signal: OpsSignal, held: boolean, now: number): boolean {
+    if (!WAKING_SIGNALS.has(signal.kind)) {
+      return false;
+    }
+    const last = this.state.opsWoken[signal.key];
+    if (last === undefined) {
+      if (held) {
+        // It held before the scheduler kept wakes, and woke its readers then: an upgrade counts
+        // it as woken where it stands, so it wakes nobody.
+        this.state.opsWoken[signal.key] = wokenAt(signal, now);
+        return false;
+      }
+      return true;
+    }
+    const level = wakeLevel(signal);
+    return level === undefined
+      ? now - Date.parse(last.at) >= this.timings.signalWakeMs
+      : level > (last.level ?? 0);
   }
 
   /** Every operations condition that holds right now, from counters and timers only. */

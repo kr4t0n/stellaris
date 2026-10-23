@@ -681,6 +681,63 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts[1]).toContain("## Operations signals\n\nNone since your last turn here.");
   });
 
+  it("lists each condition once in a reader's prompt, at its latest log", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const prompts: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve(completed("read the signals"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const idle = (days: number) =>
+      board.publishSignal({
+        kind: "idle_member",
+        key: "idle_member:eng-1",
+        summary: `eng-1 (engineer) has not completed a turn for ${days}d`,
+        value: days,
+        agent: "eng-1",
+        wakes: false,
+      });
+    await idle(3);
+    await board.publishSignal({
+      kind: "role_gap",
+      key: "role_gap:lab:referee",
+      summary: "a stage waits on the referee role, which nobody fills",
+      value: 1,
+    });
+    await idle(4);
+    for (const cost of [1, 2]) {
+      await board.publishSignal({
+        kind: "turn_cost",
+        key: "turn_cost",
+        summary: `1 turn(s) completed for $${cost}.00 since the last report`,
+        value: cost,
+      });
+    }
+    await run({
+      agent: "steward-1",
+      project: "society",
+      trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
+      priority: 0,
+    });
+    const listed = (prompts[0] ?? "")
+      .split("\n")
+      .filter((line) => /^- \[[^\]]+\] [a-z_]+: /.test(line))
+      .map((line) => line.replace(/^- \[[^\]]+\] /, "").replace(/ \([^()]*\)$/, ""))
+      // The runner's connection is logged too.
+      .filter((line) => !line.startsWith("runner: "));
+    expect(listed).toEqual([
+      "role_gap: a stage waits on the referee role, which nobody fills",
+      "idle_member: eng-1 (engineer) has not completed a turn for 4d",
+      "turn_cost: 1 turn(s) completed for $2.00 since the last report",
+    ]);
+  });
+
   it("asks the user in a thread of its own when a turn needs a decision and mentioned nobody", async () => {
     const { board } = await Board.init(dir, { name: "asks" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });

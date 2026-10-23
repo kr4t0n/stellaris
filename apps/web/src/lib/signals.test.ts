@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SignalRecord } from "./api.js";
-import { holdingNow, signalFacts, wakesReaders } from "./signals.js";
+import { holdingNow, signalFacts } from "./signals.js";
 
 function record(id: string, key: string): SignalRecord {
   return {
@@ -24,9 +24,6 @@ describe("the operations log", () => {
   });
 
   it("says which kinds wake the steward and what a signal concerns, without its numbers", () => {
-    expect(wakesReaders("role_gap")).toBe(true);
-    expect(wakesReaders("runner")).toBe(false);
-    expect(wakesReaders("turn_cost")).toBe(false);
     expect(
       signalFacts({
         kind: "backlog",
@@ -41,5 +38,19 @@ describe("the operations log", () => {
     expect(signalFacts({ kind: "runner", key: "runner:server", summary: "s", value: 1 })).toEqual(
       [],
     );
+  });
+
+  it("marks a log of a waking kind that woke nobody, such as a repeat, as not waking", () => {
+    const idle = {
+      kind: "idle_member",
+      key: "idle_member:ada",
+      summary: "s",
+      value: 4,
+      agent: "ada",
+    } as const;
+    expect(signalFacts({ ...idle, wakes: true })).toEqual(["ada", "wakes the steward"]);
+    expect(signalFacts({ ...idle, wakes: false })).toEqual(["ada"]);
+    // Signals without the mark go by their kind.
+    expect(signalFacts(idle)).toEqual(["ada", "wakes the steward"]);
   });
 });

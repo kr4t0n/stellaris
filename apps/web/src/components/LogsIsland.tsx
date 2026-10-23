@@ -1,7 +1,8 @@
+import { signalWakes } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { ago } from "../lib/format.js";
 import { useNow, useScheduler, useSignals } from "../lib/session.js";
-import { holdingNow, SIGNAL_LABEL, signalFacts, wakesReaders } from "../lib/signals.js";
+import { holdingNow, SIGNAL_LABEL, signalFacts } from "../lib/signals.js";
 import { LinkedText } from "./Entities.js";
 import { Island } from "./Island.js";
 
@@ -39,7 +40,7 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
       ) : (
         <ol className="flex-1 overflow-y-auto">
           {records.toReversed().map(({ id, ts, signal }) => {
-            const wakes = wakesReaders(signal.kind);
+            const wakes = signalWakes(signal);
             const facts = signalFacts(signal);
             return (
               <li key={id} className="border-b border-line/60 px-4 py-2.5 last:border-b-0">

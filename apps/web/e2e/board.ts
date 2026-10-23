@@ -702,7 +702,10 @@ const SOCIETY_SKILL_FILES = [
   },
 ];
 
-/** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
+/**
+ * The operations log: a runner reconnect, which informs, a role gap, which wakes the steward, and
+ * an idle member's repeat, which only logs.
+ */
 const SIGNALS = [
   {
     id: "01M3Q2FFFFFFFFFFFFFFFFFFF1",
@@ -724,6 +727,19 @@ const SIGNALS = [
       value: 1,
       project: "lab",
       role: "referee",
+    },
+  },
+  {
+    id: "01M3Q2FFFFFFFFFFFFFFFFFFF3",
+    ts: CREATED,
+    signal: {
+      kind: "idle_member",
+      key: "idle_member:ada",
+      summary: "ada (researcher) has not completed a turn for 4d",
+      value: 4 * 24 * 3_600_000,
+      agent: "ada",
+      role: "researcher",
+      wakes: false,
     },
   },
 ];

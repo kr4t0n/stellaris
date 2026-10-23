@@ -8,6 +8,7 @@ import {
   CLI_ENV,
   parseTurnStatus,
   ResumeError,
+  ZERO_USAGE,
   type AgentSpec,
   type ResidentSession,
   type ResidentStart,
@@ -550,6 +551,11 @@ interface TurnCollector {
   limited: boolean;
   /** Whether Codex ended the turn on a failure the model service may not repeat in a minute. */
   transient: boolean;
+  /**
+   * Whether the model answered at all: an item other than a user message completed. A turn it
+   * never answered used no tokens, whatever the thread's totals say about the turns before it.
+   */
+  answered: boolean;
 }
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
@@ -801,6 +807,9 @@ export class CodexAppServerSession implements ResidentSession {
           }
           return;
         }
+        if (method === "item/completed") {
+          turn.answered = true;
+        }
         if (item["type"] === "agentMessage") {
           const text = str(item["text"]) ?? "";
           if (method === "item/completed" && text.length > 0) {
@@ -901,6 +910,7 @@ export class CodexAppServerSession implements ResidentSession {
       stopped: false,
       limited: false,
       transient: false,
+      answered: false,
     };
     this.active = turn;
     emit({
@@ -981,7 +991,7 @@ export class CodexAppServerSession implements ResidentSession {
     if (turn.error !== undefined) {
       emit({ type: "error", message: turn.error });
     }
-    const usage = turnUsage(turn.baseline, this.threadTotal);
+    const usage = turn.answered ? turnUsage(turn.baseline, this.threadTotal) : ZERO_USAGE;
     emit({ type: "turn_completed", usage, costUsd: 0, status, exitReason });
     return {
       events,

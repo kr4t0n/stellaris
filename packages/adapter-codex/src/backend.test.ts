@@ -129,6 +129,8 @@ function fakeAppServer(
      * only to a resume that takes its turns, and a `paginated` one's to any resume.
      */
     history?: "legacy" | "paginated";
+    /** Sends no totals on any resume, as when Codex cannot tell which turn its saved totals belong to. */
+    noReplay?: boolean;
   } = {},
 ): {
   spawn: SpawnAppServer;
@@ -224,7 +226,10 @@ function fakeAppServer(
             },
           });
           total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
-          if (script.history === "legacy" && message.params?.["excludeTurns"] === true) {
+          if (
+            script.noReplay === true ||
+            (script.history === "legacy" && message.params?.["excludeTurns"] === true)
+          ) {
             return;
           }
           // A resumed thread reports where it stood, about the turn it last ran.
@@ -533,10 +538,15 @@ describe("CodexBackend cold turns", () => {
       message: "Selected model is at capacity. Please try a different model.",
       codexErrorInfo: "serverOverloaded",
     };
-    for (const history of ["legacy", "paginated"] as const) {
+    for (const script of [
+      { history: "legacy" as const },
+      { history: "paginated" as const },
+      // Without the thread's totals before the turn, a turn the model never answered still used none.
+      { history: "paginated" as const, noReplay: true },
+    ]) {
       const fake = fakeAppServer({
         known: ["thread-3"],
-        history,
+        ...script,
         turn: (turn) => turn.refuse(overloaded),
       });
       const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(

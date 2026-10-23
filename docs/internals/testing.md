@@ -54,6 +54,8 @@ Its body goes on running after Vitest gives up on it, so its cleanup races the t
 
 `setup({ record: true })` makes it write turn records through the board on the injected clock; the reflection test needs that because the cadence reads `last-turn.json`. Other tests leave it off, so their idle-member and spend signals stay as they were.
 
+With records on, every turn the fake runs restarts its member's idle clock, and two kinds come uninvited. A member that has worked since its last reflection gets one at the next `reflectionMs`, a day by default. A mention stays unread, since the fake moves no cursor, so the member's heartbeat wakes it again at every pass. The idle-member tests therefore push reflections out (`OFF_REFLECTION`) and give a member its turn with `requestWake`, not a mention.
+
 ### Timestamps in the reflection rule come from two clocks
 
 The scheduler compares a turn record's `endedAt`, written by the runner, with its own `lastReflection`. In production both are wall time; a test that advances an injected scheduler clock while the runner uses wall time sees every later turn as older than the last reflection, which is harmless there but explains a missing dispatch.

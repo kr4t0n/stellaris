@@ -25,7 +25,10 @@ export const OPS_SIGNAL_KINDS = [
 export const OpsSignalKindSchema = z.enum(OPS_SIGNAL_KINDS);
 export type OpsSignalKind = z.infer<typeof OpsSignalKindSchema>;
 
-/** The kinds that wake roles charted for `ops_event`; the rest wait for their next turn. */
+/**
+ * The kinds that wake roles charted for `ops_event`; the rest wait for their next turn. A signal
+ * the operations pass logs carries `wakes`, which says whether that one log of it woke them.
+ */
 export const WAKING_SIGNAL_KINDS: readonly OpsSignalKind[] = [
   "backlog",
   "role_gap",
@@ -49,5 +52,18 @@ export const OpsSignalSchema = z.object({
   agent: NameSchema.optional(),
   role: NameSchema.optional(),
   taskId: UlidSchema.optional(),
+  /**
+   * Whether this log of the condition wakes the roles charted for `ops_event`, as its publisher
+   * decided: the operations pass wakes them when a condition is new, and again only at the steps
+   * it names, not at every repeat. Absent, the kind decides.
+   */
+  wakes: z.boolean().optional(),
 });
 export type OpsSignal = z.infer<typeof OpsSignalSchema>;
+
+const WAKING: ReadonlySet<OpsSignalKind> = new Set(WAKING_SIGNAL_KINDS);
+
+/** Whether a logged signal wakes the roles charted for `ops_event`: as it is marked, else by its kind. */
+export function signalWakes(signal: OpsSignal): boolean {
+  return signal.wakes ?? WAKING.has(signal.kind);
+}

@@ -151,6 +151,21 @@ async function addWorkRoles(board: Board): Promise<void> {
   });
 }
 
+const DAY = 24 * 3_600_000;
+const HOUR = 3_600_000;
+
+/** A reflection is a finished turn too, so runs that measure idle time keep it off the clock. */
+const OFF_REFLECTION = { reflectionMs: 1_000 * DAY };
+
+const opsTurns = (runner: FakeRunner): number =>
+  runner.dispatches.filter((d) => d.trigger.kind === "ops_event").length;
+
+/** Each log of a condition: its value, in `unit`s rounded down, and whether it woke the steward. */
+const logs = async (board: Board, key: string, unit = 1): Promise<Array<[number, unknown]>> =>
+  (await board.listSignals(10_000))
+    .filter((record) => record.signal.key === key)
+    .map((record) => [Math.floor(record.signal.value / unit), record.signal.wakes]);
+
 /** The cron wakes dispatched so far: whom, where, and which crons each carried. */
 const cronTurns = (runner: FakeRunner) =>
   runner.dispatches
@@ -1534,6 +1549,170 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("ops_event");
     expect(runner.dispatches.map((d) => d.agent)).not.toContain("rev-1");
     expect(scheduler.pendingCount).toBe(0);
+  });
+
+  /** One operations pass, then the passes that wake the steward on what it logged and run the turn. */
+  async function opsPass(scheduler: Scheduler, ms: number): Promise<void> {
+    advance(ms);
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      advance(1_000);
+    }
+    await scheduler.drain();
+  }
+
+  it("wakes the steward when a member goes idle and at 7, 14 and 30 days, not at each repeat", async () => {
+    const { board, runner, scheduler } = await setup({ record: true, timings: OFF_REFLECTION });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.retireAgent(USER, { name: "rev-1", reason: "test" });
+
+    // eng-1 goes idle three days after its onboarding turn, and the steward with it.
+    await opsPass(scheduler, 3 * DAY + 5 * 60_000);
+    expect(opsTurns(runner)).toBe(1);
+    // The repeats every six hours log the condition and wake nobody.
+    for (let i = 0; i < 8; i += 1) {
+      await opsPass(scheduler, 6 * HOUR);
+    }
+    expect(opsTurns(runner)).toBe(1);
+    expect(await logs(board, "idle_member:eng-1", DAY)).toEqual([
+      [3, true],
+      ...Array.from({ length: 8 }, (_, i): [number, boolean] => [
+        3 + Math.floor((i + 1) / 4),
+        false,
+      ]),
+    ]);
+
+    // A step wakes at the first pass past it, ten minutes after the last log, not at the next repeat.
+    await opsPass(scheduler, 2 * DAY - 10 * 60_000);
+    const before = opsTurns(runner);
+    await opsPass(scheduler, 10 * 60_000);
+    expect((await logs(board, "idle_member:eng-1", DAY)).at(-1)).toEqual([7, true]);
+    expect(opsTurns(runner)).toBe(before + 1);
+
+    // Each step wakes once, and nothing does after 30 days. A pass a day keeps this short; every
+    // one of them is a repeat, and logs the condition.
+    for (let i = 0; i < 35; i += 1) {
+      await opsPass(scheduler, DAY);
+    }
+    const idle = await logs(board, "idle_member:eng-1", DAY);
+    expect(idle.filter(([, wakes]) => wakes === true).map(([days]) => days)).toEqual([
+      3, 7, 14, 30,
+    ]);
+    expect(idle).toHaveLength(1 + 8 + 2 + 35);
+    expect(idle.at(-1)).toEqual([42, false]);
+
+    // A finished turn clears the condition, and the steps start over.
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await opsPass(scheduler, 0);
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toContainEqual([
+      "eng-1",
+      "manual",
+    ]);
+    await opsPass(scheduler, 5 * 60_000);
+    expect(scheduler.activeSignals).not.toContain("idle_member:eng-1");
+    for (let i = 0; i < 8; i += 1) {
+      await opsPass(scheduler, DAY);
+    }
+    const again = (await logs(board, "idle_member:eng-1", DAY)).slice(idle.length);
+    expect(again.filter(([, wakes]) => wakes === true).map(([days]) => days)).toEqual([3, 7]);
+  });
+
+  it("counts a condition that held before an upgrade as having woken the steward where it stands", async () => {
+    const { board, runner, scheduler } = await setup({ record: true, timings: OFF_REFLECTION });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await opsPass(scheduler, 12 * DAY + 12 * HOUR);
+    expect(opsTurns(runner)).toBe(1);
+    // The scheduler before this kept no wakes: its state lacks them.
+    const saved = await board.readState("scheduler", z.record(z.string(), z.unknown()), {});
+    delete saved["opsWoken"];
+    await board.writeState("scheduler", saved);
+    const upgraded = new Scheduler({
+      board,
+      runner,
+      now,
+      timings: { debounceMs: 1_000, userDebounceMs: 0, heartbeatMs: 10_000, ...OFF_REFLECTION },
+    });
+    // The repeats after the upgrade wake nobody; the next step, 14 days, does.
+    for (let i = 0; i < 5; i += 1) {
+      await opsPass(upgraded, 6 * HOUR);
+    }
+    expect(opsTurns(runner)).toBe(1);
+    await opsPass(upgraded, 6 * HOUR);
+    expect(opsTurns(runner)).toBe(2);
+    const woke = (await logs(board, "idle_member:eng-1", DAY)).filter(([, wakes]) => wakes);
+    expect(woke).toEqual([
+      [12, true],
+      [14, true],
+    ]);
+  });
+
+  it("wakes the steward on churn when the release count rises, not on a repeat at the same count", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "flaky",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    const release = async (): Promise<void> => {
+      await board.claimTask(ENG, { task_id: task.id });
+      await board.releaseTask(ENG, { task_id: task.id });
+    };
+    await release();
+    await release();
+    await opsPass(scheduler, 5 * 60_000);
+    expect(opsTurns(runner)).toBe(1);
+    await opsPass(scheduler, 6 * HOUR);
+    expect(opsTurns(runner)).toBe(1);
+    // A third release is logged at the next pass, not the next repeat, and wakes the steward.
+    await release();
+    await opsPass(scheduler, 5 * 60_000);
+    expect(opsTurns(runner)).toBe(2);
+    expect(await logs(board, `churn:${task.id}`)).toEqual([
+      [2, true],
+      [2, false],
+      [3, true],
+    ]);
+  });
+
+  it("wakes the steward on a persisting backlog at most once a day, and at once when it returns", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const build = [{ name: "build", role: "engineer" }];
+    for (const title of ["a", "b", "c"]) {
+      await board.createTask(USER, { project: "demo", title, stages: build });
+    }
+    await opsPass(scheduler, 5 * 60_000);
+    expect(opsTurns(runner)).toBe(1);
+    for (let i = 0; i < 3; i += 1) {
+      await opsPass(scheduler, 6 * HOUR);
+    }
+    expect(opsTurns(runner)).toBe(1);
+    await opsPass(scheduler, 6 * HOUR);
+    expect(opsTurns(runner)).toBe(2);
+    expect((await logs(board, "backlog:demo:engineer")).map(([, wakes]) => wakes)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      true,
+    ]);
+
+    // Cleared, the condition is forgotten with its last wake: back an hour later, it wakes at once.
+    for (const task of await board.listTasks("demo")) {
+      await board.updateTask(USER, { task_id: task.id, status: "abandoned" });
+    }
+    await opsPass(scheduler, 5 * 60_000);
+    expect(scheduler.activeSignals).not.toContain("backlog:demo:engineer");
+    for (const title of ["d", "e", "f"]) {
+      await board.createTask(USER, { project: "demo", title, stages: build });
+    }
+    await opsPass(scheduler, HOUR);
+    expect(opsTurns(runner)).toBe(3);
   });
 
   it("signals a conflict copy left in a home past its age, without waking the steward", async () => {

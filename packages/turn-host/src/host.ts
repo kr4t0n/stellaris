@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { CLOSING_ATTEMPTS, type Actor, type Board, type TurnInFlight } from "@stellaris/board-core";
+import {
+  CLOSING_ATTEMPTS,
+  type Actor,
+  type Board,
+  type SignalRecord,
+  type TurnInFlight,
+} from "@stellaris/board-core";
 import {
   channelRef,
   conversationPart,
@@ -164,6 +170,19 @@ function stuckNotice(stuck: StuckWork): string {
 
 /** How many signals a reader's prompt lists at most, newest kept. */
 const MAX_SIGNALS = 30;
+
+/**
+ * Each condition's latest log among signal records, oldest first by that log, so the repeats of
+ * a persisting condition, or hourly spend reports, cannot push other conditions past the cap.
+ */
+function latestPerKey(records: readonly SignalRecord[]): SignalRecord[] {
+  const latest = new Map<string, SignalRecord>();
+  for (const record of records) {
+    latest.delete(record.signal.key);
+    latest.set(record.signal.key, record);
+  }
+  return [...latest.values()];
+}
 
 /**
  * The server side of a turn. It turns a dispatch into a self-contained job, everything the runner
@@ -369,16 +388,17 @@ export class TurnHost {
           dir: `${PATH_TOKENS.board}/projects/${dispatch.project}/knowledge`,
           topics: await this.board.listKnowledge(dispatch.project),
         };
-    // Readers of operations signals get those logged for this scope since their last home turn here.
+    // Readers of operations signals get those logged for this scope since their last home turn
+    // here, each condition once.
     const signals =
       part === undefined && charter.wakeTriggers.includes(OPS_TRIGGER)
-        ? (await this.board.listSignals(500))
-            .filter(
+        ? latestPerKey(
+            (await this.board.listSignals(500)).filter(
               (record) =>
                 wakeScope(agent, record.signal.project ?? null) === dispatch.project &&
                 (lastTurn === null || record.ts > lastTurn.startedAt),
-            )
-            .slice(-MAX_SIGNALS)
+            ),
+          ).slice(-MAX_SIGNALS)
         : null;
     const waiting =
       task !== null && task.status === "open" && !task.completing && mayHoldStage(actor, task)

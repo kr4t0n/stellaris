@@ -56,11 +56,17 @@ Approvers are always read through `proposalApprovers`, which narrows a kind's li
 
 ### Signals are counters or timers, keyed, and logged rather than posted
 
-`OpsSignal.key` names the condition; the scheduler logs a persisting key again only after `signalRepeatMs` and forgets it when it clears. `publishSignal` appends an `ops.signal` event and nothing else: the scheduler wakes the roles charted for `ops_event` on the kinds in `WAKING_SIGNAL_KINDS` (`shared`), the runner lists the signals filed in a reader's scope since its last turn there under "Operations signals" in its prompt, and the interface shows the log from `GET /api/signals` in the Logs island off the HUD, with the conditions that still hold marked from the scheduler view's `signals`. Summaries may quote task titles and agent names, which are metadata, never message bodies.
+`OpsSignal.key` names the condition; the scheduler logs a persisting key again only after `signalRepeatMs` and forgets it when it clears. `publishSignal` appends an `ops.signal` event and nothing else: the scheduler wakes the roles charted for `ops_event` on the logs `signalWakes` (`shared`) says wake, the runner lists the signals filed in a reader's scope since its last turn there under "Operations signals" in its prompt, each key once at its latest log (`latestPerKey`), so a quiet day of repeats and hourly spend reports cannot push older conditions past the cap of 30 (`MAX_SIGNALS`), and the interface shows the log from `GET /api/signals` in the Logs island off the HUD, with the conditions that still hold marked from the scheduler view's `signals` and the logs that woke the steward marked by `signalWakes`. Summaries may quote task titles and agent names, which are metadata, never message bodies.
 
 ### Not every signal wakes
 
-`waiting_stage`, `turn_cost`, `runner`, `home_conflict`, `stuck_workspace`, `cron_failing`, and `turn_refused` only inform: the steward reads them in its prompt at its next wake for something else. Backlog, role gaps, churn, stale threads, idle members, missing capabilities, and replicas added wake `ops_event` roles, debounced like mentions so a burst becomes one turn.
+`waiting_stage`, `turn_cost`, `runner`, `home_conflict`, `stuck_workspace`, `cron_failing`, and `turn_refused` only inform: the steward reads them in its prompt at its next wake for something else. Backlog, role gaps, churn, stale threads, idle members, missing capabilities, and replicas added (`WAKING_SIGNAL_KINDS`) wake `ops_event` roles, debounced like mentions so a burst becomes one turn, when they are new and then only at steps.
+
+### A persisting condition wakes at steps, not at every repeat
+
+The operations pass marks each log it makes with `wakes`, and `signalWakes` reads the mark, falling back to the kind for a signal logged without one, such as `scaled`, which is logged once, and the kinds that only inform. A condition of a waking kind wakes when it is new. After that, an idle member wakes again as its idle time crosses 7, 14 and 30 days (`IDLE_WAKE_STEPS_MS`), and never again while it stays idle. Churn wakes again when the task's release count rises past the count it last woke at, since the count holds until the task ends. Backlog, role gaps, stale threads, and missing capabilities wake again once their last wake is `signalWakeMs` old, a day by default: the net for a condition the steward judged to be noise that then stays for days.
+
+`wakesNow` decides this on every pass, so a step is logged and wakes when it is crossed, not at the next repeat. Each key's last wake, and the level it woke at (`wakeLevel`: the steps crossed, or the release count), is in the scheduler's state as `opsWoken`, forgotten with the key, so a condition that clears and returns wakes at once, and a finished turn starts an idle member's steps over. A key that held before the scheduler kept wakes counts as woken where it stands, so an upgrade wakes nobody.
 
 ### The operations pass runs on the first tick after start
 
@@ -107,6 +113,10 @@ Every ask was a topic thread on the society's `general`, so closing one posted i
 ### Signals were once posts in an `ops` society channel
 
 Every signal was posted there as the board as well as logged, and readers of signals followed it. In the second live society it held six posts after an hour, five of them runner reconnects from server restarts and one a spend report, while no signal that calls for judgment had fired; it read as noise in the navigator, and the steward took a heartbeat turn to note a reconnect. Signals are only logged now, the reader's prompt lists them, and the user reads them in the Logs island. The channel was retired from the society's channels and every member's subscriptions, and its old posts stay on disk.
+
+### Every repeat once woke the steward
+
+The scheduler used to wake `ops_event` roles by a signal's kind alone, so every six-hour repeat of a persisting condition woke the steward just as the condition's first log had. A member idle for a month woke it more than a hundred times, four times a day, and each idle member on a clock of its own added four more a day. Many of those turns started the steward's session cold, and none of them told it anything new. The steps keep the wakes at the points where the steward's decision can change: a member going idle, a week, two weeks, and a month.
 
 ### The steward is not a rubber stamp, and each of its turns costs money
 

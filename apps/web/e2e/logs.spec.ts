@@ -23,6 +23,10 @@ test("the operations log floats from the top bar, apart from the board, and Esc 
   await expect(runner).not.toContainText("wakes the steward");
   await expect(runner).not.toContainText("value");
   await expect(runner).not.toContainText("holds now");
+  // A repeat of a condition that wakes the steward only when it is new or crosses a step.
+  const idle = log.getByRole("listitem").filter({ hasText: "idle member" });
+  await expect(idle).toContainText("ada · role researcher");
+  await expect(idle).not.toContainText("wakes the steward");
 
   // Esc closes the log first and leaves the board open.
   await page.keyboard.press("Escape");

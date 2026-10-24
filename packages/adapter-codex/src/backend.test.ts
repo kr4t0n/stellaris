@@ -63,7 +63,17 @@ interface Received {
 interface TurnContext {
   readonly turnId: string;
   readonly turns: number;
-  item(method: "item/started" | "item/completed", item: Record<string, unknown>): void;
+  /** An item of this turn, or of another turn's id, as one an earlier turn left running completes. */
+  item(
+    method: "item/started" | "item/completed",
+    item: Record<string, unknown>,
+    turnId?: string,
+  ): void;
+  /**
+   * A sub-agent's thread reports, since the server sends every thread it runs to each connection:
+   * its turn, its message, its own totals, the account's rate limits, and its failure when given one.
+   */
+  subAgent(text: string, error?: Record<string, unknown>): void;
   /** One model request finished, which the server reports with the thread's new totals. */
   request(): void;
   complete(status: string, error?: string): void;
@@ -130,6 +140,8 @@ function fakeAppServer(
      * its turns, and as a live 0.158.0 did once for a `paginated` one.
      */
     noReplay?: boolean;
+    /** A sub-agent's thread reports as each `turn/start` arrives, before the server answers it. */
+    subAgentAtStart?: { text: string; error?: Record<string, unknown> };
   } = {},
 ): {
   spawn: SpawnAppServer;
@@ -149,7 +161,7 @@ function fakeAppServer(
     const send = (message: unknown): void => {
       stdout.write(`${JSON.stringify(message)}\n`);
     };
-    const threadId = "thread-7";
+    let threadId = "thread-7";
     let turns = 0;
     let running: string | null = null;
     let context: TurnContext | null = null;
@@ -169,6 +181,44 @@ function fakeAppServer(
         outputTokens: total.outputTokens + last.outputTokens,
       };
       usage(turnId, last);
+    };
+    // A sub-agent's turn on its own thread, as codex-cli 0.162.1 sends it to every connection: its
+    // message, its own totals, the account's rate limits its request brought, and its end.
+    const subAgent = (text: string, error?: Record<string, unknown>): void => {
+      const child = { threadId: "thread-8", turnId: "turn-8-1" };
+      const turn = { id: child.turnId, items: [], status: "inProgress" };
+      send({ method: "turn/started", params: { threadId: child.threadId, turn } });
+      send({
+        method: "item/completed",
+        params: { ...child, item: { type: "agentMessage", id: "a8", text } },
+      });
+      const own = { inputTokens: 7_000, cachedInputTokens: 0, outputTokens: 70 };
+      send({
+        method: "thread/tokenUsage/updated",
+        params: { ...child, tokenUsage: { total: own, last: own } },
+      });
+      send({
+        method: "account/rateLimits/updated",
+        params: {
+          rateLimits: {
+            limitId: "codex",
+            primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 1_792_473_118 },
+            secondary: null,
+            credits: null,
+            planType: null,
+          },
+        },
+      });
+      if (error !== undefined) {
+        send({ method: "error", params: { ...child, willRetry: false, error } });
+      }
+      send({
+        method: "turn/completed",
+        params: {
+          threadId: child.threadId,
+          turn: { ...turn, status: error === undefined ? "completed" : "failed", error },
+        },
+      });
     };
     const complete = (turnId: string, status: string, error?: string): void => {
       running = null;
@@ -215,6 +265,7 @@ function fakeAppServer(
             return;
           }
           send({ id: message.id, result: { thread: { id }, model: "gpt-5" } });
+          threadId = id;
           total = { inputTokens: 5_000, cachedInputTokens: 4_000, outputTokens: 500 };
           if (script.noReplay === true) {
             return;
@@ -275,6 +326,9 @@ function fakeAppServer(
           }
           return;
         case "turn/start": {
+          if (script.subAgentAtStart !== undefined) {
+            subAgent(script.subAgentAtStart.text, script.subAgentAtStart.error);
+          }
           turns += 1;
           const turnId = `turn-${turns}`;
           running = turnId;
@@ -289,7 +343,9 @@ function fakeAppServer(
           context = {
             turnId,
             turns,
-            item: (method, item) => send({ method, params: { threadId, turnId, item } }),
+            item: (method, item, owner) =>
+              send({ method, params: { threadId, turnId: owner ?? turnId, item } }),
+            subAgent,
             request: () => modelRequest(turnId),
             complete: (status, error) => complete(turnId, status, error),
             error: (said, willRetry) =>
@@ -590,6 +646,194 @@ describe("CodexBackend cold turns", () => {
       inputTokens: 300,
       outputTokens: 40,
       cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts no sub-agent's report as an answer, whichever turn it comes under", async () => {
+    // codex-cli 0.162.1 reports a sub-agent's turn ending under the parent's turn that started it,
+    // which may be over, on whatever turn the parent is running.
+    const activity = {
+      type: "subAgentActivity",
+      id: "subagent-completed-turn-8-1",
+      kind: "completed",
+      agentThreadId: "thread-8",
+      agentPath: "/root/worker",
+    };
+    const overloaded = {
+      message: "Selected model is at capacity.",
+      codexErrorInfo: "serverOverloaded",
+    };
+    for (const owner of [undefined, "turn-0"]) {
+      const report = (turn: TurnContext): void => {
+        turn.item("item/started", activity, owner);
+        turn.item("item/completed", activity, owner);
+      };
+      const refusing = fakeAppServer({
+        known: ["thread-3"],
+        noReplay: true,
+        turn: (turn) => {
+          report(turn);
+          turn.refuse(overloaded);
+        },
+      });
+      const refused = await new CodexBackend({ spawn: refusing.spawn }).runTurn(
+        request({ session: "thread-3", newSession: false }),
+      );
+      expect(refused).toMatchObject({ exitReason: "error", transient: true });
+      expect(refused.usage).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+
+      // Then the totals as they stand, and the model's one request.
+      const answering = fakeAppServer({
+        known: ["thread-3"],
+        noReplay: true,
+        turn: (turn) => {
+          report(turn);
+          turn.report();
+          turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+          turn.complete("completed");
+        },
+      });
+      const answered = await new CodexBackend({ spawn: answering.spawn }).runTurn(
+        request({ session: "thread-3", newSession: false }),
+      );
+      expect(answered.usage).toEqual({
+        inputTokens: 300,
+        outputTokens: 40,
+        cacheReadTokens: 100,
+        cacheWriteTokens: 0,
+      });
+    }
+  });
+
+  it("counts no tool output a turn starts with as an answer", async () => {
+    // Codex records a client's tool output as the turn's input and reports it as an item.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        const output = { type: "functionCallOutput", id: "o1", name: "lookup", namespace: null };
+        turn.item("item/started", { ...output, output: "" });
+        turn.item("item/completed", { ...output, output: "found" });
+        turn.refuse({ message: "Codex ran out of room.", codexErrorInfo: "contextWindowExceeded" });
+      },
+    });
+    const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(refused.exitReason).toBe("error");
+    expect(refused.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts no command an earlier turn left running as this turn's answer", async () => {
+    // On a warm 0.162.1 session, a command started in one turn completed in the next under its own.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      noReplay: true,
+      turn: (turn) => {
+        const command = { type: "commandExecution", id: "c0", command: "sleep 8" };
+        turn.item("item/completed", { ...command, status: "completed", exitCode: 0 }, "turn-0");
+        turn.refuse({
+          message: "Selected model is at capacity.",
+          codexErrorInfo: "serverOverloaded",
+        });
+      },
+    });
+    const refused = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(refused.exitReason).toBe("error");
+    expect(refused.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("reads only its own thread, so a sub-agent's requests, message, and failure are not its turn's", async () => {
+    // A sub-agent the model spawns runs on a thread of its own, which 0.162.1 sends here too.
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        const spawn = { type: "collabAgentToolCall", id: "s1", tool: "spawnAgent" };
+        turn.item("item/started", { ...spawn, status: "inProgress" });
+        turn.item("item/completed", { ...spawn, status: "completed" });
+        turn.request();
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("parent") });
+        turn.subAgent(STATUS("child"), {
+          message: "Selected model is at capacity.",
+          codexErrorInfo: "serverOverloaded",
+        });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.exitReason).toBe("completed");
+    expect(result.error).toBeUndefined();
+    expect(result.transient).toBeUndefined();
+    expect(result.status?.summary).toBe("parent");
+    // The parent's two requests alone.
+    expect(result.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+    // The rate limits name no thread: they are the account's, whichever thread's request brought them.
+    expect(result.quota?.windows).toMatchObject([
+      { key: "primary", minutes: 300, usedPercent: 30 },
+    ]);
+  });
+
+  it("reads none of a sub-agent's turn that comes before the server answers the turn's start", async () => {
+    // On a warm session, a sub-agent of the turn before may end while the next turn has no id yet.
+    const fake = fakeAppServer({
+      subAgentAtStart: {
+        text: STATUS("child"),
+        error: { message: "Selected model is at capacity.", codexErrorInfo: "serverOverloaded" },
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.exitReason).toBe("completed");
+    expect(result.error).toBeUndefined();
+    expect(result.transient).toBeUndefined();
+    expect(result.status?.summary).toBe("answered turn 1");
+    expect(result.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("starts from the totals the resumed thread reports about itself while the resume is in flight", async () => {
+    // The only update before the turn's first item is a request's: with no totals from the resume,
+    // it would set the starting point past that request.
+    const fake = fakeAppServer({
+      known: ["thread-3"],
+      turn: (turn) => {
+        turn.request();
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("done") });
+        turn.complete("completed");
+      },
+    });
+    const resumed = await new CodexBackend({ spawn: fake.spawn }).runTurn(
+      request({ session: "thread-3", newSession: false }),
+    );
+    expect(resumed.usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 80,
+      cacheReadTokens: 200,
       cacheWriteTokens: 0,
     });
   });
@@ -938,6 +1182,24 @@ describe("CodexBackend resident sessions", () => {
     await session.close();
     expect(fake.killed()).toBe(1);
     await expect(session.runTurn("late")).rejects.toThrow(/ended/);
+  });
+
+  it("keeps a sub-agent that reports between two turns out of the next turn's count", async () => {
+    // A sub-agent the first turn spawned ends after that turn, on its own thread.
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        ordinaryTurn(turn);
+        if (turn.turns === 1) turn.subAgent(STATUS("child"));
+      },
+    });
+    const session = await new CodexBackend({ spawn: fake.spawn }).startResident(spec, start);
+    const first = await session.runTurn("hello");
+    const second = await session.runTurn("again");
+    const own = { inputTokens: 600, outputTokens: 80, cacheReadTokens: 200, cacheWriteTokens: 0 };
+    expect(first.usage).toEqual(own);
+    expect(second.usage).toEqual(own);
+    expect(second.status?.summary).toBe("answered turn 2");
+    await session.close();
   });
 });
 

@@ -558,22 +558,26 @@ interface TurnCollector {
   /** Whether Codex ended the turn on a failure the model service may not repeat in a minute. */
   transient: boolean;
   /**
-   * Whether the model answered at all: an item its answer made started or completed. A turn it
-   * never answered used no tokens, whatever the thread's totals say about the turns before it.
+   * Whether the model answered at all: an item its answer made started or completed in this turn. A
+   * turn it never answered used no tokens, whatever the thread's totals say about the turns before it.
    */
   answered: boolean;
 }
 
 /**
- * The items Codex or the user makes rather than the model's answer: the prompt and steers, a hook's
- * prompt, review mode, and a compaction, which Codex starts before its own request, refused or not.
+ * The items Codex or the user makes rather than the model's answer: the prompt and steers, a tool
+ * output a client starts a turn with, a hook's prompt, review mode, a compaction, which Codex starts
+ * before its own request, refused or not, and a sub-agent's activity, which reports a sub-agent's
+ * turn ending under the turn that started it, while a later turn may be running.
  */
 const NOT_ANSWERS = new Set([
   "userMessage",
+  "functionCallOutput",
   "hookPrompt",
   "enteredReviewMode",
   "exitedReviewMode",
   "contextCompaction",
+  "subAgentActivity",
 ]);
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
@@ -765,6 +769,16 @@ export class CodexAppServerSession implements ResidentSession {
     if (!isDict(params)) {
       return;
     }
+    // The server sends every thread it runs to each connection, a sub-agent's too; its turns, items,
+    // totals, and failures are none of this thread's.
+    const thread = str(params["threadId"]);
+    if (
+      thread !== undefined &&
+      thread !== this.session &&
+      !this.session.startsWith(PENDING_THREAD_PREFIX)
+    ) {
+      return;
+    }
     // Rate limits come with the requests a turn makes, and between turns on a warm session.
     if (method === "account/rateLimits/updated") {
       // A report the adapter cannot read is dropped: it never stops the reader, or the turn.
@@ -826,8 +840,11 @@ export class CodexAppServerSession implements ResidentSession {
           }
           return;
         }
-        // A command can run past its request's update, or past the turn, so an answer counts as it starts.
-        if (!NOT_ANSWERS.has(String(item["type"]))) {
+        // A command can run past its request's update, or past the turn, so an answer counts as it
+        // starts; one left running by an earlier turn completes under that turn's id.
+        const owner = str(params["turnId"]);
+        const ours = owner === undefined || turn.turnId === null || owner === turn.turnId;
+        if (ours && !NOT_ANSWERS.has(String(item["type"]))) {
           turn.answered = true;
         }
         if (item["type"] === "agentMessage") {

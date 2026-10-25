@@ -4,7 +4,6 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Board } from "@stellaris/board-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -137,9 +136,7 @@ describe("board server", () => {
       const transport = new StreamableHTTPClientTransport(url, {
         requestInit: { headers: { authorization: `Bearer ${engToken}` } },
       });
-      // The SDK's client transport and its Transport interface disagree on optional `undefined` under strict optional typing.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      await client.connect(transport as unknown as Transport);
+      await client.connect(transport);
       const tools = await client.listTools();
       const names = tools.tools.map((tool) => tool.name);
       expect(names).toContain("claim_task");

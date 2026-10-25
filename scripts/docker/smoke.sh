@@ -34,12 +34,13 @@ same "the server image's admin CLI version" "$(docker run --rm "$server_image" s
 same "the server image's server version" \
   "$(docker run --rm "$server_image" node /app/server/dist/index.js --version)" "$version"
 same "the runner image's runner version" "$(docker run --rm "$runner_image" stellaris-runner --version)" "$version"
-# The account the chart's securityContext and the README's volume steps assume, and the CLIs and
-# git that turns shell out to, on the PATH the image sets.
+# The account the chart's securityContext and the README's volume steps assume, and the CLIs, git,
+# and kubectl that turns shell out to, on the PATH the image sets. kubectl's --client keeps it from
+# looking for a cluster.
 same "the runner image's account" \
   "$(docker run --rm "$runner_image" sh -c 'echo "$(id -un) $(id -u):$(id -g) $HOME"')" \
   "stellaris 1000:100 /home/stellaris"
-docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version'
+docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version && kubectl version --client'
 
 docker network create "$run" > /dev/null
 docker volume create "$run-data" > /dev/null

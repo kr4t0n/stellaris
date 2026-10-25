@@ -10,6 +10,22 @@ import {
 } from "@stellaris/shared";
 import type { z } from "zod";
 
+/**
+ * The most array elements and object members, at any depth, that one tool call's arguments may
+ * hold. Without a cap the SDK validates whatever a request carries, and a few megabytes of tiny
+ * elements can exhaust the server's memory (GHSA-46jr-4wx8-v453). The largest call measured on a
+ * running board held 53, a ten-stage `plan_task`; 1,000 leaves room for a plan of 199 stages. A
+ * call over it gets an error result, and its verb never runs.
+ */
+const MAX_TOOL_INPUT_ELEMENTS = 1_000;
+
+/**
+ * The largest request body `/mcp` reads, in bytes, a quarter of the SDK's 4 MiB default
+ * (GHSA-46jr-4wx8-v453). The largest call measured on a running board was 60,067 bytes, a
+ * knowledge topic; 1 MiB leaves 17 times that. A larger body is answered 413 before it is parsed.
+ */
+const MAX_REQUEST_BODY_SIZE = 1024 * 1024;
+
 /** One MCP tool per board verb. The schema is the shared verb input; the description is the shared text. */
 export interface BoardToolDefinition {
   readonly name: VerbName;
@@ -48,7 +64,10 @@ export async function createBoardMcpServer(
   actor: Actor,
   version: string,
 ): Promise<McpServer> {
-  const server = new McpServer({ name: "stellaris-board", version });
+  const server = new McpServer(
+    { name: "stellaris-board", version },
+    { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS },
+  );
   const charter = await board.readRole(actor.role);
   for (const tool of toolsForRole(charter)) {
     server.registerTool(
@@ -84,7 +103,10 @@ export async function handleMcpRequest(
 ): Promise<Response> {
   const server = await createBoardMcpServer(board, actor, version);
   // No sessionIdGenerator means stateless mode: every request stands alone.
-  const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    enableJsonResponse: true,
+    maxRequestBodySize: MAX_REQUEST_BODY_SIZE,
+  });
   await server.connect(transport);
   try {
     return await transport.handleRequest(request, {

@@ -22,6 +22,7 @@ import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
+import { API_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import { githubAuthRoutes, type GithubAuthOptions } from "./github-auth.js";
 import { ENROLL_LIMIT, RateLimiter, rateLimit, SIGN_IN_LIMIT } from "./rate-limit.js";
@@ -151,6 +152,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   const api = new Hono<Env>();
   api.use("*", authenticate);
+  // After the token check, so a body without a valid token is never buffered. Only the methods that
+  // carry one, since the limit makes `@hono/node-server` build a whole request to look for a body.
+  api.on(["POST", "PUT", "PATCH", "DELETE"], "*", limitBody(API_BODY_LIMIT_BYTES));
 
   // Identity and society. A GitHub sign-in also says who signed in, with the account's picture,
   // which a sign-in whose picture GitHub did not give on its own avatar host takes from the login.

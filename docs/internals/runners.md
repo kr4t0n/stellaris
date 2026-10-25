@@ -120,6 +120,19 @@ The desk forgets an approved enrollment when it tells the runner, so the token n
 
 The socket's peer of a server behind an Ingress or a tunnel is the proxy, so with `STELLARIS_TRUSTED_PROXIES` left at 0 every client shares one limit, and a stranger's flood blocks your runner too; set to more proxies than there are, the server believes an entry the client wrote, and one client becomes as many addresses as it likes. The chart sets 1 when its Ingress is on, and `server.config.trustedProxies` overrides it, for example 2 with Cloudflare in front of the Ingress.
 
+### Every route that reads a request body caps it
+
+Neither `@hono/node-server` nor hono caps a request body, so a route that reads `c.req.json()` once parsed whatever arrived, from anyone on the two enroll routes. `limitBody` (`apps/server/src/body-limit.ts`) puts hono's `bodyLimit` in front of each such route, which answers a body over its limit with a 413 (`PAYLOAD_TOO_LARGE`) before anything parses it: at once when its declared length is over, or as soon as the bytes streamed in pass the limit. Each limit sits well above the largest real body measured on a running board:
+
+- `POST /runner/enroll` and `/runner/enroll/poll`, which take no token: 16 KiB (`ENROLL_BODY_LIMIT_BYTES`). The largest body the enroll schema accepts, every string at its longest and every character escaped as `\uXXXX`, is 14,455 bytes; a real request is under 200 and a poll is 60.
+- Every `POST`, `PUT`, `PATCH`, and `DELETE` under `/api`, after the token check, so a body without a valid token is never buffered: 1 MiB (`API_BODY_LIMIT_BYTES`), what `/mcp` takes ([board.md](board.md#the-mcp-endpoint-caps-a-requests-size-and-a-tool-calls-elements)), since `/api/verbs` takes the MCP tools' inputs. The largest real one was a knowledge topic of 59,972 bytes. A `GET` is left alone, since looking for a body makes `@hono/node-server` build a whole request.
+- A runner's hello, its reports of workspaces and warm sessions, its projection reads, and a turn's steps and outcome: 8 MiB (`RUNNER_BODY_LIMIT_BYTES`). A projection read names 200 paths, and nothing but the CLI's output bounds a batch of steps, as a file a tool call writes whole; the largest real batch was 131,680 bytes, one post with an image inlined as base64, and the largest outcome under 6 KB.
+- A runner's answer to a request (`/runner/requests/:id`): 16 MiB (`RUNNER_ANSWER_LIMIT_BYTES`), since it carries a file read on a branch or an image a turn uploads, each up to 8 MiB, as base64, 10.7 MiB.
+
+The home's git route carries packs and has no limit, and `/mcp` sets its own. A runner takes a 413 as a refusal and posts the body no more (`persist` in the daemon): a refused batch of steps is dropped while the turn's later steps go on, a refused answer leaves its request to time out on the server, and a refused outcome never arrives, so the server takes the turn as running until the runner registers again. A refused hello is tried again, every 15 seconds at the longest, as any refusal of a hello is but a 401 before the runner first connected. So no limit may come near a real body.
+
+A 413 closes the connection. `@hono/node-server` drops a connection whose body went unread after the answer, and while the 413 offered to keep it open, a client could send its next request there, or still be sending the refused one when it dropped, and see `other side closed` instead of the 413, which a runner takes for the network and posts again: 15 of 30 posts just over 1 MiB, sent between small requests with Node 24's fetch, did. With `Connection: close` on the 413, none of 150 did, 30 just over each of the four limits and 30 of 64 MiB.
+
 ## History
 
 ### A job once carried the server's own idea of its address

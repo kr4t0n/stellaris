@@ -70,6 +70,14 @@ Runners in the cluster
   Agents run with every permission, so these pods run whatever they decide with the pod's network.
   runner.networkPolicy.enabled keeps them from the cluster's private addresses.
 {{- end }}
+{{- if eq (toString ($runner.automountServiceAccountToken | default false)) "true" }}
+
+  Every agent on these pods holds the token of the ServiceAccount {{ $runner.serviceAccountName | default "default" }}, and with it the
+  account's permissions in the cluster.
+  {{- if $runner.networkPolicy.enabled }} The network policy is likely to block the API: allow it in
+  runner.networkPolicy.extraEgress, as the chart's README describes.
+  {{- end }}
+{{- end }}
 {{- end }}
 
 Before an upgrade, pause the society with the board's Pause switch and let running turns end, then

@@ -3,8 +3,8 @@ import { bodyLimit } from "hono/body-limit";
 
 /**
  * Asking to enroll and polling for the answer, which anyone may do without a token. The largest
- * body the enroll schema accepts, every string at its longest and every character escaped as
- * `\uXXXX`, is 14,455 bytes; a real request is under 200, and a poll 60.
+ * body a runner sends, every field at the longest the schema accepts, is under 8 KB, and under 15 KB
+ * with every character escaped as `\uXXXX`; a real request is under 200 bytes, and a poll 60.
  */
 export const ENROLL_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -37,7 +37,8 @@ export const RUNNER_ANSWER_LIMIT_BYTES = 16 * 1024 * 1024;
  *
  * The refusal closes the connection. `@hono/node-server` drops a connection whose body went unread
  * after the answer anyway, and an answer that offered to keep it open let the client send its next
- * request there, or still be sending this one when it dropped, and see a failure, not the 413.
+ * request there and see it fail. A client still sending a large body may yet see the connection
+ * reset rather than the 413, and a runner then posts again until it reads the 413.
  */
 export function limitBody(maxSize: number): MiddlewareHandler {
   return bodyLimit({

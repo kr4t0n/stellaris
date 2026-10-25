@@ -180,8 +180,8 @@ ingress:
 # its own. Runners on other machines connect as before, with or without these.
 #
 # Agents run with every permission and no sandbox, so a runner pod runs whatever they decide with
-# the pod's network. The pod gets no service-account token, and networkPolicy keeps it from the
-# cluster's private addresses.
+# the pod's network. The pod gets no service-account token unless automountServiceAccountToken
+# asks for one, and networkPolicy keeps it from the cluster's private addresses.
 runner:
   enabled: false
   # Each replica enrolls on its first start, under the name you approve on the board, which
@@ -286,8 +286,19 @@ runner:
       - fc00::/7
       - fe80::/10
     # More egress rules in NetworkPolicy's shape, for something in those ranges agents need, such
-    # as a serverUrl at a private address or a package mirror.
+    # as a serverUrl at a private address, a package mirror, or the cluster's API.
     extraEgress: []
+
+  # The ServiceAccount the runner pods run as, which the chart never creates or binds; empty is
+  # the namespace's `default`. With automountServiceAccountToken its token is mounted in every
+  # runner pod, and every agent there gets the account's permissions, so bind it to no more than
+  # the runners' work needs, such as read-only access. networkPolicy is likely to block that API:
+  # the `kubernetes` Service's address (10.96.0.1 under kubeadm) and the API server's own are
+  # often in deniedCidrs, and which of the two the policy sees is up to the network plugin, so
+  # allow both in extraEgress, the Service's on port 443 and those its EndpointSlice lists. Nor is
+  # the policy a guard against the API: one at a public address is outside deniedCidrs.
+  serviceAccountName: ""
+  automountServiceAccountToken: false
 
   podAnnotations: {}
   podLabels: {}

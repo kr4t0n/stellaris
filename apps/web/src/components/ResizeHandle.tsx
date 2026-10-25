@@ -78,7 +78,6 @@ export function ResizeHandle({
     <button
       type="button"
       aria-label={`Width of the board's content, ${width} of at most ${max} pixels: drag or use the arrow keys, Enter widens it all the way or back`}
-      title="Drag to resize. Double-click to widen it all the way, or back."
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

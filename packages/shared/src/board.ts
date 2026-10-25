@@ -640,9 +640,6 @@ export const ReallocationProposalSchema = z.object({
 });
 export type ReallocationProposal = z.infer<typeof ReallocationProposalSchema>;
 
-/** A reallocation filed before reallocations changed anything; approving one only records it. */
-export const LegacyReallocationSchema = z.object({ description: z.string().min(1) });
-
 /** The role's charter with a reallocation's changes applied. */
 export function applyRoleChanges(role: RoleCharter, changes: RoleChanges): RoleCharter {
   return {
@@ -706,15 +703,13 @@ export const ArchiveProposalSchema = z.object({
 export type ArchiveProposal = z.infer<typeof ArchiveProposalSchema>;
 
 /**
- * A skill proposed for the society. Without `body`, the skill is the folder `skills/<name>/` in the
- * proposer's home, SKILL.md and every file beside it, which the board takes once the turn that
- * proposed it has ended; with it, the skill is that SKILL.md text alone. Approval publishes it under
- * `society/skills/<name>/`.
+ * A skill proposed for the society: the folder `skills/<name>/` in the proposer's home, SKILL.md and
+ * every file beside it, which the board takes once the turn that proposed it has ended. Approval
+ * publishes it under `society/skills/<name>/`.
  */
 export const SkillProposalSchema = z.object({
   name: NameSchema,
   summary: z.string().min(1).max(200),
-  body: z.string().min(1).optional(),
 });
 export type SkillProposal = z.infer<typeof SkillProposalSchema>;
 
@@ -819,13 +814,9 @@ export function describeCharter(kind: ProposalKind, charter: Record<string, unkn
     }
     case "reallocation": {
       const parsed = ReallocationProposalSchema.safeParse(charter);
-      if (parsed.success) {
-        const { role, changes, description } = parsed.data;
-        return `reallocation of role ${role} (${describeRoleChanges(changes)}): ${description}`;
-      }
-      const legacy = LegacyReallocationSchema.safeParse(charter);
-      if (!legacy.success) break;
-      return `reallocation: ${legacy.data.description}`;
+      if (!parsed.success) break;
+      const { role, changes, description } = parsed.data;
+      return `reallocation of role ${role} (${describeRoleChanges(changes)}): ${description}`;
     }
     case "skill": {
       const parsed = SkillProposalSchema.safeParse(charter);

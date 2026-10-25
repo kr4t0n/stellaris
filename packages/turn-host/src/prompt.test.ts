@@ -571,7 +571,7 @@ describe("buildTurnPrompt", () => {
   it("tells a proposer woken by a decision to drop its own copy of a skill once it is published", () => {
     const prompt = buildTurnPrompt({
       dispatch: {
-        agent: "scout",
+        agent: "eng-2",
         project: "society",
         trigger: TriggerSchema.parse({
           kind: "proposal_decided",
@@ -689,7 +689,7 @@ describe("buildTurnPrompt", () => {
       buildTurnPrompt({
         ...base,
         dispatch: {
-          agent: "sage",
+          agent: "eng-1",
           project,
           trigger: TriggerSchema.parse({ kind: "mention", from: "user", channel }),
           priority: 2,

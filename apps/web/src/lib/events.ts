@@ -49,12 +49,22 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
     type.startsWith("pull_request.") ||
     type === "lease.expired"
   ) {
-    return [["tasks"], ["task", text(payload["taskId"])], ["members"], ["metrics"]];
+    const keys: QueryKey[] = [
+      ["tasks"],
+      ["task", text(payload["taskId"])],
+      ["members"],
+      ["metrics"],
+    ];
+    // A landing moves the project's default branch.
+    return type === "merge.completed"
+      ? [...keys, ["project-file", text(payload["project"])]]
+      : keys;
   }
   if (type === "turn.completed" || type === "turn.failed") {
     // A turn may have rewritten the citizen's memory and skills, or reconciled or left a conflict
-    // copy, each a change in its home's history, as well as its turns; and its hand-back committed
-    // what it left on a task's branch, which a home turn may have worked on too.
+    // copy, each a change in its home's history, as well as its turns; its hand-back committed
+    // what it left on a task's branch, which a home turn may have worked on too; and its start had
+    // the runner follow the project's remote, which may have moved the default branch.
     return [
       ["scheduler"],
       ["members"],
@@ -66,6 +76,7 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
       ["task-file"],
       ["task-changes"],
       ["task-diff"],
+      ["project-file"],
       ["metrics"],
       ["tokens"],
       ["crons"],

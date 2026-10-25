@@ -16,6 +16,8 @@ import {
 } from "./files.js";
 
 const TASK = "01M4D03FTQRBZ6JCCS1QNWDZ4Q";
+const ON_TASK = { kind: "task", taskId: TASK } as const;
+const ON_PROJECT = { kind: "project", slug: "lab" } as const;
 
 function text(value: string): Uint8Array {
   return new TextEncoder().encode(value);
@@ -24,40 +26,40 @@ function text(value: string): Uint8Array {
 describe("linkTarget", () => {
   it("reads a path through any runner's task worktree as that task's file", () => {
     for (const href of [
-      `/home/tiger/runner-data/worktrees/sage/.tasks/${TASK}/report.md`,
+      `/home/tiger/runner-data/worktrees/eng-1/.tasks/${TASK}/report.md`,
       `/home/stellaris/stellaris-runner/worktrees/ada/.tasks/${TASK}/report.md`,
-      `worktrees/sage/.tasks/${TASK}/./report.md`,
-      `/data/worktrees/sage/.tasks/${TASK}/report.md?raw=1#top`,
+      `worktrees/eng-1/.tasks/${TASK}/./report.md`,
+      `/data/worktrees/eng-1/.tasks/${TASK}/report.md?raw=1#top`,
     ]) {
-      expect(linkTarget(href)).toEqual({ kind: "task-file", taskId: TASK, path: "report.md" });
+      expect(linkTarget(href)).toEqual({ kind: "file", source: ON_TASK, path: "report.md" });
     }
     expect(
-      linkTarget(`/r/worktrees/sage/.tasks/${TASK}/evidence/analysis/policy%20diagnostics.png`),
+      linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}/evidence/analysis/policy%20diagnostics.png`),
     ).toEqual({
-      kind: "task-file",
-      taskId: TASK,
+      kind: "file",
+      source: ON_TASK,
       path: "evidence/analysis/policy diagnostics.png",
     });
-    expect(linkTarget(`/r/worktrees/sage/.tasks/${TASK}`)).toEqual({
-      kind: "task-file",
-      taskId: TASK,
+    expect(linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}`)).toEqual({
+      kind: "file",
+      source: ON_TASK,
       path: "",
     });
   });
 
   it("splits off the line a link cites, as both CLIs and GitHub write one", () => {
-    const at = `/home/tiger/runner-data/worktrees/sage/.tasks/${TASK}`;
+    const at = `/home/tiger/runner-data/worktrees/eng-1/.tasks/${TASK}`;
     for (const [href, path, line] of [
       [`${at}/report.md:67`, "report.md", 67],
       [`${at}/src/run.py:12:5`, "src/run.py", 12],
       [`${at}/report.md%3A67`, "report.md", 67],
       [`${at}/report.md#L40-L52`, "report.md", 40],
     ] as const) {
-      expect(linkTarget(href)).toEqual({ kind: "task-file", taskId: TASK, path, line });
+      expect(linkTarget(href)).toEqual({ kind: "file", source: ON_TASK, path, line });
     }
-    expect(linkTarget("plot.png:3", { taskId: TASK, dir: "docs" })).toEqual({
-      kind: "task-file",
-      taskId: TASK,
+    expect(linkTarget("plot.png:3", { source: ON_TASK, dir: "docs" })).toEqual({
+      kind: "file",
+      source: ON_TASK,
       path: "docs/plot.png",
       line: 3,
     });
@@ -67,29 +69,49 @@ describe("linkTarget", () => {
     expect(citedLine("notes/v2:draft.md")).toEqual({ path: "notes/v2:draft.md" });
   });
 
-  it("resolves a relative link against the file it is written in", () => {
-    const base = { taskId: TASK, dir: "docs" };
+  it("resolves a relative link against the file it is written in, on its own branch", () => {
+    const base = { source: ON_TASK, dir: "docs" };
     expect(linkTarget("evidence/plot.png", base)).toEqual({
-      kind: "task-file",
-      taskId: TASK,
+      kind: "file",
+      source: ON_TASK,
       path: "docs/evidence/plot.png",
     });
     expect(linkTarget("../metrics-plan.md", base)).toEqual({
-      kind: "task-file",
-      taskId: TASK,
+      kind: "file",
+      source: ON_TASK,
       path: "metrics-plan.md",
     });
     expect(linkTarget("../../etc/passwd", base)).toEqual({ kind: "local" });
+    // A project's file links within the project's default branch.
+    const guide = { source: ON_PROJECT, dir: "docs/guide" };
+    expect(linkTarget("../internals/board.md#L12", guide)).toEqual({
+      kind: "file",
+      source: ON_PROJECT,
+      path: "docs/internals/board.md",
+      line: 12,
+    });
+    expect(linkTarget("../../README.md", guide)).toEqual({
+      kind: "file",
+      source: ON_PROJECT,
+      path: "README.md",
+    });
+    expect(linkTarget("../../../x", guide)).toEqual({ kind: "local" });
+    // A task's worktree is that task's, whichever file names it.
+    expect(linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}/report.md`, guide)).toEqual({
+      kind: "file",
+      source: ON_TASK,
+      path: "report.md",
+    });
   });
 
   it("reads every other path on a machine as one the board cannot open", () => {
-    expect(linkTarget("/home/tiger/runner-data/worktrees/sage/demo/report.md")).toEqual({
+    expect(linkTarget("/home/tiger/runner-data/worktrees/eng-1/demo/report.md")).toEqual({
       kind: "local",
     });
     expect(linkTarget("/tmp/out.txt")).toEqual({ kind: "local" });
     expect(linkTarget("report.md")).toEqual({ kind: "local" });
-    expect(linkTarget("/abs/report.md", { taskId: TASK, dir: "" })).toEqual({ kind: "local" });
-    expect(linkTarget(`/r/worktrees/sage/.tasks/${TASK}/../../x`)).toEqual({ kind: "local" });
+    expect(linkTarget("/abs/report.md", { source: ON_TASK, dir: "" })).toEqual({ kind: "local" });
+    expect(linkTarget(`/r/worktrees/eng-1/.tasks/${TASK}/../../x`)).toEqual({ kind: "local" });
     expect(linkTarget("")).toEqual({ kind: "local" });
   });
 
@@ -101,7 +123,7 @@ describe("linkTarget", () => {
 
   it("reads image: and an id as an image uploaded to the board, inside a task's file too", () => {
     expect(linkTarget(`image:${TASK}`)).toEqual({ kind: "upload", id: TASK });
-    expect(linkTarget(`image:${TASK}`, { taskId: TASK, dir: "docs" })).toEqual({
+    expect(linkTarget(`image:${TASK}`, { source: ON_TASK, dir: "docs" })).toEqual({
       kind: "upload",
       id: TASK,
     });
@@ -167,7 +189,7 @@ describe("rehypeLineTarget", () => {
 });
 
 /** A file a branch added, last touched by `author` at `at`. */
-function change(path: string, author = "sage", at = "2026-10-08T09:00:00.000Z") {
+function change(path: string, author = "eng-1", at = "2026-10-08T09:00:00.000Z") {
   return { path, status: "added" as const, added: 1, removed: 0, lastChange: { author, at } };
 }
 

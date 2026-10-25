@@ -44,9 +44,14 @@ function replaying(messages: readonly SDKMessage[]): { queryFn: QueryFn; calls: 
 /**
  * A turn the API refused, as Claude Code 2.1.283 streamed it against a local server answering 400:
  * the init message that says it opened the session, a synthetic assistant message with the API's
- * words, then a `success` result marked `is_error`.
+ * words, then a `success` result marked `is_error`. Against 529 and 500 it streamed the same
+ * frames once its own retries ran out, with `error: "server_error"` and the status.
  */
-function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
+function refusedTurn(
+  text = "API Error: 400 stub refuses",
+  status: number | null = 400,
+  error = "unknown",
+): SDKMessage[] {
   const frames: unknown[] = [
     { type: "system", subtype: "init", session_id: "recorded", model: "claude-opus-5-5" },
     {
@@ -59,7 +64,7 @@ function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
         content: [{ type: "text", text }],
       },
       parent_tool_use_id: null,
-      error: "unknown",
+      error,
       is_api_error_message: true,
       session_id: "recorded",
     },
@@ -67,7 +72,7 @@ function refusedTurn(text = "API Error: 400 stub refuses"): SDKMessage[] {
       type: "result",
       subtype: "success",
       is_error: true,
-      api_error_status: 400,
+      api_error_status: status,
       terminal_reason: "api_error",
       result: text,
       total_cost_usd: 0,
@@ -442,6 +447,46 @@ describe("ClaudeAgentBackend replay", () => {
     const refusedLast = await coldTurn(replaying([...done, ...refusedTurn()]).queryFn);
     expect(refusedLast.exitReason).toBe("error");
     expect(refusedLast.error).toBe("API Error: 400 stub refuses");
+  });
+
+  it("says a turn the API turned away with a 5xx or a 529 may pass, and no other", async () => {
+    const overloaded = refusedTurn(
+      "API Error: Repeated 529 Overloaded errors. The API is at capacity — this is usually temporary.",
+      529,
+      "server_error",
+    );
+    const failing = refusedTurn("API Error: 500 Internal server error.", 500, "server_error");
+    for (const queryFn of [
+      replaying(overloaded).queryFn,
+      exitingAfter(overloaded),
+      replaying(failing).queryFn,
+      replaying(refusedTurn("API Error: Overloaded", null, "overloaded")).queryFn,
+    ]) {
+      const result = await coldTurn(queryFn);
+      expect(result.exitReason).toBe("error");
+      expect(result.transient).toBe(true);
+    }
+    for (const frames of [
+      refusedTurn(),
+      refusedTurn("API Error: Connection error.", null),
+      // The plan's limit, which the CLI's `rate_limit` says, waits for its reset instead.
+      refusedTurn("You've hit your limit · resets 3pm", 429, "rate_limit"),
+    ]) {
+      const result = await coldTurn(replaying(frames).queryFn);
+      expect(result.exitReason).toBe("error");
+      expect(result.transient).toBeUndefined();
+    }
+
+    // The latest run decides: a run that completed after an overload, and an error of its own after one.
+    const done = (await recorded("sdk-synthetic.jsonl")).filter((frame) => frame.type === "result");
+    expect((await coldTurn(replaying([...overloaded, ...done]).queryFn)).transient).toBeUndefined();
+    const maxTurns: unknown[] = [
+      { type: "result", subtype: "error_max_turns", errors: ["10"], total_cost_usd: 0 },
+    ];
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const then = await coldTurn(replaying([...overloaded, ...(maxTurns as SDKMessage[])]).queryFn);
+    expect(then.exitReason).toBe("error");
+    expect(then.transient).toBeUndefined();
   });
 
   it("treats a stream without a result message as an error", async () => {

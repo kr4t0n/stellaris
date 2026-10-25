@@ -3,6 +3,7 @@ import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@ta
 import { createContext, useContext, useEffect, useState } from "react";
 import type { MetricsWindow } from "@stellaris/shared";
 import { ApiError, type Api } from "./api.js";
+import type { FileSource } from "./files.js";
 
 export interface Session {
   readonly api: Api;
@@ -157,14 +158,29 @@ export function useThread(id: string | null) {
 }
 
 /**
- * One path on a task's branch. A path not on the branch, or a runner that is away, is not asked
- * again at once; a finished turn refreshes it, since the hand-back is what commits a turn's files.
+ * One path on a task's branch or a project's default branch. A path not on the branch, or a runner
+ * that is away, is not asked again at once; a finished turn refreshes it, since the hand-back is
+ * what commits a turn's files and the turn's start is when the runner follows the project's remote.
+ * A project's is keyed by the branch the board names as its default, so a new one is read afresh,
+ * and waits until the project is known.
  */
-export function useTaskFile(taskId: string, path: string) {
+export function useBranchFile(source: FileSource, path: string) {
   const { api } = useSession();
+  const projects = useProjects();
+  const branch =
+    source.kind === "project"
+      ? projects.data?.find((project) => project.slug === source.slug)?.defaultBranch
+      : undefined;
   return useQuery({
-    queryKey: ["task-file", taskId, path],
-    queryFn: () => api.taskFile(taskId, path),
+    queryKey:
+      source.kind === "task"
+        ? ["task-file", source.taskId, path]
+        : ["project-file", source.slug, branch, path],
+    queryFn: () =>
+      source.kind === "task"
+        ? api.taskFile(source.taskId, path)
+        : api.projectFile(source.slug, path),
+    enabled: source.kind === "task" || branch !== undefined,
     staleTime: 30_000,
     retry: (failures, error) =>
       failures < 1 &&

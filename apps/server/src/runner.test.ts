@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
+import { Scheduler } from "@stellaris/scheduler";
 import {
   createRunner,
   EnrollmentDeniedError,
@@ -216,6 +217,64 @@ const deskPost = {
   trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
   priority: 2,
 };
+
+/** A signal reader's backend that keeps each prompt's signal lines, the runner's connection left out. */
+function signalReader(): { backend: AgentBackend; listed: string[][] } {
+  const listed: string[][] = [];
+  const backend: AgentBackend = {
+    kind: "claude",
+    newSession: () => Promise.resolve("session-1"),
+    runTurn: (request) => {
+      listed.push(
+        request.prompt
+          .split("\n")
+          .filter(
+            (line) => /^- \[[^\]]+\] [a-z_]+: /.test(line) && !/^- \[[^\]]+\] runner: /.test(line),
+          ),
+      );
+      return Promise.resolve(completed("read the signals"));
+    },
+  };
+  return { backend, listed };
+}
+
+const stewardTurn = {
+  agent: "steward-1",
+  project: "society",
+  trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
+  priority: 0,
+};
+
+/** Logs a spend report worded as the scheduler's `reportCost` words it. */
+async function spendReport(board: Board, turns: number, cost: number): Promise<void> {
+  await board.publishSignal({
+    kind: "turn_cost",
+    key: "turn_cost",
+    summary: `${turns} turn(s) completed for $${cost.toFixed(2)} since the last report`,
+    value: cost,
+  });
+}
+
+/** Logs one idle member's condition `count` times, to fill the newest signals a prompt reads. */
+async function idleRepeats(board: Board, count: number): Promise<void> {
+  for (let days = 1; days <= count; days += 1) {
+    await board.publishSignal({
+      kind: "idle_member",
+      key: "idle_member:eng-1",
+      summary: `eng-1 (engineer) has not completed a turn for ${days}d`,
+      value: days,
+      agent: "eng-1",
+      wakes: false,
+    });
+  }
+}
+
+/** When each spend report was logged, oldest first. */
+async function spendTimes(board: Board): Promise<string[]> {
+  return (await board.listSignals(10_000))
+    .filter((record) => record.signal.kind === "turn_cost")
+    .map((record) => record.ts);
+}
 
 describe("turns on a runner over the runner protocol", () => {
   let dir: string;
@@ -681,6 +740,201 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts[1]).toContain("## Operations signals\n\nNone since your last turn here.");
   });
 
+  it("lists each condition once in a reader's prompt, at its latest log", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const prompts: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve(completed("read the signals"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const idle = (days: number) =>
+      board.publishSignal({
+        kind: "idle_member",
+        key: "idle_member:eng-1",
+        summary: `eng-1 (engineer) has not completed a turn for ${days}d`,
+        value: days,
+        agent: "eng-1",
+        wakes: false,
+      });
+    await idle(3);
+    await board.publishSignal({
+      kind: "role_gap",
+      key: "role_gap:lab:referee",
+      summary: "a stage waits on the referee role, which nobody fills",
+      value: 1,
+    });
+    await idle(4);
+    for (const cost of [1, 2]) {
+      await board.publishSignal({
+        kind: "turn_cost",
+        key: "turn_cost",
+        summary: `1 turn(s) completed for $${cost}.00 since the last report`,
+        value: cost,
+      });
+    }
+    await run({
+      agent: "steward-1",
+      project: "society",
+      trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
+      priority: 0,
+    });
+    const listed = (prompts[0] ?? "")
+      .split("\n")
+      .filter((line) => /^- \[[^\]]+\] [a-z_]+: /.test(line))
+      .map((line) => line.replace(/^- \[[^\]]+\] /, "").replace(/ \([^()]*\)$/, ""))
+      // The runner's connection is logged too.
+      .filter((line) => !line.startsWith("runner: "));
+    expect(listed).toEqual([
+      "role_gap: a stage waits on the referee role, which nobody fills",
+      "idle_member: eng-1 (engineer) has not completed a turn for 4d",
+      expect.stringMatching(
+        /^turn_cost: 2 turn\(s\) completed for \$3\.00 in 2 hourly report\(s\) /,
+      ),
+    ]);
+  });
+
+  it("sums the spend reports logged since a reader's last turn into one line", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // Logged before the reader's last turn, so left out of the next one's sum.
+    await spendReport(board, 9, 9);
+    await run(stewardTurn);
+    await spendReport(board, 2, 1.25);
+    await spendReport(board, 5, 4.5);
+    // More conditions than the prompt lists: the oldest goes, while the sum around them stays.
+    for (let gap = 0; gap < 30; gap += 1) {
+      await board.publishSignal({
+        kind: "role_gap",
+        key: `role_gap:lab:role-${gap}`,
+        summary: `a stage waits on the role-${gap} role, which nobody fills`,
+        value: 1,
+      });
+    }
+    await spendReport(board, 1, 0.75);
+    await run(stewardTurn);
+    await spendReport(board, 3, 2);
+    await run(stewardTurn);
+    await spendReport(board, 3, 2);
+    await board.publishSignal({
+      kind: "turn_cost",
+      key: "turn_cost",
+      summary: "spend in the last hour: $1.20",
+      value: 1.2,
+    });
+    await run(stewardTurn);
+    const at = await spendTimes(board);
+    expect(listed[1]).toHaveLength(30);
+    expect(listed[1]?.[0]).toMatch(/ role_gap: a stage waits on the role-1 role, /);
+    expect(listed[1]?.at(-1)).toBe(
+      `- [${at[3]}] turn_cost: 8 turn(s) completed for $6.50 in 3 hourly report(s) logged from ${at[1]} to ${at[3]}; the dearest, logged at ${at[2]}, was $4.50 (value 6.5)`,
+    );
+    // One report since the last turn reads as the scheduler wrote it.
+    expect(listed[2]).toEqual([
+      `- [${at[4]}] turn_cost: 3 turn(s) completed for $2.00 since the last report (value 2)`,
+    ]);
+    // A report whose summary gives no turn count leaves the turns uncounted, never short.
+    expect(listed[3]).toEqual([
+      `- [${at[6]}] turn_cost: turns completed for $3.20 in 2 hourly report(s) logged from ${at[5]} to ${at[6]}; the dearest, logged at ${at[5]}, was $2.00 (value 3.2)`,
+    ]);
+  });
+
+  it("calls the spend a lower bound only when the signals read cut some logged since the last turn", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // No last turn, and more than 500 signals: the first report falls out of the newest 500.
+    await spendReport(board, 4, 3);
+    await idleRepeats(board, 499);
+    await spendReport(board, 2, 1);
+    await run(stewardTurn);
+    // More than 500 signals, but the one past the newest 500 is older than the last turn.
+    await spendReport(board, 1, 0.5);
+    await spendReport(board, 3, 2);
+    expect((await board.listSignals(1000)).length).toBeGreaterThan(500);
+    await run(stewardTurn);
+    // 502 signals since the last turn: the newest 500 leave out two, a report among them.
+    await spendReport(board, 4, 3);
+    await idleRepeats(board, 499);
+    await spendReport(board, 2, 1);
+    await spendReport(board, 1, 0.5);
+    await run(stewardTurn);
+    // Exactly 500 signals since the last turn: the newest 500 leave out none.
+    await spendReport(board, 2, 1);
+    await idleRepeats(board, 497);
+    await spendReport(board, 1, 0.5);
+    await spendReport(board, 3, 2);
+    await run(stewardTurn);
+    const at = await spendTimes(board);
+    const idle = expect.stringMatching(/ idle_member: eng-1 \(engineer\) .* for 499d /);
+    expect(listed[0]).toEqual([
+      idle,
+      `- [${at[1]}] turn_cost: 2 turn(s) completed for $1.00 in 1 hourly report(s) logged at ${at[1]}; the read holds the newest 500 signals, so these are lower bounds (value 1)`,
+    ]);
+    expect(listed[1]).toEqual([
+      `- [${at[3]}] turn_cost: 4 turn(s) completed for $2.50 in 2 hourly report(s) logged from ${at[2]} to ${at[3]}; the dearest, logged at ${at[3]}, was $2.00 (value 2.5)`,
+    ]);
+    expect(listed[2]).toEqual([
+      idle,
+      `- [${at[6]}] turn_cost: 3 turn(s) completed for $1.50 in 2 hourly report(s) logged from ${at[5]} to ${at[6]}; the dearest, logged at ${at[5]}, was $1.00; the read holds the newest 500 signals, so these are lower bounds (value 1.5)`,
+    ]);
+    expect(listed[3]).toEqual([
+      expect.stringMatching(/ idle_member: eng-1 \(engineer\) .* for 497d /),
+      `- [${at[9]}] turn_cost: 6 turn(s) completed for $3.50 in 3 hourly report(s) logged from ${at[7]} to ${at[9]}; the dearest, logged at ${at[9]}, was $2.00 (value 3.5)`,
+    ]);
+  });
+
+  it("counts the turns of the spend reports the scheduler writes", async () => {
+    const { board } = await Board.init(dir, { name: "signals" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const { backend, listed } = signalReader();
+    const { run } = await start(board, backend);
+    // The scheduler keeps a clock of its own and runs no turn: it only reports what turns cost.
+    let clock = Date.parse("2026-10-01T00:00:00.000Z");
+    const scheduler = new Scheduler({
+      board,
+      runner: {
+        assign: () => Promise.resolve(null),
+        runTurn: () => Promise.reject(new Error("no turns from this scheduler")),
+        completeTask: () => Promise.resolve("deferred"),
+      },
+      now: () => new Date(clock),
+    });
+    const conciergeTurn = {
+      agent: "concierge-1",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    await run(stewardTurn);
+    await scheduler.tick();
+    await run(conciergeTurn);
+    await run(conciergeTurn);
+    clock += 3_600_000;
+    await scheduler.tick();
+    await run(stewardTurn);
+    const reports = (await board.listSignals(1000)).filter(
+      (record) => record.signal.kind === "turn_cost",
+    );
+    const at = reports.map((record) => record.ts);
+    const [one = 0, two = 0] = reports.map((record) => record.signal.value);
+    expect(reports).toHaveLength(2);
+    expect(two).toBeGreaterThan(one);
+    // The concierge's turns are in the list too, with no signals in their prompts.
+    expect(listed.at(-1)?.filter((line) => line.includes("] turn_cost: "))).toEqual([
+      `- [${at[1]}] turn_cost: 3 turn(s) completed for $${(one + two).toFixed(2)} in 2 hourly report(s) logged from ${at[0]} to ${at[1]}; the dearest, logged at ${at[1]}, was $${two.toFixed(2)} (value ${one + two})`,
+    ]);
+  });
+
   it("asks the user in a thread of its own when a turn needs a decision and mentioned nobody", async () => {
     const { board } = await Board.init(dir, { name: "asks" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -1009,6 +1263,36 @@ describe("turns on a runner over the runner protocol", () => {
     expect(failed.map((event) => event.payload)).toEqual([
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
+    ]);
+  });
+
+  it("records a turn the model service turned away as transient, and only a failed one", async () => {
+    const { board } = await Board.init(dir, { name: "refused" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const post = { ...deskPost, agent: "concierge-1" };
+    const words = "API Error: Repeated 529 Overloaded errors.";
+    const plan: TurnResult[] = [
+      { ...completed("refused"), status: null, exitReason: "error", error: words, transient: true },
+      // A CLI that says so of a turn that completed is not believed.
+      { ...completed("ran"), transient: true },
+    ];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.resolve(plan.shift() ?? completed("ran")),
+    };
+    const { run } = await start(board, backend);
+    const refused = await run(post);
+    expect(refused).toMatchObject({ exitReason: "error", error: words, transient: true });
+    const ran = await run(post);
+    expect(ran.exitReason).toBe("completed");
+    expect(ran.transient).toBeUndefined();
+    const ended = (await board.readEvents(null, 1_000)).filter((event) =>
+      ["turn.failed", "turn.completed"].includes(event.type),
+    );
+    expect(ended.map((event) => [event.type, event.payload["transient"] ?? null])).toEqual([
+      ["turn.failed", true],
+      ["turn.completed", null],
     ]);
   });
 
@@ -2181,14 +2465,14 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "researcher",
       cli: "claude",
       memberships: ["lab"],
     });
-    const core = path.join(board.paths.agent("sage"), "memory", "core.md");
+    const core = path.join(board.paths.agent("eng-1"), "memory", "core.md");
     await writeFile(core, "# Core memory\n\n- one\n- two\n- three\n- four\n- five\n", "utf8");
-    await commitHome(board, "sage", "an earlier turn wrote the core");
+    await commitHome(board, "eng-1", "an earlier turn wrote the core");
     let arrived = 0;
     const { promise: both, resolve: together } = Promise.withResolvers<void>();
     const backendOn = ([line, changed]: [string, string]): AgentBackend => ({
@@ -2215,13 +2499,13 @@ describe("turns on a runner over the runner protocol", () => {
       extraRunners: [{ name: "b", backends: () => ({ claude: backendOn(edits.b) }) }],
     });
     // Its work outside projects runs on a, and the lab lives on b.
-    await board.setAgentRunner(USER, "sage", "a");
+    await board.setAgentRunner(USER, "eng-1", "a");
     await board.placeProject("lab", "b");
     const { run } = society;
     const [home, lab] = await Promise.all(
       (["society", "lab"] as const).map((project) =>
         run({
-          agent: "sage",
+          agent: "eng-1",
           project,
           trigger: { kind: "manual", fromUser: true, reason: "test" },
           priority: 1,
@@ -2240,10 +2524,12 @@ describe("turns on a runner over the runner protocol", () => {
     const merged = await readFile(core, "utf8");
     expect(merged).toContain("- one, from the society's work");
     expect(merged).toContain("- five, from the lab");
-    expect(await board.listHomeConflicts("sage")).toEqual([]);
-    const authors = await execa("git", ["log", "--format=%an"], { cwd: board.paths.agent("sage") });
+    expect(await board.listHomeConflicts("eng-1")).toEqual([]);
+    const authors = await execa("git", ["log", "--format=%an"], {
+      cwd: board.paths.agent("eng-1"),
+    });
     expect(
-      authors.stdout.split("\n").filter((name) => name === "sage").length,
+      authors.stdout.split("\n").filter((name) => name === "eng-1").length,
     ).toBeGreaterThanOrEqual(2);
   });
 
@@ -2257,21 +2543,21 @@ describe("turns on a runner over the runner protocol", () => {
       prompts,
     );
     const kept = await readFile(core, "utf8");
-    const [conflict, ...more] = await board.listHomeConflicts("sage");
+    const [conflict, ...more] = await board.listHomeConflicts("eng-1");
     expect(more).toEqual([]);
     expect(conflict?.path).toMatch(/^memory\/core\.md\.conflict-[0-9A-HJKMNP-TV-Z]{8}$/);
     expect(conflict?.file).toBe("memory/core.md");
     // The copy's age is the commit that brought it, made moments ago on a runner.
     expect(Date.now() - Date.parse(conflict?.since ?? "")).toBeLessThan(60_000);
     const other = await readFile(
-      path.join(board.paths.agent("sage"), conflict?.path ?? ""),
+      path.join(board.paths.agent("eng-1"), conflict?.path ?? ""),
       "utf8",
     );
     // One version is in place and the other beside it; neither is lost.
     expect([kept, other].join("\n")).toContain("- three, as the society's work saw it");
     expect([kept, other].join("\n")).toContain("- three, as the lab saw it");
     // The history shows both turns' edits and the merge that kept the copy, with that alone.
-    const { changes } = await board.homeHistory("sage", 30);
+    const { changes } = await board.homeHistory("eng-1", 30);
     const turns = changes.filter((change) => change.turnId !== undefined);
     expect(turns.map((change) => change.kind)).toEqual(["turn", "turn"]);
     expect(
@@ -2281,7 +2567,7 @@ describe("turns on a runner over the runner protocol", () => {
       changes.filter((change) => change.kind === "merge").map((change) => change.files),
     ).toEqual([[{ path: conflict?.path, status: "added", added: 7, removed: 0 }]]);
     await run({
-      agent: "sage",
+      agent: "eng-1",
       project: "society",
       trigger: { kind: "manual", fromUser: true, reason: "test" },
       priority: 1,
@@ -2494,12 +2780,12 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
     });
-    const SAGE = { name: "sage", role: "engineer" };
+    const ENG = { name: "eng-1", role: "engineer" };
     const refused: string[] = [];
     const backend: AgentBackend = {
       kind: "claude",
@@ -2510,7 +2796,7 @@ describe("turns on a runner over the runner protocol", () => {
         await execa("git", ["add", "notes.md"], { cwd });
         await execa(
           "git",
-          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "notes"],
           {
             cwd,
           },
@@ -2532,7 +2818,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { run, runner, hub } = await start(board, backend);
     const turnOn = (taskId: string) =>
       run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: taskId, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2548,8 +2834,8 @@ describe("turns on a runner over the runner protocol", () => {
     const repo = runner.paths.repo("demo");
     const log = async (ref: string) =>
       (await execa("git", ["log", "--oneline", ref], { cwd: repo })).stdout;
-    await board.claimTask(SAGE, { task_id: second.id });
-    expect(await board.advanceTask(SAGE, { task_id: second.id })).toMatchObject({
+    await board.claimTask(ENG, { task_id: second.id });
+    expect(await board.advanceTask(ENG, { task_id: second.id })).toMatchObject({
       completing: true,
     });
     expect(await hub.completeTask("demo", second.id)).toBe("done");
@@ -2570,7 +2856,7 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
@@ -2595,7 +2881,7 @@ describe("turns on a runner over the runner protocol", () => {
         await execa("git", ["add", "notes.md"], { cwd });
         await execa(
           "git",
-          ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "notes"],
+          ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "notes"],
           {
             cwd,
           },
@@ -2612,7 +2898,7 @@ describe("turns on a runner over the runner protocol", () => {
     const task = await board.createTask(USER, { project: "demo", title: "notes" });
     const turn = () =>
       run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: task.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2716,12 +3002,12 @@ describe("turns on a runner over the runner protocol", () => {
         wakeTriggers: ["heartbeat"],
       });
       await board.addAgent(USER, {
-        name: "sage",
+        name: "eng-1",
         role: "engineer",
         cli: "claude",
         memberships: ["demo"],
       });
-      const SAGE = { name: "sage", role: "engineer" };
+      const ENG = { name: "eng-1", role: "engineer" };
       // The agent opens its pull request from a branch named for what it does, as gh would show it.
       const opened: Array<{ number: number; branch: string; content: string }> = [];
       const backend: AgentBackend = {
@@ -2735,7 +3021,7 @@ describe("turns on a runner over the runner protocol", () => {
             await execa("git", ["add", "feature.md"], { cwd });
             await execa(
               "git",
-              ["-c", "user.name=sage", "-c", "user.email=sage@x", "commit", "-m", "feat: add"],
+              ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-m", "feat: add"],
               { cwd },
             );
             await execa("git", ["push", "origin", `HEAD:${next.branch}`], { cwd });
@@ -2759,7 +3045,7 @@ describe("turns on a runner over the runner protocol", () => {
         expect(
           (
             await run({
-              agent: "sage",
+              agent: "eng-1",
               project: "demo",
               thread: { id: taskId, task: true },
               trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2767,16 +3053,16 @@ describe("turns on a runner over the runner protocol", () => {
             })
           ).exitReason,
         ).toBe("completed");
-        await board.updateTask(SAGE, {
+        await board.updateTask(ENG, {
           task_id: taskId,
           pull_request: {
             url: `https://github.com/acme/demo/pull/${pull}`,
             merge_subject: "feat: add the readable feature",
-            merge_body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+            merge_body: "Adds it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
           },
         });
-        await board.claimTask(SAGE, { task_id: taskId });
-        await board.advanceTask(SAGE, { task_id: taskId });
+        await board.claimTask(ENG, { task_id: taskId });
+        await board.advanceTask(ENG, { task_id: taskId });
         return hub.completeTask("demo", taskId);
       };
 
@@ -2786,7 +3072,7 @@ describe("turns on a runner over the runner protocol", () => {
       expect(merges).toEqual([
         {
           subject: "feat: add the readable feature",
-          body: "Adds it.\n\nCo-Authored-By: sage <sage@x>",
+          body: "Adds it.\n\nCo-Authored-By: eng-1 <eng-1@x>",
         },
       ]);
       const landed = await rev("main");
@@ -2794,7 +3080,7 @@ describe("turns on a runner over the runner protocol", () => {
         (
           await execa("git", ["log", "-1", "--format=%B", landed], { cwd: origin })
         ).stdout.trimEnd(),
-      ).toBe("feat: add the readable feature\n\nAdds it.\n\nCo-Authored-By: sage <sage@x>");
+      ).toBe("feat: add the readable feature\n\nAdds it.\n\nCo-Authored-By: eng-1 <eng-1@x>");
       // The merged branch is gone, and the runner's clone follows the remote at once.
       expect(deleted).toEqual(["feat/readable-1"]);
       const clone = runner.paths.repo("demo");
@@ -2810,7 +3096,7 @@ describe("turns on a runner over the runner protocol", () => {
       const second = await board.createTask(USER, { project: "demo", title: "drifted" });
       opened.push({ number: 2, branch: "feat/drifted", content: "2\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: second.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2824,12 +3110,12 @@ describe("turns on a runner over the runner protocol", () => {
       );
       await execa("git", ["update-ref", "refs/pull/2/head", drifted], { cwd: origin });
       pulls.set(2, { branch: "feat/drifted", head: drifted, merged: null });
-      await board.updateTask(SAGE, {
+      await board.updateTask(ENG, {
         task_id: second.id,
         pull_request: { url: "https://github.com/acme/demo/pull/2" },
       });
-      await board.claimTask(SAGE, { task_id: second.id });
-      await board.advanceTask(SAGE, { task_id: second.id });
+      await board.claimTask(ENG, { task_id: second.id });
+      await board.advanceTask(ENG, { task_id: second.id });
       expect(await hub.completeTask("demo", second.id)).toBe("done");
       expect(await board.getTask(USER, { task_id: second.id })).toMatchObject({
         status: "open",
@@ -2845,7 +3131,7 @@ describe("turns on a runner over the runner protocol", () => {
       const third = await board.createTask(USER, { project: "demo", title: "merged by hand" });
       opened.push({ number: 3, branch: "feat/by-hand", content: "3\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: third.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2853,9 +3139,9 @@ describe("turns on a runner over the runner protocol", () => {
       });
       const byHand = "https://github.com/acme/demo/pull/3";
       await github.merge(byHand, pulls.get(3)?.head ?? "", { subject: "by hand", body: "" });
-      await board.updateTask(SAGE, { task_id: third.id, pull_request: { url: byHand } });
-      await board.claimTask(SAGE, { task_id: third.id });
-      await board.advanceTask(SAGE, { task_id: third.id });
+      await board.updateTask(ENG, { task_id: third.id, pull_request: { url: byHand } });
+      await board.claimTask(ENG, { task_id: third.id });
+      await board.advanceTask(ENG, { task_id: third.id });
       expect(await hub.completeTask("demo", third.id)).toBe("done");
       expect((await board.getTask(USER, { task_id: third.id })).status).toBe("done");
       expect((await board.listThread(third.id)).at(-1)?.body).toContain("was merged already");
@@ -2871,13 +3157,13 @@ describe("turns on a runner over the runner protocol", () => {
       const fourth = await board.createTask(USER, { project: "demo", title: "given up" });
       opened.push({ number: 4, branch: "feat/given-up", content: "4\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: fourth.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
         priority: 2,
       });
-      await board.updateTask(SAGE, {
+      await board.updateTask(ENG, {
         task_id: fourth.id,
         pull_request: { url: "https://github.com/acme/demo/pull/4" },
       });
@@ -2909,14 +3195,14 @@ describe("turns on a runner over the runner protocol", () => {
       const fifth = await board.createTask(USER, { project: "demo", title: "closed by hand" });
       opened.push({ number: 5, branch: "feat/by-hand-closed", content: "5\n" });
       await run({
-        agent: "sage",
+        agent: "eng-1",
         project: "demo",
         thread: { id: fifth.id, task: true },
         trigger: { kind: "manual", fromUser: true, reason: "test" },
         priority: 2,
       });
       const closedByHand = "https://github.com/acme/demo/pull/5";
-      await board.updateTask(SAGE, { task_id: fifth.id, pull_request: { url: closedByHand } });
+      await board.updateTask(ENG, { task_id: fifth.id, pull_request: { url: closedByHand } });
       await github.close(closedByHand, "by hand");
       await board.updateTask(USER, { task_id: fifth.id, status: "abandoned" });
       expect(await hub.closePullRequest("demo", fifth.id)).toBe("done");
@@ -2945,7 +3231,7 @@ describe("turns on a runner over the runner protocol", () => {
       wakeTriggers: ["heartbeat"],
     });
     await board.addAgent(USER, {
-      name: "sage",
+      name: "eng-1",
       role: "engineer",
       cli: "claude",
       memberships: ["demo"],
@@ -2969,7 +3255,7 @@ describe("turns on a runner over the runner protocol", () => {
     };
     const { app, run, runner, hub } = await start(board, backend);
     await run({
-      agent: "sage",
+      agent: "eng-1",
       project: "demo",
       thread: { id: task.id, task: true },
       trigger: { kind: "manual", fromUser: true, reason: "test" },
@@ -2985,14 +3271,14 @@ describe("turns on a runner over the runner protocol", () => {
     expect(Buffer.from(file.kind === "file" ? (file.content ?? "") : "", "base64").toString()).toBe(
       "# Report\n",
     );
-    expect(file.commit.author).toBe("sage");
+    expect(file.commit.author).toBe("eng-1");
     // The runner commits what the turn left as the citizen, author and committer alike.
     const tip = await execa(
       "git",
       ["log", "-1", "--format=%an <%ae> | %cn <%ce>", `task/${task.id}`],
       { cwd: repoDir },
     );
-    expect(tip.stdout).toBe("sage <sage@stellaris.local> | sage <sage@stellaris.local>");
+    expect(tip.stdout).toBe("eng-1 <eng-1@stellaris.local> | eng-1 <eng-1@stellaris.local>");
     const root = BranchFileSchema.parse(await (await read(`${task.id}/files`)).json());
     expect(root.kind === "dir" ? root.entries.map((entry) => entry.name) : null).toEqual([
       "evidence",
@@ -3004,21 +3290,21 @@ describe("turns on a runner over the runner protocol", () => {
 
     // The task's view lists what its branch changed, each file with the citizen whose turn wrote it.
     const changes = BranchChangesSchema.parse(await (await read(`${task.id}/changes`)).json());
-    expect(changes).toMatchObject({ total: 2, head: { author: "sage" } });
+    expect(changes).toMatchObject({ total: 2, head: { author: "eng-1" } });
     expect(changes.files).toEqual([
       {
         path: "evidence/plot.png",
         status: "added",
         added: null,
         removed: null,
-        lastChange: { author: "sage", at: changes.head.at },
+        lastChange: { author: "eng-1", at: changes.head.at },
       },
       {
         path: "report.md",
         status: "added",
         added: 1,
         removed: 0,
-        lastChange: { author: "sage", at: changes.head.at },
+        lastChange: { author: "eng-1", at: changes.head.at },
       },
     ]);
     expect((await read(`${waiting.id}/changes`)).status).toBe(404);
@@ -3071,6 +3357,110 @@ describe("turns on a runner over the runner protocol", () => {
     await runner.stop();
     await vi.waitFor(() => expect(hub.connected).toEqual([]));
     const away = await read(`${task.id}/files/report.md`);
+    expect(away.status).toBe(503);
+    expect(await away.json()).toMatchObject({ error: "RUNNER_AWAY" });
+  });
+
+  it("reads a project's default branch on the project's runner, not its tasks' work", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "project-files" });
+    for (const slug of ["demo", "idle"]) {
+      await board.addProject(USER, { slug });
+    }
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const task = await board.createTask(USER, { project: "demo", title: "guide" });
+    let repoDir = "";
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        repoDir = request.spec.repoDir;
+        await mkdir(path.join(request.spec.cwd, "docs"), { recursive: true });
+        await writeFile(path.join(request.spec.cwd, "docs", "guide.md"), "# Guide\n");
+        await writeFile(path.join(request.spec.cwd, "README.md"), "# Demo\n");
+        return completed("wrote the guide");
+      },
+    };
+    const { app, run, runner, hub } = await start(board, backend);
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      thread: { id: task.id, task: true },
+      trigger: { kind: "manual", fromUser: true, reason: "test" },
+      priority: 2,
+    });
+    const read = (route: string) =>
+      app.request(`/api/projects/${route}`, { headers: { authorization: `Bearer ${userToken}` } });
+
+    // The default branch holds the clone's first commit alone; the task's work is on its own branch.
+    const listed = await read("demo/files");
+    expect(listed.status).toBe(200);
+    const empty = BranchFileSchema.parse(await listed.json());
+    expect(empty).toMatchObject({ kind: "dir", path: "", entries: [] });
+    const initial = await execa("git", ["rev-parse", "main"], { cwd: repoDir });
+    expect(empty.commit.id).toBe(initial.stdout);
+    expect((await read("demo/files/README.md")).status).toBe(404);
+
+    // Whatever branch the project names as its default is the one read.
+    await execa("git", ["branch", "site", `task/${task.id}`], { cwd: repoDir });
+    await board.configureProject(USER, { project: "demo", default_branch: "site" });
+    const root = BranchFileSchema.parse(await (await read("demo/files")).json());
+    expect(root.kind === "dir" ? root.entries : null).toEqual([
+      { name: "README.md", kind: "file", size: 7 },
+      { name: "docs", kind: "dir", size: null },
+    ]);
+    expect(root.commit.author).toBe("eng-1");
+    const guide = BranchFileSchema.parse(await (await read("demo/files/docs/guide.md")).json());
+    expect(guide).toMatchObject({ kind: "file", path: "docs/guide.md", size: 8 });
+    expect(
+      Buffer.from(guide.kind === "file" ? (guide.content ?? "") : "", "base64").toString(),
+    ).toBe("# Guide\n");
+    expect(BranchFileSchema.parse(await (await read("demo/files/docs")).json())).toMatchObject({
+      kind: "dir",
+      entries: [{ name: "guide.md", kind: "file", size: 8 }],
+    });
+
+    expect((await read("demo/files/draft.md")).status).toBe(404);
+    expect((await read("demo/files/docs%2F..%2FREADME.md")).status).toBe(400);
+    expect((await read("nothing/files")).status).toBe(404);
+    expect((await read("..%2Fdemo/files")).status).toBe(400);
+    // A project no turn has run in has no repository on any runner yet.
+    expect((await read("idle/files")).status).toBe(404);
+
+    // A runner from before file reads is refused at once rather than left to time out.
+    await hub.register("pod", {
+      protocol: RUNNER_PROTOCOL,
+      version: "0.3.1",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: false,
+      branchChanges: false,
+      quotaReads: false,
+      imageReads: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    const old = await read("demo/files");
+    expect(old.status).toBe(409);
+    expect(await old.json()).toMatchObject({ message: expect.stringContaining("upgrade it") });
+
+    await runner.stop();
+    await vi.waitFor(() => expect(hub.connected).toEqual([]));
+    const away = await read("demo/files/README.md");
     expect(away.status).toBe(503);
     expect(await away.json()).toMatchObject({ error: "RUNNER_AWAY" });
   });

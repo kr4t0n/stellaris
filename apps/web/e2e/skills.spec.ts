@@ -112,9 +112,8 @@ test("a society skill is removed from its page with a reason, and the society li
   await form.getByRole("button", { name: "Cancel" }).click();
   await expect(form).toHaveCount(0);
 
-  // The first click asks for a reason and says what removing does; only the second removes.
+  // The first click asks for a reason; only the second removes.
   await view.getByRole("button", { name: "Remove…" }).click();
-  await expect(form).toContainText("No citizen's skills index lists uv-setup");
   await expect(view.getByRole("button", { name: "Remove…" })).toHaveCount(0);
   const confirm = form.getByRole("button", { name: "Remove skill" });
   await expect(confirm).toBeDisabled();
@@ -125,7 +124,7 @@ test("a society skill is removed from its page with a reason, and the society li
 
   await expect(page).toHaveURL(/\/society$/);
   await expect(view.getByRole("link", { name: /^uv-setup/ })).toHaveCount(0);
-  await expect(view).toContainText("None yet. A citizen's skill joins the society by proposal.");
+  await expect(view).toContainText("None yet.");
   expect(board.writes).toEqual([
     {
       path: "/api/verbs/remove_skill",

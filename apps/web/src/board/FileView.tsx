@@ -1,9 +1,9 @@
 import { BRANCH_FILE_LIMIT_BYTES, type BranchFile } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef, type ReactElement } from "react";
 import { BackLink } from "../components/BackLink.js";
+import { FileLink, FolderList, useFileUrl } from "../components/BranchFile.js";
 import { Markdown } from "../components/Markdown.js";
-import { TaskFileLink, useFileUrl } from "../components/TaskFile.js";
 import { ApiError } from "../lib/api.js";
 import {
   bytesOf,
@@ -11,11 +11,13 @@ import {
   imageType,
   normalizePath,
   parentOf,
+  runnerOf,
   sizeLabel,
   viewOf,
+  type FileSource,
 } from "../lib/files.js";
 import { ago } from "../lib/format.js";
-import { useNow, useProjects, useTask, useTaskFile } from "../lib/session.js";
+import { useBranchFile, useNow, useProjects, useTask } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
 const BACK =
@@ -28,7 +30,7 @@ const TABLE_ROWS = 1000;
 const NUMBERED_LINES = 20_000;
 
 /** Where the path sits: the branch's root, then each folder, each a link but the last. */
-function Trail({ taskId, path }: { taskId: string; path: string }) {
+function Trail({ source, path }: { source: FileSource; path: string }) {
   const segments = path === "" ? [] : path.split("/");
   const crumb = "text-fg-tertiary hover:text-fg-primary";
   return (
@@ -36,9 +38,9 @@ function Trail({ taskId, path }: { taskId: string; path: string }) {
       {segments.length === 0 ? (
         <span>Files</span>
       ) : (
-        <TaskFileLink taskId={taskId} path="" className={crumb}>
+        <FileLink source={source} path="" className={crumb}>
           Files
-        </TaskFileLink>
+        </FileLink>
       )}
       {segments.map((segment, at) => (
         <Fragment key={segments.slice(0, at + 1).join("/")}>
@@ -46,39 +48,13 @@ function Trail({ taskId, path }: { taskId: string; path: string }) {
           {at === segments.length - 1 ? (
             <span className="text-fg-secondary">{segment}</span>
           ) : (
-            <TaskFileLink
-              taskId={taskId}
-              path={segments.slice(0, at + 1).join("/")}
-              className={crumb}
-            >
+            <FileLink source={source} path={segments.slice(0, at + 1).join("/")} className={crumb}>
               {segment}
-            </TaskFileLink>
+            </FileLink>
           )}
         </Fragment>
       ))}
     </nav>
-  );
-}
-
-function Folder({ taskId, file }: { taskId: string; file: Extract<BranchFile, { kind: "dir" }> }) {
-  const entries = file.entries.toSorted((a, b) =>
-    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1,
-  );
-  return (
-    <ul className="mt-3 space-y-1">
-      {entries.map((entry) => (
-        <li key={entry.name} className="flex items-baseline gap-2">
-          <TaskFileLink
-            taskId={taskId}
-            path={file.path === "" ? entry.name : `${file.path}/${entry.name}`}
-            className="text-sm text-fg-secondary hover:text-fg-primary"
-          >
-            {entry.kind === "dir" ? `${entry.name}/` : entry.name}
-          </TaskFileLink>
-          {entry.size === null ? null : <span className="text-meta">{sizeLabel(entry.size)}</span>}
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -115,7 +91,7 @@ function Table({ rows }: { rows: string[][] }) {
       </table>
       {body.length > shown.length ? (
         <p className="mt-2 text-meta">
-          The first {TABLE_ROWS} of {body.length} rows; download the file for the rest.
+          The first {TABLE_ROWS} of {body.length} rows
         </p>
       ) : null}
     </div>
@@ -148,12 +124,12 @@ function TextLines({ text, line }: { text: string; line: number | undefined }) {
 }
 
 function Content({
-  taskId,
+  source,
   file,
   url,
   line,
 }: {
-  taskId: string;
+  source: FileSource;
   file: Extract<BranchFile, { kind: "file" }>;
   url: string | null;
   line: number | undefined;
@@ -167,14 +143,14 @@ function Content({
     return (
       <p className="mt-3 text-sm text-fg-secondary">
         {name} is {sizeLabel(file.size)}, more than the {sizeLabel(BRANCH_FILE_LIMIT_BYTES)} the
-        board shows. Its runner still has it on the task's branch.
+        board shows.
       </p>
     );
   }
   if (view.kind === "markdown") {
     return (
       <div className="mt-3">
-        <Markdown text={view.text} base={{ taskId, dir: parentOf(file.path) }} line={line} />
+        <Markdown text={view.text} base={{ source, dir: parentOf(file.path) }} line={line} />
       </div>
     );
   }
@@ -191,29 +167,44 @@ function Content({
   }
   return (
     <p className="mt-3 text-sm text-fg-secondary">
-      {name} is not text ({sizeLabel(file.size)}). Download it to open it.
+      {name} is not text ({sizeLabel(file.size)}).
     </p>
   );
 }
 
-/** A file or a folder on a task's branch, as the branch's newest commit has it, at a cited line. */
-export function TaskFileView() {
-  const { taskId, _splat } = useParams({ from: "/task/$taskId/files/$" });
-  const search = useSearch({ from: "/task/$taskId/files/$" });
+/** The cited line a file view's address names, after its path or as `?line=`. */
+function useCited(splat: string | undefined, search: { line?: number }) {
   // An address made before cited lines were split off still names the line after the path.
-  const cited = citedLine(normalizePath(_splat ?? "") ?? "");
-  const path = cited.path;
-  const line = search.line ?? cited.line;
-  const task = useTask(taskId);
-  const projects = useProjects();
-  const file = useTaskFile(taskId, path);
+  const cited = citedLine(normalizePath(splat ?? "") ?? "");
+  return { path: cited.path, line: search.line ?? cited.line };
+}
+
+/** What a view of a branch's files says about where it reads, which differs by source. */
+interface Place {
+  readonly source: FileSource;
+  readonly path: string;
+  readonly line: number | undefined;
+  /** The subtitle before the commit: the task's title, or the project's name and branch. */
+  readonly where: string;
+  /** The arrow back when the tab came from nowhere on the board. */
+  readonly parent: ReactElement;
+  /** What a 404 for the path says. */
+  readonly missing: string;
+  /** What a 503 says, its runner being away. */
+  readonly away: string;
+  /** Whose runner the read waits on, as in "Reading report.md from the task's runner…". */
+  readonly readFrom: string;
+}
+
+/** A file or a folder on a branch, as the branch's newest commit has it, at a cited line. */
+function BranchFileView({ source, path, line, where, parent, missing, away, readFrom }: Place) {
+  const file = useBranchFile(source, path);
   const now = useNow(30_000);
   const data = file.data;
   const content = data?.kind === "file" ? data.content : null;
   // One address serves both the image and the download.
   const url = useFileUrl(content, imageType(path) ?? "application/octet-stream");
   const name = path === "" ? "Files" : (path.split("/").at(-1) ?? path);
-  const title = task.data?.title ?? taskId;
   const scroller = useRef<HTMLDivElement>(null);
   // Once the file is shown, bring the cited line into view.
   useEffect(() => {
@@ -226,54 +217,33 @@ export function TaskFileView() {
   if (data !== undefined) {
     body =
       data.kind === "dir" ? (
-        <Folder taskId={taskId} file={data} />
+        <FolderList source={source} file={data} className="mt-3 space-y-1" />
       ) : (
-        <Content taskId={taskId} file={data} url={url} line={line} />
+        <Content source={source} file={data} url={url} line={line} />
       );
   } else if (file.error instanceof ApiError && file.error.status === 404) {
-    body = (
-      <p className="mt-3 text-sm text-fg-secondary">
-        {path === "" ? "Nothing" : path} is not on task/{taskId} yet. What a turn writes reaches the
-        branch when the turn ends.
-      </p>
-    );
+    body = <p className="mt-3 text-sm text-fg-secondary">{missing}</p>;
   } else if (file.error instanceof ApiError && file.error.status === 503) {
-    const project = projects.data?.find((each) => each.slug === task.data?.project);
-    body = (
-      <p className="mt-3 text-sm text-fg-secondary">
-        {project?.runner === undefined ? "The runner" : `${project.runner}, the runner`}{" "}
-        {project?.name ?? "the project"} lives on, is not connected, so the task's files cannot be
-        read now.
-      </p>
-    );
+    body = <p className="mt-3 text-sm text-fg-secondary">{away}</p>;
   } else if (file.error !== null) {
     body = <p className="mt-3 text-sm text-fg-secondary">{file.error.message}</p>;
   } else {
-    body = <PaneNote>Reading {name} from the task's runner…</PaneNote>;
+    body = (
+      <PaneNote>
+        Reading {name} from {readFrom}…
+      </PaneNote>
+    );
   }
 
   return (
     <>
       <PaneHeader
-        leading={
-          <BackLink
-            fallback={
-              <Link
-                to="/task/$taskId"
-                params={{ taskId }}
-                aria-label={`Back to the task ${title}`}
-                className={BACK}
-              >
-                ←
-              </Link>
-            }
-          />
-        }
+        leading={<BackLink fallback={parent} />}
         title={name}
         subtitle={
           data === undefined
-            ? title
-            : `${title}${line === undefined ? "" : ` · line ${line}`} · committed by ${data.commit.author} ${ago(data.commit.at, now)} · ${data.commit.id.slice(0, 7)}`
+            ? where
+            : `${where}${line === undefined ? "" : ` · line ${line}`} · committed by ${data.commit.author} ${ago(data.commit.at, now)} · ${data.commit.id.slice(0, 7)}`
         }
         trailing={
           url === null ? null : (
@@ -284,9 +254,78 @@ export function TaskFileView() {
         }
       />
       <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-4">
-        <Trail taskId={taskId} path={path} />
+        <Trail source={source} path={path} />
         {body}
       </div>
     </>
+  );
+}
+
+/** A file or a folder on a task's branch. */
+export function TaskFileView() {
+  const { taskId, _splat } = useParams({ from: "/task/$taskId/files/$" });
+  const { path, line } = useCited(_splat, useSearch({ from: "/task/$taskId/files/$" }));
+  const task = useTask(taskId);
+  const projects = useProjects();
+  const title = task.data?.title ?? taskId;
+  const project = projects.data?.find((each) => each.slug === task.data?.project);
+  return (
+    <BranchFileView
+      source={{ kind: "task", taskId }}
+      path={path}
+      line={line}
+      where={title}
+      parent={
+        <Link
+          to="/task/$taskId"
+          params={{ taskId }}
+          aria-label={`Back to the task ${title}`}
+          className={BACK}
+        >
+          ←
+        </Link>
+      }
+      missing={`${path === "" ? "Nothing" : path} is not on task/${taskId} yet.`}
+      away={`${runnerOf(project)}, is not connected, so the task's files cannot be read now.`}
+      readFrom="the task's runner"
+    />
+  );
+}
+
+/** A file or a folder on a project's default branch. */
+export function ProjectFileView() {
+  const { slug, _splat } = useParams({ from: "/p/$slug/files/$" });
+  const { path, line } = useCited(_splat, useSearch({ from: "/p/$slug/files/$" }));
+  const projects = useProjects();
+  const project = projects.data?.find((each) => each.slug === slug);
+  const name = project?.name ?? slug;
+  const branch = project?.defaultBranch;
+  if (projects.data !== undefined && project === undefined) {
+    return <PaneNote>There is no project {slug}.</PaneNote>;
+  }
+  return (
+    <BranchFileView
+      source={{ kind: "project", slug }}
+      path={path}
+      line={line}
+      where={branch === undefined ? name : `${name} · ${branch}`}
+      parent={
+        <Link
+          to="/p/$slug"
+          params={{ slug }}
+          aria-label={`Back to the project ${name}`}
+          className={BACK}
+        >
+          ←
+        </Link>
+      }
+      missing={
+        path === ""
+          ? `Nothing on ${branch ?? "the default branch"} yet.`
+          : `${path} is not on ${branch ?? "the default branch"}.`
+      }
+      away={`${runnerOf(project)}, is not connected, so the project's files cannot be read now.`}
+      readFrom="the project's runner"
+    />
   );
 }

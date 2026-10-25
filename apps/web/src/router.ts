@@ -14,6 +14,12 @@ function messageSearch(search: Record<string, unknown>): { message?: string } {
   return message.success ? { message: message.data } : {};
 }
 
+/** A file view's `line` search: the line a link cited, which the view marks. */
+function lineSearch(search: Record<string, unknown>): { line?: number } {
+  const line = Number(search["line"]);
+  return Number.isInteger(line) && line > 0 ? { line } : {};
+}
+
 /** The sky alone: nothing opens in the content island. */
 function SkyOnly() {
   return null;
@@ -72,11 +78,15 @@ const routeTree = rootRoute.addChildren([
     getParentRoute: () => rootRoute,
     // A file or folder on the task's branch, by its path there; `line` is the line a link cited.
     path: "/task/$taskId/files/$",
-    validateSearch: (search: Record<string, unknown>): { line?: number } => {
-      const line = Number(search["line"]);
-      return Number.isInteger(line) && line > 0 ? { line } : {};
-    },
-    component: lazyRouteComponent(() => import("./board/TaskFileView.js"), "TaskFileView"),
+    validateSearch: lineSearch,
+    component: lazyRouteComponent(() => import("./board/FileView.js"), "TaskFileView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    // A file or folder on the project's default branch, as a task's files are addressed.
+    path: "/p/$slug/files/$",
+    validateSearch: lineSearch,
+    component: lazyRouteComponent(() => import("./board/FileView.js"), "ProjectFileView"),
   }),
   createRoute({
     getParentRoute: () => rootRoute,

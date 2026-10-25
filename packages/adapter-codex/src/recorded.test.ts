@@ -10,6 +10,11 @@ import { CodexBackend } from "./backend.js";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
+/** Where the recorded turn starts: an update before it is about the thread's earlier turns. */
+function turnStart(lines: readonly string[]): number {
+  return lines.findIndex((each) => each.includes('"method":"turn/started"'));
+}
+
 function isResponse(line: string): boolean {
   return /^\{"id":\d+,"result"/.test(line);
 }
@@ -19,8 +24,14 @@ function isResponse(line: string): boolean {
  * id, followed by the notifications recorded after it. The client numbers its requests the same
  * way on every run, so the ids line up.
  */
-async function replay(fixture: string): Promise<{ spawn: SpawnAppServer; methods: string[] }> {
-  const lines = (await readFile(path.join(fixtures, fixture), "utf8")).trim().split("\n");
+async function replay(
+  fixture: string,
+  keep: (line: string, index: number, lines: readonly string[]) => boolean = () => true,
+): Promise<{ spawn: SpawnAppServer; methods: string[] }> {
+  const lines = (await readFile(path.join(fixtures, fixture), "utf8"))
+    .trim()
+    .split("\n")
+    .filter(keep);
   const methods: string[] = [];
   const spawn: SpawnAppServer = () => {
     const stdin = new PassThrough();
@@ -116,6 +127,26 @@ describe("recorded Codex app-server turns", () => {
     });
   });
 
+  it("replays a resumed turn whose thread's totals never came, counting the same", async () => {
+    // Without the update the server sends right after `thread/resume` about the thread's last turn,
+    // as a live 0.158.0 once sent none, the turn's own first update says where the thread stood.
+    const { spawn } = await replay(
+      "app-server-resume-recorded.jsonl",
+      (line, index, lines) =>
+        !(line.includes('"method":"thread/tokenUsage/updated"') && index < turnStart(lines)),
+    );
+    const result = await new CodexBackend({ spawn }).runTurn(
+      request({ session: "01a0edff-8584-7ee1-91f8-6e8d4549a794", newSession: false }),
+    );
+    expect(result.exitReason).toBe("completed");
+    expect(result.usage).toEqual({
+      inputTokens: 252,
+      outputTokens: 85,
+      cacheReadTokens: 18_304,
+      cacheWriteTokens: 0,
+    });
+  });
+
   /**
    * A turn recorded from `codex app-server` 0.156 on 2026-10-07: it ran a 30-second command, the
    * user's post arrived meanwhile as `turn/steer`, and it came back as a user message carrying the
@@ -154,6 +185,37 @@ describe("recorded Codex app-server turns", () => {
     expect(steps.slice(steered)).toContain("tool_call:mcp__board__post_message");
     expect(result.finalText).toContain("PINEAPPLE");
     // Five requests, where the last alone holds 30,630 input tokens.
+    expect(result.usage).toEqual({
+      inputTokens: 5_313,
+      outputTokens: 307,
+      cacheReadTokens: 146_048,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts a request whose only item is a command still running when its update comes", async () => {
+    // The same turn resumed with no totals before it, and without its opening message, so the
+    // first request answers with a command alone: it starts, the request's update follows, and it
+    // completes requests later.
+    const { spawn } = await replay("app-server-steered-recorded.jsonl", (line, index, lines) => {
+      if (line.includes('"method":"thread/tokenUsage/updated"') && index < turnStart(lines)) {
+        return false;
+      }
+      return !line.includes("msg_0b5fa85dcceaa350016ac65406efbc87d0b522610d734f7034");
+    });
+    const control = new TurnControl();
+    const running = new CodexBackend({ spawn }).runTurn(
+      request({ session: "01a116b8-0838-7542-905b-d37618ba329e", newSession: false }),
+      undefined,
+      control,
+    );
+    await vi.waitFor(async () =>
+      expect(await control.steer({ id: "ca202c2d-eb92-4f42-8eb3-78bd25d482bb", text: "" })).toBe(
+        true,
+      ),
+    );
+    const result = await running;
+    expect(result.exitReason).toBe("completed");
     expect(result.usage).toEqual({
       inputTokens: 5_313,
       outputTokens: 307,

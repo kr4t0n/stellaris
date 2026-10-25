@@ -27,7 +27,6 @@ import { TaskFiles } from "./TaskFiles.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 import {
   assigneeOf,
-  inPlay,
   isCurrent,
   PHASE_STYLE,
   PHASES,
@@ -103,18 +102,6 @@ function StageItem({
   );
 }
 
-/** What finishing a task's last stage sets off, said where the user approves it. */
-function landingOf(task: Task): string {
-  if (task.onDone === "ghpr") {
-    return task.pullRequest === undefined
-      ? "It lands through a pull request, and none is linked yet, so the board refuses to finish it."
-      : `Approving lands it: the board merges pull request #${task.pullRequest.number} on GitHub.`;
-  }
-  return task.onDone === "merge"
-    ? `Approving lands it: the board merges task/${task.id}.`
-    : "Approving finishes the task.";
-}
-
 /**
  * Finishes the stage that names the user, as the user, with an optional note for the task's
  * thread; on a task's last stage that is the approval its landing waits for.
@@ -124,7 +111,11 @@ function ApproveStage({ task, stage }: { task: Task; stage: Stage }) {
   const client = useQueryClient();
   const [note, setNote] = useState("");
   const index = task.stages.findIndex((each) => each.id === stage.id);
-  const next = task.stages[index + 1];
+  // The board refuses to finish a ghpr task's last stage while no pull request is linked.
+  const unlinked =
+    task.stages[index + 1] === undefined &&
+    task.onDone === "ghpr" &&
+    task.pullRequest === undefined;
   const approve = useMutation({
     mutationFn: () =>
       api.advanceTask({
@@ -147,8 +138,7 @@ function ApproveStage({ task, stage }: { task: Task; stage: Stage }) {
       }}
     >
       <p className="text-sm text-fg-secondary">
-        {stage.name} waits on you.{" "}
-        {next === undefined ? landingOf(task) : `Approving moves the task on to ${next.name}.`}
+        {stage.name} waits on you.{unlinked ? " No pull request linked yet." : ""}
       </p>
       <textarea
         value={note}
@@ -214,30 +204,6 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
         </>
       )}
     </section>
-  );
-}
-
-/** Opens a thread for a task from before tasks opened their own. */
-function OpenTaskThread({ taskId }: { taskId: string }) {
-  const { api } = useSession();
-  const client = useQueryClient();
-  const open = useMutation({
-    mutationFn: () => api.openThread({ task_id: taskId }),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ["threads"] });
-    },
-  });
-  return (
-    <div className="mt-2 flex items-center gap-3">
-      <Button variant="primary" disabled={open.isPending} onClick={() => open.mutate()}>
-        {open.isPending ? "Opening…" : "Open its thread"}
-      </Button>
-      <p className="text-meta">
-        {open.error === null
-          ? "This task is older than task threads. It closes when the task ends."
-          : open.error.message}
-      </p>
-    </div>
   );
 }
 
@@ -312,8 +278,7 @@ export function TaskView() {
         {current.returned === undefined ? null : (
           <p className="mt-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-200">
             Sent back from {stageName(current, current.returned.from)} by {current.returned.by}{" "}
-            {ago(current.returned.at, now)}. The work is redone from{" "}
-            {stageName(current, current.stage)} until it reaches that stage again.
+            {ago(current.returned.at, now)}.
           </p>
         )}
         <ol className="mt-3">
@@ -358,18 +323,9 @@ export function TaskView() {
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-section">Thread</h3>
           {threads.data === undefined ? null : thread === undefined ? (
-            inPlay(current) ? (
-              <OpenTaskThread taskId={current.id} />
-            ) : (
-              <p className="mt-2 text-meta">No thread on this task.</p>
-            )
+            <p className="mt-2 text-meta">No thread on this task.</p>
           ) : (
-            <SubjectThread
-              thread={thread}
-              now={now}
-              task={current}
-              empty="Nothing said yet. Each stage's handover lands here, and so does anything written below."
-            />
+            <SubjectThread thread={thread} now={now} task={current} empty="Nothing said yet." />
           )}
         </section>
       </StickyList>

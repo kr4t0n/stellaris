@@ -433,8 +433,7 @@ export function Playground() {
               )}
               {model.stars.length === 0 && !boardOpen ? (
                 <p className="pointer-events-none absolute inset-x-0 top-1/2 mt-24 text-center text-meta">
-                  No citizens yet. Ask the concierge for one, or add one with{" "}
-                  <code className="font-mono text-fg-secondary">stellaris agent add</code>.
+                  No citizens yet.
                 </p>
               ) : null}
               {/* The sky for keyboards and screen readers: focusing a citizen or a task shows its card, choosing it opens it. */}

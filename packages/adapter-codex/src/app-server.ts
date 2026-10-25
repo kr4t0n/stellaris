@@ -8,6 +8,7 @@ import {
   CLI_ENV,
   parseTurnStatus,
   ResumeError,
+  ZERO_USAGE,
   type AgentSpec,
   type ResidentSession,
   type ResidentStart,
@@ -118,6 +119,49 @@ const LOST_THREAD = /invalid session id|no rollout found|failed to read thread/;
 /** Why the app server could not resume a thread, from its words: nothing there to resume, or try again. */
 function resumeFailureOf(error: string): ResumeFailure {
   return LOST_THREAD.test(error) ? "lost" : "retry";
+}
+
+/**
+ * The `codexErrorInfo` codes 0.162.1 gives a failure on the model service's side, after its own
+ * retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity", and
+ * `usageLimitExceeded`, the plan's limit, is not among them.
+ */
+const TRANSIENT_ERRORS = new Set([
+  "serverOverloaded",
+  "internalServerError",
+  "rateLimitExceeded",
+  "flexUnavailable",
+]);
+
+/** The codes that carry the HTTP status the request failed with, if it got one. */
+const HTTP_FAILURES = [
+  "httpConnectionFailed",
+  "responseStreamConnectionFailed",
+  "responseStreamDisconnected",
+  "responseTooManyFailedAttempts",
+];
+
+/**
+ * Whether an app-server error says the model service turned the turn away for now: one of the
+ * codes above, or a request that failed with no answer, a 429, or a 5xx. Any other 4xx, a policy,
+ * the context window, or a sign-in is not worth sending again.
+ */
+export function isTransient(error: unknown): boolean {
+  const info = isDict(error) ? error["codexErrorInfo"] : undefined;
+  if (typeof info === "string") {
+    return TRANSIENT_ERRORS.has(info);
+  }
+  if (!isDict(info)) {
+    return false;
+  }
+  for (const kind of HTTP_FAILURES) {
+    const failure = info[kind];
+    if (isDict(failure)) {
+      const status = failure["httpStatusCode"];
+      return typeof status !== "number" || status === 429 || status >= 500;
+    }
+  }
+  return false;
 }
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -468,6 +512,16 @@ function threadTokensOf(raw: unknown): ThreadTokens {
   };
 }
 
+/** The totals less one request's, never below zero. */
+function lessTokens(total: ThreadTokens, request: ThreadTokens): ThreadTokens {
+  return {
+    input: Math.max(0, total.input - request.input),
+    cached: Math.max(0, total.cached - request.cached),
+    cacheWrite: Math.max(0, total.cacheWrite - request.cacheWrite),
+    output: Math.max(0, total.output - request.output),
+  };
+}
+
 /**
  * What a turn used, from the thread's totals before and after it. The board counts input outside
  * the cache apart from the input read from or written to it, as Claude Code does.
@@ -489,6 +543,8 @@ interface TurnCollector {
   finalText: string;
   /** The thread's totals before the turn's first request. */
   baseline: ThreadTokens;
+  /** Whether `baseline` is where the thread stood, or a zero that waits for the turn's first update. */
+  baselineKnown: boolean;
   status: string | null;
   error: string | undefined;
   readonly started: Set<string>;
@@ -499,7 +555,30 @@ interface TurnCollector {
   stopped: boolean;
   /** Whether Codex ended the turn for the plan's usage limit. */
   limited: boolean;
+  /** Whether Codex ended the turn on a failure the model service may not repeat in a minute. */
+  transient: boolean;
+  /**
+   * Whether the model answered at all: an item its answer made started or completed in this turn. A
+   * turn it never answered used no tokens, whatever the thread's totals say about the turns before it.
+   */
+  answered: boolean;
 }
+
+/**
+ * The items Codex or the user makes rather than the model's answer: the prompt and steers, a tool
+ * output a client starts a turn with, a hook's prompt, review mode, a compaction, which Codex starts
+ * before its own request, refused or not, and a sub-agent's activity, which reports a sub-agent's
+ * turn ending under the turn that started it, while a later turn may be running.
+ */
+const NOT_ANSWERS = new Set([
+  "userMessage",
+  "functionCallOutput",
+  "hookPrompt",
+  "enteredReviewMode",
+  "exitedReviewMode",
+  "contextCompaction",
+  "subAgentActivity",
+]);
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
 const STOP_GRACE_MS = 15_000;
@@ -512,6 +591,8 @@ export class CodexAppServerSession implements ResidentSession {
   private active: TurnCollector | null = null;
   /** The thread's totals as last reported, which a resumed thread reports before its first turn. */
   private threadTotal: ThreadTokens = NO_TOKENS;
+  /** Whether `threadTotal` is where the thread stands: a new thread's zero, or a total reported. */
+  private totalsKnown = false;
   private closed = false;
   private readonly stderrTail: string[] = [];
   private readonly recorded: string[] = [];
@@ -609,6 +690,7 @@ export class CodexAppServerSession implements ResidentSession {
    */
   private async openThread(): Promise<string> {
     if (this.start.newSession) {
+      this.totalsKnown = true;
       return this.threadIdOf(await this.client.request("thread/start", this.threadParams()));
     }
     let resumed: unknown;
@@ -687,6 +769,16 @@ export class CodexAppServerSession implements ResidentSession {
     if (!isDict(params)) {
       return;
     }
+    // The server sends every thread it runs to each connection, a sub-agent's too; its turns, items,
+    // totals, and failures are none of this thread's.
+    const thread = str(params["threadId"]);
+    if (
+      thread !== undefined &&
+      thread !== this.session &&
+      !this.session.startsWith(PENDING_THREAD_PREFIX)
+    ) {
+      return;
+    }
     // Rate limits come with the requests a turn makes, and between turns on a warm session.
     if (method === "account/rateLimits/updated") {
       // A report the adapter cannot read is dropped: it never stops the reader, or the turn.
@@ -704,14 +796,23 @@ export class CodexAppServerSession implements ResidentSession {
         return;
       }
       this.threadTotal = threadTokensOf(usage["total"]);
+      this.totalsKnown = true;
       // `last` is only the latest request. An update about another turn, such as the one a resumed
       // thread sends about its previous turn, says where the thread stood before this one.
       const owner = str(params["turnId"]);
-      if (
-        turn !== null &&
-        (turn.turnId === null || (owner !== undefined && owner !== turn.turnId))
-      ) {
+      if (turn === null) {
+        return;
+      }
+      if (turn.turnId === null || (owner !== undefined && owner !== turn.turnId)) {
         turn.baseline = this.threadTotal;
+        turn.baselineKnown = true;
+      } else if (!turn.baselineKnown) {
+        // A resumed thread whose totals never came: the turn's first update of its own says where
+        // the thread stood, less the request it reports if the model answered one, and as it is if not.
+        turn.baseline = turn.answered
+          ? lessTokens(this.threadTotal, threadTokensOf(usage["last"]))
+          : this.threadTotal;
+        turn.baselineKnown = true;
       }
       return;
     }
@@ -738,6 +839,13 @@ export class CodexAppServerSession implements ResidentSession {
             turn.emit({ type: "steered", steer });
           }
           return;
+        }
+        // A command can run past its request's update, or past the turn, so an answer counts as it
+        // starts; one left running by an earlier turn completes under that turn's id.
+        const owner = str(params["turnId"]);
+        const ours = owner === undefined || turn.turnId === null || owner === turn.turnId;
+        if (ours && !NOT_ANSWERS.has(String(item["type"]))) {
+          turn.answered = true;
         }
         if (item["type"] === "agentMessage") {
           const text = str(item["text"]) ?? "";
@@ -781,6 +889,7 @@ export class CodexAppServerSession implements ResidentSession {
         if (isDict(error)) {
           turn.error = str(error["message"]) ?? "turn failed";
           turn.limited ||= isUsageLimit(error);
+          turn.transient ||= isTransient(error);
         }
         turn.settle();
         return;
@@ -796,6 +905,7 @@ export class CodexAppServerSession implements ResidentSession {
         }
         turn.error = message;
         turn.limited ||= isUsageLimit(error);
+        turn.transient ||= isTransient(error);
         return;
       }
       default:
@@ -828,6 +938,7 @@ export class CodexAppServerSession implements ResidentSession {
       turnId: null,
       finalText: "",
       baseline: this.threadTotal,
+      baselineKnown: this.totalsKnown,
       status: null,
       error: undefined,
       started: new Set(),
@@ -836,6 +947,8 @@ export class CodexAppServerSession implements ResidentSession {
       outstanding: new Set(),
       stopped: false,
       limited: false,
+      transient: false,
+      answered: false,
     };
     this.active = turn;
     emit({
@@ -916,7 +1029,7 @@ export class CodexAppServerSession implements ResidentSession {
     if (turn.error !== undefined) {
       emit({ type: "error", message: turn.error });
     }
-    const usage = turnUsage(turn.baseline, this.threadTotal);
+    const usage = turn.answered ? turnUsage(turn.baseline, this.threadTotal) : ZERO_USAGE;
     emit({ type: "turn_completed", usage, costUsd: 0, status, exitReason });
     return {
       events,
@@ -929,6 +1042,7 @@ export class CodexAppServerSession implements ResidentSession {
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(quota === undefined ? {} : { quota }),
+      ...(turn.transient && !turn.limited && exitReason === "error" ? { transient: true } : {}),
     };
   }
 

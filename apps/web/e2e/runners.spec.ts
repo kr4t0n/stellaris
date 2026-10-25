@@ -229,7 +229,7 @@ test("the runners view shows each CLI login's plan quota, once for runners with 
     /^7d\s*12%\s*resets in 5d 23h$/,
     /^7d fable\s*9%\s*resets in 5d 23h$/,
   ]);
-  await expect(claude).toContainText("Same numbers on pod and laptop, so most likely one login.");
+  await expect(claude).toContainText("Same numbers on pod and laptop");
 
   const codex = rows.nth(1);
   await expect(codex).toContainText("pod");

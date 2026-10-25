@@ -76,7 +76,7 @@ function ChangeBody({ name, change }: { name: string; change: HomeChange }) {
     <div className="space-y-3 px-4 pt-1 pb-3">
       <p className="text-xs text-fg-secondary">
         {change.kind === "merge" ? (
-          "Two turns on different runners changed the same lines at once. The file kept one turn's version, and this copy holds the other's until the citizen reconciles them."
+          KIND_TITLE.merge
         ) : change.kind === "board" ? (
           `Written by the board: ${change.subject.replace(/^home: /, "")}.`
         ) : change.turnId === undefined ? (
@@ -149,17 +149,10 @@ export function CitizenHistory({ name }: { name: string }) {
   }
   const { changes, more } = history.data;
   if (changes.length === 0) {
-    return (
-      <PaneNote>
-        {name}'s home has no history yet; it starts with the citizen's first turn.
-      </PaneNote>
-    );
+    return <PaneNote>No history yet.</PaneNote>;
   }
   return (
     <div className="flex-1 overflow-y-auto">
-      <p className="px-4 pt-3 pb-1 text-meta">
-        What {name}'s turns changed in its memory, skills, and profile, newest first.
-      </p>
       <ol>
         {changes.map((change) => (
           <ChangeRow key={change.commit} name={name} change={change} now={now} />

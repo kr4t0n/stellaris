@@ -172,7 +172,7 @@ export function CitizenTurns({ name, opened }: { name: string; opened: string | 
       {opened !== null && !entries.some((entry) => entry.turnId === opened) ? (
         <p className="px-4 pb-1 text-meta">
           {history.data.length === limit
-            ? "The turn this address opens is further back; show earlier turns to reach it."
+            ? "The turn this address opens is further back."
             : "The turn this address opens is not in this citizen's history."}
         </p>
       ) : null}

@@ -196,7 +196,7 @@ function CronRow({
               <input
                 value={reason}
                 aria-label="Why it ends"
-                placeholder="Why it ends, which the cron keeps"
+                placeholder="Why it ends"
                 onChange={(event) => setReason(event.target.value)}
                 className={SMALL_FIELD}
               />
@@ -259,10 +259,6 @@ function TimezoneForm({ zone, onDone }: { zone: string; onDone: () => void }) {
           <Button onClick={() => setValue(browser)}>Use {browser}</Button>
         )}
       </div>
-      <p className="text-xs leading-relaxed text-fg-muted">
-        Crons that name no zone are read in it, so their times move with it, and every turn's prompt
-        tells the time in it.
-      </p>
       <div className="flex items-center justify-end gap-2">
         <Button onClick={onDone}>Cancel</Button>
         <Button
@@ -426,7 +422,7 @@ function NewCronForm({
         value={note}
         rows={3}
         aria-label="Note"
-        placeholder="What to do when it fires; the citizen reads this in every turn it starts."
+        placeholder="What to do when it fires"
         onChange={(event) => setNote(event.target.value)}
         className={SMALL_AREA}
       />
@@ -489,8 +485,7 @@ function NewCronForm({
             {preview.times.length === 1 ? "Fires " : "Fires next "}
             {preview.times.map((time) => clockIn(time, readIn)).join(", ")} ({readIn}).
           </>
-        )}{" "}
-        Each fire is a turn for {agent === "" ? "the citizen" : agent}, which costs money.
+        )}
       </p>
       <div className="flex items-center justify-end gap-2">
         <Button onClick={onDone}>Cancel</Button>
@@ -572,17 +567,11 @@ export function CronsView() {
           </Link>
         )}
         {crons.error !== null && crons.data === undefined ? (
-          <PaneNote>
-            The board server did not list its crons ({crons.error.message}); one older than this
-            interface has none.
-          </PaneNote>
+          <PaneNote>Could not read the crons: {crons.error.message}</PaneNote>
         ) : crons.data === undefined ? (
           <PaneNote>Reading the crons…</PaneNote>
         ) : groups.active.length + groups.paused.length + groups.ended.length === 0 ? (
-          <p className="px-2 py-2 text-meta">
-            No crons yet. A citizen sets one with create_cron when it needs to come back to
-            something later; you can set one for any citizen here.
-          </p>
+          <p className="px-2 py-2 text-meta">No crons yet.</p>
         ) : null}
         {groups.active.length === 0 ? null : (
           <ul aria-label="Running" className="space-y-0.5">

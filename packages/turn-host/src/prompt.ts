@@ -87,7 +87,8 @@ export interface TurnPromptInput {
   readonly ending?: Ending | null | undefined;
   /**
    * For roles that read operations signals, those logged for this scope since the reader's last
-   * turn here, oldest first; absent for everyone else.
+   * turn here, each condition's latest log with the spend reports summed into one, oldest first;
+   * absent for everyone else.
    */
   readonly signals?:
     | ReadonlyArray<{ readonly ts: string; readonly signal: OpsSignal }>
@@ -608,7 +609,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       lines.push("None since your last turn here.");
     } else {
       lines.push(
-        "Counters and timers the board logged since your last turn here, oldest first. A condition that persists is logged again every few hours; one that clears is not logged.",
+        "Counters and timers the board logged since your last turn here, each condition once at its latest log, oldest first, with the hourly spend reports summed into one line. A condition that persists is logged again every few hours; one that clears is not logged.",
         "",
       );
       for (const { ts, signal } of signals) {

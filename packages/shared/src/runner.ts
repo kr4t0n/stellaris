@@ -18,9 +18,9 @@ import { ImagePathSchema, ImageTypeSchema } from "./images.js";
 import { CliQuotaSchema } from "./quota.js";
 
 /**
- * The runner protocol of PLAN.md section 7.1. A runner registers, holds one event stream open for
- * what the server sends it, and posts everything it sends back; the server refuses a runner that
- * speaks another protocol version.
+ * The runner protocol of docs/plan.md section 7.1. A runner registers, holds one event stream open
+ * for what the server sends it, and posts everything it sends back; the server refuses a runner
+ * that speaks another protocol version.
  */
 export const RUNNER_PROTOCOL = 1;
 
@@ -285,6 +285,12 @@ export const TurnOutcomeSchema = z.object({
    * runner from before never sends it.
    */
   resumeFailed: ResumeFailureSchema.optional(),
+  /**
+   * Set when the model service turned the turn away for now, as when it was overloaded or failed
+   * on its side, which the scheduler answers by sending the same wake again within minutes. A
+   * runner from before never sends it.
+   */
+  transient: z.boolean().optional(),
   /** The model the CLI reported, when it reported one. */
   model: z.string().nullable(),
   work: TurnWorkSchema.nullable(),

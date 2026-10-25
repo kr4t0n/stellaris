@@ -43,12 +43,10 @@ export const VerbInputs = {
     channel: ChannelRefSchema.optional(),
     limit: z.number().int().positive().max(100).default(20),
   }),
-  /** On a task or a proposal, whose id the thread takes, or on a channel with a title. */
+  /** On a channel with a title; a task's and a proposal's open with them. */
   open_thread: z.object({
-    task_id: UlidSchema.optional(),
-    proposal_id: UlidSchema.optional(),
-    channel: ChannelRefSchema.optional(),
-    title: z.string().min(1).max(200).optional(),
+    channel: ChannelRefSchema,
+    title: z.string().min(1).max(200),
   }),
   close_thread: z.object({ thread_id: UlidSchema, summary: z.string().min(1) }),
   create_task: z.object({

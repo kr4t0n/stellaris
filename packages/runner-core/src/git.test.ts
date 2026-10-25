@@ -432,14 +432,14 @@ describe("ExecaGit", () => {
     await writeFile(path.join(worktree, "evidence", "plot.png"), png);
     await writeFile(path.join(worktree, "evidence", "nested", "raw.csv"), "a,b\n1,2\n");
     await writeFile(path.join(worktree, "big.bin"), Buffer.alloc(64));
-    const author = { name: "sage", email: "sage@stellaris.local" };
+    const author = { name: "eng-1", email: "eng-1@stellaris.local" };
     await git.handBack(worktree, null, author);
     // Left uncommitted after the hand-back, so not on the branch.
     await writeFile(path.join(worktree, "draft.md"), "not yet\n");
 
     const report = await git.readBranch(repoDir, branch, "report.md", 1024);
     expect(report).toMatchObject({ kind: "file", path: "report.md", size: text.length });
-    expect(report?.commit.author).toBe("sage");
+    expect(report?.commit.author).toBe("eng-1");
     expect(report?.commit.id).toBe(await git.head(repoDir, branch));
     const content = report?.kind === "file" ? (report.content ?? "") : "";
     expect(Buffer.from(content, "base64").toString()).toBe(text);
@@ -491,7 +491,7 @@ describe("ExecaGit", () => {
 
     await writeFile(path.join(worktree, "report.md"), "# Report\n\nfirst\n");
     await writeFile(path.join(worktree, "plot.png"), Buffer.from([0, 1, 2]));
-    await commit(worktree, "sage", "feat: report");
+    await commit(worktree, "eng-1", "feat: report");
     await writeFile(path.join(worktree, "report.md"), "# Report\n\nsecond\n");
     await writeFile(path.join(worktree, "README.md"), "demo, reviewed\n");
     await rm(path.join(worktree, "old.txt"));
@@ -517,7 +517,7 @@ describe("ExecaGit", () => {
     ).toEqual([
       ["README.md", "modified", 1, 1, "ref"],
       ["old.txt", "deleted", 0, 1, "ref"],
-      ["plot.png", "added", null, null, "sage"],
+      ["plot.png", "added", null, null, "eng-1"],
       ["report.md", "added", 3, 0, "ref"],
     ]);
     // A short list says how many files there were.

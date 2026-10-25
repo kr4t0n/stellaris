@@ -81,6 +81,9 @@ export function placeName(href: string, names: PlaceNames): string {
   }
   if (first === "p") {
     const project = names.project(second) ?? second;
+    if (third === "files") {
+      return parts.slice(3).map(decodeURIComponent).at(-1) ?? `the files of ${project}`;
+    }
     return third === "tasks" ? `the tasks of ${project}` : project;
   }
   if (first === "knowledge") {

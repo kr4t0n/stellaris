@@ -81,10 +81,6 @@ export function RunnerForm({ member, onDone }: { member: Member; onDone: () => v
           {save.isPending ? "Saving…" : "Run here"}
         </Button>
       </div>
-      <p className="text-meta">
-        Its conversations outside projects start afresh there from its next turn; its memory and
-        skills follow it. Project work runs where each project lives.
-      </p>
       <Failure error={save.error} />
     </form>
   );

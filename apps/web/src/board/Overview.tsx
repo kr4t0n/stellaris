@@ -90,12 +90,7 @@ export function TopicList({
     return <p className="text-meta">Reading…</p>;
   }
   if (topics.length === 0) {
-    return (
-      <p className="text-meta">
-        No knowledge yet. {scope === SOCIETY_SCOPE ? "The steward and you" : "Members"} write it
-        with write_knowledge.
-      </p>
-    );
+    return <p className="text-meta">No knowledge yet.</p>;
   }
   return (
     <ul className="-mx-2">

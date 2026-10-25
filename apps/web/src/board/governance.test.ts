@@ -32,8 +32,18 @@ function proposal(overrides: Partial<Proposal> & Pick<Proposal, "id" | "kind">):
 const skill = proposal({
   id: "01M3PY56V68VFS0EG5ER4B9AMD",
   kind: "skill",
-  charter: { name: "refereed-research", summary: "Plan research.", body: "# Refereed" },
+  charter: { name: "refereed-research", summary: "Plan research." },
 });
+
+/** A reallocation of a role, proposed by the concierge. */
+function reallocation(changes: Record<string, unknown>, role = "researcher"): Proposal {
+  return proposal({
+    id: skill.id,
+    kind: "reallocation",
+    proposedBy: "desk",
+    charter: { role, changes, description: "More hands." },
+  });
+}
 
 const researcher = RoleCharterSchema.parse({
   name: "researcher",
@@ -122,13 +132,6 @@ describe("governance", () => {
 
   it("leaves a reallocation of verbs or replicas to the user, and says what it changes", () => {
     const board = { members: [] as Member[], roles: [researcher], skills: [] };
-    const reallocation = (changes: Record<string, unknown>, role = "researcher") =>
-      proposal({
-        id: skill.id,
-        kind: "reallocation",
-        proposedBy: "desk",
-        charter: { role, changes, description: "More hands." },
-      });
     const tune = reallocation({ backlogThreshold: 5 });
     expect(decidersOf(tune, "concierge")).toBe("you or the steward");
     expect(proposalTitle(tune)).toBe(
@@ -152,13 +155,6 @@ describe("governance", () => {
     expect(consequenceOf(reallocation({ maxReplicas: 2 }, "nobody"), board)).toBe(
       "No role nobody exists; approving it will fail.",
     );
-    const legacy = proposal({
-      id: skill.id,
-      kind: "reallocation",
-      charter: { description: "Move rev-1 to api." },
-    });
-    expect(proposalTitle(legacy)).toBe("Reallocation: Move rev-1 to api.");
-    expect(consequenceOf(legacy, board)).toMatch(/applies nothing/);
   });
 
   it("shows what a role proposal adds and removes, defaults included", () => {
@@ -185,7 +181,7 @@ describe("governance", () => {
         ...board,
         skills: [{ name: "refereed-research", summary: "", scope: "society", path: "/x" }],
       }),
-    ).toBe("Replaces the society's refereed-research skill with this text.");
+    ).toBe("Replaces the society's refereed-research skill with these files.");
     const hire = proposal({
       id: skill.id,
       kind: "member",

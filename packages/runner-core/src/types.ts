@@ -78,6 +78,11 @@ export interface TurnResult {
   readonly quota?: CliQuota | undefined;
   /** Set when the CLI could not resume the requested session, which failed the turn before any model call. */
   readonly resumeFailed?: ResumeFailure | undefined;
+  /**
+   * Set when the model service turned the turn away for now, as when it was overloaded or failed
+   * on its side and the CLI's own retries ran out. A plan's usage limit is not transient.
+   */
+  readonly transient?: boolean | undefined;
 }
 
 /**

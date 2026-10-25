@@ -14,8 +14,8 @@ const BACK =
   "grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary";
 
 /**
- * One knowledge topic of a project or of the society, in full. Removing it takes a second click,
- * which says what removing does, and returns to the overview that listed it.
+ * One knowledge topic of a project or of the society, in full. Removing it takes a second click
+ * and returns to the overview that listed it.
  */
 export function KnowledgeView() {
   const { scope, topic } = useParams({ from: "/knowledge/$scope/$topic" });
@@ -73,11 +73,7 @@ export function KnowledgeView() {
           }}
         >
           <div className="flex items-center gap-2">
-            <p className="min-w-0 flex-1 text-meta">
-              No turn or search finds {entry.topic} again, and a note in{" "}
-              {society ? "#general" : `#${scope}/general`} says so without waking anyone. The server
-              keeps its text aside.
-            </p>
+            <p className="min-w-0 flex-1 truncate text-meta">Remove {entry.topic}?</p>
             <Button onClick={() => setConfirming(false)}>Cancel</Button>
             <Button variant="primary" type="submit" disabled={remove.isPending}>
               {remove.isPending ? "Removing…" : "Remove topic"}

@@ -4,7 +4,6 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Board } from "@stellaris/board-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -12,6 +11,19 @@ import { createApp } from "./app.js";
 import { addWorkRoles } from "./testing/scripted-backend.js";
 
 const USER = { name: "user", role: "user" } as const;
+
+// The limits board-mcp sets on `/mcp` (GHSA-46jr-4wx8-v453), restated so a change to either shows here.
+const MCP_ELEMENT_LIMIT = 1_000;
+const MCP_BODY_LIMIT = 1024 * 1024;
+
+/** Serves the app on a free local port, for clients that speak real HTTP. */
+function listen(app: ReturnType<typeof createApp>): Promise<{ url: string; close: () => void }> {
+  return new Promise((resolve) => {
+    const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, (info) =>
+      resolve({ url: `http://127.0.0.1:${info.port}/mcp`, close: () => server.close() }),
+    );
+  });
+}
 
 describe("board server", () => {
   let dir: string;
@@ -137,9 +149,7 @@ describe("board server", () => {
       const transport = new StreamableHTTPClientTransport(url, {
         requestInit: { headers: { authorization: `Bearer ${engToken}` } },
       });
-      // The SDK's client transport and its Transport interface disagree on optional `undefined` under strict optional typing.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      await client.connect(transport as unknown as Transport);
+      await client.connect(transport);
       const tools = await client.listTools();
       const names = tools.tools.map((tool) => tool.name);
       expect(names).toContain("claim_task");
@@ -169,6 +179,86 @@ describe("board server", () => {
       expect(unauthenticated.status).toBe(401);
     } finally {
       server?.close();
+    }
+  });
+
+  it("refuses an MCP tool call over the element limit and runs one at it", async () => {
+    const served = await listen(createApp({ board, version: "test" }));
+    try {
+      const client = new Client({ name: "test-client", version: "0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(served.url), {
+          requestInit: { headers: { authorization: `Bearer ${engToken}` } },
+        }),
+      );
+      // Three members, project, title and required_capabilities, and one element per capability.
+      const create = (title: string, elements: number) =>
+        client.callTool({
+          name: "create_task",
+          arguments: {
+            project: "demo",
+            title,
+            required_capabilities: Array.from({ length: elements - 3 }, (_, i) => `cap-${i}`),
+          },
+        });
+      expect((await create("at the limit", MCP_ELEMENT_LIMIT)).isError).toBeFalsy();
+      expect(await create("over the limit", MCP_ELEMENT_LIMIT + 1)).toMatchObject({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining(`more than the maximum of ${MCP_ELEMENT_LIMIT} elements`),
+          },
+        ],
+      });
+      await client.close();
+      const tasks = await board.listTasks("demo");
+      expect(tasks.map((task) => [task.title, task.requiredCapabilities.length])).toEqual([
+        ["at the limit", MCP_ELEMENT_LIMIT - 3],
+      ]);
+    } finally {
+      served.close();
+    }
+  });
+
+  it("refuses an MCP request body over the size limit and reads one at it", async () => {
+    const served = await listen(createApp({ board, version: "test" }));
+    try {
+      // A create_task call whose task body pads the request to exactly `size` bytes.
+      const post = (title: string, size: number) => {
+        const call = (body: string) =>
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "create_task", arguments: { project: "demo", title, body } },
+          });
+        const request = call("x".repeat(size - Buffer.byteLength(call(""))));
+        expect(Buffer.byteLength(request)).toBe(size);
+        return fetch(served.url, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${engToken}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: request,
+        });
+      };
+      const atLimit = await post("at the limit", MCP_BODY_LIMIT);
+      expect(atLimit.status).toBe(200);
+      const answer = z
+        .object({ result: z.object({ isError: z.boolean().optional() }) })
+        .parse(await atLimit.json());
+      expect(answer.result.isError).toBeUndefined();
+      const over = await post("over the limit", MCP_BODY_LIMIT + 1);
+      expect(over.status).toBe(413);
+      expect(await over.json()).toMatchObject({
+        error: { code: -32000, message: expect.stringContaining("Payload Too Large") },
+      });
+      expect((await board.listTasks("demo")).map((task) => task.title)).toEqual(["at the limit"]);
+    } finally {
+      served.close();
     }
   });
 });

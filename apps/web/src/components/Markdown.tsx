@@ -7,7 +7,7 @@ import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib
 import { remarkMentions } from "../lib/mentions.js";
 import { EnlargeableImage, INLINE_IMAGE, InsideLinkContext } from "./EnlargeableImage.js";
 import { EntityLink, useEntitiesFor } from "./Entities.js";
-import { FileBaseContext, TaskFileLink, TaskImage } from "./TaskFile.js";
+import { BranchImage, FileBaseContext, FileLink } from "./BranchFile.js";
 import { UploadedImage } from "./UploadedImage.js";
 
 /** What a path on a runner's machine reads as: its text, with the path on hover. */
@@ -20,8 +20,8 @@ function LocalPath({ href, children }: { href: string | undefined; children?: Re
 }
 
 /**
- * A link to a task, a proposal, a thread, a cron, or a message, or to a file on a task's branch,
- * stays in the playground; any other path on a machine is text, since nothing on the board can
+ * A link to a task, a proposal, a thread, a cron, or a message, or to a file on a branch, stays in
+ * the playground; any other path on a machine is text, since nothing on the board can
  * open it; and any other link leaves in a new tab, without handing it a reference back. An image
  * inside any of them stays a plain image, so a click on it follows the link alone.
  */
@@ -36,11 +36,11 @@ function BoardLink({ href, children }: { href?: string | undefined; children?: R
     );
   }
   const target = linkTarget(href, base);
-  if (target?.kind === "task-file") {
+  if (target?.kind === "file") {
     return (
-      <TaskFileLink taskId={target.taskId} path={target.path} line={target.line}>
+      <FileLink source={target.source} path={target.path} line={target.line}>
         <InsideLinkContext value>{children}</InsideLinkContext>
-      </TaskFileLink>
+      </FileLink>
     );
   }
   if (target?.kind === "local") {
@@ -58,14 +58,14 @@ function BoardLink({ href, children }: { href?: string | undefined; children?: R
 }
 
 /**
- * An image on a task's branch or uploaded to the board shows in place; one elsewhere on a machine
- * is its description.
+ * An image on a branch or uploaded to the board shows in place; one elsewhere on a machine is its
+ * description.
  */
 function BoardImage({ src, alt }: { src?: string | Blob | undefined; alt?: string | undefined }) {
   const base = useContext(FileBaseContext);
   const target = linkTarget(typeof src === "string" ? src : undefined, base);
-  if (target?.kind === "task-file") {
-    return <TaskImage taskId={target.taskId} path={target.path} alt={alt ?? ""} />;
+  if (target?.kind === "file") {
+    return <BranchImage source={target.source} path={target.path} alt={alt ?? ""} />;
   }
   if (target?.kind === "upload") {
     return <UploadedImage id={target.id} alt={alt ?? ""} />;
@@ -93,7 +93,7 @@ function urlTransform(url: string): string {
 /**
  * A message body as markdown. Raw HTML is never rendered and unsafe URLs are dropped, so a message
  * cannot run script in the page that holds the board token. Ids of known tasks, proposals,
- * threads, crons, and messages read as links named by their titles. `base` is where a task's file sits on its branch,
+ * threads, crons, and messages read as links named by their titles. `base` is where a file sits on its branch,
  * for relative links and images inside it, and `line` a source line to mark as `line-target`.
  */
 export function Markdown({
@@ -121,12 +121,17 @@ export function Markdown({
     [line],
   );
   // Kept by value, so a caller's fresh object does not re-render every link and image.
-  const taskId = base?.taskId;
+  const source = base?.source;
+  const kind = source?.kind;
+  const id =
+    source === undefined ? undefined : source.kind === "task" ? source.taskId : source.slug;
   const dir = base?.dir;
-  const at = useMemo(
-    () => (taskId === undefined || dir === undefined ? undefined : { taskId, dir }),
-    [taskId, dir],
-  );
+  const at = useMemo((): FileBase | undefined => {
+    if (kind === undefined || id === undefined || dir === undefined) {
+      return undefined;
+    }
+    return { source: kind === "task" ? { kind, taskId: id } : { kind, slug: id }, dir };
+  }, [kind, id, dir]);
   return (
     <div className="board-markdown">
       <FileBaseContext value={at}>

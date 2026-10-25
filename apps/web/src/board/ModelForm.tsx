@@ -151,7 +151,7 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
       </div>
       {models.data === undefined ? null : (
         <p className="text-meta">
-          As {models.data.cli} on {models.data.runner} lists them, where this citizen's turns run.
+          Listed by {models.data.cli} on {models.data.runner}
         </p>
       )}
       <Failure error={save.error} />

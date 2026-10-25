@@ -86,9 +86,7 @@ export function NewThreadForm({ channel, onDone }: { channel: string; onDone: ()
       />
       <div className="flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">
-          {wakes.length > 0
-            ? `The first message wakes ${listed(wakes)}.`
-            : "Only its participants and anyone mentioned will read it."}
+          {wakes.length > 0 ? `The first message wakes ${listed(wakes)}.` : null}
         </p>
         <Button onClick={onDone}>Cancel</Button>
         <Button variant="primary" type="submit" disabled={title.trim() === "" || open.isPending}>
@@ -136,7 +134,7 @@ export function CloseThreadForm({
         ref={field}
         value={summary}
         rows={3}
-        placeholder={`What did it settle? The summary is posted to #${channel}.`}
+        placeholder="What did it settle?"
         aria-label="Closing summary"
         onChange={(event) => setSummary(event.target.value)}
         className={`${FIELD} resize-none`}

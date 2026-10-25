@@ -72,11 +72,6 @@ export function NewChannelForm({
           {create.isPending ? "Opening…" : "Open"}
         </Button>
       </div>
-      <p className="text-meta">
-        {project === null
-          ? "Announced in the society's general, and followed by whoever subscribes to it; you read every channel without following one."
-          : `Announced in ${project}'s general, where its members choose to follow it; you read every channel without following one. Tasks filed in it hang their threads here, and it is archived once its tasks are done.`}
-      </p>
       <Failure error={create.error} />
     </form>
   );
@@ -120,11 +115,6 @@ export function ArchiveChannelForm({ channel, onDone }: { channel: string; onDon
           {archive.isPending ? "Archiving…" : "Archive channel"}
         </Button>
       </div>
-      <p className="text-meta">
-        Its open threads close, nobody follows it, and nothing more is posted or filed here; its
-        posts, threads, and tasks stay readable. The board refuses while a task filed here is in
-        play.
-      </p>
       <Failure error={archive.error} />
     </form>
   );

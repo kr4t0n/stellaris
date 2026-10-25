@@ -70,6 +70,7 @@ interface Proposal {
   reason?: string;
   provisionedAt?: string;
   provision?: Record<string, unknown>;
+  skillFiles?: Record<string, unknown>;
 }
 
 export interface Write {
@@ -240,6 +241,24 @@ const TASK = {
   body: "Survey the field and tabulate the methods.",
 };
 
+type FakeTask = Omit<typeof TASK, "pullRequest"> & { pullRequest?: (typeof TASK)["pullRequest"] };
+
+/** The study before its author linked the pull request it lands through. */
+function unlinkedTask(): FakeTask {
+  const { pullRequest: _linked, ...task } = TASK;
+  return task;
+}
+
+/** The same, with a check that names the user before Sign off, waiting on the user now. */
+function earlyApprovalTask(): FakeTask {
+  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate: true, holders: [] };
+  return {
+    ...unlinkedTask(),
+    stages: [...TASK_STAGES.slice(0, 1), check, ...TASK_STAGES.slice(1)],
+    stage: "s3",
+  };
+}
+
 /** The task's thread, opened with it, where ada's handover of the survey stage landed. */
 const TASK_THREAD = {
   id: STAGE_TASK,
@@ -355,12 +374,12 @@ const TASK_COMMIT = { id: "4f2a9c1d0e8b7a6f5e4d3c2b1a0f9e8d7c6b5a49", at: CREATE
 const PLOT_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-function taskFile(path: string, content: string) {
+function taskFile(path: string, content: string, commit = TASK_COMMIT) {
   const bytes = Buffer.from(content, path.endsWith(".png") ? "base64" : "utf8");
   return {
     kind: "file",
     path,
-    commit: TASK_COMMIT,
+    commit,
     size: bytes.length,
     content: bytes.toString("base64"),
   };
@@ -456,6 +475,54 @@ const TASK_FILES: Readonly<Record<string, unknown>> = {
   "docs/plot.png": taskFile("docs/plot.png", PLOT_PNG),
   "docs/run.log": taskFile("docs/run.log", "first line\nsecond line\nthird line\n"),
   "results.csv": taskFile("results.csv", 'method,runtime\nDijkstra,1.2\n"A*, tuned",0.9\n'),
+};
+
+/** lab's default branch as the clone on its runner has it, before the survey lands. */
+const LAB_COMMIT = { id: "9b1d3e7a5c4f2e1d0c9b8a7f6e5d4c3b2a1f0e9d", at: CREATED, author: "ref" };
+const LAB_README = "# Lab\n\nHow each run is set up is in [the methods](docs/methods.md).\n";
+const LAB_METHODS = "# Methods\n\nSeeds are fixed; [the list](../seeds.csv) has each one.\n";
+const LAB_SEEDS = "seed,model\n42,small\n";
+const LAB_PILOT = "# Pilot\n\nThe first runs, before seeds were fixed.\n";
+
+const LAB_ROOT = [
+  { name: "seeds.csv", kind: "file", size: LAB_SEEDS.length },
+  { name: "README.md", kind: "file", size: LAB_README.length },
+  { name: "docs", kind: "dir", size: null },
+];
+
+const LAB_FILES: Readonly<Record<string, unknown>> = {
+  "": { kind: "dir", path: "", commit: LAB_COMMIT, entries: LAB_ROOT },
+  docs: {
+    kind: "dir",
+    path: "docs",
+    commit: LAB_COMMIT,
+    entries: [
+      { name: "methods.md", kind: "file", size: LAB_METHODS.length },
+      { name: "archive", kind: "dir", size: null },
+    ],
+  },
+  "docs/archive": {
+    kind: "dir",
+    path: "docs/archive",
+    commit: LAB_COMMIT,
+    entries: [{ name: "pilot.md", kind: "file", size: LAB_PILOT.length }],
+  },
+  "README.md": taskFile("README.md", LAB_README, LAB_COMMIT),
+  "docs/methods.md": taskFile("docs/methods.md", LAB_METHODS, LAB_COMMIT),
+  "docs/archive/pilot.md": taskFile("docs/archive/pilot.md", LAB_PILOT, LAB_COMMIT),
+  "seeds.csv": taskFile("seeds.csv", LAB_SEEDS, LAB_COMMIT),
+};
+
+/** A branch the project may name as its default instead, whose docs hold another file. */
+const LAB_NEXT_COMMIT = { ...LAB_COMMIT, id: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f" };
+const LAB_NEXT_FILES: Readonly<Record<string, unknown>> = {
+  "": { kind: "dir", path: "", commit: LAB_NEXT_COMMIT, entries: LAB_ROOT },
+  docs: {
+    kind: "dir",
+    path: "docs",
+    commit: LAB_NEXT_COMMIT,
+    entries: [{ name: "plan.md", kind: "file", size: 8 }],
+  },
 };
 
 /** desk's one finished turn, as the event log pairs its start and end. */
@@ -635,7 +702,10 @@ const SOCIETY_SKILL_FILES = [
   },
 ];
 
-/** The operations log: a runner reconnect, which informs, and a role gap, which wakes the steward. */
+/**
+ * The operations log: a runner reconnect, which informs, a role gap, which wakes the steward, and
+ * an idle member's repeat, which only logs.
+ */
 const SIGNALS = [
   {
     id: "01M3Q2FFFFFFFFFFFFFFFFFFF1",
@@ -657,6 +727,19 @@ const SIGNALS = [
       value: 1,
       project: "lab",
       role: "referee",
+    },
+  },
+  {
+    id: "01M3Q2FFFFFFFFFFFFFFFFFFF3",
+    ts: CREATED,
+    signal: {
+      kind: "idle_member",
+      key: "idle_member:ada",
+      summary: "ada (researcher) has not completed a turn for 4d",
+      value: 4 * 24 * 3_600_000,
+      agent: "ada",
+      role: "researcher",
+      wakes: false,
     },
   },
 ];
@@ -1054,8 +1137,8 @@ const CLAUDE_MODELS = [
  * With `enrolling`, a runner waits for approval under `ENROLLING_CODE`. With `github`, the board
  * offers GitHub sign-in and the token is octocat's sign-in, and with `signedOut` the browser
  * starts with no token. With `inFlight`,
- * desk is in a turn at the society until the user stops it. With `skillFolder`, the skill proposal
- * is a folder the board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
+ * desk is in a turn at the society until the user stops it. The skill proposal is a folder the
+ * board took from stew's home, with a script beside its SKILL.md. Each runner's CLIs
  * reported their quotas minutes ago, laptop's Claude with the same numbers as pod's and studio's
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
@@ -1075,9 +1158,12 @@ export async function fakeBoard(
     github?: boolean;
     signedOut?: boolean;
     inFlight?: boolean;
-    skillFolder?: boolean;
     quotas?: "reads" | "limited";
     uploads?: boolean;
+    /** Links no pull request to the study whose sign-off names the user. */
+    unlinked?: boolean;
+    /** Links none either, and puts a check naming the user before Sign off, current. */
+    earlyApproval?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /**
@@ -1123,7 +1209,12 @@ export async function fakeBoard(
   // Renaming changes the name the board shows, never the slug.
   let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
-  let task: typeof TASK = TASK;
+  let task: FakeTask =
+    options.earlyApproval === true
+      ? earlyApprovalTask()
+      : options.unlinked === true
+        ? unlinkedTask()
+        : TASK;
   // Channels opened in lab beside its general, and their archives, as the board keeps them.
   const labChannels: Array<{
     name: string;
@@ -1148,21 +1239,12 @@ export async function fakeBoard(
     charter: {
       name: "refereed-research",
       summary: "Plan a research task with a gated referee.",
-      ...(options.skillFolder === true
-        ? {}
-        : {
-            body: "---\nname: refereed-research\ndescription: Plan a research task.\n---\n\n# Refereed research\n\nUse this for any study.",
-          }),
     },
-    ...(options.skillFolder === true
-      ? {
-          skillFiles: {
-            commit: "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
-            takenAt: CREATED,
-            files: SKILL_FILES.map(({ text: _text, truncated: _cut, ...file }) => file),
-          },
-        }
-      : {}),
+    skillFiles: {
+      commit: "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+      takenAt: CREATED,
+      files: SKILL_FILES.map(({ text: _text, truncated: _cut, ...file }) => file),
+    },
     body: "The plan has run on four tasks.",
   };
 
@@ -1529,6 +1611,20 @@ export async function fakeBoard(
         ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
         : json(route, file);
     }
+    const labFiles = "/api/projects/lab/files";
+    if (pathname === labFiles || pathname.startsWith(`${labFiles}/`)) {
+      // The clone holds main and next; a branch named default since has nothing until a turn there.
+      const branch =
+        lab.defaultBranch === "main"
+          ? LAB_FILES
+          : lab.defaultBranch === "next"
+            ? LAB_NEXT_FILES
+            : {};
+      const file = branch[decodeURIComponent(pathname.slice(labFiles.length + 1))];
+      return file === undefined
+        ? json(route, { error: "NOT_FOUND", message: "not on the branch" }, 404)
+        : json(route, file);
+    }
     const diffs = `/api/tasks/${STAGE_TASK}/diff/`;
     if (pathname.startsWith(diffs)) {
       const diff = TASK_DIFFS[decodeURIComponent(pathname.slice(diffs.length))];
@@ -1770,7 +1866,7 @@ export async function fakeBoard(
       case `/api/proposals/${SKILL_PROPOSAL}`:
         return json(route, proposal);
       case `/api/proposals/${SKILL_PROPOSAL}/files`:
-        return json(route, options.skillFolder === true ? SKILL_FILES : []);
+        return json(route, SKILL_FILES);
       default:
         return json(route, { message: `no fake for ${pathname}` }, 404);
     }

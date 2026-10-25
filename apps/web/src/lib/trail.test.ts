@@ -40,6 +40,8 @@ describe("the trail", () => {
     expect(placeName("/thread/01M4D03FTQRBZ6JCCS1QNWDZ4R", names)).toBe("the thread");
     expect(placeName("/c/lab/general", names)).toBe("#general");
     expect(placeName("/p/lab/tasks", names)).toBe("the tasks of Lab");
+    expect(placeName("/p/lab/files/docs/guide%20one.md?line=3", names)).toBe("guide one.md");
+    expect(placeName("/p/lab/files", names)).toBe("the files of Lab");
     expect(placeName("/p/lab", names)).toBe("Lab");
     expect(placeName("/knowledge/lab/seeds", names)).toBe("seeds");
     expect(placeName("/skills/uv-setup", names)).toBe("uv-setup");

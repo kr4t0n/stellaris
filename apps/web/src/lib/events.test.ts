@@ -27,6 +27,10 @@ describe("board events", () => {
       ["members"],
       ["metrics"],
     ]);
+    // A landing also moves the project's default branch.
+    expect(
+      staleKeys(event("merge.completed", { taskId: id, project: "lab", branch: `task/${id}` }, id)),
+    ).toEqual([["tasks"], ["task", id], ["members"], ["metrics"], ["project-file", "lab"]]);
     expect(staleKeys(event("turn.started", {}, id))).toEqual([
       ["scheduler"],
       ["members"],
@@ -43,6 +47,7 @@ describe("board events", () => {
       ["task-file"],
       ["task-changes"],
       ["task-diff"],
+      ["project-file"],
       ["metrics"],
       ["tokens"],
       ["crons"],

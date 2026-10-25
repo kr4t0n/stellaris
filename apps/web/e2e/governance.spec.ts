@@ -21,7 +21,7 @@ test("a message named by its id reads as who posted it where, and opens there, m
 test("a skill proposed as a folder shows its SKILL.md and opens each file beside it", async ({
   page,
 }) => {
-  await fakeBoard(page, { skillFolder: true });
+  await fakeBoard(page);
   await page.goto(`/proposal/${SKILL_PROPOSAL}`);
 
   await expect(page.getByText("stew's home at 4f1c2d9")).toBeVisible();
@@ -35,9 +35,7 @@ test("a skill proposed as a folder shows its SKILL.md and opens each file beside
   await expect(page.getByText("echo stages: work review")).toBeVisible();
 });
 
-test("approving takes a second click, says what it does, and shows what it made", async ({
-  page,
-}) => {
+test("approving takes a second click and shows what it made", async ({ page }) => {
   const board = await fakeBoard(page);
   await page.goto(`/proposal/${SKILL_PROPOSAL}`);
 
@@ -49,8 +47,7 @@ test("approving takes a second click, says what it does, and shows what it made"
 
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   const form = page.getByRole("form", { name: "Approve the proposal" });
-  // The decision wakes the proposer, not the front desk.
-  await expect(form).toContainText("wakes stew, who proposed it");
+  await expect(form.getByRole("textbox", { name: "Reason for approving" })).toBeFocused();
   expect(board.writes).toEqual([]);
 
   await form.getByRole("button", { name: "Confirm approval" }).click();

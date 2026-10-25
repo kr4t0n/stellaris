@@ -83,7 +83,20 @@ What a runner needs in its home before it starts, such as an SSH key for git ove
 
 Each replica is a runner that enrolls by itself. A project lives on the runner that took its first turn, so scaling down leaves the projects on the removed pods waiting until they come back; their claims stay, as they do on `helm uninstall`. Kubernetes refuses a change to a StatefulSet's claim template, so `runner.persistence` is fixed at install; resize a claim itself.
 
-Agents run with every permission and no sandbox, so a runner pod runs whatever they decide, with the pod's network. The pod gets no service-account token and no service links. `runner.networkPolicy.enabled` adds a policy that lets the pods reach DNS, the chart's server, and the internet outside `runner.networkPolicy.deniedCidrs` (the private ranges a cluster lives in, the shared range, and link-local, where cloud metadata services answer), and lets nothing in; it takes effect only under a network plugin that enforces NetworkPolicy. A `runner.serverUrl` at a private address, or a package mirror in the cluster, needs a rule in `runner.networkPolicy.extraEgress`. Agents the cluster should not host at all belong on a runner on another machine.
+Agents run with every permission and no sandbox, so a runner pod runs whatever they decide, with the pod's network. The pod gets no service links, and no service-account token unless `runner.automountServiceAccountToken` asks for one. `runner.networkPolicy.enabled` adds a policy that lets the pods reach DNS, the chart's server, and the internet outside `runner.networkPolicy.deniedCidrs` (the private ranges a cluster lives in, the shared range, and link-local, where cloud metadata services answer), and lets nothing in; it takes effect only under a network plugin that enforces NetworkPolicy. A `runner.serverUrl` at a private address, a package mirror in the cluster, or the cluster's API for runners with a service-account token, needs a rule in `runner.networkPolicy.extraEgress`. Agents the cluster should not host at all belong on a runner on another machine.
+
+Agents whose work is the cluster itself need its API. The runner pods run as the namespace's `default` ServiceAccount, or the one `runner.serviceAccountName` names, and `runner.automountServiceAccountToken` mounts its token. The chart creates no ServiceAccount, Role, or RoleBinding; make and bind them yourself:
+
+```yaml
+runner:
+  enabled: true
+  serviceAccountName: stellaris-runner
+  automountServiceAccountToken: true
+```
+
+The token gives every agent on those runners the account's permissions, whatever task it is on, so bind the account to no more than the runners' work needs, such as read-only access.
+
+With `runner.networkPolicy.enabled`, the policy is likely to block the API those agents need. They reach the API server through the cluster's `kubernetes` Service, whose address is the first of the service range (10.96.0.1 under kubeadm's default), and the API server's own address is often a private one: both inside `deniedCidrs`. Kubernetes leaves it to the network plugin which of the two a policy sees, so give them a rule in `runner.networkPolicy.extraEgress` for both, the Service's address on port 443 and the addresses and port that `kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes` lists. Nor is the policy a guard the other way, since an API server at a public address is outside `deniedCidrs`: keep the token from runners whose agents should not use the API rather than count on the policy.
 
 ## Ingress
 
@@ -115,6 +128,8 @@ On SIGTERM the server stops dispatching and waits for running turns to report, f
 ```bash
 helm upgrade stellaris stellaris/stellaris -n stellaris
 ```
+
+From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let the server start once before a later chart: from 0.3.25 the server no longer carries the one-time changes that 0.1.0 to 0.3.24 applied to an existing board's data when it opened.
 
 ## Values
 
@@ -164,6 +179,8 @@ helm upgrade stellaris stellaris/stellaris -n stellaris
 | `runner.networkPolicy.enabled`         | `false`                                             | Limit the runners' egress                                                        |
 | `runner.networkPolicy.deniedCidrs`     | private, shared, and link-local ranges              | Addresses kept from agents                                                       |
 | `runner.networkPolicy.extraEgress`     | empty                                               | More egress rules, in NetworkPolicy's shape                                      |
+| `runner.serviceAccountName`            | empty, the namespace's `default`                    | The ServiceAccount the runner pods run as, made outside the chart                |
+| `runner.automountServiceAccountToken`  | `false`                                             | Mount its token, giving every agent on the runners its permissions               |
 
 The probes, resources, security contexts, and scheduling fields under `server` and `runner` take the usual Kubernetes shapes; `values.yaml` documents each.
 

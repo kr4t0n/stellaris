@@ -14,9 +14,9 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@stellaris/board-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   }
 }

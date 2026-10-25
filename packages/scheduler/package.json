@@ -16,6 +16,6 @@
   "dependencies": {
     "@stellaris/board-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   }
 }

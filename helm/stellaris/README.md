@@ -83,7 +83,18 @@ What a runner needs in its home before it starts, such as an SSH key for git ove
 
 Each replica is a runner that enrolls by itself. A project lives on the runner that took its first turn, so scaling down leaves the projects on the removed pods waiting until they come back; their claims stay, as they do on `helm uninstall`. Kubernetes refuses a change to a StatefulSet's claim template, so `runner.persistence` is fixed at install; resize a claim itself.
 
-Agents run with every permission and no sandbox, so a runner pod runs whatever they decide, with the pod's network. The pod gets no service-account token and no service links. `runner.networkPolicy.enabled` adds a policy that lets the pods reach DNS, the chart's server, and the internet outside `runner.networkPolicy.deniedCidrs` (the private ranges a cluster lives in, the shared range, and link-local, where cloud metadata services answer), and lets nothing in; it takes effect only under a network plugin that enforces NetworkPolicy. A `runner.serverUrl` at a private address, or a package mirror in the cluster, needs a rule in `runner.networkPolicy.extraEgress`. Agents the cluster should not host at all belong on a runner on another machine.
+Agents run with every permission and no sandbox, so a runner pod runs whatever they decide, with the pod's network. The pod gets no service links, and no service-account token unless `runner.automountServiceAccountToken` asks for one. `runner.networkPolicy.enabled` adds a policy that lets the pods reach DNS, the chart's server, and the internet outside `runner.networkPolicy.deniedCidrs` (the private ranges a cluster lives in, the shared range, and link-local, where cloud metadata services answer), and lets nothing in; it takes effect only under a network plugin that enforces NetworkPolicy. A `runner.serverUrl` at a private address, or a package mirror in the cluster, needs a rule in `runner.networkPolicy.extraEgress`. Agents the cluster should not host at all belong on a runner on another machine.
+
+Agents whose work is the cluster itself need its API. The runner pods run as the namespace's `default` ServiceAccount, or the one `runner.serviceAccountName` names, and `runner.automountServiceAccountToken` mounts its token. The chart creates no ServiceAccount, Role, or RoleBinding; make and bind them yourself:
+
+```yaml
+runner:
+  enabled: true
+  serviceAccountName: stellaris-runner
+  automountServiceAccountToken: true
+```
+
+The token gives every agent on those runners the account's permissions, whatever task it is on, so bind the account to no more than the runners' work needs, such as read-only access. `runner.networkPolicy` is no guard for the API server: it answers behind the cluster's `kubernetes` Service, Kubernetes leaves it to the network plugin whether a policy sees that Service's address or the one it leads to, and one at a public address is outside `deniedCidrs` anyway. Keep the token from runners whose agents should not use the API rather than count on the policy.
 
 ## Ingress
 
@@ -166,6 +177,8 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `runner.networkPolicy.enabled`         | `false`                                             | Limit the runners' egress                                                        |
 | `runner.networkPolicy.deniedCidrs`     | private, shared, and link-local ranges              | Addresses kept from agents                                                       |
 | `runner.networkPolicy.extraEgress`     | empty                                               | More egress rules, in NetworkPolicy's shape                                      |
+| `runner.serviceAccountName`            | empty, the namespace's `default`                    | The ServiceAccount the runner pods run as, made outside the chart                |
+| `runner.automountServiceAccountToken`  | `false`                                             | Mount its token, giving every agent on the runners its permissions               |
 
 The probes, resources, security contexts, and scheduling fields under `server` and `runner` take the usual Kubernetes shapes; `values.yaml` documents each.
 

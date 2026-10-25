@@ -176,7 +176,7 @@ Run the CLI's setup commands before the server starts, or act through the API wh
 
 ### The runner's image
 
-`kr4t0n/stellaris-runner`, with the same tags, is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, which brings Claude Code, Codex, Node with pnpm, Python with uv, Go, Rust, and the command-line tools agents shell out to. Its account is `stellaris` (uid 1000, group `users`, gid 100), and its home holds everything: the runner's data directory at `/home/stellaris/stellaris-runner`, the CLIs' logins in `~/.claude` and `~/.codex`, the git identity agents commit with in `~/.gitconfig`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
+`kr4t0n/stellaris-runner`, with the same tags, is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, which brings Claude Code, Codex, Node with pnpm, Python with uv, Go, Rust, kubectl, and the command-line tools agents shell out to. Its account is `stellaris` (uid 1000, group `users`, gid 100), and its home holds everything: the runner's data directory at `/home/stellaris/stellaris-runner`, the CLIs' logins in `~/.claude` and `~/.codex`, the git identity agents commit with in `~/.gitconfig`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
 
 ```bash
 IMAGE=kr4t0n/stellaris-runner

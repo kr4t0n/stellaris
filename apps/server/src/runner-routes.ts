@@ -18,6 +18,12 @@ import {
 import type { RunnerHub } from "@stellaris/turn-host";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { streamSSE } from "hono/streaming";
+import {
+  ENROLL_BODY_LIMIT_BYTES,
+  limitBody,
+  RUNNER_ANSWER_LIMIT_BYTES,
+  RUNNER_BODY_LIMIT_BYTES,
+} from "./body-limit.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import { HomeGit } from "./home-git.js";
 
@@ -47,12 +53,13 @@ export function runnerRoutes(
   const routes = new Hono<RunnerEnv>();
 
   // A runner with no token asks to be enrolled and polls until the user decides, so these two
-  // answer before the token check below.
+  // answer before the token check below, with the tightest limit on what they read.
   if (enrollments !== undefined) {
-    routes.post("/enroll", enrollLimit ?? ((_c, next) => next()), async (c) =>
+    const enrollBody = limitBody(ENROLL_BODY_LIMIT_BYTES);
+    routes.post("/enroll", enrollLimit ?? ((_c, next) => next()), enrollBody, async (c) =>
       c.json(enrollments.open(RunnerEnrollRequestSchema.parse(await c.req.json()))),
     );
-    routes.post("/enroll/poll", async (c) => {
+    routes.post("/enroll/poll", enrollBody, async (c) => {
       const { deviceCode } = RunnerEnrollPollSchema.parse(await c.req.json());
       const status = enrollments.poll(deviceCode);
       return status === null
@@ -71,7 +78,10 @@ export function runnerRoutes(
     await next();
   });
 
-  routes.post("/hello", async (c) =>
+  // Every post below reads its body whole; the home's git route, which carries packs, is not one.
+  const body = limitBody(RUNNER_BODY_LIMIT_BYTES);
+
+  routes.post("/hello", body, async (c) =>
     c.json(await hub.register(c.get("runner"), RunnerHelloSchema.parse(await c.req.json()))),
   );
 
@@ -114,7 +124,7 @@ export function runnerRoutes(
     });
   });
 
-  routes.post("/turns/:id/events", async (c) => {
+  routes.post("/turns/:id/events", body, async (c) => {
     const { entries } = TurnEventsSchema.parse(await c.req.json());
     await hub.turnEvents(c.get("runner"), UlidSchema.parse(c.req.param("id")), entries);
     return c.json({ ok: true });
@@ -125,7 +135,7 @@ export function runnerRoutes(
     return c.json({ ok: true });
   });
 
-  routes.post("/turns/:id/outcome", async (c) =>
+  routes.post("/turns/:id/outcome", body, async (c) =>
     c.json(
       await hub.turnOutcome(
         c.get("runner"),
@@ -135,23 +145,23 @@ export function runnerRoutes(
     ),
   );
 
-  routes.post("/requests/:id", async (c) => {
+  routes.post("/requests/:id", limitBody(RUNNER_ANSWER_LIMIT_BYTES), async (c) => {
     hub.answer(c.get("runner"), c.req.param("id"), RunnerAnswerSchema.parse(await c.req.json()));
     return c.json({ ok: true });
   });
 
-  routes.post("/workspaces", async (c) => {
+  routes.post("/workspaces", body, async (c) => {
     hub.heldWorkspaces(c.get("runner"), HeldWorkspacesSchema.parse(await c.req.json()).workspaces);
     return c.json({ ok: true });
   });
 
-  routes.post("/warm", async (c) => {
+  routes.post("/warm", body, async (c) => {
     hub.warmChanged(c.get("runner"), WarmSessionsSchema.parse(await c.req.json()).warm);
     return c.json({ ok: true });
   });
 
   routes.get("/board/manifest", async (c) => c.json({ files: await board.boardManifest() }));
-  routes.post("/board/read", async (c) =>
+  routes.post("/board/read", body, async (c) =>
     c.json({ files: await board.readBoardFiles(FileReadSchema.parse(await c.req.json()).paths) }),
   );
 

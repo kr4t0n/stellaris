@@ -40,9 +40,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # Agents run whatever commands they like here, so they get no credentials for the cluster's
-      # API and no list of the namespace's services in their environment.
-      automountServiceAccountToken: false
+      # Agents run whatever commands they like here, so they get credentials for the cluster's API,
+      # those of the account named, only when automountServiceAccountToken asks for its token, and
+      # never a list of the namespace's services in their environment.
+      serviceAccountName: {{ $runner.serviceAccountName | default "default" }}
+      automountServiceAccountToken: {{ $runner.automountServiceAccountToken | default false }}
       enableServiceLinks: false
       {{- with $runner.podSecurityContext }}
       securityContext:

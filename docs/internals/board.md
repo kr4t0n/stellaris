@@ -8,6 +8,10 @@ The core in `packages/board-core`: the single writer of the data directory, its 
 
 Every verb: parse input with the shared schema, authorize against the role charter, run under the mutex, append an event, return the typed object. `Board.invoke` dispatches by name for the HTTP route and the MCP endpoint. A read that scans many files holds the mutex only for a snapshot: `readDigest` and `unreadByConversation` read the reader's cursors and draw a fresh id as a mark under it (`digestSnapshot`), then scan outside it, counting no message newer than the mark, and `readDigest` takes it again only to advance the cursors. Message ids come from the board's one monotonic source and messages are written under the mutex, so every message at or below the mark is whole on disk and every later one is above it; files are written through a rename (`writeFileAtomic`), so a read outside the mutex sees a file before a write or after it, never in between.
 
+### The MCP endpoint caps a request's size and a tool call's elements
+
+`handleMcpRequest` sets the two limits that GHSA-46jr-4wx8-v453 asks of an MCP server, since the SDK's defaults are no limit on elements and 4 MiB on a body. The transport reads at most `MAX_REQUEST_BODY_SIZE` (1 MiB) of a request and answers a larger one 413 before parsing it. The server counts the array elements and object members at every depth of a `tools/call`'s arguments, and answers a call over `MAX_TOOL_INPUT_ELEMENTS` (1,000) with an error result before its verb runs. Both sit well above the largest calls measured on a running board: 60,067 bytes, a knowledge topic, and 53 elements, a ten-stage `plan_task`. A verb whose input could need more raises the constant in `packages/board-mcp`, with the measurement in its pull request.
+
 ### Schemas first
 
 New fields go into `packages/shared` and are validated at every boundary. Verbs are added, never renamed; deprecate by addition.

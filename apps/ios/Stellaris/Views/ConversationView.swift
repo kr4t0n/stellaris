@@ -100,7 +100,9 @@ struct ConversationView: View {
 }
 
 /// The messages, opened at `start` when it is one of them, else at the newest, and keeping the
-/// message at the foot of the view as the conversation's anchor once the user scrolls.
+/// message at the foot of the view as the conversation's anchor once the user scrolls. A stack
+/// that measures every row, not a lazy one: a conversation runs to a few hundred messages, and a
+/// lazy stack's estimated rows left the list short of where it was sent.
 private struct MessageList<Header: View>: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
@@ -120,43 +122,46 @@ private struct MessageList<Header: View>: View {
   }
 
   var body: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16) {
-        header
-        ForEach(feed.messages) { message in
-          MessageRow(message: message)
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          header
+          ForEach(feed.messages) { message in
+            MessageRow(message: message)
+          }
+        }
+        .scrollTargetLayout()
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+      }
+      .scrollPosition(id: $anchor, anchor: .bottom)
+      .defaultScrollAnchor(.bottom)
+      .accessibilityIdentifier("messages")
+      // Until the user scrolls, the list holds to where it opens whenever it appears or its
+      // content's height changes, as when a rotation rewraps it.
+      .onAppear { hold(proxy) }
+      .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
+        hold(proxy)
+      }
+      .onScrollPhaseChange { _, phase in
+        if phase == .tracking || phase == .interacting {
+          moved = true
         }
       }
-      .scrollTargetLayout()
-      .padding(.horizontal)
-      .padding(.vertical, 12)
-    }
-    .scrollPosition(id: $anchor, anchor: .bottom)
-    .defaultScrollAnchor(.bottom)
-    .accessibilityIdentifier("messages")
-    // A scroll view that replaces another can lay out at its top, report that, and keep it as the
-    // lazy stack measures its rows. So until the user scrolls, the list holds to where it opens
-    // whenever it appears or its content's height changes.
-    .onAppear(perform: holdToStart)
-    .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
-      holdToStart()
-    }
-    .onScrollPhaseChange { _, phase in
-      if phase == .tracking || phase == .interacting {
-        moved = true
-      }
-    }
-    .onChange(of: anchor) { _, id in
-      if moved, let id {
-        model.memory?.setAnchor(id, for: feed.conversation)
+      .onChange(of: anchor) { _, id in
+        if moved, let id {
+          model.memory?.setAnchor(id, for: feed.conversation)
+        }
       }
     }
   }
 
-  private func holdToStart() {
-    if !moved, anchor != start {
-      anchor = start
+  private func hold(_ proxy: ScrollViewProxy) {
+    guard !moved, let start else {
+      return
     }
+    anchor = start
+    proxy.scrollTo(start, anchor: .bottom)
   }
 }
 

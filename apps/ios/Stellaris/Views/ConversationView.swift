@@ -23,6 +23,8 @@ struct ConversationView: View {
     }
     .scrollPosition(id: $anchor, anchor: .bottom)
     .defaultScrollAnchor(.bottom)
+    // A conversation shorter than the view starts at its top.
+    .defaultScrollAnchor(.topLeading, for: .alignment)
     .scrollDismissesKeyboard(.immediately)
     .overlay { state }
     .safeAreaInset(edge: .bottom) {
@@ -60,15 +62,24 @@ struct ConversationView: View {
     .padding(.bottom, 4)
   }
 
-  /// Where the conversation is: a project's name for its channel, the channel for a thread.
+  /// Where the conversation is: a project's name for its channel, and the channel, with its
+  /// project's name, for a thread.
   private var place: String? {
     switch feed.conversation {
     case .channel(let ref):
-      let parts = ref.split(separator: "/")
-      return parts.count > 1 ? model.store.projectName(String(parts[0])) : nil
+      return project(of: ref)
     case .thread:
-      return feed.thread.map { model.name(of: .channel($0.channel)) }
+      guard let channel = feed.thread?.channel else {
+        return nil
+      }
+      let name = model.name(of: .channel(channel))
+      return project(of: channel).map { "\($0) · \(name)" } ?? name
     }
+  }
+
+  private func project(of channel: String) -> String? {
+    let parts = channel.split(separator: "/")
+    return parts.count > 1 ? model.store.projectName(String(parts[0])) : nil
   }
 
   @ViewBuilder private var state: some View {

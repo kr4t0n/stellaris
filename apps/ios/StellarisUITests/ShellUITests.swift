@@ -26,7 +26,8 @@ class ShellTestCase: XCTestCase {
     XCTAssertTrue(address.waitForExistence(timeout: 20))
     address.tap()
     address.typeText("board.example.com")
-    app.buttons["continue"].tap()
+    // The keyboard's return key is also called "continue".
+    app.buttons["take-address"].tap()
     let field = app.secureTextFields["token"]
     XCTAssertTrue(field.waitForExistence(timeout: 20))
     field.tap()

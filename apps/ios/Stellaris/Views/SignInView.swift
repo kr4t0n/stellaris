@@ -87,7 +87,7 @@ struct SignInView: View {
         Text("Continue").frame(maxWidth: .infinity)
       }
       .buttonStyle(.borderedProminent)
-      .accessibilityIdentifier("continue")
+      .accessibilityIdentifier("take-address")
     }
   }
 

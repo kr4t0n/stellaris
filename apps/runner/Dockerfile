@@ -5,7 +5,7 @@
 #   docker build -f apps/runner/Dockerfile -t stellaris-runner .
 
 ARG NODE_VERSION=24
-ARG CLIMAGE_VERSION=0.6.1
+ARG CLIMAGE_VERSION=0.6.2
 
 # Built on the target platform, not the builder's: the Claude Agent SDK runs Claude Code from a
 # binary in a per-platform optional package, and pnpm installs only the one for the platform it

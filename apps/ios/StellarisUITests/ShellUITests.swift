@@ -35,7 +35,13 @@ class ShellTestCase: XCTestCase {
     app.buttons["sign-in-token"].tap()
   }
 
-  /// Waits for Chat to show the conversation called `name`.
+  /// Waits for Chat to show the society's general channel, which opens at its newest message. Its
+  /// title, the first line of its content, is sixty messages up, where the view builds nothing.
+  @MainActor func expectGeneral(_ app: XCUIApplication) {
+    XCTAssertTrue(message(app, 60).waitForExistence(timeout: 20), "Chat doesn't show #general")
+  }
+
+  /// Waits for Chat to show the conversation called `name`, short enough that its title shows.
   @MainActor func expectConversation(_ app: XCUIApplication, _ name: String) {
     let title = app.staticTexts["conversation-title"].firstMatch
     let shown = expectation(for: NSPredicate(format: "label == %@", name), evaluatedWith: title)
@@ -77,7 +83,7 @@ final class ShellUITests: ShellTestCase {
   @MainActor func testKeepsTheDraftAndScrollPositionThroughBoardAndARotation() {
     let app = launch()
     signIn(app)
-    expectConversation(app, "#general")
+    expectGeneral(app)
     let newest = message(app, 60)
     XCTAssertTrue(newest.waitForExistence(timeout: 20))
     XCTAssertTrue(newest.isHittable)
@@ -100,7 +106,7 @@ final class ShellUITests: ShellTestCase {
     tab(app, "Board")
     XCTAssertTrue(app.buttons["channel-governance"].waitForExistence(timeout: 20))
     tab(app, "Chat")
-    expectConversation(app, "#general")
+    XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
     XCTAssertEqual(draft(app).value as? String, "Half a thought")
     XCTAssertTrue(message(app, anchored).isHittable)
     XCTAssertFalse(newest.exists && newest.isHittable)
@@ -117,7 +123,7 @@ final class ShellUITests: ShellTestCase {
   @MainActor func testBackGoesToWhereChatCameFrom() {
     let app = launch()
     signIn(app)
-    expectConversation(app, "#general")
+    expectGeneral(app)
     XCTAssertFalse(app.buttons["back"].exists)
 
     tab(app, "Board")
@@ -136,7 +142,7 @@ final class ShellUITests: ShellTestCase {
     pick(app, "back")
     expectConversation(app, "Add the export view")
     pick(app, "back")
-    expectConversation(app, "#general")
+    expectGeneral(app)
     XCTAssertFalse(app.buttons["back"].exists)
   }
 
@@ -145,7 +151,7 @@ final class ShellUITests: ShellTestCase {
   @MainActor func testOpensTheLastConversationFromTheBackgroundAndGeneralOnAFreshStart() {
     let app = launch()
     signIn(app)
-    expectConversation(app, "#general")
+    expectGeneral(app)
     draft(app).tap()
     draft(app).typeText("Kept on disk")
     tab(app, "Board")
@@ -162,7 +168,7 @@ final class ShellUITests: ShellTestCase {
     XCTAssertTrue(app.wait(for: .runningBackground, timeout: 20))
     app.terminate()
     let again = launch(reset: false)
-    expectConversation(again, "#general")
+    expectGeneral(again)
     XCTAssertEqual(draft(again).value as? String, "Kept on disk")
   }
 
@@ -187,7 +193,7 @@ final class ShellUITests: ShellTestCase {
   @MainActor func testSignsOutFromSettings() {
     let app = launch()
     signIn(app)
-    expectConversation(app, "#general")
+    expectGeneral(app)
     tab(app, "Board")
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
@@ -213,11 +219,11 @@ final class ScreenUITests: ShellTestCase {
     }
     keepScreen("portrait-sign-in")
     signIn(app)
-    expectConversation(app, "#general")
+    expectGeneral(app)
     for name in ["portrait", "landscape"] {
       XCUIDevice.shared.orientation = name == "portrait" ? .portrait : .landscapeLeft
       tab(app, "Chat")
-      expectConversation(app, "#general")
+      expectGeneral(app)
       print("\(name) window: \(app.windows.firstMatch.frame)")
       keepScreen("\(name)-chat")
       tab(app, "Board")
@@ -234,6 +240,7 @@ final class ScreenUITests: ShellTestCase {
       pick(app, "task-00000000000000000000000010")
       expectConversation(app, "Add the export view")
       keepScreen("\(name)-thread")
+      pick(app, "back")
     }
     XCUIDevice.shared.orientation = .portrait
   }

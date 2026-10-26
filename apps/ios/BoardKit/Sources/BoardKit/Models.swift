@@ -1,7 +1,8 @@
-// The board's answers as the client reads them, mirroring the server's schemas in
-// `packages/shared` field for field. Ids are ULIDs and times ISO-8601 strings, kept as the
-// strings they are: both sort as text, and the views format times themselves. A field the schema
-// gives a default is decoded with that default when it is missing.
+// The board's answers as the client reads them: the fields of the server's schemas in
+// `packages/shared` that the app uses, under the same names. Ids are ULIDs and times ISO-8601
+// strings, kept as the strings they are: both sort as text, and the views format times
+// themselves. A field the schema gives a default is decoded with that default when it is missing,
+// and a value of a closed set is an `OrUnknown`.
 
 /// Who a token signs in as.
 public struct BoardActor: Sendable, Hashable, Codable {
@@ -52,7 +53,7 @@ public struct Society: Sendable, Hashable, Codable {
 }
 
 /// What the board does when a task's last stage completes.
-public enum CompletionEffect: String, Sendable, Hashable, Codable {
+public enum CompletionEffect: String, Sendable, Hashable {
   case none, merge, ghpr
 }
 
@@ -72,7 +73,7 @@ public struct Project: Sendable, Hashable, Codable {
   public let members: [String]
   public let approvers: [String]
   public let createdAt: String
-  public let onDone: CompletionEffect
+  public let onDone: OrUnknown<CompletionEffect>
   /// Set once the project is archived.
   public let archived: ProjectArchive?
 
@@ -88,7 +89,9 @@ public struct Project: Sendable, Hashable, Codable {
     members = try container.decode([String].self, forKey: .members)
     approvers = try container.decode([String].self, forKey: .approvers)
     createdAt = try container.decode(String.self, forKey: .createdAt)
-    onDone = try container.decodeIfPresent(CompletionEffect.self, forKey: .onDone) ?? .none
+    onDone =
+      try container.decodeIfPresent(OrUnknown<CompletionEffect>.self, forKey: .onDone)
+      ?? .known(.none)
     archived = try container.decodeIfPresent(ProjectArchive.self, forKey: .archived)
   }
 }
@@ -108,11 +111,11 @@ public struct ChannelSummary: Sendable, Hashable, Codable {
 
 /// What a task verb did, on the post it made of its note in the task's thread.
 public struct TaskStep: Sendable, Hashable, Codable {
-  public enum Action: String, Sendable, Hashable, Codable {
+  public enum Action: String, Sendable, Hashable {
     case advanced, returned, abandoned, landed, reopened
   }
 
-  public let action: Action
+  public let action: OrUnknown<Action>
   public let stage: String
   /// Where the task went, or nil once it left its plan.
   public let to: String?
@@ -120,11 +123,11 @@ public struct TaskStep: Sendable, Hashable, Codable {
 
 /// The decision on a proposal, on the post the deciding verb made in its thread.
 public struct ProposalStep: Sendable, Hashable, Codable {
-  public enum Action: String, Sendable, Hashable, Codable {
+  public enum Action: String, Sendable, Hashable {
     case approved, rejected
   }
 
-  public let action: Action
+  public let action: OrUnknown<Action>
 }
 
 public enum MessageStep: Sendable, Hashable, Codable {
@@ -176,17 +179,17 @@ public struct Message: Sendable, Hashable, Codable, Identifiable {
 }
 
 public struct ThreadSubject: Sendable, Hashable, Codable {
-  public enum Kind: String, Sendable, Hashable, Codable {
+  public enum Kind: String, Sendable, Hashable {
     case task, proposal
   }
 
-  public let kind: Kind
+  public let kind: OrUnknown<Kind>
   public let id: String
 }
 
 /// A conversation off a channel; a task's or a proposal's takes its subject's id.
 public struct BoardThread: Sendable, Hashable, Codable, Identifiable {
-  public enum State: String, Sendable, Hashable, Codable {
+  public enum State: String, Sendable, Hashable {
     case open, closed
   }
 
@@ -194,7 +197,7 @@ public struct BoardThread: Sendable, Hashable, Codable, Identifiable {
   public let channel: String
   public let title: String
   public let subject: ThreadSubject?
-  public let state: State
+  public let state: OrUnknown<State>
   public let openedBy: String
   public let openedAt: String
   public let closedBy: String?
@@ -285,7 +288,7 @@ public struct PullRequestLink: Sendable, Hashable, Codable {
 }
 
 public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
-  public enum Status: String, Sendable, Hashable, Codable {
+  public enum Status: String, Sendable, Hashable {
     case open, claimed, done, abandoned
   }
 
@@ -294,7 +297,7 @@ public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
   /// The channel of the project the task is filed in, where its thread hangs.
   public let channel: String
   public let title: String
-  public let status: Status
+  public let status: OrUnknown<Status>
   public let createdBy: String
   public let createdAt: String
   public let updatedAt: String
@@ -310,7 +313,7 @@ public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
   /// When the current stage last became current or lost its holder.
   public let stageSince: String
   public let stageSeq: Int
-  public let onDone: CompletionEffect
+  public let onDone: OrUnknown<CompletionEffect>
   public let pullRequest: PullRequestLink?
   /// The last stage is complete and the completion effect is running.
   public let completing: Bool
@@ -324,7 +327,7 @@ public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
     project = try container.decode(String.self, forKey: .project)
     channel = try container.decodeIfPresent(String.self, forKey: .channel) ?? "general"
     title = try container.decode(String.self, forKey: .title)
-    status = try container.decode(Status.self, forKey: .status)
+    status = try container.decode(OrUnknown<Status>.self, forKey: .status)
     createdBy = try container.decode(String.self, forKey: .createdBy)
     createdAt = try container.decode(String.self, forKey: .createdAt)
     updatedAt = try container.decode(String.self, forKey: .updatedAt)
@@ -337,7 +340,9 @@ public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
     stage = try container.decode(String.self, forKey: .stage)
     stageSince = try container.decode(String.self, forKey: .stageSince)
     stageSeq = try container.decode(Int.self, forKey: .stageSeq)
-    onDone = try container.decodeIfPresent(CompletionEffect.self, forKey: .onDone) ?? .none
+    onDone =
+      try container.decodeIfPresent(OrUnknown<CompletionEffect>.self, forKey: .onDone)
+      ?? .known(.none)
     pullRequest = try container.decodeIfPresent(PullRequestLink.self, forKey: .pullRequest)
     completing = try container.decodeIfPresent(Bool.self, forKey: .completing) ?? false
     returned = try container.decodeIfPresent(TaskReturn.self, forKey: .returned)
@@ -346,18 +351,18 @@ public struct BoardTask: Sendable, Hashable, Codable, Identifiable {
 }
 
 public struct Proposal: Sendable, Hashable, Codable, Identifiable {
-  public enum Kind: String, Sendable, Hashable, Codable {
+  public enum Kind: String, Sendable, Hashable {
     case role, member, channel, reallocation, retirement, skill, archive
   }
 
-  public enum Status: String, Sendable, Hashable, Codable {
+  public enum Status: String, Sendable, Hashable {
     case proposed, approved, rejected, provisioned, retired
   }
 
   public let id: String
-  public let kind: Kind
+  public let kind: OrUnknown<Kind>
   public let proposedBy: String
-  public let status: Status
+  public let status: OrUnknown<Status>
   public let createdAt: String
   public let decidedBy: String?
   public let decidedAt: String?
@@ -369,14 +374,14 @@ public struct Proposal: Sendable, Hashable, Codable, Identifiable {
 }
 
 public struct Decision: Sendable, Hashable, Codable, Identifiable {
-  public enum Outcome: String, Sendable, Hashable, Codable {
+  public enum Outcome: String, Sendable, Hashable {
     case approved, rejected
   }
 
   public let id: String
   public let proposalId: String
   public let decidedBy: String
-  public let outcome: Outcome
+  public let outcome: OrUnknown<Outcome>
   public let reason: String?
   public let ts: String
 }

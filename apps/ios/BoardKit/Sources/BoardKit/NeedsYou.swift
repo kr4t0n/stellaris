@@ -20,43 +20,47 @@ public enum Attention: Sendable, Hashable {
   }
 }
 
-/// Where a task stands, as the task views group it.
+/// Where a task stands, as the task views group it, or `unknown` for a status this client doesn't
+/// know.
 public enum TaskPhase: Sendable, Hashable {
-  case returned, waiting, working, landing, done, abandoned
+  case returned, waiting, working, landing, done, abandoned, unknown
 
   public init(of task: BoardTask) {
     switch task.status {
-    case .done: self = .done
-    case .abandoned: self = .abandoned
-    case .open, .claimed:
+    case .known(.done): self = .done
+    case .known(.abandoned): self = .abandoned
+    case .known(.open), .known(.claimed):
       if task.completing {
         self = .landing
       } else if task.returned != nil {
         self = .returned
       } else {
-        self = task.status == .claimed ? .working : .waiting
+        self = task.status == .known(.claimed) ? .working : .waiting
       }
+    case .unknown: self = .unknown
     }
   }
 }
 
 /// The roles that may decide a proposal: its kind's, narrowed to the user for a reallocation that
-/// changes a role's verbs or replica cap. The board checked the charter when it was filed.
+/// changes a role's verbs or replica cap. The board checked the charter when it was filed. The
+/// user decides every kind the board has had, so a kind this client doesn't know is the user's.
 public func proposalApprovers(_ proposal: Proposal) -> [String] {
-  if proposal.kind == .reallocation, let changes = proposal.charter["changes"],
+  if proposal.kind == .known(.reallocation), let changes = proposal.charter["changes"],
     ["verbs", "maxReplicas"].contains(where: { changes[$0] != nil && changes[$0] != .null })
   {
     return [userRole]
   }
   switch proposal.kind {
-  case .role, .member, .retirement, .archive: return [userRole]
-  case .channel, .reallocation, .skill: return [userRole, "steward"]
+  case .known(.role), .known(.member), .known(.retirement), .known(.archive), .unknown:
+    return [userRole]
+  case .known(.channel), .known(.reallocation), .known(.skill): return [userRole, "steward"]
   }
 }
 
 /// Whether the user may decide the proposal now. A proposer never decides its own.
 public func waitingOnYou(_ proposal: Proposal) -> Bool {
-  proposal.status == .proposed && proposal.proposedBy != userName
+  proposal.status == .known(.proposed) && proposal.proposedBy != userName
     && proposalApprovers(proposal).contains(userRole)
 }
 
@@ -64,7 +68,7 @@ public func waitingOnYou(_ proposal: Proposal) -> Bool {
 /// it.
 public func stageForYou(_ task: BoardTask) -> Stage? {
   switch TaskPhase(of: task) {
-  case .landing, .done, .abandoned: return nil
+  case .landing, .done, .abandoned, .unknown: return nil
   case .returned, .waiting, .working: break
   }
   guard let stage = task.stages.first(where: { $0.id == task.stage }),
@@ -72,7 +76,7 @@ public func stageForYou(_ task: BoardTask) -> Stage? {
   else {
     return nil
   }
-  return task.status == .open || task.claimedBy == userName ? stage : nil
+  return task.status == .known(.open) || task.claimedBy == userName ? stage : nil
 }
 
 /// What waits on the user: proposals the user may decide, then stages named for the user, then

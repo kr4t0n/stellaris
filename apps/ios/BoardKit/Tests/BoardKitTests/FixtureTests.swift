@@ -32,26 +32,26 @@ import Testing
       try check(fixture, BoardAPI.channel(try #require(messages.first).channel))
     case "threads":
       let threads = try check(fixture, BoardAPI.threads())
-      #expect(threads.contains { $0.thread.subject?.kind == .task })
+      #expect(threads.contains { $0.thread.subject?.kind == .known(.task) })
     case "thread":
       let detail = try fixture.decode(ThreadDetail.self)
       try check(fixture, BoardAPI.thread(detail.thread.id))
       let step = try #require(detail.messages.first?.step)
-      #expect(step == .task(TaskStep(action: .advanced, stage: "s1", to: "s2")))
+      #expect(step == .task(TaskStep(action: .known(.advanced), stage: "s1", to: "s2")))
     case "requests":
       let requests = try check(fixture, BoardAPI.requests())
       #expect(requests.map { $0.thread == nil } == [true, false])
     case "tasks":
       let tasks = try fixture.decode([BoardTask].self)
       try check(fixture, BoardAPI.tasks(project: try #require(tasks.first).project))
-      #expect(tasks.map(\.status) == [.open, .claimed])
+      #expect(tasks.map(\.status) == [.known(.open), .known(.claimed)])
     case "task":
       let task = try fixture.decode(BoardTask.self)
       try check(fixture, BoardAPI.task(task.id))
       #expect(task.stages.map(\.gate) == [false, true, true])
     case "proposals":
       let proposals = try check(fixture, BoardAPI.proposals())
-      #expect(proposals.map(\.kind) == [.member, .channel, .reallocation])
+      #expect(proposals.map(\.kind.value) == [.member, .channel, .reallocation])
     case "proposal":
       let proposal = try fixture.decode(Proposal.self)
       try check(fixture, BoardAPI.proposal(proposal.id))
@@ -71,7 +71,7 @@ import Testing
     case "open-thread":
       let (channel, title) = (try fixture.field("channel"), try fixture.field("title"))
       let thread = try check(fixture, BoardAPI.openThread(channel: channel, title: title))
-      #expect(thread.state == .open)
+      #expect(thread.state == .known(.open))
     case "advance-task":
       let task = try check(
         fixture,
@@ -79,12 +79,12 @@ import Testing
       #expect(task.stage == "s3")
     case "approve":
       let decision = try check(fixture, BoardAPI.approve(try fixture.field("proposal_id")))
-      #expect(decision.outcome == .approved)
+      #expect(decision.outcome == .known(.approved))
     case "reject":
       let decision = try check(
         fixture,
         BoardAPI.reject(try fixture.field("proposal_id"), reason: try fixture.field("reason")))
-      #expect(decision.outcome == .rejected)
+      #expect(decision.outcome == .known(.rejected))
     case "error-unauthorized":
       let error = try refusal(fixture, BoardAPI.me().endpoint)
       #expect(error.isUnauthorized && error.code == "UNAUTHORIZED")
@@ -113,7 +113,7 @@ import Testing
       requests: try Fixture("requests").decode([UserRequest].self))
     let kinds = items.map { item -> String in
       switch item {
-      case .proposal(let proposal, _): "proposal \(proposal.kind)"
+      case .proposal(let proposal, _): "proposal \(proposal.kind.rawValue)"
       case .stage(let task, let stage, _): "stage \(task.title) \(stage.id)"
       case .request(let message, _, _): "request \(message.author)"
       }

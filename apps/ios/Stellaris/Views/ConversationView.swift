@@ -90,7 +90,9 @@ struct ConversationView: View {
       }
     case .loaded:
       if feed.messages.isEmpty {
+        // Drags pass through to the conversation, to pull it to refresh.
         ContentUnavailableView("No messages", systemImage: "bubble.left")
+          .allowsHitTesting(false)
       }
     case .failed(let reason):
       if feed.messages.isEmpty {

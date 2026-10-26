@@ -130,18 +130,26 @@ public struct ProposalStep: Sendable, Hashable, Codable {
   public let action: OrUnknown<Action>
 }
 
+/// What a verb recorded on the post it made in its subject's thread, or `unknown`, with its fields
+/// as sent, for a shape a newer server added.
 public enum MessageStep: Sendable, Hashable, Codable {
   case task(TaskStep)
   case proposal(ProposalStep)
+  case unknown([String: JSONValue])
 
-  private enum Keys: String, CodingKey { case stage }
+  private enum Keys: String, CodingKey { case stage, action }
 
   public init(from decoder: any Decoder) throws {
-    // A task's step names the stage it acted at; a proposal's has none.
-    if try decoder.container(keyedBy: Keys.self).contains(.stage) {
-      self = .task(try TaskStep(from: decoder))
+    // A task's step names the stage it acted at; a proposal's names only its action.
+    let keys = try decoder.container(keyedBy: Keys.self)
+    if keys.contains(.stage), let step = try? TaskStep(from: decoder) {
+      self = .task(step)
+    } else if !keys.contains(.stage), keys.contains(.action),
+      let step = try? ProposalStep(from: decoder)
+    {
+      self = .proposal(step)
     } else {
-      self = .proposal(try ProposalStep(from: decoder))
+      self = .unknown(try [String: JSONValue](from: decoder))
     }
   }
 
@@ -149,17 +157,57 @@ public enum MessageStep: Sendable, Hashable, Codable {
     switch self {
     case .task(let step): try step.encode(to: encoder)
     case .proposal(let step): try step.encode(to: encoder)
+    case .unknown(let fields): try fields.encode(to: encoder)
     }
   }
 }
 
-/// What a verb recorded on a post about its work outside any thread: a knowledge topic written,
-/// written again, or removed.
-public struct MessageNotice: Sendable, Hashable, Codable {
-  public let kind: String
-  public let action: String
+/// A knowledge topic written, written again, or removed.
+public struct KnowledgeNotice: Sendable, Hashable, Codable {
+  public enum Action: String, Sendable, Hashable {
+    case written, updated, removed
+  }
+
+  public let action: OrUnknown<Action>
   public let topic: String
+  /// The project the topic belongs to, or nil for the society's.
   public let project: String?
+}
+
+/// What a verb recorded on a post about its work outside any thread, by its kind, or `unknown`,
+/// with its fields as sent, for a kind a newer server added.
+public enum MessageNotice: Sendable, Hashable, Codable {
+  case knowledge(KnowledgeNotice)
+  case unknown([String: JSONValue])
+
+  private enum Keys: String, CodingKey { case kind }
+
+  public init(from decoder: any Decoder) throws {
+    let kind = try? decoder.container(keyedBy: Keys.self).decode(String.self, forKey: .kind)
+    if kind == "knowledge", let notice = try? KnowledgeNotice(from: decoder) {
+      self = .knowledge(notice)
+    } else {
+      self = .unknown(try [String: JSONValue](from: decoder))
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    switch self {
+    case .knowledge(let notice):
+      try notice.encode(to: encoder)
+      var keys = encoder.container(keyedBy: Keys.self)
+      try keys.encode("knowledge", forKey: .kind)
+    case .unknown(let fields): try fields.encode(to: encoder)
+    }
+  }
+
+  /// The notice's kind, as the board names it.
+  public var kind: String {
+    switch self {
+    case .knowledge: "knowledge"
+    case .unknown(let fields): fields["kind"]?.string ?? ""
+    }
+  }
 }
 
 public struct Message: Sendable, Hashable, Codable, Identifiable {

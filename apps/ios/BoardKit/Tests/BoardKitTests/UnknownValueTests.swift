@@ -48,6 +48,56 @@ import Testing
     #expect(try JSONDecoder().decode(Decision.self, from: data).outcome == .unknown("deferred"))
   }
 
+  /// The captured channel's first message, carrying `notice`.
+  private func message(withNotice notice: [String: Any]) throws -> Message {
+    var messages = try #require(
+      try JSONSerialization.jsonObject(with: try Fixture("channel").body) as? [[String: Any]])
+    messages[0]["notice"] = notice
+    let data = try JSONSerialization.data(withJSONObject: messages)
+    return try #require(try JSONDecoder().decode([Message].self, from: data).first)
+  }
+
+  /// The captured task thread's first message, carrying `step`.
+  private func message(withStep step: [String: Any]) throws -> Message {
+    var detail = try #require(
+      try JSONSerialization.jsonObject(with: try Fixture("thread").body) as? [String: Any])
+    var messages = try #require(detail["messages"] as? [[String: Any]])
+    messages[0]["step"] = step
+    detail["messages"] = messages
+    let data = try JSONSerialization.data(withJSONObject: detail)
+    return try #require(try JSONDecoder().decode(ThreadDetail.self, from: data).messages.first)
+  }
+
+  @Test func aNoticeOfAKindItDoesNotKnow() throws {
+    let notice = try #require(
+      try message(withNotice: ["kind": "cron", "action": "fired", "cron": "daily"]).notice)
+    #expect(notice.kind == "cron")
+    let fields: [String: JSONValue] = [
+      "kind": .string("cron"), "action": .string("fired"), "cron": .string("daily"),
+    ]
+    #expect(notice == .unknown(fields))
+  }
+
+  @Test func aKnowledgeNoticeWithANewActionOrWithoutItsTopic() throws {
+    let archived = try message(withNotice: [
+      "kind": "knowledge", "action": "archived", "topic": "flow", "project": "demo",
+    ])
+    let notice = KnowledgeNotice(action: .unknown("archived"), topic: "flow", project: "demo")
+    #expect(archived.notice == .knowledge(notice))
+    let untitled = try message(withNotice: ["kind": "knowledge", "action": "written"])
+    let fields: [String: JSONValue] = ["kind": .string("knowledge"), "action": .string("written")]
+    #expect(untitled.notice == .unknown(fields))
+  }
+
+  @Test func aStepOfAShapeItDoesNotKnow() throws {
+    let merged = try message(withStep: ["kind": "merged", "sha": "abc"])
+    #expect(merged.step == .unknown(["kind": .string("merged"), "sha": .string("abc")]))
+    let deferred = try message(withStep: ["action": "deferred"])
+    #expect(deferred.step == .proposal(ProposalStep(action: .unknown("deferred"))))
+    let unplanned = try message(withStep: ["action": "abandoned", "stage": "s1"])
+    #expect(unplanned.step == .task(TaskStep(action: .known(.abandoned), stage: "s1", to: nil)))
+  }
+
   @Test func encodesTheValueItRead() throws {
     for raw in ["open", "paused"] {
       let value = OrUnknown<BoardTask.Status>(rawValue: raw)

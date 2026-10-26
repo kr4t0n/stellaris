@@ -23,6 +23,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - `apps/web`: the playground: the sky, the board's islands, and citizens' live turns, over the HTTP API and the two streams. Holds no state the board lacks and writes only through verbs.
 - `apps/cli`: user and developer operations against `board-core` directly. Never used by agents.
 - `apps/runner`: the runner daemon: configuration, its token or enrollment, both adapters, and `createRunner`; one per machine, the server's own included.
+- `apps/ios`: the native client. `BoardKit`, a Swift package: models, request builders, the event-stream parser, and ports of the web's `staleKeys` and `needsYou` in Foundation alone, and a `URLSession` transport with the token in the Keychain. Beside it, the fixtures the server's tests capture for it. No `package.json`, so pnpm leaves it alone.
 
 ## Decisions
 
@@ -127,6 +128,14 @@ One long-running process, the board server, hosts the only writer of the data di
 - Ids and worktree paths in text read as what they name (`entityIndex`, `linkTarget`), and an uploaded image is `image:<id>`.
 - The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
 
+### The iOS client ([ios.md](./docs/internals/ios.md))
+
+- BoardKit's core imports Foundation alone and passes `swift test` on Linux; what needs Apple's frameworks goes in `Transport/`, behind `#if canImport(Darwin)` or `Security`.
+- Its models mirror the schemas in `packages/shared` field for field, defaults included; ids and times stay strings, and a name Swift or Foundation already uses takes a `Board` prefix.
+- `apps/server/src/ios-fixtures.test.ts` captures every answer the client reads into `apps/ios/fixtures/api`, so a server change that alters one fails `check` until it is captured again with `-u`. A request the app starts to make gets a capture there and a check in BoardKit's `FixtureTests`.
+- A change to the web's `staleKeys` or `needsYou` changes its case table in `apps/ios/fixtures/cases`, and its Swift port with it.
+- `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run.
+
 ### Delivery and commits ([delivery.md](./docs/internals/delivery.md))
 
 - Commits follow Conventional Commits and reach `dev` through pull requests from `<type>/<slug>` branches, opened with `--base dev`. The branch rules require the CI job `check` by name, so renaming it or giving it a matrix needs the rules changed first.
@@ -185,6 +194,7 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ## Where the next work goes
 
+- **The iOS client:** BoardKit and its fixtures are built; the app follows, from its shell and sign-in to channels, tasks, and proposals.
 - **The interface:** the playground of [docs/plan.md section 10.1](./docs/plan.md#101-the-playground) is built through Phase 7's exit test, a browser session driving a planned task from an ask to done against a board server of scripted citizens. Later views come with their phases.
 - **Phase 9:** the metrics view is built; charter iteration remains, tuning the seed charters against what it shows, and perhaps giving the steward the metrics in its prompt.
 - **Phase 10:** the split is built, and the chart runs the runner's image on request; next are projects that span machines through the extensions of [section 7.3](./docs/plan.md#73-extensions-recorded-for-later) (the board as git host, then GitHub), the exit test with a second machine, per-runner host agents, and a Windows runner.

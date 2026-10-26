@@ -131,7 +131,7 @@ One long-running process, the board server, hosts the only writer of the data di
 ### The iOS client ([ios.md](./docs/internals/ios.md))
 
 - BoardKit's core imports Foundation alone and passes `swift test` on Linux; what needs Apple's frameworks goes in `Transport/`, behind `#if canImport(Darwin)` or `Security`.
-- Its models mirror the schemas in `packages/shared` field for field, defaults included; ids and times stay strings, and a name Swift or Foundation already uses takes a `Board` prefix.
+- Its models hold the fields of the schemas in `packages/shared` that the app reads, with the schemas' names and defaults; ids and times stay strings, a value of a closed set is an `OrUnknown`, so one a newer server adds leaves the answer readable, and a name Swift or Foundation already uses takes a `Board` prefix.
 - `apps/server/src/ios-fixtures.test.ts` captures every answer the client reads into `apps/ios/fixtures/api`, so a server change that alters one fails `check` until it is captured again with `-u`. A request the app starts to make gets a capture there and a check in BoardKit's `FixtureTests`.
 - A change to the web's `staleKeys` or `needsYou` changes its case table in `apps/ios/fixtures/cases`, and its Swift port with it.
 - `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run.

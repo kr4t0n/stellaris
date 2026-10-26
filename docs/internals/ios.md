@@ -12,9 +12,13 @@ How the native client's code is laid out, how it stays in step with the server, 
 
 The core builds and tests on Linux with swift.org's toolchain: the models (`Models.swift`), the request builders (`Requests.swift`), the board's refusals (`BoardError`), the server-sent-events parser (`ServerSentEventParser`), and the ports of the web's `staleKeys` and `needsYou`. `Transport/` holds what needs Apple's frameworks, compiled only where they exist: `BoardClient`, the API over `URLSession` with the bearer token, the event stream, and images; and `TokenStore`, the token in the Keychain. Linux's Foundation has no `URLSession.bytes(for:)`, which the event stream reads with, and no Keychain.
 
-### The models mirror the shared schemas
+### The models hold what the app reads of the shared schemas
 
-Each model is its schema in `packages/shared` field for field, decoding a field the schema defaults with the same default. Ids and times stay the strings the board sends, since both sort as text. A closed set, such as a task's status, is an enum, so one value the client does not know fails the whole list, as the web's schemas do. An event's type is a string instead, so an event a newer server adds touches no read. A model whose name Swift or Foundation already uses takes a `Board` prefix: `BoardTask`, `BoardThread`, and `BoardActor`.
+Each model holds the fields of its schema in `packages/shared` that the app reads, under the same names, and decodes a field the schema defaults with the same default. Ids and times stay the strings the board sends, since both sort as text.
+
+The app is installed apart from the server and falls behind its releases, so a value the server adds must not fail an answer, as one invalid item fails a whole list in the web, which the server's own build serves. A value of a closed set, such as a task's status, is an `OrUnknown`: one of the enum's cases, or `unknown` with the raw value, which a view can show as it is. `TaskPhase` has an `unknown` phase for a status the app doesn't know, whose stage waits on nobody, and a proposal of a kind it doesn't know waits on the user, who decides every kind the board has had. An event's type stays a string, so an event a newer server adds touches no read. `UnknownValueTests` decodes captured answers with one value changed to one the app doesn't know.
+
+A model whose name Swift or Foundation already uses takes a `Board` prefix: `BoardTask`, `BoardThread`, and `BoardActor`.
 
 ### The request builders name every request the app makes
 
@@ -24,7 +28,7 @@ Each model is its schema in `packages/shared` field for field, decoding a field 
 
 ### The server's tests capture what the client reads
 
-`apps/server/src/ios-fixtures.test.ts` starts a test society (`startTestSociety`), lets scripted citizens post, ask the user, file tasks and proposals, and update a dashboard through the verbs, then makes each request BoardKit makes, as the user over HTTP: the reads, the verbs, three refusals, and the event stream. It compares each answer with `apps/ios/fixtures/api/<name>.json` through `toMatchFileSnapshot`. Ids become placeholders numbered by where the capture first met them, the same in every fixture, and every time becomes one constant, so a capture is the same on every run.
+`apps/server/src/ios-fixtures.test.ts` starts a test society (`startTestSociety`), lets scripted citizens post, ask the user, file tasks and proposals, and update a dashboard through the verbs, then makes each request BoardKit makes, as the user over HTTP: the reads, the verbs, three refusals, and the event stream. `me` and the sign-out are captured twice, with the user's own token and with a GitHub sign-in's, whose answer names the account. It compares each answer with `apps/ios/fixtures/api/<name>.json` through `toMatchFileSnapshot`. Ids become placeholders numbered by where the capture first met them, the same in every fixture, and every time becomes one constant, so a capture is the same on every run.
 
 So a server change that alters any answer the client reads fails `pnpm test`, and with it `check`. Capture again with `pnpm vitest run apps/server/src/ios-fixtures.test.ts -u` after `pnpm build`, and read the fixtures' diff: the change runs `ios.yml`, where BoardKit's tests say whether the client still reads the new answers. oxfmt leaves `apps/ios/fixtures/api` alone, since the test writes it.
 

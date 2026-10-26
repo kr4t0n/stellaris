@@ -64,7 +64,7 @@ The iOS client's package has tests of its own, outside pnpm:
 ```bash
 cd apps/ios/BoardKit && swift test          # BoardKit with Swift 6, on macOS or Linux; the transport's tests need macOS
 cd apps/ios/BoardKit && xcodebuild test -scheme BoardKit -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1'
-pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # capture the client's fixtures again after a server change
+pnpm build && pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # capture the client's fixtures again after a server change
 ```
 
 [docs/internals/ios.md](./docs/internals/ios.md) covers the fixtures and the case tables that keep the client in step with the server.

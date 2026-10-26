@@ -57,6 +57,7 @@ private struct ChannelRow: View {
         Label(channel.name, systemImage: "number")
       }
     }
+    .foregroundStyle(.primary)
     .accessibilityIdentifier("channel-\(channel.ref)")
   }
 }
@@ -84,6 +85,7 @@ private struct TaskRow: View {
         Image(systemName: "checklist")
       }
     }
+    .foregroundStyle(.primary)
     .accessibilityIdentifier("task-\(task.id)")
   }
 }

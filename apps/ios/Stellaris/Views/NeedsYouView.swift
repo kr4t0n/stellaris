@@ -103,6 +103,7 @@ private struct AttentionRow: View {
           .lineLimit(2)
       }
     }
+    .foregroundStyle(.primary)
     .accessibilityIdentifier(item.id)
   }
 }

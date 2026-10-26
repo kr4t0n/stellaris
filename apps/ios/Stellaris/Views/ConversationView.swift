@@ -38,10 +38,14 @@ struct ConversationView: View {
       if feed.state != .loaded {
         await feed.load(using: model)
       }
-      // Each time the view shows, the message it was left at, which it already shows unless
-      // the view was built again.
+      // The message the view was left at, which it already shows unless it was built again. The
+      // newest is left to the bottom anchor: scrolled to by id before the lazy stack has measured
+      // its rows, it lands a message short.
       let saved = model.memory?.anchor(feed.conversation)
-      anchor = feed.messages.contains { $0.id == saved } ? saved : feed.messages.last?.id
+      let ids = feed.messages.map(\.id)
+      if let saved, saved != ids.last, ids.contains(saved), anchor != saved {
+        anchor = saved
+      }
     }
     .onChange(of: anchor) { _, id in
       if let id {

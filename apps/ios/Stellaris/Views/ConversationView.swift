@@ -16,6 +16,7 @@ struct ConversationView: View {
             .padding(.horizontal)
             .padding(.vertical, 12)
         }
+        .accessibilityIdentifier("messages")
         .overlay { state }
       } else {
         // Built once the messages are there, so it opens at its anchor rather than laying out
@@ -104,33 +105,50 @@ private struct MessageList<Header: View>: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
   let header: Header
+  /// Where the list opens.
+  let start: String?
   /// The message at the foot of the view.
   @State private var anchor: String?
+  /// Whether the list has been scrolled to `start`, before which the anchor is not kept.
+  @State private var opened = false
 
   init(feed: ConversationFeed, header: Header, start: String?) {
     self.feed = feed
     self.header = header
     let ids = feed.messages.map(\.id)
-    _anchor = State(initialValue: start.flatMap { ids.contains($0) ? $0 : nil } ?? ids.last)
+    self.start = start.flatMap { ids.contains($0) ? $0 : nil } ?? ids.last
   }
 
   var body: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16) {
-        header
-        ForEach(feed.messages) { message in
-          MessageRow(message: message)
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 16) {
+          header
+          ForEach(feed.messages) { message in
+            MessageRow(message: message)
+          }
+        }
+        .scrollTargetLayout()
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+      }
+      .scrollPosition(id: $anchor, anchor: .bottom)
+      .defaultScrollAnchor(.bottom)
+      .accessibilityIdentifier("messages")
+      .onAppear {
+        // A scroll view that replaces another can lay out at its top and report that first, so
+        // the list goes to where it opens on the main actor's next turn, once laid out.
+        Task {
+          if let start {
+            proxy.scrollTo(start, anchor: .bottom)
+          }
+          opened = true
         }
       }
-      .scrollTargetLayout()
-      .padding(.horizontal)
-      .padding(.vertical, 12)
-    }
-    .scrollPosition(id: $anchor, anchor: .bottom)
-    .defaultScrollAnchor(.bottom)
-    .onChange(of: anchor) { _, id in
-      if let id {
-        model.memory?.setAnchor(id, for: feed.conversation)
+      .onChange(of: anchor) { _, id in
+        if opened, let id {
+          model.memory?.setAnchor(id, for: feed.conversation)
+        }
       }
     }
   }

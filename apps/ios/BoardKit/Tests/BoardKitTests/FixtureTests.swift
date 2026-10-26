@@ -37,6 +37,12 @@ import Testing
     case "channel":
       let messages = try fixture.decode([Message].self)
       try check(fixture, BoardAPI.channel(try #require(messages.first).channel))
+      #expect(messages.allSatisfy { $0.notice == nil })
+    case "channel-notice":
+      let messages = try fixture.decode([Message].self)
+      try check(fixture, BoardAPI.channel(try #require(messages.first).channel))
+      let notice = KnowledgeNotice(action: .known(.written), topic: "release-flow", project: "demo")
+      #expect(messages.last?.notice == .knowledge(notice))
     case "threads":
       let threads = try check(fixture, BoardAPI.threads())
       #expect(threads.contains { $0.thread.subject?.kind == .known(.task) })
@@ -134,7 +140,7 @@ import Testing
 
   static let checked = [
     "auth-config", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
-    "channels", "channel", "threads",
+    "channels", "channel", "channel-notice", "threads",
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream",

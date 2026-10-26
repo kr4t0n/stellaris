@@ -263,6 +263,15 @@ describe("the answers the iOS client reads", () => {
     await call("error-not-found", "GET", "/api/tasks/01HZZZZZZZZZZZZZZZZZZZZZZZ");
     await call("error-refused", "POST", "/api/verbs/approve", { proposal_id: channel?.id });
 
+    // A notice, the post a verb makes about its work, as writing a knowledge topic does.
+    await board.invoke(ENGINEER, "write_knowledge", {
+      project: "demo",
+      topic: "release-flow",
+      body: "The docs land before the export view.",
+      revision: 0,
+    });
+    await call("channel-notice", "GET", "/api/channels/demo/general");
+
     // The event stream as the server writes it, every event since the society was set up.
     const events = BoardEventSchema.array().parse(await read(`/api/events?since=${streamFrom}`));
     const route = `/api/events/stream?since=${streamFrom}`;
@@ -289,7 +298,7 @@ describe("the answers the iOS client reads", () => {
     });
 
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(27);
+    expect(captures.size).toBe(28);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

@@ -23,14 +23,17 @@ public struct BoardError: Error, Sendable, Hashable {
 
   private struct Body: Decodable {
     let error: String
-    let message: String
+    /// Left out by the app's code exchange, which answers as OAuth does (RFC 6749, section 5.2).
+    let message: String?
   }
 
   /// The refusal in an answer's body; one without the board's shape, as from a proxy, keeps its
   /// status alone.
   public init(status: Int, body: Data) {
     if let refusal = try? JSONDecoder().decode(Body.self, from: body) {
-      self.init(status: status, code: refusal.error, message: refusal.message)
+      self.init(
+        status: status, code: refusal.error,
+        message: refusal.message ?? "The board answered \(status).")
     } else {
       self.init(status: status, code: "HTTP_\(status)", message: "The board answered \(status).")
     }

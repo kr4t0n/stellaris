@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/auth/github/callback?state=fixture-state&code=fixture-github-code"
+  },
+  "status": 302,
+  "location": "/auth/app/signin#code=fixture-code"
+}

@@ -26,16 +26,46 @@ const TIME = "2026-01-01T00:00:00.000Z";
 const IdSchema = z.object({ id: z.string() });
 const TaskRowSchema = z.object({ id: z.string(), title: z.string() });
 const ProposalRowSchema = z.object({ id: z.string(), kind: z.string() });
+const SessionSchema = z.object({ session: z.string() });
+
+/** The app's PKCE pair: RFC 7636's example in its appendix B, a verifier and its S256 challenge. */
+const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+/** The GitHub login the board lets in, and the code GitHub gives back for one it doesn't. */
+const LOGIN = "fixture-login";
+const STRANGER = "stranger";
+
+/** GitHub as the board's sign-in asks it: a token for any code, then the account it names. */
+const github: typeof fetch = async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (url === "https://github.com/login/oauth/access_token") {
+    const body = typeof init?.body === "string" ? init.body : "{}";
+    const { code } = z.object({ code: z.string() }).parse(JSON.parse(body));
+    return Response.json({ access_token: `gho_${code}` });
+  }
+  const authorization = new Headers(init?.headers).get("authorization") ?? "";
+  return Response.json({ login: authorization.endsWith(STRANGER) ? STRANGER : LOGIN, id: 1001 });
+};
 
 /**
  * Ids and times as a fixture shows them. Each id becomes a placeholder numbered in the order the
  * capture first met it, the same in every fixture, so a request names what an earlier answer gave.
+ * A secret the server made up, as a sign-in's state, code, or session, becomes the name given it.
  */
 class Normaliser {
   private readonly ids = new Map<string, string>();
+  private readonly secrets = new Map<string, string>();
+
+  secret(value: string, name: string): void {
+    this.secrets.set(value, name);
+  }
 
   text(raw: string): string {
-    return raw
+    let masked = raw;
+    for (const [value, name] of this.secrets) {
+      masked = masked.replaceAll(value, name);
+    }
+    return masked
       .replace(ULIDS, (id) => {
         let placeholder = this.ids.get(id);
         if (placeholder === undefined) {
@@ -58,6 +88,8 @@ interface Capture {
   /** The answer's JSON, or for the event stream its text. */
   readonly body?: unknown;
   readonly text?: string;
+  /** Where a redirect sends the browser, for the steps of a sign-in. */
+  readonly location?: string;
 }
 
 /** The project and the citizens the fixtures' society has. */
@@ -160,7 +192,20 @@ describe("the answers the iOS client reads", () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-ios-fixtures-"));
     const { board, userToken } = await Board.init(dir, { name: "fixtures" });
     await addMembers(board);
-    society = await startTestSociety({ board, runnerName: "runner-1", backends: () => ({}) });
+    society = await startTestSociety({
+      board,
+      runnerName: "runner-1",
+      backends: () => ({}),
+      signIn: {
+        github: {
+          clientId: "Iv1.fixtures",
+          clientSecret: "fixture-secret",
+          users: [LOGIN],
+          appleAppId: "ABCDE12345.com.example.stellaris",
+        },
+        fetch: github,
+      },
+    });
     const { url } = society;
     // The runner's connection is logged a moment after it starts; the stream is captured from after it.
     await expect
@@ -206,8 +251,74 @@ describe("the answers the iOS client reads", () => {
     const read = async (route: string): Promise<unknown> =>
       (await fetch(`${url}${route}`, { headers: { authorization: `Bearer ${userToken}` } })).json();
 
+    /**
+     * A step of a sign-in in the browser, kept under `name`, after the code a landing carries is
+     * named; returns where it sends the browser.
+     */
+    const step = async (name: string, route: string): Promise<string> => {
+      const response = await fetch(`${url}${route}`, { redirect: "manual" });
+      const location = response.headers.get("location") ?? "";
+      const code = new URLSearchParams(new URL(location, url).hash.slice(1)).get("code");
+      if (code !== null) {
+        normaliser.secret(code, "fixture-code");
+      }
+      captures.set(name, {
+        request: normaliser.json({ method: "GET", path: route }),
+        status: response.status,
+        location: normaliser.text(location),
+      });
+      return location;
+    };
+    /** Starts the app's sign-in, kept under `name` when given, and gives the state GitHub would come back with. */
+    const leave = async (name: string | null, stateName: string): Promise<string> => {
+      const query = `landing=app&code_challenge=${CHALLENGE}&code_challenge_method=S256`;
+      const response = await fetch(`${url}/auth/github?${query}`, { redirect: "manual" });
+      const location = response.headers.get("location") ?? "";
+      const state = new URL(location).searchParams.get("state") ?? "";
+      normaliser.secret(state, stateName);
+      if (name === null) {
+        return state;
+      }
+      captures.set(name, {
+        request: normaliser.json({ method: "GET", path: `/auth/github?${query}` }),
+        status: response.status,
+        location: normaliser.text(location),
+      });
+      return state;
+    };
+
     // The reads, before the user changes anything.
     await call("auth-config", "GET", "/auth/config", undefined, null);
+
+    // The app's sign-in with GitHub: the app starts it with its challenge, GitHub sends the browser
+    // back to the board, which lands at the app's https path with a code the app trades with its
+    // verifier for the session. One more lands refused, for a login the board doesn't let in.
+    const state = await leave("app-sign-in", "fixture-state");
+    const landing = await step(
+      "app-landing",
+      `/auth/github/callback?state=${state}&code=fixture-github-code`,
+    );
+    const code = new URLSearchParams(new URL(landing, url).hash.slice(1)).get("code") ?? "";
+    const refusedState = await leave(null, "fixture-state-refused");
+    await step(
+      "app-landing-refused",
+      `/auth/github/callback?state=${refusedState}&code=${STRANGER}`,
+    );
+    const exchange = { code, code_verifier: VERIFIER };
+    const traded = await fetch(`${url}/auth/app/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(exchange),
+    });
+    const tradedBody: unknown = await traded.json();
+    normaliser.secret(SessionSchema.parse(tradedBody).session, "fixture-session");
+    captures.set("app-token", {
+      request: normaliser.json({ method: "POST", path: "/auth/app/token", body: exchange }),
+      status: traded.status,
+      body: normaliser.json(tradedBody),
+    });
+    // A code is good once.
+    await call("error-app-token", "POST", "/auth/app/token", exchange, null);
     await call("me", "GET", "/api/me");
     await call("society", "GET", "/api/society");
     await call("projects", "GET", "/api/projects");
@@ -298,7 +409,7 @@ describe("the answers the iOS client reads", () => {
     });
 
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(28);
+    expect(captures.size).toBe(33);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

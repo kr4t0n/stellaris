@@ -13,6 +13,8 @@ struct Fixture {
   let body: Data
   /// The answer's text, for the event stream.
   let text: String?
+  /// Where a step of a sign-in sends the browser.
+  let location: String?
 
   /// The folder the fixtures are in, beside this package.
   static let folder = URL(fileURLWithPath: #filePath)
@@ -41,6 +43,7 @@ struct Fixture {
     status = file["status"] as? Int ?? 0
     body = try file["body"].map { try JSONSerialization.data(withJSONObject: $0) } ?? Data()
     text = file["text"] as? String
+    location = file["location"] as? String
   }
 
   /// The request's body as it was sent.

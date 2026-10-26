@@ -15,7 +15,29 @@ import Testing
     let fixture = try Fixture(name)
     switch name {
     case "auth-config":
-      #expect(try check(fixture, BoardAPI.authConfig()).github == false)
+      let config = try check(fixture, BoardAPI.authConfig())
+      #expect(config.github && config.appLanding)
+    case "app-sign-in":
+      let query = try #require(URLComponents(string: fixture.path)?.queryItems)
+      let challenge = try #require(query.first { $0.name == "code_challenge" }?.value)
+      expectEndpoint(fixture, BoardAPI.appSignIn(challenge: challenge))
+      // The board took the challenge and sent the browser on to GitHub.
+      #expect(fixture.status == 302)
+      let location = try #require(fixture.location)
+      #expect(URL(string: location)?.host == "github.com")
+    case "app-landing":
+      #expect(try landing(fixture) == .code("fixture-code"))
+    case "app-landing-refused":
+      #expect(try landing(fixture) == .refused("not-allowed"))
+    case "app-token":
+      let request = BoardAPI.appToken(
+        code: try fixture.field("code"), verifier: try fixture.field("code_verifier"))
+      #expect(try check(fixture, request).session == "fixture-session")
+    case "error-app-token":
+      let request = BoardAPI.appToken(
+        code: try fixture.field("code"), verifier: try fixture.field("code_verifier"))
+      let error = try refusal(fixture, request.endpoint)
+      #expect(error.status == 400 && error.code == "invalid_grant")
     case "me":
       let actor = try check(fixture, BoardAPI.me())
       #expect(actor.name == "user" && actor.signIn == nil)
@@ -139,7 +161,8 @@ import Testing
   }
 
   static let checked = [
-    "auth-config", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
+    "auth-config", "app-sign-in", "app-landing", "app-landing-refused", "app-token",
+    "error-app-token", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
     "channels", "channel", "channel-notice", "threads",
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
@@ -161,6 +184,15 @@ import Testing
     let error = BoardError(status: fixture.status, body: fixture.body)
     #expect(!error.message.isEmpty && !error.code.hasPrefix("HTTP_"))
     return error
+  }
+
+  /// What the app reads of where a sign-in step sent the browser, on a board at any address.
+  private func landing(_ fixture: Fixture) throws -> AppSignIn.Landing? {
+    #expect(fixture.status == 302)
+    let board = try #require(URL(string: "https://board.example"))
+    let location = try #require(fixture.location)
+    let address = try #require(URL(string: location, relativeTo: board))
+    return AppSignIn.landing(address.absoluteURL)
   }
 
   private func expectEndpoint(_ fixture: Fixture, _ endpoint: Endpoint) {

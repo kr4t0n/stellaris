@@ -59,6 +59,19 @@
     override func stopLoading() {}
   }
 
+  /// A flag set once, from whichever thread a stub answers on; `set` says whether it was set before.
+  final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() -> Bool {
+      lock.withLock {
+        defer { value = true }
+        return value
+      }
+    }
+  }
+
   extension URLRequest {
     /// The body as a session hands it to a protocol, which is a stream.
     var sentBody: Data {
@@ -127,6 +140,36 @@
         StubBoard.Answer(pieces: [Data("<!doctype html>".utf8)])
       }
       #expect(await BoardClient.authConfig(board: address, session: older).github == false)
+    }
+
+    /// The code trade as the board answered it, sent with no token and refused once the code is used.
+    @Test func tradesTheAppsCodeForTheSession() async throws {
+      let traded = try Fixture("app-token")
+      let refused = try Fixture("error-app-token")
+      let (input, answer) = (traded.inputData, traded.body)
+      let (status, refusal) = (refused.status, refused.body)
+      let used = LockedFlag()
+      let (session, board) = StubBoard.board { request in
+        guard request.httpMethod == "POST", request.url?.path == "/auth/app/token",
+          request.value(forHTTPHeaderField: "Authorization") == nil,
+          request.sentBody.json == input?.json
+        else {
+          return StubBoard.Answer(status: 404)
+        }
+        return used.set()
+          ? StubBoard.Answer(status: status, pieces: [refusal])
+          : StubBoard.Answer(pieces: [answer])
+      }
+      let (code, verifier) = (try traded.field("code"), try traded.field("code_verifier"))
+      let token = try await BoardClient.appSession(
+        board: board, code: code, verifier: verifier, session: session)
+      #expect(token == "fixture-session")
+      await #expect(
+        throws: BoardError(status: 400, code: "invalid_grant", message: "The board answered 400.")
+      ) {
+        try await BoardClient.appSession(
+          board: board, code: code, verifier: verifier, session: session)
+      }
     }
 
     @Test func readsAnImagesBytes() async throws {

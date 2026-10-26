@@ -20,6 +20,25 @@ public struct SignIn: Sendable, Hashable, Codable {
 /// How a board lets people in, asked before anyone has a token.
 public struct AuthConfig: Sendable, Hashable, Codable {
   public let github: Bool
+  /// Whether the board takes the app's own sign-in with GitHub (`AppSignIn`), which it does only
+  /// once it names the app; false from a board that doesn't say.
+  public let appLanding: Bool
+
+  public init(github: Bool, appLanding: Bool = false) {
+    self.github = github
+    self.appLanding = appLanding
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    github = try container.decode(Bool.self, forKey: .github)
+    appLanding = try container.decodeIfPresent(Bool.self, forKey: .appLanding) ?? false
+  }
+}
+
+/// The session the app's sign-in with GitHub ends in: a token like any other.
+public struct AppSession: Sendable, Hashable, Codable {
+  public let session: String
 }
 
 public struct SignedOut: Sendable, Hashable, Codable {

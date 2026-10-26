@@ -29,6 +29,16 @@
       return config
     }
 
+    /// Trades the code the app's sign-in with GitHub landed with, and the verifier it started with,
+    /// for the session; the board's refusal as a `BoardError`.
+    public static func appSession(
+      board: URL, code: String, verifier: String, session: URLSession = .shared
+    ) async throws -> String {
+      let request = BoardAPI.appToken(code: code, verifier: verifier)
+      let data = try await bytes(of: request.endpoint, board: board, token: nil, session: session)
+      return try request.decode(data).session
+    }
+
     /// The answer to `request`, or the board's refusal as a `BoardError`.
     public func send<Response>(_ request: BoardRequest<Response>) async throws -> Response {
       try request.decode(try await bytes(of: request.endpoint))
@@ -80,6 +90,12 @@
     }
 
     private func bytes(of endpoint: Endpoint) async throws -> Data {
+      try await BoardClient.bytes(of: endpoint, board: board, token: token, session: session)
+    }
+
+    private static func bytes(
+      of endpoint: Endpoint, board: URL, token: String?, session: URLSession
+    ) async throws -> Data {
       let data: Data
       let response: URLResponse
       do {

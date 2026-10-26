@@ -239,31 +239,29 @@ final class ScreenUITests: ShellTestCase {
       attachment.lifetime = .keepAlways
       add(attachment)
     }
-    keepScreen("portrait-sign-in")
+    keepScreen("sign-in")
     signIn(app)
+    // Chat is the tab shown: tapping it again would scroll the conversation to its top, as iOS
+    // does for the tab in front. Portrait alone, since setting the orientation leaves the
+    // simulator's outer display as it is.
     expectGeneral(app)
-    // Portrait alone: setting the orientation leaves the simulator's outer display as it is.
-    let name = "portrait"
-    do {
-      tab(app, "Chat")
-      expectGeneral(app)
-      print("\(name) window: \(app.windows.firstMatch.frame)")
-      keepScreen("\(name)-chat")
-      tab(app, "Board")
-      XCTAssertTrue(app.buttons["channel-governance"].waitForExistence(timeout: 20))
-      keepScreen("\(name)-board")
-      tab(app, "Needs you")
-      XCTAssertTrue(app.buttons["stage-00000000000000000000000010"].waitForExistence(timeout: 20))
-      keepScreen("\(name)-needs-you")
-      tab(app, "Board")
-      pick(app, "settings")
-      XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
-      keepScreen("\(name)-settings")
-      app.buttons["Done"].firstMatch.tap()
-      pick(app, "task-00000000000000000000000010")
-      expectConversation(app, "Add the export view")
-      keepScreen("\(name)-thread")
-      pick(app, "back")
-    }
+    print("window: \(app.windows.firstMatch.frame)")
+    keepScreen("chat")
+    tab(app, "Board")
+    XCTAssertTrue(app.buttons["channel-governance"].waitForExistence(timeout: 20))
+    keepScreen("board")
+    tab(app, "Needs you")
+    XCTAssertTrue(app.buttons["stage-00000000000000000000000010"].waitForExistence(timeout: 20))
+    keepScreen("needs-you")
+    tab(app, "Board")
+    pick(app, "settings")
+    XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
+    keepScreen("settings")
+    app.buttons["Done"].firstMatch.tap()
+    pick(app, "task-00000000000000000000000010")
+    expectConversation(app, "Add the export view")
+    keepScreen("thread")
+    pick(app, "back")
+    expectGeneral(app)
   }
 }

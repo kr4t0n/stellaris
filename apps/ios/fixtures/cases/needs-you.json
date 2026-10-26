@@ -1,0 +1,890 @@
+[
+  {
+    "name": "proposals the user may decide, oldest first",
+    "proposals": [
+      {
+        "id": "01M5A0000000000000000000PA",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T10:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PB",
+        "kind": "channel",
+        "proposedBy": "eng-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "project": "demo",
+          "name": "release",
+          "purpose": "The release."
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PC",
+        "kind": "skill",
+        "proposedBy": "steward-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T11:00:00.000Z",
+        "charter": {
+          "name": "triage",
+          "summary": "Sort the inbox."
+        },
+        "body": ""
+      }
+    ],
+    "tasks": [],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PB",
+        "since": "2026-10-26T09:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PA",
+        "since": "2026-10-26T10:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PC",
+        "since": "2026-10-26T11:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "a proposal the user filed or one already decided waits on nobody",
+    "proposals": [
+      {
+        "id": "01M5A0000000000000000000PD",
+        "kind": "member",
+        "proposedBy": "user",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PE",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "approved",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": "",
+        "decidedBy": "user",
+        "decidedAt": "2026-10-26T10:00:00.000Z"
+      },
+      {
+        "id": "01M5A0000000000000000000PF",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "rejected",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": "",
+        "decidedBy": "steward-1",
+        "decidedAt": "2026-10-26T10:00:00.000Z",
+        "reason": "Not now."
+      }
+    ],
+    "tasks": [],
+    "requests": [],
+    "expected": []
+  },
+  {
+    "name": "a reallocation waits on the user whatever it changes",
+    "proposals": [
+      {
+        "id": "01M5A0000000000000000000PG",
+        "kind": "reallocation",
+        "proposedBy": "steward-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "role": "reviewer",
+          "changes": {
+            "maxReplicas": 2
+          },
+          "description": "Two."
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PH",
+        "kind": "reallocation",
+        "proposedBy": "steward-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "charter": {
+          "role": "reviewer",
+          "changes": {
+            "backlogThreshold": 3
+          },
+          "description": "Sooner."
+        },
+        "body": ""
+      }
+    ],
+    "tasks": [],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PH",
+        "since": "2026-10-26T08:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PG",
+        "since": "2026-10-26T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "proposals filed in the same moment keep their order",
+    "proposals": [
+      {
+        "id": "01M5A0000000000000000000PJ",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PK",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PM",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T09:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      }
+    ],
+    "tasks": [],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PJ",
+        "since": "2026-10-26T09:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PK",
+        "since": "2026-10-26T09:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PM",
+        "since": "2026-10-26T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "stages named for the user or the user's role, oldest first",
+    "proposals": [],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TA",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TA",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T10:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000TB",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TB",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "role": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:30:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      }
+    ],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "stage",
+        "id": "01M5A0000000000000000000TB",
+        "stage": "s2",
+        "since": "2026-10-26T09:30:00.000Z"
+      },
+      {
+        "kind": "stage",
+        "id": "01M5A0000000000000000000TA",
+        "stage": "s2",
+        "since": "2026-10-26T10:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "a stage the user holds still waits on the user",
+    "proposals": [],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TC",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TC",
+        "status": "claimed",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": ["user"],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": "",
+        "claimedBy": "user",
+        "leaseExpiresAt": "2026-10-26T10:00:00.000Z"
+      }
+    ],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "stage",
+        "id": "01M5A0000000000000000000TC",
+        "stage": "s2",
+        "since": "2026-10-26T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "a stage someone else holds or is named for waits on them",
+    "proposals": [],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TD",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TD",
+        "status": "claimed",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": ["concierge-1"],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": "",
+        "claimedBy": "concierge-1",
+        "leaseExpiresAt": "2026-10-26T10:00:00.000Z"
+      },
+      {
+        "id": "01M5A0000000000000000000TE",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TE",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "rev-1"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000TF",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TF",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "role": "reviewer"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000TG",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TG",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": []
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      }
+    ],
+    "requests": [],
+    "expected": []
+  },
+  {
+    "name": "a task landing, done, or abandoned waits on nobody",
+    "proposals": [],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TH",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TH",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": true,
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000TJ",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TJ",
+        "status": "done",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000TK",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TK",
+        "status": "abandoned",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      }
+    ],
+    "requests": [],
+    "expected": []
+  },
+  {
+    "name": "a task sent back to the user's stage waits on the user",
+    "proposals": [],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TM",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TM",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T09:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": "",
+        "returned": {
+          "from": "s3",
+          "by": "rev-1",
+          "at": "2026-10-26T09:00:00.000Z"
+        }
+      }
+    ],
+    "requests": [],
+    "expected": [
+      {
+        "kind": "stage",
+        "id": "01M5A0000000000000000000TM",
+        "stage": "s2",
+        "since": "2026-10-26T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "questions oldest first, in channels and threads",
+    "proposals": [],
+    "tasks": [],
+    "requests": [
+      {
+        "message": {
+          "id": "01M5A0000000000000000000MA",
+          "author": "eng-1",
+          "channel": "demo/general",
+          "ts": "2026-10-26T10:00:00.000Z",
+          "mentions": ["user"],
+          "body": "@user, which first?"
+        },
+        "thread": null
+      },
+      {
+        "message": {
+          "id": "01M5A0000000000000000000MB",
+          "author": "concierge-1",
+          "channel": "general",
+          "ts": "2026-10-26T08:00:00.000Z",
+          "mentions": ["user"],
+          "body": "@user, which first?",
+          "thread": "01M5A00000000000000THREAD1"
+        },
+        "thread": {
+          "id": "01M5A00000000000000THREAD1",
+          "channel": "general",
+          "title": "Release notes",
+          "state": "open",
+          "openedBy": "concierge-1",
+          "openedAt": "2026-10-26T07:00:00.000Z",
+          "body": ""
+        }
+      }
+    ],
+    "expected": [
+      {
+        "kind": "request",
+        "id": "01M5A0000000000000000000MB",
+        "thread": "01M5A00000000000000THREAD1",
+        "since": "2026-10-26T08:00:00.000Z"
+      },
+      {
+        "kind": "request",
+        "id": "01M5A0000000000000000000MA",
+        "thread": null,
+        "since": "2026-10-26T10:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "proposals, then stages, then questions, each oldest first",
+    "proposals": [
+      {
+        "id": "01M5A0000000000000000000PN",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T12:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      },
+      {
+        "id": "01M5A0000000000000000000PP",
+        "kind": "member",
+        "proposedBy": "concierge-1",
+        "status": "proposed",
+        "createdAt": "2026-10-26T11:00:00.000Z",
+        "charter": {
+          "name": "eng-2",
+          "role": "engineer",
+          "cli": "claude",
+          "memberships": ["demo"]
+        },
+        "body": ""
+      }
+    ],
+    "tasks": [
+      {
+        "id": "01M5A0000000000000000000TN",
+        "project": "demo",
+        "channel": "general",
+        "title": "Task TN",
+        "status": "open",
+        "createdBy": "concierge-1",
+        "createdAt": "2026-10-26T08:00:00.000Z",
+        "updatedAt": "2026-10-26T09:00:00.000Z",
+        "blockedBy": [],
+        "requiredCapabilities": [],
+        "stages": [
+          {
+            "id": "s1",
+            "name": "Build it",
+            "role": "engineer",
+            "gate": false,
+            "holders": ["eng-1"],
+            "completedBy": "eng-1",
+            "completedAt": "2026-10-26T09:00:00.000Z"
+          },
+          {
+            "id": "s2",
+            "name": "Approve it",
+            "gate": true,
+            "holders": [],
+            "agent": "user"
+          }
+        ],
+        "stage": "s2",
+        "stageSince": "2026-10-26T10:00:00.000Z",
+        "stageSeq": 2,
+        "onDone": "none",
+        "completing": false,
+        "body": ""
+      }
+    ],
+    "requests": [
+      {
+        "message": {
+          "id": "01M5A0000000000000000000MC",
+          "author": "eng-1",
+          "channel": "demo/general",
+          "ts": "2026-10-26T09:00:00.000Z",
+          "mentions": ["user"],
+          "body": "@user, which first?"
+        },
+        "thread": null
+      },
+      {
+        "message": {
+          "id": "01M5A0000000000000000000MD",
+          "author": "eng-1",
+          "channel": "demo/general",
+          "ts": "2026-10-26T07:00:00.000Z",
+          "mentions": ["user"],
+          "body": "@user, which first?"
+        },
+        "thread": null
+      }
+    ],
+    "expected": [
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PP",
+        "since": "2026-10-26T11:00:00.000Z"
+      },
+      {
+        "kind": "proposal",
+        "id": "01M5A0000000000000000000PN",
+        "since": "2026-10-26T12:00:00.000Z"
+      },
+      {
+        "kind": "stage",
+        "id": "01M5A0000000000000000000TN",
+        "stage": "s2",
+        "since": "2026-10-26T10:00:00.000Z"
+      },
+      {
+        "kind": "request",
+        "id": "01M5A0000000000000000000MD",
+        "thread": null,
+        "since": "2026-10-26T07:00:00.000Z"
+      },
+      {
+        "kind": "request",
+        "id": "01M5A0000000000000000000MC",
+        "thread": null,
+        "since": "2026-10-26T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "nothing waits",
+    "proposals": [],
+    "tasks": [],
+    "requests": [],
+    "expected": []
+  }
+]

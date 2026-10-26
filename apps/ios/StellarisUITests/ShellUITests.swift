@@ -89,11 +89,14 @@ class ShellTestCase: XCTestCase {
     }
   }
 
-  /// Sends the app to the background, where iOS suspends it.
+  /// Sends the app to the background, where iOS suspends it, by bringing Settings to the front, as
+  /// switching to another app does: on the iPhone Duo simulator, pressing Home leaves it in front.
   @MainActor func toBackground(_ app: XCUIApplication) {
-    XCUIDevice.shared.press(.home)
-    let gone = app.wait(for: .runningBackgroundSuspended, timeout: 20)
-    XCTAssertTrue(gone || app.state == .runningBackground, "the app is still in front")
+    let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+    settings.activate()
+    XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 20))
+    let away = app.wait(for: .runningBackgroundSuspended, timeout: 20)
+    XCTAssertTrue(away || app.state == .runningBackground, "the app is still in front")
   }
 
   /// Keeps a picture of the screen with the test's results.

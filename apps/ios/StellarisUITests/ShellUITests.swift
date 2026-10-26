@@ -39,6 +39,7 @@ class ShellTestCase: XCTestCase {
   /// title, the first line of its content, is sixty messages up, where the view builds nothing.
   @MainActor func expectGeneral(_ app: XCUIApplication) {
     XCTAssertTrue(message(app, 60).waitForExistence(timeout: 20), "Chat doesn't show #general")
+    XCTAssertTrue(message(app, 60).isHittable, "#general doesn't open at its newest message")
   }
 
   /// Waits for Chat to show the conversation called `name`, short enough that its title shows.
@@ -109,9 +110,10 @@ class ShellTestCase: XCTestCase {
 }
 
 final class ShellUITests: ShellTestCase {
-  /// The draft and the scroll position of the open conversation survive a trip to Board and back,
-  /// and a rotation.
-  @MainActor func testKeepsTheDraftAndScrollPositionThroughBoardAndARotation() {
+  /// The draft and the scroll position of the open conversation survive a trip to Board and back.
+  /// Rotation isn't checked here: setting the orientation leaves the iPhone Duo simulator's outer
+  /// display as it is.
+  @MainActor func testKeepsTheDraftAndScrollPositionThroughBoardAndBack() {
     let app = launch()
     signIn(app)
     expectGeneral(app)
@@ -122,7 +124,7 @@ final class ShellUITests: ShellTestCase {
     draft(app).typeText("Half a thought")
     dragDown(app, times: 3)
     keepScreen("scrolled-up")
-    XCTAssertFalse(newest.isHittable)
+    XCTAssertFalse(newest.exists && newest.isHittable)
     guard let anchored = lowestShown(app) else {
       return XCTFail("no message of #general shows after scrolling")
     }
@@ -132,17 +134,8 @@ final class ShellUITests: ShellTestCase {
     tab(app, "Chat")
     XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
     XCTAssertEqual(lowestShown(app), anchored)
+    XCTAssertFalse(newest.exists && newest.isHittable)
     XCTAssertEqual(draft(app).value as? String, "Half a thought")
-
-    XCUIDevice.shared.orientation = .landscapeLeft
-    XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
-    keepScreen("scrolled-up-landscape")
-    XCTAssertTrue(message(app, anchored).isHittable)
-    XCTAssertFalse(newest.isHittable)
-    XCTAssertEqual(draft(app).value as? String, "Half a thought")
-    XCUIDevice.shared.orientation = .portrait
-    XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
-    XCTAssertTrue(message(app, anchored).isHittable)
   }
 
   /// Picking in Board or Needs you opens the conversation in Chat, and Back retraces the steps.
@@ -233,8 +226,8 @@ final class ShellUITests: ShellTestCase {
   }
 }
 
-/// Pictures of each screen on the simulator in both orientations, and what the simulator says of
-/// its displays, for review; these fail only when a screen can't be reached.
+/// Pictures of each screen on the simulator, and what the simulator says of its displays, for
+/// review; these fail only when a screen can't be reached.
 final class ScreenUITests: ShellTestCase {
   @MainActor func testScreens() {
     let app = launch()
@@ -249,8 +242,9 @@ final class ScreenUITests: ShellTestCase {
     keepScreen("portrait-sign-in")
     signIn(app)
     expectGeneral(app)
-    for name in ["portrait", "landscape"] {
-      XCUIDevice.shared.orientation = name == "portrait" ? .portrait : .landscapeLeft
+    // Portrait alone: setting the orientation leaves the simulator's outer display as it is.
+    let name = "portrait"
+    do {
       tab(app, "Chat")
       expectGeneral(app)
       print("\(name) window: \(app.windows.firstMatch.frame)")
@@ -271,6 +265,5 @@ final class ScreenUITests: ShellTestCase {
       keepScreen("\(name)-thread")
       pick(app, "back")
     }
-    XCUIDevice.shared.orientation = .portrait
   }
 }

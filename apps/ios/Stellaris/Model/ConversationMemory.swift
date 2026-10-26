@@ -10,48 +10,53 @@ import Observation
     var anchors: [String: String] = [:]
   }
 
-  private var saved: Saved
+  private var drafts: [String: String]
+  /// Not observed: a view reads its anchor once, as it is built, and scrolling changes it often.
+  @ObservationIgnored private var anchors: [String: String]
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private let key: String
 
   init(board: URL, defaults: UserDefaults) {
     self.defaults = defaults
     key = "conversations.\(board.absoluteString)"
-    saved =
+    let saved =
       defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
       ?? Saved()
+    drafts = saved.drafts
+    anchors = saved.anchors
   }
 
   func draft(_ conversation: Conversation) -> String {
-    saved.drafts[conversation.key] ?? ""
+    drafts[conversation.key] ?? ""
   }
 
   func setDraft(_ text: String, for conversation: Conversation) {
-    saved.drafts[conversation.key] = text.isEmpty ? nil : text
+    drafts[conversation.key] = text.isEmpty ? nil : text
     save()
   }
 
   /// The id of the message at the foot of the conversation's view when the user last saw it.
   func anchor(_ conversation: Conversation) -> String? {
-    saved.anchors[conversation.key]
+    anchors[conversation.key]
   }
 
   func setAnchor(_ id: String?, for conversation: Conversation) {
-    guard saved.anchors[conversation.key] != id else {
+    guard anchors[conversation.key] != id else {
       return
     }
-    saved.anchors[conversation.key] = id
+    anchors[conversation.key] = id
     save()
   }
 
   /// Drops everything kept for the board, as signing out does.
   func forget() {
-    saved = Saved()
+    drafts = [:]
+    anchors = [:]
     defaults.removeObject(forKey: key)
   }
 
   private func save() {
-    if let data = try? JSONEncoder().encode(saved) {
+    if let data = try? JSONEncoder().encode(Saved(drafts: drafts, anchors: anchors)) {
       defaults.set(data, forKey: key)
     }
   }

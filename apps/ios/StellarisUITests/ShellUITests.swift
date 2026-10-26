@@ -64,13 +64,16 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
+  /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
-    app.staticTexts[String(format: "message-general-%02d", number)].firstMatch
+    app.scrollViews["messages"].staticTexts[String(format: "message-general-%02d", number)]
+      .firstMatch
   }
 
   /// The number of the lowest message of #general on screen, if one is.
   @MainActor func lowestShown(_ app: XCUIApplication) -> Int? {
-    let shown = app.staticTexts
+    let shown = app.scrollViews["messages"].staticTexts
       .matching(NSPredicate(format: "identifier BEGINSWITH 'message-general-'"))
       .allElementsBoundByIndex.filter { $0.isHittable }
       .compactMap { Int($0.identifier.dropFirst("message-general-".count)) }

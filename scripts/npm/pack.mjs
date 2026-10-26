@@ -2,6 +2,7 @@
 // bundles its apps together with the workspace packages they import, since those are not
 // published, and keeps every other import external: those become the package's dependencies, at
 // the exact versions the workspace pins. release/manifest.json lists what was built.
+import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import path from "node:path";
@@ -57,12 +58,12 @@ async function workspaceDependencies() {
   const workspaceNames = new Set();
   for (const group of ["apps", "packages"]) {
     for (const entry of await readdir(path.join(root, group), { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
+      const file = path.join(root, group, entry.name, "package.json");
+      // A folder without a manifest, as apps/ios, is no workspace package, as pnpm reads the globs.
+      if (!entry.isDirectory() || !existsSync(file)) {
         continue;
       }
-      const manifest = JSON.parse(
-        await readFile(path.join(root, group, entry.name, "package.json"), "utf8"),
-      );
+      const manifest = JSON.parse(await readFile(file, "utf8"));
       workspaceNames.add(manifest.name);
       for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
         if (version.startsWith("workspace:")) {

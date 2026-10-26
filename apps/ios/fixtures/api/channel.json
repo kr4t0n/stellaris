@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/channels/demo/general"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": "00000000000000000000000001",
+      "author": "eng-1",
+      "channel": "demo/general",
+      "ts": "2026-01-01T00:00:00.000Z",
+      "mentions": [
+        "user"
+      ],
+      "body": "The build is green on `dev`. @user, should the release wait for the docs?\n"
+    }
+  ]
+}

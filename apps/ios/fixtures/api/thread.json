@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/threads/00000000000000000000000010"
+  },
+  "status": 200,
+  "body": {
+    "thread": {
+      "id": "00000000000000000000000010",
+      "channel": "demo/general",
+      "title": "Add the export view",
+      "subject": {
+        "kind": "task",
+        "id": "00000000000000000000000010"
+      },
+      "state": "open",
+      "openedBy": "concierge-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": ""
+    },
+    "messages": [
+      {
+        "id": "00000000000000000000000011",
+        "author": "eng-1",
+        "channel": "demo/general",
+        "thread": "00000000000000000000000010",
+        "step": {
+          "action": "advanced",
+          "stage": "s1",
+          "to": "s2"
+        },
+        "ts": "2026-01-01T00:00:00.000Z",
+        "mentions": [],
+        "body": "Built; the design is in the thread.\n"
+      }
+    ]
+  }
+}

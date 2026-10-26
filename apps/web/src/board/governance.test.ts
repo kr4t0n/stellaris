@@ -1,12 +1,17 @@
 import {
+  MessageFrontmatterSchema,
+  ProposalFrontmatterSchema,
   RoleCharterSchema,
   TaskFrontmatterSchema,
+  ThreadFrontmatterSchema,
   type Member,
   type Message,
   type Proposal,
   type Task,
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import needsYouCases from "../../../ios/fixtures/cases/needs-you.json?raw";
 import {
   consequenceOf,
   decidersOf,
@@ -255,4 +260,49 @@ describe("governance", () => {
       ),
     ).toEqual([skill.id, mine.id, byRole.id, earlier.id, later.id]);
   });
+
+  it("agrees with the iOS client's port on every case of its table", () => {
+    const cases = NeedsYouCaseSchema.array().parse(JSON.parse(needsYouCases));
+    const run = cases.map(({ name, expected: _expected, ...board }) => ({
+      name,
+      items: needsYou(board).map((item) =>
+        item.kind === "proposal"
+          ? { kind: item.kind, id: item.proposal.id, since: item.since }
+          : item.kind === "stage"
+            ? { kind: item.kind, id: item.task.id, stage: item.stage.id, since: item.since }
+            : {
+                kind: item.kind,
+                id: item.message.id,
+                thread: item.thread?.id ?? null,
+                since: item.since,
+              },
+      ),
+    }));
+    expect(run).toEqual(cases.map(({ name, expected }) => ({ name, items: expected })));
+  });
+});
+
+/** A case of the table in `apps/ios/fixtures/cases`, which BoardKit's tests run too. */
+const NeedsYouCaseSchema = z.object({
+  name: z.string(),
+  proposals: ProposalFrontmatterSchema.extend({ body: z.string() }).array(),
+  tasks: TaskFrontmatterSchema.extend({ body: z.string() }).array(),
+  requests: z
+    .object({
+      message: MessageFrontmatterSchema.extend({ body: z.string() }),
+      thread: ThreadFrontmatterSchema.extend({ body: z.string() }).nullable(),
+    })
+    .array(),
+  expected: z.array(
+    z.union([
+      z.object({ kind: z.literal("proposal"), id: z.string(), since: z.string() }),
+      z.object({ kind: z.literal("stage"), id: z.string(), stage: z.string(), since: z.string() }),
+      z.object({
+        kind: z.literal("request"),
+        id: z.string(),
+        thread: z.string().nullable(),
+        since: z.string(),
+      }),
+    ]),
+  ),
 });

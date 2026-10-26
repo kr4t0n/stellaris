@@ -1,0 +1,44 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/requests"
+  },
+  "status": 200,
+  "body": [
+    {
+      "message": {
+        "id": "00000000000000000000000001",
+        "author": "eng-1",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z",
+        "mentions": [
+          "user"
+        ],
+        "body": "The build is green on `dev`. @user, should the release wait for the docs?\n"
+      },
+      "thread": null
+    },
+    {
+      "message": {
+        "id": "00000000000000000000000003",
+        "author": "concierge-1",
+        "channel": "general",
+        "thread": "00000000000000000000000002",
+        "ts": "2026-01-01T00:00:00.000Z",
+        "mentions": [
+          "user"
+        ],
+        "body": "A draft is in the notes. @user, which features lead?\n"
+      },
+      "thread": {
+        "id": "00000000000000000000000002",
+        "channel": "general",
+        "title": "Release notes for 0.4.0",
+        "state": "open",
+        "openedBy": "concierge-1",
+        "openedAt": "2026-01-01T00:00:00.000Z",
+        "body": ""
+      }
+    }
+  ]
+}

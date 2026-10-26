@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/verbs/approve",
+    "body": {
+      "proposal_id": "00000000000000000000000006"
+    }
+  },
+  "status": 409,
+  "body": {
+    "error": "INVALID_STATE",
+    "message": "proposal 00000000000000000000000006 is already provisioned"
+  }
+}

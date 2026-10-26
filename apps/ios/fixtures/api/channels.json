@@ -1,0 +1,41 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/channels"
+  },
+  "status": 200,
+  "body": [
+    {
+      "ref": "general",
+      "project": null,
+      "name": "general",
+      "messages": 0,
+      "lastMessageId": null,
+      "lastAt": null
+    },
+    {
+      "ref": "governance",
+      "project": null,
+      "name": "governance",
+      "messages": 0,
+      "lastMessageId": null,
+      "lastAt": null
+    },
+    {
+      "ref": "asks",
+      "project": null,
+      "name": "asks",
+      "messages": 0,
+      "lastMessageId": null,
+      "lastAt": null
+    },
+    {
+      "ref": "demo/general",
+      "project": "demo",
+      "name": "general",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000001",
+      "lastAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

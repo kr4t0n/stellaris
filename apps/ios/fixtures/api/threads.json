@@ -1,0 +1,101 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/threads"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": "00000000000000000000000002",
+      "channel": "general",
+      "title": "Release notes for 0.4.0",
+      "state": "open",
+      "openedBy": "concierge-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000003",
+      "lastAuthor": "concierge-1"
+    },
+    {
+      "id": "00000000000000000000000004",
+      "channel": "governance",
+      "title": "member proposal: member eng-2 as engineer on claude for demo",
+      "subject": {
+        "kind": "proposal",
+        "id": "00000000000000000000000004"
+      },
+      "state": "open",
+      "openedBy": "concierge-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000005",
+      "lastAuthor": "concierge-1"
+    },
+    {
+      "id": "00000000000000000000000006",
+      "channel": "governance",
+      "title": "channel proposal: channel demo/release: The 0.4.0 release.",
+      "subject": {
+        "kind": "proposal",
+        "id": "00000000000000000000000006"
+      },
+      "state": "open",
+      "openedBy": "eng-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000007",
+      "lastAuthor": "eng-1"
+    },
+    {
+      "id": "00000000000000000000000008",
+      "channel": "governance",
+      "title": "reallocation proposal: reallocation of role reviewer (up to 2 per project): Two reviewers per project.",
+      "subject": {
+        "kind": "proposal",
+        "id": "00000000000000000000000008"
+      },
+      "state": "open",
+      "openedBy": "rev-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000009",
+      "lastAuthor": "rev-1"
+    },
+    {
+      "id": "00000000000000000000000010",
+      "channel": "demo/general",
+      "title": "Add the export view",
+      "subject": {
+        "kind": "task",
+        "id": "00000000000000000000000010"
+      },
+      "state": "open",
+      "openedBy": "concierge-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 1,
+      "lastMessageId": "00000000000000000000000011",
+      "lastAuthor": "eng-1"
+    },
+    {
+      "id": "00000000000000000000000012",
+      "channel": "demo/general",
+      "title": "Fix the empty state",
+      "subject": {
+        "kind": "task",
+        "id": "00000000000000000000000012"
+      },
+      "state": "open",
+      "openedBy": "eng-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "body": "",
+      "messages": 0,
+      "lastMessageId": null,
+      "lastAuthor": null
+    }
+  ]
+}

@@ -159,9 +159,12 @@
       for try await event in client.events(since: since) {
         types.append(event.type)
       }
-      #expect(types.count == text.components(separatedBy: "\n\n").count - 2)
-      #expect(types.first == "message.posted")
-      #expect(types.last == "thread.closed")
+      // Each of the server's frames, in order, names its event's type; the ping is left out.
+      let named = try #require(fixture.text).split(separator: "\n")
+        .filter { $0.hasPrefix("event: ") }
+        .map { String($0.dropFirst("event: ".count)) }
+      #expect(named.count > 30)
+      #expect(types == named)
     }
 
     @Test func endsTheStreamWithTheBoardsRefusal() async throws {

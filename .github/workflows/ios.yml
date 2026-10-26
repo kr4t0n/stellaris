@@ -76,14 +76,21 @@ jobs:
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
             -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult"
-      # Which display the simulator shows, and whether simctl can capture the other, with the app
-      # open on its sign-in.
+      # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
       - name: Look at the simulator's displays
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
+          set +e
           mkdir -p "$RUNNER_TEMP/screens/displays"
-          device=$(xcrun simctl list devices booted | grep -m1 'iPhone Duo' | grep -oE '[0-9A-F-]{36}')
+          device=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, each in devices.items() if runtime.endswith("iOS-27-1")
+                     for d in each if d["name"] == "iPhone Duo"))')
+          echo "iPhone Duo: $device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
           xcrun simctl io "$device" enumerate
           SIMCTL_CHILD_STELLARIS_FAKE_BOARD="$PWD/apps/ios/fixtures/api" \
             xcrun simctl launch "$device" com.example.stellaris -StellarisReset
@@ -92,6 +99,7 @@ jobs:
             xcrun simctl io "$device" screenshot --display="$display" \
               "$RUNNER_TEMP/screens/displays/$display.png" || echo "no $display display"
           done
+          exit 0
       - name: Collect the screenshots
         if: ${{ !cancelled() }}
         run: |

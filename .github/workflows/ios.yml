@@ -76,12 +76,13 @@ jobs:
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
             -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult"
-      # The host the build names, expanded into the app's associated domains.
+      # The host the build names, expanded into the app's associated domains. A simulator build
+      # signs to run locally and keeps its entitlements beside the signature, as Xcode wrote them.
       - name: Show the app's entitlements
         if: ${{ !cancelled() }}
         run: |
-          codesign -d --entitlements - \
-            "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Stellaris.app"
+          find "$RUNNER_TEMP/derived/Build/Intermediates.noindex" -name 'Stellaris.app*.xcent' \
+            -print -exec plutil -p {} \;
       # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
       - name: Look at the simulator's displays
         if: ${{ !cancelled() }}

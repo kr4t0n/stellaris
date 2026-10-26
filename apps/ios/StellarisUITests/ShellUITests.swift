@@ -38,8 +38,11 @@ class ShellTestCase: XCTestCase {
   /// Waits for Chat to show the society's general channel, which opens at its newest message. Its
   /// title, the first line of its content, is sixty messages up, where the view builds nothing.
   @MainActor func expectGeneral(_ app: XCUIApplication) {
-    XCTAssertTrue(message(app, 60).waitForExistence(timeout: 20), "Chat doesn't show #general")
-    XCTAssertTrue(message(app, 60).isHittable, "#general doesn't open at its newest message")
+    let newest = message(app, 60)
+    XCTAssertTrue(newest.waitForExistence(timeout: 20), "Chat doesn't show #general")
+    XCTAssertTrue(newest.isHittable, "#general doesn't open at its newest message")
+    XCTAssertLessThanOrEqual(
+      newest.frame.maxY, draft(app).frame.minY, "#general's newest message is under the draft")
   }
 
   /// Waits for Chat to show the conversation called `name`, short enough that its title shows.

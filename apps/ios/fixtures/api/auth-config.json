@@ -5,6 +5,7 @@
   },
   "status": 200,
   "body": {
-    "github": false
+    "github": false,
+    "appLanding": false
   }
 }

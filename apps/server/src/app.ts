@@ -24,7 +24,11 @@ import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import { API_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
 import type { EnrollmentDesk } from "./enrollment.js";
-import { githubAuthRoutes, type GithubAuthOptions } from "./github-auth.js";
+import {
+  appleAppSiteAssociation,
+  githubAuthRoutes,
+  type GithubAuthOptions,
+} from "./github-auth.js";
 import { ENROLL_LIMIT, RateLimiter, rateLimit, SIGN_IN_LIMIT } from "./rate-limit.js";
 import type { ModelSource } from "./models.js";
 import type { QuotaSource } from "./quotas.js";
@@ -603,6 +607,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       limit: limited(SIGN_IN_LIMIT, "sign-ins"),
     }),
   );
+  // Ahead of the interface, which would answer it with its page.
+  app.route("/.well-known", appleAppSiteAssociation(deps.signIn?.github ?? null));
   if (deps.runners !== undefined) {
     app.route(
       "/runner",

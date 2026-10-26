@@ -47,6 +47,10 @@ auth:
     existingSecretKey: client-secret
     # GitHub logins allowed in, in any case, or numeric user ids, which survive a rename.
     users: []
+    # The iOS app that may sign in, as <team id>.<bundle id>, for example ABCDE12345.com.example.app.
+    # The board then serves Apple's association file naming it, which Apple's CDN fetches, so the
+    # board's address must be https with a valid certificate that the public internet reaches.
+    appleAppId: ""
 
 server:
   enabled: true

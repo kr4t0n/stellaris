@@ -52,6 +52,8 @@ auth:
 
 Each listed login signs in as the user for 30 days; anyone else is turned away after GitHub says who they are. `clientSecret` puts the secret in a Secret the chart creates instead of one of your own.
 
+The iOS app signs in through the same OAuth app. A board the app signs in to sets `appleAppId` to the app's `<team id>.<bundle id>`, and then serves Apple's association file naming it at `/.well-known/apple-app-site-association`, which lets only that app take the board's `https` sign-in landing. The app's associated domain and its sign-in callback host must be `ingress.host`, the host in the OAuth app's callback URL. Apple's CDN fetches the file, so the board's address needs `https` with a valid certificate, no redirect, and reach from the public internet; the Ingress's default `path: /` sends `/.well-known/` to the server.
+
 ## Runners on other machines
 
 Start a runner on its machine with `STELLARIS_SERVER_URL` set to an address of this server it can reach. Asking to enroll needs no token, so each client address may ask five times in ten minutes; the server finds the client's address behind the chart's Ingress from `X-Forwarded-For`, trusting one proxy, so set `server.config.trustedProxies` to 2 if another proxy that appends to it, such as Cloudflare, sits in front of the Ingress. Approve only the code your own runner printed, since anyone may ask and a request names whatever hostname it likes. With no token, it asks the board to enroll it and prints a code and a link to the board's runners view, where you approve it under a name; it keeps the token approval gives it in its data directory and uses it from then on. A runner registered by hand (`POST /api/runners` with the user token, which shows the runner's token once) starts with `STELLARIS_RUNNER_TOKEN` instead. Each runner's agents reach the MCP endpoint at the runner's server address, unless `server.config.publicUrl` names one for every runner.
@@ -144,6 +146,7 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `auth.github.clientSecret`             | empty                                               | Its client secret, for a Secret the chart creates                                |
 | `auth.github.existingSecret`, `Key`    | empty, `client-secret`                              | A Secret of your own holding the client secret, and its key                      |
 | `auth.github.users`                    | empty                                               | GitHub logins or numeric user ids allowed in                                     |
+| `auth.github.appleAppId`               | empty                                               | `STELLARIS_APPLE_APP_ID`, the iOS app that may sign in                           |
 | `server.config.logLevel`               | `info`                                              | `STELLARIS_LOG_LEVEL`                                                            |
 | `server.config.publicUrl`              | empty                                               | `STELLARIS_PUBLIC_URL`, one MCP address for every runner's agents                |
 | `server.config.concurrency`            | empty, no cap beyond each runner's                  | `STELLARIS_CONCURRENCY`, turns at once across the society                        |

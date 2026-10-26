@@ -9,6 +9,13 @@ import { bodyLimit } from "hono/body-limit";
 export const ENROLL_BODY_LIMIT_BYTES = 16 * 1024;
 
 /**
+ * The app trading its sign-in's code for the session, which takes no token. The largest body the
+ * schema takes, a 64-character code and a 128-character verifier, is under 250 bytes, and under
+ * 1.3 KB with every character escaped as `\uXXXX`; a real one is about 130.
+ */
+export const APP_TOKEN_BODY_LIMIT_BYTES = 16 * 1024;
+
+/**
  * A write under `/api`. `/api/verbs` takes the inputs the MCP tools take, so this is the 1 MiB
  * `/mcp` allows, 17 times the largest real one, a knowledge topic of 60 KB; a charter, the other
  * large body, is under 4 KB.

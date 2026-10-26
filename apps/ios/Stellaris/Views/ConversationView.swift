@@ -1,0 +1,159 @@
+import BoardKit
+import SwiftUI
+
+/// A channel's or a thread's messages, newest at the foot, with its draft below. The view opens
+/// where the user left it: at the message its scroll was anchored at, or at the newest.
+struct ConversationView: View {
+  @Environment(AppModel.self) private var model
+  let feed: ConversationFeed
+  /// The message at the foot of the view.
+  @State private var anchor: String?
+
+  var body: some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 16) {
+        header
+        ForEach(feed.messages) { message in
+          MessageRow(message: message)
+        }
+      }
+      .scrollTargetLayout()
+      .padding(.horizontal)
+      .padding(.vertical, 12)
+    }
+    .scrollPosition(id: $anchor, anchor: .bottom)
+    .defaultScrollAnchor(.bottom)
+    .scrollDismissesKeyboard(.immediately)
+    .overlay { state }
+    .safeAreaInset(edge: .bottom) {
+      DraftField(conversation: feed.conversation)
+    }
+    .refreshable { await feed.load(using: model) }
+    .task {
+      if feed.state != .loaded {
+        await feed.load(using: model)
+      }
+      let saved = model.memory?.anchor(feed.conversation)
+      anchor =
+        feed.messages.contains { $0.id == saved } ? saved : feed.messages.last?.id
+    }
+    .onChange(of: anchor) { _, id in
+      if let id {
+        model.memory?.setAnchor(id, for: feed.conversation)
+      }
+    }
+  }
+
+  /// The view's title, as the first line of its content, since a vertical bar has no room for one.
+  private var header: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(model.name(of: feed.conversation))
+        .font(.title2.bold())
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("conversation-title")
+      if let place {
+        Text(place)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(.bottom, 4)
+  }
+
+  /// Where the conversation is: a project's name for its channel, the channel for a thread.
+  private var place: String? {
+    switch feed.conversation {
+    case .channel(let ref):
+      let parts = ref.split(separator: "/")
+      return parts.count > 1 ? model.store.projectName(String(parts[0])) : nil
+    case .thread:
+      return feed.thread.map { model.name(of: .channel($0.channel)) }
+    }
+  }
+
+  @ViewBuilder private var state: some View {
+    switch feed.state {
+    case .idle, .loading:
+      if feed.messages.isEmpty {
+        ProgressView()
+      }
+    case .loaded:
+      if feed.messages.isEmpty {
+        ContentUnavailableView("No messages", systemImage: "bubble.left")
+      }
+    case .failed(let reason):
+      if feed.messages.isEmpty {
+        ContentUnavailableView {
+          Label(reason, systemImage: "wifi.exclamationmark")
+        } actions: {
+          Button("Retry") {
+            Task { await feed.load(using: model) }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// One message: who wrote it, when, and its text. Markdown, images, and links render from a later
+/// change; here the text shows as written.
+struct MessageRow: View {
+  let message: Message
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(message.author)
+          .font(.subheadline.bold())
+        Text(BoardTime.text(message.ts))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Text(message.body)
+        .font(.body)
+        .textSelection(.enabled)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("message-\(message.id)")
+  }
+}
+
+/// The draft of the conversation's next message, kept by conversation as it is typed.
+struct DraftField: View {
+  @Environment(AppModel.self) private var model
+  let conversation: Conversation
+
+  var body: some View {
+    let draft = Binding(
+      get: { model.memory?.draft(conversation) ?? "" },
+      set: { model.memory?.setDraft($0, for: conversation) })
+    TextField("Message", text: draft, axis: .vertical)
+      .lineLimit(1...5)
+      .textFieldStyle(.roundedBorder)
+      .accessibilityIdentifier("draft")
+      .padding(.horizontal)
+      .padding(.vertical, 8)
+      .background(.bar)
+  }
+}
+
+/// A time the board sent, as the user's own clock reads it.
+enum BoardTime {
+  static func date(_ iso: String) -> Date? {
+    (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(iso))
+      ?? (try? Date.ISO8601FormatStyle().parse(iso))
+  }
+
+  static func text(_ iso: String) -> String {
+    date(iso)?.formatted(date: .abbreviated, time: .shortened) ?? iso
+  }
+
+  /// How long ago, as "3 hours ago".
+  static func ago(_ iso: String) -> String {
+    guard let date = date(iso) else {
+      return iso
+    }
+    return date.formatted(.relative(presentation: .named, unitsStyle: .wide))
+  }
+}

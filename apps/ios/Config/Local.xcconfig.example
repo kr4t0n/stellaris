@@ -1,0 +1,5 @@
+// Copy to Local.xcconfig, which git ignores, and set your own. The board's
+// STELLARIS_APPLE_APP_ID is <team>.<bundle ID> from these.
+STELLARIS_BUNDLE_ID = com.example.stellaris
+STELLARIS_TEAM = ABCDE12345
+STELLARIS_BOARD_HOST = board.example.com

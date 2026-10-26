@@ -17,9 +17,16 @@ import Testing
     case "auth-config":
       #expect(try check(fixture, BoardAPI.authConfig()).github == false)
     case "me":
-      #expect(try check(fixture, BoardAPI.me()).name == "user")
+      let actor = try check(fixture, BoardAPI.me())
+      #expect(actor.name == "user" && actor.signIn == nil)
+    case "me-signed-in":
+      let signIn = try #require(try check(fixture, BoardAPI.me()).signIn)
+      #expect(signIn.login == "fixture-login")
+      #expect(signIn.avatarUrl == "https://github.com/fixture-login.png")
     case "sign-out":
       #expect(try check(fixture, BoardAPI.signOut()).signedOut == false)
+    case "sign-out-signed-in":
+      #expect(try check(fixture, BoardAPI.signOut()).signedOut == true)
     case "society":
       #expect(try check(fixture, BoardAPI.society()).channels.contains("general"))
     case "projects":
@@ -126,7 +133,8 @@ import Testing
   }
 
   static let checked = [
-    "auth-config", "me", "sign-out", "society", "projects", "channels", "channel", "threads",
+    "auth-config", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
+    "channels", "channel", "threads",
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream",

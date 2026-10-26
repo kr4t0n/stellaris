@@ -253,6 +253,10 @@ describe("the answers the iOS client reads", () => {
       reason: "One reviewer keeps up for now.",
     });
     await call("sign-out", "DELETE", "/api/sign-in");
+    // The same two under a GitHub sign-in, the app's own way in, which names the account.
+    const signedIn = await board.signIn("fixture-login", 60 * 60 * 1000);
+    await call("me-signed-in", "GET", "/api/me", undefined, signedIn);
+    await call("sign-out-signed-in", "DELETE", "/api/sign-in", undefined, signedIn);
 
     // The refusals, as `{error, message}`.
     await call("error-unauthorized", "GET", "/api/me", undefined, "not-a-token");
@@ -285,7 +289,7 @@ describe("the answers the iOS client reads", () => {
     });
 
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(25);
+    expect(captures.size).toBe(27);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/verbs/post_message",
+    "body": {
+      "channel": "general",
+      "body": "Morning. The export view's design is next."
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "00000000000000000000000013",
+    "author": "user",
+    "channel": "general",
+    "ts": "2026-01-01T00:00:00.000Z",
+    "mentions": [],
+    "body": "Morning. The export view's design is next."
+  }
+}

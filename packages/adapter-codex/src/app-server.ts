@@ -17,6 +17,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  addUsage,
   AGENT_TOKEN_ENV,
   capOutput,
   EffortOptionSchema,
@@ -538,6 +539,28 @@ export function turnUsage(before: ThreadTokens, after: ThreadTokens): Usage {
   };
 }
 
+/** Another thread's totals as last reported, and how far a turn of this thread has counted them. */
+interface OtherThreadTokens {
+  total: ThreadTokens;
+  counted: ThreadTokens;
+}
+
+/**
+ * The sub-agent threads an item names: a v1 collab tool call's receivers, filled once a spawn
+ * completes, and the thread a `multi_agent_v2` sub-agent's activity is about. Either is reported
+ * on the thread that started or addressed it.
+ */
+function subAgentsNamedBy(item: Dict): string[] {
+  if (item["type"] === "subAgentActivity") {
+    const thread = str(item["agentThreadId"]);
+    return thread === undefined ? [] : [thread];
+  }
+  if (item["type"] === "collabAgentToolCall" && Array.isArray(item["receiverThreadIds"])) {
+    return item["receiverThreadIds"].filter((each): each is string => typeof each === "string");
+  }
+  return [];
+}
+
 interface TurnCollector {
   turnId: string | null;
   finalText: string;
@@ -593,6 +616,12 @@ export class CodexAppServerSession implements ResidentSession {
   private threadTotal: ThreadTokens = NO_TOKENS;
   /** Whether `threadTotal` is where the thread stands: a new thread's zero, or a total reported. */
   private totalsKnown = false;
+  /** Every other thread that reported totals here, a sub-agent of this thread's or not. */
+  private readonly others = new Map<string, OtherThreadTokens>();
+  /** The sub-agents this thread started or addressed, and theirs in turn: the threads its turns count. */
+  private readonly subAgents = new Set<string>();
+  /** Threads named by a thread not yet known to be a sub-agent, by the thread that named them. */
+  private readonly namedBy = new Map<string, Set<string>>();
   private closed = false;
   private readonly stderrTail: string[] = [];
   private readonly recorded: string[] = [];
@@ -764,19 +793,77 @@ export class CodexAppServerSession implements ResidentSession {
     return (this.options.now ?? (() => new Date()))();
   }
 
+  /**
+   * `parent` started or addressed `named`, which is a sub-agent of this thread's when `parent` is
+   * this thread or one. The two threads report on their own, in either order, so a thread named
+   * before its parent is known waits for it, with whatever it named in turn.
+   */
+  private noteSubAgent(parent: string, named: string): void {
+    if (parent !== this.session && !this.subAgents.has(parent)) {
+      this.namedBy.set(parent, (this.namedBy.get(parent) ?? new Set<string>()).add(named));
+      return;
+    }
+    const found = [named];
+    for (const thread of found) {
+      if (thread === this.session || this.subAgents.has(thread)) continue;
+      this.subAgents.add(thread);
+      found.push(...(this.namedBy.get(thread) ?? []));
+      this.namedBy.delete(thread);
+    }
+  }
+
+  /**
+   * Another thread's totals. The first this server reports of a thread is about one request, before
+   * which the thread stood at zero if new, at its saved totals if resumed, and at its parent's if
+   * forked from a `legacy` thread.
+   */
+  private noteOtherTotals(thread: string, raw: unknown): void {
+    if (!isDict(raw)) {
+      return;
+    }
+    const total = threadTokensOf(raw["total"]);
+    const known = this.others.get(thread);
+    if (known === undefined) {
+      this.others.set(thread, { total, counted: lessTokens(total, threadTokensOf(raw["last"])) });
+    } else {
+      known.total = total;
+    }
+  }
+
+  /**
+   * What the sub-agents used since a turn last counted them, which the ending turn counts: a
+   * sub-agent's requests after one turn ends count in the next turn on this session.
+   */
+  private subAgentUsage(): Usage {
+    let usage = ZERO_USAGE;
+    for (const [thread, tokens] of this.others) {
+      if (!this.subAgents.has(thread)) continue;
+      usage = addUsage(usage, turnUsage(tokens.counted, tokens.total));
+      tokens.counted = tokens.total;
+    }
+    return usage;
+  }
+
   private onNotification(method: string, params: unknown): void {
     const turn = this.active;
     if (!isDict(params)) {
       return;
     }
-    // The server sends every thread it runs to each connection, a sub-agent's too; its turns, items,
-    // totals, and failures are none of this thread's.
     const thread = str(params["threadId"]);
+    const finished = method === "item/completed" ? params["item"] : undefined;
+    if (thread !== undefined && isDict(finished)) {
+      for (const named of subAgentsNamedBy(finished)) this.noteSubAgent(thread, named);
+    }
+    // The server sends every thread it runs to each connection, a sub-agent's too. Its totals count
+    // in the turn (`subAgentUsage`); its turns, items, and failures are none of this thread's.
     if (
       thread !== undefined &&
       thread !== this.session &&
       !this.session.startsWith(PENDING_THREAD_PREFIX)
     ) {
+      if (method === "thread/tokenUsage/updated") {
+        this.noteOtherTotals(thread, params["tokenUsage"]);
+      }
       return;
     }
     // Rate limits come with the requests a turn makes, and between turns on a warm session.
@@ -1029,7 +1116,10 @@ export class CodexAppServerSession implements ResidentSession {
     if (turn.error !== undefined) {
       emit({ type: "error", message: turn.error });
     }
-    const usage = turn.answered ? turnUsage(turn.baseline, this.threadTotal) : ZERO_USAGE;
+    const usage = addUsage(
+      turn.answered ? turnUsage(turn.baseline, this.threadTotal) : ZERO_USAGE,
+      this.subAgentUsage(),
+    );
     emit({ type: "turn_completed", usage, costUsd: 0, status, exitReason });
     return {
       events,

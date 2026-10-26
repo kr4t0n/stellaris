@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/verbs/approve",
+    "body": {
+      "proposal_id": "00000000000000000000000006"
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "00000000000000000000000016",
+    "proposalId": "00000000000000000000000006",
+    "decidedBy": "user",
+    "outcome": "approved",
+    "ts": "2026-01-01T00:00:00.000Z"
+  }
+}

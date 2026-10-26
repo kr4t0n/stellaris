@@ -23,6 +23,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - `apps/web`: the playground: the sky, the board's islands, and citizens' live turns, over the HTTP API and the two streams. Holds no state the board lacks and writes only through verbs.
 - `apps/cli`: user and developer operations against `board-core` directly. Never used by agents.
 - `apps/runner`: the runner daemon: configuration, its token or enrollment, both adapters, and `createRunner`; one per machine, the server's own included.
+- `apps/ios`: the native client. `BoardKit`, a Swift package: models, request builders, the event-stream parser, and ports of the web's `staleKeys` and `needsYou` in Foundation alone, and a `URLSession` transport with the token in the Keychain. Beside it, the fixtures the server's tests capture for it. No `package.json`, so pnpm leaves it alone.
 
 ## Decisions
 
@@ -128,6 +129,14 @@ One long-running process, the board server, hosts the only writer of the data di
 - Ids and worktree paths in text read as what they name (`entityIndex`, `linkTarget`), and an uploaded image is `image:<id>`.
 - The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
 
+### The iOS client ([ios.md](./docs/internals/ios.md))
+
+- BoardKit's core imports Foundation alone and passes `swift test` on Linux; what needs Apple's frameworks goes in `Transport/`, behind `#if canImport(Darwin)` or `Security`.
+- Its models hold the fields of the schemas in `packages/shared` that the app reads, with the schemas' names and defaults; ids and times stay strings, a value of a closed set is an `OrUnknown` and a message's step or notice of a shape it doesn't know is `unknown`, so what a newer server adds leaves the answer readable, and a name Swift or Foundation already uses takes a `Board` prefix.
+- `apps/server/src/ios-fixtures.test.ts` captures every answer the client reads into `apps/ios/fixtures/api`, so a server change that alters one fails `check` until it is captured again with `-u`. A request the app starts to make gets a capture there and a check in BoardKit's `FixtureTests`.
+- A change to the web's `staleKeys` or `needsYou` changes its case table in `apps/ios/fixtures/cases`, and its Swift port with it.
+- `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run.
+
 ### Delivery and commits ([delivery.md](./docs/internals/delivery.md))
 
 - Commits follow Conventional Commits and reach `dev` through pull requests from `<type>/<slug>` branches, opened with `--base dev`. The branch rules require the CI job `check` by name, so renaming it or giving it a matrix needs the rules changed first.
@@ -172,7 +181,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - The Codex app-server bindings are generated on demand and never committed; the recorded turns in `packages/adapter-codex/fixtures` catch a release that changes the fields read. Scan a recorded stream for token-like strings before committing it.
 - Codex reads the runner account's own `~/.codex/config.toml` and global `AGENTS.md`; the Claude adapter loads project settings only.
 - A turn's Codex usage is what the thread's totals grew by, from the totals the app server reports right after `thread/resume`. Those may never come (a `legacy` thread resumed with `excludeTurns`, and once a live `paginated` one), so the turn's own first update sets the starting point, less its request once an item of the model's answer has started (a command can complete after the update, or never); a turn where none started counts nothing. An item under another turn's id, or a sub-agent's activity, is no answer.
-- The Codex app server sends a connection every thread it runs, a sub-agent's too, each under its own `threadId`; the adapter drops what another thread sends, or a sub-agent's totals, message, and failure would pass for the parent turn's.
+- The Codex app server sends a connection every thread it runs, a sub-agent's too, each under its own `threadId`; the adapter reads none of another thread's turns, items, or failures, or a sub-agent's message and failure would pass for the parent turn's. A turn counts its sub-agents' totals as well, each from its first total less that update's `last`: the threads its own items name (a v1 collab call's `receiverThreadIds`, a v2 `subAgentActivity`'s `agentThreadId`) and theirs, never any other thread, since no `thread/started` comes for a sub-agent. What one spends between turns counts in the next.
 - A Codex thread id is a `pending-` placeholder until `thread/start` answers. Claude's model list starts with a `default` entry that is not a model, and the Agent SDK can send several init messages in one query, of which the adapter keeps the first.
 - Claude Code refuses a foreground `sleep`; a live test that needs a busy turn waits another way. A steer with no priority may wait for the turn's end, so the adapter sets `next`.
 - With `STELLARIS_TURN_TIMEOUT_MS=unlimited` a turn has no time limit, so nothing may assume one, and Node fires a `setTimeout` of `Infinity` at once.
@@ -186,6 +195,7 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ## Where the next work goes
 
+- **The iOS client:** BoardKit and its fixtures are built; the app follows, from its shell and sign-in to channels, tasks, and proposals.
 - **The interface:** the playground of [docs/plan.md section 10.1](./docs/plan.md#101-the-playground) is built through Phase 7's exit test, a browser session driving a planned task from an ask to done against a board server of scripted citizens. Later views come with their phases.
 - **Phase 9:** the metrics view is built; charter iteration remains, tuning the seed charters against what it shows, and perhaps giving the steward the metrics in its prompt.
 - **Phase 10:** the split is built, and the chart runs the runner's image on request; next are projects that span machines through the extensions of [section 7.3](./docs/plan.md#73-extensions-recorded-for-later) (the board as git host, then GitHub), the exit test with a second machine, per-runner host agents, and a Windows runner.
@@ -199,6 +209,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Every Codex turn starts its own app server, because the board's turn token reaches the server's MCP client through the process environment. One server per runner holding every thread, as [docs/plan.md section 11.4](./docs/plan.md#114-adapters) once described, would need the token passed per thread.
 - Archiving a project has no reverse: nothing clears `archived`, so a project archived by mistake is restored by hand in its `project.md`, after which its members join again.
 - Codex turns are metered at zero cost; a token price table is needed.
+- Claude turns count no sub-agent's requests: a result's `usage` is the main loop's alone, and `modelUsage`, which has them, runs for the whole session, so a turn's share needs a saved starting point, as the cost has.
 - A `merge` project with a remote lands on the runner's clone and never pushes the merge; a project on GitHub lands through `ghpr` instead. `ghpr` merges a pull request an agent opened and linked: the board does not open one, wait for a review or a check GitHub requires (a merge GitHub refuses reopens the task), merge any way but with a merge commit, or show a pull request's state live, and a pull request it failed to close for an abandoned task stays open until someone closes it by hand.
 - The `--as` flag in the CLI has no audit trail beyond the event log's actor field.
 - The operations pass scans every project's tasks, threads, and last-turn records each time; `listSignals` scans the whole event log. Fine at this scale; the search upgrade is the place to index both.

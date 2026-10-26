@@ -1,0 +1,788 @@
+[
+  {
+    "event": {
+      "id": "01M5A00000000000000000E001",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "society.initialized",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E002",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "project.added",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E003",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "project.configured",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E004",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "project.archived",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E005",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "project.placed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E006",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.added",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E007",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.configured",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E008",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.placed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E009",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "message.posted",
+      "actor": "eng-1",
+      "payload": {
+        "id": "01M5A0000000000000000MSG01",
+        "channel": "demo/general",
+        "thread": null,
+        "mentions": ["user"],
+        "step": null
+      }
+    },
+    "keys": [["channels"], ["channel", "demo/general"], ["requests"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E010",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "message.posted",
+      "actor": "eng-1",
+      "payload": {
+        "id": "01M5A0000000000000000MSG01",
+        "channel": "demo/general",
+        "thread": "01M5A000000000000000THREAD",
+        "mentions": [],
+        "step": null
+      }
+    },
+    "keys": [["threads"], ["thread", "01M5A000000000000000THREAD"], ["requests"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E011",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "thread.opened",
+      "actor": "eng-1",
+      "payload": {
+        "threadId": "01M5A000000000000000THREAD",
+        "channel": "general",
+        "subject": null
+      }
+    },
+    "keys": [["threads"], ["thread", "01M5A000000000000000THREAD"], ["channel"], ["requests"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E012",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "thread.closed",
+      "actor": "eng-1",
+      "payload": {
+        "threadId": "01M5A000000000000000THREAD",
+        "channel": "general"
+      }
+    },
+    "keys": [["threads"], ["thread", "01M5A000000000000000THREAD"], ["channel"], ["requests"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E013",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "thread.closed",
+      "actor": "eng-1",
+      "payload": {
+        "channel": "general"
+      }
+    },
+    "keys": [["threads"], ["thread", null], ["channel"], ["requests"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E014",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.created",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E015",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.claimed",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E016",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.released",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E017",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.updated",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E018",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.planned",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E019",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.advanced",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E020",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.advanced",
+      "actor": "eng-1",
+      "payload": {
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E021",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.moved",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E022",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.completing",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E023",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.completed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E024",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "task.reopened",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E025",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "lease.expired",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E026",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "subscription.changed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E027",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "proposal.created",
+      "actor": "eng-1",
+      "payload": {
+        "proposalId": "01M5A00000000000000PR0P0SA",
+        "kind": "member"
+      }
+    },
+    "keys": [["proposals"], ["proposal", "01M5A00000000000000PR0P0SA"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E028",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "proposal.decided",
+      "actor": "eng-1",
+      "payload": {
+        "proposalId": "01M5A00000000000000PR0P0SA",
+        "outcome": "approved"
+      }
+    },
+    "keys": [["proposals"], ["proposal", "01M5A00000000000000PR0P0SA"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E029",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "proposal.provisioned",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["proposals"], ["proposal", null], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E030",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "proposal.files_taken",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["proposals"], ["proposal", null], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E031",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "channel.added",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E032",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "channel.archived",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E033",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "role.added",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["roles"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E034",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.retired",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E035",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.joined",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E036",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "agent.left",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["members"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E037",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "knowledge.written",
+      "actor": "eng-1",
+      "payload": {
+        "project": "demo",
+        "topic": "flow"
+      }
+    },
+    "keys": [["knowledge", "demo"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E038",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "knowledge.written",
+      "actor": "eng-1",
+      "payload": {
+        "project": null,
+        "topic": "norms"
+      }
+    },
+    "keys": [["knowledge", "society"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E039",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "knowledge.removed",
+      "actor": "eng-1",
+      "payload": {
+        "project": null,
+        "topic": "norms"
+      }
+    },
+    "keys": [["knowledge", "society"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E040",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "dashboard.updated",
+      "actor": "eng-1",
+      "payload": {
+        "project": "demo",
+        "revision": 2
+      }
+    },
+    "keys": [["dashboard", "demo"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E041",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "skill.promoted",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["skills"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E042",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "skill.removed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["skills"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E043",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.added",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["runners"], ["models"], ["server-version"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E044",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "user.signed_in",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E045",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "user.signed_out",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E046",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "user.token_rotated",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E047",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.changed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["runners"], ["models"], ["server-version"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E048",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.quota",
+      "actor": "eng-1",
+      "payload": {
+        "name": "runner-1",
+        "cli": "claude"
+      }
+    },
+    "keys": [["runners"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E049",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "ops.signal",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["signals"], ["scheduler"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E050",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "paused.changed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["scheduler"], ["members"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E051",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "wake.requested",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["scheduler"], ["members"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E052",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "turn.started",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["scheduler"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E053",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "turn.steered",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["scheduler"], ["members"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E054",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "turn.stopped",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["scheduler"], ["members"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E055",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "turn.completed",
+      "actor": "eng-1",
+      "payload": {
+        "project": "demo"
+      }
+    },
+    "keys": [
+      ["scheduler"],
+      ["members"],
+      ["turns", "eng-1"],
+      ["memory", "eng-1"],
+      ["agent-skills", "eng-1"],
+      ["conflicts", "eng-1"],
+      ["history", "eng-1"],
+      ["task-file"],
+      ["task-changes"],
+      ["task-diff"],
+      ["project-file"],
+      ["metrics"],
+      ["tokens"],
+      ["crons"]
+    ]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E056",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "turn.failed",
+      "actor": "concierge-1",
+      "payload": {
+        "project": "society"
+      }
+    },
+    "keys": [
+      ["scheduler"],
+      ["members"],
+      ["turns", "concierge-1"],
+      ["memory", "concierge-1"],
+      ["agent-skills", "concierge-1"],
+      ["conflicts", "concierge-1"],
+      ["history", "concierge-1"],
+      ["task-file"],
+      ["task-changes"],
+      ["task-diff"],
+      ["project-file"],
+      ["metrics"],
+      ["tokens"],
+      ["crons"]
+    ]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E057",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "merge.completed",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo",
+        "branch": "task/01M5A0000000000000000TASK1"
+      }
+    },
+    "keys": [
+      ["tasks"],
+      ["task", "01M5A0000000000000000TASK1"],
+      ["members"],
+      ["metrics"],
+      ["project-file", "demo"]
+    ]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E058",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "merge.failed",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E059",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "pull_request.closed",
+      "actor": "eng-1",
+      "payload": {
+        "taskId": "01M5A0000000000000000TASK1",
+        "project": "demo"
+      }
+    },
+    "keys": [["tasks"], ["task", "01M5A0000000000000000TASK1"], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E060",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "pull_request.close_failed",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["tasks"], ["task", null], ["members"], ["metrics"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E061",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "workspace.leftovers",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E062",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "society.configured",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["society"], ["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E063",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "cron.created",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E064",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "cron.updated",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E065",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "cron.fired",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E066",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "cron.skipped",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E067",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "cron.ended",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": [["crons"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E068",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "image.uploaded",
+      "actor": "eng-1",
+      "payload": {}
+    },
+    "keys": []
+  }
+]

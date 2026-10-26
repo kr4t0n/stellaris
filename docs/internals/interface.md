@@ -24,7 +24,7 @@ Routes are code-based in `router.ts` (`/c/$` for a channel ref and `/thread/$thr
 
 ### An event refreshes what it touched
 
-`followBoardEvents` in `lib/events.ts` streams `/api/events/stream?since=latest` over `fetch` and resumes from the last id it saw; `staleKeys` maps each event type to the query keys it makes stale. A new query whose data an event can change needs an entry there, or it only refreshes on its slow poll.
+`followBoardEvents` in `lib/events.ts` streams `/api/events/stream?since=latest` over `fetch` and resumes from the last id it saw; `staleKeys` maps each event type to the query keys it makes stale. A new query whose data an event can change needs an entry there, or it only refreshes on its slow poll, and a change to `staleKeys` changes the case table the iOS client's port runs too ([ios.md](ios.md#the-two-ports-run-the-webs-case-tables)).
 
 ### Live turns are a projection of the turn stream
 
@@ -34,7 +34,7 @@ Routes are code-based in `router.ts` (`/c/$` for a channel ref and `/thread/$thr
 
 ### What needs the user is derived, never stored
 
-`needsYou` in `board/governance.ts` gathers proposals the user may decide (`waitingOnYou`, which reads `ROLE_KIND_APPROVERS` from `shared`), stages that name the user or the `user` role and are unheld or held by the user, and questions asked of the user: `listRequests` on the board (`GET /api/requests`) returns every message by someone else that mentions the user, in an open thread or a channel still listed, with no later post by the user in the same thread, or channel for a channel post. All three leave when the board changes, not when a browser looks: a question stays until the user answers where it was asked or its thread closes. The HUD chip and the navigator count them through `useNeedsYou`, and each question links to its task's or proposal's view, its thread, or its channel.
+`needsYou` in `board/governance.ts` gathers proposals the user may decide (`waitingOnYou`, which reads `ROLE_KIND_APPROVERS` from `shared`), stages that name the user or the `user` role and are unheld or held by the user, and questions asked of the user: `listRequests` on the board (`GET /api/requests`) returns every message by someone else that mentions the user, in an open thread or a channel still listed, with no later post by the user in the same thread, or channel for a channel post. All three leave when the board changes, not when a browser looks: a question stays until the user answers where it was asked or its thread closes. The iOS client's port of `needsYou` runs the same case table ([ios.md](ios.md#the-two-ports-run-the-webs-case-tables)). The HUD chip and the navigator count them through `useNeedsYou`, and each question links to its task's or proposal's view, its thread, or its channel.
 
 ### An ask is a thread
 

@@ -1,6 +1,14 @@
-import type { BoardEvent } from "@stellaris/shared";
+import { BOARD_EVENT_TYPES, BoardEventSchema, type BoardEvent } from "@stellaris/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import staleKeyCases from "../../../ios/fixtures/cases/stale-keys.json?raw";
 import { followBoardEvents, staleKeys } from "./events.js";
+
+/** A case of the table in `apps/ios/fixtures/cases`, which BoardKit's tests run too. */
+const StaleKeyCaseSchema = z.object({
+  event: BoardEventSchema,
+  keys: z.array(z.array(z.string().nullable())),
+});
 
 function event(type: BoardEvent["type"], payload: Record<string, unknown>, id: string): BoardEvent {
   return { id, ts: "2026-09-29T10:00:00.000Z", type, actor: "ada", payload };
@@ -90,6 +98,17 @@ describe("board events", () => {
       ["scheduler"],
       ["metrics"],
     ]);
+  });
+
+  it("agrees with the iOS client's port on every event type", () => {
+    const cases = StaleKeyCaseSchema.array().parse(JSON.parse(staleKeyCases));
+    expect(
+      cases.map((each) => ({
+        type: each.event.type,
+        keys: staleKeys(each.event).map((key) => key.map((part) => part ?? null)),
+      })),
+    ).toEqual(cases.map((each) => ({ type: each.event.type, keys: each.keys })));
+    expect(new Set(cases.map((each) => each.event.type))).toEqual(new Set(BOARD_EVENT_TYPES));
   });
 
   it("reads frames split across chunks and resumes after the last event it saw", async () => {

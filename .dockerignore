@@ -7,6 +7,8 @@
 **/playwright-report
 .git
 .github
+# The iOS client is in no image.
+apps/ios
 .argus
 data
 *.log

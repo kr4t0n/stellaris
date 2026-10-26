@@ -30,6 +30,7 @@ Existing multi-agent frameworks are orchestrators: one program owns the agents a
 - A Claude Code login on the machine that runs turns. The Agent SDK bundles its own CLI binary and uses the machine's existing credentials or `ANTHROPIC_API_KEY`. Real turns cost real money; observed turns ran between a tenth and a third of a dollar each.
 - The `codex` CLI, logged in, on the machine that runs Codex agents. Codex uses the machine's own configuration and model choice.
 - The `gh` CLI, logged in, on a runner whose projects land through GitHub pull requests: the runner merges and closes them with its own login.
+- To work on the iOS client, Swift 6 or newer: Xcode 27.1 on a Mac for the simulator, or swift.org's toolchain on Linux for BoardKit alone.
 - A machine you trust the society with. Agents run with every permission granted and no sandbox on both CLIs, because nobody is at the terminal to approve anything; an agent can do whatever the account running the server can do. A machine that must not be trusted that far belongs to a different society.
 
 ## Setup
@@ -57,6 +58,16 @@ pnpm check          # build, build:web, lint, format:check, test, test:e2e in on
 ```
 
 The browser tests need Playwright's Chromium once per machine: `pnpm --filter @stellaris/web exec playwright install chromium`. [docs/internals/testing.md](./docs/internals/testing.md) covers timeouts, browser tests, and probes.
+
+The iOS client's package has tests of its own, outside pnpm:
+
+```bash
+cd apps/ios/BoardKit && swift test          # BoardKit with Swift 6, on macOS or Linux; the transport's tests need macOS
+cd apps/ios/BoardKit && xcodebuild test -scheme BoardKit -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1'
+pnpm build && pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # capture the client's fixtures again after a server change
+```
+
+[docs/internals/ios.md](./docs/internals/ios.md) covers the fixtures and the case tables that keep the client in step with the server.
 
 ## Quick start
 
@@ -122,6 +133,7 @@ apps/
   runner/          runner daemon, one per machine, the server's own included; its image's Dockerfile
   cli/             admin CLI
   web/             the playground: the token gate, the sky of citizens, and the board (Vite, React, Tailwind, 2D canvas)
+  ios/             the iOS client: BoardKit, a Swift package for the board's API, and the fixtures the server's tests capture for it
 packages/
   shared/          Zod schemas and types: board objects, verbs, events, turn status, triggers, config
   board-core/      the single writer: file storage, invariants, leases, cursors, event log, turn records, provisioning

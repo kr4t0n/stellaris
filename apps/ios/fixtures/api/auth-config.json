@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/auth/config"
+  },
+  "status": 200,
+  "body": {
+    "github": false
+  }
+}

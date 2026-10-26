@@ -19,8 +19,8 @@ cases=(
 --set runner.replicas=2 --set runner.config.capabilities={gpu} --set runner.networkPolicy.enabled=true \
 --set runner.extraVolumes[0].name=ssh-key --set runner.extraVolumes[0].secret.secretName=ssh-key \
 --set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37 \
---set auth.github.appLanding=true\
-|            - name: STELLARIS_GITHUB_APP_LANDING"
+--set auth.github.appleAppId=ABCDE12345.com.example.app\
+|            - name: STELLARIS_APPLE_APP_ID|              value: \"ABCDE12345.com.example.app\""
   "runners only|--set server.enabled=false --set runner.enabled=true --set runner.serverUrl=https://stellaris.example.com \
 --set runner.existingSecret=runner-token --set persistence.enabled=false\
 |      serviceAccountName: default|      automountServiceAccountToken: false"
@@ -35,7 +35,9 @@ refusals=(
   "runner.extraVolumes: home is the runner's claim|--set runner.enabled=true --set runner.extraVolumes[0].name=home \
 --set runner.extraVolumes[0].emptyDir.medium=Memory"
   "auth.github.clientId is required|--set auth.github.enabled=true"
-  "auth.github.appLanding needs GitHub sign-in|--set auth.github.appLanding=true"
+  "auth.github.appleAppId needs GitHub sign-in|--set auth.github.appleAppId=ABCDE12345.com.example.app"
+  "is not <team id>.<bundle id>|--set auth.github.enabled=true --set auth.github.clientId=client-1 \
+--set auth.github.clientSecret=secret-1 --set auth.github.users={octocat} --set auth.github.appleAppId=com.example.app"
   "runner.existingSecret holds one runner's token|--set runner.enabled=true --set runner.existingSecret=runner-token \
 --set runner.replicas=2"
 )

@@ -98,7 +98,7 @@ The board server and each runner read their own.
 | `STELLARIS_GITHUB_CLIENT_SECRET`      | none                    | server; that app's client secret                                                                                                                       |
 | `STELLARIS_TRUSTED_PROXIES`           | `0`                     | server; reverse proxies in front of it that append the client to `X-Forwarded-For`, for the per-address limits on enrolling and signing in             |
 | `STELLARIS_GITHUB_USERS`              | none                    | server; comma-separated GitHub logins, in any case, or numeric user ids, allowed to sign in as the user                                                |
-| `STELLARIS_GITHUB_APP_LANDING`        | `false`                 | server; `true` lets the iOS app sign in at `stellaris://signin`; off by default, as a custom URL scheme can't prove which app receives the session     |
+| `STELLARIS_APPLE_APP_ID`              | none                    | server; the iOS app that may sign in, `<team id>.<bundle id>`, named in Apple's association file; the board needs `https` that Apple's CDN reaches     |
 | `STELLARIS_SERVER_URL`                | `http://127.0.0.1:4700` | runner; the board server, as this machine reaches it; its agents reach the MCP endpoint under the same address                                         |
 | `STELLARIS_RUNNER_TOKEN`              | none                    | runner; a token `runner add` printed; without it the runner uses what an enrollment saved, or enrolls                                                  |
 | `STELLARIS_RUNNER_DIR`                | `./runner-data`         | runner; its own data directory: the board mirror, agent homes, repositories, and worktrees                                                             |
@@ -109,6 +109,8 @@ The board server and each runner read their own.
 | `STELLARIS_AGENT_TOKEN`               | none                    | set per turn in the agent CLI's environment by the runner                                                                                              |
 | `HUSKY`                               | `0`                     | set in every agent CLI's environment by the runner, so husky neither points the clone away from the default branch's guard nor runs its hooks          |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | none                    | the agent CLIs on a runner; leave empty to use their own login state                                                                                   |
+
+With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of the board, and the board serves Apple's association file at `/.well-known/apple-app-site-association` naming the app. The app's associated domain and its sign-in callback host must be the host in the GitHub OAuth app's callback URL, and Apple's CDN fetches the file there, so that host needs `https` with a valid certificate, no redirect, and reach from the public internet.
 
 Tokens are minted once and stored only as hashes: the user's, each runner's, each agent's, and each GitHub sign-in's. Agents receive short-lived turn tokens that live only in the server's memory. Never commit a real one, nor the GitHub client secret.
 

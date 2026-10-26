@@ -5,6 +5,14 @@ export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error",
 export type LogLevel = z.infer<typeof LogLevelSchema>;
 
 /**
+ * An iOS app as Apple names it, `<team id>.<bundle id>`: a ten-character team id of capitals and
+ * digits, as Apple's examples have it, and a bundle id of letters, digits, hyphens, and periods.
+ */
+export const AppleAppIdSchema = z
+  .string()
+  .regex(/^[A-Z0-9]{10}\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*$/, "not <team id>.<bundle id>");
+
+/**
  * A GitHub OAuth app the board signs the user in with, and the GitHub logins it lets in, every one
  * of them as the board's one user. The app's callback is `<board address>/auth/github/callback`.
  */
@@ -14,10 +22,10 @@ export const GithubSignInSchema = z.object({
   /** Logins, lowercased; GitHub logins are case-insensitive. */
   users: z.array(z.string().min(1)).min(1),
   /**
-   * Whether a sign-in the app starts lands at its `stellaris://` scheme. Off unless asked for, since
-   * any app can claim a custom scheme, so the board can't tell which one receives the session.
+   * The iOS app that may sign in, which Apple's association file names so that only it can take the
+   * board's `https` landing; null when no app signs in.
    */
-  appLanding: z.boolean(),
+  appleAppId: AppleAppIdSchema.nullable(),
 });
 export type GithubSignIn = z.infer<typeof GithubSignInSchema>;
 
@@ -65,38 +73,27 @@ function list(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
-/** A switch from the environment: `true` or `false`, in any case, or the default when unset. */
-function flag(name: string, value: string | undefined, fallback: boolean): boolean {
-  const text = (value ?? "").trim().toLowerCase();
-  if (text === "") {
-    return fallback;
-  }
-  if (text !== "true" && text !== "false") {
-    throw new Error(`${name} is true or false, not ${JSON.stringify(value)}`);
-  }
-  return text === "true";
-}
-
 /** Environment variable every agent's config home reads its board token from. */
 export const AGENT_TOKEN_ENV = "STELLARIS_AGENT_TOKEN";
 
 /**
- * GitHub sign-in from the environment: all three variables, or none of them, and the app's
- * landing only beside them.
+ * GitHub sign-in from the environment: all three variables, or none of them, and the iOS app only
+ * beside them.
  */
 function githubSignIn(env: Readonly<Record<string, string | undefined>>): GithubSignIn | null {
   const clientId = env["STELLARIS_GITHUB_CLIENT_ID"] ?? "";
   const clientSecret = env["STELLARIS_GITHUB_CLIENT_SECRET"] ?? "";
   // Logins, or numeric user ids, which survive a rename.
   const users = list(env["STELLARIS_GITHUB_USERS"]).map((login) => login.toLowerCase());
-  const appLanding = flag(
-    "STELLARIS_GITHUB_APP_LANDING",
-    env["STELLARIS_GITHUB_APP_LANDING"],
-    false,
-  );
+  const appleAppId = env["STELLARIS_APPLE_APP_ID"]?.trim() || null;
+  if (appleAppId !== null && !AppleAppIdSchema.safeParse(appleAppId).success) {
+    throw new Error(
+      `STELLARIS_APPLE_APP_ID is <team id>.<bundle id>, not ${JSON.stringify(appleAppId)}`,
+    );
+  }
   if (clientId === "" && clientSecret === "" && users.length === 0) {
-    if (appLanding) {
-      throw new Error("STELLARIS_GITHUB_APP_LANDING needs GitHub sign-in");
+    if (appleAppId !== null) {
+      throw new Error("STELLARIS_APPLE_APP_ID needs GitHub sign-in");
     }
     return null;
   }
@@ -105,7 +102,7 @@ function githubSignIn(env: Readonly<Record<string, string | undefined>>): Github
       "GitHub sign-in needs STELLARIS_GITHUB_CLIENT_ID, STELLARIS_GITHUB_CLIENT_SECRET, and STELLARIS_GITHUB_USERS together",
     );
   }
-  return GithubSignInSchema.parse({ clientId, clientSecret, users, appLanding });
+  return GithubSignInSchema.parse({ clientId, clientSecret, users, appleAppId });
 }
 
 /** Builds the server configuration from an environment map. Callers pass `process.env`. */

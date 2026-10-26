@@ -113,7 +113,7 @@ describe("board server routes", () => {
           clientId: "Iv1.test",
           clientSecret: "secret",
           users: ["kr4t0n"],
-          appLanding: false,
+          appleAppId: null,
         },
         fetch: github,
       },
@@ -161,7 +161,7 @@ describe("board server routes", () => {
       board,
       version: "t",
       signIn: {
-        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["666"], appLanding: false },
+        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["666"], appleAppId: null },
         fetch: github,
       },
     });
@@ -208,7 +208,7 @@ describe("board server routes", () => {
           clientId: "Iv1.test",
           clientSecret: "secret",
           users: ["kr4t0n"],
-          appLanding: false,
+          appleAppId: null,
         },
       },
     });
@@ -223,6 +223,33 @@ describe("board server routes", () => {
     expect((await app.request("/auth/config")).status).toBe(200);
   });
 
+  it("limits the app's code trades per address as it limits starting a sign-in", async () => {
+    const app = createApp({
+      board,
+      version: "t",
+      trustedProxies: 1,
+      signIn: {
+        github: {
+          clientId: "Iv1.test",
+          clientSecret: "secret",
+          users: ["kr4t0n"],
+          appleAppId: "ABCDE12345.com.example.app",
+        },
+      },
+    });
+    const trade = (address: string) =>
+      app.request("/auth/app/token", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": address },
+        body: JSON.stringify({ code: "unknown", code_verifier: "v".repeat(43) }),
+      });
+    for (let n = 0; n < 20; n += 1) {
+      expect((await trade("198.51.100.1")).status).toBe(400);
+    }
+    expect((await trade("198.51.100.1")).status).toBe(429);
+    expect((await trade("198.51.100.2")).status).toBe(400);
+  });
+
   it("offers no GitHub sign-in unless it is configured", async () => {
     const app = createApp({ board, version: "t" });
     expect(await (await app.request("/auth/config")).json()).toEqual({
@@ -230,6 +257,44 @@ describe("board server routes", () => {
       appLanding: false,
     });
     expect((await app.request("/auth/github")).status).toBe(404);
+  });
+
+  it("serves Apple's association file ahead of the interface, only on a board that names the app", async () => {
+    const web = path.join(dir, "web");
+    await mkdir(web, { recursive: true });
+    await writeFile(path.join(web, "index.html"), "<html>sky</html>", "utf8");
+    const github = { clientId: "Iv1.test", clientSecret: "secret", users: ["kr4t0n"] };
+    const association = (appleAppId: string | null) =>
+      createApp({
+        board,
+        version: "t",
+        webDir: web,
+        signIn: { github: { ...github, appleAppId } },
+      }).request("/.well-known/apple-app-site-association");
+
+    const named = await association("ABCDE12345.com.example.app");
+    expect(named.status).toBe(200);
+    expect(named.headers.get("content-type")).toBe("application/json");
+    expect(named.headers.get("location")).toBeNull();
+    expect(await named.json()).toEqual({
+      webcredentials: { apps: ["ABCDE12345.com.example.app"] },
+    });
+    // Without an app, a 404 rather than the interface's page.
+    for (const answer of [
+      await association(null),
+      await createApp({ board, version: "t", webDir: web }).request(
+        "/.well-known/apple-app-site-association",
+      ),
+    ]) {
+      expect(answer.status).toBe(404);
+      expect(await answer.text()).not.toContain("sky");
+    }
+    // Nor does the interface answer at the app's landing.
+    const landing = await createApp({ board, version: "t", webDir: web }).request(
+      "/auth/app/signin",
+    );
+    expect(landing.status).toBe(404);
+    expect(await landing.text()).not.toContain("sky");
   });
 
   it("exposes scheduler state with pause, resume, and manual wakes", async () => {

@@ -120,8 +120,13 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- fail (printf "auth.github.users: %q is not a GitHub login or user id" (toString .)) -}}
 {{- end -}}
 {{- end -}}
-{{- else if $github.appLanding -}}
-{{- fail "auth.github.appLanding needs GitHub sign-in: set auth.github.enabled" -}}
+{{- with $github.appleAppId -}}
+{{- if not (regexMatch "^[A-Z0-9]{10}[.][A-Za-z0-9-]+([.][A-Za-z0-9-]+)*$" (toString .)) -}}
+{{- fail (printf "auth.github.appleAppId: %q is not <team id>.<bundle id>" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- else if $github.appleAppId -}}
+{{- fail "auth.github.appleAppId needs GitHub sign-in: set auth.github.enabled" -}}
 {{- end -}}
 {{- range .Values.society.citizens -}}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9-]{0,31}$" (toString .name)) -}}

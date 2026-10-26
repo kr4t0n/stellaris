@@ -49,6 +49,12 @@ export function safeNext(next: string | undefined): string {
   return next !== undefined && /^\/(?![/\\])/.test(next) ? next : "/";
 }
 
+/**
+ * Where a sign-in the app started lands: the address its `ASWebAuthenticationSession` waits for.
+ * Fixed here; a request only asks for it, with `landing=app`, and never names a scheme or a host.
+ */
+const APP_LANDING = "stellaris://signin";
+
 function land(c: Context, next: string, fragment: string): Response {
   return c.redirect(`${next}#${fragment}`, 302);
 }
@@ -56,9 +62,11 @@ function land(c: Context, next: string, fragment: string): Response {
 /**
  * Signing in to the board with GitHub, under `/auth`. The browser leaves for GitHub with a state
  * the server remembers, comes back to `/auth/github/callback`, and the server asks GitHub who
- * signed in; a login on the list gets a sign-in token, handed to the interface in the address's
- * fragment, which no request and no proxy log carries. The authorize request names no redirect, so
- * GitHub sends the browser to the one callback the OAuth app registers, the board's address.
+ * signed in; a login on the list gets a sign-in token, handed to the interface, or to the app at
+ * `APP_LANDING`, in the address's fragment, which no request and no proxy log carries. A state the
+ * server no longer holds lands on the sky, since nothing then says the app asked. The authorize
+ * request names no redirect, so GitHub sends the browser to the one callback the OAuth app
+ * registers, the board's address.
  */
 export function githubAuthRoutes(options: GithubAuthOptions): Hono {
   const { board, github } = options;
@@ -79,7 +87,8 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
       }
     }
     const state = randomBytes(24).toString("base64url");
-    states.set(state, { next: safeNext(c.req.query("next")), expiresAt: now() + STATE_TTL_MS });
+    const next = c.req.query("landing") === "app" ? APP_LANDING : safeNext(c.req.query("next"));
+    states.set(state, { next, expiresAt: now() + STATE_TTL_MS });
     const authorize = new URL("https://github.com/login/oauth/authorize");
     authorize.searchParams.set("client_id", github.clientId);
     authorize.searchParams.set("state", state);

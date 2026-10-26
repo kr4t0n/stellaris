@@ -6,26 +6,29 @@ import SwiftUI
 struct ConversationView: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
+  /// The message at the foot of the view.
+  @State private var anchor: String?
 
   var body: some View {
-    Group {
-      if feed.messages.isEmpty {
-        ScrollView {
-          header
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.vertical, 12)
+    // One scroll view from the first frame, empty while the messages load: anchored at the
+    // bottom, it keeps the foot in view as they come in, which a scroll view built afterwards
+    // didn't do.
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 16) {
+        header
+        ForEach(feed.messages) { message in
+          MessageRow(message: message)
         }
-        .accessibilityIdentifier("messages")
-        .overlay { state }
-      } else {
-        // Built once the messages are there, so it opens at its anchor rather than laying out
-        // empty first and staying at the top.
-        MessageList(
-          feed: feed, header: header, start: model.memory?.anchor(feed.conversation))
       }
+      .scrollTargetLayout()
+      .padding(.horizontal)
+      .padding(.vertical, 12)
     }
+    .scrollPosition(id: $anchor, anchor: .bottom)
+    .defaultScrollAnchor(.bottom)
     .scrollDismissesKeyboard(.immediately)
+    .accessibilityIdentifier("messages")
+    .overlay { state }
     .safeAreaInset(edge: .bottom) {
       DraftField(conversation: feed.conversation)
     }
@@ -33,6 +36,15 @@ struct ConversationView: View {
     .task {
       if feed.state != .loaded {
         await feed.load(using: model)
+      }
+      // Each time the view shows, the message it was left at, which it already shows unless
+      // the view was built again.
+      let saved = model.memory?.anchor(feed.conversation)
+      anchor = feed.messages.contains { $0.id == saved } ? saved : feed.messages.last?.id
+    }
+    .onChange(of: anchor) { _, id in
+      if let id {
+        model.memory?.setAnchor(id, for: feed.conversation)
       }
     }
   }
@@ -96,72 +108,6 @@ struct ConversationView: View {
         }
       }
     }
-  }
-}
-
-/// The messages, opened at `start` when it is one of them, else at the newest, and keeping the
-/// message at the foot of the view as the conversation's anchor once the user scrolls. A stack
-/// that measures every row, not a lazy one: a conversation runs to a few hundred messages, and a
-/// lazy stack's estimated rows left the list short of where it was sent.
-private struct MessageList<Header: View>: View {
-  @Environment(AppModel.self) private var model
-  let feed: ConversationFeed
-  let header: Header
-  /// Where the list opens.
-  let start: String?
-  /// The message at the foot of the view.
-  @State private var anchor: String?
-  /// Whether the user has scrolled since the list opened.
-  @State private var moved = false
-
-  init(feed: ConversationFeed, header: Header, start: String?) {
-    self.feed = feed
-    self.header = header
-    let ids = feed.messages.map(\.id)
-    self.start = start.flatMap { ids.contains($0) ? $0 : nil } ?? ids.last
-  }
-
-  var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          header
-          ForEach(feed.messages) { message in
-            MessageRow(message: message)
-          }
-        }
-        .scrollTargetLayout()
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-      }
-      .scrollPosition(id: $anchor, anchor: .bottom)
-      .defaultScrollAnchor(.bottom)
-      .accessibilityIdentifier("messages")
-      // Until the user scrolls, the list holds to where it opens whenever it appears or its
-      // content's height changes, as when a rotation rewraps it.
-      .onAppear { hold(proxy) }
-      .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
-        hold(proxy)
-      }
-      .onScrollPhaseChange { _, phase in
-        if phase == .tracking || phase == .interacting {
-          moved = true
-        }
-      }
-      .onChange(of: anchor) { _, id in
-        if moved, let id {
-          model.memory?.setAnchor(id, for: feed.conversation)
-        }
-      }
-    }
-  }
-
-  private func hold(_ proxy: ScrollViewProxy) {
-    guard !moved, let start else {
-      return
-    }
-    anchor = start
-    proxy.scrollTo(start, anchor: .bottom)
   }
 }
 

@@ -95,9 +95,13 @@ jobs:
           SIMCTL_CHILD_STELLARIS_FAKE_BOARD="$PWD/apps/ios/fixtures/api" \
             xcrun simctl launch "$device" com.example.stellaris -StellarisReset
           sleep 5
-          for display in internal external; do
+          # Asked for a screenshot without one, simctl names each display it can capture.
+          displays=$(xcrun simctl io "$device" screenshot "$RUNNER_TEMP/any.png" 2>&1 |
+            grep -oE -- '--display=[0-9]+' | cut -d= -f2)
+          echo "displays: $displays"
+          for display in $displays; do
             xcrun simctl io "$device" screenshot --display="$display" \
-              "$RUNNER_TEMP/screens/displays/$display.png" || echo "no $display display"
+              "$RUNNER_TEMP/screens/displays/display-$display.png"
           done
           exit 0
       - name: Collect the screenshots

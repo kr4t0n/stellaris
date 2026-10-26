@@ -58,7 +58,7 @@ On the outer display the keyboard covers the side bar, tabs included, until it g
 
 ### Nothing lays out by the screen, the device, or the orientation
 
-The app's window isn't the screen on iPhone Duo, and either display shows it either way round, so a view reads its size classes and its own size. `scripts/ios/check-adaptivity.sh`, part of `pnpm lint` and so of `check`, refuses `UIScreen.main`, the interface idiom, and the device's or the interface's orientation in the app's sources and BoardKit's. Before it reads them it plants a line of each kind it refuses in a scratch folder and stops unless it catches every one. The UI tests set the simulator's orientation, which is why they are outside what it reads.
+The app's window isn't the screen on iPhone Duo, and either display shows it either way round, so a view reads its size classes and its own size. `scripts/ios/check-adaptivity.sh`, part of `pnpm lint` and so of `check`, refuses reading the screen (`UIScreen`, or a scene's or a window's `screen`), the kind of device (the interface idiom, or the device's model), and the device's, the interface's, or the status bar's orientation in the app's sources and BoardKit's. Before it reads them it plants a line of each kind it refuses in a scratch folder and stops unless it catches every one. The UI tests set the simulator's orientation, which is why they are outside what it reads.
 
 ## Keeping the client in step with the server
 

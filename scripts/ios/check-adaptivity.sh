@@ -6,22 +6,27 @@
 # Usage: check-adaptivity.sh [folder...], by default the app's sources and BoardKit's.
 set -euo pipefail
 
-pattern='UIScreen\.main|userInterfaceIdiom|UIUserInterfaceIdiom|UIDeviceOrientation|UIInterfaceOrientation|interfaceOrientation|orientationDidChangeNotification|\.orientation([^A-Za-z0-9_]|$)'
+pattern='UIScreen([^A-Za-z0-9_]|$)|\.screen([.?]| *$)|userInterfaceIdiom|UIUserInterfaceIdiom|UIDevice\.current\.(model|localizedModel)|UIDeviceOrientation|UIInterfaceOrientation|interfaceOrientation|statusBarOrientation|orientationDidChangeNotification|\.orientation([^A-Za-z0-9_]|$)'
 
 planted=(
   'let width = UIScreen.main.bounds.width'
+  'let first = UIScreen.screens.first'
+  'let width = view.window?.windowScene?.screen.bounds.width'
+  'let screen = scene.screen'
   'if UIDevice.current.userInterfaceIdiom == .pad {}'
   'let idiom: UIUserInterfaceIdiom = .phone'
+  'if UIDevice.current.model == "iPad" {}'
   'let wide = UIDevice.current.orientation.isLandscape'
   'let turned: UIDeviceOrientation = .portrait'
   'let side = scene.interfaceOrientation'
   'let allowed: UIInterfaceOrientationMask = .all'
+  'let bar = UIApplication.shared.statusBarOrientation'
   'let name = UIDevice.orientationDidChangeNotification'
 )
 probe=$(mktemp -d)
 trap 'rm -rf "$probe"' EXIT
 printf '%s\n' "${planted[@]}" 'let size = proxy.size' 'let regular = sizeClass == .regular' \
-  >"$probe/Planted.swift"
+  'Text("Lit").blendMode(.screen)' >"$probe/Planted.swift"
 caught=$(grep -rnE --include='*.swift' "$pattern" "$probe" | wc -l | tr -d ' ')
 if [ "$caught" != "${#planted[@]}" ]; then
   echo "check-adaptivity.sh caught $caught lines of the ${#planted[@]} planted" >&2

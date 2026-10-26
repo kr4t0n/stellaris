@@ -61,11 +61,31 @@ class ShellTestCase: XCTestCase {
   }
 
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
-    app.descendants(matching: .any)[String(format: "message-general-%02d", number)].firstMatch
+    app.staticTexts[String(format: "message-general-%02d", number)].firstMatch
+  }
+
+  /// The number of the lowest message of #general on screen, if one is.
+  @MainActor func lowestShown(_ app: XCUIApplication) -> Int? {
+    let shown = app.staticTexts
+      .matching(NSPredicate(format: "identifier BEGINSWITH 'message-general-'"))
+      .allElementsBoundByIndex.filter { $0.isHittable }
+      .compactMap { Int($0.identifier.dropFirst("message-general-".count)) }
+    return shown.max()
   }
 
   @MainActor func draft(_ app: XCUIApplication) -> XCUIElement {
-    app.descendants(matching: .any)["draft"].firstMatch
+    app.textFields["draft"].firstMatch
+  }
+
+  /// Drags the conversation down by half its height `times` times, to older messages; the first
+  /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display.
+  @MainActor func dragDown(_ app: XCUIApplication, times: Int = 1) {
+    let messages = app.scrollViews.firstMatch
+    for _ in 0..<times {
+      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.25))
+      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.75))
+      start.press(forDuration: 0.1, thenDragTo: end)
+    }
   }
 
   /// Keeps a picture of the screen with the test's results.
@@ -85,37 +105,32 @@ final class ShellUITests: ShellTestCase {
     signIn(app)
     expectGeneral(app)
     let newest = message(app, 60)
-    XCTAssertTrue(newest.waitForExistence(timeout: 20))
     XCTAssertTrue(newest.isHittable)
 
     draft(app).tap()
     draft(app).typeText("Half a thought")
-    let messages = app.scrollViews.firstMatch
-    for _ in 0..<3 {
-      messages.swipeDown()
-    }
-    XCTAssertFalse(newest.exists && newest.isHittable)
-    guard
-      let anchored = (1...59).reversed().first(where: {
-        message(app, $0).exists && message(app, $0).isHittable
-      })
-    else {
-      return XCTFail("no message shows after scrolling")
+    dragDown(app, times: 3)
+    keepScreen("scrolled-up")
+    XCTAssertFalse(newest.isHittable)
+    guard let anchored = lowestShown(app) else {
+      return XCTFail("no message of #general shows after scrolling")
     }
 
     tab(app, "Board")
     XCTAssertTrue(app.buttons["channel-governance"].waitForExistence(timeout: 20))
     tab(app, "Chat")
     XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
+    XCTAssertEqual(lowestShown(app), anchored)
     XCTAssertEqual(draft(app).value as? String, "Half a thought")
-    XCTAssertTrue(message(app, anchored).isHittable)
-    XCTAssertFalse(newest.exists && newest.isHittable)
 
     XCUIDevice.shared.orientation = .landscapeLeft
     XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
+    keepScreen("scrolled-up-landscape")
     XCTAssertTrue(message(app, anchored).isHittable)
+    XCTAssertFalse(newest.isHittable)
     XCTAssertEqual(draft(app).value as? String, "Half a thought")
     XCUIDevice.shared.orientation = .portrait
+    XCTAssertTrue(message(app, anchored).waitForExistence(timeout: 20))
     XCTAssertTrue(message(app, anchored).isHittable)
   }
 
@@ -147,21 +162,23 @@ final class ShellUITests: ShellTestCase {
   }
 
   /// Back from the background shows the conversation that was open; a fresh start shows general,
-  /// with the draft kept on disk.
+  /// and each conversation's draft is kept on disk.
   @MainActor func testOpensTheLastConversationFromTheBackgroundAndGeneralOnAFreshStart() {
     let app = launch()
     signIn(app)
     expectGeneral(app)
-    draft(app).tap()
-    draft(app).typeText("Kept on disk")
     tab(app, "Board")
     pick(app, "channel-governance")
     expectConversation(app, "#governance")
+    draft(app).tap()
+    draft(app).typeText("Kept on disk")
+    dragDown(app)
 
     XCUIDevice.shared.press(.home)
     XCTAssertTrue(app.wait(for: .runningBackground, timeout: 20))
     app.activate()
     expectConversation(app, "#governance")
+    XCTAssertEqual(draft(app).value as? String, "Kept on disk")
 
     // Ended in the background, as iOS ends an app or someone swipes it away.
     XCUIDevice.shared.press(.home)
@@ -169,6 +186,9 @@ final class ShellUITests: ShellTestCase {
     app.terminate()
     let again = launch(reset: false)
     expectGeneral(again)
+    tab(again, "Board")
+    pick(again, "channel-governance")
+    expectConversation(again, "#governance")
     XCTAssertEqual(draft(again).value as? String, "Kept on disk")
   }
 

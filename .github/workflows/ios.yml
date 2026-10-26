@@ -37,3 +37,9 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1' \
             -derivedDataPath "$RUNNER_TEMP/derived" \
             -resultBundlePath "$RUNNER_TEMP/BoardKit.xcresult"
+      # The simulator's Keychain turns away a package's tests, which run in no app, so the token
+      # store's test runs here, on the host.
+      - name: Test BoardKit on macOS
+        if: ${{ !cancelled() }}
+        working-directory: apps/ios/BoardKit
+        run: swift test --scratch-path "$RUNNER_TEMP/swiftpm"

@@ -1,5 +1,6 @@
 #if canImport(Darwin)
   import Foundation
+  import Security
   import Testing
 
   @testable import BoardKit
@@ -175,8 +176,19 @@
     }
   }
 
+  /// Whether the Keychain takes this test process. The iOS simulator's turns a package's tests away
+  /// with `errSecMissingEntitlement`, since they run in no app; macOS's takes them.
+  private let keychainTakesThisProcess: Bool = {
+    let probe: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "stellaris.board.probe",
+    ]
+    return SecItemCopyMatching(probe as CFDictionary, nil) != errSecMissingEntitlement
+  }()
+
   @Suite struct TokenStoreTests {
-    @Test func keepsReplacesAndForgetsAToken() throws {
+    @Test(.enabled(if: keychainTakesThisProcess, "the Keychain turns away this test process"))
+    func keepsReplacesAndForgetsAToken() throws {
       let store = TokenStore(service: "stellaris.board.test.\(UUID().uuidString)")
       let board = URL(string: "https://board.example")!
       let other = URL(string: "https://other.example")!

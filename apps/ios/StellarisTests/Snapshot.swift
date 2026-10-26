@@ -35,14 +35,19 @@ import XCTest
       name: "largest", dynamic: .accessibility5, category: .accessibilityExtraExtraExtraLarge),
   ]
 
-  /// `view` drawn in a window `size` big, with a regular width from 600 points up.
+  /// `view` drawn in a window `size` big, with a regular width from 600 points up. iOS places its
+  /// vertical bar by the display the simulator shows, the outer one, so in a window wider than that
+  /// the bars fall back to the horizontal ones, as on the inner display in portrait.
   static func image(of view: some View, size: CGSize, type: TypeSize) async throws -> UIImage {
     let scene = try XCTUnwrap(
       UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
       "the test host has no window scene")
     let window = UIWindow(windowScene: scene)
     window.frame = CGRect(origin: .zero, size: size)
-    let host = UIHostingController(rootView: view.environment(\.dynamicTypeSize, type.dynamic))
+    let wider = size.width > scene.screen.bounds.width
+    let host = UIHostingController(
+      rootView: view.environment(\.dynamicTypeSize, type.dynamic).modifier(
+        HorizontalBars(enabled: wider)))
     host.traitOverrides.horizontalSizeClass = size.width >= 600 ? .regular : .compact
     host.traitOverrides.preferredContentSizeCategory = type.category
     window.rootViewController = host
@@ -106,5 +111,18 @@ import XCTest
       }
     }
     return count
+  }
+}
+
+/// Turns the vertical bar off, where iOS 27.1 lets a view.
+private struct HorizontalBars: ViewModifier {
+  let enabled: Bool
+
+  func body(content: Content) -> some View {
+    if enabled, #available(iOS 27.1, *) {
+      content.toolbarVerticalBehavior(.disabled)
+    } else {
+      content
+    }
   }
 }

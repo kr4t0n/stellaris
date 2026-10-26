@@ -80,12 +80,20 @@ class ShellTestCase: XCTestCase {
   /// Drags the conversation down by half its height `times` times, to older messages; the first
   /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display.
   @MainActor func dragDown(_ app: XCUIApplication, times: Int = 1) {
-    let messages = app.scrollViews.firstMatch
+    // By its name: with the keyboard up, the first scroll view is its row of suggestions.
+    let messages = app.scrollViews["messages"].firstMatch
     for _ in 0..<times {
       let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.25))
       let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.75))
       start.press(forDuration: 0.1, thenDragTo: end)
     }
+  }
+
+  /// Sends the app to the background, where iOS suspends it.
+  @MainActor func toBackground(_ app: XCUIApplication) {
+    XCUIDevice.shared.press(.home)
+    let gone = app.wait(for: .runningBackgroundSuspended, timeout: 20)
+    XCTAssertTrue(gone || app.state == .runningBackground, "the app is still in front")
   }
 
   /// Keeps a picture of the screen with the test's results.
@@ -174,15 +182,13 @@ final class ShellUITests: ShellTestCase {
     draft(app).typeText("Kept on disk")
     dragDown(app)
 
-    XCUIDevice.shared.press(.home)
-    XCTAssertTrue(app.wait(for: .runningBackground, timeout: 20))
+    toBackground(app)
     app.activate()
     expectConversation(app, "#governance")
     XCTAssertEqual(draft(app).value as? String, "Kept on disk")
 
     // Ended in the background, as iOS ends an app or someone swipes it away.
-    XCUIDevice.shared.press(.home)
-    XCTAssertTrue(app.wait(for: .runningBackground, timeout: 20))
+    toBackground(app)
     app.terminate()
     let again = launch(reset: false)
     expectGeneral(again)

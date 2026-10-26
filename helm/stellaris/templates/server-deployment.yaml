@@ -145,6 +145,10 @@ spec:
                   key: {{ ternary $github.existingSecretKey "client-secret" (not (empty $github.existingSecret)) }}
             - name: STELLARIS_GITHUB_USERS
               value: {{ join "," $github.users | quote }}
+            {{- if $github.appLanding }}
+            - name: STELLARIS_GITHUB_APP_LANDING
+              value: "true"
+            {{- end }}
             {{- end }}
             {{- with .Values.server.extraEnv }}
             {{- toYaml . | nindent 12 }}

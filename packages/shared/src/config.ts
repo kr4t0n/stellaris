@@ -13,6 +13,11 @@ export const GithubSignInSchema = z.object({
   clientSecret: z.string().min(1),
   /** Logins, lowercased; GitHub logins are case-insensitive. */
   users: z.array(z.string().min(1)).min(1),
+  /**
+   * Whether a sign-in the app starts lands at its `stellaris://` scheme. Off unless asked for, since
+   * any app can claim a custom scheme, so the board can't tell which one receives the session.
+   */
+  appLanding: z.boolean(),
 });
 export type GithubSignIn = z.infer<typeof GithubSignInSchema>;
 
@@ -60,17 +65,39 @@ function list(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+/** A switch from the environment: `true` or `false`, in any case, or the default when unset. */
+function flag(name: string, value: string | undefined, fallback: boolean): boolean {
+  const text = (value ?? "").trim().toLowerCase();
+  if (text === "") {
+    return fallback;
+  }
+  if (text !== "true" && text !== "false") {
+    throw new Error(`${name} is true or false, not ${JSON.stringify(value)}`);
+  }
+  return text === "true";
+}
+
 /** Environment variable every agent's config home reads its board token from. */
 export const AGENT_TOKEN_ENV = "STELLARIS_AGENT_TOKEN";
 
-/** Builds the server configuration from an environment map. Callers pass `process.env`. */
-/** GitHub sign-in from the environment: all three variables, or none of them. */
+/**
+ * GitHub sign-in from the environment: all three variables, or none of them, and the app's
+ * landing only beside them.
+ */
 function githubSignIn(env: Readonly<Record<string, string | undefined>>): GithubSignIn | null {
   const clientId = env["STELLARIS_GITHUB_CLIENT_ID"] ?? "";
   const clientSecret = env["STELLARIS_GITHUB_CLIENT_SECRET"] ?? "";
   // Logins, or numeric user ids, which survive a rename.
   const users = list(env["STELLARIS_GITHUB_USERS"]).map((login) => login.toLowerCase());
+  const appLanding = flag(
+    "STELLARIS_GITHUB_APP_LANDING",
+    env["STELLARIS_GITHUB_APP_LANDING"],
+    false,
+  );
   if (clientId === "" && clientSecret === "" && users.length === 0) {
+    if (appLanding) {
+      throw new Error("STELLARIS_GITHUB_APP_LANDING needs GitHub sign-in");
+    }
     return null;
   }
   if (clientId === "" || clientSecret === "" || users.length === 0) {
@@ -78,9 +105,10 @@ function githubSignIn(env: Readonly<Record<string, string | undefined>>): Github
       "GitHub sign-in needs STELLARIS_GITHUB_CLIENT_ID, STELLARIS_GITHUB_CLIENT_SECRET, and STELLARIS_GITHUB_USERS together",
     );
   }
-  return GithubSignInSchema.parse({ clientId, clientSecret, users });
+  return GithubSignInSchema.parse({ clientId, clientSecret, users, appLanding });
 }
 
+/** Builds the server configuration from an environment map. Callers pass `process.env`. */
 export function loadServerConfig(env: Readonly<Record<string, string | undefined>>): ServerConfig {
   return ServerConfigSchema.parse({
     dataDir: env["STELLARIS_DATA_DIR"] ?? "./data",

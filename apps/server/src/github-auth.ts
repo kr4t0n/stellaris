@@ -71,6 +71,7 @@ export function safeNext(next: string | undefined): string {
 /**
  * Where a sign-in the app started lands: the address its `ASWebAuthenticationSession` waits for.
  * Fixed here; a request only asks for it, with `landing=app`, and never names a scheme or a host.
+ * A board lands there only with `appLanding` on, and refuses the request otherwise.
  */
 const APP_LANDING = "stellaris://signin";
 
@@ -94,19 +95,27 @@ export function githubAuthRoutes(options: GithubAuthOptions): Hono {
   const states = new Map<string, { next: string; expiresAt: number }>();
   const routes = new Hono();
 
-  routes.get("/config", (c) => c.json({ github: github !== null }));
+  routes.get("/config", (c) =>
+    c.json({ github: github !== null, appLanding: github?.appLanding === true }),
+  );
   if (github === null) {
     return routes;
   }
 
   routes.get("/github", options.limit ?? ((_c, next) => next()), (c) => {
+    const app = c.req.query("landing") === "app";
+    // Refused, not sent to the board's own landing: the app would never hear back, and the
+    // session would stay in a browser nobody meant to sign in.
+    if (app && !github.appLanding) {
+      return c.text("Signing in to the app is off on this board", 403);
+    }
     for (const [state, pending] of states) {
       if (pending.expiresAt <= now() || states.size >= MAX_STATES) {
         states.delete(state);
       }
     }
     const state = randomBytes(24).toString("base64url");
-    const next = c.req.query("landing") === "app" ? APP_LANDING : safeNext(c.req.query("next"));
+    const next = app ? APP_LANDING : safeNext(c.req.query("next"));
     states.set(state, { next, expiresAt: now() + STATE_TTL_MS });
     const authorize = new URL("https://github.com/login/oauth/authorize");
     authorize.searchParams.set("client_id", github.clientId);

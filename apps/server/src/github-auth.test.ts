@@ -27,29 +27,31 @@ describe("GitHub sign-in's landing", () => {
     return answer.headers.get("location") ?? "";
   };
   const signIn = async (query: string, code = "good") => back(await leave(query), code);
+  const github: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url === "https://github.com/login/oauth/access_token") {
+      const body = typeof init?.body === "string" ? init.body : "{}";
+      const { code } = z.object({ code: z.string() }).parse(JSON.parse(body));
+      // GitHub answers a bad code with 200 and an error.
+      return Response.json(
+        code === "good" ? { access_token: "gho_test" } : { error: "bad_verification_code" },
+      );
+    }
+    return Response.json({ login, id: 1001 });
+  };
+  /** The routes alone, without the per-address limit the app puts in front of them. */
+  const build = (appLanding: boolean) =>
+    githubAuthRoutes({
+      board,
+      github: { clientId: "Iv1.test", clientSecret: "secret", users: ["signer-1"], appLanding },
+      fetch: github,
+    });
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-github-auth-"));
     board = (await Board.init(dir, { name: "github-auth" })).board;
     login = "signer-1";
-    const github: typeof fetch = async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url === "https://github.com/login/oauth/access_token") {
-        const body = typeof init?.body === "string" ? init.body : "{}";
-        const { code } = z.object({ code: z.string() }).parse(JSON.parse(body));
-        // GitHub answers a bad code with 200 and an error.
-        return Response.json(
-          code === "good" ? { access_token: "gho_test" } : { error: "bad_verification_code" },
-        );
-      }
-      return Response.json({ login, id: 1001 });
-    };
-    // The routes alone, without the per-address limit the app puts in front of them.
-    routes = githubAuthRoutes({
-      board,
-      github: { clientId: "Iv1.test", clientSecret: "secret", users: ["signer-1"] },
-      fetch: github,
-    });
+    routes = build(true);
   });
 
   afterEach(async () => {
@@ -66,6 +68,28 @@ describe("GitHub sign-in's landing", () => {
     expect(await signIn("landing=app", "stale")).toBe("stellaris://signin#signin-error=github");
     login = "mallory";
     expect(await signIn("landing=app")).toBe("stellaris://signin#signin-error=not-allowed");
+  });
+
+  it("refuses a sign-in the app asks for while the app's landing is off", async () => {
+    routes = build(false);
+    for (const query of ["landing=app", `landing=app&next=${encodeURIComponent("/runners")}`]) {
+      const start = await routes.request(`/github?${query}`);
+      expect(start.status).toBe(403);
+      expect(start.headers.get("location")).toBeNull();
+      expect(await start.text()).toBe("Signing in to the app is off on this board");
+    }
+    // The board's own sign-in still lands on the board.
+    expect(await signIn(`next=${encodeURIComponent("/runners")}`)).toMatch(/^\/runners#session=/);
+    expect(await signIn("landing=APP")).toMatch(/^\/#session=/);
+    expect(await (await routes.request("/config")).json()).toEqual({
+      github: true,
+      appLanding: false,
+    });
+    routes = build(true);
+    expect(await (await routes.request("/config")).json()).toEqual({
+      github: true,
+      appLanding: true,
+    });
   });
 
   /** Values of `next` that name another host or scheme, as written or as a browser resolves them. */

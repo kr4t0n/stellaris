@@ -109,11 +109,19 @@ describe("board server routes", () => {
       board,
       version: "t",
       signIn: {
-        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["kr4t0n"] },
+        github: {
+          clientId: "Iv1.test",
+          clientSecret: "secret",
+          users: ["kr4t0n"],
+          appLanding: false,
+        },
         fetch: github,
       },
     });
-    expect(await (await app.request("/auth/config")).json()).toEqual({ github: true });
+    expect(await (await app.request("/auth/config")).json()).toEqual({
+      github: true,
+      appLanding: false,
+    });
 
     const leave = async (next: string): Promise<string> => {
       const response = await app.request(`/auth/github?next=${encodeURIComponent(next)}`);
@@ -153,7 +161,7 @@ describe("board server routes", () => {
       board,
       version: "t",
       signIn: {
-        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["666"] },
+        github: { clientId: "Iv1.test", clientSecret: "secret", users: ["666"], appLanding: false },
         fetch: github,
       },
     });
@@ -195,7 +203,14 @@ describe("board server routes", () => {
       board,
       version: "t",
       trustedProxies: 1,
-      signIn: { github: { clientId: "Iv1.test", clientSecret: "secret", users: ["kr4t0n"] } },
+      signIn: {
+        github: {
+          clientId: "Iv1.test",
+          clientSecret: "secret",
+          users: ["kr4t0n"],
+          appLanding: false,
+        },
+      },
     });
     const start = (address: string) =>
       app.request("/auth/github", { headers: { "x-forwarded-for": address } });
@@ -210,7 +225,10 @@ describe("board server routes", () => {
 
   it("offers no GitHub sign-in unless it is configured", async () => {
     const app = createApp({ board, version: "t" });
-    expect(await (await app.request("/auth/config")).json()).toEqual({ github: false });
+    expect(await (await app.request("/auth/config")).json()).toEqual({
+      github: false,
+      appLanding: false,
+    });
     expect((await app.request("/auth/github")).status).toBe(404);
   });
 

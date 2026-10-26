@@ -18,7 +18,9 @@ cases=(
 --set server.config.concurrency=4 --set server.config.timings.opsIntervalMs=60000 --set runner.enabled=true \
 --set runner.replicas=2 --set runner.config.capabilities={gpu} --set runner.networkPolicy.enabled=true \
 --set runner.extraVolumes[0].name=ssh-key --set runner.extraVolumes[0].secret.secretName=ssh-key \
---set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37"
+--set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37 \
+--set auth.github.appLanding=true\
+|            - name: STELLARIS_GITHUB_APP_LANDING"
   "runners only|--set server.enabled=false --set runner.enabled=true --set runner.serverUrl=https://stellaris.example.com \
 --set runner.existingSecret=runner-token --set persistence.enabled=false\
 |      serviceAccountName: default|      automountServiceAccountToken: false"
@@ -33,6 +35,7 @@ refusals=(
   "runner.extraVolumes: home is the runner's claim|--set runner.enabled=true --set runner.extraVolumes[0].name=home \
 --set runner.extraVolumes[0].emptyDir.medium=Memory"
   "auth.github.clientId is required|--set auth.github.enabled=true"
+  "auth.github.appLanding needs GitHub sign-in|--set auth.github.appLanding=true"
   "runner.existingSecret holds one runner's token|--set runner.enabled=true --set runner.existingSecret=runner-token \
 --set runner.replicas=2"
 )

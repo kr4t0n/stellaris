@@ -205,11 +205,36 @@ describe("server config", () => {
       clientId: "Iv1.abc",
       clientSecret: "secret",
       users: ["kr4t0n", "octocat"],
+      appLanding: false,
     });
     expect(() =>
       loadServerConfig({ ...github, STELLARIS_GITHUB_CLIENT_SECRET: undefined }),
     ).toThrow(/together/);
     expect(() => loadServerConfig({ ...github, STELLARIS_GITHUB_USERS: " " })).toThrow(/together/);
+  });
+
+  it("lands a sign-in in the app only when asked to", () => {
+    const github = {
+      STELLARIS_GITHUB_CLIENT_ID: "Iv1.abc",
+      STELLARIS_GITHUB_CLIENT_SECRET: "secret",
+      STELLARIS_GITHUB_USERS: "octocat",
+    };
+    const appLanding = (value: string | undefined) =>
+      loadServerConfig({ ...github, STELLARIS_GITHUB_APP_LANDING: value }).github?.appLanding;
+    expect(appLanding(undefined)).toBe(false);
+    expect(appLanding("")).toBe(false);
+    expect(appLanding("false")).toBe(false);
+    expect(appLanding("true")).toBe(true);
+    expect(appLanding(" TRUE ")).toBe(true);
+    // A value the board can't read stops the start, so a typo never leaves the landing off unseen.
+    for (const value of ["yes", "1", "on"]) {
+      expect(() => appLanding(value)).toThrow(/true or false/);
+    }
+    // Without GitHub sign-in there is nothing to land.
+    expect(() => loadServerConfig({ STELLARIS_GITHUB_APP_LANDING: "true" })).toThrow(
+      /needs GitHub sign-in/,
+    );
+    expect(loadServerConfig({ STELLARIS_GITHUB_APP_LANDING: "false" }).github).toBeNull();
   });
 });
 

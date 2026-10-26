@@ -47,6 +47,9 @@ auth:
     existingSecretKey: client-secret
     # GitHub logins allowed in, in any case, or numeric user ids, which survive a rename.
     users: []
+    # Lets the iOS app sign in, landing at its stellaris:// scheme. Off by default, since a custom
+    # URL scheme can't prove which app receives the session.
+    appLanding: false
 
 server:
   enabled: true

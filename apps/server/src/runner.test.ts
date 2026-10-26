@@ -181,6 +181,8 @@ class UsageTotalingBackend implements AgentBackend {
   readonly kind = "claude" as const;
   /** The running usage each cold turn and each warm start was handed, in order. */
   readonly startedFrom: Array<Usage | undefined> = [];
+  /** The folder each cold turn ran in. */
+  readonly cwds: string[] = [];
   /** Whether the next turn sees no result. */
   noResult = false;
   private total: Usage = ZERO_USAGE;
@@ -189,8 +191,9 @@ class UsageTotalingBackend implements AgentBackend {
     return Promise.resolve("session-1");
   }
 
-  runTurn(request: { usageSoFar?: Usage | undefined }): Promise<TurnResult> {
+  runTurn(request: { usageSoFar?: Usage | undefined; spec: { cwd: string } }): Promise<TurnResult> {
     this.startedFrom.push(request.usageSoFar);
+    this.cwds.push(request.spec.cwd);
     this.total = request.usageSoFar ?? ZERO_USAGE;
     return Promise.resolve(this.turn("cold turn"));
   }
@@ -1144,6 +1147,47 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn({ ...last, session: "session-0" });
     await run(dispatch);
     expect(backend.startedFrom.at(-1)).toBeUndefined();
+  });
+
+  it("keeps a session's running usage through a turn that never reached its CLI", async () => {
+    const { board } = await Board.init(dir, { name: "usage-unstarted" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const backend = new UsageTotalingBackend();
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const dispatch = {
+      agent: "steward-1",
+      project: "society",
+      thread: { id: ask.id, task: false },
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+    };
+    await society.run(dispatch);
+    await society.run(dispatch);
+
+    // The board's copy never arrives, so the runner fails the turn before the CLI starts.
+    dropping = true;
+    const unpulled = await society.run(dispatch);
+    dropping = false;
+    expect(unpulled.error).toMatch(/^the runner could not run the turn/);
+    expect(unpulled).toMatchObject({ session: "session-1", sessionUsage: turnsOfUsage(2) });
+
+    // Nor from a workspace that could not be prepared: a file stands where its folder goes.
+    const workspace = backend.cwds.at(-1) ?? "";
+    await rm(workspace, { recursive: true });
+    await writeFile(workspace, "", "utf8");
+    const unprepared = await society.run(dispatch);
+    expect(unprepared.error).toMatch(/^could not prepare the workspace/);
+    expect(unprepared).toMatchObject({ session: "session-1", sessionUsage: turnsOfUsage(2) });
+    await rm(workspace);
+
+    await society.run(dispatch);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(1), turnsOfUsage(2)]);
   });
 
   it("hands a warm session that starts on a saved session the running usage its last turn reported", async () => {

@@ -150,6 +150,11 @@ interface TurnState {
    * said: every request of the query and of the session before it, sub-agents' and the CLI's own.
    */
   sessionUsage: Usage | undefined;
+  /**
+   * The most the session can have held before the turn's first result that reported its running
+   * usage: that usage less the run's own, since the run spent its main loop at least.
+   */
+  heldBefore: Usage | undefined;
   /** Cumulative for the query: per turn on a cold run, running total on a resident session. */
   totalCostUsd: number;
   finalText: string;
@@ -185,6 +190,7 @@ function freshState(model?: string): TurnState {
   return {
     usage: ZERO_USAGE,
     sessionUsage: undefined,
+    heldBefore: undefined,
     totalCostUsd: 0,
     finalText: "",
     structured: null,
@@ -264,22 +270,45 @@ function sessionUsageOf(raw: unknown): Usage | undefined {
   );
 }
 
+/** What `now` grew by from `from`, never less than nothing in any count. */
+function grownBy(now: Usage, from: Usage): Usage {
+  return {
+    inputTokens: Math.max(0, now.inputTokens - from.inputTokens),
+    outputTokens: Math.max(0, now.outputTokens - from.outputTokens),
+    cacheReadTokens: Math.max(0, now.cacheReadTokens - from.cacheReadTokens),
+    cacheWriteTokens: Math.max(0, now.cacheWriteTokens - from.cacheWriteTokens),
+  };
+}
+
+/** Whether any count of `usage` is below the same count of `floor`. */
+function fallsShort(usage: Usage, floor: Usage): boolean {
+  return (
+    usage.inputTokens < floor.inputTokens ||
+    usage.outputTokens < floor.outputTokens ||
+    usage.cacheReadTokens < floor.cacheReadTokens ||
+    usage.cacheWriteTokens < floor.cacheWriteTokens
+  );
+}
+
 /**
- * A turn's own usage: what the session's running usage grew by from where the turn found it, never
- * less than nothing in any count. Without both, as on a resumed session whose last turn left none,
- * it is the sum of the turn's results, which leaves out its sub-agents and the CLI's own calls.
+ * A turn's own usage: what the session's running usage grew by from where the board left it. It
+ * is the sum of the turn's results instead, which leaves out its sub-agents and the CLI's own
+ * calls, when the growth cannot be measured: on a resumed session whose last turn left no running
+ * usage, and on one the CLI resumed from less than the board held, as after it was killed outright
+ * before it saved its totals.
  */
 function turnUsage(state: TurnState, soFar: Usage | undefined): Usage {
   const now = state.sessionUsage;
-  if (now === undefined || soFar === undefined) {
+  const before = state.heldBefore;
+  if (
+    now === undefined ||
+    before === undefined ||
+    soFar === undefined ||
+    fallsShort(before, soFar)
+  ) {
     return state.usage;
   }
-  return {
-    inputTokens: Math.max(0, now.inputTokens - soFar.inputTokens),
-    outputTokens: Math.max(0, now.outputTokens - soFar.outputTokens),
-    cacheReadTokens: Math.max(0, now.cacheReadTokens - soFar.cacheReadTokens),
-    cacheWriteTokens: Math.max(0, now.cacheWriteTokens - soFar.cacheWriteTokens),
-  };
+  return grownBy(now, soFar);
 }
 
 /**
@@ -389,9 +418,14 @@ function handleMessage(
     case "result": {
       state.sawResult = true;
       // Each result counts only its own run, and a turn can run more than once in one process.
-      state.usage = addUsage(state.usage, usageOf(message.usage));
+      const run = usageOf(message.usage);
+      state.usage = addUsage(state.usage, run);
       // Like the cost, `modelUsage` is the session's running total.
-      state.sessionUsage = sessionUsageOf(message.modelUsage) ?? state.sessionUsage;
+      const totals = sessionUsageOf(message.modelUsage);
+      if (totals !== undefined) {
+        state.heldBefore ??= grownBy(totals, run);
+        state.sessionUsage = totals;
+      }
       state.totalCostUsd = message.total_cost_usd;
       state.apiError = message.subtype === "success" && message.is_error;
       // Like the error, the latest run decides whether the turn is worth sending again.

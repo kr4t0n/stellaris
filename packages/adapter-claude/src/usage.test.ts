@@ -156,14 +156,27 @@ describe("a Claude turn's usage", () => {
     expect(result.sessionUsage).toEqual(usage(14_930, 593, 18_000, 90));
   });
 
-  it("never counts less than nothing when the session reports less than the board held", async () => {
+  it("counts a session the CLI resumed from less than the board held by its results", async () => {
+    // As after the CLI was killed outright: it saves its totals only as its process ends.
     const frames = await recorded("sdk-subagent-resumed-recorded.jsonl");
     const result = await new ClaudeAgentBackend({ queryFn: replaying(frames) }).runTurn({
       ...request,
       usageSoFar: usage(20_000, 300, 10_000, 100),
     });
-    expect(result.usage).toEqual(usage(0, 293, 8_000, 0));
+    expect(result.usage).toEqual(usage(400, 200, 8_000, 40));
+    // The next turn measures from what the CLI holds now, which it saves as it ends.
     expect(result.sessionUsage).toEqual(usage(14_930, 593, 18_000, 90));
+  });
+
+  it("finds a short resume from the turn's first result, though the turn outgrew the board's figure", async () => {
+    // The first result holds 14,730 / 493 / 14,000 / 70, of which its run's main loop spent
+    // 200 / 100 / 4,000 / 20, so the session held at most 393 output tokens before it, not 400.
+    const frames = await recorded("sdk-subagent-resumed-recorded.jsonl");
+    const result = await new ClaudeAgentBackend({ queryFn: replaying(frames) }).runTurn({
+      ...request,
+      usageSoFar: usage(7_530, 400, 10_000, 50),
+    });
+    expect(result.usage).toEqual(usage(400, 200, 8_000, 40));
   });
 
   it("counts in a warm session's next turn what it spent between turns, once", async () => {

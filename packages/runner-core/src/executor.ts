@@ -348,8 +348,6 @@ export class TurnExecutor {
         "the CLI could not resume the session",
       );
     }
-    // A turn that reports no running usage, as one that saw no result, leaves the session's as it was.
-    const sessionUsage = result.sessionUsage ?? job.usageSoFar;
     const { work, stuck } = await this.handBack(job, workspace);
     const leftovers = workspace.own && (await this.leftoversIn(workspace.cwd));
     this.log.info(
@@ -370,7 +368,7 @@ export class TurnExecutor {
       usage: result.usage,
       costUsd: result.costUsd,
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
-      ...(sessionUsage === undefined ? {} : { sessionUsage }),
+      ...(result.sessionUsage === undefined ? {} : { sessionUsage: result.sessionUsage }),
       session: result.session ?? (started ? session : job.session),
       ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
       ...(result.transient === true && result.exitReason === "error" ? { transient: true } : {}),

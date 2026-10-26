@@ -13,7 +13,7 @@
     "web:dev": "pnpm --filter @stellaris/web dev",
     "web:serve": "pnpm --filter @stellaris/web preview --port 5173 --strictPort",
     "clean": "tsc -b --clean",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware && scripts/ios/check-adaptivity.sh",
     "lint:fix": "oxlint --type-aware --fix",
     "format": "oxfmt",
     "format:check": "oxfmt --check",

@@ -25,7 +25,12 @@ struct BoardView: View {
           }
         }
       }
-      .overlay { BoardState(state: model.store.state, empty: nil) }
+      .overlay {
+        BoardState(
+          state: model.store.state,
+          rows: !model.store.societyChannels.isEmpty || !model.store.openProjects.isEmpty,
+          empty: nil)
+      }
       .refreshable { await model.refresh() }
       .toolbar {
         ToolbarItem(placement: .primaryAction) {
@@ -90,27 +95,32 @@ private struct TaskRow: View {
   }
 }
 
-/// What a list of the board shows while it loads, when it fails, or when it is empty.
+/// What a list of the board shows while it loads, when it fails, or when it is empty: nothing once
+/// it has rows, which a refresh that fails leaves as they were, as a conversation does its messages.
 struct BoardState: View {
   @Environment(AppModel.self) private var model
   let state: Loading
+  /// Whether the list has rows.
+  let rows: Bool
   /// The empty state's words, for a list that can be empty.
   let empty: String?
 
   var body: some View {
-    switch state {
-    case .idle, .loading:
-      ProgressView()
-    case .loaded:
-      if let empty {
-        ContentUnavailableView(empty, systemImage: "checkmark.circle")
-      }
-    case .failed(let reason):
-      ContentUnavailableView {
-        Label(reason, systemImage: "wifi.exclamationmark")
-      } actions: {
-        Button("Retry") {
-          Task { await model.refresh() }
+    if !rows {
+      switch state {
+      case .idle, .loading:
+        ProgressView()
+      case .loaded:
+        if let empty {
+          ContentUnavailableView(empty, systemImage: "checkmark.circle")
+        }
+      case .failed(let reason):
+        ContentUnavailableView {
+          Label(reason, systemImage: "wifi.exclamationmark")
+        } actions: {
+          Button("Retry") {
+            Task { await model.refresh() }
+          }
         }
       }
     }

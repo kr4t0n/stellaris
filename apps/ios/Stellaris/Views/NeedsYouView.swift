@@ -22,7 +22,7 @@ struct NeedsYouView: View {
         }
       }
       .overlay {
-        BoardState(state: model.store.state, empty: items.isEmpty ? "Nothing needs you" : nil)
+        BoardState(state: model.store.state, rows: !items.isEmpty, empty: "Nothing needs you")
       }
       .refreshable { await model.refresh() }
     }

@@ -119,11 +119,17 @@ struct ConversationView: View {
 /// One message: who wrote it, when, and its text. Markdown, images, and links render from a later
 /// change; here the text shows as written.
 struct MessageRow: View {
+  @Environment(\.dynamicTypeSize) private var typeSize
   let message: Message
 
   var body: some View {
+    // Who and when side by side, or one above the other at the accessibility sizes.
+    let byline =
+      typeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+      : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
     VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
+      byline {
         Text(message.author)
           .font(.subheadline.bold())
         Text(BoardTime.text(message.ts))

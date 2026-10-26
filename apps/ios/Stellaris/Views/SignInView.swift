@@ -7,6 +7,7 @@ import SwiftUI
 struct SignInView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+  @Environment(\.dynamicTypeSize) private var typeSize
   @State private var address = ""
   @State private var token = ""
   /// The board whose address was taken, and how it lets people in.
@@ -92,18 +93,27 @@ struct SignInView: View {
   }
 
   private func options(_ url: URL, _ config: AuthConfig) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(alignment: .firstTextBaseline) {
+    // The board and Change side by side, or one above the other at the accessibility sizes.
+    let accessible = typeSize.isAccessibilitySize
+    let row =
+      accessible
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+      : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+    return VStack(alignment: .leading, spacing: 12) {
+      row {
         Text(url.host() ?? url.absoluteString)
           .font(.headline)
-          .lineLimit(2)
+          .lineLimit(accessible ? 3 : 2)
           .truncationMode(.middle)
           .accessibilityIdentifier("board-host")
-        Spacer()
+        if !accessible {
+          Spacer()
+        }
         Button("Change") {
           board = nil
           problem = nil
         }
+        .fixedSize()
       }
       if offersGitHub(url, config) {
         Button {

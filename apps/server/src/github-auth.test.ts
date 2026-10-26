@@ -68,14 +68,31 @@ describe("GitHub sign-in's landing", () => {
     expect(await signIn("landing=app")).toBe("stellaris://signin#signin-error=not-allowed");
   });
 
+  /** Values of `next` that name another host or scheme, as written or as a browser resolves them. */
+  const crafted = [
+    "//evil.example/",
+    "https://evil.example/",
+    "evil://signin",
+    "stellaris://signin",
+    "/\\evil.example/",
+    // A browser drops tabs and newlines from an address before it parses it.
+    "/\t/evil.example",
+    "/\n/evil.example",
+    "/\r\n/evil.example",
+    // Dot segments go, leaving a path that starts with two slashes.
+    "/.//evil.example",
+    "/a/..//evil.example",
+    "/./\\evil.example",
+  ];
+
   it("lands nowhere a request names, with the flag or without it", async () => {
     // With the flag, `next` names nothing.
-    for (const next of ["/runners", "//evil.example/", "https://evil.example/", "evil://signin"]) {
+    for (const next of ["/runners", ...crafted]) {
       expect(await signIn(`landing=app&next=${encodeURIComponent(next)}`)).toMatch(
         /^stellaris:\/\/signin#session=/,
       );
     }
-    // Any other flag is no flag: the board's own landing, with `next` read as before.
+    // Any other flag is no flag: the board's own landing, with `next` read as without one.
     for (const flag of [
       "evil://signin",
       "https://evil.example/",
@@ -91,18 +108,31 @@ describe("GitHub sign-in's landing", () => {
       expect(await signIn(`${flagged}&next=${encodeURIComponent("/runners?code=BCDF")}`)).toMatch(
         /^\/runners\?code=BCDF#session=/,
       );
-      expect(await signIn(`${flagged}&next=${encodeURIComponent("//evil.example/")}`)).toMatch(
-        /^\/#session=/,
-      );
+      for (const next of crafted) {
+        expect(await signIn(`${flagged}&next=${encodeURIComponent(next)}`)).toMatch(/^\/#session=/);
+      }
     }
     // The first of a repeated flag counts, and either way the landing is one of the two.
     const evil = encodeURIComponent("https://evil.example/");
     expect(await signIn(`landing=${evil}&landing=app`)).toMatch(/^\/#session=/);
     expect(await signIn(`landing=app&landing=${evil}`)).toMatch(/^stellaris:\/\/signin#session=/);
-    // Without the flag, `next` reaches neither the app's scheme nor any other.
-    for (const next of ["stellaris://signin", "evil://signin", "/\\evil.example/"]) {
+    // Without the flag, `next` reaches neither the app's scheme nor any other host.
+    for (const next of crafted) {
       expect(await signIn(`next=${encodeURIComponent(next)}`)).toMatch(/^\/#session=/);
     }
+  });
+
+  it("lands the board's own sign-in on the path a browser would resolve `next` to", async () => {
+    expect(await signIn(`next=${encodeURIComponent("/runners?code=BCDF")}`)).toMatch(
+      /^\/runners\?code=BCDF#session=/,
+    );
+    expect(await signIn(`next=${encodeURIComponent("/a/../runners?code=BCDF")}`)).toMatch(
+      /^\/runners\?code=BCDF#session=/,
+    );
+    // A fragment of its own would hide the session's.
+    expect(await signIn(`next=${encodeURIComponent("/runners#top")}`)).toMatch(
+      /^\/runners#session=/,
+    );
   });
 
   it("lands a state it no longer holds on the sky, since nothing then says the app asked", async () => {

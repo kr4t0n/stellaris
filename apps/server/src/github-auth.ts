@@ -44,9 +44,28 @@ export interface GithubAuthOptions {
   readonly limit?: MiddlewareHandler | undefined;
 }
 
-/** A path inside the board to land on after signing in; anything else lands on the sky. */
+/** Stands in for the board's own origin while `safeNext` resolves a path; never a real host. */
+const BOARD_ORIGIN = "https://board.invalid";
+
+/**
+ * A path inside the board to land on after signing in; anything else lands on the sky. `next` is
+ * resolved as a browser resolves it, which drops tabs and newlines first, so `/<tab>/host` names
+ * another host however the raw string reads. The landing is rebuilt from the resolved path and
+ * query, and refused when that path starts with `//` or `/\`, as `/.//host`'s does once its dot
+ * segment goes.
+ */
 export function safeNext(next: string | undefined): string {
-  return next !== undefined && /^\/(?![/\\])/.test(next) ? next : "/";
+  if (next === undefined || !next.startsWith("/")) {
+    return "/";
+  }
+  let url: URL;
+  try {
+    url = new URL(next, BOARD_ORIGIN);
+  } catch {
+    return "/";
+  }
+  const path = `${url.pathname}${url.search}`;
+  return url.origin === BOARD_ORIGIN && /^\/(?![/\\])/.test(path) ? path : "/";
 }
 
 /**

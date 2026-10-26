@@ -129,17 +129,25 @@
       }
     }
 
+    /// A board that answers without saying how, as one from before GitHub sign-in, takes tokens
+    /// only; an address where nothing answers is unreachable.
     @Test func readsHowABoardSignsPeopleIn() async throws {
       let (session, board) = StubBoard.board { request in
         request.value(forHTTPHeaderField: "Authorization") == nil
           ? StubBoard.Answer(pieces: [Data(#"{"github":true}"#.utf8)])
           : StubBoard.Answer(status: 400)
       }
-      #expect(await BoardClient.authConfig(board: board, session: session).github)
+      #expect(try await BoardClient.authConfig(board: board, session: session).github)
       let (older, address) = StubBoard.board { _ in
         StubBoard.Answer(pieces: [Data("<!doctype html>".utf8)])
       }
-      #expect(await BoardClient.authConfig(board: address, session: older).github == false)
+      #expect(try await BoardClient.authConfig(board: address, session: older).github == false)
+      let (missing, place) = StubBoard.board { _ in StubBoard.Answer(status: 404) }
+      #expect(try await BoardClient.authConfig(board: place, session: missing).github == false)
+      let nowhere = URL(string: "https://nowhere.test")!
+      await #expect(throws: BoardError.unreachable) {
+        try await BoardClient.authConfig(board: nowhere, session: session)
+      }
     }
 
     /// The code trade as the board answered it, sent with no token and refused once the code is used.

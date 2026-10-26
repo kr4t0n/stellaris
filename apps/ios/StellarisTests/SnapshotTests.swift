@@ -55,6 +55,23 @@ final class SnapshotTests: XCTestCase {
     try await Snapshot.record(ShellView().environment(model), named: "needs-you", in: self)
   }
 
+  /// Board and Needs you once a refresh after the board loaded has failed.
+  @MainActor func testBoardAfterARefreshFails() async throws {
+    let (model, _) = fakeApp()
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: "fading")
+    try await waitUntilLoaded(model)
+    await model.refresh()
+    XCTAssertEqual(model.store.state, .failed(Loading.unreachable))
+    XCTAssertFalse(model.store.attention.isEmpty)
+    model.tab = .board
+    try await Snapshot.record(
+      ShellView().environment(model), named: "board-refresh-failed", in: self)
+    model.tab = .needsYou
+    try await Snapshot.record(
+      ShellView().environment(model), named: "needs-you-refresh-failed", in: self)
+  }
+
   @MainActor func testSettings() async throws {
     let model = try await signedIn()
     try await Snapshot.record(SettingsView().environment(model), named: "settings", in: self)

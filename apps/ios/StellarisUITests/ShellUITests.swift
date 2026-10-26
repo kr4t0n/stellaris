@@ -213,6 +213,39 @@ final class ShellUITests: ShellTestCase {
     XCTAssertEqual(draft(again).value as? String, "Kept on disk")
   }
 
+  /// An address where nothing answers keeps sign-in at the address, saying so.
+  @MainActor func testStaysAtTheAddressWhenNoBoardAnswers() {
+    let app = launch()
+    let address = app.textFields["address"]
+    XCTAssertTrue(address.waitForExistence(timeout: 20))
+    address.tap()
+    address.typeText("nowhere.invalid")
+    app.buttons["take-address"].tap()
+    let problem = app.staticTexts["sign-in-problem"]
+    XCTAssertTrue(problem.waitForExistence(timeout: 20))
+    XCTAssertEqual(problem.label, "Can't reach the board.")
+    XCTAssertTrue(address.exists)
+    XCTAssertFalse(app.secureTextFields["token"].exists)
+  }
+
+  /// A refresh that fails once Board has loaded leaves its rows as they were.
+  @MainActor func testKeepsBoardsRowsWhenARefreshFails() {
+    let app = launch()
+    signIn(app, token: "fading")
+    expectGeneral(app)
+    tab(app, "Board")
+    let general = app.buttons["channel-general"]
+    XCTAssertTrue(general.waitForExistence(timeout: 20))
+    // Pulled down, Board loads again, and the board's channels don't come.
+    let start = general.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 320)))
+    XCTAssertFalse(
+      app.buttons["Retry"].waitForExistence(timeout: 10), "the failure covers Board's rows")
+    keepScreen("board-refresh-failed")
+    XCTAssertTrue(general.isHittable)
+    XCTAssertTrue(app.buttons["channel-governance"].isHittable)
+  }
+
   @MainActor func testStaysAtSignInWithATokenTheBoardRefuses() {
     let app = launch()
     signIn(app, token: "refused")

@@ -8,10 +8,14 @@
   /// launched with `STELLARIS_FAKE_BOARD` set to `apps/ios/fixtures/api`, and starts afresh when
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll. Any token signs in, except `refused`, which the board doesn't take, and
-  /// `revoked`, which it takes for sign-in and refuses on every request after.
+  /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
+  /// list of the channels after the first fails, as when the network goes once the board loaded,
+  /// and a host under `.invalid`, which never resolves, can't be reached.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     private static let folder = Mutex<URL?>(nil)
+    /// How many times `fading` has listed the channels.
+    private static let fadingListings = Mutex(0)
 
     /// The app's environment when it was launched against the fake board.
     static func launched() -> AppEnvironment? {
@@ -40,13 +44,20 @@
     }
 
     override class func canInit(with request: URLRequest) -> Bool {
-      request.url?.host() == address.host()
+      guard let host = request.url?.host() else {
+        return false
+      }
+      return host == address.host() || host.hasSuffix(".invalid")
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
       guard let url = request.url else {
+        return
+      }
+      if FakeBoard.unreachable(request) {
+        client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
         return
       }
       let (status, body) = FakeBoard.answer(request)
@@ -61,6 +72,23 @@
     override func stopLoading() {}
 
     // MARK: Answers
+
+    /// Whether `request` fails as when nothing answers: at a host under `.invalid`, or as
+    /// `fading`'s second list of the channels or a later one.
+    private static func unreachable(_ request: URLRequest) -> Bool {
+      if request.url?.host()?.hasSuffix(".invalid") == true {
+        return true
+      }
+      guard request.url?.path(percentEncoded: true) == "/api/channels",
+        request.value(forHTTPHeaderField: "Authorization") == "Bearer fading"
+      else {
+        return false
+      }
+      return fadingListings.withLock { listed in
+        listed += 1
+        return listed > 1
+      }
+    }
 
     static func answer(_ request: URLRequest) -> (Int, Data) {
       let method = request.httpMethod ?? "GET"

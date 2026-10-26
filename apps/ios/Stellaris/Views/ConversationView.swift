@@ -99,8 +99,8 @@ struct ConversationView: View {
   }
 }
 
-/// The messages, scrolled to `start` when it is one of them, else to the newest, and keeping the
-/// message at the foot of the view as the conversation's anchor as it scrolls.
+/// The messages, opened at `start` when it is one of them, else at the newest, and keeping the
+/// message at the foot of the view as the conversation's anchor once the user scrolls.
 private struct MessageList<Header: View>: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
@@ -109,8 +109,8 @@ private struct MessageList<Header: View>: View {
   let start: String?
   /// The message at the foot of the view.
   @State private var anchor: String?
-  /// Whether the list has been scrolled to `start`, before which the anchor is not kept.
-  @State private var opened = false
+  /// Whether the user has scrolled since the list opened.
+  @State private var moved = false
 
   init(feed: ConversationFeed, header: Header, start: String?) {
     self.feed = feed
@@ -120,36 +120,42 @@ private struct MessageList<Header: View>: View {
   }
 
   var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 16) {
-          header
-          ForEach(feed.messages) { message in
-            MessageRow(message: message)
-          }
-        }
-        .scrollTargetLayout()
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-      }
-      .scrollPosition(id: $anchor, anchor: .bottom)
-      .defaultScrollAnchor(.bottom)
-      .accessibilityIdentifier("messages")
-      .onAppear {
-        // A scroll view that replaces another can lay out at its top and report that first, so
-        // the list goes to where it opens on the main actor's next turn, once laid out.
-        Task {
-          if let start {
-            proxy.scrollTo(start, anchor: .bottom)
-          }
-          opened = true
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 16) {
+        header
+        ForEach(feed.messages) { message in
+          MessageRow(message: message)
         }
       }
-      .onChange(of: anchor) { _, id in
-        if opened, let id {
-          model.memory?.setAnchor(id, for: feed.conversation)
-        }
+      .scrollTargetLayout()
+      .padding(.horizontal)
+      .padding(.vertical, 12)
+    }
+    .scrollPosition(id: $anchor, anchor: .bottom)
+    .defaultScrollAnchor(.bottom)
+    .accessibilityIdentifier("messages")
+    // A scroll view that replaces another can lay out at its top, report that, and keep it as the
+    // lazy stack measures its rows. So until the user scrolls, the list holds to where it opens
+    // whenever it appears or its content's height changes.
+    .onAppear(perform: holdToStart)
+    .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
+      holdToStart()
+    }
+    .onScrollPhaseChange { _, phase in
+      if phase == .tracking || phase == .interacting {
+        moved = true
       }
+    }
+    .onChange(of: anchor) { _, id in
+      if moved, let id {
+        model.memory?.setAnchor(id, for: feed.conversation)
+      }
+    }
+  }
+
+  private func holdToStart() {
+    if !moved, anchor != start {
+      anchor = start
     }
   }
 }

@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/verbs/reject",
+    "body": {
+      "proposal_id": "00000000000000000000000008",
+      "reason": "One reviewer keeps up for now."
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "00000000000000000000000017",
+    "proposalId": "00000000000000000000000008",
+    "decidedBy": "user",
+    "outcome": "rejected",
+    "reason": "One reviewer keeps up for now.",
+    "ts": "2026-01-01T00:00:00.000Z"
+  }
+}

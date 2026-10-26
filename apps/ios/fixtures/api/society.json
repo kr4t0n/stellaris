@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/society"
+  },
+  "status": 200,
+  "body": {
+    "name": "fixtures",
+    "version": 1,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "channels": [
+      "general",
+      "governance",
+      "asks"
+    ],
+    "archivedChannels": [],
+    "timezone": "UTC"
+  }
+}

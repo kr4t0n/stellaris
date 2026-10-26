@@ -162,9 +162,15 @@ struct SignInView: View {
       problem = nil
       busy = true
       Task {
-        let config = await BoardClient.authConfig(board: url, session: model.environment.session)
-        board = (url, config)
-        busy = false
+        defer { busy = false }
+        do {
+          let config = try await BoardClient.authConfig(
+            board: url, session: model.environment.session)
+          board = (url, config)
+        } catch {
+          // The address stays, to be corrected or tried again.
+          problem = Loading.unreachable + "."
+        }
       }
     }
   }

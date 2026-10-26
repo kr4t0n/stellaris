@@ -14,19 +14,18 @@
       self.session = session
     }
 
-    /// How `board` lets people in. A board that cannot say, as one from before GitHub sign-in,
-    /// takes tokens only.
-    public static func authConfig(board: URL, session: URLSession = .shared) async -> AuthConfig {
+    /// How `board` lets people in. A board that answers without saying, as one from before GitHub
+    /// sign-in, takes tokens only; `BoardError.unreachable` when nothing answers at the address.
+    public static func authConfig(board: URL, session: URLSession = .shared) async throws
+      -> AuthConfig
+    {
       let request = BoardAPI.authConfig()
-      guard
-        let (data, response) = try? await session.data(
-          for: request.endpoint.urlRequest(board: board, token: nil)),
-        (response as? HTTPURLResponse)?.statusCode == 200,
-        let config = try? request.decode(data)
-      else {
+      do {
+        let data = try await bytes(of: request.endpoint, board: board, token: nil, session: session)
+        return (try? request.decode(data)) ?? AuthConfig(github: false)
+      } catch let refusal as BoardError where refusal.status != 0 {
         return AuthConfig(github: false)
       }
-      return config
     }
 
     /// Trades the code the app's sign-in with GitHub landed with, and the verifier it started with,

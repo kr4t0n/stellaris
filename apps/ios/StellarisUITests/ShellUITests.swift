@@ -171,9 +171,29 @@ final class ShellUITests: ShellTestCase {
     XCTAssertFalse(app.buttons["back"].exists)
   }
 
-  /// Back from the background shows the conversation that was open; a fresh start shows general,
-  /// and each conversation's draft is kept on disk.
-  @MainActor func testOpensTheLastConversationFromTheBackgroundAndGeneralOnAFreshStart() {
+  /// Back from the background, Chat shows the conversation that was open, with its draft.
+  @MainActor func testShowsTheLastConversationBackFromTheBackground() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    tab(app, "Board")
+    pick(app, "channel-governance")
+    expectConversation(app, "#governance")
+    draft(app).tap()
+    draft(app).typeText("Half a thought")
+    dragDown(app)
+
+    toBackground(app)
+    app.activate()
+    expectConversation(app, "#governance")
+    XCTAssertEqual(draft(app).value as? String, "Half a thought")
+  }
+
+  /// A fresh start opens the society's general channel, whatever was open, and each
+  /// conversation's draft is kept on disk. The app ends in front here: it keeps nothing about
+  /// where it was, so ending it in the background, which the simulator makes hard to do twice
+  /// in a test, starts it the same way.
+  @MainActor func testOpensGeneralOnAFreshStartWithTheDraftsKept() {
     let app = launch()
     signIn(app)
     expectGeneral(app)
@@ -184,13 +204,6 @@ final class ShellUITests: ShellTestCase {
     draft(app).typeText("Kept on disk")
     dragDown(app)
 
-    toBackground(app)
-    app.activate()
-    expectConversation(app, "#governance")
-    XCTAssertEqual(draft(app).value as? String, "Kept on disk")
-
-    // Ended in the background, as iOS ends an app or someone swipes it away.
-    toBackground(app)
     app.terminate()
     let again = launch(reset: false)
     expectGeneral(again)

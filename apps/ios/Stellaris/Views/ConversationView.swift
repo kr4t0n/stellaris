@@ -6,49 +6,45 @@ import SwiftUI
 struct ConversationView: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
-  /// Where the view is scrolled: at the bottom edge, which it keeps as the messages come in and
-  /// which leaves the newest above the draft, or at the message the user left it at.
-  @State private var position = ScrollPosition(idType: String.self, edge: .bottom)
-  /// Whether the view has gone to the message it was left at, which it does once as it is built.
-  @State private var restored = false
+  /// The message at the foot of the view.
+  @State private var anchor: String?
 
   var body: some View {
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16) {
-        header
-        ForEach(feed.messages) { message in
-          MessageRow(message: message)
+    // The draft is a row below the messages, not laid over them, so the foot of the messages'
+    // view is the top of the draft and the newest message stays in sight above it.
+    VStack(spacing: 0) {
+      // One scroll view from the first frame, empty while the messages load: anchored at the
+      // bottom, it keeps the foot in view as they come in.
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 16) {
+          header
+          ForEach(feed.messages) { message in
+            MessageRow(message: message)
+          }
         }
+        .scrollTargetLayout()
+        .padding(.horizontal)
+        .padding(.vertical, 12)
       }
-      .scrollTargetLayout()
-      .padding(.horizontal)
-      .padding(.vertical, 12)
-    }
-    .scrollPosition($position, anchor: .bottom)
-    .scrollDismissesKeyboard(.immediately)
-    .accessibilityIdentifier("messages")
-    .overlay { state }
-    .safeAreaInset(edge: .bottom) {
+      .scrollPosition(id: $anchor, anchor: .bottom)
+      .defaultScrollAnchor(.bottom)
+      .scrollDismissesKeyboard(.immediately)
+      .accessibilityIdentifier("messages")
+      .overlay { state }
+      .refreshable { await feed.load(using: model) }
       DraftField(conversation: feed.conversation)
     }
-    .refreshable { await feed.load(using: model) }
     .task {
       if feed.state != .loaded {
         await feed.load(using: model)
       }
-      if !restored {
-        restored = true
-        // The newest message is the bottom edge, which keeps it above the draft.
-        let saved = model.memory?.anchor(feed.conversation)
-        let ids = feed.messages.map(\.id)
-        if let saved, saved != ids.last, ids.contains(saved) {
-          position.scrollTo(id: saved, anchor: .bottom)
-        }
-      }
+      // Each time the view shows, the message it was left at, which it already shows unless
+      // the view was built again.
+      let saved = model.memory?.anchor(feed.conversation)
+      anchor = feed.messages.contains { $0.id == saved } ? saved : feed.messages.last?.id
     }
-    // The message at the foot of the view, once a scroll comes to rest.
-    .onScrollPhaseChange { _, phase in
-      if phase == .idle, let id = position.viewID(type: String.self) {
+    .onChange(of: anchor) { _, id in
+      if let id {
         model.memory?.setAnchor(id, for: feed.conversation)
       }
     }

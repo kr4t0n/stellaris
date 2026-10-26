@@ -66,7 +66,10 @@ enum Loading: Equatable, Sendable {
     projects.first { $0.slug == slug }?.name ?? slug
   }
 
+  /// Loads the board `model` is signed in to. What comes back once it has signed out, or in again,
+  /// is dropped.
   func refresh(using model: AppModel) async {
+    let signIn = model.generation
     if state != .loaded {
       state = .loading
     }
@@ -80,6 +83,9 @@ enum Loading: Equatable, Sendable {
       for project in loaded.1 where project.archived == nil {
         tasks += try await model.send(BoardAPI.tasks(project: project.slug))
       }
+      guard model.generation == signIn else {
+        return
+      }
       self.channels = loaded.0
       self.projects = loaded.1
       self.proposals = loaded.2
@@ -89,7 +95,9 @@ enum Loading: Equatable, Sendable {
     } catch is CancellationError {
       return
     } catch {
-      state = Loading(error)
+      if model.generation == signIn {
+        state = Loading(error)
+      }
     }
   }
 

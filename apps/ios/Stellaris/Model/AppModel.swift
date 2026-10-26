@@ -34,8 +34,9 @@ enum SignInFailure: Error, Equatable {
 
   @ObservationIgnored let environment: AppEnvironment
   @ObservationIgnored private var client: BoardClient?
-  /// Counts sign-ins, so a refusal of an earlier one's token ends nothing.
-  @ObservationIgnored private var generation = 0
+  /// Counts sign-ins and sign-outs, so what comes back for an earlier sign-in changes nothing: a
+  /// refusal of its token ends no other, and its answers are dropped.
+  @ObservationIgnored private(set) var generation = 0
   /// Each conversation's messages as last loaded, kept while the app is signed in.
   @ObservationIgnored private var feeds: [Conversation: ConversationFeed] = [:]
 
@@ -124,7 +125,11 @@ enum SignInFailure: Error, Equatable {
   /// Loads the board again: what Board and Needs you show, and who the token signs in as.
   func refresh() async {
     if actor == nil {
-      actor = try? await send(BoardAPI.me())
+      let sent = generation
+      let found = try? await send(BoardAPI.me())
+      if sent == generation, let found {
+        actor = found
+      }
     }
     await store.refresh(using: self)
   }

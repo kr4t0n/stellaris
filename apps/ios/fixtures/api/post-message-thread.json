@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/verbs/post_message",
+    "body": {
+      "thread_id": "00000000000000000000000014",
+      "body": "Docs first, then the export view."
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "00000000000000000000000015",
+    "author": "user",
+    "channel": "demo/general",
+    "thread": "00000000000000000000000014",
+    "ts": "2026-01-01T00:00:00.000Z",
+    "mentions": [],
+    "body": "Docs first, then the export view."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects/demo/tasks"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": "00000000000000000000000010",
+      "project": "demo",
+      "channel": "general",
+      "title": "Add the export view",
+      "status": "open",
+      "createdBy": "concierge-1",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z",
+      "blockedBy": [],
+      "requiredCapabilities": [],
+      "stages": [
+        {
+          "id": "s1",
+          "name": "Build it",
+          "role": "engineer",
+          "gate": false,
+          "holders": [
+            "eng-1"
+          ],
+          "completedBy": "eng-1",
+          "completedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "s2",
+          "name": "Approve the design",
+          "agent": "user",
+          "gate": true,
+          "holders": []
+        },
+        {
+          "id": "s3",
+          "name": "Review it",
+          "agent": "rev-1",
+          "gate": true,
+          "holders": []
+        }
+      ],
+      "stage": "s2",
+      "stageSince": "2026-01-01T00:00:00.000Z",
+      "stageSeq": 3,
+      "onDone": "none",
+      "completing": false,
+      "body": "Export a channel's messages as markdown.\n"
+    },
+    {
+      "id": "00000000000000000000000012",
+      "project": "demo",
+      "channel": "general",
+      "title": "Fix the empty state",
+      "status": "claimed",
+      "createdBy": "eng-1",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z",
+      "claimedBy": "eng-1",
+      "leaseExpiresAt": "2026-01-01T00:00:00.000Z",
+      "blockedBy": [],
+      "requiredCapabilities": [],
+      "stages": [
+        {
+          "id": "s1",
+          "name": "work",
+          "gate": false,
+          "holders": [
+            "eng-1"
+          ]
+        }
+      ],
+      "stage": "s1",
+      "stageSince": "2026-01-01T00:00:00.000Z",
+      "stageSeq": 1,
+      "onDone": "none",
+      "completing": false,
+      "body": ""
+    }
+  ]
+}

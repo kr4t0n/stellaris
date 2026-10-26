@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/me"
+  },
+  "status": 401,
+  "body": {
+    "error": "UNAUTHORIZED",
+    "message": "a valid bearer token is required"
+  }
+}

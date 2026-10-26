@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects"
+  },
+  "status": 200,
+  "body": [
+    {
+      "slug": "demo",
+      "name": "Demo",
+      "repo": null,
+      "defaultBranch": "main",
+      "channels": [
+        "general"
+      ],
+      "archivedChannels": [],
+      "members": [
+        "eng-1",
+        "rev-1"
+      ],
+      "approvers": [
+        "user"
+      ],
+      "requiredCapabilities": [],
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "onDone": "none"
+    }
+  ]
+}

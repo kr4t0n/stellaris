@@ -1,0 +1,45 @@
+name: ios
+
+# The iOS client, on the changes that reach it: its code, and the fixtures the server's own tests
+# capture into `apps/ios/fixtures`. Not a required check, since GitHub leaves a required workflow
+# that its paths skipped pending, which would block every pull request that leaves the client alone.
+on:
+  push:
+    branches: [main, dev]
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boardkit:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      # The SDK the app builds with, named rather than taken from the image's default.
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: xcodebuild -version && swift --version
+      - name: Test BoardKit on the iPhone Duo simulator
+        working-directory: apps/ios/BoardKit
+        run: |
+          set -o pipefail
+          xcodebuild -list
+          xcodebuild test \
+            -scheme BoardKit \
+            -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1' \
+            -derivedDataPath "$RUNNER_TEMP/derived" \
+            -resultBundlePath "$RUNNER_TEMP/BoardKit.xcresult"
+      # The simulator's Keychain turns away a package's tests, which run in no app, so the token
+      # store's test runs here, on the host.
+      - name: Test BoardKit on macOS
+        if: ${{ !cancelled() }}
+        working-directory: apps/ios/BoardKit
+        run: swift test --scratch-path "$RUNNER_TEMP/swiftpm"

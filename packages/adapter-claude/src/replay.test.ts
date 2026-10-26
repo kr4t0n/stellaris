@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import { TurnControl, ZERO_USAGE, type TurnRequest } from "@stellaris/runner-core";
 import { describe, expect, it } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
 
@@ -281,7 +281,7 @@ describe("ClaudeAgentBackend replay", () => {
 
   it("fails a resume the CLI cannot make, lost on its words for a missing session and retry otherwise, and starts no other", async () => {
     // Claude Code 2.1.283 asked to resume an id with no transcript, or one it cannot read: a result
-    // before any init message, then the SDK's throw, and no model call.
+    // before any init message, its usage zeroed, then the SDK's throw, and no model call.
     const missing = `No conversation found with session ID: ${request.session}`;
     const unresumed: unknown[] = [
       {
@@ -293,6 +293,7 @@ describe("ClaudeAgentBackend replay", () => {
         session_id: request.session,
         total_cost_usd: 0,
         usage: { input_tokens: 0, output_tokens: 0 },
+        modelUsage: {},
         errors: [missing],
       },
     ];
@@ -305,7 +306,7 @@ describe("ClaudeAgentBackend replay", () => {
         calls.push(params.options);
         return notFound(params);
       },
-    }).runTurn({ ...request, costSoFarUsd: 0.1 });
+    }).runTurn({ ...request, costSoFarUsd: 0.1, usageSoFar: { ...ZERO_USAGE, inputTokens: 500 } });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.resume).toBe(request.session);
     expect(calls[0]?.sessionId).toBeUndefined();
@@ -314,6 +315,8 @@ describe("ClaudeAgentBackend replay", () => {
     expect(lost.resumeFailed).toBe("lost");
     expect(lost.session).toBeUndefined();
     expect(lost.costUsd).toBe(0);
+    // Its zeroed usage is no running usage of the session's.
+    expect(lost).not.toHaveProperty("sessionUsage");
 
     // A CLI that ended before it opened the session for anything else may resume it next time.
     for (const queryFn of [exitingAfter([]), replaying([]).queryFn]) {

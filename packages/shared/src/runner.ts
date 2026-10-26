@@ -232,6 +232,11 @@ export const TurnJobSchema = z.object({
   session: z.string().min(1).nullable(),
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   costSoFarUsd: z.number().nonnegative(),
+  /**
+   * The session's running usage after its last turn, which a resumed session's own usage is
+   * measured from. Absent when the board holds none for the session, and from a server from before.
+   */
+  usageSoFar: UsageSchema.optional(),
   /** The rendered charter, norms, memory core, and skills index, with `PATH_TOKENS` for places. */
   instructions: z.string(),
   prompt: z.string(),
@@ -273,6 +278,11 @@ export const TurnOutcomeSchema = z.object({
   costUsd: z.number().nonnegative(),
   /** The session's running total after this turn, for CLIs that report one. */
   sessionCostUsd: z.number().nonnegative().optional(),
+  /**
+   * The session's running usage after this turn, for CLIs that report one, else the job's
+   * `usageSoFar`. A runner from before never sends it.
+   */
+  sessionUsage: UsageSchema.optional(),
   /**
    * The session the CLI used, which differs from the job's for CLIs that assign their own ids. A
    * turn whose CLI never started, because it failed or was stopped first, reports the job's own,

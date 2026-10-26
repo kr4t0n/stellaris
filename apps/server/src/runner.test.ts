@@ -20,6 +20,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  addUsage,
   BranchChangesSchema,
   BranchFileDiffSchema,
   BranchFileSchema,
@@ -33,6 +34,7 @@ import {
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
+  type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -162,6 +164,68 @@ class TotalingBackend implements AgentBackend {
       sessionCostUsd,
     });
   }
+}
+
+const TURN_USAGE: Usage = {
+  inputTokens: 100,
+  outputTokens: 10,
+  cacheReadTokens: 1_000,
+  cacheWriteTokens: 5,
+};
+
+/**
+ * A backend whose session reports its running usage, as Claude's `modelUsage` does, cold or warm:
+ * each turn that sees a result adds `TURN_USAGE` to it, and one that sees none reports none.
+ */
+class UsageTotalingBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  /** The running usage each cold turn and each warm start was handed, in order. */
+  readonly startedFrom: Array<Usage | undefined> = [];
+  /** Whether the next turn sees no result. */
+  noResult = false;
+  private total: Usage = ZERO_USAGE;
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  runTurn(request: { usageSoFar?: Usage | undefined }): Promise<TurnResult> {
+    this.startedFrom.push(request.usageSoFar);
+    this.total = request.usageSoFar ?? ZERO_USAGE;
+    return Promise.resolve(this.turn("cold turn"));
+  }
+
+  startResident(
+    _spec: object,
+    start: { session: string; usageSoFar?: Usage | undefined },
+  ): Promise<ResidentSession> {
+    this.startedFrom.push(start.usageSoFar);
+    this.total = start.usageSoFar ?? ZERO_USAGE;
+    return Promise.resolve({
+      session: start.session,
+      runTurn: () => Promise.resolve(this.turn("warm turn")),
+      close: () => Promise.resolve(),
+    });
+  }
+
+  private turn(summary: string): TurnResult {
+    if (this.noResult) {
+      this.noResult = false;
+      return completed(summary);
+    }
+    this.total = addUsage(this.total, TURN_USAGE);
+    return { ...completed(summary), usage: TURN_USAGE, sessionUsage: this.total };
+  }
+}
+
+/** `TURN_USAGE` times `turns`, the running usage after that many turns that saw a result. */
+function turnsOfUsage(turns: number): Usage {
+  return {
+    inputTokens: TURN_USAGE.inputTokens * turns,
+    outputTokens: TURN_USAGE.outputTokens * turns,
+    cacheReadTokens: TURN_USAGE.cacheReadTokens * turns,
+    cacheWriteTokens: TURN_USAGE.cacheWriteTokens * turns,
+  };
 }
 
 /** Commits what a test wrote into a home on the board's side, as an earlier turn's push would have. */
@@ -1038,6 +1102,63 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
     await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
+  });
+
+  it("hands a resumed session the running usage its last turn reported, and none a record does not hold", async () => {
+    const { board } = await Board.init(dir, { name: "usage" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const backend = new UsageTotalingBackend();
+    const { run, host } = await start(board, backend);
+    const dispatch = {
+      agent: "steward-1",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+    };
+    await run(dispatch);
+    const second = await run(dispatch);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(1)]);
+    expect(second).toMatchObject({ usage: TURN_USAGE, sessionUsage: turnsOfUsage(2) });
+
+    // A turn that saw no result reports no running usage, and the session's stays as it was.
+    backend.noResult = true;
+    expect((await run(dispatch)).sessionUsage).toEqual(turnsOfUsage(2));
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toEqual(turnsOfUsage(2));
+
+    // A runner from before reports none at all, and the record then holds none.
+    const close = host.closeTurn.bind(host);
+    const older = vi.spyOn(host, "closeTurn").mockImplementation((turnId, outcome) => {
+      const { sessionUsage: _unknown, ...before } = outcome;
+      return close(turnId, before);
+    });
+    const unreported = await run(dispatch);
+    older.mockRestore();
+    expect(unreported).not.toHaveProperty("sessionUsage");
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toBeUndefined();
+
+    // Nor does a record of another session hand its running usage on.
+    const last = await run(dispatch);
+    expect(last.sessionUsage).toBeDefined();
+    await board.finishTurn({ ...last, session: "session-0" });
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toBeUndefined();
+  });
+
+  it("hands a warm session that starts on a saved session the running usage its last turn reported", async () => {
+    const { board } = await Board.init(dir, { name: "warm-usage" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const backend = new UsageTotalingBackend();
+    const { run } = await start(board, backend, { residentIdleMs: 60_000 });
+    const post = { ...deskPost, agent: "concierge-1" };
+    await run(post);
+    expect((await run(post)).sessionUsage).toEqual(turnsOfUsage(2));
+    // A new model starts the warm session again, on the saved session.
+    await board.setAgentModel(USER, "concierge-1", "sonnet");
+    const resumed = await run(post);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(2)]);
+    expect(resumed).toMatchObject({ usage: TURN_USAGE, sessionUsage: turnsOfUsage(3) });
   });
 
   it("keeps no session from a turn whose CLI never started, so the conversation's next turn starts one", async () => {

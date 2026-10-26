@@ -441,6 +441,11 @@ export class RunnerDaemon {
         leftovers: false,
       };
     }
+    // A turn that reports no running usage, as one that saw no result or never reached its CLI,
+    // leaves the session's as the job gave it.
+    if (outcome.sessionUsage === undefined && job.usageSoFar !== undefined) {
+      outcome = { ...outcome, sessionUsage: job.usageSoFar };
+    }
     try {
       await this.homes.publish(job.agent, job.turnId);
     } catch (error) {

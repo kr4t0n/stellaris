@@ -299,6 +299,7 @@ export class TurnExecutor {
             limits,
             statusSchema,
             costSoFarUsd: job.costSoFarUsd,
+            ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
           },
           collect,
           control,
@@ -367,6 +368,7 @@ export class TurnExecutor {
       usage: result.usage,
       costUsd: result.costUsd,
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
+      ...(result.sessionUsage === undefined ? {} : { sessionUsage: result.sessionUsage }),
       session: result.session ?? (started ? session : job.session),
       ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
       ...(result.transient === true && result.exitReason === "error" ? { transient: true } : {}),
@@ -1128,6 +1130,7 @@ export class TurnExecutor {
         limits: input.limits,
         statusSchema: input.statusSchema,
         costSoFarUsd: job.costSoFarUsd,
+        ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
       });
       current = {
         session,

@@ -348,6 +348,10 @@ export class TurnHost {
       !newSession && lastTurn?.session === recorded
         ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
         : 0;
+    // Its running usage too, which records from before `sessionUsage`, or from a runner that
+    // reports none, do not hold: the adapter then counts the turn without it.
+    const usageSoFar =
+      !newSession && lastTurn?.session === recorded ? lastTurn.sessionUsage : undefined;
     // Failed resumes of this session counted so far, while they come one after another.
     const resumeRetries =
       !newSession && lastTurn?.session === recorded && lastTurn.resumeFailed === "retry"
@@ -519,6 +523,7 @@ export class TurnHost {
       ...base,
       session: recorded ?? null,
       sessionCostUsd: costSoFarUsd,
+      ...(usageSoFar === undefined ? {} : { sessionUsage: usageSoFar }),
     });
     if (record.id === undefined) {
       throw new Error("the board gave the turn no id");
@@ -536,6 +541,7 @@ export class TurnHost {
       ...(place === undefined ? {} : { place }),
       session: recorded ?? null,
       costSoFarUsd,
+      ...(usageSoFar === undefined ? {} : { usageSoFar }),
       instructions,
       prompt,
       mcp: { url: this.mcpUrl, token },
@@ -772,8 +778,10 @@ export class TurnHost {
     const dropSession =
       job.session !== null &&
       (outcome.resumeFailed === "lost" || (resumeRetries ?? 0) >= RESUME_RETRIES);
+    // The running usage is the runner's to report: it keeps the job's for a turn that saw none.
+    const { sessionUsage: _started, ...begun } = turn.record;
     const finished: TurnRecord = {
-      ...turn.record,
+      ...begun,
       session: outcome.session,
       endedAt: this.now().toISOString(),
       exitReason: outcome.exitReason,
@@ -782,6 +790,7 @@ export class TurnHost {
       usage: outcome.usage,
       costUsd: outcome.costUsd,
       sessionCostUsd: outcome.sessionCostUsd ?? turn.costSoFarUsd,
+      ...(outcome.sessionUsage === undefined ? {} : { sessionUsage: outcome.sessionUsage }),
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
       model: outcome.model ?? turn.configuredModel,
       ...(outcome.work === null ? {} : { work: outcome.work }),

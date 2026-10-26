@@ -59,6 +59,13 @@ import Testing
     #expect(events("data: étoile ✶\n\n", chunk: 1).map(\.data) == ["étoile ✶"])
   }
 
+  @Test(arguments: [Int.max, 1])
+  func dropsAByteOrderMarkAtTheStartAlone(chunk: Int) {
+    #expect(events("\u{FEFF}data: a\n\n", chunk: chunk).map(\.data) == ["a"])
+    // Later, it is part of the line: a field named "\u{FEFF}data", which nothing reads.
+    #expect(events("data: a\n\n\u{FEFF}data: b\n\n", chunk: chunk).map(\.data) == ["a"])
+  }
+
   @Test func holdsAnUnfinishedEvent() {
     #expect(events("data: a\n").isEmpty)
   }

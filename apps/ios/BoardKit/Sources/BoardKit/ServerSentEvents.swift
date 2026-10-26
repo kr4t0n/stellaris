@@ -9,10 +9,14 @@ public struct ServerSentEvent: Sendable, Hashable {
 }
 
 /// Reads a server-sent-events stream byte by byte, as the WHATWG HTML standard's event-stream
-/// interpretation does: lines end at CRLF, LF, or CR, a blank line dispatches the event, a line
-/// starting with a colon is a comment, and one space after a field's colon is dropped.
+/// interpretation does: a byte order mark at the stream's start is dropped, lines end at CRLF, LF,
+/// or CR, a blank line dispatches the event, a line starting with a colon is a comment, and one
+/// space after a field's colon is dropped.
 public struct ServerSentEventParser: Sendable {
+  private static let byteOrderMark: [UInt8] = [0xEF, 0xBB, 0xBF]
+
   private var line: [UInt8] = []
+  private var firstLine = true
   private var afterCarriageReturn = false
   private var data = ""
   private var hasData = false
@@ -32,6 +36,10 @@ public struct ServerSentEventParser: Sendable {
       line.append(byte)
       return nil
     }
+    if firstLine, line.starts(with: ServerSentEventParser.byteOrderMark) {
+      line.removeFirst(ServerSentEventParser.byteOrderMark.count)
+    }
+    firstLine = false
     let text = String(decoding: line, as: UTF8.self)
     line.removeAll(keepingCapacity: true)
     return process(text)

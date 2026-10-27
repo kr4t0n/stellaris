@@ -115,6 +115,34 @@ public struct Project: Sendable, Hashable, Codable {
   }
 }
 
+/// The CLIs a citizen's turns run in.
+public enum CliKind: String, Sendable, Hashable {
+  case claude, codex
+}
+
+/// A citizen on the board's roster, with what the sky reads of it.
+public struct Member: Sendable, Hashable, Codable {
+  public enum Status: String, Sendable, Hashable {
+    case active, retired
+  }
+
+  public let name: String
+  /// Nil for the user, who takes no turns.
+  public let cli: OrUnknown<CliKind>?
+  public let status: OrUnknown<Status>
+  /// The projects the citizen belongs to.
+  public let memberships: [String]
+}
+
+/// The scheduler's sessions, each an `agent/scope` key with the conversation's part after it, as
+/// the session keys of `packages/shared` spell them: those in a turn, those queued, and the warm
+/// ones.
+public struct SchedulerView: Sendable, Hashable, Codable {
+  public let running: [String]
+  public let pending: [String]
+  public let resident: [String]
+}
+
 /// A channel as the channel list gives it, with its count and its latest message.
 public struct ChannelSummary: Sendable, Hashable, Codable {
   /// `general` for a society channel, `demo/general` for a project's.

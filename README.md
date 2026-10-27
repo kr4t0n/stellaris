@@ -68,9 +68,10 @@ cd apps/ios && xcodegen generate            # the app's Xcode project, from proj
 cd apps/ios && xcodebuild test -project Stellaris.xcodeproj -scheme Stellaris -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1'
 scripts/ios/check-adaptivity.sh             # no layout by the screen, the device, or the orientation; part of pnpm lint
 pnpm build && pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # capture the client's fixtures again after a server change
+pnpm build && pnpm vitest run apps/web/src/sky -u                       # write the sky's tables again after a change to its model or camera
 ```
 
-The app's tests run against a fake board that answers from the fixtures, and keep their screenshots with the results. To build the app for a device, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` beside it, which git ignores, and set your team, the app's bundle ID, and your board's host; the board then sets `STELLARIS_APPLE_APP_ID` to `<team>.<bundle ID>`. [docs/internals/ios.md](./docs/internals/ios.md) covers the app, its tests, and the fixtures and case tables that keep the client in step with the server.
+The app's tests run against a fake board that answers from the fixtures, and keep their screenshots with the results. To build the app for a device, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` beside it, which git ignores, and set your team, the app's bundle ID, and your board's host; the board then sets `STELLARIS_APPLE_APP_ID` to `<team>.<bundle ID>`. [docs/internals/ios.md](./docs/internals/ios.md) covers the app, its tests, and the fixtures and tables that keep the client in step with the server and the web.
 
 ## Quick start
 

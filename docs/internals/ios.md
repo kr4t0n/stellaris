@@ -6,7 +6,7 @@ How the native client's code is laid out, how the app signs in and keeps its pla
 
 ### `apps/ios` holds the app, BoardKit, and their fixtures
 
-`apps/ios/BoardKit` is a Swift package, BoardKit, for the board's API: Swift 6, for iOS 27.0, and macOS 15 so `swift test` runs on a Mac. `apps/ios/Stellaris` is the SwiftUI app, for iPhone on iOS 27.0, with its unit tests in `StellarisTests` and its UI tests in `StellarisUITests`. `apps/ios/fixtures` holds what the tests read beside the server's and the web's: `api/`, the answers the server's tests capture, and `cases/`, the case tables of the two ports. `apps/ios` has no `package.json`, so pnpm and the TypeScript build leave it alone.
+`apps/ios/BoardKit` is a Swift package, BoardKit, for the board's API: Swift 6, for iOS 27.0, and macOS 15 so `swift test` runs on a Mac. `apps/ios/Stellaris` is the SwiftUI app, for iPhone on iOS 27.0, with its unit tests in `StellarisTests` and its UI tests in `StellarisUITests`. `apps/ios/fixtures` holds what the tests read beside the server's and the web's: `api/`, the answers the server's tests capture, `cases/`, the case tables of the two ports, and `sky/`, the tables the web's sky tests write for the sky's port. `apps/ios` has no `package.json`, so pnpm and the TypeScript build leave it alone.
 
 ### XcodeGen writes the app's project
 
@@ -16,7 +16,7 @@ How the native client's code is laid out, how the app signs in and keeps its pla
 
 ### BoardKit's core is Foundation alone, and its transport is Apple's
 
-The core builds and tests on Linux with swift.org's toolchain: the models (`Models.swift`), the request builders (`Requests.swift`), the board's refusals (`BoardError`), the server-sent-events parser (`ServerSentEventParser`), the app's GitHub sign-in (`AppSignIn`: the verifier, the landing's address read, and base64url), and the ports of the web's `staleKeys` and `needsYou`. `Transport/` holds what needs Apple's frameworks, compiled only where they exist: `BoardClient`, the API over `URLSession` with the bearer token, the event stream, images, and the sign-in's code trade; the sign-in's S256 challenge, with CryptoKit; and `TokenStore`, the token in the Keychain. Linux's Foundation has no `URLSession.bytes(for:)`, which the event stream reads with, no SHA-256, and no Keychain.
+The core builds and tests on Linux with swift.org's toolchain: the models (`Models.swift`), the request builders (`Requests.swift`), the board's refusals (`BoardError`), the server-sent-events parser (`ServerSentEventParser`), the app's GitHub sign-in (`AppSignIn`: the verifier, the landing's address read, and base64url), the ports of the web's `staleKeys` and `needsYou`, and the port of the sky's model and camera (`SkyModel.swift`, `SkyCamera.swift`). `Transport/` holds what needs Apple's frameworks, compiled only where they exist: `BoardClient`, the API over `URLSession` with the bearer token, the event stream, images, and the sign-in's code trade; the sign-in's S256 challenge, with CryptoKit; and `TokenStore`, the token in the Keychain. Linux's Foundation has no `URLSession.bytes(for:)`, which the event stream reads with, no SHA-256, and no Keychain.
 
 ### The models hold what the app reads of the shared schemas
 
@@ -75,6 +75,20 @@ So a server change that alters any answer the client reads fails `pnpm test`, an
 ### The two ports run the web's case tables
 
 `staleKeys` in `apps/web/src/lib/events.ts` and `needsYou` in `apps/web/src/board/governance.ts` each have a port in BoardKit and a case table in `apps/ios/fixtures/cases`. The web's `events.test.ts` and `governance.test.ts` run each table against the web's function, importing it with Vite's `?raw`, and BoardKit's `CaseTableTests` run it against the port. A change to either function changes its table, which fails BoardKit's tests until the port follows. The `staleKeys` table holds a case for every type in `BOARD_EVENT_TYPES`, which the web's test checks.
+
+### The web's sky tests write the sky's tables
+
+`skyModel`, `markLabel`, and `starOf` in `apps/web/src/sky/model.ts` and the camera in `apps/web/src/sky/camera.ts` have a port in BoardKit's core, `SkyModel.swift` and `SkyCamera.swift`, with the two models the model reads, `Member` and `SchedulerView`. What they give is positions no one writes by hand, so the web's tests write it into `apps/ios/fixtures/sky` through `toMatchFileSnapshot`, laid out by `tableText` in `sky/ios-tables.ts`:
+
+- `model.json`: each board `model.test.ts` draws, with what `skyModel`, `markLabel`, and `starOf` give for it;
+- `camera.json`: each viewport, camera, and sphere `camera.test.ts` puts through the camera's functions;
+- `fake-board.json`: five boards the browser tests' fake board serves, read through the web's own API client as the sky reads them, with the model, and the camera's home view and each project framed in the app's poses. `ios-fixture.test.ts` imports `apps/web/e2e/board.ts` by a path held in a constant, so the app's compiler leaves that file to `tsconfig.e2e.json`, and answers the fake board's routes without a browser.
+
+BoardKit's `SkyTests` decode each board as the board's answers and expect the port to give the same, numbers within a millionth, since the platforms' sines and cosines come from different libraries; on Linux every number comes out the same as the web's. So a change to the model or the camera fails `check` until the tables are written again with `pnpm vitest run apps/web/src/sky -u` after `pnpm build`, and then `ios.yml` until the port follows. oxfmt leaves the folder alone, since the tests write it.
+
+The port keeps the web's order of operations in every sum, and rounds positions as `Math.round` does, a half toward positive infinity, where Swift's `rounded()` goes away from zero (`roundedAsJavaScript`). Projects, citizens, and task ids sort by their UTF-16 code units on both sides: `byCodeUnits` in the web's model, `sortsBefore` in the port. `localeCompare` would follow the host's locale: in Danish it puts `aarhus` after `zed`, and in Czech `chris` after `hana`, so a browser, or the machine writing the tables, would order one board its own way. Swift's own orders differ as well: Foundation's `localizedStandardCompare` puts `p9` before `p10`. The table's `sortedApart` board holds such names, and `model.test.ts` checks that `skyModel` never calls `localeCompare`. On what the board's names, ULIDs, and times can hold, code units give the order `localeCompare` gives in English.
+
+The port's viewport adds top and bottom insets to the web's left and right, for a fold, the chat part, or the cameras. A viewport with insets is the web's camera over the band between them, drawn lower by the top inset: the port computes in that band, and the camera's table works out its answers from the web's camera the same way. Framing keeps the web's 64 points clear at the band's top, the room the web keeps for its HUD. `SkyCameraMotion` ports the camera's half of the web's `SkyScene`: the three modes, a focus framed at the next step, and the easing, with time from the caller's clock where the web reads `performance.now()`, and a center that glides on both axes, since the insets now move it up and down. It is a value, so the app's model can keep it through a fold. The scene's own motion, the stars' springs and fades, comes with the sky's view.
 
 ## Tests and CI
 

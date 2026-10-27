@@ -24,7 +24,7 @@ Tests live beside the code as `*.test.ts` and run with Vitest from the root. `bo
 
 ### The iOS client's tests live in its package
 
-BoardKit's Swift tests are in `apps/ios/BoardKit/Tests` and run with `swift test` or `xcodebuild`, not Vitest. `apps/server/src/ios-fixtures.test.ts` captures the answers they decode, and the web's `events.test.ts` and `governance.test.ts` run the case tables they share ([ios.md](ios.md)).
+BoardKit's Swift tests are in `apps/ios/BoardKit/Tests` and run with `swift test` or `xcodebuild`, not Vitest. `apps/server/src/ios-fixtures.test.ts` captures the answers they decode, the web's `events.test.ts` and `governance.test.ts` run the case tables they share, and the web's sky tests write the sky's tables they run ([ios.md](ios.md)).
 
 ### A test that imports another workspace package reads its build
 

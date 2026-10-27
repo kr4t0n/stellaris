@@ -4,11 +4,11 @@
 # that end it were doing while it is still there: its state, its open terminals, its stacks with the
 # kernel's, the simulator's jobs, and the simulator's log of those processes, with the stacks of
 # xcodebuild, which reads the app's console. For the first copies it sees launch, it also keeps
-# where their console goes: their open devices, who holds those terminals, and their logging
-# variables, and it fails when a copy launched against the fake board has a terminal for its output,
-# since its writes there wait on xcodebuild (docs/internals/ios.md). It keeps nothing else of the
-# Mac's, no log and no environment beyond those variables, since what it keeps becomes an artifact
-# anyone signed in to GitHub can download.
+# where their console goes, as last recorded while they run: their open devices, who holds those
+# terminals, and their logging variables. It fails when a copy launched against the fake board still
+# has a terminal for its output then, since its writes there wait on xcodebuild
+# (docs/internals/ios.md). It keeps nothing else of the Mac's, no log and no environment beyond
+# those variables, since what it keeps becomes an artifact anyone signed in to GitHub can download.
 # Usage: catch-stuck-app.sh <bundle id> <test output> <folder>. It stops once <test output>.done
 # exists, after the captures under way.
 set -uo pipefail
@@ -59,33 +59,45 @@ devices() {
   lsof -n -P -a -p "$1" -d 0-255 2>&1 | awk 'NR == 1 || $5 == "CHR"'
 }
 
-# Where a copy's console goes, once it has started: its devices, who holds each terminal among them,
-# and its logging variables, by an allowlist of names, since its environment holds more than they do.
+# Where a copy's console goes: its devices, who holds each terminal among them, and its logging
+# variables, by an allowlist of names, since its environment holds more than they do.
+record() {
+  local pid=$1 tty
+  echo "$(now) $bundle:$pid"
+  devices "$pid"
+  for tty in $(devices "$pid" | awk '$NF ~ /^\/dev\/ttys[0-9]+$/ { print $NF }' | sort -u); do
+    echo "holders of $tty:"
+    lsof -n -P "$tty" 2>&1 | awk '{ print $1, $2, $4, $5, $9 }'
+  done
+  echo "xcodebuild's terminals:"
+  for proc in $(pgrep -x xcodebuild); do
+    devices "$proc" | awk '/ptmx|ttys/'
+  done
+  if ps -wwE -o command= -p "$pid" | tr ' ' '\n' | grep -q '^STELLARIS_FAKE_BOARD='; then
+    echo "fake board: yes"
+  else
+    echo "fake board: no"
+  fi
+  echo "logging variables:"
+  ps -wwE -o command= -p "$pid" | tr ' ' '\n' |
+    grep -E '^(OS_ACTIVITY_[A-Z_]*|OS_LOG_[A-Z_]*|IDE_[A-Za-z_]*|CFLOG_[A-Z_]*|NSUnbufferedIO)=' |
+    cut -c1-80
+}
+
+# Records a copy's console every 10 s while it runs, keeping the last record that found its devices,
+# since a copy still starting up hasn't yet pointed its console where the app sends it.
 console() {
-  local pid=$1 file="$folder/console/$1.txt" tty
-  sleep 5
+  local pid=$1 file="$folder/console/$1.txt"
   mkdir -p "$folder/console"
-  {
-    echo "$(now) $bundle:$pid"
-    devices "$pid"
-    for tty in $(devices "$pid" | awk '$NF ~ /^\/dev\/ttys[0-9]+$/ { print $NF }' | sort -u); do
-      echo "holders of $tty:"
-      lsof -n -P "$tty" 2>&1 | awk '{ print $1, $2, $4, $5, $9 }'
-    done
-    echo "xcodebuild's terminals:"
-    for proc in $(pgrep -x xcodebuild); do
-      devices "$proc" | awk '/ptmx|ttys/'
-    done
-    if ps -wwE -o command= -p "$pid" | tr ' ' '\n' | grep -q '^STELLARIS_FAKE_BOARD='; then
-      echo "fake board: yes"
-    else
-      echo "fake board: no"
+  sleep 5
+  while ps -p "$pid" >/dev/null 2>&1 && [ ! -e "$output.done" ]; do
+    record "$pid" >"$file.new" 2>&1
+    if grep -q '^Stellaris ' "$file.new"; then
+      mv "$file.new" "$file"
     fi
-    echo "logging variables:"
-    ps -wwE -o command= -p "$pid" | tr ' ' '\n' |
-      grep -E '^(OS_ACTIVITY_[A-Z_]*|OS_LOG_[A-Z_]*|IDE_[A-Za-z_]*|CFLOG_[A-Z_]*|NSUnbufferedIO)=' |
-      cut -c1-80
-  } >"$file" 2>&1
+    sleep 10
+  done
+  rm -f "$file.new"
 }
 
 simulator_log() {

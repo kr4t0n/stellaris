@@ -79,7 +79,7 @@ final class SkySnapshotTests: XCTestCase {
     }
   }
 
-  /// A zoom and a pan, which Fit then shows as there to undo.
+  /// A zoom and a pan.
   @MainActor func testZoomedIn() async throws {
     try await record("zoomed") { model in
       let sky = model.sky

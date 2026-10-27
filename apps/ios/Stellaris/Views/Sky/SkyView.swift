@@ -5,9 +5,10 @@ import SwiftUI
 /// The sky: the society's citizens as stars, its projects as spheres with their tasks orbiting
 /// them, drawn edge to edge in whatever frame it is given, with the camera fitting the sky inside
 /// the safe area and `insets`, the room a fold, the chat part, or the cameras take. A tap opens a
-/// card at the foot of the sky, a drag pans, a pinch zooms around the fingers, a double tap zooms
-/// in, and Fit goes home. It draws at most thirty frames a second, none while it is off screen or
-/// the app is not active, and with Reduce Motion or in Low Power Mode nothing drifts.
+/// card at the foot of the sky, a drag pans, a pinch zooms around the fingers, and a double tap
+/// zooms in; no button sits over it, and VoiceOver's camera element takes it back to the whole sky.
+/// It draws at most thirty frames a second, none while it is off screen or the app is not active,
+/// and with Reduce Motion or in Low Power Mode nothing drifts.
 struct SkyView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
@@ -98,11 +99,6 @@ struct SkyView: View {
         .onTapGesture { point in
           sky.tap(at: SkyPoint(x: point.x, y: point.y))
         }
-        .overlay(alignment: .topTrailing) {
-          FitButton()
-            .padding(.top, viewport.top + 8)
-            .padding(.trailing, viewport.right + 8)
-        }
         .overlay {
           if sky.members.isEmpty {
             switch sky.state {
@@ -123,9 +119,9 @@ struct SkyView: View {
         }
         .overlay(alignment: .bottom) {
           if let card = sky.card {
-            // Inside the sky's part, and below Fit: the card scrolls in what room that leaves.
+            // Inside the sky's part: the card scrolls in what room it leaves.
             VStack(spacing: 0) {
-              Spacer(minLength: viewport.top + 60)
+              Spacer(minLength: viewport.top + 12)
               SkyCard(target: card, model: skyModel)
             }
             .padding(.bottom, viewport.bottom + 12)
@@ -153,38 +149,6 @@ struct SkyView: View {
     ) { _ in
       lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     }
-  }
-}
-
-/// Fit, which takes the camera home, carrying the camera's state as its value and the zooms as
-/// its actions for VoiceOver. It does nothing while the whole sky shows.
-private struct FitButton: View {
-  @Environment(AppModel.self) private var model
-
-  var body: some View {
-    let sky = model.sky
-    Button {
-      sky.home()
-    } label: {
-      // The whole circle takes the tap, not only the icon's strokes, which would let a tap
-      // between them through to the sky.
-      // A fixed size, so the symbol stays inside its circle at every type size; the large content
-      // viewer shows it bigger.
-      Label("Fit the whole sky", systemImage: "arrow.up.left.and.arrow.down.right")
-        .labelStyle(.iconOnly)
-        .font(.system(size: 17, weight: .medium))
-        .frame(width: 44, height: 44)
-        .background(.regularMaterial, in: Circle())
-        .contentShape(Circle())
-    }
-    .buttonStyle(.plain)
-    .foregroundStyle(.secondary)
-    .accessibilityShowsLargeContentViewer()
-    .opacity(sky.camera.mode == .home ? 0.5 : 1)
-    .accessibilityIdentifier("sky-fit")
-    .accessibilityValue(SkyElements.describe(sky.camera, model: model))
-    .accessibilityAction(named: "Zoom in") { sky.zoom(by: SkyView.stepZoom) }
-    .accessibilityAction(named: "Zoom out") { sky.zoom(by: 1 / SkyView.stepZoom) }
   }
 }
 

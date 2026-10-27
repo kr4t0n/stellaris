@@ -7,7 +7,7 @@ import Observation
 /// card. It lives in the app's model, not in the view, so a fold or a rotation that builds the
 /// view again keeps every star where it was and the camera where the user left it.
 @MainActor @Observable final class SkyStore {
-  /// The camera as VoiceOver and the Fit button describe it: published when a gesture moves it,
+  /// The camera as VoiceOver describes it: published when a gesture moves it,
   /// and when the motion turns to a new target, not at every frame.
   struct Camera: Equatable {
     var mode = SkyCameraMotion.Mode.home

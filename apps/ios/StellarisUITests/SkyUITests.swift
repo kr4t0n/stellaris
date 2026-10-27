@@ -50,30 +50,28 @@ final class SkyUITests: ShellTestCase {
 
     let star = sky.buttons["sky-star-rev-1"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
     star.press(forDuration: 0.1, thenDragTo: star.withOffset(CGVector(dx: -120, dy: -120)))
-    expectValue(sky.buttons["sky-fit"], "CONTAINS", "%")
+    expectValue(sky.buttons["sky-camera"], "CONTAINS", "%")
     XCTAssertFalse(card.exists, "a drag from a star opened its card")
   }
 
-  /// A pinch and a drag each move the camera, as its value says, and Fit takes it home.
+  /// A pinch and a drag each move the camera, as its VoiceOver element's value says. Its Fit is
+  /// VoiceOver's to activate, which XCTest can't do; `SkyStoreTests` takes the camera home.
   @MainActor func testPinchAndDragMoveTheCamera() throws {
     let (_, sky) = openSky()
-    let fit = sky.buttons["sky-fit"]
-    XCTAssertEqual(fit.value as? String, "Whole sky")
+    let camera = sky.buttons["sky-camera"]
+    XCTAssertEqual(camera.value as? String, "Whole sky")
 
     sky.pinch(withScale: 2, velocity: 1)
-    expectValue(fit, "CONTAINS", "%")
-    let pinched = try XCTUnwrap(fit.value as? String)
+    expectValue(camera, "CONTAINS", "%")
+    let pinched = try XCTUnwrap(camera.value as? String)
 
     let start = sky.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7))
     start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 120, dy: -80)))
-    expectValue(fit, "!=", pinched)
+    expectValue(camera, "!=", pinched)
     keepScreen("sky-moved")
-
-    fit.tap()
-    expectValue(fit, "==", "Whole sky")
   }
 
-  /// VoiceOver finds every sphere, star, and task's mark, in words, and Fit.
+  /// VoiceOver finds the camera, and every sphere, star, and task's mark, in words.
   @MainActor func testListsTheSkyForVoiceOver() {
     let (_, sky) = openSky()
     let listed = Set(
@@ -83,8 +81,9 @@ final class SkyUITests: ShellTestCase {
       listed,
       [
         "sky-sphere-society", "sky-sphere-demo", "sky-task-\(atTheUsersStage)", "sky-task-\(held)",
-        "sky-star-concierge-1", "sky-star-eng-1", "sky-star-rev-1", "sky-fit",
+        "sky-star-concierge-1", "sky-star-eng-1", "sky-star-rev-1", "sky-camera",
       ])
+    XCTAssertEqual(sky.buttons["sky-camera"].label, "Fit the whole sky")
     XCTAssertEqual(sky.buttons["sky-sphere-demo"].label, "Demo")
     XCTAssertEqual(
       sky.buttons["sky-task-\(atTheUsersStage)"].label,

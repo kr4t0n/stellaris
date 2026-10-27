@@ -1,9 +1,9 @@
 import BoardKit
 import SwiftUI
 
-/// The sky for VoiceOver, as the web's keyboard mirror is for keyboards: an element for each
-/// sphere, star, and task mark, where it rests once the camera lands. Activating one opens its
-/// card, and Zoom in and Zoom out zoom around it.
+/// The sky for VoiceOver, as the web's keyboard mirror is for keyboards: the camera, then an element
+/// for each sphere, star, and task mark, where it rests once the camera lands. Activating one opens
+/// its card, and Zoom in and Zoom out zoom around it.
 struct SkyElements: View {
   /// The app, handed in rather than read from the environment, which the accessibility children
   /// are built apart from.
@@ -19,6 +19,20 @@ struct SkyElements: View {
       SkyPoint(x: center.x + (x - camera.x) * camera.scale, y: center.y + (y - camera.y) * camera.scale)
     }
     ZStack(alignment: .topLeading) {
+      // The camera, for VoiceOver alone, since a pinch is hard to make with it on: where the camera
+      // is, Fit as what activating it does, and the zooms. The sky shows no button for it, as
+      // pinching and dragging are how the phone moves around it.
+      Color.clear
+        .frame(width: 44, height: 44)
+        .position(x: viewport.left + 22, y: viewport.top + 22)
+        .accessibilityElement()
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Fit the whole sky")
+        .accessibilityValue(SkyElements.describe(sky.camera, model: app))
+        .accessibilityIdentifier("sky-camera")
+        .accessibilityAction { sky.home() }
+        .accessibilityAction(named: "Zoom in") { sky.zoom(by: SkyView.stepZoom) }
+        .accessibilityAction(named: "Zoom out") { sky.zoom(by: 1 / SkyView.stepZoom) }
       ForEach(model.anchors) { anchor in
         let at = place(anchor.x, anchor.y)
         let side = max(44, 2 * anchor.radius * camera.scale)

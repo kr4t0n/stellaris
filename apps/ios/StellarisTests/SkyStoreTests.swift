@@ -139,8 +139,8 @@ final class ChangingScheduler: URLProtocol {
     #expect(sky.card == nil)
   }
 
-  /// A zoom and a drag leave the camera where the user put it, which VoiceOver and Fit describe,
-  /// and Fit takes it home.
+  /// A zoom and a drag leave the camera where the user put it, which VoiceOver describes, and the
+  /// Fit its camera element offers takes it home.
   @Test func theGesturesMoveTheCameraAndFitTakesItHome() {
     let model = settledSample()
     let sky = model.sky

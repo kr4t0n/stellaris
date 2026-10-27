@@ -56,7 +56,7 @@ final class SkyUITests: ShellTestCase {
 
   /// A pinch and a drag each move the camera, as its VoiceOver element's value says, and a pinch out
   /// past the whole sky goes back to it; no Fit button sits over the sky. The element's own Fit is
-  /// VoiceOver's to activate, which XCTest can't do, so `SkyAccessibilityTests` does it in the app.
+  /// VoiceOver's to activate, which XCTest can't do.
   @MainActor func testPinchAndDragMoveTheCamera() throws {
     let (_, sky) = openSky()
     XCTAssertFalse(sky.buttons["sky-fit"].exists, "the sky still has a Fit button")

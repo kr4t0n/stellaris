@@ -155,12 +155,8 @@ interface TurnState {
    * usage: that usage less the run's own, since the run spent its main loop at least.
    */
   heldBefore: Usage | undefined;
-  /**
-   * The session's running cost, as the latest result that reported its running usage said: like
-   * that usage, every request of the query and of the session before it. A result that names no
-   * model in `modelUsage` reports neither.
-   */
-  totalCostUsd: number | undefined;
+  /** Cumulative for the query: per turn on a cold run, running total on a resident session. */
+  totalCostUsd: number;
   finalText: string;
   structured: unknown;
   exitReason: TurnExitReason;
@@ -195,7 +191,7 @@ function freshState(model?: string): TurnState {
     usage: ZERO_USAGE,
     sessionUsage: undefined,
     heldBefore: undefined,
-    totalCostUsd: undefined,
+    totalCostUsd: 0,
     finalText: "",
     structured: null,
     exitReason: "error",
@@ -316,14 +312,6 @@ function turnUsage(state: TurnState, soFar: Usage | undefined): Usage {
 }
 
 /**
- * A turn's own cost: what the session's running cost grew by from where the board left it, never
- * less than nothing, and nothing for a turn whose results reported none.
- */
-function turnCost(state: TurnState, soFar: number): number {
-  return state.totalCostUsd === undefined ? 0 : Math.max(0, state.totalCostUsd - soFar);
-}
-
-/**
  * The subprocess environment: inherit, add the runner's settings for every CLI and the board
  * token, and drop nested-session markers.
  */
@@ -432,14 +420,13 @@ function handleMessage(
       // Each result counts only its own run, and a turn can run more than once in one process.
       const run = usageOf(message.usage);
       state.usage = addUsage(state.usage, run);
-      // Like the cost, `modelUsage` is the session's running total. A result that names no model
-      // in it carries neither: the zeroed one the CLI writes for a resume it could not make.
+      // Like the cost, `modelUsage` is the session's running total.
       const totals = sessionUsageOf(message.modelUsage);
       if (totals !== undefined) {
         state.heldBefore ??= grownBy(totals, run);
         state.sessionUsage = totals;
-        state.totalCostUsd = message.total_cost_usd;
       }
+      state.totalCostUsd = message.total_cost_usd;
       state.apiError = message.subtype === "success" && message.is_error;
       // Like the error, the latest run decides whether the turn is worth sending again.
       const serverError = state.serverError;
@@ -528,7 +515,7 @@ function finishTurn(
     exitReason: state.exitReason,
     ...(state.error === undefined ? {} : { error: state.error }),
     ...(state.model === undefined ? {} : { model: state.model }),
-    ...(state.totalCostUsd === undefined ? {} : { sessionCostUsd: state.totalCostUsd }),
+    ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
     ...(state.sessionUsage === undefined ? {} : { sessionUsage: state.sessionUsage }),
     ...(state.quota === undefined ? {} : { quota: state.quota }),
     ...(state.transient && state.limitText === undefined && state.exitReason === "error"
@@ -610,6 +597,17 @@ function withResumeFailure(result: TurnResult): TurnResult {
   return result.exitReason === "error" || result.exitReason === "timeout"
     ? { ...result, resumeFailed: resumeFailureOf(result.error) }
     : result;
+}
+
+/**
+ * A turn on a saved session that the CLI never opened, however it ended. A result it saw came
+ * before the session, as the zeroed one the CLI writes for a resume it could not make, so it says
+ * nothing of the session's running totals: the board keeps the ones it holds. Once the CLI has
+ * opened the session, a total of nothing is its own, as after a kill that saved none.
+ */
+function unopened(result: TurnResult): TurnResult {
+  const { sessionCostUsd: _zeroed, sessionUsage: _none, ...rest } = result;
+  return withResumeFailure(rest);
 }
 
 /**
@@ -847,13 +845,16 @@ class ClaudeResident implements ResidentSession {
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the turn ended without a result message";
     }
-    const costUsd = turnCost(state, this.lastTotalCostUsd);
-    this.lastTotalCostUsd = state.totalCostUsd ?? this.lastTotalCostUsd;
+    const opened = !this.resuming || this.opened;
+    const costUsd = Math.max(0, state.totalCostUsd - this.lastTotalCostUsd);
+    if (state.sawResult && opened) {
+      this.lastTotalCostUsd = state.totalCostUsd;
+    }
     // What the session spent between turns, as a background sub-agent that finished, counts here.
     const usage = turnUsage(state, this.lastSessionUsage);
     this.lastSessionUsage = state.sessionUsage ?? this.lastSessionUsage;
     const result = finishTurn(state, costUsd, usage, events, emit);
-    return this.resuming && !this.opened ? withResumeFailure(result) : result;
+    return opened ? result : unopened(result);
   }
 
   async close(): Promise<void> {
@@ -1073,12 +1074,12 @@ export class ClaudeAgentBackend implements AgentBackend {
     }
     // A resumed session's total starts from what its transcript saved: the earlier turns' cost.
     const costSoFarUsd = resuming ? (request.costSoFarUsd ?? 0) : 0;
-    const costUsd = turnCost(state, costSoFarUsd);
+    const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
     // Its usage too, from the running usage the board holds for it, when it holds one.
     const usage = turnUsage(state, resuming ? request.usageSoFar : ZERO_USAGE);
     const result = finishTurn(state, costUsd, usage, events, emit);
     // The CLI announces a session once it has opened it, and says first why it could not.
-    return resuming && !state.initialized ? withResumeFailure(result) : result;
+    return resuming && !state.initialized ? unopened(result) : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */

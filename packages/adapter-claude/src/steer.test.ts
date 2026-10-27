@@ -33,8 +33,7 @@ function frame(value: Record<string, unknown>): SDKMessage {
   return value as unknown as SDKMessage;
 }
 
-/** The result of the query's `runs`th run, with the query's running totals, as the CLI reports them. */
-function result(summary: string, total: number, subtype = "success", runs = 1): SDKMessage {
+function result(summary: string, total: number, subtype = "success"): SDKMessage {
   return frame({
     type: "result",
     subtype,
@@ -46,18 +45,6 @@ function result(summary: string, total: number, subtype = "success", runs = 1): 
         : undefined,
     total_cost_usd: total,
     usage: { input_tokens: 10, output_tokens: 1 },
-    modelUsage: {
-      "claude-test": {
-        inputTokens: 10 * runs,
-        outputTokens: runs,
-        cacheReadInputTokens: 0,
-        cacheCreationInputTokens: 0,
-        webSearchRequests: 0,
-        costUSD: total,
-        contextWindow: 200_000,
-        maxOutputTokens: 32_000,
-      },
-    },
     errors: subtype === "success" ? [] : ["[Request interrupted by user]"],
   });
 }
@@ -197,7 +184,7 @@ function scriptedCli(options: { foldQueued?: boolean; backgroundTaskFirst?: bool
           model: "claude-test",
         });
         yield echo(message);
-        yield result(`run ${run}`, 0.1 * run, "success", run);
+        yield result(`run ${run}`, 0.1 * run);
       }
     })();
     return Object.assign(stream, {

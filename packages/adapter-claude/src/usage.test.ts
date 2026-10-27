@@ -24,6 +24,9 @@ import { ClaudeAgentBackend, type QueryFn } from "./index.js";
  *   one left it at 7,530 input, 323 output, 10,000 cache-read and 50 cache-write tokens.
  * - `sdk-warm-subagent-recorded.jsonl`: a warm session of three prompts, whose first prompt's
  *   sub-agent finished after that turn's result, before the second prompt.
+ * - `sdk-refused-after-kill-recorded.jsonl` and `sdk-resumed-after-kill-recorded.jsonl`: cold
+ *   resumes of a session after the CLI of its warm session was killed outright, so they restored
+ *   no totals. The stub refused the first with a 400; the second made one main-loop request.
  */
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -358,5 +361,35 @@ describe("a Claude turn's cost", () => {
     expect(failed.resumeFailed).toBe("retry");
     expect((await nextTurn(failed)).costUsd).toBeCloseTo(0.01475, 8);
     expect(failed).not.toHaveProperty("sessionCostUsd");
+  });
+
+  it("reports the CLI's own total of nothing once it opened the session, as after a kill that saved none", async () => {
+    // A warm session's two turns left the board at $0.00406 before its CLI was killed outright.
+    const killed = { costSoFarUsd: 0.00406, usageSoFar: usage(260, 106, 4_000, 20) };
+    const refusedFrames = await recorded("sdk-refused-after-kill-recorded.jsonl");
+    const cold = await new ClaudeAgentBackend({ queryFn: replaying(refusedFrames) }).runTurn({
+      ...request,
+      ...killed,
+    });
+    const session = await new ClaudeAgentBackend({
+      queryFn: replayingWarm(refusedFrames),
+    }).startResident(spec, { ...start, newSession: false, ...killed });
+    const warm = await session.runTurn("refused.");
+    await session.close();
+
+    const resumed = await recorded("sdk-resumed-after-kill-recorded.jsonl");
+    for (const refused of [cold, warm]) {
+      expect(refused.exitReason).toBe("error");
+      expect(refused.resumeFailed).toBeUndefined();
+      // The next resume counts its one request, measured from what the CLI holds, not the board.
+      const next = await new ClaudeAgentBackend({ queryFn: replaying(resumed) }).runTurn({
+        ...request,
+        costSoFarUsd: refused.sessionCostUsd ?? killed.costSoFarUsd,
+        usageSoFar: refused.sessionUsage ?? killed.usageSoFar,
+      });
+      expect(next.costUsd).toBeCloseTo(0.00185, 8);
+      expect(next.usage).toEqual(usage(100, 50, 2_000, 10));
+      expect(refused.sessionCostUsd).toBe(0);
+    }
   });
 });

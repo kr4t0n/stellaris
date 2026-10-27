@@ -59,6 +59,8 @@ export interface TestSocietyOptions {
         readonly capabilities?: readonly string[] | undefined;
       }>
     | undefined;
+  /** Signing in with GitHub, with GitHub itself faked through its `fetch`. */
+  readonly signIn?: AppDependencies["signIn"];
 }
 
 export interface TestSociety {
@@ -129,6 +131,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     enrollments: new EnrollmentDesk(board, { pollIntervalMs: 50 }),
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
+    ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
   });
   options.routes?.(app);
   fetcher = app.fetch;

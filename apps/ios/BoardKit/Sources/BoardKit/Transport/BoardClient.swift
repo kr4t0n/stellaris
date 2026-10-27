@@ -14,19 +14,28 @@
       self.session = session
     }
 
-    /// How `board` lets people in. A board that cannot say, as one from before GitHub sign-in,
-    /// takes tokens only.
-    public static func authConfig(board: URL, session: URLSession = .shared) async -> AuthConfig {
+    /// How `board` lets people in. A board that answers without saying, as one from before GitHub
+    /// sign-in, takes tokens only; `BoardError.unreachable` when nothing answers at the address.
+    public static func authConfig(board: URL, session: URLSession = .shared) async throws
+      -> AuthConfig
+    {
       let request = BoardAPI.authConfig()
-      guard
-        let (data, response) = try? await session.data(
-          for: request.endpoint.urlRequest(board: board, token: nil)),
-        (response as? HTTPURLResponse)?.statusCode == 200,
-        let config = try? request.decode(data)
-      else {
+      do {
+        let data = try await bytes(of: request.endpoint, board: board, token: nil, session: session)
+        return (try? request.decode(data)) ?? AuthConfig(github: false)
+      } catch let refusal as BoardError where refusal.status != 0 {
         return AuthConfig(github: false)
       }
-      return config
+    }
+
+    /// Trades the code the app's sign-in with GitHub landed with, and the verifier it started with,
+    /// for the session; the board's refusal as a `BoardError`.
+    public static func appSession(
+      board: URL, code: String, verifier: String, session: URLSession = .shared
+    ) async throws -> String {
+      let request = BoardAPI.appToken(code: code, verifier: verifier)
+      let data = try await bytes(of: request.endpoint, board: board, token: nil, session: session)
+      return try request.decode(data).session
     }
 
     /// The answer to `request`, or the board's refusal as a `BoardError`.
@@ -80,6 +89,12 @@
     }
 
     private func bytes(of endpoint: Endpoint) async throws -> Data {
+      try await BoardClient.bytes(of: endpoint, board: board, token: token, session: session)
+    }
+
+    private static func bytes(
+      of endpoint: Endpoint, board: URL, token: String?, session: URLSession
+    ) async throws -> Data {
       let data: Data
       let response: URLResponse
       do {

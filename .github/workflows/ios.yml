@@ -3,6 +3,7 @@ name: ios
 # The iOS client, on the changes that reach it: its code, and the fixtures the server's own tests
 # capture into `apps/ios/fixtures`. Not a required check, since GitHub leaves a required workflow
 # that its paths skipped pending, which would block every pull request that leaves the client alone.
+# The app's job keeps its screenshots as the `screens` artifact for review.
 on:
   push:
     branches: [main, dev]
@@ -43,3 +44,82 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: apps/ios/BoardKit
         run: swift test --scratch-path "$RUNNER_TEMP/swiftpm"
+
+  app:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      # XcodeGen from its release, checked against the digest GitHub lists for the asset.
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+      DESTINATION: platform=iOS Simulator,name=iPhone Duo,OS=27.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install XcodeGen
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+      - name: Generate the project
+        working-directory: apps/ios
+        run: xcodegen generate
+      - name: Test the app on the iPhone Duo simulator
+        working-directory: apps/ios
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Stellaris.xcodeproj \
+            -scheme Stellaris \
+            -destination "$DESTINATION" \
+            -derivedDataPath "$RUNNER_TEMP/derived" \
+            -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult"
+      # The host the build names, expanded into the app's associated domains. A simulator build
+      # signs to run locally and keeps its entitlements beside the signature, as Xcode wrote them.
+      - name: Show the app's entitlements
+        if: ${{ !cancelled() }}
+        run: |
+          find "$RUNNER_TEMP/derived/Build/Intermediates.noindex" -name 'Stellaris.app*.xcent' \
+            -print -exec plutil -p {} \;
+      # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
+      - name: Look at the simulator's displays
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/screens/displays"
+          device=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, each in devices.items() if runtime.endswith("iOS-27-1")
+                     for d in each if d["name"] == "iPhone Duo"))')
+          echo "iPhone Duo: $device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl io "$device" enumerate
+          SIMCTL_CHILD_STELLARIS_FAKE_BOARD="$PWD/apps/ios/fixtures/api" \
+            xcrun simctl launch "$device" com.example.stellaris -StellarisReset
+          sleep 5
+          # Asked for a screenshot without one, simctl names each display it can capture.
+          displays=$(xcrun simctl io "$device" screenshot "$RUNNER_TEMP/any.png" 2>&1 |
+            grep -oE -- '--display=[0-9]+' | cut -d= -f2)
+          echo "displays: $displays"
+          for display in $displays; do
+            xcrun simctl io "$device" screenshot --display="$display" \
+              "$RUNNER_TEMP/screens/displays/display-$display.png"
+          done
+          exit 0
+      - name: Collect the screenshots
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/screens/tests"
+          xcrun xcresulttool export attachments \
+            --path "$RUNNER_TEMP/Stellaris.xcresult" --output-path "$RUNNER_TEMP/screens/tests"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: screens
+          path: ${{ runner.temp }}/screens
+          retention-days: 14

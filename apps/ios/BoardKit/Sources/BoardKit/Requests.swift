@@ -17,7 +17,8 @@ public struct Endpoint: Sendable, Hashable {
   public let path: String
   /// A JSON body, for a verb.
   public let body: Data?
-  /// Whether it carries the bearer token; only `/auth/config` is asked without one.
+  /// Whether it carries the bearer token; `/auth/config` and the app's sign-in are asked without
+  /// one.
   public let authenticated: Bool
 
   /// The request for a board at `board`, which may end in a path of its own, as behind a proxy.
@@ -55,6 +56,26 @@ public enum BoardAPI {
   public static func authConfig() -> BoardRequest<AuthConfig> {
     BoardRequest(
       endpoint: Endpoint(method: .get, path: "/auth/config", body: nil, authenticated: false))
+  }
+
+  /// Where the app's sign-in with GitHub starts, in the browser, with its PKCE challenge (S256).
+  public static func appSignIn(challenge: String) -> Endpoint {
+    Endpoint(
+      method: .get,
+      path:
+        "/auth/github?landing=app&code_challenge=\(component(challenge))&code_challenge_method=S256",
+      body: nil, authenticated: false)
+  }
+
+  /// Trades the code the app's sign-in landed with, and the verifier it started with, for the
+  /// session.
+  public static func appToken(code: String, verifier: String) -> BoardRequest<AppSession> {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    // Two strings always encode.
+    let body = try! encoder.encode(CodeExchange(code: code, code_verifier: verifier))
+    return BoardRequest(
+      endpoint: Endpoint(method: .post, path: "/auth/app/token", body: body, authenticated: false))
   }
 
   public static func me() -> BoardRequest<BoardActor> { read("/api/me") }
@@ -197,5 +218,10 @@ public enum BoardAPI {
   private struct DecideInput: Encodable {
     let proposal_id: String
     let reason: String?
+  }
+
+  private struct CodeExchange: Encodable {
+    let code: String
+    let code_verifier: String
   }
 }

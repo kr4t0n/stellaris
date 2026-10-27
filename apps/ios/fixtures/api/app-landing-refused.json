@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/auth/github/callback?state=fixture-state-refused&code=stranger"
+  },
+  "status": 302,
+  "location": "/auth/app/signin#signin-error=not-allowed"
+}

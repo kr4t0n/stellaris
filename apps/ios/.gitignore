@@ -1,0 +1,6 @@
+# XcodeGen's output: the project and the plists it writes from project.yml
+Stellaris.xcodeproj/
+Generated/
+
+# Your developer account and board, from Config/Local.xcconfig.example
+Config/Local.xcconfig

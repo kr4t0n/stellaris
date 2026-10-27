@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/app/token",
+    "body": {
+      "code": "fixture-code",
+      "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    }
+  },
+  "status": 400,
+  "body": {
+    "error": "invalid_grant"
+  }
+}

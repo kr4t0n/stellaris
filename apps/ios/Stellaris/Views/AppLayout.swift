@@ -22,18 +22,18 @@ struct AppLayout: View {
 
   var pose: Pose?
 
-  /// The window's size without the keyboard.
-  @State private var unkeyed: CGSize?
+  /// The tallest the view has been at its width: its size without the keyboard, since only the
+  /// keyboard shortens it without changing its width, where a fold, a turn, or Split View change
+  /// the width.
+  @State private var tallest = CGSize.zero
 
   var body: some View {
     GeometryReader { proxy in
       // The reader ends at the keyboard while it is up; the split keeps to the size without it.
-      let size = unkeyed.flatMap { full in
-        full.width == proxy.size.width && full.height > proxy.size.height ? full : nil
-      }
+      let keyed = tallest.width == proxy.size.width && tallest.height > proxy.size.height
       let parts = InnerLayout.parts(
-        in: size ?? proxy.size,
-        keyboardTop: pose?.keyboardTop ?? size.map { _ in proxy.size.height },
+        in: keyed ? tallest : proxy.size,
+        keyboardTop: pose?.keyboardTop ?? (keyed ? proxy.size.height : nil),
         regular: regular,
         divisions: pose?.divisions ?? regions(.division, in: proxy),
         cameras: pose?.cameras ?? regions(.occlusion, in: proxy))
@@ -47,20 +47,19 @@ struct AppLayout: View {
           // The keyboard comes up over the sky rather than squeezing it.
           .ignoresSafeArea(.keyboard)
           .accessibilityHidden(parts.chatCoversSky)
-          .transition(.opacity)
+          .transition(.opacity.animation(.easeInOut(duration: 0.3)))
           .layoutValue(key: InnerPart.self, value: .sky)
         }
         ShellView()
           .modifier(BarAxis(horizontal: parts.arrangement == .stacked))
           .layoutValue(key: InnerPart.self, value: .chat)
       }
-      .animation(.easeInOut(duration: 0.3), value: parts.sky != nil)
       .animation(.smooth(duration: 0.3), value: parts.chatCoversSky)
-    }
-    .background {
-      Color.clear
-        .ignoresSafeArea(.keyboard)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { unkeyed = $0 }
+      .onChange(of: proxy.size, initial: true) { _, size in
+        if size.width != tallest.width || size.height > tallest.height {
+          tallest = size
+        }
+      }
     }
   }
 

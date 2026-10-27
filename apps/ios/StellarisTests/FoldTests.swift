@@ -66,32 +66,34 @@ final class FoldTests: XCTestCase {
     // Open: the sky on the leading side, at the whole sky, and the chat beside it.
     window.resize(to: landscape)
     try await window.settle()
+    try window.keep("fold-open-landscape", in: self)
     XCTAssertNotNil(model.sky.lastFrame, "no sky beside the chat on the inner display")
     messages = try expectTheChat("opened", in: window, model, after: messages)
     XCTAssertLessThan(model.sky.viewport.width, Double(landscape.width) * 0.6)
     XCTAssertEqual(model.sky.viewport.height, Double(landscape.height), accuracy: 1)
-    XCTAssertGreaterThanOrEqual(
-      Double(window.frame(of: messages).minX), model.sky.viewport.width - 1,
-      "the chat isn't beside the sky")
+    let beside = try await window.until {
+      Double(window.frame(of: messages).minX) >= model.sky.viewport.width - 1
+    }
+    XCTAssertTrue(beside, "the chat isn't beside the sky: \(window.frame(of: messages))")
     XCTAssertEqual(model.sky.scene.camera.mode, .home, "the first unfold isn't at the whole sky")
     let asked = CountedScheduler.asked.withLock { $0 }
     try await Task.sleep(for: .seconds(1))
     XCTAssertGreaterThanOrEqual(
       CountedScheduler.asked.withLock { $0 } - asked, 2, "the sky doesn't ask the scheduler")
-    try window.keep("fold-open-landscape", in: self)
 
     // Moved by hand, then turned: the sky above, the chat below.
     model.sky.zoom(by: 2)
     let scale = model.sky.scene.camera.target.scale
     window.resize(to: portrait)
     try await window.settle()
+    try window.keep("fold-open-portrait", in: self)
     messages = try expectTheChat("turned", in: window, model, after: messages)
     XCTAssertEqual(model.sky.viewport.width, Double(portrait.width), accuracy: 1)
     XCTAssertLessThan(model.sky.viewport.height, Double(portrait.height) * 0.6)
-    XCTAssertGreaterThanOrEqual(
-      Double(window.frame(of: messages).minY), model.sky.viewport.height - 1,
-      "the chat isn't below the sky")
-    try window.keep("fold-open-portrait", in: self)
+    let below = try await window.until {
+      Double(window.frame(of: messages).minY) >= model.sky.viewport.height - 1
+    }
+    XCTAssertTrue(below, "the chat isn't below the sky: \(window.frame(of: messages))")
 
     // Folded: the chat alone, and the sky neither draws nor asks.
     window.resize(to: outer)
@@ -171,6 +173,17 @@ final class FoldTests: XCTestCase {
     window.frame = CGRect(origin: .zero, size: size)
     host.traitOverrides.horizontalSizeClass = size.width >= 600 ? .regular : .compact
     host.traitOverrides.verticalSizeClass = .regular
+  }
+
+  /// Whether `done` holds within five seconds, asked again every tenth of a second.
+  func until(_ done: () -> Bool) async throws -> Bool {
+    var tries = 0
+    while !done(), tries < 50 {
+      tries += 1
+      host.view.layoutIfNeeded()
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    return done()
   }
 
   /// Lays the window out and lets its views run what they start.

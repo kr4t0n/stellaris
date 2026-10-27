@@ -115,6 +115,16 @@ const RING_MIN = 280;
 const FIRST_RING = 8;
 const MARGIN = 40;
 
+/**
+ * Two strings in the order of their UTF-16 code units, as a sort with no comparator orders them:
+ * the same in every browser, where `localeCompare` follows the browser's locale (Danish puts
+ * `aarhus` after `zed`). On the board's names, ids, and times it is the order `localeCompare`
+ * gives in English, and the one BoardKit's port of the sky follows.
+ */
+function byCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function sphereRadius(citizens: number): number {
   return Math.max(SPHERE_MIN, STAR_SPACING * Math.sqrt(Math.max(0, citizens - 1)) + SPHERE_PAD);
 }
@@ -160,7 +170,7 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
   // An archived project has no members and takes no work, so it has no sphere.
   const projects = snapshot.projects
     .filter((project) => project.archived === undefined)
-    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug));
+    .toSorted((a, b) => byCodeUnits(a.createdAt, b.createdAt) || byCodeUnits(a.slug, b.slug));
   const slugs = new Set(projects.map((project) => project.slug));
   const placeOf = (scope: string): string => (slugs.has(scope) ? scope : SOCIETY_SCOPE);
 
@@ -170,7 +180,7 @@ export function skyModel(snapshot: SkySnapshot): SkyModel {
   const citizens = snapshot.members
     .filter((member): member is Member & { cli: CliKind } => member.cli !== null)
     .filter((member) => member.status === "active")
-    .toSorted((a, b) => a.name.localeCompare(b.name));
+    .toSorted((a, b) => byCodeUnits(a.name, b.name));
 
   const placements = citizens.flatMap((member): Placement[] => {
     const turns = [...new Set((running.get(member.name) ?? []).map(placeOf))];
@@ -271,7 +281,7 @@ function placeTasks(
         const phase = phaseOf(task);
         return phase === "done" || phase === "abandoned" ? [] : [{ task, phase }];
       })
-      .toSorted((a, b) => a.task.id.localeCompare(b.task.id));
+      .toSorted((a, b) => byCodeUnits(a.task.id, b.task.id));
     const step = Math.min(TASK_STEP, TASK_ARC / Math.max(1, inPlay.length));
     const orbit = anchor.radius + TASK_ORBIT;
     inPlay.forEach(({ task, phase }, index) => {

@@ -181,12 +181,11 @@ private let ringMin = 280.0
 private let firstRing = 8
 private let margin = 40.0
 
-/// Whether `a` sorts before `b` as the web sorts the board's names, slugs, ids and times. The web
-/// sorts them with `localeCompare` in the browser's locale, where Swift's comparisons differ (a
-/// numeric or a locale-aware compare puts `p9` before `p10`, and a Danish locale puts `aa` after
-/// `z`). On the characters those strings hold, lowercase letters, digits and hyphens for names, a
-/// ULID's capitals and digits, and an ISO time's, `localeCompare` in English orders as their UTF-16
-/// code units, as the web's default sort does, and so does this.
+/// Whether `a` sorts before `b` as the web sorts the board's names, slugs, ids and times: by their
+/// UTF-16 code units (`byCodeUnits` in the web's model), the same in every locale. Swift's other
+/// orders differ: a numeric or a locale-aware compare puts `p9` before `p10`, and a Danish locale
+/// puts `aarhus` after `zed`. On the characters those strings hold, code units give the order the
+/// web's `localeCompare` gave in English.
 func sortsBefore(_ a: String, _ b: String) -> Bool {
   a.utf16.lexicographicallyPrecedes(b.utf16)
 }

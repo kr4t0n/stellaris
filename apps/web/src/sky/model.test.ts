@@ -1,5 +1,5 @@
 import { TaskFrontmatterSchema, type Member, type Project, type Task } from "@stellaris/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SchedulerView } from "../lib/api.js";
 import { tableText } from "./ios-tables.js";
 import { markLabel, skyModel, starOf, type SkySnapshot } from "./model.js";
@@ -108,14 +108,19 @@ function ulid(tail: string): string {
   return `01M3Q2${tail.padStart(20, "B")}`;
 }
 
-/** Names a numeric or a locale's order would sort apart from the board's, which the port follows. */
+/**
+ * Names a numeric order or a locale would sort apart from their code units: Danish puts `aarhus`
+ * after `zed`, Czech puts `chris` after `hana`.
+ */
 const SORTED_APART = [
   "p10",
   "p9",
   "p1-2",
   "p1",
   "aarhus",
-  "berlin",
+  "zed",
+  "hana",
+  "chris",
   "eng-10",
   "eng-9",
   "a-b",
@@ -245,6 +250,10 @@ const BOARDS = {
 } satisfies Record<string, SkySnapshot>;
 
 describe("skyModel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("draws only active citizens with a CLI, so not the user and not the retired", () => {
     const model = skyModel(BOARDS.onlyActive);
     expect(model.stars.map((star) => star.name)).toEqual(["ada"]);
@@ -422,14 +431,18 @@ describe("skyModel", () => {
     expect(starOf(model, "nobody", "lab")).toBeNull();
   });
 
-  it("orders citizens, projects and tasks as the board's names sort, digits and hyphens included", () => {
+  it("orders citizens, projects and tasks by their code units, whatever the browser's locale", () => {
+    const localeCompare = vi.spyOn(String.prototype, "localeCompare");
     const model = skyModel(BOARDS.sortedApart);
+    // A locale's order would draw one board differently in two browsers, and apart from the app's.
+    expect(localeCompare).not.toHaveBeenCalled();
     expect(model.stars.map((star) => star.name)).toEqual(SORTED_APART.toSorted());
-    expect(model.stars.map((star) => star.name).slice(0, 4)).toEqual([
+    expect(model.stars.map((star) => star.name).slice(0, 5)).toEqual([
       "a-b",
       "aarhus",
       "ab",
-      "berlin",
+      "chris",
+      "eng-10",
     ]);
     // The oldest project first, then those created together by slug.
     expect(model.anchors.map((anchor) => anchor.id)).toEqual([
@@ -441,46 +454,6 @@ describe("skyModel", () => {
       "p9",
     ]);
     expect(model.tasks.map((mark) => mark.id.slice(-2))).toEqual(["10", "9Z", "B0"]);
-  });
-
-  it("sorts the board's names, ids and times as their code units, which BoardKit's port does", () => {
-    // Every name of up to two characters and many of three, as `NameSchema` takes them.
-    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-";
-    const names = alphabet
-      .slice(0, 36)
-      .split("")
-      .flatMap((first) => [
-        first,
-        ...alphabet
-          .split("")
-          .flatMap((second) => [
-            `${first}${second}`,
-            ..."a0-z9".split("").map((third) => `${first}${second}${third}`),
-          ]),
-      ]);
-    let seed = 7;
-    const next = (): number => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
-      return seed / 2_147_483_648;
-    };
-    const ulids = Array.from({ length: 2_000 }, () =>
-      Array.from(
-        { length: 26 },
-        () => "0123456789ABCDEFGHJKMNPQRSTVWXYZ"[Math.floor(next() * 32)],
-      ).join(""),
-    );
-    // Times as `toISOString` writes them, and with fewer digits of a second, as the schema allows.
-    const times = Array.from({ length: 2_000 }, (_, index) => {
-      const time = new Date(Date.parse(ts) + Math.floor(next() * 1e10)).toISOString();
-      return index % 3 === 0
-        ? time
-        : index % 3 === 1
-          ? time.replace(/\.\d+Z$/, "Z")
-          : time.replace(/\d\dZ$/, "Z");
-    });
-    for (const list of [names, ulids, times]) {
-      expect(list.toSorted((a, b) => a.localeCompare(b))).toEqual(list.toSorted());
-    }
   });
 });
 

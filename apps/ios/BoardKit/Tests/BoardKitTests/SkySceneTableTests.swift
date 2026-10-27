@@ -118,6 +118,18 @@ import Testing
     let specks: [[Double]]
     /// Each citizen's name as drawn: the text, x, y, and the font's size.
     let names: [[JSONValue]]
+    /// Each star as drawn, in order: its glow's size and alpha, and each circle as x, y, and radius.
+    let stars: [StarDrawn]
+    /// Each task mark's glow, as its size and alpha.
+    let markGlows: [[Double]]
+    /// How far along each held task's thread its spark is, or nil while nothing moves.
+    let links: [Double?]
+  }
+
+  struct StarDrawn: Decodable {
+    let id: String
+    let glow: [Double]
+    let arcs: [[Double]]
   }
 
   struct Sequence: Decodable {
@@ -255,6 +267,48 @@ import Testing
         text == star.name && near(star.center.x, x ?? .nan) && near(star.nameTop, y ?? .nan)
           // The web writes the font's size to one place.
           && near(star.nameSize, size ?? .nan, within: 0.05 + 1e-9), "\(place): \(star.name)'s name")
+    }
+
+    // What each star draws: its glow, then its ripple, flicker, warm and queued rings, its disc,
+    // and its sparks, in the web's order.
+    #expect(drawn.stars.map(\.id) == sample.stars.map(\.id), "\(place): the stars as drawn")
+    for (star, expected) in zip(drawn.stars, sample.stars) {
+      let at = star.center
+      var arcs: [[Double]] = []
+      for ring in [star.ripple?.radius, star.flash?.radius, star.residentRing, star.queuedRing] {
+        if let ring {
+          arcs.append([at.x, at.y, ring])
+        }
+      }
+      arcs.append([at.x, at.y, star.radius])
+      arcs += star.sparks.map { [$0.x, $0.y, 1.6] }
+      #expect(
+        expected.glow.count == 2 && near(star.glowSize, expected.glow[0])
+          && near(star.glowAlpha, expected.glow[1]), "\(place): \(star.id)'s glow")
+      #expect(
+        arcs.count == expected.arcs.count
+          && zip(arcs, expected.arcs).allSatisfy { zip($0, $1).allSatisfy { near($0, $1) } },
+        "\(place): \(star.id)'s circles")
+    }
+
+    // Each task mark's glow, seven times its diamond.
+    #expect(drawn.marks.count == sample.markGlows.count, "\(place): the marks' glows")
+    for (mark, glow) in zip(drawn.marks, sample.markGlows) {
+      #expect(
+        near(mark.size * 7, glow[0]) && near(mark.alpha, glow[1]), "\(place): \(mark.id)'s glow")
+    }
+
+    // Each thread's spark, by how far along it runs: the web draws the thread's star end where the
+    // star stood a frame before, so the fraction is what both draw alike.
+    #expect(drawn.links.count == sample.links.count, "\(place): the threads")
+    for (link, expected) in zip(drawn.links, sample.links) {
+      let along = link.spark.map { spark -> Double in
+        let (dx, dy) = (link.from.x - link.to.x, link.from.y - link.to.y)
+        return abs(dx) >= abs(dy) ? (spark.x - link.to.x) / dx : (spark.y - link.to.y) / dy
+      }
+      #expect(
+        (along == nil && expected == nil) || (along.map { near($0, expected ?? .nan) } == true),
+        "\(place): a thread's spark")
     }
   }
 }

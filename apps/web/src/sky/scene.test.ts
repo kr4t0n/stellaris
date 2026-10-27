@@ -254,6 +254,27 @@ const sequences: Sequence[] = [
     ],
   },
   {
+    // From a camera zoomed past what fits, a framed sphere's room around it decides the zoom. A
+    // resize keeps the height: the port eases its center's height where the web moves it at once.
+    name: "a project framed close up, where the room around it decides the zoom",
+    reducedMotion: false,
+    view: landscape,
+    frames: [
+      at(START, { model: "working" }),
+      run(START + FRAME, 15, 15),
+      at(START + 16 * FRAME, { zoom: [3, 237, 334] }, { zoom: [3, 237, 334] }, { focus: "lab" }),
+      run(START + 17 * FRAME, 45, 15),
+      at(
+        START + 62 * FRAME,
+        { view: { width: 320, height: 669, left: 52, right: 0 } },
+        { focus: null },
+      ),
+      run(START + 63 * FRAME, 15, 15),
+      at(START + 78 * FRAME, { zoomMiddle: 3 }, { zoomMiddle: 3 }, { focus: "web" }),
+      run(START + 79 * FRAME, 45, 15),
+    ],
+  },
+  {
     name: "a paused society dims its specks",
     reducedMotion: false,
     view: landscape,
@@ -311,12 +332,38 @@ function field<T>(scene: SkyScene, name: string, schema: z.ZodType<T>): T {
 /** The specks a sample keeps of the 280, each as x, y, size, and alpha. */
 const SPECKS = [0, 1, 100, 279];
 
-/** A 2D context that does nothing but note the specks and the citizens' names as drawn. */
+/** What one star's drawing holds: its glow's size and alpha, and each circle's x, y, and radius. */
+interface StarDrawn {
+  readonly id: string;
+  glow: number[];
+  readonly arcs: number[][];
+}
+
+/**
+ * A 2D context that does nothing but note what a frame draws: the specks, the citizens' names,
+ * each star's glow and circles (its rings, its disc, and its sparks), each task mark's glow, and
+ * the threads from held tasks with the sparks running along them. `play` tells it whose drawing
+ * is under way, by wrapping the scene's own `drawTasks` and `drawBody`.
+ */
 function recordingContext(names: ReadonlySet<string>) {
   let fillStyle = "";
   let font = "";
+  let alpha = 1;
   let rects = 0;
-  const drawn = { specks: [] as number[][], names: [] as (string | number)[][] };
+  const drawn = {
+    specks: [] as number[][],
+    names: [] as (string | number)[][],
+    stars: [] as StarDrawn[],
+    /** Each task mark's glow, as its size and alpha. */
+    marks: [] as number[][],
+    /** Each thread as it starts at its task's mark and ends at its holder's star. */
+    lines: [] as number[][],
+    /** Where each thread's spark is. */
+    sparks: [] as number[][],
+    /** Whose drawing is under way: the tasks', a star's, or neither. */
+    phase: null as "tasks" | StarDrawn | null,
+  };
+  let line: number[] = [];
   const gradient = { addColorStop: () => {} };
   const context = new Proxy(
     {},
@@ -333,14 +380,18 @@ function recordingContext(names: ReadonlySet<string>) {
               rects = 0;
               drawn.specks = [];
               drawn.names = [];
+              drawn.stars = [];
+              drawn.marks = [];
+              drawn.lines = [];
+              drawn.sparks = [];
             };
           case "fillRect":
             return (x: number, y: number, width: number) => {
               rects += 1;
               // The first rectangle is the night itself; the next 280 are the specks.
               if (rects >= 2 && rects <= 281) {
-                const alpha = Number(/,\s*([\d.]+)\)$/.exec(fillStyle)?.[1] ?? Number.NaN);
-                drawn.specks.push([x, y, width, alpha]);
+                const speck = Number(/,\s*([\d.]+)\)$/.exec(fillStyle)?.[1] ?? Number.NaN);
+                drawn.specks.push([x, y, width, speck]);
               }
             };
           case "fillText":
@@ -348,6 +399,32 @@ function recordingContext(names: ReadonlySet<string>) {
               if (names.has(text)) {
                 const size = Number(/([\d.]+)px/.exec(font)?.[1] ?? Number.NaN);
                 drawn.names.push([text, x, y, size]);
+              }
+            };
+          case "drawImage":
+            return (_image: unknown, _x: number, _y: number, width: number) => {
+              if (drawn.phase === "tasks") {
+                drawn.marks.push([width, alpha]);
+              } else if (drawn.phase !== null) {
+                drawn.phase.glow = [width, alpha];
+              }
+            };
+          case "arc":
+            return (x: number, y: number, radius: number) => {
+              if (drawn.phase === "tasks") {
+                drawn.sparks.push([x, y]);
+              } else if (drawn.phase !== null) {
+                drawn.phase.arcs.push([x, y, radius]);
+              }
+            };
+          case "moveTo":
+            return (x: number, y: number) => {
+              line = [x, y];
+            };
+          case "lineTo":
+            return (x: number, y: number) => {
+              if (drawn.phase === "tasks") {
+                drawn.lines.push([...line, x, y]);
               }
             };
           case "createRadialGradient":
@@ -364,12 +441,38 @@ function recordingContext(names: ReadonlySet<string>) {
           fillStyle = String(value);
         } else if (key === "font") {
           font = String(value);
+        } else if (key === "globalAlpha") {
+          alpha = Number(value);
         }
         return true;
       },
     },
   );
   return { context, drawn };
+}
+
+/** Wraps one of the scene's own methods so `around` runs it. */
+function wrap(scene: SkyScene, name: string, around: (call: () => void, args: unknown[]) => void) {
+  const original = z
+    .custom<(...args: unknown[]) => unknown>((value) => typeof value === "function")
+    .parse(Reflect.get(scene, name));
+  Reflect.set(scene, name, (...args: unknown[]) =>
+    around(() => {
+      Reflect.apply(original, scene, args);
+    }, args),
+  );
+}
+
+/** How far along its thread a spark is, from the holder's star at 0 to the task's mark at 1. */
+function along(line: readonly number[], spark: readonly number[] | undefined): number | null {
+  const [fromX = 0, fromY = 0, toX = 0, toY = 0] = line;
+  if (spark === undefined) {
+    return null;
+  }
+  const [x = 0, y = 0] = spark;
+  return Math.abs(fromX - toX) >= Math.abs(fromY - toY)
+    ? (x - toX) / (fromX - toX)
+    : (y - toY) / (fromY - toY);
 }
 
 function canvas(context: object): HTMLCanvasElement {
@@ -388,6 +491,19 @@ function play(sequence: Sequence) {
   const frame = z
     .custom<(now: number) => void>((value) => typeof value === "function")
     .parse(Reflect.get(scene, "frame"));
+  wrap(scene, "drawTasks", (call) => {
+    drawn.phase = "tasks";
+    call();
+    drawn.phase = null;
+  });
+  const BodyStarSchema = z.object({ star: z.object({ id: z.string() }) });
+  wrap(scene, "drawBody", (call, args) => {
+    const star: StarDrawn = { id: BodyStarSchema.parse(args[0]).star.id, glow: [], arcs: [] };
+    drawn.stars.push(star);
+    drawn.phase = star;
+    call();
+    drawn.phase = null;
+  });
   let view = sequence.view;
   scene.resize(view.width, view.height, 1);
   scene.setInsets(view.left, view.right);
@@ -441,6 +557,9 @@ function play(sequence: Sequence) {
           bubbles: entries("bubbles", BubbleSchema),
           specks: SPECKS.map((index) => drawn.specks[index]),
           names: drawn.names,
+          stars: drawn.stars,
+          markGlows: drawn.marks,
+          links: drawn.lines.map((line, index) => along(line, drawn.sparks[index])),
         }),
       );
     }
@@ -483,6 +602,11 @@ describe("the scene's table for BoardKit", () => {
     // Every sample drew the specks and every citizen's name.
     expect(sampled.every((each) => each.specks.every((speck) => speck?.length === 4))).toBe(true);
     expect(sampled.every((each) => each.names.length >= each.bodies.length)).toBe(true);
+    // Every star drew its glow and its disc, every mark its glow.
+    expect(sampled.every((each) => each.stars.length === each.bodies.length)).toBe(true);
+    expect(sampled.every((each) => each.stars.every((star) => star.glow.length === 2))).toBe(true);
+    expect(sampled.every((each) => each.markGlows.length === each.marks.length)).toBe(true);
+    expect(sampled.some((each) => each.links.some((spark) => spark !== null))).toBe(true);
     await expect(tableText({ models, sequences: played })).toMatchFileSnapshot(
       "../../../ios/fixtures/sky/scene.json",
     );

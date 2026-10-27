@@ -37,9 +37,9 @@ final class CountedScheduler: URLProtocol {
 /// The app's window as iOS resizes it when the phone opens, turns, and folds again, with the size
 /// classes each display gives, since the simulator in CI keeps the inner display closed and its
 /// outer display upright. The sky draws beside the chat on the inner display alone, and asks the
-/// board nothing while the phone is folded; Chat keeps the conversation, its draft, and the
-/// message its scroll is anchored at through every change; and the sky's camera starts at the
-/// whole sky and is kept through a fold.
+/// board nothing while the phone is folded; Chat keeps the conversation's scroll view, its draft,
+/// and the message its scroll is anchored at through every change; and the sky's camera starts at
+/// the whole sky and is kept through a fold.
 final class FoldTests: XCTestCase {
   /// The outer display, and the inner display in landscape and in portrait.
   private let outer = CGSize(width: 466, height: 678)
@@ -116,8 +116,8 @@ final class FoldTests: XCTestCase {
     _ = try expectTheChat("opened again", in: window, model, after: messages)
   }
 
-  /// Chat still shows #general with its draft and its anchor, and gives its scroll view. Whether
-  /// that is the scroll view it had before, or one built again, goes to the test's log.
+  /// Chat still shows #general with its draft and its anchor, in the scroll view it had before, so
+  /// the split built nothing again.
   @MainActor private func expectTheChat(
     _ step: String, in window: TestWindow, _ model: AppModel, after previous: UIScrollView?,
     line: UInt = #line
@@ -130,8 +130,8 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(
       model.memory?.anchor(.general), anchored, "\(step): the scroll moved", line: line)
     if let previous {
-      let kept = previous === messages ? "the same" : "built again"
-      print("FoldTests: \(step): the conversation's scroll view is \(kept)")
+      XCTAssertIdentical(
+        messages, previous, "\(step): the conversation was built again", line: line)
     }
     return messages
   }

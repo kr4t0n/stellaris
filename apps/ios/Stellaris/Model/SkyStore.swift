@@ -33,6 +33,9 @@ import Observation
   @ObservationIgnored var viewport = SkyViewport(width: 0, height: 0)
   /// The last frame drawn, where a touch finds what it took.
   @ObservationIgnored var lastFrame: SkyFrame?
+  /// How often the scheduler is asked again while the sky is shown: its queue changes with no
+  /// event, so the web asks every three seconds too.
+  @ObservationIgnored var schedulerPoll = Duration.seconds(3)
   /// The clock the turn stream's events are measured against.
   @ObservationIgnored var now: @MainActor () -> Date = Date.init
   /// Reads an event made stale, gathered while a reload waits.
@@ -99,13 +102,27 @@ import Observation
 
   // MARK: Loading and following the board
 
-  /// Loads the sky, then follows the board's events and the live turn stream until cancelled, as
-  /// the sky's view does while it is shown.
+  /// Loads the sky, then follows the board's events, the scheduler's queue, and the live turn
+  /// stream until cancelled, as the sky's view does while it is shown.
   func run(using model: AppModel) async {
     await load(using: model)
     await withTaskGroup(of: Void.self) { group in
       group.addTask { await self.follow(using: model) }
+      group.addTask { await self.poll(using: model) }
       group.addTask { await self.listen(using: model) }
+    }
+  }
+
+  /// Asks the scheduler again every `schedulerPoll`: a wake queued for a free slot, or a heartbeat's
+  /// wake, logs no event, so only asking shows its citizen queued.
+  private func poll(using model: AppModel) async {
+    while !Task.isCancelled {
+      do {
+        try await Task.sleep(for: schedulerPoll)
+      } catch {
+        return
+      }
+      await reload(["scheduler"], using: model)
     }
   }
 

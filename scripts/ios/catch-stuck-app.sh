@@ -4,9 +4,11 @@
 # it were doing while it still runs: its state, its open terminals, its stacks with the kernel's, the
 # simulator's jobs, and the simulator's log of those processes, with the stacks of xcodebuild, which
 # reads the app's console. For the first copies it sees launch, it also keeps where their console
-# goes: their open devices, who holds those terminals, and their logging variables. It keeps nothing
-# else of the Mac's, no log and no environment beyond those variables, since what it keeps becomes
-# an artifact anyone signed in to GitHub can download.
+# goes: their open devices, who holds those terminals, and their logging variables, and it fails
+# when a copy launched against the fake board has a terminal for its output, since its writes there
+# wait on xcodebuild (docs/internals/ios.md). It keeps nothing else of the Mac's, no log and no
+# environment beyond those variables, since what it keeps becomes an artifact anyone signed in to
+# GitHub can download.
 # Usage: catch-stuck-app.sh <bundle id> <test output> <folder>. It stops once <test output>.done
 # exists, after the captures under way.
 set -uo pipefail
@@ -57,6 +59,11 @@ console() {
     for proc in $(pgrep -x xcodebuild); do
       devices "$proc" | awk '/ptmx|ttys/'
     done
+    if ps -wwE -o command= -p "$pid" | tr ' ' '\n' | grep -q '^STELLARIS_FAKE_BOARD='; then
+      echo "fake board: yes"
+    else
+      echo "fake board: no"
+    fi
     echo "logging variables:"
     ps -wwE -o command= -p "$pid" | tr ' ' '\n' |
       grep -E '^(OS_ACTIVITY_[A-Z_]*|OS_LOG_[A-Z_]*|IDE_[A-Za-z_]*|CFLOG_[A-Z_]*|NSUnbufferedIO)=' |
@@ -185,3 +192,14 @@ wait
 ends=$(echo "$seen" | wc -w | tr -d ' ')
 kept=$(find "$folder" -mindepth 1 -maxdepth 1 -type d ! -name console | wc -l | tr -d ' ')
 echo "catch-stuck-app.sh: followed $ends ends of $bundle, kept $kept captures"
+loud=""
+for file in "$folder"/console/*.txt; do
+  if [ -e "$file" ] && grep -q '^fake board: yes' "$file" &&
+    grep -qE '^Stellaris +[0-9]+ +[^ ]+ +[12][a-z]* +CHR .*/dev/ttys[0-9]+$' "$file"; then
+    loud="$loud ${file##*/}"
+  fi
+done
+if [ -n "$loud" ]; then
+  echo "catch-stuck-app.sh: launched against the fake board, these copies write to a terminal:$loud" >&2
+  exit 1
+fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Follows the output of the app's UI tests, and when a copy of the app still runs 10 s after XCTest
-# began ending it, which takes 1 to 2 s, keeps what that copy and the simulator's processes that end
+# began ending it, which takes 1 to 3 s, keeps what that copy and the simulator's processes that end
 # it were doing while it still runs: its state, its stacks with the kernel's, the simulator's jobs,
 # and the simulator's log of those processes. It reads the simulator's processes alone, never the
 # Mac's, since what it keeps becomes an artifact anyone signed in to GitHub can download.
@@ -133,3 +133,6 @@ while [ ! -e "$output.done" ]; do
   sleep 1
 done
 wait
+ends=$(echo "$seen" | wc -w | tr -d ' ')
+kept=$(find "$folder" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+echo "catch-stuck-app.sh: followed $ends ends of $bundle, kept $kept captures"

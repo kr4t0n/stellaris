@@ -8,8 +8,8 @@ import SwiftUI
 /// card at the foot of the sky, a drag pans, a pinch zooms around the fingers, and a double tap
 /// zooms in; no button sits over it. A pinch out to the whole sky's zoom or past it goes back to the
 /// whole sky, as VoiceOver's camera element does.
-/// It draws at most thirty frames a second, none while it is off screen or the app is not active,
-/// and with Reduce Motion or in Low Power Mode nothing drifts.
+/// It draws at most thirty frames a second, none while it is off screen or covered or the app is
+/// not active, and with Reduce Motion or in Low Power Mode nothing drifts.
 struct SkyView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
@@ -17,6 +17,9 @@ struct SkyView: View {
 
   /// Room the sky's camera leaves clear beyond the safe area.
   var insets = EdgeInsets()
+  /// Whether something lies over the whole sky, as the chat does while the keyboard is up; it then
+  /// draws nothing.
+  var covered = false
   /// For the snapshots: a clock fixed at this many seconds, and Reduce Motion set either way.
   var fixedClock: Double?
   var reduceMotion: Bool?
@@ -34,7 +37,7 @@ struct SkyView: View {
     let reduced = reduceMotion ?? systemReduceMotion
     let skyModel = sky.model(projects: model.store.projects, tasks: model.store.tasks)
     let focus = model.skyFocus
-    let paused = fixedClock != nil || !shown || scenePhase != .active
+    let paused = fixedClock != nil || !shown || covered || scenePhase != .active
     // The outer reader keeps to the safe area, so it reads the insets; the inner one runs edge to
     // edge, where a reader reads none.
     GeometryReader { safe in

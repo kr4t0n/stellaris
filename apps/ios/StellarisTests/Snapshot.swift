@@ -47,7 +47,7 @@ import XCTest
     let wider = size.width > scene.screen.bounds.width
     let host = UIHostingController(
       rootView: view.environment(\.dynamicTypeSize, type.dynamic).modifier(
-        HorizontalBars(enabled: wider)))
+        BarAxis(horizontal: wider)))
     host.traitOverrides.horizontalSizeClass = size.width >= 600 ? .regular : .compact
     host.traitOverrides.preferredContentSizeCategory = type.category
     window.rootViewController = host
@@ -111,18 +111,5 @@ import XCTest
       }
     }
     return count
-  }
-}
-
-/// Turns the vertical bar off, where iOS 27.1 lets a view.
-private struct HorizontalBars: ViewModifier {
-  let enabled: Bool
-
-  func body(content: Content) -> some View {
-    if enabled, #available(iOS 27.1, *) {
-      content.toolbarVerticalBehavior(.disabled)
-    } else {
-      content
-    }
   }
 }

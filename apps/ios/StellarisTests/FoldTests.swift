@@ -74,7 +74,7 @@ final class FoldTests: XCTestCase {
       Double(window.frame(of: messages).minX), model.sky.viewport.width - 1,
       "the chat isn't beside the sky")
     XCTAssertEqual(model.sky.scene.camera.mode, .home, "the first unfold isn't at the whole sky")
-    try expectTheChatKept(messages, draft, in: window, model)
+    expectTheChatKept(messages, draft, in: window, model)
     let asked = CountedScheduler.asked.withLock { $0 }
     try await Task.sleep(for: .seconds(1))
     XCTAssertGreaterThanOrEqual(
@@ -91,7 +91,7 @@ final class FoldTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(
       Double(window.frame(of: messages).minY), model.sky.viewport.height - 1,
       "the chat isn't below the sky")
-    try expectTheChatKept(messages, draft, in: window, model)
+    expectTheChatKept(messages, draft, in: window, model)
     try window.keep("fold-open-portrait", in: self)
 
     // Folded: the chat alone, and the sky neither draws nor asks.
@@ -103,7 +103,7 @@ final class FoldTests: XCTestCase {
     XCTAssertNil(model.sky.lastFrame, "the sky draws while the phone is folded")
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")
-    try expectTheChatKept(messages, draft, in: window, model)
+    expectTheChatKept(messages, draft, in: window, model)
 
     // Open again: the sky comes back with the camera it had.
     window.resize(to: landscape)
@@ -111,14 +111,14 @@ final class FoldTests: XCTestCase {
     XCTAssertNotNil(model.sky.lastFrame, "the sky doesn't come back when the phone opens")
     XCTAssertEqual(model.sky.scene.camera.mode, .manual, "the sky lost its camera")
     XCTAssertEqual(model.sky.scene.camera.target.scale, scale, accuracy: 1e-9)
-    try expectTheChatKept(messages, draft, in: window, model)
+    expectTheChatKept(messages, draft, in: window, model)
   }
 
   /// The conversation's views are the ones it had, not built again, with the draft and the anchor.
   @MainActor private func expectTheChatKept(
     _ messages: UIScrollView, _ draft: UIView, in window: TestWindow, _ model: AppModel,
     line: UInt = #line
-  ) throws {
+  ) {
     XCTAssertTrue(window.messages() === messages, "the conversation was built again", line: line)
     XCTAssertTrue(
       window.field(showing: draftText) === draft, "the draft's field was built again", line: line)

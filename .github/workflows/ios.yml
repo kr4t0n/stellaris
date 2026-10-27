@@ -66,16 +66,26 @@ jobs:
       - name: Generate the project
         working-directory: apps/ios
         run: xcodegen generate
+      # A copy of the app that XCTest can't end is captured while it still runs, as the `stuck-app`
+      # artifact, since a step after the tests could come once it has gone.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
         run: |
           set -o pipefail
+          output="$RUNNER_TEMP/test-output.txt"
+          : >"$output"
+          ../../scripts/ios/catch-stuck-app.sh com.example.stellaris "$output" "$RUNNER_TEMP/stuck-app" &
+          watcher=$!
+          status=0
           xcodebuild test \
             -project Stellaris.xcodeproj \
             -scheme Stellaris \
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
-            -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult"
+            -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult" 2>&1 | tee "$output" || status=$?
+          touch "$output.done"
+          wait "$watcher" || true
+          exit "$status"
       # The host the build names, expanded into the app's associated domains. A simulator build
       # signs to run locally and keeps its entitlements beside the signature, as Xcode wrote them.
       - name: Show the app's entitlements
@@ -122,4 +132,11 @@ jobs:
         with:
           name: screens
           path: ${{ runner.temp }}/screens
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: stuck-app
+          path: ${{ runner.temp }}/stuck-app
+          if-no-files-found: ignore
           retention-days: 14

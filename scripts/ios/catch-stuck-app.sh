@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Follows the output of the app's UI tests, and when a copy of the app still runs 10 s after XCTest
-# began ending it, which takes 1 to 3 s, keeps what that copy and the simulator's processes that end
-# it were doing while it still runs: its state, its open terminals, its stacks with the kernel's, the
-# simulator's jobs, and the simulator's log of those processes, with the stacks of xcodebuild, which
-# reads the app's console. For the first copies it sees launch, it also keeps where their console
-# goes: their open devices, who holds those terminals, and their logging variables, and it fails
-# when a copy launched against the fake board has a terminal for its output, since its writes there
-# wait on xcodebuild (docs/internals/ios.md). It keeps nothing else of the Mac's, no log and no
-# environment beyond those variables, since what it keeps becomes an artifact anyone signed in to
-# GitHub can download.
+# Follows the output of the app's UI tests, and when a copy of the app is still there 10 s after
+# XCTest began ending it, which takes 1 to 3 s, keeps what that copy and the simulator's processes
+# that end it were doing while it is still there: its state, its open terminals, its stacks with the
+# kernel's, the simulator's jobs, and the simulator's log of those processes, with the stacks of
+# xcodebuild, which reads the app's console. For the first copies it sees launch, it also keeps
+# where their console goes: their open devices, who holds those terminals, and their logging
+# variables, and it fails when a copy launched against the fake board has a terminal for its output,
+# since its writes there wait on xcodebuild (docs/internals/ios.md). It keeps nothing else of the
+# Mac's, no log and no environment beyond those variables, since what it keeps becomes an artifact
+# anyone signed in to GitHub can download.
 # Usage: catch-stuck-app.sh <bundle id> <test output> <folder>. It stops once <test output>.done
 # exists, after the captures under way.
 set -uo pipefail
@@ -30,6 +30,23 @@ device_of() {
       sed -nE 's/.*\(([0-9A-F-]{36})\) \(Booted\).*/\1/p' | head -1)
   fi
   echo "$device"
+}
+
+# Whether a copy is still there: in the Mac's process table, or still a job of the simulator's
+# launchd, which reaps it. A copy XCTest couldn't end has left the first long before the second
+# reaped it.
+alive() {
+  if ps -p "$1" >/dev/null 2>&1; then
+    return 0
+  fi
+  [ -n "$2" ] && xcrun simctl spawn "$2" launchctl list 2>/dev/null |
+    awk -v pid="$1" '$1 == pid { found = 1 } END { exit !found }'
+}
+
+# A copy's line in the Mac's process table and in the simulator's launchd, if it has them.
+state() {
+  echo "$(now) ps: $(ps -A -o pid=,stat=,%cpu=,etime= | awk -v pid="$1" '$1 == pid')" \
+    "launchd: $(xcrun simctl spawn "$2" launchctl list 2>/dev/null | awk -v pid="$1" '$1 == pid')"
 }
 
 # The pid of the simulator's job whose label matches, from launchd inside the simulator.
@@ -80,20 +97,21 @@ simulator_log() {
 
 capture() {
   local pid=$1 dir="$folder/$1" waited=0 device jobs proc
-  while ps -p "$pid" >/dev/null 2>&1 && [ "$waited" -lt 10 ]; do
+  device=$(device_of "$pid")
+  while alive "$pid" "$device" && [ "$waited" -lt 10 ]; do
     sleep 1
     waited=$((waited + 1))
   done
-  if ! ps -p "$pid" >/dev/null 2>&1; then
+  if ! alive "$pid" "$device"; then
     return 0
   fi
   mkdir -p "$dir"
-  device=$(device_of "$pid")
   {
-    echo "$(now) $bundle:$pid still runs $waited s after XCTest began ending it, in simulator ${device:-unknown}"
-    ps -o pid,ppid,stat,etime,time,%cpu,rss,command -p "$pid"
+    echo "$(now) $bundle:$pid still there $waited s after XCTest began ending it, in simulator ${device:-unknown}"
+    ps -A -o pid,ppid,stat,etime,time,%cpu,rss,command | awk -v pid="$pid" 'NR == 1 || $1 == pid'
     ps -o wchan -p "$pid"
     devices "$pid"
+    state "$pid" "$device"
   } >>"$dir/summary.txt" 2>&1
   if [ -z "$device" ]; then
     return 0
@@ -122,12 +140,12 @@ capture() {
   sudo -n chown -R "$(id -u)" "$dir" 2>/dev/null
   # How long it outlives XCTest's attempt, and in what state.
   waited=0
-  while ps -p "$pid" >/dev/null 2>&1 && [ "$waited" -lt 180 ]; do
-    ps -o stat=,%cpu=,etime= -p "$pid" | sed "s/^/$(now) /" >>"$dir/summary.txt"
+  while alive "$pid" "$device" && [ "$waited" -lt 180 ]; do
+    state "$pid" "$device" >>"$dir/summary.txt" 2>&1
     sleep 5
     waited=$((waited + 5))
   done
-  if ps -p "$pid" >/dev/null 2>&1; then
+  if alive "$pid" "$device"; then
     echo "$(now) still running" >>"$dir/summary.txt"
   else
     echo "$(now) gone" >>"$dir/summary.txt"

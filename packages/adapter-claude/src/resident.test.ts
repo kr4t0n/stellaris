@@ -44,6 +44,19 @@ function frames(turn: number, text: string, totalCost: number, stall = false): S
     },
     total_cost_usd: totalCost,
     usage: { input_tokens: 10 * turn, output_tokens: turn },
+    // The query's running totals: every turn's so far.
+    modelUsage: {
+      "claude-test-model": {
+        inputTokens: (10 * turn * (turn + 1)) / 2,
+        outputTokens: (turn * (turn + 1)) / 2,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        webSearchRequests: 0,
+        costUSD: totalCost,
+        contextWindow: 200_000,
+        maxOutputTokens: 32_000,
+      },
+    },
     errors: [],
   };
   // Test frames stand in for the SDK's own union, which is far too large to build here.

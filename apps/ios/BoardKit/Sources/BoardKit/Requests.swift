@@ -88,6 +88,12 @@ public enum BoardAPI {
 
   public static func society() -> BoardRequest<Society> { read("/api/society") }
 
+  /// The roster of citizens.
+  public static func members() -> BoardRequest<[Member]> { read("/api/members") }
+
+  /// The scheduler's sessions: those in a turn, those queued, and the warm ones.
+  public static func scheduler() -> BoardRequest<SchedulerView> { read("/api/scheduler") }
+
   public static func projects() -> BoardRequest<[Project]> { read("/api/projects") }
 
   public static func channels() -> BoardRequest<[ChannelSummary]> { read("/api/channels") }
@@ -132,6 +138,14 @@ public enum BoardAPI {
     Endpoint(
       method: .get, path: "/api/events/stream?since=\(component(since))", body: nil,
       authenticated: true)
+  }
+
+  /// The live turn stream after the event numbered `since`; each frame's data is a
+  /// `LiveTurnEvent`. Its numbering starts over when the server does, so the sky asks from 0, as
+  /// the web does, and the server replays its short buffer first.
+  public static func turnStream(since: Int = 0) -> Endpoint {
+    Endpoint(
+      method: .get, path: "/api/turns/stream?since=\(since)", body: nil, authenticated: true)
   }
 
   /// An image a citizen uploaded, as its bytes.

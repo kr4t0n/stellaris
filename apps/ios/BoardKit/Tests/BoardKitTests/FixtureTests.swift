@@ -134,6 +134,24 @@ import Testing
       expectEndpoint(fixture, BoardAPI.eventStream(since: since))
       #expect(fixture.status == 200)
       #expect(try #require(fixture.text).hasPrefix("event: message.posted\n"))
+    case "members":
+      let members = try check(fixture, BoardAPI.members())
+      #expect(members.map(\.name) == ["concierge-1", "eng-1", "rev-1", "user"])
+      #expect(members.allSatisfy { $0.role != nil })
+      #expect(members.first { $0.name == "user" }?.cli == nil)
+    case "scheduler":
+      let scheduler = try check(fixture, BoardAPI.scheduler())
+      #expect(scheduler.paused == false)
+    case "turn-stream":
+      expectEndpoint(fixture, BoardAPI.turnStream(since: 0))
+      #expect(fixture.status == 200)
+      var parser = ServerSentEventParser()
+      let frames = parser.push(contentsOf: Array(try #require(fixture.text).utf8))
+      #expect(frames.allSatisfy { $0.event == "turn" })
+      let items = try frames.map {
+        try JSONDecoder().decode(LiveTurnEvent.self, from: Data($0.data.utf8))
+      }
+      #expect(items.map(\.seq) == [1, 2, 3, 4, 5])
     default:
       Issue.record("no check for the fixture \(name)")
     }
@@ -160,13 +178,41 @@ import Testing
       ])
   }
 
+  /// The sky over the fixtures' society, and what the captured turn stream sets off in it while
+  /// it is new: the post's first line rises from its author's star, a command only flickers it,
+  /// and a step that calls no tool sets off nothing.
+  @Test func theTurnStreamMovesTheCapturedSky() throws {
+    let model = skyModel(
+      SkySnapshot(
+        members: try Fixture("members").decode([Member].self),
+        projects: try Fixture("projects").decode([Project].self),
+        scheduler: try Fixture("scheduler").decode(SchedulerView.self),
+        tasks: try Fixture("tasks").decode([BoardTask].self)))
+    #expect(model.stars.map(\.id) == ["concierge-1", "eng-1", "rev-1"])
+    var parser = ServerSentEventParser()
+    let text = try #require(try Fixture("turn-stream").text)
+    let items = try parser.push(contentsOf: Array(text.utf8))
+      .map { try JSONDecoder().decode(LiveTurnEvent.self, from: Data($0.data.utf8)) }
+    let first = try #require(items.first)
+    let stamped = try #require(parseBoardTime(first.ts))
+    let now = stamped.addingTimeInterval(1)
+    #expect(
+      items.map { skyCue(for: $0, in: model, now: now) } == [
+        nil, SkyCue(star: "eng-1", line: "The export view is in"), SkyCue(star: "eng-1", line: nil),
+        nil, SkyCue(star: "concierge-1", line: nil),
+      ])
+    // The same stream replayed on connect, sixteen seconds on, is history and moves nothing.
+    #expect(items.allSatisfy { skyCue(for: $0, in: model, now: stamped.addingTimeInterval(16)) == nil })
+  }
+
   static let checked = [
     "auth-config", "app-sign-in", "app-landing", "app-landing-refused", "app-token",
     "error-app-token", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
     "channels", "channel", "channel-notice", "threads",
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
-    "error-unauthorized", "error-not-found", "error-refused", "event-stream",
+    "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
+    "scheduler", "turn-stream",
   ]
 
   @discardableResult

@@ -66,6 +66,36 @@ enum Loading: Equatable, Sendable {
     projects.first { $0.slug == slug }?.name ?? slug
   }
 
+  /// A line with each task's id in it read as the task's title, as the web reads ids as what they
+  /// name.
+  func withTaskTitles(_ line: String) -> String {
+    line.replacing(/[0-9A-HJKMNP-TV-Z]{26}/) { match in
+      let id = String(match.output)
+      return tasks.first { $0.id == id }?.title ?? id
+    }
+  }
+
+  /// Loads the projects and their tasks again, as an event that touched them asks, leaving the
+  /// rest of the board as it was. What comes back once the app has signed out, or in again, is
+  /// dropped, and so is a load that fails: the sky keeps what it had.
+  func reloadProjects(using model: AppModel) async {
+    let signIn = model.generation
+    do {
+      let projects = try await model.send(BoardAPI.projects())
+      var tasks: [BoardTask] = []
+      for project in projects where project.archived == nil {
+        tasks += try await model.send(BoardAPI.tasks(project: project.slug))
+      }
+      guard model.generation == signIn else {
+        return
+      }
+      self.projects = projects
+      self.tasks = tasks
+    } catch {
+      return
+    }
+  }
+
   /// Loads the board `model` is signed in to. What comes back once it has signed out, or in again,
   /// is dropped.
   func refresh(using model: AppModel) async {
@@ -99,6 +129,13 @@ enum Loading: Equatable, Sendable {
         state = Loading(error)
       }
     }
+  }
+
+  /// Shows projects and tasks as they stand, for the sky's snapshots.
+  func show(projects: [Project], tasks: [BoardTask]) {
+    self.projects = projects
+    self.tasks = tasks
+    state = .loaded
   }
 
   func clear() {

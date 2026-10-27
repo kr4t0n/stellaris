@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/scheduler"
+  },
+  "status": 200,
+  "body": {
+    "paused": false,
+    "running": [],
+    "pending": [],
+    "resident": [],
+    "signals": [],
+    "turns": []
+  }
+}

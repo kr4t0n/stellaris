@@ -8,8 +8,8 @@ private let fixtures = URL(fileURLWithPath: #filePath)
 
 /// The app as someone uses it on the simulator, signed in to the fake board.
 class ShellTestCase: XCTestCase {
-  /// Launches the app against the fake board, afresh unless `reset` is false.
-  @MainActor func launch(reset: Bool = true) -> XCUIApplication {
+  /// Launches the app against the fake board, afresh unless `reset` is false, with `arguments`.
+  @MainActor func launch(reset: Bool = true, arguments: [String] = []) -> XCUIApplication {
     continueAfterFailure = false
     XCUIDevice.shared.orientation = .portrait
     let app = XCUIApplication()
@@ -17,6 +17,7 @@ class ShellTestCase: XCTestCase {
     if reset {
       app.launchArguments.append("-StellarisReset")
     }
+    app.launchArguments += arguments
     app.launch()
     return app
   }

@@ -10,10 +10,26 @@ struct RootView: View {
       switch model.phase {
       case .starting: ProgressView()
       case .signedOut: SignInView()
-      case .signedIn: ShellView()
+      case .signedIn:
+        if RootView.showsSkyAlone {
+          SkyView()
+        } else {
+          ShellView()
+        }
       }
     }
     .task { await model.start() }
+  }
+
+  /// A debug build launched with `-StellarisSky` shows the sky alone in its window, the plain
+  /// frame the UI tests drive it in, since it shows only on the inner display, which the
+  /// simulator in CI keeps closed.
+  private static var showsSkyAlone: Bool {
+    #if DEBUG
+      ProcessInfo.processInfo.arguments.contains("-StellarisSky")
+    #else
+      false
+    #endif
   }
 }
 

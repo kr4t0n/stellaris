@@ -2,7 +2,7 @@ import Testing
 
 @testable import BoardKit
 
-/// The ports run the case tables the web's own `staleKeys` and `needsYou` tests run.
+/// The ports run the case tables the web's own `staleKeys`, `needsYou`, and `postedLine` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -24,6 +24,21 @@ import Testing
     let stage: String?
     let thread: String?
     let since: String
+  }
+
+  struct PostedLineCase: Decodable {
+    let name: String
+    let tool: String
+    let input: JSONValue
+    let line: String?
+  }
+
+  @Test func postedLineAgreesWithTheWeb() throws {
+    let cases = try Fixture.table("posted-line", as: [PostedLineCase].self)
+    #expect(cases.count > 10)
+    for each in cases {
+      #expect(postedLine(name: each.tool, input: each.input) == each.line, "\(each.name)")
+    }
   }
 
   @Test func staleKeysAgreesWithTheWeb() throws {

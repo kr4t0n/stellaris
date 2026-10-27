@@ -1,5 +1,7 @@
 import type { AgentEvent, LiveTurnEvent } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import postedLineCases from "../../../ios/fixtures/cases/posted-line.json?raw";
 import {
   applyLive,
   conversationOf,
@@ -222,6 +224,22 @@ describe("live turns", () => {
     ).toBe("Survey done");
     expect(postedLine("mcp__board__claim_task", { body: "x" })).toBeNull();
     expect(postedLine("mcp__board__post_message", { body: "   " })).toBeNull();
+  });
+
+  it("gives each line the table in apps/ios/fixtures/cases holds, which BoardKit's port runs too", () => {
+    const cases = z
+      .object({
+        name: z.string(),
+        tool: z.string(),
+        input: z.unknown(),
+        line: z.string().nullable(),
+      })
+      .array()
+      .parse(JSON.parse(postedLineCases));
+    expect(cases.length).toBeGreaterThan(10);
+    expect(
+      cases.map((each) => ({ name: each.name, line: postedLine(each.tool, each.input) })),
+    ).toEqual(cases.map((each) => ({ name: each.name, line: each.line })));
   });
 
   it("shows a steer where the citizen took it: how many posts, from whom, and the posts", () => {

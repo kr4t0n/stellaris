@@ -36,6 +36,8 @@ targets:
         CFBundleDisplayName: Stellaris
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        # Dark only, as the web is: every window of the app, whatever the system's setting.
+        UIUserInterfaceStyle: Dark
         # One scene in v1: the app's one window resizes with the display it is on.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

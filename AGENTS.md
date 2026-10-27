@@ -137,6 +137,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A change to the web's `staleKeys` or `needsYou` changes its case table in `apps/ios/fixtures/cases`, and its Swift port with it.
 - The app's Xcode project is generated with `xcodegen generate` from `apps/ios/project.yml` and never committed. What names an Apple account or a board (team, bundle ID, board host) lives in `Config/Stellaris.xcconfig`, with a device build's own in the ignored `Config/Local.xcconfig`.
 - Layout reads size classes and a view's own size, never the screen (`UIScreen`, a scene's `screen`), the kind of device, or an orientation: `scripts/ios/check-adaptivity.sh`, part of `pnpm lint`, refuses them in the app and BoardKit.
+- The app is dark only, as the web is: `UIUserInterfaceStyle` is `Dark` in `project.yml`'s Info.plist, and views use the system's semantic colours.
 - State a fold, a rotation, or a rebuilt view could lose lives in the model (`AppModel`, `ConversationMemory`), never only in a view. A fresh start opens the society's general channel; nothing about where the app was is restored at launch.
 - The app's tests run against `FakeBoard`, a debug-only `URLProtocol` answering from `apps/ios/fixtures/api`; a screen the app gains gets a fake answer there, a UI test, and a `Snapshot.record` in `SnapshotTests`, whose pictures are for review and are never committed.
 - `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run and the `screens` artifact its `app` job keeps.

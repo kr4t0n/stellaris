@@ -198,6 +198,21 @@ final class ChangingScheduler: URLProtocol {
     }
   }
 
+  /// A pinch that ends at or past the whole sky's zoom goes back to the whole sky, which follows the
+  /// society again; one that ends zoomed in stays where it was.
+  @Test func aPinchOutToTheWholeSkyGoesHome() {
+    let model = settledSample()
+    let sky = model.sky
+    sky.pan(dx: 60, dy: -30)
+    sky.zoom(by: 2)
+    sky.endPinch()
+    #expect(sky.camera.mode == .manual)
+    sky.zoom(by: 0.4)
+    sky.endPinch()
+    #expect(sky.camera.mode == .home)
+    #expect(SkyElements.describe(sky.camera, model: model) == "Whole sky")
+  }
+
   /// The fake board's turn stream, the captured one stamped now: the post's first line rises from
   /// its author's star and stays known as its last, and a call that posts nothing raises no line.
   @Test(.timeLimit(.minutes(1))) func theTurnStreamRaisesAPostsLine() async throws {

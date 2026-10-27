@@ -77,6 +77,18 @@ import Observation
     publishCamera()
   }
 
+  /// A pinch that ends with the sky no larger than the whole sky's own zoom goes back to the whole
+  /// sky, which then follows the society again: with no button over the sky, a pinch out is how
+  /// someone gets there.
+  func endPinch() {
+    guard scene.camera.mode != .home, let radius = scene.model?.radius,
+      scene.camera.target.scale <= homeCamera(viewport, radius: radius).scale
+    else {
+      return
+    }
+    home()
+  }
+
   /// Back to the whole sky.
   func home() {
     scene.home()

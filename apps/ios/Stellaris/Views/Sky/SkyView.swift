@@ -6,7 +6,8 @@ import SwiftUI
 /// them, drawn edge to edge in whatever frame it is given, with the camera fitting the sky inside
 /// the safe area and `insets`, the room a fold, the chat part, or the cameras take. A tap opens a
 /// card at the foot of the sky, a drag pans, a pinch zooms around the fingers, and a double tap
-/// zooms in; no button sits over it, and VoiceOver's camera element takes it back to the whole sky.
+/// zooms in; no button sits over it. A pinch out to the whole sky's zoom or past it goes back to the
+/// whole sky, as VoiceOver's camera element does.
 /// It draws at most thirty frames a second, none while it is off screen or the app is not active,
 /// and with Reduce Motion or in Low Power Mode nothing drifts.
 struct SkyView: View {
@@ -90,7 +91,10 @@ struct SkyView: View {
                 sky.zoom(by: value.magnification / pinched, at: anchor)
                 pinched = value.magnification
               }
-              .onEnded { _ in pinched = 1 }
+              .onEnded { _ in
+                pinched = 1
+                sky.endPinch()
+              }
           )
         )
         .onTapGesture(count: 2) { point in

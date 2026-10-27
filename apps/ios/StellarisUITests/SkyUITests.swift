@@ -54,10 +54,12 @@ final class SkyUITests: ShellTestCase {
     XCTAssertFalse(card.exists, "a drag from a star opened its card")
   }
 
-  /// A pinch and a drag each move the camera, as its VoiceOver element's value says. Its Fit is
-  /// VoiceOver's to activate, which XCTest can't do; `SkyStoreTests` takes the camera home.
+  /// A pinch and a drag each move the camera, as its VoiceOver element's value says, and a pinch out
+  /// past the whole sky goes back to it; no Fit button sits over the sky. The element's own Fit is
+  /// VoiceOver's to activate, which XCTest can't do, so `SkyAccessibilityTests` does it in the app.
   @MainActor func testPinchAndDragMoveTheCamera() throws {
     let (_, sky) = openSky()
+    XCTAssertFalse(sky.buttons["sky-fit"].exists, "the sky still has a Fit button")
     let camera = sky.buttons["sky-camera"]
     XCTAssertEqual(camera.value as? String, "Whole sky")
 
@@ -69,6 +71,10 @@ final class SkyUITests: ShellTestCase {
     start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 120, dy: -80)))
     expectValue(camera, "!=", pinched)
     keepScreen("sky-moved")
+
+    sky.pinch(withScale: 0.2, velocity: -1)
+    expectValue(camera, "==", "Whole sky")
+    keepScreen("sky-pinched-home")
   }
 
   /// VoiceOver finds the camera, and every sphere, star, and task's mark, in words.

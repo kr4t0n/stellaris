@@ -14,19 +14,19 @@ struct SkyCard: View {
       switch target {
       case .star(let id):
         if let star = model.stars.first(where: { $0.id == id }) {
-          citizen(star)
+          citizenCard(star)
         } else {
           gone
         }
       case .task(let id):
         if let mark = model.tasks.first(where: { $0.id == id }) {
-          task(mark)
+          taskCard(mark)
         } else {
           gone
         }
       case .sphere(let id):
         if let anchor = model.anchors.first(where: { $0.id == id }) {
-          sphere(anchor)
+          sphereCard(anchor)
         } else {
           gone
         }
@@ -45,7 +45,7 @@ struct SkyCard: View {
 
   // MARK: A citizen
 
-  private func citizen(_ star: SkyStar) -> some View {
+  private func citizenCard(_ star: SkyStar) -> some View {
     let member = app.sky.members.first { $0.name == star.name }
     let mark = CliMark.of(star.cli)
     let modelName = member?.lastModel ?? member?.model
@@ -81,7 +81,7 @@ struct SkyCard: View {
 
   // MARK: A task
 
-  private func task(_ mark: SkyTaskMark) -> some View {
+  private func taskCard(_ mark: SkyTaskMark) -> some View {
     let color = SkyPalette.phase(mark.phase)
     let holderCli = app.sky.members.first { $0.name == mark.holder }?.cli
     return VStack(alignment: .leading, spacing: 8) {
@@ -112,7 +112,7 @@ struct SkyCard: View {
 
   // MARK: A sphere
 
-  private func sphere(_ anchor: SkyAnchor) -> some View {
+  private func sphereCard(_ anchor: SkyAnchor) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       header(
         title: anchor.kind == .society ? "The society" : anchor.label,

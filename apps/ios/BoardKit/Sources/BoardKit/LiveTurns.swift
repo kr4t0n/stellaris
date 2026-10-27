@@ -125,6 +125,11 @@ public let recentTurnEvents: TimeInterval = 15
 public struct SkyCue: Sendable, Hashable {
   public let star: String
   public let line: String?
+
+  public init(star: String, line: String?) {
+    self.star = star
+    self.line = line
+  }
 }
 
 /// The motion `item` sets off in `model` at `now`: a tool's call flickers its citizen's star, and

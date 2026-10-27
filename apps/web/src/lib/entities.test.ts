@@ -1,5 +1,7 @@
 import type { Proposal } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import withTitlesCases from "../../../ios/fixtures/cases/with-titles.json?raw";
 import {
   entityHref,
   entityIndex,
@@ -238,5 +240,27 @@ describe("entities", () => {
   it("never asks about an uploaded image's id as a message's", () => {
     expect(unknownIds(`![the board](image:${UNKNOWN})`, index)).toEqual([]);
     expect(unknownIds(`![the board](image:${UNKNOWN}) is ${UNKNOWN}`, index)).toEqual([UNKNOWN]);
+  });
+});
+
+describe("the ids table BoardKit's port runs too", () => {
+  it("reads each task's id as its title where the web would, in apps/ios/fixtures/cases", () => {
+    const cases = z
+      .object({
+        name: z.string(),
+        text: z.string(),
+        titles: z.record(z.string(), z.string()),
+        line: z.string(),
+      })
+      .array()
+      .parse(JSON.parse(withTitlesCases));
+    expect(cases.length).toBeGreaterThan(10);
+    const read = (each: (typeof cases)[number]) => {
+      const tasks = Object.entries(each.titles).map(([id, title]) => ({ id, title }));
+      return withTitles(each.text, entityIndex([], tasks, []));
+    };
+    expect(cases.map((each) => ({ name: each.name, line: read(each) }))).toEqual(
+      cases.map((each) => ({ name: each.name, line: each.line })),
+    );
   });
 });

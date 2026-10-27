@@ -1,0 +1,155 @@
+[
+  {
+    "name": "an id standing alone, a period after it ending the sentence",
+    "text": "Done with 01M5A00000000000000000T001.",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Done with Add the export view."
+  },
+  {
+    "name": "a task's branch, a path",
+    "text": "Pushed task/01M5A00000000000000000T001 to origin",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Pushed task/01M5A00000000000000000T001 to origin"
+  },
+  {
+    "name": "a file name",
+    "text": "Wrote 01M5A00000000000000000T001.md",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Wrote 01M5A00000000000000000T001.md"
+  },
+  {
+    "name": "an id inside a word",
+    "text": "see x01M5A00000000000000000T001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "see x01M5A00000000000000000T001"
+  },
+  {
+    "name": "an id after a hyphen, and one before a hyphen",
+    "text": "id-01M5A00000000000000000T001 and 01M5A00000000000000000T001-old",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "id-01M5A00000000000000000T001 and 01M5A00000000000000000T001-old"
+  },
+  {
+    "name": "an id after a period",
+    "text": "v.01M5A00000000000000000T001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "v.01M5A00000000000000000T001"
+  },
+  {
+    "name": "an id in parentheses",
+    "text": "(01M5A00000000000000000T001)",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "(Add the export view)"
+  },
+  {
+    "name": "the title echoed in quotes",
+    "text": "01M5A00000000000000000T001 \"Add the export view\" is in",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Add the export view is in"
+  },
+  {
+    "name": "the title echoed after a colon",
+    "text": "See 01M5A00000000000000000T001: Add the export view",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "See Add the export view"
+  },
+  {
+    "name": "another title in quotes stays",
+    "text": "01M5A00000000000000000T001 \"the page\" is in",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Add the export view \"the page\" is in"
+  },
+  {
+    "name": "an id the board doesn't know",
+    "text": "See 01M5A00000000000000000T009 next",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "See 01M5A00000000000000000T009 next"
+  },
+  {
+    "name": "two ids",
+    "text": "Merged 01M5A00000000000000000T001 and 01M5A00000000000000000T002, in that order",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Merged Add the export view and Fix the empty state, in that order"
+  },
+  {
+    "name": "an id at either end",
+    "text": "01M5A00000000000000000T001 then 01M5A00000000000000000T002",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "Add the export view then Fix the empty state"
+  },
+  {
+    "name": "a run longer than an id",
+    "text": "01M5A00000000000000000T001X",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "01M5A00000000000000000T001X"
+  },
+  {
+    "name": "letters ULIDs never use",
+    "text": "01M5A00000000000000000I001 and 01M5A00000000000000000U001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "01M5A00000000000000000I001 and 01M5A00000000000000000U001"
+  },
+  {
+    "name": "lower case is no id",
+    "text": "01m5a00000000000000000t001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "01m5a00000000000000000t001"
+  },
+  {
+    "name": "after a letter outside ASCII",
+    "text": "→01M5A00000000000000000T001 and é01M5A00000000000000000T001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "line": "→Add the export view and éAdd the export view"
+  }
+]

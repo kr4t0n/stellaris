@@ -1,11 +1,42 @@
 import BoardKit
 import Foundation
+import Synchronization
 import Testing
 
 @testable import Stellaris
 
+/// The scheduler's answer as a test sets it, in front of the fake board, which answers the rest: the
+/// scheduler's queue changes with no event, as when a wake waits for a free slot.
+final class ChangingScheduler: URLProtocol {
+  static let idle = #"{"paused":false,"running":[],"pending":[],"resident":[]}"#
+  static let answer = Mutex(idle)
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host() == FakeBoard.address.host()
+      && request.url?.path(percentEncoded: true) == "/api/scheduler"
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+  override func startLoading() {
+    guard let url = request.url,
+      let response = HTTPURLResponse(
+        url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+        headerFields: ["Content-Type": "application/json"])
+    else {
+      return
+    }
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(ChangingScheduler.answer.withLock { $0 }.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+
+  override func stopLoading() {}
+}
+
 /// The sky's store against the fake board: what it loads, what a failure shows, the project it
-/// frames, what a touch and the gestures do, and what the turn stream raises.
+/// frames, what a touch and the gestures do, what the turn stream raises, and how a post's ids
+/// read.
 @MainActor @Suite(.serialized) struct SkyStoreTests {
   private let board = FakeBoard.address
   private let view = SkyViewport(width: 475, height: 669)
@@ -16,6 +47,30 @@ import Testing
     try await model.signIn(board: board, token: "fixture-token")
     try await waitUntilLoaded(model)
     return model
+  }
+
+  /// Signed in to the fake board with the scheduler's answer from `ChangingScheduler`.
+  private func signedInChangingTheScheduler() async throws -> AppModel {
+    let defaults = UserDefaults(suiteName: "sky-\(UUID().uuidString)")!
+    var environment = FakeBoard.environment(folder: fixturesFolder, defaults: defaults)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ChangingScheduler.self, FakeBoard.self]
+    environment.session = URLSession(configuration: configuration)
+    environment.tokens = MemoryTokens()
+    let model = AppModel(environment: environment)
+    await model.start()
+    try await model.signIn(board: board, token: "fixture-token")
+    try await waitUntilLoaded(model)
+    return model
+  }
+
+  /// Waits up to `seconds` for `done`.
+  private func wait(seconds: Int, until done: () -> Bool) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(seconds)
+    while !done(), clock.now < deadline {
+      try await Task.sleep(for: .milliseconds(50))
+    }
   }
 
   /// The sample sky stepped once with Reduce Motion, so everything stands where the model puts it.
@@ -99,6 +154,48 @@ import Testing
     sky.home()
     #expect(sky.camera.mode == .home)
     #expect(SkyElements.describe(sky.camera, model: model) == "Whole sky")
+  }
+
+  /// A wake queued with no event to say so shows its citizen queued all the same, as the web's sky
+  /// shows it by asking the scheduler every three seconds.
+  @Test(.timeLimit(.minutes(1))) func followsTheSchedulersQueueWithNoEvent() async throws {
+    ChangingScheduler.answer.withLock { $0 = ChangingScheduler.idle }
+    defer { ChangingScheduler.answer.withLock { $0 = ChangingScheduler.idle } }
+    let model = try await signedInChangingTheScheduler()
+    let running = Task { await model.sky.run(using: model) }
+    defer { running.cancel() }
+    try await wait(seconds: 10) { model.sky.state == .loaded }
+    #expect(model.sky.scheduler?.pending == [])
+
+    ChangingScheduler.answer.withLock {
+      $0 = #"{"paused":false,"running":[],"pending":["rev-1/demo"],"resident":[]}"#
+    }
+    try await wait(seconds: 10) { model.sky.scheduler?.pending == ["rev-1/demo"] }
+    #expect(model.sky.scheduler?.pending == ["rev-1/demo"])
+    let sky = model.sky.model(projects: model.store.projects, tasks: model.store.tasks)
+    #expect(sky.stars.first { $0.name == "rev-1" }?.state == .queued)
+  }
+
+  struct TitlesCase: Decodable {
+    let name: String
+    let text: String
+    let titles: [String: String]
+    let line: String
+  }
+
+  /// A post's task ids read as their titles where the web's `withTitles` reads them, over the cases
+  /// in `apps/ios/fixtures/cases` the web runs too: an id standing alone, never one in a path or a
+  /// file name, and a title it echoes said once.
+  @Test func readsTaskIdsInALineAsTheWebDoes() throws {
+    let table = fixturesFolder.deletingLastPathComponent().appendingPathComponent(
+      "cases/with-titles.json")
+    let cases = try JSONDecoder().decode([TitlesCase].self, from: Data(contentsOf: table))
+    #expect(cases.count > 10)
+    let (model, _) = fakeApp()
+    for each in cases {
+      model.store.show(projects: [], tasks: SkySample.tasks(titled: each.titles))
+      #expect(model.store.withTaskTitles(each.text) == each.line, "\(each.name)")
+    }
   }
 
   /// The fake board's turn stream, the captured one stamped now: the post's first line rises from

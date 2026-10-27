@@ -51,6 +51,20 @@ enum SkySample {
     ])
   }
 
+  /// Tasks with these ids and titles, each open at a stage of its own.
+  static func tasks(titled titles: [String: String]) -> [BoardTask] {
+    decode(
+      titles.sorted { $0.key < $1.key }.map { id, title in
+        [
+          "id": id, "project": "demo", "channel": "general", "title": title, "status": "open",
+          "createdBy": "concierge-1", "createdAt": time, "updatedAt": time,
+          "blockedBy": [String](), "requiredCapabilities": [String](),
+          "stages": [["id": "s1", "name": "Build it"]], "stage": "s1", "stageSince": time,
+          "stageSeq": 1, "body": "",
+        ]
+      })
+  }
+
   /// The app signed in to nothing, showing the sample board as loaded.
   @MainActor static func app() -> AppModel {
     let (model, _) = fakeApp()

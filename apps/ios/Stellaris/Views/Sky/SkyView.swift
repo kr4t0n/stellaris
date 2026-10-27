@@ -33,105 +33,110 @@ struct SkyView: View {
     let skyModel = sky.model(projects: model.store.projects, tasks: model.store.tasks)
     let focus = model.skyFocus
     let paused = fixedClock != nil || !shown || scenePhase != .active
-    GeometryReader { proxy in
-      let viewport = SkyViewport(
-        width: proxy.size.width, height: proxy.size.height,
-        left: proxy.safeAreaInsets.leading + insets.leading,
-        right: proxy.safeAreaInsets.trailing + insets.trailing,
-        top: proxy.safeAreaInsets.top + insets.top,
-        bottom: proxy.safeAreaInsets.bottom + insets.bottom)
-      TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
-        let now = fixedClock ?? timeline.date.timeIntervalSinceReferenceDate
-        Canvas { context, _ in
-          if sky.scene.reducedMotion != reduced {
-            sky.scene.reducedMotion = reduced
-          }
-          if sky.scene.model != skyModel {
-            sky.scene.setModel(skyModel)
-          }
-          sky.scene.setFocus(focus)
-          sky.viewport = viewport
-          sky.scene.step(at: now, in: viewport)
-          let frame = sky.scene.frame(
-            in: viewport, ambient: !lowPower, hovered: sky.card?.hovered,
-            paused: sky.scheduler?.paused == true)
-          sky.lastFrame = frame
-          SkyDrawing(frame: frame).draw(in: &context)
-          if sky.scene.camera.mode != sky.camera.mode
-            || sky.scene.camera.target != sky.camera.target
-          {
-            Task { @MainActor in sky.publishCamera() }
+    // The outer reader keeps to the safe area, so it reads the insets; the inner one runs edge to
+    // edge, where a reader reads none.
+    GeometryReader { safe in
+      let safeArea = safe.safeAreaInsets
+      GeometryReader { proxy in
+        let viewport = SkyViewport(
+          width: proxy.size.width, height: proxy.size.height,
+          left: safeArea.leading + insets.leading,
+          right: safeArea.trailing + insets.trailing,
+          top: safeArea.top + insets.top,
+          bottom: safeArea.bottom + insets.bottom)
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
+          let now = fixedClock ?? timeline.date.timeIntervalSinceReferenceDate
+          Canvas { context, _ in
+            if sky.scene.reducedMotion != reduced {
+              sky.scene.reducedMotion = reduced
+            }
+            if sky.scene.model != skyModel {
+              sky.scene.setModel(skyModel)
+            }
+            sky.scene.setFocus(focus)
+            sky.viewport = viewport
+            sky.scene.step(at: now, in: viewport)
+            let frame = sky.scene.frame(
+              in: viewport, ambient: !lowPower, hovered: sky.card?.hovered,
+              paused: sky.scheduler?.paused == true)
+            sky.lastFrame = frame
+            SkyDrawing(frame: frame).draw(in: &context)
+            if sky.scene.camera.mode != sky.camera.mode
+              || sky.scene.camera.target != sky.camera.target
+            {
+              Task { @MainActor in sky.publishCamera() }
+            }
           }
         }
-      }
-      .accessibilityChildren {
-        SkyElements(app: model, model: skyModel, viewport: viewport)
-      }
-      .gesture(
-        SimultaneousGesture(
-          DragGesture(minimumDistance: 4)
-            .onChanged { value in
-              sky.pan(
-                dx: value.translation.width - dragged.width,
-                dy: value.translation.height - dragged.height)
-              dragged = value.translation
-            }
-            .onEnded { _ in dragged = .zero },
-          MagnifyGesture()
-            .onChanged { value in
-              let anchor = SkyPoint(
-                x: value.startAnchor.x * proxy.size.width,
-                y: value.startAnchor.y * proxy.size.height)
-              sky.zoom(by: value.magnification / pinched, at: anchor)
-              pinched = value.magnification
-            }
-            .onEnded { _ in pinched = 1 }
-        )
-      )
-      .onTapGesture(count: 2) { point in
-        sky.zoom(by: 2, at: SkyPoint(x: point.x, y: point.y))
-      }
-      .onTapGesture { point in
-        sky.tap(at: SkyPoint(x: point.x, y: point.y))
-      }
-      .overlay(alignment: .topTrailing) {
-        FitButton()
-          .padding(.top, viewport.top + 8)
-          .padding(.trailing, viewport.right + 8)
-      }
-      .overlay {
-        if sky.members.isEmpty {
-          switch sky.state {
-          case .idle, .loading:
-            ProgressView()
-          case .failed(let reason):
-            ContentUnavailableView {
-              Label(reason, systemImage: "wifi.exclamationmark")
-            } actions: {
-              Button("Retry") {
-                Task { await sky.load(using: model) }
+        .accessibilityChildren {
+          SkyElements(app: model, model: skyModel, viewport: viewport)
+        }
+        .gesture(
+          SimultaneousGesture(
+            DragGesture(minimumDistance: 4)
+              .onChanged { value in
+                sky.pan(
+                  dx: value.translation.width - dragged.width,
+                  dy: value.translation.height - dragged.height)
+                dragged = value.translation
               }
+              .onEnded { _ in dragged = .zero },
+            MagnifyGesture()
+              .onChanged { value in
+                let anchor = SkyPoint(
+                  x: value.startAnchor.x * proxy.size.width,
+                  y: value.startAnchor.y * proxy.size.height)
+                sky.zoom(by: value.magnification / pinched, at: anchor)
+                pinched = value.magnification
+              }
+              .onEnded { _ in pinched = 1 }
+          )
+        )
+        .onTapGesture(count: 2) { point in
+          sky.zoom(by: 2, at: SkyPoint(x: point.x, y: point.y))
+        }
+        .onTapGesture { point in
+          sky.tap(at: SkyPoint(x: point.x, y: point.y))
+        }
+        .overlay(alignment: .topTrailing) {
+          FitButton()
+            .padding(.top, viewport.top + 8)
+            .padding(.trailing, viewport.right + 8)
+        }
+        .overlay {
+          if sky.members.isEmpty {
+            switch sky.state {
+            case .idle, .loading:
+              ProgressView()
+            case .failed(let reason):
+              ContentUnavailableView {
+                Label(reason, systemImage: "wifi.exclamationmark")
+              } actions: {
+                Button("Retry") {
+                  Task { await sky.load(using: model) }
+                }
+              }
+            case .loaded:
+              EmptyView()
             }
-          case .loaded:
-            EmptyView()
+          }
+        }
+        .overlay(alignment: .bottom) {
+          if let card = sky.card {
+            // Inside the sky's part, and below Fit: the card scrolls in what room that leaves.
+            VStack(spacing: 0) {
+              Spacer(minLength: viewport.top + 60)
+              SkyCard(target: card, model: skyModel)
+            }
+            .padding(.bottom, viewport.bottom + 12)
+            .padding(.leading, viewport.left + 12)
+            .padding(.trailing, viewport.right + 12)
           }
         }
       }
-      .overlay(alignment: .bottom) {
-        if let card = sky.card {
-          // Inside the sky's part, and below Fit: the card scrolls in what room that leaves.
-          VStack(spacing: 0) {
-            Spacer(minLength: viewport.top + 60)
-            SkyCard(target: card, model: skyModel)
-          }
-          .padding(.bottom, viewport.bottom + 12)
-          .padding(.leading, viewport.left + 12)
-          .padding(.trailing, viewport.right + 12)
-        }
-      }
+      .ignoresSafeArea()
     }
-    .ignoresSafeArea()
-    .background(Color(sky: SkyPalette.surface0))
+    .background(Color(sky: SkyPalette.surface0).ignoresSafeArea())
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("sky")
     .onAppear { shown = true }

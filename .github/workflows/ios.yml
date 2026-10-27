@@ -78,7 +78,8 @@ jobs:
           ../../scripts/ios/catch-stuck-app.sh com.example.stellaris "$output" "$RUNNER_TEMP/stuck-app" &
           watcher=$!
           status=0
-          xcodebuild test \
+          # Probe: xcodebuild, and so its reads of the app's console, at the throttle I/O policy.
+          taskpolicy -d throttle xcodebuild test \
             -project Stellaris.xcodeproj \
             -scheme Stellaris \
             -destination "$DESTINATION" \

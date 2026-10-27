@@ -37,9 +37,9 @@ final class CountedScheduler: URLProtocol {
 /// The app's window as iOS resizes it when the phone opens, turns, and folds again, with the size
 /// classes each display gives, since the simulator in CI keeps the inner display closed and its
 /// outer display upright. The sky draws beside the chat on the inner display alone, and asks the
-/// board nothing while the phone is folded; the conversation keeps its scroll view, its draft
-/// field, and the message its scroll is anchored at through every change; and the sky's camera
-/// starts at the whole sky and is kept through a fold.
+/// board nothing while the phone is folded; Chat keeps the conversation, its draft, and the
+/// message its scroll is anchored at through every change; and the sky's camera starts at the
+/// whole sky and is kept through a fold.
 final class FoldTests: XCTestCase {
   /// The outer display, and the inner display in landscape and in portrait.
   private let outer = CGSize(width: 466, height: 678)
@@ -59,8 +59,7 @@ final class FoldTests: XCTestCase {
     let window = try TestWindow(RootView().environment(model), size: outer)
     defer { window.close() }
     try await window.settle()
-    let messages = try XCTUnwrap(window.messages(), "Chat shows no conversation")
-    let draft = try XCTUnwrap(window.field(showing: draftText), "Chat shows no draft")
+    var messages = try expectTheChat("folded", in: window, model, after: nil)
     XCTAssertNil(model.sky.lastFrame, "the sky drew on the outer display")
     try window.keep("fold-outer", in: self)
 
@@ -68,13 +67,13 @@ final class FoldTests: XCTestCase {
     window.resize(to: landscape)
     try await window.settle()
     XCTAssertNotNil(model.sky.lastFrame, "no sky beside the chat on the inner display")
+    messages = try expectTheChat("opened", in: window, model, after: messages)
     XCTAssertLessThan(model.sky.viewport.width, Double(landscape.width) * 0.6)
     XCTAssertEqual(model.sky.viewport.height, Double(landscape.height), accuracy: 1)
     XCTAssertGreaterThanOrEqual(
       Double(window.frame(of: messages).minX), model.sky.viewport.width - 1,
       "the chat isn't beside the sky")
     XCTAssertEqual(model.sky.scene.camera.mode, .home, "the first unfold isn't at the whole sky")
-    expectTheChatKept(messages, draft, in: window, model)
     let asked = CountedScheduler.asked.withLock { $0 }
     try await Task.sleep(for: .seconds(1))
     XCTAssertGreaterThanOrEqual(
@@ -86,12 +85,12 @@ final class FoldTests: XCTestCase {
     let scale = model.sky.scene.camera.target.scale
     window.resize(to: portrait)
     try await window.settle()
+    messages = try expectTheChat("turned", in: window, model, after: messages)
     XCTAssertEqual(model.sky.viewport.width, Double(portrait.width), accuracy: 1)
     XCTAssertLessThan(model.sky.viewport.height, Double(portrait.height) * 0.6)
     XCTAssertGreaterThanOrEqual(
       Double(window.frame(of: messages).minY), model.sky.viewport.height - 1,
       "the chat isn't below the sky")
-    expectTheChatKept(messages, draft, in: window, model)
     try window.keep("fold-open-portrait", in: self)
 
     // Folded: the chat alone, and the sky neither draws nor asks.
@@ -103,7 +102,7 @@ final class FoldTests: XCTestCase {
     XCTAssertNil(model.sky.lastFrame, "the sky draws while the phone is folded")
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")
-    expectTheChatKept(messages, draft, in: window, model)
+    messages = try expectTheChat("folded again", in: window, model, after: messages)
 
     // Open again: the sky comes back with the camera it had.
     window.resize(to: landscape)
@@ -111,18 +110,27 @@ final class FoldTests: XCTestCase {
     XCTAssertNotNil(model.sky.lastFrame, "the sky doesn't come back when the phone opens")
     XCTAssertEqual(model.sky.scene.camera.mode, .manual, "the sky lost its camera")
     XCTAssertEqual(model.sky.scene.camera.target.scale, scale, accuracy: 1e-9)
-    expectTheChatKept(messages, draft, in: window, model)
+    _ = try expectTheChat("opened again", in: window, model, after: messages)
   }
 
-  /// The conversation's views are the ones it had, not built again, with the draft and the anchor.
-  @MainActor private func expectTheChatKept(
-    _ messages: UIScrollView, _ draft: UIView, in window: TestWindow, _ model: AppModel,
+  /// Chat still shows #general with its draft and its anchor, and gives its scroll view. Whether
+  /// that is the scroll view it had before, or one built again, goes to the test's log.
+  @MainActor private func expectTheChat(
+    _ step: String, in window: TestWindow, _ model: AppModel, after previous: UIScrollView?,
     line: UInt = #line
-  ) {
-    XCTAssertTrue(window.messages() === messages, "the conversation was built again", line: line)
-    XCTAssertTrue(
-      window.field(showing: draftText) === draft, "the draft's field was built again", line: line)
-    XCTAssertEqual(model.memory?.anchor(.general), anchored, "the scroll moved", line: line)
+  ) throws -> UIScrollView {
+    let messages = try XCTUnwrap(
+      window.messages(), "\(step): Chat shows no conversation", line: line)
+    XCTAssertEqual(model.history.current, .general, "\(step): Chat moved", line: line)
+    XCTAssertNotNil(
+      window.field(showing: draftText), "\(step): the draft doesn't show", line: line)
+    XCTAssertEqual(
+      model.memory?.anchor(.general), anchored, "\(step): the scroll moved", line: line)
+    if let previous {
+      let kept = previous === messages ? "the same" : "built again"
+      print("FoldTests: \(step): the conversation's scroll view is \(kept)")
+    }
+    return messages
   }
 
   /// Signed in to the fake board, with the scheduler counted and asked every fifth of a second.

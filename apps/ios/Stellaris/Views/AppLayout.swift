@@ -1,13 +1,12 @@
-import Combine
 import SwiftUI
-import UIKit
 
 /// The signed-in app: the tabs, with the sky beside them on the inner display, split at the fold as
-/// `InnerLayout` says. The tabs keep one place in the view whatever the pose, so a fold, an unfold,
-/// or a turn moves them without building them again, and the open conversation keeps its scroll
-/// and its draft. The sky fades in with the camera it had, and folding takes it away, which stops
-/// its drawing and its reads; its state stays in the model. While the keyboard is up with the sky
-/// above the chat, the chat grows over the sky, which draws nothing until the keyboard goes.
+/// `InnerLayout` says. The tabs keep one place in the view whatever the pose, so the split never
+/// builds them again, and what a view built again needs, the conversation's draft and anchor, is in
+/// the model. The sky fades in with the camera it had, and folding takes it away, which stops its
+/// drawing and its reads; its state stays in the model. The split keeps to the window as it is
+/// without the keyboard, and once the keyboard leaves the chat below the sky little room, the chat
+/// grows over the sky, which draws nothing until the keyboard goes.
 struct AppLayout: View {
   @Environment(\.horizontalSizeClass) private var width
   @Environment(\.verticalSizeClass) private var height
@@ -17,21 +16,27 @@ struct AppLayout: View {
   struct Pose {
     var divisions: [CGRect]
     var cameras: [CGRect] = []
-    var typing = false
+    var keyboardTop: CGFloat?
     var skyClock: Double?
   }
 
   var pose: Pose?
 
-  @State private var keyboardUp = false
+  /// The window's size without the keyboard.
+  @State private var unkeyed: CGSize?
 
   var body: some View {
     GeometryReader { proxy in
+      // The reader ends at the keyboard while it is up; the split keeps to the size without it.
+      let size = unkeyed.flatMap { full in
+        full.width == proxy.size.width && full.height > proxy.size.height ? full : nil
+      }
       let parts = InnerLayout.parts(
-        in: proxy.size, regular: regular,
+        in: size ?? proxy.size,
+        keyboardTop: pose?.keyboardTop ?? size.map { _ in proxy.size.height },
+        regular: regular,
         divisions: pose?.divisions ?? regions(.division, in: proxy),
-        cameras: pose?.cameras ?? regions(.occlusion, in: proxy),
-        typing: pose?.typing ?? keyboardUp)
+        cameras: pose?.cameras ?? regions(.occlusion, in: proxy))
       let split = InnerSplit(parts: parts)
       split {
         if parts.sky != nil {
@@ -52,12 +57,11 @@ struct AppLayout: View {
       .animation(.easeInOut(duration: 0.3), value: parts.sky != nil)
       .animation(.smooth(duration: 0.3), value: parts.chatCoversSky)
     }
-    .onReceive(keyboard(UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
-    .onReceive(keyboard(UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
-  }
-
-  private func keyboard(_ name: Notification.Name) -> NotificationCenter.Publisher {
-    NotificationCenter.default.publisher(for: name)
+    .background {
+      Color.clear
+        .ignoresSafeArea(.keyboard)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { unkeyed = $0 }
+    }
   }
 
   /// Both size classes regular: the inner display, which a debug build launched with

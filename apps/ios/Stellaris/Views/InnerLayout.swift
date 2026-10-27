@@ -9,7 +9,9 @@ import CoreGraphics
 /// fold: the sky on the leading side and the chat on the trailing one when the fold runs top to
 /// bottom, and the sky above the chat when it runs across. The fold is the division iOS reports,
 /// active or not, so a partial fold moves nothing; with none reported, the middle of the window's
-/// longer side.
+/// longer side. The split keeps to the window as it is without the keyboard: only the chat's foot
+/// follows the keyboard, and the chat grows over a sky above it once the keyboard leaves it less
+/// than half its part.
 enum InnerLayout {
   /// Room at each edge of a part, in points.
   struct Room: Equatable, Sendable {
@@ -35,15 +37,19 @@ enum InnerLayout {
     var chatCoversSky = false
   }
 
-  /// The parts of a window of `size`. `regular` is whether both its size classes are; `divisions`
-  /// and `cameras` are the frames of the reserved regions iOS reports, inactive ones included; and
-  /// `typing` is whether the keyboard is up.
+  /// The parts of a window of `size`, as it is without the keyboard. `keyboardTop` is how far down
+  /// the window the keyboard leaves room while it is up; `regular` is whether both size classes
+  /// are; and `divisions` and `cameras` are the frames of the reserved regions iOS reports,
+  /// inactive ones included.
   static func parts(
-    in size: CGSize, regular: Bool, divisions: [CGRect], cameras: [CGRect], typing: Bool
+    in size: CGSize, keyboardTop: CGFloat? = nil, regular: Bool, divisions: [CGRect],
+    cameras: [CGRect]
   ) -> Parts {
     let whole = CGRect(origin: .zero, size: size)
+    let foot = min(keyboardTop ?? size.height, size.height)
     guard regular, size.width > 0, size.height > 0 else {
-      return Parts(arrangement: .chatAlone, chat: whole)
+      return Parts(
+        arrangement: .chatAlone, chat: CGRect(x: 0, y: 0, width: size.width, height: foot))
     }
     let found = divisions.first { whole.intersects($0) }
     let sideBySide = found.map { $0.height >= $0.width } ?? (size.width >= size.height)
@@ -55,7 +61,7 @@ enum InnerLayout {
       parts = Parts(
         arrangement: .sideBySide, sky: sky,
         skyRoom: Room(trailing: max(0, edge - max(fold.minX, 0))),
-        chat: CGRect(x: edge, y: 0, width: size.width - edge, height: size.height))
+        chat: CGRect(x: edge, y: 0, width: size.width - edge, height: foot))
     } else {
       let fold = found ?? CGRect(x: 0, y: size.height / 2, width: size.width, height: 0)
       let edge = min(max(fold.maxY, 0), size.height)
@@ -63,10 +69,10 @@ enum InnerLayout {
       parts = Parts(
         arrangement: .stacked, sky: sky,
         skyRoom: Room(bottom: max(0, edge - max(fold.minY, 0))),
-        chat: CGRect(x: 0, y: edge, width: size.width, height: size.height - edge))
-      if typing {
+        chat: CGRect(x: 0, y: edge, width: size.width, height: foot - edge))
+      if foot - edge < (size.height - edge) / 2 {
         // The keyboard leaves the chat below the fold little room, so it grows over the sky.
-        parts.chat = whole
+        parts.chat = CGRect(x: 0, y: 0, width: size.width, height: foot)
         parts.chatCoversSky = true
       }
     }

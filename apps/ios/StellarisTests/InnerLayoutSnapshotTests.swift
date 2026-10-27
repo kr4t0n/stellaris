@@ -7,11 +7,11 @@ import XCTest
 /// The app in each pose over the fake board, with a draft in #general and the sky on a fixed clock
 /// with Reduce Motion on: on the inner display the sky beside the chat in landscape and above it
 /// in portrait, flat or folded alike, since the split is at the fold either way, the chat grown
-/// over the sky while the keyboard is up in portrait, and a card in the sky's part; and the chat
-/// alone on the outer display and in Split View. The fold is a band 21 points wide at the middle,
-/// as the sign-in's tests have it, since what iOS reports there is checked on the device. The
-/// pictures go with the test's results for review; the tests fail when a pose draws the sky
-/// where it has none, or outside its part, or without the fold's band clear.
+/// over the sky while a keyboard 336 points tall is up in portrait, and a card in the sky's part;
+/// and the chat alone on the outer display and in Split View. The fold is a band 21 points wide at
+/// the middle, as the sign-in's tests have it, since what iOS reports there is checked on the
+/// device. The pictures go with the test's results for review; the tests fail when a pose draws
+/// the sky where it has none, or outside its part, or without the fold's band clear.
 final class InnerLayoutSnapshotTests: XCTestCase {
   /// Where the sky's part is: beside the chat or above it, as far as the fold.
   private enum Side {
@@ -43,7 +43,7 @@ final class InnerLayoutSnapshotTests: XCTestCase {
       Pose(name: "portrait", size: CGSize(width: 669, height: 951), pose: portrait, sky: .top),
       Pose(
         name: "portrait-typing", size: CGSize(width: 669, height: 951),
-        pose: AppLayout.Pose(divisions: portrait.divisions, typing: true, skyClock: clock),
+        pose: AppLayout.Pose(divisions: portrait.divisions, keyboardTop: 615, skyClock: clock),
         sky: nil),
       Pose(
         name: "outer", size: CGSize(width: 466, height: 678),

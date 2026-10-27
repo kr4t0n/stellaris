@@ -12,11 +12,12 @@ import Testing
   private let across = CGRect(x: 0, y: 465, width: 669, height: 21)
 
   private func parts(
-    _ size: CGSize, regular: Bool = true, divisions: [CGRect] = [], cameras: [CGRect] = [],
-    typing: Bool = false
+    _ size: CGSize, keyboardTop: CGFloat? = nil, regular: Bool = true, divisions: [CGRect] = [],
+    cameras: [CGRect] = []
   ) -> InnerLayout.Parts {
     InnerLayout.parts(
-      in: size, regular: regular, divisions: divisions, cameras: cameras, typing: typing)
+      in: size, keyboardTop: keyboardTop, regular: regular, divisions: divisions,
+      cameras: cameras)
   }
 
   @Test func leavesTheChatAloneWhenEitherSizeClassIsCompact() {
@@ -70,15 +71,32 @@ import Testing
     #expect(parts(landscape, divisions: [elsewhere]) == wide)
   }
 
-  /// While the keyboard is up, the chat below the sky grows over it, and the sky keeps its part;
-  /// beside the sky the chat keeps its own.
-  @Test func growsTheChatOverTheSkyAboveItWhileTyping() {
-    let typing = parts(portrait, divisions: [across], typing: true)
-    #expect(typing.chat == CGRect(origin: .zero, size: portrait))
+  /// A keyboard that leaves the chat below the sky less than half its part grows the chat over
+  /// the sky, which keeps its part; a shorter one, as a hardware keyboard's bar, only lifts the
+  /// chat's foot, as it does beside the sky and with the chat alone.
+  @Test func growsTheChatOverTheSkyAboveItWhileTheKeyboardIsUp() {
+    let typing = parts(portrait, keyboardTop: 615, divisions: [across])
+    #expect(typing.chat == CGRect(x: 0, y: 0, width: 669, height: 615))
     #expect(typing.chatCoversSky)
     #expect(typing.sky == parts(portrait, divisions: [across]).sky)
-    let beside = parts(landscape, divisions: [upright])
-    #expect(parts(landscape, divisions: [upright], typing: true) == beside)
+    let bar = parts(portrait, keyboardTop: 900, divisions: [across])
+    #expect(bar.chat == CGRect(x: 0, y: 486, width: 669, height: 414))
+    #expect(!bar.chatCoversSky)
+    let beside = parts(landscape, keyboardTop: 330, divisions: [upright])
+    #expect(beside.chat == CGRect(x: 486, y: 0, width: 465, height: 330))
+    #expect(beside.sky == parts(landscape, divisions: [upright]).sky)
+    #expect(!beside.chatCoversSky)
+    let alone = parts(CGSize(width: 466, height: 678), keyboardTop: 340, regular: false)
+    #expect(alone.chat == CGRect(x: 0, y: 0, width: 466, height: 340))
+  }
+
+  /// The keyboard never turns the split, even with no fold reported, where the window's shape
+  /// decides: the size the split reads is the window's without the keyboard.
+  @Test func keepsTheSplitWhileTheKeyboardIsUp() {
+    let tall = parts(portrait, keyboardTop: 300)
+    #expect(tall.arrangement == .stacked)
+    #expect(tall.sky == parts(portrait).sky)
+    #expect(tall.chatCoversSky)
   }
 
   /// A camera in the sky's part takes room from the nearer edge; one in the chat's takes none.

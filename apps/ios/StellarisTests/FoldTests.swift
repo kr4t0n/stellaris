@@ -79,9 +79,8 @@ final class FoldTests: XCTestCase {
     XCTAssertTrue(beside, "the chat isn't beside the sky: \(window.frame(of: messages))")
     XCTAssertEqual(model.sky.scene.camera.mode, .home, "the first unfold isn't at the whole sky")
     let asked = CountedScheduler.asked.withLock { $0 }
-    try await Task.sleep(for: .seconds(1))
-    XCTAssertGreaterThanOrEqual(
-      CountedScheduler.asked.withLock { $0 } - asked, 2, "the sky doesn't ask the scheduler")
+    let asking = try await window.until { CountedScheduler.asked.withLock { $0 } - asked >= 2 }
+    XCTAssertTrue(asking, "the sky doesn't ask the scheduler")
 
     // Moved by hand, then turned: the sky above, the chat below.
     model.sky.zoom(by: 2)
@@ -102,7 +101,7 @@ final class FoldTests: XCTestCase {
     try await window.settle()
     model.sky.lastFrame = nil
     let folded = CountedScheduler.asked.withLock { $0 }
-    try await Task.sleep(for: .seconds(1))
+    try await Task.sleep(for: .seconds(2))
     XCTAssertNil(model.sky.lastFrame, "the sky draws while the phone is folded")
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")

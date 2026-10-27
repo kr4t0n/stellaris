@@ -56,7 +56,9 @@ final class FoldTests: XCTestCase {
     memory.setDraft(draftText, for: .general)
     memory.setAnchor(anchored, for: .general)
 
-    let window = try TestWindow(RootView().environment(model), size: outer)
+    // A window the test makes has no scene phase of its own; the app's in front is active.
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
     defer { window.close() }
     try await window.settle()
     var messages = try expectTheChat("folded", in: window, model, after: nil)

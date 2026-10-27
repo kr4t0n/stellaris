@@ -2,6 +2,8 @@ import SwiftUI
 import UIKit
 import XCTest
 
+@testable import Stellaris
+
 /// Renders a view in a window of a fixed size, so each view can be seen at every width the app runs
 /// at and at the default and the largest type size. The pictures are kept with the test's results,
 /// where CI collects them; nothing compares them with earlier ones.

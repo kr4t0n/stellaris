@@ -119,10 +119,14 @@ struct SkyView: View {
       }
       .overlay(alignment: .bottom) {
         if let card = sky.card {
-          SkyCard(target: card, model: skyModel)
-            .padding(.bottom, viewport.bottom + 12)
-            .padding(.leading, viewport.left + 12)
-            .padding(.trailing, viewport.right + 12)
+          // Inside the sky's part, and below Fit: the card scrolls in what room that leaves.
+          VStack(spacing: 0) {
+            Spacer(minLength: viewport.top + 60)
+            SkyCard(target: card, model: skyModel)
+          }
+          .padding(.bottom, viewport.bottom + 12)
+          .padding(.leading, viewport.left + 12)
+          .padding(.trailing, viewport.right + 12)
         }
       }
     }
@@ -157,13 +161,16 @@ private struct FitButton: View {
     Button {
       sky.home()
     } label: {
+      // The whole circle takes the tap, not only the icon's strokes, which would let a tap
+      // between them through to the sky.
       Label("Fit the whole sky", systemImage: "arrow.up.left.and.arrow.down.right")
         .labelStyle(.iconOnly)
         .frame(width: 44, height: 44)
+        .background(.regularMaterial, in: Circle())
+        .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .foregroundStyle(.secondary)
-    .background(.regularMaterial, in: Circle())
     .opacity(sky.camera.mode == .home ? 0.5 : 1)
     .accessibilityIdentifier("sky-fit")
     .accessibilityValue(SkyElements.describe(sky.camera, model: model))

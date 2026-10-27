@@ -4,12 +4,31 @@ import SwiftUI
 /// The card of what a tap took, in a panel at the foot of the sky rather than over it: the web's
 /// hover cards for a citizen and a task, and one for a sphere. Open goes to the task's thread or
 /// the project's general channel; a citizen's card has none until the app has a citizen's view.
+/// At the accessibility type sizes its parts stack rather than share a line, and a card taller than
+/// the room it is offered scrolls inside it, so it never runs past the sky's part.
 struct SkyCard: View {
   @Environment(AppModel.self) private var app
+  @Environment(\.dynamicTypeSize) private var typeSize
   let target: SkyTarget
   let model: SkyModel
 
+  private var stacked: Bool { typeSize.isAccessibilitySize }
+
   var body: some View {
+    ViewThatFits(in: .vertical) {
+      content
+      ScrollView {
+        content
+      }
+      .scrollBounceBehavior(.basedOnSize)
+    }
+    .frame(maxWidth: stacked ? .infinity : 420, alignment: .leading)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("sky-card")
+  }
+
+  private var content: some View {
     VStack(alignment: .leading, spacing: 10) {
       switch target {
       case .star(let id):
@@ -33,10 +52,7 @@ struct SkyCard: View {
       }
     }
     .padding(14)
-    .frame(maxWidth: 420, alignment: .leading)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-    .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("sky-card")
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var gone: some View {
@@ -88,26 +104,21 @@ struct SkyCard: View {
       header(
         title: mark.title, icon: AnyView(Diamond(color: color)),
         chip: (mark.phase.label.lowercased(), color))
-      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-        row("Project", app.store.projectName(mark.project))
-        row("Stage", mark.stage)
-        if let holder = mark.holder {
-          GridRow {
-            Text("Held by").foregroundStyle(.tertiary)
-            HStack(spacing: 4) {
-              if let holderCli {
-                Glyph(mark: CliMark.of(holderCli), size: 14)
-              }
-              Text("\(holder) · \(mark.linked == nil ? "resting" : "in a turn on it")")
-            }
-          }
-        } else if let waiting = mark.waitingFor {
-          row("Waiting for", waiting)
-        }
-      }
-      .font(.subheadline)
+      details(rows(of: mark), glyph: holderCli.map { CliMark.of($0) })
+        .font(.subheadline)
       open { app.open(.thread(mark.id)) }
     }
+  }
+
+  /// What the task card lists: its project, its stage, and who holds it or may take it.
+  private func rows(of mark: SkyTaskMark) -> [(String, String)] {
+    var rows = [("Project", app.store.projectName(mark.project)), ("Stage", mark.stage)]
+    if let holder = mark.holder {
+      rows.append(("Held by", "\(holder) · \(mark.linked == nil ? "resting" : "in a turn on it")"))
+    } else if let waiting = mark.waitingFor {
+      rows.append(("Waiting for", waiting))
+    }
+    return rows
   }
 
   // MARK: A sphere
@@ -132,29 +143,42 @@ struct SkyCard: View {
   private func header(
     title: String, subtitle: String = "", icon: AnyView, chip: (String, SkyColor)?
   ) -> some View {
-    HStack(alignment: .top, spacing: 10) {
-      icon
-        .frame(width: 32, height: 32)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.headline)
-          .accessibilityIdentifier("sky-card-title")
-        if !subtitle.isEmpty {
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+    let layout =
+      stacked
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+      : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+    return HStack(alignment: .top, spacing: 10) {
+      if !stacked {
+        icon
+          .frame(width: 32, height: 32)
+          .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+          .accessibilityHidden(true)
       }
-      Spacer(minLength: 0)
-      if let chip {
-        Text(chip.0)
-          .font(.caption.weight(.medium))
-          .padding(.horizontal, 8)
-          .padding(.vertical, 2)
-          .foregroundStyle(Color(sky: chip.1))
-          .background(Color(sky: chip.1, opacity: 0.15), in: Capsule())
+      layout {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title)
+            .font(.headline)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("sky-card-title")
+          if !subtitle.isEmpty {
+            Text(subtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        if !stacked {
+          Spacer(minLength: 0)
+        }
+        if let chip {
+          Text(chip.0)
+            .font(.caption.weight(.medium))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .foregroundStyle(Color(sky: chip.1))
+            .background(Color(sky: chip.1, opacity: 0.15), in: Capsule())
+        }
       }
       Button {
         app.sky.card = nil
@@ -162,6 +186,7 @@ struct SkyCard: View {
         Label("Close", systemImage: "xmark")
           .labelStyle(.iconOnly)
           .frame(width: 28, height: 28)
+          .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .foregroundStyle(.secondary)
@@ -169,10 +194,37 @@ struct SkyCard: View {
     }
   }
 
-  private func row(_ label: String, _ value: String) -> some View {
-    GridRow {
-      Text(label).foregroundStyle(.tertiary)
-      Text(value).lineLimit(2)
+  /// Labelled values in two columns, or each label over its value at the accessibility sizes. The
+  /// last row's value, who holds the task, leads with `glyph`, its CLI's mark.
+  @ViewBuilder private func details(_ rows: [(String, String)], glyph: CliMark?) -> some View {
+    let last = rows.count - 1
+    if stacked {
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(rows.indices, id: \.self) { index in
+          VStack(alignment: .leading, spacing: 2) {
+            Text(rows[index].0).foregroundStyle(.tertiary)
+            value(rows[index].1, glyph: index == last && rows[index].0 == "Held by" ? glyph : nil)
+          }
+        }
+      }
+    } else {
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+        ForEach(rows.indices, id: \.self) { index in
+          GridRow {
+            Text(rows[index].0).foregroundStyle(.tertiary)
+            value(rows[index].1, glyph: index == last && rows[index].0 == "Held by" ? glyph : nil)
+          }
+        }
+      }
+    }
+  }
+
+  private func value(_ text: String, glyph: CliMark?) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 4) {
+      if let glyph {
+        Glyph(mark: glyph, size: 14)
+      }
+      Text(text).fixedSize(horizontal: false, vertical: true)
     }
   }
 

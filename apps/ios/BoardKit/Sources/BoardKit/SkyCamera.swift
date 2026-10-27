@@ -131,8 +131,9 @@ public func frameSphere(
     x: sphere.x, y: sphere.y, scale: min(camera.scale, clamp(fits, skyMinScale, skyMaxScale)))
 }
 
-/// Room around a focused sphere the camera keeps in view: its name and its tasks' orbit.
-private let focusRoom = 34.0
+/// Room around a focused sphere the camera keeps in view: its name and its tasks' orbit. The web's
+/// `FOCUS_ROOM`, which the scene's table checks.
+let skyFocusRoom = 34.0
 /// The longest step the motion takes, in seconds, however long the clock went between two.
 private let longestStep = 0.05
 /// How much of the way to its target the camera goes in a second, as a rate.
@@ -237,7 +238,7 @@ public struct SkyCameraMotion: Sendable, Hashable {
       return
     }
     if let framed = frameSphere(
-      target, view, sphere: (x: sphere.x, y: sphere.y, reach: sphere.radius + focusRoom))
+      target, view, sphere: (x: sphere.x, y: sphere.y, reach: sphere.radius + skyFocusRoom))
     {
       target = framed
       mode = .focus

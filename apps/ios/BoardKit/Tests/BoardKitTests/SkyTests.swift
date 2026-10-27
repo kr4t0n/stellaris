@@ -257,7 +257,7 @@ import Testing
         for frame in pose.frames {
           let anchor = try #require(model.anchors.first { $0.id == frame.anchor })
           let framed = frameSphere(
-            home, view, sphere: (x: anchor.x, y: anchor.y, reach: anchor.radius + 34))
+            home, view, sphere: (x: anchor.x, y: anchor.y, reach: anchor.radius + skyFocusRoom))
           #expect(Self.close(framed, frame.camera), "\(board.name), \(pose.pose), \(frame.anchor)")
         }
       }

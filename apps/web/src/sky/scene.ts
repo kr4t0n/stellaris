@@ -92,8 +92,11 @@ const BUBBLE_FONT = `500 11px ${LABEL_FAMILY}`;
 const BUBBLE_LIFE = 5;
 const BUBBLE_WIDTH = 240;
 
-/** Room around a focused sphere the camera keeps in view: its name and its tasks' orbit. */
-const FOCUS_ROOM = 34;
+/**
+ * Room around a focused sphere the camera keeps in view: its name and its tasks' orbit. The sky's
+ * tables for BoardKit read it from here.
+ */
+export const FOCUS_ROOM = 34;
 /** How far the background drifts against a pan, for depth. */
 const PARALLAX = 0.06;
 

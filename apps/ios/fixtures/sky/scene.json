@@ -1,0 +1,3731 @@
+{
+  "models": {
+    "resting": {
+      "anchors": [
+        {"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":161.77945491468364},
+        {"id":"lab","label":"LAB","kind":"project","x":0,"y":-354,"radius":112},
+        {"id":"web","label":"WEB","kind":"project","x":0,"y":354,"radius":58}
+      ],
+      "stars": [
+        {"id":"ada","name":"ada","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"bo","name":"bo","cli":"codex","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50},
+        {"id":"cy","name":"cy","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":-96,"y":-8},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":93,"y":-72}
+      ],
+      "tasks": [],
+      "radius": 532
+    },
+    "working": {
+      "anchors": [
+        {"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":161.77945491468364},
+        {"id":"lab","label":"LAB","kind":"project","x":0,"y":-354,"radius":112},
+        {"id":"web","label":"WEB","kind":"project","x":0,"y":354,"radius":58}
+      ],
+      "stars": [
+        {"id":"ada/lab","name":"ada","cli":"claude","state":"working","resident":false,"anchor":"lab","queuedFor":null,"x":0,"y":-354},
+        {"id":"bo","name":"bo","cli":"codex","state":"queued","resident":false,"anchor":"society","queuedFor":"lab","x":46,"y":50},
+        {"id":"cy","name":"cy","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":-96,"y":-8},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":true,"anchor":"society","queuedFor":null,"x":93,"y":-72}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2BBBBBBBBBBBBBBBBBBB1",
+          "title": "task 1",
+          "project": "lab",
+          "phase": "working",
+          "stage": "Work",
+          "holder": "ada",
+          "waitingFor": null,
+          "linked": "ada/lab",
+          "x": 0,
+          "y": -479
+        },
+        {
+          "id": "01M3Q2BBBBBBBBBBBBBBBBBBB2",
+          "title": "task 2",
+          "project": "lab",
+          "phase": "waiting",
+          "stage": "Work",
+          "holder": null,
+          "waitingFor": "any engineer",
+          "linked": null,
+          "x": -37,
+          "y": -473
+        }
+      ],
+      "radius": 532
+    },
+    "split": {
+      "anchors": [
+        {"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":161.77945491468364},
+        {"id":"lab","label":"LAB","kind":"project","x":0,"y":-354,"radius":112},
+        {"id":"web","label":"WEB","kind":"project","x":0,"y":354,"radius":112}
+      ],
+      "stars": [
+        {"id":"ada/lab","name":"ada","cli":"claude","state":"working","resident":false,"anchor":"lab","queuedFor":null,"x":0,"y":-354},
+        {"id":"ada/web","name":"ada","cli":"claude","state":"working","resident":false,"anchor":"web","queuedFor":null,"x":46,"y":404},
+        {"id":"bo","name":"bo","cli":"codex","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50},
+        {"id":"cy","name":"cy","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":-96,"y":-8},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":93,"y":-72}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2BBBBBBBBBBBBBBBBBBB1",
+          "title": "task 1",
+          "project": "lab",
+          "phase": "working",
+          "stage": "Work",
+          "holder": "ada",
+          "waitingFor": null,
+          "linked": "ada/lab",
+          "x": 0,
+          "y": -479
+        }
+      ],
+      "radius": 532
+    }
+  },
+  "sequences": [
+    {
+      "name": "a citizen rises, goes to a turn, and comes back",
+      "reducedMotion": false,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"resting"}],"sample":true},
+        {"ms":1000033,"count":60,"every":30},
+        {"ms":1002013,"ops":[{"model":"working"}],"sample":true},
+        {"ms":1002046,"count":90,"every":30},
+        {"ms":1005016,"ops":[{"model":"resting"}],"sample":true},
+        {"ms":1005049,"count":90,"every":30}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":1,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":240.7154079,"y":337.9370754}},
+            {"id":"bo","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":238.3376889,"y":339.4599602}},
+            {"id":"cy","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":235.5732347,"y":340.7644263}},
+            {"id":"stew","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":232.5403882,"y":330.0525791}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.135],
+            [221.4605004,160.5099494,1.1086582,0.104],
+            [425.0975679,49.6232839,0.7814026,0.038],
+            [450.4154662,573.3615356,0.9345913,0.128]
+          ],
+          "names": [["ada",240.7154079,363.9370754,11],["bo",238.3376889,365.4599602,11],["cy",235.5732347,366.7644263,11],["stew",232.5403882,356.0525791,11]]
+        },
+        {
+          "ms": 1000990,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.474105,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0.9244591,"flash":0,"leaving":false,"screen":{"x":238.2477241,"y":336.5743904}},
+            {
+              "id": "bo",
+              "x": 31.6458523,
+              "y": 34.3976655,
+              "vx": 25.0139308,
+              "vy": 27.1890552,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.0942663,"y":353.4473421}
+            },
+            {
+              "id": "cy",
+              "x": -66.0435178,
+              "y": -5.5036265,
+              "vx": -52.202986,
+              "vy": -4.3502488,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":204.5638488,"y":334.893218}
+            },
+            {
+              "id": "stew",
+              "x": 63.9796578,
+              "y": -49.5326383,
+              "vx": 50.5716427,
+              "vy": -39.1522395,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":266.0168642,"y":309.1258977}
+            }
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.144],
+            [425.0975679,49.6232839,0.7814026,0.064],
+            [450.4154662,573.3615356,0.9345913,0.113]
+          ],
+          "names": [["ada",238.2477241,353.3672301,9],["bo",252.0942663,370.2401818,9],["cy",204.5638488,351.6860576,9],["stew",266.0168642,325.9187374,9]]
+        },
+        {
+          "ms": 1001980,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4510565,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0.9942936,"flash":0,"leaving":false,"screen":{"x":237.3942396,"y":336.7928623}},
+            {
+              "id": "bo",
+              "x": 43.864206,
+              "y": 47.6784848,
+              "vx": 4.6341316,
+              "vy": 5.0370995,
+              "presence": 0.9942936,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.1090742,"y":358.6717395}
+            },
+            {
+              "id": "cy",
+              "x": -91.5426908,
+              "y": -7.6285576,
+              "vx": -9.6712311,
+              "vy": -0.8059359,
+              "presence": 0.9942936,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":194.0410485,"y":333.8272361}
+            },
+            {
+              "id": "stew",
+              "x": 88.6819817,
+              "y": -68.6570181,
+              "vx": 9.3690051,
+              "vy": -7.2534233,
+              "presence": 0.9942936,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":276.3553149,"y":302.0199083}
+            }
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.105],
+            [221.4605004,160.5099494,1.1086582,0.204],
+            [425.0975679,49.6232839,0.7814026,0.098],
+            [450.4154662,573.3615356,0.9345913,0.123]
+          ],
+          "names": [["ada",237.3942396,353.4013139,9],["bo",256.1090742,375.2801912,9],["cy",194.0410485,350.4356877,9],["stew",276.3553149,318.6283599,9]]
+        },
+        {
+          "ms": 1002013,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4509519,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 44.0075661,
+              "y": 47.834311,
+              "vx": 4.3442469,
+              "vy": 4.7220076,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.1435049,"y":358.7394878}
+            },
+            {
+              "id": "cy",
+              "x": -91.8418772,
+              "y": -7.6534898,
+              "vx": -9.0662545,
+              "vy": -0.7555212,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":193.8970086,"y":333.8112419}
+            },
+            {
+              "id": "stew",
+              "x": 88.9718185,
+              "y": -68.8814079,
+              "vx": 8.782934,
+              "vy": -6.7996909,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":276.4970996,"y":301.9369365}
+            },
+            {"id":"ada/lab","x":0,"y":-1.92753,"vx":0,"vy":-58.41,"presence":0.9947644,"flash":0,"leaving":false,"screen":{"x":237.4331608,"y":334.7812981}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.0825,"leaving":false,"screen":{"x":237.5,"y":118.4940571}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.0825,"leaving":false,"screen":{"x":220.814781,"y":121.1997683}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.107],
+            [221.4605004,160.5099494,1.1086582,0.206],
+            [425.0975679,49.6232839,0.7814026,0.099],
+            [450.4154662,573.3615356,0.9345913,0.124]
+          ],
+          "names": [["bo",256.1435049,375.3471027,9],["cy",193.8970086,350.4188568,9],["stew",276.4970996,318.5445514,9],["ada",237.4331608,351.388913,9]]
+        },
+        {
+          "ms": 1003003,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500417,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 45.785248,
+              "y": 49.7665739,
+              "vx": 0.532664,
+              "vy": 0.5789826,
+              "presence": 0.9996045,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.1598099,"y":359.5902762}
+            },
+            {
+              "id": "cy",
+              "x": -95.5518219,
+              "y": -7.9626518,
+              "vx": -1.1116466,
+              "vy": -0.0926372,
+              "presence": 0.9996045,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.8038293,"y":333.4721533}
+            },
+            {
+              "id": "stew",
+              "x": 92.5658275,
+              "y": -71.6638664,
+              "vx": 1.0769077,
+              "vy": -0.833735,
+              "presence": 0.9996045,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":278.6395081,"y":301.0966043}
+            },
+            {
+              "id": "ada/lab",
+              "x": 0,
+              "y": -249.6089522,
+              "vx": 0,
+              "vy": -184.0448644,
+              "presence": 0.9996045,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":237.0144525,"y":223.413955}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9306912,"leaving":false,"screen":{"x":237.5,"y":118.9300173}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9306912,"leaving":false,"screen":{"x":220.8484565,"y":121.6302676}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.181],
+            [221.4605004,160.5099494,1.1086582,0.277],
+            [425.0975679,49.6232839,0.7814026,0.131],
+            [450.4154662,573.3615356,0.9345913,0.158]
+          ],
+          "names": [["bo",256.1598099,376.19061,9],["cy",191.8038293,350.0724871,9],["stew",278.6395081,317.6969381,9],["ada",237.0144525,240.0142887,9]]
+        },
+        {
+          "ms": 1003993,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500018,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 45.9828887,
+              "y": 49.9814008,
+              "vx": 0.0492445,
+              "vy": 0.0535266,
+              "presence": 0.9999701,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.5947529,"y":359.5980919}
+            },
+            {
+              "id": "cy",
+              "x": -95.9642895,
+              "y": -7.9970241,
+              "vx": -0.102771,
+              "vy": -0.0085643,
+              "presence": 0.9999701,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.2617962,"y":333.16096}
+            },
+            {
+              "id": "stew",
+              "x": 92.9654054,
+              "y": -71.9732171,
+              "vx": 0.0995594,
+              "vy": -0.0770783,
+              "presence": 0.9999701,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.3894041,"y":301.3411801}
+            },
+            {
+              "id": "ada/lab",
+              "x": 0,
+              "y": -338.6669221,
+              "vx": 0,
+              "vy": -33.4318135,
+              "presence": 0.9999701,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":236.6143886,"y":183.3882038}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9947644,"leaving":false,"screen":{"x":237.5,"y":118.9491242}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9947644,"leaving":false,"screen":{"x":220.8499324,"y":121.6491352}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.284],
+            [221.4605004,160.5099494,1.1086582,0.347],
+            [425.0975679,49.6232839,0.7814026,0.15],
+            [450.4154662,573.3615356,0.9345913,0.213]
+          ],
+          "names": [["bo",255.5947529,376.1981065,9],["cy",191.2617962,349.7609746,9],["stew",279.3894041,317.9411947,9],["ada",236.6143886,199.9882184,9]]
+        },
+        {
+          "ms": 1004983,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500001,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 45.9992738,
+              "y": 49.9992107,
+              "vx": 0.0030614,
+              "vy": 0.0033276,
+              "presence": 0.9999977,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.0926006,"y":359.4122851}
+            },
+            {
+              "id": "cy",
+              "x": -95.9984845,
+              "y": -7.9998737,
+              "vx": -0.0063889,
+              "vy": -0.0005324,
+              "presence": 0.9999977,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0710363,"y":332.7886097}
+            },
+            {
+              "id": "stew",
+              "x": 92.9985319,
+              "y": -71.9988634,
+              "vx": 0.0061893,
+              "vy": -0.0047917,
+              "presence": 0.9999977,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.9018732,"y":301.7205837}
+            },
+            {
+              "id": "ada/lab",
+              "x": 0,
+              "y": -352.3473433,
+              "vx": 0,
+              "vy": -4.0991969,
+              "presence": 0.9999977,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":236.2611062,"y":177.2144571}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9996045,"leaving":false,"screen":{"x":237.5,"y":118.9499616}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9996045,"leaving":false,"screen":{"x":220.849997,"y":121.6499621}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.378],
+            [221.4605004,160.5099494,1.1086582,0.404],
+            [425.0975679,49.6232839,0.7814026,0.149],
+            [450.4154662,573.3615356,0.9345913,0.281]
+          ],
+          "names": [["bo",255.0926006,376.0122857,9],["cy",191.0710363,349.3886103,9],["stew",279.9018732,318.3205844,9],["ada",236.2611062,193.8144578,9]]
+        },
+        {
+          "ms": 1005016,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500001,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 45.9993648,
+              "y": 49.9993096,
+              "vx": 0.0027569,
+              "vy": 0.0029966,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.0786143,"y":359.4041873}
+            },
+            {
+              "id": "cy",
+              "x": -95.9986744,
+              "y": -7.9998895,
+              "vx": -0.0057535,
+              "vy": -0.0004795,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0685663,"y":332.775194}
+            },
+            {
+              "id": "stew",
+              "x": 92.9987158,
+              "y": -71.9990058,
+              "vx": 0.0055737,
+              "vy": -0.0043151,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.9167659,"y":301.7334276}
+            },
+            {"id":"ada","x":0,"y":-350.5453366,"vx":0,"vy":54.6062634,"presence":0.9999979,"flash":0,"leaving":false,"screen":{"x":235.0008812,"y":179.2929882}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9171371,"leaving":true,"screen":{"x":237.5,"y":118.9499654}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9171371,"leaving":true,"screen":{"x":220.8499973,"y":121.6499658}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.381],
+            [221.4605004,160.5099494,1.1086582,0.405],
+            [425.0975679,49.6232839,0.7814026,0.149],
+            [450.4154662,573.3615356,0.9345913,0.284]
+          ],
+          "names": [["bo",255.0786143,376.0041879,9],["cy",191.0685663,349.3751945,9],["stew",279.9167659,318.3334281,9],["ada",235.0008812,195.8929888,9]]
+        },
+        {
+          "ms": 1006006,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 46.0000601,
+              "y": 50.0000653,
+              "vx": -0.0000041,
+              "vy": -0.0000045,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.7584368,"y":359.1157973}
+            },
+            {
+              "id": "cy",
+              "x": -96.0001253,
+              "y": -8.0000104,
+              "vx": 0.0000086,
+              "vy": 7e-7,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.1049049,"y":332.3501026}
+            },
+            {
+              "id": "stew",
+              "x": 93.0001214,
+              "y": -72.000094,
+              "vx": -0.0000083,
+              "vy": 0.0000064,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.2969028,"y":302.1079847}
+            },
+            {
+              "id": "ada",
+              "x": 0,
+              "y": -104.2708548,
+              "vx": 0,
+              "vy": 183.6966936,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":234.4435185,"y":289.9665415}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.0692814,"leaving":true,"screen":{"x":237.5,"y":118.9499985}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.0692814,"leaving":true,"screen":{"x":220.8499999,"y":121.6499985}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.431],
+            [221.4605004,160.5099494,1.1086582,0.44],
+            [425.0975679,49.6232839,0.7814026,0.128],
+            [450.4154662,573.3615356,0.9345913,0.358]
+          ],
+          "names": [["bo",254.7584368,375.7157973,9],["cy",191.1049049,348.9501026,9],["stew",280.2969028,318.7079847,9],["ada",234.4435185,306.5665415,9]]
+        },
+        {
+          "ms": 1006996,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 46.0000184,
+              "y": 50.00002,
+              "vx": -0.0000321,
+              "vy": -0.0000349,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.6474937,"y":358.75475}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000383,
+              "y": -8.0000032,
+              "vx": 0.0000671,
+              "vy": 0.0000056,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.3527697,"y":331.8981035}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000371,
+              "y": -72.0000287,
+              "vx": -0.000065,
+              "vy": 0.0000503,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.5351973,"y":302.4437631}
+            },
+            {"id":"ada","x":0,"y":-15.3281897,"vx":0,"vy":33.4105975,"presence":1,"flash":0,"leaving":false,"screen":{"x":234.0708781,"y":329.7438568}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.42],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.095],
+            [450.4154662,573.3615356,0.9345913,0.431]
+          ],
+          "names": [["bo",254.6474937,375.35475,9],["cy",191.3527697,348.4981035,9],["stew",280.5351973,319.0437631,9],["ada",234.0708781,346.3438568,9]]
+        },
+        {
+          "ms": 1007986,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {
+              "id": "bo",
+              "x": 46.0000027,
+              "y": 50.000003,
+              "vx": -0.0000059,
+              "vy": -0.0000064,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.7571124,"y":358.3440714}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000057,
+              "y": -8.0000005,
+              "vx": 0.0000123,
+              "vy": 0.000001,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.8005271,"y":331.4448265}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000055,
+              "y": -72.0000043,
+              "vx": -0.0000119,
+              "vy": 0.0000092,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.6194886,"y":302.7191021}
+            },
+            {"id":"ada","x":0,"y":-1.6531189,"vx":0,"vy":4.0992286,"presence":1,"flash":0,"leaving":false,"screen":{"x":233.9092327,"y":335.5715286}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.351],
+            [221.4605004,160.5099494,1.1086582,0.427],
+            [425.0975679,49.6232839,0.7814026,0.061],
+            [450.4154662,573.3615356,0.9345913,0.494]
+          ],
+          "names": [["bo",254.7571124,374.9440714,9],["cy",191.8005271,348.0448265,9],["stew",280.6194886,319.3191021,9],["ada",233.9092327,352.1715286,9]]
+        }
+      ]
+    },
+    {
+      "name": "a second turn splits off and merges back",
+      "reducedMotion": false,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"working"}],"sample":true},
+        {"ms":1000033,"count":45,"every":15},
+        {"ms":1001518,"ops":[{"model":"split"}],"sample":true},
+        {"ms":1001551,"count":60,"every":30},
+        {"ms":1003531,"ops":[{"model":"working"}],"sample":true},
+        {"ms":1003564,"count":75,"every":15}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":1,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":239.1077039,"y":-17.7814623}},
+            {"id":"bo","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":238.3376889,"y":339.4599602}},
+            {"id":"cy","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":235.5732347,"y":340.7644263}},
+            {"id":"stew","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":232.5403882,"y":330.0525791}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0,"leaving":false,"screen":{"x":237.5,"y":-144.5}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0,"leaving":false,"screen":{"x":200.5,"y":-138.5}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.135],
+            [221.4605004,160.5099494,1.1086582,0.104],
+            [425.0975679,49.6232839,0.7814026,0.038],
+            [450.4154662,573.3615356,0.9345913,0.128]
+          ],
+          "names": [["ada",239.1077039,8.2185377,11],["bo",238.3376889,365.4599602,11],["cy",235.5732347,366.7644263,11],["stew",232.5403882,356.0525791,11]]
+        },
+        {
+          "ms": 1000495,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.5651422,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.7251529,"flash":0,"leaving":false,"screen":{"x":238.1852692,"y":135.5510301}},
+            {
+              "id": "bo",
+              "x": 15.4924061,
+              "y": 16.8395719,
+              "vx": 39.6190421,
+              "vy": 43.0641762,
+              "presence": 0.7251529,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":246.2556726,"y":347.0093984}
+            },
+            {
+              "id": "cy",
+              "x": -32.331978,
+              "y": -2.6943315,
+              "vx": -82.6832183,
+              "vy": -6.8902682,
+              "presence": 0.7251529,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":217.7108339,"y":336.5561386}
+            },
+            {
+              "id": "stew",
+              "x": 31.3216037,
+              "y": -24.2489835,
+              "vx": 80.0993677,
+              "vy": -62.0124137,
+              "presence": 0.7251529,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.7018748,"y":318.3986374}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.7251529,"leaving":false,"screen":{"x":237.5,"y":63.7968823}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.7251529,"leaving":false,"screen":{"x":216.5897383,"y":67.1877355}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.105],
+            [221.4605004,160.5099494,1.1086582,0.121],
+            [425.0975679,49.6232839,0.7814026,0.049],
+            [450.4154662,573.3615356,0.9345913,0.118]
+          ],
+          "names": [["ada",238.1852692,153.0721678,9],["bo",246.2556726,364.5305361,9],["cy",217.7108339,354.0772763,9],["stew",252.7018748,335.9197751,9]]
+        },
+        {
+          "ms": 1000990,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.474105,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9244591,"flash":0,"leaving":false,"screen":{"x":237.873862,"y":167.7040393}},
+            {
+              "id": "bo",
+              "x": 31.6458523,
+              "y": 34.3976655,
+              "vx": 25.0139308,
+              "vy": 27.1890552,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.0942663,"y":353.4473421}
+            },
+            {
+              "id": "cy",
+              "x": -66.0435178,
+              "y": -5.5036265,
+              "vx": -52.202986,
+              "vy": -4.3502488,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":204.5638488,"y":334.893218}
+            },
+            {
+              "id": "stew",
+              "x": 63.9796578,
+              "y": -49.5326383,
+              "vx": 50.5716427,
+              "vy": -39.1522395,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":266.0168642,"y":309.1258977}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9244591,"leaving":false,"screen":{"x":237.5,"y":107.4037241}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9244591,"leaving":false,"screen":{"x":219.9581165,"y":110.2483538}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.144],
+            [425.0975679,49.6232839,0.7814026,0.064],
+            [450.4154662,573.3615356,0.9345913,0.113]
+          ],
+          "names": [["ada",237.873862,184.496879,9],["bo",252.0942663,370.2401818,9],["cy",204.5638488,351.6860576,9],["stew",266.0168642,325.9187374,9]]
+        },
+        {
+          "ms": 1001485,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4550464,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9792378,"flash":0,"leaving":false,"screen":{"x":237.6559808,"y":174.496579}},
+            {
+              "id": "bo",
+              "x": 40.1918215,
+              "y": 43.6867625,
+              "vx": 11.5663663,
+              "vy": 12.5721372,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9984296,"y":357.006138}
+            },
+            {
+              "id": "cy",
+              "x": -83.878584,
+              "y": -6.989882,
+              "vx": -24.1385035,
+              "vy": -2.011542,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":197.447945,"y":334.1710944}
+            },
+            {
+              "id": "stew",
+              "x": 81.2573783,
+              "y": -62.908938,
+              "vx": 23.3841753,
+              "vy": -18.1038776,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":273.0204762,"y":304.1948865}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9792378,"leaving":false,"screen":{"x":237.5,"y":116.5327933}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9792378,"leaving":false,"screen":{"x":220.6632847,"y":119.2630714}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.172],
+            [425.0975679,49.6232839,0.7814026,0.08],
+            [450.4154662,573.3615356,0.9345913,0.115]
+          ],
+          "names": [["ada",237.6559808,191.1369499,9],["bo",254.9984296,373.6465089,9],["cy",197.447945,350.8114653,9],["stew",273.0204762,320.8352574,9]]
+        },
+        {
+          "ms": 1001518,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4545468,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9809507,"flash":0,"leaving":false,"screen":{"x":237.6420319,"y":174.6775845}},
+            {
+              "id": "bo",
+              "x": 40.5522349,
+              "y": 44.0785162,
+              "vx": 10.9216174,
+              "vy": 11.8713232,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.1165365,"y":357.1646453}
+            },
+            {
+              "id": "cy",
+              "x": -84.6307511,
+              "y": -7.0525626,
+              "vx": -22.7929406,
+              "vy": -1.8994117,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":197.1290878,"y":334.1399167}
+            },
+            {
+              "id": "stew",
+              "x": 81.9860401,
+              "y": -63.4730633,
+              "vx": 22.0806612,
+              "vy": -17.0947054,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":273.3323604,"y":303.9814325}
+            },
+            {
+              "id": "ada/web",
+              "x": 0.25047,
+              "y": -349.87269,
+              "vx": 7.59,
+              "vy": 125.07,
+              "presence": 0.0825,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":237.7558822,"y":176.5536399}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9809507,"leaving":false,"screen":{"x":237.5,"y":116.7720967}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.8984507,"leaving":true,"screen":{"x":220.6817695,"y":119.4993774}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":63.346}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.09],
+            [221.4605004,160.5099494,1.1086582,0.174],
+            [425.0975679,49.6232839,0.7814026,0.082],
+            [450.4154662,573.3615356,0.9345913,0.115]
+          ],
+          "names": [
+            ["ada",237.6420319,191.3139586,9],
+            ["bo",255.1165365,373.8010195,9],
+            ["cy",197.1290878,350.7762909,9],
+            ["stew",273.3323604,320.6178067,9],
+            ["ada",237.7558822,193.1900141,9]
+          ]
+        },
+        {
+          "ms": 1002508,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4501993,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.998561,"flash":0,"leaving":false,"screen":{"x":237.2232602,"y":176.3355487}},
+            {
+              "id": "bo",
+              "x": 45.3232085,
+              "y": 49.2643571,
+              "vx": 1.5776982,
+              "vy": 1.7148893,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.3231488,"y":359.3728833}
+            },
+            {
+              "id": "cy",
+              "x": -94.5875656,
+              "y": -7.8822971,
+              "vx": -3.2925875,
+              "vy": -0.2743823,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":192.4614825,"y":333.6215326}
+            },
+            {
+              "id": "stew",
+              "x": 91.6317042,
+              "y": -70.9406742,
+              "vx": 3.1896941,
+              "vy": -2.4694406,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":277.9320613,"y":301.2315075}
+            },
+            {
+              "id": "ada/web",
+              "x": 32.4350616,
+              "y": 180.4734062,
+              "vx": 23.9154344,
+              "vy": 394.0847662,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":251.8255013,"y":416.9550872}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.998561,"leaving":false,"screen":{"x":237.5,"y":118.8545486}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.0678698,"leaving":true,"screen":{"x":220.8426269,"y":121.5557442}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":109.8676314}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.138],
+            [221.4605004,160.5099494,1.1086582,0.241],
+            [425.0975679,49.6232839,0.7814026,0.116],
+            [450.4154662,573.3615356,0.9345913,0.138]
+          ],
+          "names": [
+            ["ada",237.2232602,192.9371428,9],
+            ["bo",256.3231488,375.9744775,9],
+            ["cy",192.4614825,350.2231268,9],
+            ["stew",277.9320613,317.8331017,9],
+            ["ada",251.8255013,433.5566814,9]
+          ]
+        },
+        {
+          "ms": 1003498,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500087,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9998913,"flash":0,"leaving":false,"screen":{"x":236.8102884,"y":176.4730061}},
+            {
+              "id": "bo",
+              "x": 45.9366123,
+              "y": 49.9311004,
+              "vx": 0.1679985,
+              "vy": 0.182607,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.8854105,"y":359.6332782}
+            },
+            {
+              "id": "cy",
+              "x": -95.8677127,
+              "y": -7.9889761,
+              "vx": -0.3506055,
+              "vy": -0.0292171,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.4635062,"y":333.3231741}
+            },
+            {
+              "id": "stew",
+              "x": 92.8718467,
+              "y": -71.9007845,
+              "vx": 0.3396491,
+              "vy": -0.2629541,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.0678442,"y":301.1800398}
+            },
+            {
+              "id": "ada/web",
+              "x": 44.0075661,
+              "y": 371.1681552,
+              "vx": 4.3442469,
+              "vy": 71.5856345,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.6140775,"y":502.8050092}
+            }
+          ],
+          "marks": [{"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9998913,"leaving":false,"screen":{"x":237.5,"y":118.9458166}}],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":111.9065443}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.231],
+            [221.4605004,160.5099494,1.1086582,0.313],
+            [425.0975679,49.6232839,0.7814026,0.143],
+            [450.4154662,573.3615356,0.9345913,0.183]
+          ],
+          "names": [
+            ["ada",236.8102884,193.073076,9],
+            ["bo",255.8854105,376.2333481,9],
+            ["cy",191.4635062,349.9232439,9],
+            ["stew",279.0678442,317.7801097,9],
+            ["ada",256.6140775,519.4050791,9]
+          ]
+        },
+        {
+          "ms": 1003531,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500079,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999003,"flash":0,"leaving":false,"screen":{"x":236.7969319,"y":176.4746306}},
+            {
+              "id": "bo",
+              "x": 45.941733,
+              "y": 49.9366664,
+              "vx": 0.1551729,
+              "vy": 0.1686661,
+              "presence": 0.9999003,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.8659326,"y":359.6327706}
+            },
+            {
+              "id": "cy",
+              "x": -95.8783994,
+              "y": -7.9898666,
+              "vx": -0.323839,
+              "vy": -0.0269866,
+              "presence": 0.9999003,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.446817,"y":333.3128405}
+            },
+            {
+              "id": "stew",
+              "x": 92.8821994,
+              "y": -71.9087996,
+              "vx": 0.313719,
+              "vy": -0.2428793,
+              "presence": 0.9999003,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.091582,"y":301.1892381}
+            },
+            {
+              "id": "ada/web",
+              "x": 43.8914354,
+              "y": 369.2545221,
+              "vx": -3.5191141,
+              "vy": -57.9888801,
+              "presence": 0.9126963,
+              "flash": 0,
+              "leaving": true,
+              "screen": {"x":256.5484232,"y":501.9448568}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999003,"leaving":false,"screen":{"x":237.5,"y":118.9462308}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.0825,"leaving":false,"screen":{"x":220.8497088,"y":121.646278}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":106.5697964}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.234],
+            [221.4605004,160.5099494,1.1086582,0.315],
+            [425.0975679,49.6232839,0.7814026,0.143],
+            [450.4154662,573.3615356,0.9345913,0.185]
+          ],
+          "names": [
+            ["ada",236.7969319,193.0746935,9],
+            ["bo",255.8659326,376.2328336,9],
+            ["cy",191.446817,349.9129035,9],
+            ["stew",279.091582,317.7893011,9],
+            ["ada",256.5484232,518.5449197,9]
+          ]
+        },
+        {
+          "ms": 1004026,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500016,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999726,"flash":0,"leaving":false,"screen":{"x":236.6017088,"y":176.4886841}},
+            {
+              "id": "bo",
+              "x": 45.9843817,
+              "y": 49.9830236,
+              "vx": 0.0452425,
+              "vy": 0.0491767,
+              "presence": 0.9999726,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.575884,"y":359.5940109}
+            },
+            {
+              "id": "cy",
+              "x": -95.9674053,
+              "y": -7.9972838,
+              "vx": -0.0944192,
+              "vy": -0.0078683,
+              "presence": 0.9999726,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.2514285,"y":333.1495694}
+            },
+            {
+              "id": "stew",
+              "x": 92.9684239,
+              "y": -71.975554,
+              "vx": 0.0914686,
+              "vy": -0.0708144,
+              "presence": 0.9999726,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.4087975,"y":301.353147}
+            },
+            {
+              "id": "ada/web",
+              "x": 28.5870029,
+              "y": 117.0640905,
+              "vx": -37.6908961,
+              "vy": -621.0804178,
+              "presence": 0.2508519,
+              "flash": 0,
+              "leaving": true,
+              "screen": {"x":249.4659072,"y":388.4683008}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999726,"leaving":false,"screen":{"x":237.5,"y":118.9492109}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.7478278,"leaving":false,"screen":{"x":220.849939,"y":121.6492208}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":68.1680611}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.287],
+            [221.4605004,160.5099494,1.1086582,0.349],
+            [425.0975679,49.6232839,0.7814026,0.15],
+            [450.4154662,573.3615356,0.9345913,0.215]
+          ],
+          "names": [
+            ["ada",236.6017088,193.0886973,9],
+            ["bo",255.575884,376.1940241,9],
+            ["cy",191.2514285,349.7495826,9],
+            ["stew",279.4087975,317.9531602,9],
+            ["ada",249.4659072,405.068314,9]
+          ]
+        },
+        {
+          "ms": 1004521,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500003,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999925,"flash":0,"leaving":false,"screen":{"x":236.418458,"y":176.4862843}},
+            {
+              "id": "bo",
+              "x": 45.996355,
+              "y": 49.996038,
+              "vx": 0.0120109,
+              "vy": 0.0130554,
+              "presence": 0.9999925,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.3084834,"y":359.5137714}
+            },
+            {
+              "id": "cy",
+              "x": -95.992393,
+              "y": -7.9993661,
+              "vx": -0.0250663,
+              "vy": -0.0020889,
+              "presence": 0.9999925,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.1310152,"y":332.9699963}
+            },
+            {
+              "id": "stew",
+              "x": 92.9926307,
+              "y": -71.9942948,
+              "vx": 0.024283,
+              "vy": -0.0187997,
+              "presence": 0.9999925,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.6790711,"y":301.5405889}
+            },
+            {
+              "id": "ada/web",
+              "x": 13.3664973,
+              "y": -133.7433699,
+              "vx": -23.4211635,
+              "vy": -385.9400421,
+              "presence": 0.0689459,
+              "flash": 0,
+              "leaving": true,
+              "screen": {"x":242.4333864,"y":275.6018438}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999925,"leaving":false,"screen":{"x":237.5,"y":118.9498348}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9306912,"leaving":false,"screen":{"x":220.8499872,"y":121.6498369}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":60.1286782}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.338],
+            [221.4605004,160.5099494,1.1086582,0.379],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.248]
+          ],
+          "names": [
+            ["ada",236.418458,193.0862871,9],
+            ["bo",255.3084834,376.1137742,9],
+            ["cy",191.1310152,349.5699991,9],
+            ["stew",279.6790711,318.1405917,9],
+            ["ada",242.4333864,292.2018466,9]
+          ]
+        },
+        {
+          "ms": 1005016,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500001,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999979,"flash":0,"leaving":false,"screen":{"x":236.2504406,"y":176.4691819}},
+            {
+              "id": "bo",
+              "x": 45.9993648,
+              "y": 49.9993096,
+              "vx": 0.0027569,
+              "vy": 0.0029966,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.0786143,"y":359.4041873}
+            },
+            {
+              "id": "cy",
+              "x": -95.9986744,
+              "y": -7.9998895,
+              "vx": -0.0057535,
+              "vy": -0.0004795,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0685663,"y":332.775194}
+            },
+            {
+              "id": "stew",
+              "x": 92.9987158,
+              "y": -71.9990058,
+              "vx": 0.0055737,
+              "vy": -0.0043151,
+              "presence": 0.9999979,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.9167659,"y":301.7334276}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999979,"leaving":false,"screen":{"x":237.5,"y":118.9499654}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9809507,"leaving":false,"screen":{"x":220.8499973,"y":121.6499658}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58.4456377}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.381],
+            [221.4605004,160.5099494,1.1086582,0.405],
+            [425.0975679,49.6232839,0.7814026,0.149],
+            [450.4154662,573.3615356,0.9345913,0.284]
+          ],
+          "names": [["ada",236.2504406,193.0691825,9],["bo",255.0786143,376.0041879,9],["cy",191.0685663,349.3751945,9],["stew",279.9167659,318.3334281,9]]
+        },
+        {
+          "ms": 1005511,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999994,"flash":0,"leaving":false,"screen":{"x":236.1006507,"y":176.4382265}},
+            {
+              "id": "bo",
+              "x": 45.9999878,
+              "y": 49.9999867,
+              "vx": 0.0004593,
+              "vy": 0.0004992,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.8937498,"y":359.2704639}
+            },
+            {
+              "id": "cy",
+              "x": -95.9999745,
+              "y": -7.9999979,
+              "vx": -0.0009585,
+              "vy": -0.0000799,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.060061,"y":332.5675866}
+            },
+            {
+              "id": "stew",
+              "x": 92.9999753,
+              "y": -71.9999809,
+              "vx": 0.0009286,
+              "vy": -0.0007189,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.123387,"y":301.9239933}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999994,"leaving":false,"screen":{"x":237.5,"y":118.9499928}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9947644,"leaving":false,"screen":{"x":220.8499994,"y":121.6499929}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58.093294}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.413],
+            [221.4605004,160.5099494,1.1086582,0.426],
+            [425.0975679,49.6232839,0.7814026,0.141],
+            [450.4154662,573.3615356,0.9345913,0.321]
+          ],
+          "names": [["ada",236.1006507,193.0382266,9],["bo",254.8937498,375.870464,9],["cy",191.060061,349.1675867,9],["stew",280.123387,318.5239934,9]]
+        },
+        {
+          "ms": 1006006,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999998,"flash":0,"leaving":false,"screen":{"x":235.9717593,"y":176.3942121}},
+            {
+              "id": "bo",
+              "x": 46.0000601,
+              "y": 50.0000653,
+              "vx": -0.0000041,
+              "vy": -0.0000045,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.7584368,"y":359.1157973}
+            },
+            {
+              "id": "cy",
+              "x": -96.0001253,
+              "y": -8.0000104,
+              "vx": 0.0000086,
+              "vy": 7e-7,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.1049049,"y":332.3501026}
+            },
+            {
+              "id": "stew",
+              "x": 93.0001214,
+              "y": -72.000094,
+              "vx": -0.0000083,
+              "vy": 0.0000064,
+              "presence": 0.9999998,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.2969028,"y":302.1079847}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999998,"leaving":false,"screen":{"x":237.5,"y":118.9499985}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.998561,"leaving":false,"screen":{"x":220.8499999,"y":121.6499985}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58.0195311}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.431],
+            [221.4605004,160.5099494,1.1086582,0.44],
+            [425.0975679,49.6232839,0.7814026,0.128],
+            [450.4154662,573.3615356,0.9345913,0.358]
+          ],
+          "names": [["ada",235.9717593,192.9942122,9],["bo",254.7584368,375.7157973,9],["cy",191.1049049,348.9501026,9],["stew",280.2969028,318.7079847,9]]
+        }
+      ]
+    },
+    {
+      "name": "a call flickers and a post rises, then fades",
+      "reducedMotion": false,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"working"}],"sample":true},
+        {"ms":1000033,"count":45,"every":45},
+        {"ms":1001518,"ops":[{"flash":"ada/lab"},{"say":["ada/lab","The export view is in"]}],"sample":true},
+        {"ms":1001551,"count":180,"every":30},
+        {"ms":1007491,"ops":[{"say":["stew","Next"]},{"flash":"nobody"}],"sample":true},
+        {"ms":1007524,"count":15,"every":5}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":1,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":239.1077039,"y":-17.7814623}},
+            {"id":"bo","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":238.3376889,"y":339.4599602}},
+            {"id":"cy","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":235.5732347,"y":340.7644263}},
+            {"id":"stew","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":232.5403882,"y":330.0525791}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0,"leaving":false,"screen":{"x":237.5,"y":-144.5}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0,"leaving":false,"screen":{"x":200.5,"y":-138.5}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.135],
+            [221.4605004,160.5099494,1.1086582,0.104],
+            [425.0975679,49.6232839,0.7814026,0.038],
+            [450.4154662,573.3615356,0.9345913,0.128]
+          ],
+          "names": [["ada",239.1077039,8.2185377,11],["bo",238.3376889,365.4599602,11],["cy",235.5732347,366.7644263,11],["stew",232.5403882,356.0525791,11]]
+        },
+        {
+          "ms": 1001485,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4550464,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9792378,"flash":0,"leaving":false,"screen":{"x":237.6559808,"y":174.496579}},
+            {
+              "id": "bo",
+              "x": 40.1918215,
+              "y": 43.6867625,
+              "vx": 11.5663663,
+              "vy": 12.5721372,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9984296,"y":357.006138}
+            },
+            {
+              "id": "cy",
+              "x": -83.878584,
+              "y": -6.989882,
+              "vx": -24.1385035,
+              "vy": -2.011542,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":197.447945,"y":334.1710944}
+            },
+            {
+              "id": "stew",
+              "x": 81.2573783,
+              "y": -62.908938,
+              "vx": 23.3841753,
+              "vy": -18.1038776,
+              "presence": 0.9792378,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":273.0204762,"y":304.1948865}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9792378,"leaving":false,"screen":{"x":237.5,"y":116.5327933}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9792378,"leaving":false,"screen":{"x":220.6632847,"y":119.2630714}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.172],
+            [425.0975679,49.6232839,0.7814026,0.08],
+            [450.4154662,573.3615356,0.9345913,0.115]
+          ],
+          "names": [["ada",237.6559808,191.1369499,9],["bo",254.9984296,373.6465089,9],["cy",197.447945,350.8114653,9],["stew",273.0204762,320.8352574,9]]
+        },
+        {
+          "ms": 1001518,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4545468,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9809507,"flash":0.9274,"leaving":false,"screen":{"x":237.6420319,"y":174.6775845}},
+            {
+              "id": "bo",
+              "x": 40.5522349,
+              "y": 44.0785162,
+              "vx": 10.9216174,
+              "vy": 11.8713232,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.1165365,"y":357.1646453}
+            },
+            {
+              "id": "cy",
+              "x": -84.6307511,
+              "y": -7.0525626,
+              "vx": -22.7929406,
+              "vy": -1.8994117,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":197.1290878,"y":334.1399167}
+            },
+            {
+              "id": "stew",
+              "x": 81.9860401,
+              "y": -63.4730633,
+              "vx": 22.0806612,
+              "vy": -17.0947054,
+              "presence": 0.9809507,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":273.3323604,"y":303.9814325}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9809507,"leaving":false,"screen":{"x":237.5,"y":116.7720967}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9809507,"leaving":false,"screen":{"x":220.6817695,"y":119.4993774}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.09],
+            [221.4605004,160.5099494,1.1086582,0.174],
+            [425.0975679,49.6232839,0.7814026,0.082],
+            [450.4154662,573.3615356,0.9345913,0.115]
+          ],
+          "names": [["ada",237.6420319,191.3139586,9],["bo",255.1165365,373.8010195,9],["cy",197.1290878,350.7762909,9],["stew",273.3323604,320.6178067,9]]
+        },
+        {
+          "ms": 1002508,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4501993,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.998561,"flash":0,"leaving":false,"screen":{"x":237.2232602,"y":176.3355487}},
+            {
+              "id": "bo",
+              "x": 45.3232085,
+              "y": 49.2643571,
+              "vx": 1.5776982,
+              "vy": 1.7148893,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.3231488,"y":359.3728833}
+            },
+            {
+              "id": "cy",
+              "x": -94.5875656,
+              "y": -7.8822971,
+              "vx": -3.2925875,
+              "vy": -0.2743823,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":192.4614825,"y":333.6215326}
+            },
+            {
+              "id": "stew",
+              "x": 91.6317042,
+              "y": -70.9406742,
+              "vx": 3.1896941,
+              "vy": -2.4694406,
+              "presence": 0.998561,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":277.9320613,"y":301.2315075}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.998561,"leaving":false,"screen":{"x":237.5,"y":118.8545486}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.998561,"leaving":false,"screen":{"x":220.8426269,"y":121.5557442}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.138],
+            [221.4605004,160.5099494,1.1086582,0.241],
+            [425.0975679,49.6232839,0.7814026,0.116],
+            [450.4154662,573.3615356,0.9345913,0.138]
+          ],
+          "names": [["ada",237.2232602,192.9371428,9],["bo",256.3231488,375.9744775,9],["cy",192.4614825,350.2231268,9],["stew",277.9320613,317.8331017,9]]
+        },
+        {
+          "ms": 1003498,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500087,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9998913,"flash":0,"leaving":false,"screen":{"x":236.8102884,"y":176.4730061}},
+            {
+              "id": "bo",
+              "x": 45.9366123,
+              "y": 49.9311004,
+              "vx": 0.1679985,
+              "vy": 0.182607,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.8854105,"y":359.6332782}
+            },
+            {
+              "id": "cy",
+              "x": -95.8677127,
+              "y": -7.9889761,
+              "vx": -0.3506055,
+              "vy": -0.0292171,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.4635062,"y":333.3231741}
+            },
+            {
+              "id": "stew",
+              "x": 92.8718467,
+              "y": -71.9007845,
+              "vx": 0.3396491,
+              "vy": -0.2629541,
+              "presence": 0.9998913,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.0678442,"y":301.1800398}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9998913,"leaving":false,"screen":{"x":237.5,"y":118.9458166}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9998913,"leaving":false,"screen":{"x":220.8496769,"y":121.645869}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.231],
+            [221.4605004,160.5099494,1.1086582,0.313],
+            [425.0975679,49.6232839,0.7814026,0.143],
+            [450.4154662,573.3615356,0.9345913,0.183]
+          ],
+          "names": [["ada",236.8102884,193.073076,9],["bo",255.8854105,376.2333481,9],["cy",191.4635062,349.9232439,9],["stew",279.0678442,317.7801097,9]]
+        },
+        {
+          "ms": 1004488,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4500004,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999918,"flash":0,"leaving":false,"screen":{"x":236.4302355,"y":176.4869129}},
+            {
+              "id": "bo",
+              "x": 45.9959586,
+              "y": 49.9956072,
+              "vx": 0.0131694,
+              "vy": 0.0143145,
+              "presence": 0.9999918,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.3252518,"y":359.5201137}
+            },
+            {
+              "id": "cy",
+              "x": -95.9915658,
+              "y": -7.9992972,
+              "vx": -0.0274839,
+              "vy": -0.0022903,
+              "presence": 0.9999918,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.1371539,"y":332.9824637}
+            },
+            {
+              "id": "stew",
+              "x": 92.9918294,
+              "y": -71.9936744,
+              "vx": 0.026625,
+              "vy": -0.0206129,
+              "presence": 0.9999918,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.6621242,"y":301.527805}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999918,"leaving":false,"screen":{"x":237.5,"y":118.9498167}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999918,"leaving":false,"screen":{"x":220.8499858,"y":121.649819}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.335],
+            [221.4605004,160.5099494,1.1086582,0.377],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.246]
+          ],
+          "names": [["ada",236.4302355,193.0869159,9],["bo",255.3252518,376.1201168,9],["cy",191.1371539,349.5824667,9],["stew",279.6621242,318.127808,9]]
+        },
+        {
+          "ms": 1005478,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999994,"flash":0,"leaving":false,"screen":{"x":236.1100142,"y":176.4407057}},
+            {
+              "id": "bo",
+              "x": 45.9999726,
+              "y": 49.9999703,
+              "vx": 0.0005279,
+              "vy": 0.0005739,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9045732,"y":359.2800617}
+            },
+            {
+              "id": "cy",
+              "x": -95.9999429,
+              "y": -7.9999952,
+              "vx": -0.0011018,
+              "vy": -0.0000918,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0589667,"y":332.5817682}
+            },
+            {
+              "id": "stew",
+              "x": 92.9999447,
+              "y": -71.9999572,
+              "vx": 0.0010674,
+              "vy": -0.0008264,
+              "presence": 0.9999994,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.1106139,"y":301.9114541}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999994,"leaving":false,"screen":{"x":237.5,"y":118.949992}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999994,"leaving":false,"screen":{"x":220.8499994,"y":121.6499921}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.411],
+            [221.4605004,160.5099494,1.1086582,0.425],
+            [425.0975679,49.6232839,0.7814026,0.141],
+            [450.4154662,573.3615356,0.9345913,0.318]
+          ],
+          "names": [["ada",236.1100142,193.0407059,9],["bo",254.9045732,375.8800619,9],["cy",191.0589667,349.1817683,9],["stew",280.1106139,318.5114543,9]]
+        },
+        {
+          "ms": 1006468,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.8723476,"y":176.3421478}},
+            {
+              "id": "bo",
+              "x": 46.0000409,
+              "y": 50.0000445,
+              "vx": -0.0000521,
+              "vy": -0.0000566,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.6795466,"y":358.9549912}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000854,
+              "y": -8.0000071,
+              "vx": 0.0001086,
+              "vy": 0.0000091,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.1946336,"y":332.140966}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000827,
+              "y": -72.0000641,
+              "vx": -0.0001053,
+              "vy": 0.0000815,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.4267849,"y":302.2709282}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.9499996}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.6499997}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"The export view is in","born":1001.485}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.434],
+            [221.4605004,160.5099494,1.1086582,0.447],
+            [425.0975679,49.6232839,0.7814026,0.114],
+            [450.4154662,573.3615356,0.9345913,0.393]
+          ],
+          "names": [["ada",235.8723476,192.9421478,9],["bo",254.6795466,375.5549912,9],["cy",191.1946336,348.740966,9],["stew",280.4267849,318.8709282,9]]
+        },
+        {
+          "ms": 1007458,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7340732,"y":176.1989947}},
+            {
+              "id": "bo",
+              "x": 46.0000079,
+              "y": 50.0000086,
+              "vx": -0.0000157,
+              "vy": -0.000017,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.6711333,"y":358.5678052}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000165,
+              "y": -8.0000014,
+              "vx": 0.0000327,
+              "vy": 0.0000027,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.5380978,"y":331.6851747}
+            },
+            {
+              "id": "stew",
+              "x": 93.000016,
+              "y": -72.0000124,
+              "vx": -0.0000316,
+              "vy": 0.0000245,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.5939484,"y":302.5809373}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.394],
+            [221.4605004,160.5099494,1.1086582,0.441],
+            [425.0975679,49.6232839,0.7814026,0.079],
+            [450.4154662,573.3615356,0.9345913,0.462]
+          ],
+          "names": [["ada",235.7340732,192.7989947,9],["bo",254.6711333,375.1678052,9],["cy",191.5380978,348.2851747,9],["stew",280.5939484,319.1809373,9]]
+        },
+        {
+          "ms": 1007491,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7313104,"y":176.1935639}},
+            {
+              "id": "bo",
+              "x": 46.0000074,
+              "y": 50.000008,
+              "vx": -0.0000148,
+              "vy": -0.0000161,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.6746713,"y":358.5541024}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000155,
+              "y": -8.0000013,
+              "vx": 0.0000309,
+              "vy": 0.0000026,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.5529539,"y":331.670024}
+            },
+            {
+              "id": "stew",
+              "x": 93.000015,
+              "y": -72.0000116,
+              "vx": -0.0000299,
+              "vy": 0.0000231,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.596843,"y":302.5901785}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"stew","text":"Next","born":1007.458}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.391],
+            [221.4605004,160.5099494,1.1086582,0.441],
+            [425.0975679,49.6232839,0.7814026,0.077],
+            [450.4154662,573.3615356,0.9345913,0.464]
+          ],
+          "names": [["ada",235.7313104,192.7935639,9],["bo",254.6746713,375.1541024,9],["cy",191.5529539,348.270024,9],["stew",280.596843,319.1901785,9]]
+        },
+        {
+          "ms": 1007656,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.719332,"y":176.1658412}},
+            {
+              "id": "bo",
+              "x": 46.0000053,
+              "y": 50.0000058,
+              "vx": -0.000011,
+              "vy": -0.000012,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.6960472,"y":358.4849808}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000112,
+              "y": -8.0000009,
+              "vx": 0.000023,
+              "vy": 0.0000019,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.630379,"y":331.594482}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000108,
+              "y": -72.0000084,
+              "vx": -0.0000223,
+              "vy": 0.0000173,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.6087127,"y":302.635204}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"stew","text":"Next","born":1007.458}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.379],
+            [221.4605004,160.5099494,1.1086582,0.437],
+            [425.0975679,49.6232839,0.7814026,0.072],
+            [450.4154662,573.3615356,0.9345913,0.474]
+          ],
+          "names": [["ada",235.719332,192.7658412,9],["bo",254.6960472,375.0849808,9],["cy",191.630379,348.194482,9],["stew",280.6087127,319.235204,9]]
+        },
+        {
+          "ms": 1007821,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7104286,"y":176.1372081}},
+            {
+              "id": "bo",
+              "x": 46.0000038,
+              "y": 50.0000042,
+              "vx": -0.0000081,
+              "vy": -0.0000088,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.7235417,"y":358.4149316}
+            },
+            {
+              "id": "cy",
+              "x": -96.000008,
+              "y": -8.0000007,
+              "vx": 0.0000169,
+              "vy": 0.0000014,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.7129495,"y":331.5193776}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000077,
+              "y": -72.000006,
+              "vx": -0.0000164,
+              "vy": 0.0000127,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.6162535,"y":302.6782041}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"stew","text":"Next","born":1007.458}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.365],
+            [221.4605004,160.5099494,1.1086582,0.432],
+            [425.0975679,49.6232839,0.7814026,0.066],
+            [450.4154662,573.3615356,0.9345913,0.484]
+          ],
+          "names": [["ada",235.7104286,192.7372081,9],["bo",254.7235417,375.0149316,9],["cy",191.7129495,348.1193776,9],["stew",280.6162535,319.2782041,9]]
+        },
+        {
+          "ms": 1007986,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7046163,"y":176.1077161}},
+            {
+              "id": "bo",
+              "x": 46.0000027,
+              "y": 50.000003,
+              "vx": -0.0000059,
+              "vy": -0.0000064,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.7571124,"y":358.3440714}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000057,
+              "y": -8.0000005,
+              "vx": 0.0000123,
+              "vy": 0.000001,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.8005271,"y":331.4448265}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000055,
+              "y": -72.0000043,
+              "vx": -0.0000119,
+              "vy": 0.0000092,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.6194886,"y":302.7191021}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"stew","text":"Next","born":1007.458}],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.351],
+            [221.4605004,160.5099494,1.1086582,0.427],
+            [425.0975679,49.6232839,0.7814026,0.061],
+            [450.4154662,573.3615356,0.9345913,0.494]
+          ],
+          "names": [["ada",235.7046163,192.7077161,9],["bo",254.7571124,374.9440714,9],["cy",191.8005271,348.0448265,9],["stew",280.6194886,319.3191021,9]]
+        }
+      ]
+    },
+    {
+      "name": "the camera zooms, pans, goes home, frames a project, and lets it go",
+      "reducedMotion": false,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"working"}],"sample":true},
+        {"ms":1000033,"count":30,"every":30},
+        {"ms":1001023,"ops":[{"zoom":[2.5,120,200]}],"sample":true},
+        {"ms":1001056,"count":30,"every":30},
+        {"ms":1002046,"ops":[{"pan":[-80,40]},{"zoomMiddle":0.7692307692307692}],"sample":true},
+        {"ms":1002079,"count":30,"every":30},
+        {"ms":1003069,"ops":[{"home":true}],"sample":true},
+        {"ms":1003102,"count":45,"every":15},
+        {"ms":1004587,"ops":[{"zoom":[3,237,334]},{"focus":"web"}],"sample":true},
+        {"ms":1004620,"count":45,"every":15},
+        {"ms":1006105,"ops":[{"focus":null}],"sample":true},
+        {"ms":1006138,"count":45,"every":15},
+        {"ms":1007623,"ops":[{"view":{"width":951,"height":669,"left":0,"right":476}}],"sample":true},
+        {"ms":1007656,"count":45,"every":15},
+        {"ms":1011141,"ops":[],"sample":true},
+        {"ms":1011174,"count":15,"every":15},
+        {"ms":1010669,"ops":[],"sample":true},
+        {"ms":1010702,"count":15,"every":15}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":1,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":239.1077039,"y":-17.7814623}},
+            {"id":"bo","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":238.3376889,"y":339.4599602}},
+            {"id":"cy","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":235.5732347,"y":340.7644263}},
+            {"id":"stew","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":232.5403882,"y":330.0525791}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0,"leaving":false,"screen":{"x":237.5,"y":-144.5}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0,"leaving":false,"screen":{"x":200.5,"y":-138.5}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.135],
+            [221.4605004,160.5099494,1.1086582,0.104],
+            [425.0975679,49.6232839,0.7814026,0.038],
+            [450.4154662,573.3615356,0.9345913,0.128]
+          ],
+          "names": [["ada",239.1077039,8.2185377,11],["bo",238.3376889,365.4599602,11],["cy",235.5732347,366.7644263,11],["stew",232.5403882,356.0525791,11]]
+        },
+        {
+          "ms": 1000990,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.474105,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9244591,"flash":0,"leaving":false,"screen":{"x":237.873862,"y":167.7040393}},
+            {
+              "id": "bo",
+              "x": 31.6458523,
+              "y": 34.3976655,
+              "vx": 25.0139308,
+              "vy": 27.1890552,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.0942663,"y":353.4473421}
+            },
+            {
+              "id": "cy",
+              "x": -66.0435178,
+              "y": -5.5036265,
+              "vx": -52.202986,
+              "vy": -4.3502488,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":204.5638488,"y":334.893218}
+            },
+            {
+              "id": "stew",
+              "x": 63.9796578,
+              "y": -49.5326383,
+              "vx": 50.5716427,
+              "vy": -39.1522395,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":266.0168642,"y":309.1258977}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9244591,"leaving":false,"screen":{"x":237.5,"y":107.4037241}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9244591,"leaving":false,"screen":{"x":219.9581165,"y":110.2483538}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.144],
+            [425.0975679,49.6232839,0.7814026,0.064],
+            [450.4154662,573.3615356,0.9345913,0.113]
+          ],
+          "names": [["ada",237.873862,184.496879,9],["bo",252.0942663,370.2401818,9],["cy",204.5638488,351.6860576,9],["stew",266.0168642,325.9187374,9]]
+        },
+        {
+          "ms": 1001023,
+          "camera": {"mode":"manual","target":{"x":-156.6666667,"y":-179.3333333,"scale":1.125},"x":-15.51,"y":-17.754,"scale":0.5385436,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9306912,"flash":0,"leaving":false,"screen":{"x":246.2618031,"y":154.6024441}},
+            {
+              "id": "bo",
+              "x": 32.4350616,
+              "y": 35.2555017,
+              "vx": 23.9154344,
+              "vy": 25.9950373,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":262.8243924,"y":366.0543703}
+            },
+            {
+              "id": "cy",
+              "x": -67.6905633,
+              "y": -5.6408803,
+              "vx": -49.9104717,
+              "vy": -4.159206,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":207.5269272,"y":344.4327817}
+            },
+            {
+              "id": "stew",
+              "x": 65.5752332,
+              "y": -50.7679225,
+              "vx": 48.3507695,
+              "vy": -37.4328538,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.1269745,"y":314.5832}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9306912,"leaving":false,"screen":{"x":245.8528108,"y":86.0989329}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9306912,"leaving":false,"screen":{"x":225.9266987,"y":89.3301943}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [6.0609264,42.0237525,1.5745984,0.088],
+            [221.9616691,161.0836275,1.1086582,0.146],
+            [425.5987366,50.196962,0.7814026,0.065],
+            [450.9166348,573.9352138,0.9345913,0.113]
+          ],
+          "names": [["ada",246.2618031,171.9107926,9],["bo",262.8243924,383.3627188,9],["cy",207.5269272,361.7411303,9],["stew",279.1269745,331.8915485,9]]
+        },
+        {
+          "ms": 1002013,
+          "camera": {"mode":"manual","target":{"x":-156.6666667,"y":-179.3333333,"scale":1.125},"x":-150.4801652,"y":-172.2517635,"scale":1.0992973,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9947644,"flash":0,"leaving":false,"screen":{"x":402.7594969,"y":137.5093185}},
+            {
+              "id": "bo",
+              "x": 44.0075661,
+              "y": 47.834311,
+              "vx": 4.3442469,
+              "vy": 4.7220076,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":448.3701964,"y":582.94513}
+            },
+            {
+              "id": "cy",
+              "x": -91.8418772,
+              "y": -7.6534898,
+              "vx": -9.0662545,
+              "vy": -0.7555212,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":296.6302703,"y":522.1768872}
+            },
+            {
+              "id": "stew",
+              "x": 88.9718185,
+              "y": -68.8814079,
+              "vx": 8.782934,
+              "vy": -6.7996909,
+              "presence": 0.9947644,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":497.9866914,"y":444.4760521}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9947644,"leaving":false,"screen":{"x":402.9224327,"y":-2.7074948}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9947644,"leaving":false,"screen":{"x":362.2484342,"y":3.8882887}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [15.4851037,52.8114278,1.5745984,0.107],
+            [231.3858464,171.8713028,1.1086582,0.206],
+            [435.0229139,60.9846373,0.7814026,0.099],
+            [460.3408121,584.7228891,0.9345913,0.124]
+          ],
+          "names": [["ada",402.7594969,165.7931554,11],["bo",448.3701964,611.2289669,11],["cy",296.6302703,550.4607241,11],["stew",497.9866914,472.759889,11]]
+        },
+        {
+          "ms": 1002046,
+          "camera": {"mode":"manual","target":{"x":-85.5555556,"y":-214.8888889,"scale":0.8653846},"x":-78.4834667,"y":-209.25742,"scale":1.0761399,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9951963,"flash":0,"leaving":false,"screen":{"x":321.7663184,"y":181.4925505}},
+            {
+              "id": "bo",
+              "x": 44.1419054,
+              "y": 47.9803319,
+              "vx": 4.0708859,
+              "vy": 4.424876,
+              "presence": 0.9951963,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":366.5324269,"y":617.698923}
+            },
+            {
+              "id": "cy",
+              "x": -92.1222373,
+              "y": -7.6768531,
+              "vx": -8.4957619,
+              "vy": -0.7079802,
+              "presence": 0.9951963,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":217.5588998,"y":558.0094817}
+            },
+            {
+              "id": "stew",
+              "x": 89.2434174,
+              "y": -69.091678,
+              "vx": 8.2302693,
+              "vy": -6.3718214,
+              "presence": 0.9951963,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":415.3611441,"y":481.7819797}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9951963,"leaving":false,"screen":{"x":321.9591904,"y":44.2192455}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9951963,"leaving":false,"screen":{"x":282.1420139,"y":50.676085}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [10.6273092,54.9614899,1.5745984,0.108],
+            [226.5280519,174.021365,1.1086582,0.209],
+            [430.1651193,63.1346995,0.7814026,0.1],
+            [455.4830176,586.8729513,0.9345913,0.125]
+          ],
+          "names": [["ada",321.7663184,209.2437683,11],["bo",366.5324269,645.4501409,11],["cy",217.5588998,585.7606995,11],["stew",415.3611441,509.5331975,11]]
+        },
+        {
+          "ms": 1003036,
+          "camera": {"mode":"manual","target":{"x":-85.5555556,"y":-214.8888889,"scale":0.8653846},"x":-85.2456057,"y":-214.6420774,"scale":0.8746214,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9996371,"flash":0,"leaving":false,"screen":{"x":311.0871891,"y":215.0452431}},
+            {
+              "id": "bo",
+              "x": 45.8015589,
+              "y": 49.7843032,
+              "vx": 0.4942709,
+              "vy": 0.5372509,
+              "presence": 0.9996371,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":348.2900363,"y":571.0050557}
+            },
+            {
+              "id": "cy",
+              "x": -95.5858621,
+              "y": -7.9654885,
+              "vx": -1.0315218,
+              "vy": -0.0859601,
+              "presence": 0.9996371,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":223.1923606,"y":520.2141466}
+            },
+            {
+              "id": "stew",
+              "x": 92.5988039,
+              "y": -71.6893966,
+              "vx": 0.9992867,
+              "vy": -0.7736413,
+              "presence": 0.9996371,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":392.0765778,"y":457.3151509}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9996371,"leaving":false,"screen":{"x":312.0576335,"y":103.2868958}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9996371,"leaving":false,"screen":{"x":279.6966406,"y":108.5346243}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [10.0332158,52.713908,1.5745984,0.184],
+            [225.9339585,171.773783,1.1086582,0.28],
+            [429.5710259,60.8871175,0.7814026,0.132],
+            [454.8889242,584.6253693,0.9345913,0.16]
+          ],
+          "names": [["ada",311.0871891,238.161536,9.6],["bo",348.2900363,594.1213486,9.6],["cy",223.1923606,543.3304395,9.6],["stew",392.0765778,480.4314438,9.6]]
+        },
+        {
+          "ms": 1003069,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-76.8062907,"y":-193.3925117,"scale":0.8325839,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9996671,"flash":0,"leaving":false,"screen":{"x":300.49839,"y":203.0987979}},
+            {
+              "id": "bo",
+              "x": 45.8166897,
+              "y": 49.8007497,
+              "vx": 0.4585077,
+              "vy": 0.4983779,
+              "presence": 0.9996671,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":335.9078494,"y":541.9572255}
+            },
+            {
+              "id": "cy",
+              "x": -95.6174394,
+              "y": -7.9681199,
+              "vx": -0.9568856,
+              "vy": -0.0797405,
+              "presence": 0.9996671,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":216.8004842,"y":493.5780066}
+            },
+            {
+              "id": "stew",
+              "x": 92.6293944,
+              "y": -71.7130795,
+              "vx": 0.9269829,
+              "vy": -0.7176642,
+              "presence": 0.9996671,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":377.6828035,"y":433.7232098}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9996671,"leaving":false,"screen":{"x":301.4476817,"y":96.7078012}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9996671,"leaving":false,"screen":{"x":270.6420771,"y":101.7033047}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [9.3966187,51.1110039,1.5745984,0.187],
+            [225.2973613,170.170879,1.1086582,0.282],
+            [428.9344288,59.2842134,0.7814026,0.133],
+            [454.2523271,583.0224652,0.9345913,0.161]
+          ],
+          "names": [["ada",300.49839,225.2482278,9.2],["bo",335.9078494,564.1066553,9.2],["cy",216.8004842,515.7274365,9.2],["stew",377.6828035,455.8726397,9.2]]
+        },
+        {
+          "ms": 1003564,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-16.0793562,"y":-40.4866197,"scale":0.5300937,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999085,"flash":0,"leaving":false,"screen":{"x":245.1796856,"y":169.8147501}},
+            {
+              "id": "bo",
+              "x": 45.9464613,
+              "y": 49.9418057,
+              "vx": 0.1432799,
+              "vy": 0.1557391,
+              "presence": 0.9999085,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":267.635049,"y":385.5663252}
+            },
+            {
+              "id": "cy",
+              "x": -95.888267,
+              "y": -7.9906889,
+              "vx": -0.299019,
+              "vy": -0.0249183,
+              "presence": 0.9999085,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.7554014,"y":354.5510203}
+            },
+            {
+              "id": "stew",
+              "x": 92.8917587,
+              "y": -71.9162003,
+              "vx": 0.2896747,
+              "vy": -0.2242643,
+              "presence": 0.9999085,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":295.0445769,"y":316.7338897}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999085,"leaving":false,"screen":{"x":246.023566,"y":102.046803}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999085,"leaving":false,"screen":{"x":226.4100977,"y":105.2273654}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [6.0711717,42.7377765,1.5745984,0.238],
+            [221.9719144,161.7976516,1.1086582,0.317],
+            [425.6089819,50.9109861,0.7814026,0.144],
+            [450.9268801,574.6492379,0.9345913,0.187]
+          ],
+          "names": [["ada",245.1796856,187.0555,9],["bo",267.635049,402.8070751,9],["cy",191.7554014,371.7917702,9],["stew",295.0445769,333.9746396,9]]
+        },
+        {
+          "ms": 1004059,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-3.3662047,"y":-8.4758524,"scale":0.4667676,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999748,"flash":0,"leaving":false,"screen":{"x":238.1263786,"y":174.5581056}},
+            {
+              "id": "bo",
+              "x": 45.9857528,
+              "y": 49.9845139,
+              "vx": 0.0415489,
+              "vy": 0.0451619,
+              "presence": 0.9999748,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":257.8011275,"y":364.4807962}
+            },
+            {
+              "id": "cy",
+              "x": -95.9702668,
+              "y": -7.9975222,
+              "vx": -0.0867108,
+              "vy": -0.0072259,
+              "presence": 0.9999748,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0891187,"y":337.043617}
+            },
+            {
+              "id": "stew",
+              "x": 92.9711959,
+              "y": -71.9777001,
+              "vx": 0.0840011,
+              "vy": -0.0650331,
+              "presence": 0.9999748,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":282.561378,"y":304.08693}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999748,"leaving":false,"screen":{"x":239.0712352,"y":114.8745815}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999748,"leaving":false,"screen":{"x":221.8008347,"y":117.675187}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.6540319,41.6874495,1.5745984,0.291],
+            [221.5547746,160.7473246,1.1086582,0.351],
+            [425.191842,49.860659,0.7814026,0.151],
+            [450.5097403,573.5989108,0.9345913,0.217]
+          ],
+          "names": [["ada",238.1263786,191.2922463,9],["bo",257.8011275,381.2149369,9],["cy",191.0891187,353.7777577,9],["stew",282.561378,320.8210706,9]]
+        },
+        {
+          "ms": 1004554,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.7047132,"y":-1.7744152,"scale":0.4535103,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999931,"flash":0,"leaving":false,"screen":{"x":236.7178156,"y":176.0578039}},
+            {
+              "id": "bo",
+              "x": 45.9967163,
+              "y": 49.9964307,
+              "vx": 0.0109476,
+              "vy": 0.0118996,
+              "presence": 0.9999931,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":255.7502544,"y":360.5070718}
+            },
+            {
+              "id": "cy",
+              "x": -95.993147,
+              "y": -7.9994289,
+              "vx": -0.0228473,
+              "vy": -0.0019039,
+              "presence": 0.9999931,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":191.0830037,"y":333.7501447}
+            },
+            {
+              "id": "stew",
+              "x": 92.9933611,
+              "y": -71.9948602,
+              "vx": 0.0221333,
+              "vy": -0.0171354,
+              "presence": 0.9999931,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.3445969,"y":302.1011277}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999931,"leaving":false,"screen":{"x":237.8195947,"y":118.0732894}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999931,"leaving":false,"screen":{"x":221.0397141,"y":120.7943511}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5789334,41.4983572,1.5745984,0.341],
+            [221.4796761,160.5582323,1.1086582,0.381],
+            [425.1167436,49.6715668,0.7814026,0.152],
+            [450.4346419,573.4098186,0.9345913,0.25]
+          ],
+          "names": [["ada",236.7178156,192.6858862,9],["bo",255.7502544,377.135154,9],["cy",191.0830037,350.378227,9],["stew",280.3445969,318.72921,9]]
+        },
+        {
+          "ms": 1004587,
+          "camera": {"mode":"focus","target":{"x":0,"y":354,"scale":1.35},"x":-0.6349466,"y":33.4472519,"scale":0.5422628,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999937,"flash":0,"leaving":false,"screen":{"x":236.5128815,"y":125.950159}},
+            {
+              "id": "bo",
+              "x": 45.9970453,
+              "y": 49.9967884,
+              "vx": 0.0099721,
+              "vy": 0.0108393,
+              "presence": 0.9999937,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":259.2642244,"y":346.4893395}
+            },
+            {
+              "id": "cy",
+              "x": -95.9938338,
+              "y": -7.9994861,
+              "vx": -0.0208114,
+              "vy": -0.0017343,
+              "presence": 0.9999937,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":181.9545202,"y":314.4888115}
+            },
+            {
+              "id": "stew",
+              "x": 92.9940264,
+              "y": -71.9953753,
+              "vx": 0.020161,
+              "vy": -0.0156085,
+              "presence": 0.9999937,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":288.7115888,"y":276.6766813}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999937,"leaving":false,"screen":{"x":237.8443079,"y":56.6189357}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999937,"leaving":false,"screen":{"x":217.7805855,"y":59.8725123}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5804162,40.3618424,1.5745984,0.344],
+            [221.4811589,159.4217174,1.1086582,0.383],
+            [425.1182264,48.5350519,0.7814026,0.152],
+            [450.4361247,572.2733037,0.9345913,0.253]
+          ],
+          "names": [["ada",236.5128815,143.2882612,9],["bo",259.2642244,363.8274417,9],["cy",181.9545202,331.8269137,9],["stew",288.7115888,294.0147834,9]]
+        },
+        {
+          "ms": 1005082,
+          "camera": {"mode":"focus","target":{"x":0,"y":354,"scale":1.35},"x":-0.1329257,"y":286.8924522,"scale":1.1809006,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999983,"flash":0,"leaving":false,"screen":{"x":234.3225124,"y":-419.0084093}},
+            {
+              "id": "bo",
+              "x": 45.9995201,
+              "y": 49.9994784,
+              "vx": 0.0022272,
+              "vy": 0.0024209,
+              "presence": 0.9999983,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":283.7153609,"y":61.0193307}
+            },
+            {
+              "id": "cy",
+              "x": -95.9989985,
+              "y": -7.9999165,
+              "vx": -0.0046481,
+              "vy": -0.0003873,
+              "presence": 0.9999983,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":115.7994371,"y":-8.8886152}
+            },
+            {
+              "id": "stew",
+              "x": 92.9990298,
+              "y": -71.9992489,
+              "vx": 0.0045028,
+              "vy": -0.0034861,
+              "presence": 0.9999983,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":349.045121,"y":-90.2109644}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999983,"leaving":false,"screen":{"x":237.6569721,"y":-569.942886}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999983,"leaving":false,"screen":{"x":193.9636484,"y":-562.8574821}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5691761,21.1225855,1.5745984,0.386],
+            [221.4699188,140.1824606,1.1086582,0.408],
+            [425.1069862,29.295795,0.7814026,0.148],
+            [450.4248845,553.0340468,0.9345913,0.288]
+          ],
+          "names": [["ada",234.3225124,-388.8476946,11],["bo",283.7153609,91.1800454,11],["cy",115.7994371,21.2720995,11],["stew",349.045121,-60.0502497,11]]
+        },
+        {
+          "ms": 1005577,
+          "camera": {"mode":"focus","target":{"x":0,"y":354,"scale":1.35},"x":-0.0278279,"y":339.9510705,"scale":1.3145991,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999995,"flash":0,"leaving":false,"screen":{"x":233.3947295,"y":-574.1651904}},
+            {
+              "id": "bo",
+              "x": 46.0000122,
+              "y": 50.0000133,
+              "vx": 0.0003424,
+              "vy": 0.0003721,
+              "presence": 0.9999995,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":288.2881891,"y":-40.0935412}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000255,
+              "y": -8.0000021,
+              "vx": -0.0007145,
+              "vy": -0.0000595,
+              "presence": 0.9999995,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":101.8786046,"y":-118.1278452}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000247,
+              "y": -72.0000191,
+              "vx": 0.0006922,
+              "vy": -0.0005359,
+              "presence": 0.9999995,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":362.126957,"y":-207.4916933}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999995,"leaving":false,"screen":{"x":237.5365826,"y":-742.0923716}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999995,"leaving":false,"screen":{"x":188.8964145,"y":-734.2047768}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5619527,14.6361113,1.5745984,0.416],
+            [221.4626954,133.6959863,1.1086582,0.428],
+            [425.0997629,22.8093208,0.7814026,0.139],
+            [450.4176611,546.5475726,0.9345913,0.326]
+          ],
+          "names": [["ada",233.3947295,-540.9294102,11],["bo",288.2881891,-6.857761,11],["cy",101.8786046,-84.892065,11],["stew",362.126957,-174.2559132,11]]
+        },
+        {
+          "ms": 1006072,
+          "camera": {"mode":"focus","target":{"x":0,"y":354,"scale":1.35},"x":-0.0058258,"y":351.0588641,"scale":1.3425888,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999999,"flash":0,"leaving":false,"screen":{"x":232.9020879,"y":-608.5615093}},
+            {
+              "id": "bo",
+              "x": 46.0000589,
+              "y": 50.000064,
+              "vx": -0.0000214,
+              "vy": -0.0000233,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":288.9567681,"y":-63.4515301}
+            },
+            {
+              "id": "cy",
+              "x": -96.0001229,
+              "y": -8.0000102,
+              "vx": 0.0000447,
+              "vy": 0.0000037,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":99.1164625,"y":-143.3302457}
+            },
+            {
+              "id": "stew",
+              "x": 93.0001191,
+              "y": -72.0000922,
+              "vx": -0.0000433,
+              "vy": 0.0000335,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":365.2548499,"y":-233.3991141}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999999,"leaving":false,"screen":{"x":237.5078216,"y":-779.9277744}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999999,"leaving":false,"screen":{"x":187.8320342,"y":-771.8722413}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.560227,13.1704114,1.5745984,0.432],
+            [221.4609697,132.2302864,1.1086582,0.441],
+            [425.0980372,21.3436209,0.7814026,0.126],
+            [450.4159355,545.0818727,0.9345913,0.363]
+          ],
+          "names": [["ada",232.9020879,-574.6819658,11],["bo",288.9567681,-29.5719866,11],["cy",99.1164625,-109.4507022,11],["stew",365.2548499,-199.5195706,11]]
+        },
+        {
+          "ms": 1006105,
+          "camera": {"mode":"home","target":{"x":0,"y":354,"scale":1.35},"x":-0.005249,"y":351.3500365,"scale":1.3433226,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":0.9999999,"flash":0,"leaving":false,"screen":{"x":232.8761645,"y":-609.4784183}},
+            {
+              "id": "bo",
+              "x": 46.000058,
+              "y": 50.000063,
+              "vx": -0.0000282,
+              "vy": -0.0000306,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":288.9640906,"y":-64.0934179}
+            },
+            {
+              "id": "cy",
+              "x": -96.000121,
+              "y": -8.0000101,
+              "vx": 0.0000588,
+              "vy": 0.0000049,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":99.056044,"y":-144.0267848}
+            },
+            {
+              "id": "stew",
+              "x": 93.0001172,
+              "y": -72.0000907,
+              "vx": -0.000057,
+              "vy": 0.0000441,
+              "presence": 0.9999999,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":365.3537699,"y":-234.0651954}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":0.9999999,"leaving":false,"screen":{"x":237.5070511,"y":-780.9279304}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":0.9999999,"leaving":false,"screen":{"x":187.8041167,"y":-772.8679951}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5601808,13.1314886,1.5745984,0.433],
+            [221.4609235,132.1913637,1.1086582,0.442],
+            [425.097991,21.3046982,0.7814026,0.125],
+            [450.4158892,545.04295,0.9345913,0.366]
+          ],
+          "names": [["ada",232.8761645,-575.5819995,11],["bo",288.9640906,-30.1969992,11],["cy",99.056044,-110.1303661,11],["stew",365.3537699,-200.1687767,11]]
+        },
+        {
+          "ms": 1006600,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.0010989,"y":73.5549437,"scale":0.6370166,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.1619713,"y":63.7335719}},
+            {
+              "id": "bo",
+              "x": 46.0000343,
+              "y": 50.0000373,
+              "vx": -0.000049,
+              "vy": -0.0000533,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":261.8002848,"y":322.1938728}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000715,
+              "y": -8.000006,
+              "vx": 0.0001023,
+              "vy": 0.0000085,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":171.9993544,"y":284.2192503}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000693,
+              "y": -72.0000536,
+              "vx": -0.0000991,
+              "vy": 0.0000768,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":298.3116599,"y":242.0842711}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5007,"y":-17.4866729}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":213.9310857,"y":-13.6645733}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597997,38.6387311,1.5745984,0.432],
+            [221.4605424,157.6986062,1.1086582,0.448],
+            [425.0976099,46.8119406,0.7814026,0.109],
+            [450.4155082,570.5501924,0.9345913,0.403]
+          ],
+          "names": [["ada",235.1619713,81.8297047,9],["bo",261.8002848,340.2900056,9],["cy",171.9993544,302.3153831,9],["stew",298.3116599,260.1804039,9]]
+        },
+        {
+          "ms": 1007095,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.00023,"y":15.3986885,"scale":0.4891518,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.6222658,"y":154.9559249}},
+            {
+              "id": "bo",
+              "x": 46.0000155,
+              "y": 50.0000168,
+              "vx": -0.000028,
+              "vy": -0.0000304,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":256.1405877,"y":353.2900713}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000322,
+              "y": -8.0000027,
+              "vx": 0.0000583,
+              "vy": 0.0000049,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":187.3771233,"y":324.0897619}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000312,
+              "y": -72.0000242,
+              "vx": -0.0000565,
+              "vy": 0.0000438,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":284.2963395,"y":292.1556784}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5001125,"y":92.6639785}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":219.4014949,"y":95.5988895}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597645,40.9981365,1.5745984,0.415],
+            [221.4605072,160.0580116,1.1086582,0.447],
+            [425.0975747,49.1713461,0.7814026,0.092],
+            [450.4154729,572.9095979,0.9345913,0.438]
+          ],
+          "names": [["ada",235.6222658,171.8691396,9],["bo",256.1405877,370.2032859,9],["cy",187.3771233,341.0029765,9],["stew",284.2963395,309.068893,9]]
+        },
+        {
+          "ms": 1007590,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.0000482,"y":3.2237073,"scale":0.4581964,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.6914246,"y":171.8162168}},
+            {
+              "id": "bo",
+              "x": 46.0000061,
+              "y": 50.0000066,
+              "vx": -0.0000124,
+              "vy": -0.0000135,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9998267,"y":357.4730304}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000127,
+              "y": -8.0000011,
+              "vx": 0.0000259,
+              "vy": 0.0000022,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":190.7627498,"y":330.0951894}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000123,
+              "y": -72.0000095,
+              "vx": -0.0000251,
+              "vy": 0.0000194,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":281.3896233,"y":300.5596242}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000221,"y":113.5468265}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.5467547,"y":116.296005}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597591,41.3614489,1.5745984,0.384],
+            [221.4605018,160.4213239,1.1086582,0.438],
+            [425.0975692,49.5346584,0.7814026,0.074],
+            [450.4154675,573.2729102,0.9345913,0.47]
+          ],
+          "names": [["ada",235.6914246,188.4817881,9],["bo",254.9998267,374.1386017,9],["cy",190.7627498,346.7607607,9],["stew",281.3896233,317.2251955,9]]
+        },
+        {
+          "ms": 1007623,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.0000434,"y":2.9045602,"scale":0.457385,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.6923149,"y":172.2446216}},
+            {
+              "id": "bo",
+              "x": 46.0000057,
+              "y": 50.0000062,
+              "vx": -0.0000117,
+              "vy": -0.0000127,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9734281,"y":357.5642275}
+            },
+            {
+              "id": "cy",
+              "x": -96.0000119,
+              "y": -8.000001,
+              "vx": 0.0000244,
+              "vy": 0.000002,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":190.8614687,"y":330.2336218}
+            },
+            {
+              "id": "stew",
+              "x": 93.0000116,
+              "y": -72.0000089,
+              "vx": -0.0000237,
+              "vy": 0.0000183,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":281.3141311,"y":300.7747766}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000198,"y":114.0840976}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.576776,"y":116.8284074}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312214,41.3703642,1.5745984,0.382],
+            [443.3872347,160.4302392,1.1086582,0.437],
+            [851.0900793,49.5435737,0.7814026,0.073],
+            [901.7791766,573.2818255,0.9345913,0.472]
+          ],
+          "names": [["ada",235.6923149,188.9037014,9],["bo",254.9734281,374.2233073,9],["cy",190.8614687,346.8927015,9],["stew",281.3141311,317.4338563,9]]
+        },
+        {
+          "ms": 1008118,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.0000091,"y":0.6080681,"scale":0.451546,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.6960266,"y":175.2647063}},
+            {
+              "id": "bo",
+              "x": 46.0000021,
+              "y": 50.0000022,
+              "vx": -0.0000045,
+              "vy": -0.0000049,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.8477078,"y":358.0940308}
+            },
+            {"id":"cy","x":-96.0000043,"y":-8.0000004,"vx":0.0000095,"vy":8e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":191.717344,"y":331.1003903}},
+            {
+              "id": "stew",
+              "x": 93.0000042,
+              "y": -72.0000032,
+              "vx": -0.0000092,
+              "vy": 0.0000071,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.7671446,"y":302.3666063}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000041,"y":117.9348764}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.7928006,"y":120.6441526}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312205,41.4336001,1.5745984,0.338],
+            [443.3872338,160.4934751,1.1086582,0.422],
+            [851.0900783,49.6068096,0.7814026,0.057],
+            [901.7791757,573.3450614,0.9345913,0.501]
+          ],
+          "names": [["ada",235.6960266,191.8770746,9],["bo",254.8477078,374.7063991,9],["cy",191.717344,347.7127586,9],["stew",280.7671446,318.9789747,9]]
+        },
+        {
+          "ms": 1008613,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-0.0000019,"y":0.1272987,"scale":0.4503237,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7095338,"y":175.8174194}},
+            {
+              "id": "bo",
+              "x": 46.0000007,
+              "y": 50.0000007,
+              "vx": -0.0000016,
+              "vy": -0.0000018,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":254.9515188,"y":358.0291109}
+            },
+            {"id":"cy","x":-96.0000014,"y":-8.0000001,"vx":0.0000034,"vy":3e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":192.1436285,"y":331.108854}},
+            {
+              "id": "stew",
+              "x": 93.0000014,
+              "y": -72.0000011,
+              "vx": -0.0000033,
+              "vy": 0.0000025,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.6242424,"y":302.7740125}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000009,"y":118.73764}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8380253,"y":121.439582}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312203,41.4466348,1.5745984,0.288],
+            [443.3872336,160.5065098,1.1086582,0.4],
+            [851.0900781,49.6198443,0.7814026,0.044],
+            [901.7791755,573.3580961,0.9345913,0.525]
+          ],
+          "names": [["ada",235.7095338,192.4200087,9],["bo",254.9515188,374.6317002,9],["cy",192.1436285,347.7114433,9],["stew",280.6242424,319.3766018,9]]
+        },
+        {
+          "ms": 1009108,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-4e-7,"y":0.0266499,"scale":0.4500678,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":235.7468738,"y":175.8527175}},
+            {"id":"bo","x":46.0000002,"y":50.0000002,"vx":-5e-7,"vy":-6e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":255.143541,"y":357.841422}},
+            {"id":"cy","x":-96.0000004,"y":-8,"vx":0.0000011,"vy":1e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":192.5093142,"y":330.9487404}},
+            {
+              "id": "stew",
+              "x": 93.0000004,
+              "y": -72.0000003,
+              "vx": -0.0000011,
+              "vy": 8e-7,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":280.5376337,"y":302.9194399}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000002,"y":118.9055494}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8474931,"y":121.6059559}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312203,41.4493547,1.5745984,0.235],
+            [443.3872335,160.5092297,1.1086582,0.373],
+            [851.0900781,49.6225642,0.7814026,0.035],
+            [901.7791755,573.360816,0.9345913,0.544]
+          ],
+          "names": [["ada",235.7468738,192.4532595,9],["bo",255.143541,374.441964,9],["cy",192.5093142,347.5492825,9],["stew",280.5376337,319.519982,9]]
+        },
+        {
+          "ms": 1011141,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-3e-7,"y":0.0226524,"scale":0.4500576,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":236.163438,"y":175.4237236}},
+            {"id":"bo","x":46.0000002,"y":50.0000002,"vx":-5e-7,"vy":-5e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":256.4246264,"y":356.9848639}},
+            {"id":"cy","x":-96.0000004,"y":-8,"vx":0.000001,"vy":1e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":194.1745028,"y":330.2577759}},
+            {
+              "id": "stew",
+              "x": 93.0000004,
+              "y": -72.0000003,
+              "vx": -0.000001,
+              "vy": 8e-7,
+              "presence": 1,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":279.9669766,"y":303.00716}
+            }
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5000002,"y":118.9122172}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8478691,"y":121.6125628}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312203,41.4494626,1.5745984,0.089],
+            [443.3872335,160.5093377,1.1086582,0.232],
+            [851.0900781,49.6226722,0.7814026,0.05],
+            [901.7791755,573.360924,0.9345913,0.558]
+          ],
+          "names": [["ada",236.163438,192.0241843,9],["bo",256.4246264,373.5853246,9],["cy",194.1745028,346.8582366,9],["stew",279.9669766,319.6076207,9]]
+        },
+        {
+          "ms": 1011636,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-1e-7,"y":0.0047423,"scale":0.4500121,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":236.3202231,"y":175.3447473}},
+            {"id":"bo","x":46.0000001,"y":50.0000001,"vx":-1e-7,"vy":-2e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":256.8168891,"y":356.8079654}},
+            {"id":"cy","x":-96.0000001,"y":-8,"vx":3e-7,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":194.6138364,"y":330.1476528}},
+            {"id":"stew","x":93.0000001,"y":-72.0000001,"vx":-3e-7,"vy":2e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":279.7696493,"y":302.9752512}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.9420904}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8495539,"y":121.6421628}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312203,41.4499463,1.5745984,0.089],
+            [443.3872335,160.5098213,1.1086582,0.197],
+            [851.0900781,49.6231558,0.7814026,0.064],
+            [901.7791754,573.3614076,0.9345913,0.546]
+          ],
+          "names": [["ada",236.3202231,191.9448437,9],["bo",256.8168891,373.4080619,9],["cy",194.6138364,346.7477493,9],["stew",279.7696493,319.5753477,9]]
+        },
+        {
+          "ms": 1010669,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":-1e-7,"y":0.0047423,"scale":0.4500121,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":236.03207,"y":175.5487069}},
+            {"id":"bo","x":46.0000001,"y":50.0000001,"vx":-1e-7,"vy":-2e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":256.070895,"y":357.1771467}},
+            {"id":"cy","x":-96.0000001,"y":-8,"vx":3e-7,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":193.7679729,"y":330.3995018}},
+            {"id":"stew","x":93.0000001,"y":-72.0000001,"vx":-3e-7,"vy":2e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":280.1316862,"y":303.0361347}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.9420904}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8495539,"y":121.6421628}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312203,41.4499463,1.5745984,0.105],
+            [443.3872335,160.5098213,1.1086582,0.266],
+            [851.0900781,49.6231558,0.7814026,0.039],
+            [901.7791754,573.3614076,0.9345913,0.564]
+          ],
+          "names": [["ada",236.03207,192.1488033,9],["bo",256.070895,373.7772431,9],["cy",193.7679729,346.9995982,9],["stew",280.1316862,319.6362311,9]]
+        },
+        {
+          "ms": 1011164,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0.0009928,"scale":0.4500025,"centerX":237.5},
+          "bodies": [
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":236.1704751,"y":175.4480732}},
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":256.4401026,"y":356.9830592}},
+            {"id":"cy","x":-96,"y":-8,"vx":1e-7,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":194.1999773,"y":330.26204}},
+            {"id":"stew","x":93,"y":-72,"vx":-1e-7,"vy":1e-7,"presence":1,"flash":0,"leaving":false,"screen":{"x":279.9531297,"y":303.0193106}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.9483441}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.8499066,"y":121.6483593}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [11.1312202,41.4500475,1.5745984,0.089],
+            [443.3872335,160.5099226,1.1086582,0.23],
+            [851.0900781,49.623257,0.7814026,0.05],
+            [901.7791754,573.3615088,0.9345913,0.558]
+          ],
+          "names": [["ada",236.1704751,192.0480934,9],["bo",256.4401026,373.5830794,9],["cy",194.1999773,346.8620602,9],["stew",279.9531297,319.6193308,9]]
+        }
+      ]
+    },
+    {
+      "name": "a paused society dims its specks",
+      "reducedMotion": false,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"resting"}],"sample":true},
+        {"ms":1000033,"count":30,"every":30},
+        {"ms":1001023,"ops":[{"paused":true}],"sample":true},
+        {"ms":1001056,"ops":[{"paused":false}],"sample":true}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":1,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":240.7154079,"y":337.9370754}},
+            {"id":"bo","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":238.3376889,"y":339.4599602}},
+            {"id":"cy","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":235.5732347,"y":340.7644263}},
+            {"id":"stew","x":0,"y":0,"vx":0,"vy":0,"presence":0,"flash":0,"leaving":false,"screen":{"x":232.5403882,"y":330.0525791}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.135],
+            [221.4605004,160.5099494,1.1086582,0.104],
+            [425.0975679,49.6232839,0.7814026,0.038],
+            [450.4154662,573.3615356,0.9345913,0.128]
+          ],
+          "names": [["ada",240.7154079,363.9370754,11],["bo",238.3376889,365.4599602,11],["cy",235.5732347,366.7644263,11],["stew",232.5403882,356.0525791,11]]
+        },
+        {
+          "ms": 1000990,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.474105,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0.9244591,"flash":0,"leaving":false,"screen":{"x":238.2477241,"y":336.5743904}},
+            {
+              "id": "bo",
+              "x": 31.6458523,
+              "y": 34.3976655,
+              "vx": 25.0139308,
+              "vy": 27.1890552,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.0942663,"y":353.4473421}
+            },
+            {
+              "id": "cy",
+              "x": -66.0435178,
+              "y": -5.5036265,
+              "vx": -52.202986,
+              "vy": -4.3502488,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":204.5638488,"y":334.893218}
+            },
+            {
+              "id": "stew",
+              "x": 63.9796578,
+              "y": -49.5326383,
+              "vx": 50.5716427,
+              "vy": -39.1522395,
+              "presence": 0.9244591,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":266.0168642,"y":309.1258977}
+            }
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.089],
+            [221.4605004,160.5099494,1.1086582,0.144],
+            [425.0975679,49.6232839,0.7814026,0.064],
+            [450.4154662,573.3615356,0.9345913,0.113]
+          ],
+          "names": [["ada",238.2477241,353.3672301,9],["bo",252.0942663,370.2401818,9],["cy",204.5638488,351.6860576,9],["stew",266.0168642,325.9187374,9]]
+        },
+        {
+          "ms": 1001023,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4717186,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0.9306912,"flash":0,"leaving":false,"screen":{"x":238.2164853,"y":336.5769091}},
+            {
+              "id": "bo",
+              "x": 32.4350616,
+              "y": 35.2555017,
+              "vx": 23.9154344,
+              "vy": 25.9950373,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.3656686,"y":353.7640652}
+            },
+            {
+              "id": "cy",
+              "x": -67.6905633,
+              "y": -5.6408803,
+              "vx": -49.9104717,
+              "vy": -4.159206,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":203.929771,"y":334.8253843}
+            },
+            {
+              "id": "stew",
+              "x": 65.5752332,
+              "y": -50.7679225,
+              "vx": 48.3507695,
+              "vy": -37.4328538,
+              "presence": 0.9306912,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":266.6453501,"y":308.679678}
+            }
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.053],
+            [221.4605004,160.5099494,1.1086582,0.087],
+            [425.0975679,49.6232839,0.7814026,0.039],
+            [450.4154662,573.3615356,0.9345913,0.068]
+          ],
+          "names": [["ada",238.2164853,353.3506577,9],["bo",252.3656686,370.5378138,9],["cy",203.929771,351.5991329,9],["stew",266.6453501,325.4534266,9]]
+        },
+        {
+          "ms": 1001056,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.4695684,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":0.9364092,"flash":0,"leaving":false,"screen":{"x":238.1857805,"y":336.5802222}},
+            {
+              "id": "bo",
+              "x": 33.1887476,
+              "y": 36.0747257,
+              "vx": 22.83897,
+              "vy": 24.8249674,
+              "presence": 0.9364092,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":252.6244979,"y":354.0682042}
+            },
+            {
+              "id": "cy",
+              "x": -69.2634733,
+              "y": -5.7719561,
+              "vx": -47.6639374,
+              "vy": -3.9719948,
+              "presence": 0.9364092,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":203.321449,"y":334.7611096}
+            },
+            {
+              "id": "stew",
+              "x": 67.0989897,
+              "y": -51.9476049,
+              "vx": 46.1744393,
+              "vy": -35.747953,
+              "presence": 0.9364092,
+              "flash": 0,
+              "leaving": false,
+              "screen": {"x":267.247368,"y":308.2522462}
+            }
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.088],
+            [221.4605004,160.5099494,1.1086582,0.147],
+            [425.0975679,49.6232839,0.7814026,0.066],
+            [450.4154662,573.3615356,0.9345913,0.113]
+          ],
+          "names": [["ada",238.1857805,353.3367696,9],["bo",252.6244979,370.8247517,9],["cy",203.321449,351.517657,9],["stew",267.247368,325.0087936,9]]
+        }
+      ]
+    },
+    {
+      "name": "with Reduce Motion everything lands at once",
+      "reducedMotion": true,
+      "view": {"width":475,"height":669,"left":0,"right":0},
+      "frames": [
+        {"ms":1000000,"ops":[{"model":"resting"}],"sample":true},
+        {"ms":1000033,"ops":[],"sample":true},
+        {"ms":1000066,"ops":[{"model":"working"},{"flash":"ada/lab"}],"sample":true},
+        {"ms":1000099,"ops":[{"say":["ada/lab","Merged"]},{"zoom":[2,100,100]}],"sample":true},
+        {"ms":1000132,"count":30,"every":30},
+        {"ms":1001122,"ops":[{"model":"split"},{"focus":"lab"}],"sample":true},
+        {"ms":1001155,"ops":[{"model":"resting"},{"home":true}],"sample":true},
+        {"ms":1001188,"count":10,"every":10}
+      ],
+      "samples": [
+        {
+          "ms": 1000000,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":240.0349715,"y":334.2583144}},
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":260.0880746,"y":355.7703452}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":195.2465682,"y":328.5011635}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":276.2518376,"y":304.4905953}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.435],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.565]
+          ],
+          "names": [["ada",240.0349715,350.8583144,9],["bo",260.0880746,372.3703452,9],["cy",195.2465682,345.1011635,9],["stew",276.2518376,321.0905953,9]]
+        },
+        {
+          "ms": 1000033,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":240.0349715,"y":334.2583144}},
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":260.0880746,"y":355.7703452}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":195.2465682,"y":328.5011635}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":276.2518376,"y":304.4905953}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.435],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.565]
+          ],
+          "names": [["ada",240.0349715,350.8583144,9],["bo",260.0880746,372.3703452,9],["cy",195.2465682,345.1011635,9],["stew",276.2518376,321.0905953,9]]
+        },
+        {
+          "ms": 1000066,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":260.0880746,"y":355.7703452}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":195.2465682,"y":328.5011635}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":276.2518376,"y":304.4905953}},
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":238.7674858,"y":175.0791572}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":118.95}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":220.85,"y":121.65}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.435],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.565]
+          ],
+          "names": [["bo",260.0880746,372.3703452,9],["cy",195.2465682,345.1011635,9],["stew",276.2518376,321.0905953,9],["ada",238.7674858,191.6791572,9]]
+        },
+        {
+          "ms": 1000099,
+          "camera": {"mode":"manual","target":{"x":-152.7777778,"y":-260.5555556,"scale":0.9},"x":-152.7777778,"y":-260.5555556,"scale":0.9,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":420.1761493,"y":611.5406905}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":290.4931364,"y":557.0023271}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":452.5036752,"y":508.9811906}},
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":377.5349715,"y":250.1583144}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":375,"y":137.9}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":341.7,"y":143.3}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"Merged","born":1000.066}],
+          "specks": [
+            [13.8097577,55.5200743,1.5745984,0.435],
+            [229.7105004,174.5799494,1.1086582,0.448],
+            [433.3475679,63.6932839,0.7814026,0.152],
+            [458.6654662,587.4315356,0.9345913,0.565]
+          ],
+          "names": [["bo",420.1761493,635.2406905,9.9],["cy",290.4931364,580.7023271,9.9],["stew",452.5036752,532.6811906,9.9],["ada",377.5349715,273.8583144,9.9]]
+        },
+        {
+          "ms": 1001089,
+          "camera": {"mode":"manual","target":{"x":-152.7777778,"y":-260.5555556,"scale":0.9},"x":-152.7777778,"y":-260.5555556,"scale":0.9,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":420.1761493,"y":611.5406905}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":290.4931364,"y":557.0023271}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":452.5036752,"y":508.9811906}},
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":377.5349715,"y":250.1583144}}
+          ],
+          "marks": [
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":375,"y":137.9}},
+            {"id":"01M3Q2BBBBBBBBBBBBBBBBBBB2","x":-37,"y":-473,"presence":1,"leaving":false,"screen":{"x":341.7,"y":143.3}}
+          ],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [{"id":"ada/lab","text":"Merged","born":1000.066}],
+          "specks": [
+            [13.8097577,55.5200743,1.5745984,0.435],
+            [229.7105004,174.5799494,1.1086582,0.448],
+            [433.3475679,63.6932839,0.7814026,0.152],
+            [458.6654662,587.4315356,0.9345913,0.565]
+          ],
+          "names": [["bo",420.1761493,635.2406905,9.9],["cy",290.4931364,580.7023271,9.9],["stew",452.5036752,532.6811906,9.9],["ada",377.5349715,273.8583144,9.9]]
+        },
+        {
+          "ms": 1001122,
+          "camera": {"mode":"focus","target":{"x":0,"y":-354,"scale":0.9},"x":0,"y":-354,"scale":0.9,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":282.6761493,"y":695.6406905}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":152.9931364,"y":641.1023271}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":315.0036752,"y":593.0811906}},
+            {"id":"ada/lab","x":0,"y":-354,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":240.0349715,"y":334.2583144}},
+            {"id":"ada/web","x":46,"y":404,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":281.4349715,"y":1016.4583144}}
+          ],
+          "marks": [{"id":"01M3Q2BBBBBBBBBBBBBBBBBBB1","x":0,"y":-479,"presence":1,"leaving":false,"screen":{"x":237.5,"y":222}}],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":112}],
+          "bubbles": [{"id":"ada/lab","text":"Merged","born":1000.066}],
+          "specks": [
+            [5.5597577,60.5660743,1.5745984,0.435],
+            [221.4605004,179.6259494,1.1086582,0.448],
+            [425.0975679,68.7392839,0.7814026,0.152],
+            [450.4154662,592.4775356,0.9345913,0.565]
+          ],
+          "names": [
+            ["bo",282.6761493,719.3406905,9.9],
+            ["cy",152.9931364,664.8023271,9.9],
+            ["stew",315.0036752,616.7811906,9.9],
+            ["ada",240.0349715,357.9583144,9.9],
+            ["ada",281.4349715,1040.1583144,9.9]
+          ]
+        },
+        {
+          "ms": 1001155,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":260.0880746,"y":355.7703452}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":195.2465682,"y":328.5011635}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":276.2518376,"y":304.4905953}},
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":240.0349715,"y":334.2583144}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.435],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.565]
+          ],
+          "names": [["bo",260.0880746,372.3703452,9],["cy",195.2465682,345.1011635,9],["stew",276.2518376,321.0905953,9],["ada",240.0349715,350.8583144,9]]
+        },
+        {
+          "ms": 1001485,
+          "camera": {"mode":"home","target":{"x":0,"y":0,"scale":0.45},"x":0,"y":0,"scale":0.45,"centerX":237.5},
+          "bodies": [
+            {"id":"bo","x":46,"y":50,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":260.0880746,"y":355.7703452}},
+            {"id":"cy","x":-96,"y":-8,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":195.2465682,"y":328.5011635}},
+            {"id":"stew","x":93,"y":-72,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":276.2518376,"y":304.4905953}},
+            {"id":"ada","x":0,"y":0,"vx":0,"vy":0,"presence":1,"flash":0,"leaving":false,"screen":{"x":240.0349715,"y":334.2583144}}
+          ],
+          "marks": [],
+          "spheres": [{"id":"society","x":0,"y":0,"radius":161.7794549},{"id":"lab","x":0,"y":-354,"radius":112},{"id":"web","x":0,"y":354,"radius":58}],
+          "bubbles": [],
+          "specks": [
+            [5.5597577,41.4500743,1.5745984,0.435],
+            [221.4605004,160.5099494,1.1086582,0.448],
+            [425.0975679,49.6232839,0.7814026,0.152],
+            [450.4154662,573.3615356,0.9345913,0.565]
+          ],
+          "names": [["bo",260.0880746,372.3703452,9],["cy",195.2465682,345.1011635,9],["stew",276.2518376,321.0905953,9],["ada",240.0349715,350.8583144,9]]
+        }
+      ]
+    }
+  ]
+}

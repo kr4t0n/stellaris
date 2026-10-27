@@ -90,13 +90,40 @@ import Testing
     #expect(alone.chat == CGRect(x: 0, y: 0, width: 466, height: 340))
   }
 
-  /// The keyboard never turns the split, even with no fold reported, where the window's shape
-  /// decides: the size the split reads is the window's without the keyboard.
-  @Test func keepsTheSplitWhileTheKeyboardIsUp() {
-    let tall = parts(portrait, keyboardTop: 300)
+  /// What the layout's reader gives: its size, which ends at the keyboard while it is up, and its
+  /// bottom inset, the keyboard's height then and the home indicator's otherwise.
+  private func read(_ reader: CGSize, inset: CGFloat, divisions: [CGRect]) -> InnerLayout.Parts {
+    InnerLayout.parts(
+      reader: reader, bottomInset: inset, regular: true, divisions: divisions, cameras: [])
+  }
+
+  /// The keyboard never moves the split, with a fold reported or none, where the window's shape
+  /// decides. Each pose reads only what the reader gives in it, so a turn with the keyboard up, or
+  /// a view built again, lands where typing in that pose from the start does. Portrait has a
+  /// keyboard 336 points tall, landscape one 339 points tall, and the home indicator takes 20.
+  @Test(arguments: [true, false]) func keepsTheSplitWithTheKeyboardUp(folded: Bool) {
+    let (upright, across) = folded ? ([self.upright], [self.across]) : ([], [])
+    let tall = read(CGSize(width: 669, height: 615), inset: 336, divisions: across)
     #expect(tall.arrangement == .stacked)
-    #expect(tall.sky == parts(portrait).sky)
+    #expect(tall.chat == CGRect(x: 0, y: 0, width: 669, height: 615))
     #expect(tall.chatCoversSky)
+    #expect(tall.sky == read(CGSize(width: 669, height: 931), inset: 20, divisions: across).sky)
+    let wide = read(CGSize(width: 951, height: 330), inset: 339, divisions: upright)
+    #expect(wide.arrangement == .sideBySide)
+    #expect(wide.sky?.height == 669)
+    #expect(wide.chat.height == 330)
+    #expect(!wide.chatCoversSky)
+  }
+
+  /// Without the keyboard, the sky runs under the home indicator and the chat stops above it.
+  @Test func stopsTheChatAboveTheHomeIndicator() {
+    let open = read(CGSize(width: 669, height: 931), inset: 20, divisions: [across])
+    #expect(open.sky == CGRect(x: 0, y: 0, width: 669, height: 486))
+    #expect(open.chat == CGRect(x: 0, y: 486, width: 669, height: 445))
+    #expect(!open.chatCoversSky)
+    let wide = read(CGSize(width: 951, height: 649), inset: 20, divisions: [upright])
+    #expect(wide.sky == CGRect(x: 0, y: 0, width: 486, height: 669))
+    #expect(wide.chat == CGRect(x: 486, y: 0, width: 465, height: 649))
   }
 
   /// A camera in the sky's part takes room from the nearer edge; one in the chat's takes none.

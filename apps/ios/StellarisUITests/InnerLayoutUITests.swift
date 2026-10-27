@@ -35,7 +35,10 @@ final class InnerLayoutUITests: ShellTestCase {
 
     draft(app).tap()
     draft(app).typeText(draftText)
-    waitUntil("the chat doesn't grow over the sky") { messages.frame.minY < skyFrame.midY }
+    // Over the sky's whole width: a split turned side by side would leave the sky in view.
+    waitUntil("the chat doesn't grow over the sky") {
+      messages.frame.minY < skyFrame.midY && messages.frame.width >= skyFrame.width - 1
+    }
     keepScreen("inner-stacked-typing")
     waitUntil("the covered sky's stars take a touch") { !star.isHittable }
 

@@ -4,39 +4,37 @@ import SwiftUI
 /// `InnerLayout` says. The tabs keep one place in the view whatever the pose, so the split never
 /// builds them again, and what a view built again needs, the conversation's draft and anchor, is in
 /// the model. The sky fades in with the camera it had, and folding takes it away, which stops its
-/// drawing and its reads; its state stays in the model. The split keeps to the window as it is
-/// without the keyboard, and once the keyboard leaves the chat below the sky little room, the chat
-/// grows over the sky, which draws nothing until the keyboard goes.
+/// drawing and its reads; its state stays in the model. The keyboard never moves the split, and
+/// once it leaves the chat below the sky little room, the chat grows over the sky, which draws and
+/// reads nothing until the keyboard goes.
 struct AppLayout: View {
   @Environment(\.horizontalSizeClass) private var width
   @Environment(\.verticalSizeClass) private var height
 
-  /// For the snapshots: a pose's reserved regions and keyboard, and a sky with a fixed clock and
-  /// Reduce Motion on.
+  /// For the snapshots: a pose's reserved regions, in the window's coordinates as a fold at the
+  /// middle of the display is, a keyboard's height, and a sky with a fixed clock and Reduce Motion
+  /// on.
   struct Pose {
     var divisions: [CGRect]
     var cameras: [CGRect] = []
-    var keyboardTop: CGFloat?
+    var keyboard: CGFloat?
     var skyClock: Double?
   }
 
   var pose: Pose?
 
-  /// The tallest the view has been at its width: its size without the keyboard, since only the
-  /// keyboard shortens it without changing its width, where a fold, a turn, or Split View change
-  /// the width.
-  @State private var tallest = CGSize.zero
-
   var body: some View {
     GeometryReader { proxy in
-      // The reader ends at the keyboard while it is up; the split keeps to the size without it.
-      let keyed = tallest.width == proxy.size.width && tallest.height > proxy.size.height
+      // The reader keeps to the safe area, so it ends at the keyboard while the keyboard is up, and
+      // reads the keyboard's height as its bottom inset; a pose's keyboard does the same.
+      let foot = proxy.size.height + proxy.safeAreaInsets.bottom
       let parts = InnerLayout.parts(
-        in: keyed ? tallest : proxy.size,
-        keyboardTop: pose?.keyboardTop ?? (keyed ? proxy.size.height : nil),
+        reader: pose?.keyboard.map { CGSize(width: proxy.size.width, height: foot - $0) }
+          ?? proxy.size,
+        bottomInset: pose?.keyboard ?? proxy.safeAreaInsets.bottom,
         regular: regular,
-        divisions: pose?.divisions ?? regions(.division, in: proxy),
-        cameras: pose?.cameras ?? regions(.occlusion, in: proxy))
+        divisions: pose.map { inReader($0.divisions, proxy) } ?? regions(.division, in: proxy),
+        cameras: pose.map { inReader($0.cameras, proxy) } ?? regions(.occlusion, in: proxy))
       let split = InnerSplit(parts: parts)
       split {
         if parts.sky != nil {
@@ -55,12 +53,14 @@ struct AppLayout: View {
           .layoutValue(key: InnerPart.self, value: .chat)
       }
       .animation(.smooth(duration: 0.3), value: parts.chatCoversSky)
-      .onChange(of: proxy.size, initial: true) { _, size in
-        if size.width != tallest.width || size.height > tallest.height {
-          tallest = size
-        }
-      }
     }
+  }
+
+  /// A pose's frames, given in the window's coordinates, in the reader's, as iOS gives a reserved
+  /// region's.
+  private func inReader(_ frames: [CGRect], _ proxy: GeometryProxy) -> [CGRect] {
+    let origin = proxy.frame(in: .global).origin
+    return frames.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
   }
 
   /// Both size classes regular: the inner display, which a debug build launched with

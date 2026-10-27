@@ -9,9 +9,11 @@ import XCTest
 /// in portrait, flat or folded alike, since the split is at the fold either way, the chat grown
 /// over the sky while a keyboard 336 points tall is up in portrait, and a card in the sky's part;
 /// and the chat alone on the outer display and in Split View. The fold is a band 21 points wide at
-/// the middle, as the sign-in's tests have it, since what iOS reports there is checked on the
-/// device. The pictures go with the test's results for review; the tests fail when a pose draws
-/// the sky where it has none, or outside its part, or without the fold's band clear.
+/// the middle of the window, as the sign-in's tests have it and as the device's hinge would be,
+/// which the layout reads in its own coordinates, below the window's safe area, as it does what
+/// iOS reports; where the real fold lies is checked on the device. The pictures go with the test's
+/// results for review; the tests fail when a pose draws the sky where it has none, or anywhere but
+/// up to the fold, or without the fold's band clear.
 final class InnerLayoutSnapshotTests: XCTestCase {
   /// Where the sky's part is: beside the chat or above it, as far as the fold.
   private enum Side {
@@ -43,7 +45,7 @@ final class InnerLayoutSnapshotTests: XCTestCase {
       Pose(name: "portrait", size: CGSize(width: 669, height: 951), pose: portrait, sky: .top),
       Pose(
         name: "portrait-typing", size: CGSize(width: 669, height: 951),
-        pose: AppLayout.Pose(divisions: portrait.divisions, keyboardTop: 615, skyClock: clock),
+        pose: AppLayout.Pose(divisions: portrait.divisions, keyboard: 336, skyClock: clock),
         sky: nil),
       Pose(
         name: "outer", size: CGSize(width: 466, height: 678),
@@ -65,7 +67,7 @@ final class InnerLayoutSnapshotTests: XCTestCase {
         try Snapshot.keep(image, named: "inner-\(pose.name)-\(type.name)", in: self)
         if let side = pose.sky {
           XCTAssertNotNil(model.sky.lastFrame, "\(pose.name): no sky")
-          expectTheSky(model.sky.viewport, in: pose.size, on: side, pose.name)
+          expectTheSky(model.sky.viewport, in: pose, on: side)
         } else if pose.name != "portrait-typing" {
           XCTAssertNil(model.sky.lastFrame, "\(pose.name): a sky with the chat alone")
         }
@@ -83,26 +85,27 @@ final class InnerLayoutSnapshotTests: XCTestCase {
         type: Snapshot.typeSizes[0])
       try Snapshot.keep(image, named: "inner-\(pose.name)-card", in: self)
       // The card keeps to the sky's viewport less its room, which holds the fold's band.
-      expectTheSky(model.sky.viewport, in: pose.size, on: try XCTUnwrap(pose.sky), pose.name)
+      expectTheSky(model.sky.viewport, in: pose, on: try XCTUnwrap(pose.sky))
     }
   }
 
-  /// The sky's viewport spans the window one way and runs to the fold the other, with room for the
-  /// fold's band; a safe area at the window's edges can add to it.
-  private func expectTheSky(_ view: SkyViewport, in size: CGSize, on side: Side, _ pose: String) {
-    let (width, height) = (Double(size.width), Double(size.height))
-    let fold = side == .leading ? width / 2 : height / 2
+  /// The sky's viewport, which runs out to the window's edges, spans the window one way and ends
+  /// at the far edge of the fold's band the other, in the window as in the pose, with room for the
+  /// band.
+  private func expectTheSky(_ view: SkyViewport, in pose: Pose, on side: Side) {
+    let (width, height) = (Double(pose.size.width), Double(pose.size.height))
+    guard let fold = pose.pose.divisions.first else {
+      return XCTFail("\(pose.name): no fold")
+    }
     switch side {
     case .leading:
-      XCTAssertEqual(view.height, height, accuracy: 1, pose)
-      XCTAssertGreaterThanOrEqual(view.width, fold, pose)
-      XCTAssertLessThan(view.width, width * 0.6, pose)
-      XCTAssertGreaterThanOrEqual(view.right, InnerLayoutSnapshotTests.band, pose)
+      XCTAssertEqual(view.height, height, accuracy: 1, pose.name)
+      XCTAssertEqual(view.width, Double(fold.maxX), accuracy: 1, pose.name)
+      XCTAssertGreaterThanOrEqual(view.right, InnerLayoutSnapshotTests.band, pose.name)
     case .top:
-      XCTAssertEqual(view.width, width, accuracy: 1, pose)
-      XCTAssertGreaterThanOrEqual(view.height, fold, pose)
-      XCTAssertLessThan(view.height, height * 0.6, pose)
-      XCTAssertGreaterThanOrEqual(view.bottom, InnerLayoutSnapshotTests.band, pose)
+      XCTAssertEqual(view.width, width, accuracy: 1, pose.name)
+      XCTAssertEqual(view.height, Double(fold.maxY), accuracy: 1, pose.name)
+      XCTAssertGreaterThanOrEqual(view.bottom, InnerLayoutSnapshotTests.band, pose.name)
     }
   }
 

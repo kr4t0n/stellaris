@@ -1,17 +1,17 @@
 import CoreGraphics
 
-/// Where the sky and the chat go in the app's window. Frames are in the window's own coordinates,
-/// mirrored for a right-to-left layout as reserved regions are, so the leading side has the
-/// smaller x.
+/// Where the sky and the chat go in the app's window. Frames are in the coordinates of the view
+/// the layout fills, which keeps to the window's safe area, as the frames of the reserved regions
+/// it reads are: (0, 0) is that view's top-leading corner, below the status bar, and right to
+/// left the frames are mirrored, so the leading side has the smaller x.
 ///
 /// With a compact width or height, the outer display and Split View, the chat has the whole
 /// window and there is no sky. With both regular, the inner display, the window splits at its
 /// fold: the sky on the leading side and the chat on the trailing one when the fold runs top to
 /// bottom, and the sky above the chat when it runs across. The fold is the division iOS reports,
 /// active or not, so a partial fold moves nothing; with none reported, the middle of the window's
-/// longer side. The split keeps to the window as it is without the keyboard: only the chat's foot
-/// follows the keyboard, and the chat grows over a sky above it once the keyboard leaves it less
-/// than half its part.
+/// longer side. The keyboard never moves the split: only the chat's foot follows it, and the chat
+/// grows over a sky above it once the keyboard leaves it less than half its part.
 enum InnerLayout {
   /// Room at each edge of a part, in points.
   struct Room: Equatable, Sendable {
@@ -37,10 +37,22 @@ enum InnerLayout {
     var chatCoversSky = false
   }
 
-  /// The parts of a window of `size`, as it is without the keyboard. `keyboardTop` is how far down
-  /// the window the keyboard leaves room while it is up; `regular` is whether both size classes
-  /// are; and `divisions` and `cameras` are the frames of the reserved regions iOS reports,
-  /// inactive ones included.
+  /// The parts of a view `reader` big whose safe area leaves `bottomInset` below it: the keyboard's
+  /// height while it is up, and the home indicator's otherwise. The view ends at the keyboard and
+  /// the inset grows by as much, so the two reach the window's foot whatever the keyboard does, and
+  /// the split reads that height, from nothing seen before; the chat's foot is the view's.
+  static func parts(
+    reader: CGSize, bottomInset: CGFloat, regular: Bool, divisions: [CGRect], cameras: [CGRect]
+  ) -> Parts {
+    parts(
+      in: CGSize(width: reader.width, height: reader.height + max(0, bottomInset)),
+      keyboardTop: reader.height, regular: regular, divisions: divisions, cameras: cameras)
+  }
+
+  /// The parts of a view of `size`, as it is to the window's foot. `keyboardTop` is how far down
+  /// it the chat may reach, where the keyboard or the home indicator starts; `regular` is whether
+  /// both size classes are; and `divisions` and `cameras` are the frames of the reserved regions
+  /// iOS reports, inactive ones included.
   static func parts(
     in size: CGSize, keyboardTop: CGFloat? = nil, regular: Bool, divisions: [CGRect],
     cameras: [CGRect]

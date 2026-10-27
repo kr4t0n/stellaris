@@ -24,7 +24,6 @@
       guard let path = ProcessInfo.processInfo.environment["STELLARIS_FAKE_BOARD"] else {
         return nil
       }
-      silenceConsole()
       let environment = FakeBoard.environment(
         folder: URL(fileURLWithPath: path), defaults: .standard)
       if ProcessInfo.processInfo.arguments.contains("-StellarisReset") {
@@ -246,19 +245,5 @@
     private static func json(_ value: Any) -> Data {
       (try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])) ?? Data()
     }
-  }
-
-  /// Points the app's standard output and error at /dev/null. Launched by XCTest, the app writes its
-  /// log, XCTest's own automation in it included, to a terminal that xcodebuild reads, and each write
-  /// waits while xcodebuild reads late, as it does on a busy runner, where its reads are throttled:
-  /// the app's main thread then stops inside XCTest's query. Nothing in the tests reads the console.
-  private func silenceConsole() {
-    let null = open("/dev/null", O_WRONLY)
-    guard null >= 0 else {
-      return
-    }
-    dup2(null, STDOUT_FILENO)
-    dup2(null, STDERR_FILENO)
-    close(null)
   }
 #endif

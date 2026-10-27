@@ -3,6 +3,7 @@ import { createApi } from "../lib/api.js";
 import { frameSphere, homeCamera } from "./camera.js";
 import { band, tableText, type InsetViewport } from "./ios-tables.js";
 import { markLabel, skyModel, type SkyModel } from "./model.js";
+import { FOCUS_ROOM } from "./scene.js";
 
 /**
  * The browser tests' fake board, which `tsconfig.e2e.json` checks. A path held in a constant keeps
@@ -101,9 +102,6 @@ const POSES: ReadonlyArray<{ readonly name: string; readonly view: InsetViewport
     view: { width: 320, height: 678, left: 52, right: 0, top: 0, bottom: 0 },
   },
 ];
-
-/** The room the scene keeps around a project it brings into view (`FOCUS_ROOM` in scene.ts). */
-const FOCUS_ROOM = 34;
 
 /**
  * The board as the web's sky reads it: through the web's own API client, with every request

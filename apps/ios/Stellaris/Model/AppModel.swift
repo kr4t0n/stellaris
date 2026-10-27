@@ -11,8 +11,8 @@ enum SignInFailure: Error, Equatable {
   case keychain
 }
 
-/// The app's state: whether it is signed in and to which board, the board as last loaded, which tab
-/// is open, and Chat's history. A fresh start opens the society's general channel; coming back from
+/// The app's state: whether it is signed in and to which board, the board as last loaded, the sky,
+/// which tab is open, and Chat's history. A fresh start opens the society's general channel; coming back from
 /// the background keeps what was open, since the model lives as long as the app does.
 @MainActor @Observable final class AppModel {
   enum Phase: Equatable {
@@ -31,6 +31,7 @@ enum SignInFailure: Error, Equatable {
   private(set) var history = ChatHistory()
   private(set) var memory: ConversationMemory?
   let store = BoardStore()
+  let sky = SkyStore()
 
   @ObservationIgnored let environment: AppEnvironment
   @ObservationIgnored private var client: BoardClient?
@@ -112,14 +113,42 @@ enum SignInFailure: Error, Equatable {
     do {
       return try await client.send(request)
     } catch let error as BoardError where error.isUnauthorized {
-      if sent == generation, phase == .signedIn {
-        if let board {
-          try? environment.tokens.delete(for: board)
-        }
-        leave(notice: AppModel.ended)
+      if sent == generation {
+        endSignIn()
       }
       throw error
     }
+  }
+
+  /// The board's events after `since`, from one connection, as the signed-in user; nil when
+  /// signed out.
+  func events(since: String) -> AsyncThrowingStream<BoardEvent, any Error>? {
+    client?.events(since: since)
+  }
+
+  /// The live turn stream from the start of the server's buffer; nil when signed out.
+  func turns() -> AsyncThrowingStream<LiveTurnEvent, any Error>? {
+    client?.turns(since: 0)
+  }
+
+  /// Whether a stream's failure ended the sign-in: a token the board no longer takes does, and
+  /// the app goes back to sign-in, as for any other request.
+  func ended(by error: any Error) -> Bool {
+    guard let error = error as? BoardError, error.isUnauthorized else {
+      return false
+    }
+    endSignIn()
+    return true
+  }
+
+  private func endSignIn() {
+    guard phase == .signedIn else {
+      return
+    }
+    if let board {
+      try? environment.tokens.delete(for: board)
+    }
+    leave(notice: AppModel.ended)
   }
 
   /// Loads the board again: what Board and Needs you show, and who the token signs in as.
@@ -161,6 +190,25 @@ enum SignInFailure: Error, Equatable {
     return feed
   }
 
+  /// The project of the conversation Chat shows, which the sky frames and brightens, as the web's
+  /// does a project the board has open: a project's channel, or a thread in one, once the thread
+  /// or its task is known.
+  var skyFocus: String? {
+    let channel: String?
+    switch history.current {
+    case .channel(let ref):
+      channel = ref
+    case .thread(let id):
+      channel =
+        feeds[history.current]?.thread?.channel
+        ?? store.tasks.first { $0.id == id }.map { "\($0.project)/general" }
+    }
+    guard let channel, let slash = channel.firstIndex(of: "/") else {
+      return nil
+    }
+    return String(channel[..<slash])
+  }
+
   /// What a conversation is called: `#general`, or a thread's title once it is known.
   func name(of conversation: Conversation) -> String {
     switch conversation {
@@ -186,6 +234,7 @@ enum SignInFailure: Error, Equatable {
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
     feeds = [:]
+    sky.clear()
     tab = .chat
     notice = nil
     phase = .signedIn
@@ -199,6 +248,7 @@ enum SignInFailure: Error, Equatable {
     memory = nil
     feeds = [:]
     store.clear()
+    sky.clear()
     history = ChatHistory()
     showsSettings = false
     self.notice = notice

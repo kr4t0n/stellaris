@@ -120,27 +120,45 @@ public enum CliKind: String, Sendable, Hashable {
   case claude, codex
 }
 
-/// A citizen on the board's roster, with what the sky reads of it.
+/// A citizen on the board's roster, with what the sky and its cards read of it.
 public struct Member: Sendable, Hashable, Codable {
   public enum Status: String, Sendable, Hashable {
     case active, retired
   }
 
   public let name: String
+  /// The citizen's role. The board always sends it; the sky's tables, which the web's tests write
+  /// from boards of their own, leave it out.
+  public let role: String?
   /// Nil for the user, who takes no turns.
   public let cli: OrUnknown<CliKind>?
   public let status: OrUnknown<Status>
+  /// The model configured on the record, if any; the CLI's own default applies otherwise.
+  public let model: String?
+  /// The model the CLI reported on the citizen's last turn.
+  public let lastModel: String?
   /// The projects the citizen belongs to.
   public let memberships: [String]
+  public let lastTurnAt: String?
 }
 
 /// The scheduler's sessions, each an `agent/scope` key with the conversation's part after it, as
 /// the session keys of `packages/shared` spell them: those in a turn, those queued, and the warm
 /// ones.
 public struct SchedulerView: Sendable, Hashable, Codable {
+  /// Whether the society is paused, which dims the sky. The board always sends it; the sky's
+  /// tables leave it out.
+  public let paused: Bool?
   public let running: [String]
   public let pending: [String]
   public let resident: [String]
+
+  public init(paused: Bool?, running: [String], pending: [String], resident: [String]) {
+    self.paused = paused
+    self.running = running
+    self.pending = pending
+    self.resident = resident
+  }
 }
 
 /// A channel as the channel list gives it, with its count and its latest message.

@@ -10,7 +10,9 @@
   /// enough to scroll. Any token signs in, except `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
   /// list of the channels after the first fails, as when the network goes once the board loaded,
-  /// and a host under `.invalid`, which never resolves, can't be reached.
+  /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
+  /// nothing, and its turn stream sends the captured one, stamped now, as live; both stay open,
+  /// as the board's do.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     private static let folder = Mutex<URL?>(nil)
@@ -60,6 +62,17 @@
         client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
         return
       }
+      if let stream = FakeBoard.stream(request) {
+        let response = HTTPURLResponse(
+          url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+          headerFields: ["Content-Type": "text/event-stream"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if !stream.isEmpty {
+          client?.urlProtocol(self, didLoad: stream)
+        }
+        // Held open until the app lets go of it.
+        return
+      }
       let (status, body) = FakeBoard.answer(request)
       let response = HTTPURLResponse(
         url: url, statusCode: status, httpVersion: "HTTP/1.1",
@@ -90,6 +103,30 @@
       }
     }
 
+    /// What a stream the app opens sends at once, or nil for a request that is no stream or that
+    /// the board refuses, which `answer` answers.
+    private static func stream(_ request: URLRequest) -> Data? {
+      let path = request.url?.path(percentEncoded: true) ?? ""
+      let token = request.value(forHTTPHeaderField: "Authorization")
+      guard request.httpMethod ?? "GET" == "GET", token != nil, token != "Bearer refused",
+        token != "Bearer revoked"
+      else {
+        return nil
+      }
+      switch path {
+      case "/api/events/stream":
+        return Data()
+      case "/api/turns/stream":
+        guard let text = read("turn-stream")?["text"] as? String else {
+          return nil
+        }
+        let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        return Data(text.replacingOccurrences(of: "2026-01-01T00:00:00.000Z", with: now).utf8)
+      default:
+        return nil
+      }
+    }
+
     static func answer(_ request: URLRequest) -> (Int, Data) {
       let method = request.httpMethod ?? "GET"
       let path = request.url?.path(percentEncoded: true) ?? ""
@@ -104,6 +141,8 @@
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
+      case ("GET", "/api/members"): return fixture("members")
+      case ("GET", "/api/scheduler"): return fixture("scheduler")
       case ("GET", "/api/projects"): return fixture("projects")
       case ("GET", "/api/channels"): return fixture("channels")
       case ("GET", "/api/channels/general"): return (200, json(general))

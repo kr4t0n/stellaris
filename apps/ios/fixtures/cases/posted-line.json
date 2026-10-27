@@ -1,0 +1,136 @@
+[
+  {
+    "name": "a heading's words, without its marks",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "channel": "general",
+      "body": "\n## Survey done\n\nDetails follow."
+    },
+    "line": "Survey done"
+  },
+  {
+    "name": "the first line with words",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "thread_id": "01M5A00000000000000000T001",
+      "body": "  \n\t\nThe build is green.\nMore below."
+    },
+    "line": "The build is green."
+  },
+  {
+    "name": "a quote and a list item lose their marks, and bold its leading stars",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "> - **Done**: the export view"
+    },
+    "line": "Done**: the export view"
+  },
+  {
+    "name": "line endings of CR and LF",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "\r\nFirst line\r\nSecond line"
+    },
+    "line": "First line"
+  },
+  {
+    "name": "a non-breaking space and a tab before the words",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": " \t# Heads up"
+    },
+    "line": "Heads up"
+  },
+  {
+    "name": "a post with no words",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "   "
+    },
+    "line": null
+  },
+  {
+    "name": "a post of marks alone",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "## \n---\n"
+    },
+    "line": null
+  },
+  {
+    "name": "a body that isn't text",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": 42
+    },
+    "line": null
+  },
+  {
+    "name": "no body",
+    "tool": "mcp__board__post_message",
+    "input": {},
+    "line": null
+  },
+  {
+    "name": "an input that isn't an object",
+    "tool": "mcp__board__post_message",
+    "input": "hello",
+    "line": null
+  },
+  {
+    "name": "another board verb",
+    "tool": "mcp__board__claim_task",
+    "input": {
+      "body": "x"
+    },
+    "line": null
+  },
+  {
+    "name": "the verb by its bare name",
+    "tool": "post_message",
+    "input": {
+      "body": "Bare"
+    },
+    "line": "Bare"
+  },
+  {
+    "name": "another server's tool of the same name",
+    "tool": "mcp__slack__post_message",
+    "input": {
+      "body": "Elsewhere"
+    },
+    "line": null
+  },
+  {
+    "name": "a server name with underscores",
+    "tool": "mcp__my_board__post_message",
+    "input": {
+      "body": "Elsewhere"
+    },
+    "line": null
+  },
+  {
+    "name": "a long line, cut to 400 code units",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+    },
+    "line": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word…"
+  },
+  {
+    "name": "a line of exactly 400 code units",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "line": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "name": "letters outside the basic plane count as two code units",
+    "tool": "mcp__board__post_message",
+    "input": {
+      "body": "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀abcccccccccc"
+    },
+    "line": "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀a…"
+  }
+]

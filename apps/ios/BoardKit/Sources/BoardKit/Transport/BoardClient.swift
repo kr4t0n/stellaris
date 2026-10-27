@@ -51,7 +51,26 @@
     /// The board's events after `since`, from one connection, until it ends or fails. Keep-alive
     /// pings are left out; following the board across drops is the caller's.
     public func events(since: String) -> AsyncThrowingStream<BoardEvent, any Error> {
-      let request = BoardAPI.eventStream(since: since).urlRequest(board: board, token: token)
+      frames(of: BoardAPI.eventStream(since: since)) { frame in
+        try JSONDecoder().decode(BoardEvent.self, from: Data(frame.data.utf8))
+      }
+    }
+
+    /// The live turn stream after the event numbered `since`, from one connection, until it ends
+    /// or fails. Pings are left out, and so is a frame of a shape this client can't read, as the
+    /// web skips one its schema refuses; following the stream across drops is the caller's.
+    public func turns(since: Int = 0) -> AsyncThrowingStream<LiveTurnEvent, any Error> {
+      frames(of: BoardAPI.turnStream(since: since)) { frame in
+        try? JSONDecoder().decode(LiveTurnEvent.self, from: Data(frame.data.utf8))
+      }
+    }
+
+    /// The frames with data a stream at `endpoint` sends, each read by `read`, which leaves a
+    /// frame out by giving nil and ends the stream by throwing.
+    private func frames<Item: Sendable>(
+      of endpoint: Endpoint, read: @escaping @Sendable (ServerSentEvent) throws -> Item?
+    ) -> AsyncThrowingStream<Item, any Error> {
+      let request = endpoint.urlRequest(board: board, token: token)
       let session = session
       return AsyncThrowingStream { continuation in
         let reading = Task {
@@ -66,11 +85,9 @@
               throw BoardError(status: status, body: body)
             }
             var parser = ServerSentEventParser()
-            let decoder = JSONDecoder()
             for try await byte in bytes {
-              if let frame = parser.push(byte), !frame.data.isEmpty {
-                let event = try decoder.decode(BoardEvent.self, from: Data(frame.data.utf8))
-                continuation.yield(event)
+              if let frame = parser.push(byte), !frame.data.isEmpty, let item = try read(frame) {
+                continuation.yield(item)
               }
             }
             continuation.finish()

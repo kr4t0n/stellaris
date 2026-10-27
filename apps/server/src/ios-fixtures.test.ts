@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
+import { TurnHub } from "./turn-hub.js";
 
 /**
  * The answers the iOS client reads, captured from a real server into `apps/ios/fixtures/api`,
@@ -192,10 +193,12 @@ describe("the answers the iOS client reads", () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-ios-fixtures-"));
     const { board, userToken } = await Board.init(dir, { name: "fixtures" });
     await addMembers(board);
+    const turns = new TurnHub();
     society = await startTestSociety({
       board,
       runnerName: "runner-1",
       backends: () => ({}),
+      turns,
       signIn: {
         github: {
           clientId: "Iv1.fixtures",
@@ -408,8 +411,59 @@ describe("the answers the iOS client reads", () => {
       text: normaliser.text(text),
     });
 
+    // What the sky reads: the roster and the scheduler, and the live turn stream, where a turn
+    // posts in the task's thread and runs a command while another citizen reads its inbox.
+    await call("members", "GET", "/api/members");
+    await call("scheduler", "GET", "/api/scheduler");
+    const conversation = { thread: task?.id };
+    turns.push("eng-1", "demo", { type: "text", delta: "Checking the export view." }, conversation);
+    turns.push(
+      "eng-1",
+      "demo",
+      {
+        type: "tool_call",
+        name: "mcp__board__post_message",
+        input: { thread_id: task?.id, body: "## The export view is in\n\nThe design is approved." },
+      },
+      conversation,
+    );
+    turns.push(
+      "eng-1",
+      "demo",
+      { type: "tool_call", name: "Bash", input: { command: "pnpm test" } },
+      conversation,
+    );
+    turns.push("eng-1", "demo", { type: "tool_result", name: "Bash", ok: true }, conversation);
+    turns.push("concierge-1", "society", {
+      type: "tool_call",
+      name: "mcp__board__read_inbox",
+      input: {},
+    });
+    const turnRoute = "/api/turns/stream?since=0";
+    const turnResponse = await fetch(`${url}${turnRoute}`, {
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    const turnReader = turnResponse.body?.pipeThrough(new TextDecoderStream()).getReader();
+    if (turnReader === undefined) {
+      throw new Error("the turn stream has no body");
+    }
+    let turnText = "";
+    while (turnText.split("\n\n").length <= turns.lastSeq) {
+      const { value, done } = await turnReader.read();
+      if (done) {
+        break;
+      }
+      turnText += value;
+    }
+    await turnReader.cancel();
+    captures.set("turn-stream", {
+      request: normaliser.json({ method: "GET", path: turnRoute }),
+      status: turnResponse.status,
+      text: normaliser.text(turnText),
+    });
+
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(33);
+    expect(captures.size).toBe(36);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

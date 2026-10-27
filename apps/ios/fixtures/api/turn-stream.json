@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/turns/stream?since=0"
+  },
+  "status": 200,
+  "text": "event: turn\ndata: {\"seq\":1,\"ts\":\"2026-01-01T00:00:00.000Z\",\"agent\":\"eng-1\",\"project\":\"demo\",\"thread\":\"00000000000000000000000010\",\"event\":{\"type\":\"text\",\"delta\":\"Checking the export view.\"}}\nid: 1\n\nevent: turn\ndata: {\"seq\":2,\"ts\":\"2026-01-01T00:00:00.000Z\",\"agent\":\"eng-1\",\"project\":\"demo\",\"thread\":\"00000000000000000000000010\",\"event\":{\"type\":\"tool_call\",\"name\":\"mcp__board__post_message\",\"input\":{\"thread_id\":\"00000000000000000000000010\",\"body\":\"## The export view is in\\n\\nThe design is approved.\"}}}\nid: 2\n\nevent: turn\ndata: {\"seq\":3,\"ts\":\"2026-01-01T00:00:00.000Z\",\"agent\":\"eng-1\",\"project\":\"demo\",\"thread\":\"00000000000000000000000010\",\"event\":{\"type\":\"tool_call\",\"name\":\"Bash\",\"input\":{\"command\":\"pnpm test\"}}}\nid: 3\n\nevent: turn\ndata: {\"seq\":4,\"ts\":\"2026-01-01T00:00:00.000Z\",\"agent\":\"eng-1\",\"project\":\"demo\",\"thread\":\"00000000000000000000000010\",\"event\":{\"type\":\"tool_result\",\"name\":\"Bash\",\"ok\":true}}\nid: 4\n\nevent: turn\ndata: {\"seq\":5,\"ts\":\"2026-01-01T00:00:00.000Z\",\"agent\":\"concierge-1\",\"project\":\"society\",\"event\":{\"type\":\"tool_call\",\"name\":\"mcp__board__read_inbox\",\"input\":{}}}\nid: 5\n\n"
+}

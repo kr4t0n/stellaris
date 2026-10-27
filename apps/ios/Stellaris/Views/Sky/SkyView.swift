@@ -168,14 +168,18 @@ private struct FitButton: View {
     } label: {
       // The whole circle takes the tap, not only the icon's strokes, which would let a tap
       // between them through to the sky.
+      // A fixed size, so the symbol stays inside its circle at every type size; the large content
+      // viewer shows it bigger.
       Label("Fit the whole sky", systemImage: "arrow.up.left.and.arrow.down.right")
         .labelStyle(.iconOnly)
+        .font(.system(size: 17, weight: .medium))
         .frame(width: 44, height: 44)
         .background(.regularMaterial, in: Circle())
         .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .foregroundStyle(.secondary)
+    .accessibilityShowsLargeContentViewer()
     .opacity(sky.camera.mode == .home ? 0.5 : 1)
     .accessibilityIdentifier("sky-fit")
     .accessibilityValue(SkyElements.describe(sky.camera, model: model))

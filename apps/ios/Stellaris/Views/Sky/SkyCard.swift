@@ -180,16 +180,20 @@ struct SkyCard: View {
             .background(Color(sky: chip.1, opacity: 0.15), in: Capsule())
         }
       }
+      // Stacked, the parts take the card's width, so Close keeps to its trailing corner.
+      .frame(maxWidth: .infinity, alignment: .leading)
       Button {
         app.sky.card = nil
       } label: {
         Label("Close", systemImage: "xmark")
           .labelStyle(.iconOnly)
+          .font(.system(size: 15, weight: .semibold))
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .foregroundStyle(.secondary)
+      .accessibilityShowsLargeContentViewer()
       .accessibilityIdentifier("sky-card-close")
     }
   }

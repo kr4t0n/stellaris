@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ResidentStart, TurnRequest } from "@stellaris/runner-core";
+import {
+  TurnControl,
+  type ResidentStart,
+  type TurnRequest,
+  type TurnResult,
+} from "@stellaris/runner-core";
 import type { Usage } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { ClaudeAgentBackend, type QueryFn } from "./index.js";
@@ -19,6 +24,9 @@ import { ClaudeAgentBackend, type QueryFn } from "./index.js";
  *   one left it at 7,530 input, 323 output, 10,000 cache-read and 50 cache-write tokens.
  * - `sdk-warm-subagent-recorded.jsonl`: a warm session of three prompts, whose first prompt's
  *   sub-agent finished after that turn's result, before the second prompt.
+ * - `sdk-refused-after-kill-recorded.jsonl` and `sdk-resumed-after-kill-recorded.jsonl`: cold
+ *   resumes of a session after the CLI of its warm session was killed outright, so they restored
+ *   no totals. The stub refused the first with a 400; the second made one main-loop request.
  */
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -239,5 +247,149 @@ describe("a Claude turn's usage", () => {
     expect(result.exitReason).toBe("error");
     expect(result.usage).toEqual(usage(0, 0, 0, 0));
     expect(result).not.toHaveProperty("sessionUsage");
+  });
+});
+
+/**
+ * The zeroed result Claude Code 2.1.283 writes before any init message for a resume it could not
+ * make, as it wrote it for an id it found no transcript of: no model in `modelUsage`, and a total
+ * of nothing, whatever the session's transcript saved. It writes the same result for a startup
+ * failure it names, such as a session it runs in the background, under other words.
+ */
+function unresumed(words: string): SDKMessage {
+  const frame = {
+    type: "result",
+    subtype: "error_during_execution",
+    duration_ms: 0,
+    duration_api_ms: 0,
+    is_error: true,
+    num_turns: 0,
+    stop_reason: null,
+    session_id: request.session,
+    total_cost_usd: 0,
+    usage: {
+      input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 0,
+    },
+    modelUsage: {},
+    permission_denials: [],
+    uuid: "a358955e-b6aa-4046-ab7d-2010691562ef",
+    errors: [words],
+    result_index: 0,
+  };
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return frame as unknown as SDKMessage;
+}
+
+/**
+ * A query that streams these frames, then throws as the SDK does. A warm one `waits` for its first
+ * prompt, so they come during the turn.
+ */
+function exitingAfter(frames: readonly SDKMessage[], error: string, waits = false): QueryFn {
+  return (params) => {
+    const prompts = params.prompt;
+    return (async function* () {
+      if (waits && typeof prompts !== "string") {
+        await prompts[Symbol.asyncIterator]().next();
+      }
+      yield* frames;
+      throw new Error(error);
+    })();
+  };
+}
+
+describe("a Claude turn's cost", () => {
+  /** Where the session's second turn left it, which the board hands its third. */
+  const held = { costSoFarUsd: 0.01678, usageSoFar: usage(7_530, 323, 10_000, 50) };
+  const missing = `No conversation found with session ID: ${request.session}`;
+  // Stand-in words: no startup failure but a missing session's could be made here.
+  const background = `Error: session ${request.session} is running in the background`;
+
+  /** The session's next turn, handed what the host keeps: the outcome's totals, else the job's. */
+  async function nextTurn(failed: Pick<TurnResult, "sessionCostUsd" | "sessionUsage">) {
+    const frames = await recorded("sdk-subagent-resumed-recorded.jsonl");
+    return new ClaudeAgentBackend({ queryFn: replaying(frames) }).runTurn({
+      ...request,
+      costSoFarUsd: failed.sessionCostUsd ?? held.costSoFarUsd,
+      usageSoFar: failed.sessionUsage ?? held.usageSoFar,
+    });
+  }
+
+  it("keeps the board's running cost through a resume the CLI could not make, so the session's cost counts once", async () => {
+    // The host drops a lost session, but its record should not say it holds nothing either.
+    for (const [words, failure] of [
+      [background, "retry"],
+      [missing, "lost"],
+    ] as const) {
+      const sdkWords = `Claude Code returned an error result: ${words}`;
+      const failed = await new ClaudeAgentBackend({
+        queryFn: exitingAfter([unresumed(words)], sdkWords),
+      }).runTurn({ ...request, ...held });
+      expect(failed.resumeFailed).toBe(failure);
+      expect(failed.costUsd).toBe(0);
+
+      // The next resume counts its own four main-loop requests and the sub-agent's, not the
+      // earlier turns' $0.01678 again.
+      const next = await nextTurn(failed);
+      expect(next.costUsd).toBeCloseTo(0.01475, 8);
+      expect(next.usage).toEqual(usage(7_400, 270, 8_000, 40));
+      expect(failed).not.toHaveProperty("sessionCostUsd");
+      expect(failed).not.toHaveProperty("sessionUsage");
+    }
+  });
+
+  it("keeps the board's running cost through a stop during a resume the CLI could not make", async () => {
+    const control = new TurnControl();
+    control.stop();
+    const stopped = await new ClaudeAgentBackend({
+      queryFn: exitingAfter([unresumed(background)], "Claude Code process aborted by user"),
+    }).runTurn({ ...request, ...held }, undefined, control);
+    expect(stopped.exitReason).toBe("stopped");
+    expect((await nextTurn(stopped)).costUsd).toBeCloseTo(0.01475, 8);
+    expect(stopped).not.toHaveProperty("sessionCostUsd");
+  });
+
+  it("keeps the board's running cost through a warm session's resume the CLI could not make", async () => {
+    const sdkWords = `Claude Code returned an error result: ${background}`;
+    const warm = await new ClaudeAgentBackend({
+      queryFn: exitingAfter([unresumed(background)], sdkWords, true),
+    }).startResident(spec, { ...start, newSession: false, ...held });
+    const failed = await warm.runTurn("PARENT-TASK: plain turn.");
+    await warm.close();
+    expect(failed.resumeFailed).toBe("retry");
+    expect((await nextTurn(failed)).costUsd).toBeCloseTo(0.01475, 8);
+    expect(failed).not.toHaveProperty("sessionCostUsd");
+  });
+
+  it("reports the CLI's own total of nothing once it opened the session, as after a kill that saved none", async () => {
+    // A warm session's two turns left the board at $0.00406 before its CLI was killed outright.
+    const killed = { costSoFarUsd: 0.00406, usageSoFar: usage(260, 106, 4_000, 20) };
+    const refusedFrames = await recorded("sdk-refused-after-kill-recorded.jsonl");
+    const cold = await new ClaudeAgentBackend({ queryFn: replaying(refusedFrames) }).runTurn({
+      ...request,
+      ...killed,
+    });
+    const session = await new ClaudeAgentBackend({
+      queryFn: replayingWarm(refusedFrames),
+    }).startResident(spec, { ...start, newSession: false, ...killed });
+    const warm = await session.runTurn("refused.");
+    await session.close();
+
+    const resumed = await recorded("sdk-resumed-after-kill-recorded.jsonl");
+    for (const refused of [cold, warm]) {
+      expect(refused.exitReason).toBe("error");
+      expect(refused.resumeFailed).toBeUndefined();
+      // The next resume counts its one request, measured from what the CLI holds, not the board.
+      const next = await new ClaudeAgentBackend({ queryFn: replaying(resumed) }).runTurn({
+        ...request,
+        costSoFarUsd: refused.sessionCostUsd ?? killed.costSoFarUsd,
+        usageSoFar: refused.sessionUsage ?? killed.usageSoFar,
+      });
+      expect(next.costUsd).toBeCloseTo(0.00185, 8);
+      expect(next.usage).toEqual(usage(100, 50, 2_000, 10));
+      expect(refused.sessionCostUsd).toBe(0);
+    }
   });
 });

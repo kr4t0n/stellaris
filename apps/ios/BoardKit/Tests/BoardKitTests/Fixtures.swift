@@ -70,6 +70,12 @@ struct Fixture {
     let data = try Data(contentsOf: folder.appendingPathComponent("cases/\(name).json"))
     return try JSONDecoder().decode(type, from: data)
   }
+
+  /// One of the sky's tables from `apps/ios/fixtures/sky`, which the web's tests write.
+  static func sky<T: Decodable>(_ name: String, as type: T.Type) throws -> T {
+    let data = try Data(contentsOf: folder.appendingPathComponent("sky/\(name).json"))
+    return try JSONDecoder().decode(type, from: data)
+  }
 }
 
 extension Data {

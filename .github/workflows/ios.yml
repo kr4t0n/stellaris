@@ -66,8 +66,9 @@ jobs:
       - name: Generate the project
         working-directory: apps/ios
         run: xcodegen generate
-      # A copy of the app that XCTest can't end is captured while it still runs, as the `stuck-app`
-      # artifact, since a step after the tests could come once it has gone.
+      # A copy of the app that XCTest can't end is captured while it still runs, since a step after
+      # the tests could come once it has gone, and where the first copies' console goes is kept
+      # beside it, as the `stuck-app` artifact.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
         run: |

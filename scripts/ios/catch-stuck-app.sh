@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Follows the output of the app's UI tests, and when a copy of the app still runs 10 s after XCTest
 # began ending it, which takes 1 to 3 s, keeps what that copy and the simulator's processes that end
-# it were doing while it still runs: its state, its stacks with the kernel's, the simulator's jobs,
-# and the simulator's log of those processes. It reads the simulator's processes alone, never the
-# Mac's, since what it keeps becomes an artifact anyone signed in to GitHub can download.
+# it were doing while it still runs: its state, its open terminals, its stacks with the kernel's, the
+# simulator's jobs, and the simulator's log of those processes, with the stacks of xcodebuild, which
+# reads the app's console. For the first copies it sees launch, it also keeps where their console
+# goes: their open devices, who holds those terminals, and their logging variables. It keeps nothing
+# else of the Mac's, no log and no environment beyond those variables, since what it keeps becomes
+# an artifact anyone signed in to GitHub can download.
 # Usage: catch-stuck-app.sh <bundle id> <test output> <folder>. It stops once <test output>.done
 # exists, after the captures under way.
 set -uo pipefail
@@ -32,6 +35,35 @@ job_pid() {
   awk -v label="$2" '$3 ~ label && $1 ~ /^[0-9]+$/ { print $1; exit }' "$1"
 }
 
+# A process's open character devices: terminals, /dev/null, and the like.
+devices() {
+  lsof -n -P -a -p "$1" -d 0-255 2>&1 | awk 'NR == 1 || $5 == "CHR"'
+}
+
+# Where a copy's console goes, once it has started: its devices, who holds each terminal among them,
+# and its logging variables, by an allowlist of names, since its environment holds more than they do.
+console() {
+  local pid=$1 file="$folder/console/$1.txt" tty
+  sleep 5
+  mkdir -p "$folder/console"
+  {
+    echo "$(now) $bundle:$pid"
+    devices "$pid"
+    for tty in $(devices "$pid" | awk '$NF ~ /^\/dev\/ttys[0-9]+$/ { print $NF }' | sort -u); do
+      echo "holders of $tty:"
+      lsof -n -P "$tty" 2>&1 | awk '{ print $1, $2, $4, $5, $9 }'
+    done
+    echo "xcodebuild's terminals:"
+    for proc in $(pgrep -x xcodebuild); do
+      devices "$proc" | awk '/ptmx|ttys/'
+    done
+    echo "logging variables:"
+    ps -wwE -o command= -p "$pid" | tr ' ' '\n' |
+      grep -E '^(OS_ACTIVITY_[A-Z_]*|OS_LOG_[A-Z_]*|IDE_[A-Za-z_]*|CFLOG_[A-Z_]*|NSUnbufferedIO)=' |
+      cut -c1-80
+  } >"$file" 2>&1
+}
+
 simulator_log() {
   local device=$1 dir=$2
   xcrun simctl spawn "$device" log show --last 6m --info --style compact --predicate \
@@ -54,6 +86,7 @@ capture() {
     echo "$(now) $bundle:$pid still runs $waited s after XCTest began ending it, in simulator ${device:-unknown}"
     ps -o pid,ppid,stat,etime,time,%cpu,rss,command -p "$pid"
     ps -o wchan -p "$pid"
+    devices "$pid"
   } >>"$dir/summary.txt" 2>&1
   if [ -z "$device" ]; then
     return 0
@@ -71,6 +104,9 @@ capture() {
     if [ -n "$proc" ]; then
       others+=(-proc "$proc")
     fi
+  done
+  for proc in $(pgrep -x xcodebuild); do
+    others+=(-proc "$proc")
   done
   sudo -n spindump "$pid" 5 10 -onlyTarget ${others[@]+"${others[@]}"} -noBinary -timelimit 90 \
     -o "$dir/spindump.txt" >/dev/null 2>"$dir/spindump.err" ||
@@ -111,7 +147,20 @@ ending="Terminate ${bundle//./\\.}:[0-9]+"
 failed="Failed to terminate ${bundle//./\\.}:[0-9]+"
 seen=" "
 missed=" "
+launched=" "
 while [ ! -e "$output.done" ]; do
+  # The app's process is named after its executable, Stellaris.
+  for pid in $(pgrep -x Stellaris); do
+    case "$launched" in
+      *" $pid "*) ;;
+      *)
+        launched="$launched$pid "
+        if [ "$(echo "$launched" | wc -w)" -le 4 ]; then
+          console "$pid" &
+        fi
+        ;;
+    esac
+  done
   while read -r pid; do
     case "$seen" in
       *" $pid "*) ;;
@@ -134,5 +183,5 @@ while [ ! -e "$output.done" ]; do
 done
 wait
 ends=$(echo "$seen" | wc -w | tr -d ' ')
-kept=$(find "$folder" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+kept=$(find "$folder" -mindepth 1 -maxdepth 1 -type d ! -name console | wc -l | tr -d ' ')
 echo "catch-stuck-app.sh: followed $ends ends of $bundle, kept $kept captures"

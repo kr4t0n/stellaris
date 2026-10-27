@@ -66,13 +66,10 @@ enum Loading: Equatable, Sendable {
     projects.first { $0.slug == slug }?.name ?? slug
   }
 
-  /// A line with each task's id in it read as the task's title, as the web reads ids as what they
-  /// name.
+  /// A line with each task's id in it read as the task's title where the web's `withTitles` reads
+  /// one: standing alone, not in a path or a file name, with a title it echoes said once.
   func withTaskTitles(_ line: String) -> String {
-    line.replacing(/[0-9A-HJKMNP-TV-Z]{26}/) { match in
-      let id = String(match.output)
-      return tasks.first { $0.id == id }?.title ?? id
-    }
+    withTitles(line, titles: Dictionary(tasks.map { ($0.id, $0.title) }, uniquingKeysWith: { $1 }))
   }
 
   /// Loads the projects and their tasks again, as an event that touched them asks, leaving the

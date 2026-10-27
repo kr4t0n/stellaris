@@ -48,8 +48,8 @@ final class SkyUITests: ShellTestCase {
     card.buttons["sky-card-close"].tap()
     XCTAssertTrue(card.waitForNonExistence(timeout: 20), "Close leaves the card open")
 
-    let star = sky.buttons["sky-star-rev-1"]
-    star.press(forDuration: 0.1, thenDragTo: sky.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)))
+    let star = sky.buttons["sky-star-rev-1"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    star.press(forDuration: 0.1, thenDragTo: star.withOffset(CGVector(dx: -120, dy: -120)))
     expectValue(sky.buttons["sky-fit"], "CONTAINS", "%")
     XCTAssertFalse(card.exists, "a drag from a star opened its card")
   }

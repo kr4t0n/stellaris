@@ -56,10 +56,15 @@ final class ConversationUITests: ShellTestCase {
     XCTAssertFalse(title.exists, "the sheet stays once the thread is open")
 
     pick(app, "back")
+    // At the foot, where it was opened, below #general's newest message.
     let row = app.scrollViews["messages"].buttons
-      .matching(NSPredicate(format: "identifier BEGINSWITH 'thread-'")).firstMatch
+      .matching(
+        NSPredicate(
+          format: "identifier BEGINSWITH 'thread-' AND label CONTAINS %@", "Release checklist")
+      ).firstMatch
     XCTAssertTrue(row.waitForExistence(timeout: 20), "#general doesn't show the thread opened")
-    XCTAssertTrue(row.label.contains("Release checklist"), "the thread's row reads \(row.label)")
+    XCTAssertTrue(row.isHittable, "the thread's row isn't at #general's foot")
+    XCTAssertGreaterThan(row.frame.minY, message(app, 60).frame.minY)
     keepScreen("thread-in-channel")
   }
 

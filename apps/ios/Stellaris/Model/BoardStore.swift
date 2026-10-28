@@ -161,6 +161,76 @@ enum Loading: Equatable, Sendable {
     withTitles(line, index: entities)
   }
 
+  /// The lists `reload` reads again, as the web's queries name them (`staleKeys`).
+  static let lists: Set<String> = [
+    "channels", "projects", "tasks", "proposals", "requests", "members", "threads",
+  ]
+
+  /// Loads again the lists `names` names, as events that touched them ask, leaving the rest of
+  /// the board as it was. What comes back once the app has signed out, or in again, is dropped,
+  /// and so is a list that fails to load, which stays as it was.
+  func reload(_ names: Set<String>, using model: AppModel) async {
+    let signIn = model.generation
+    func load<Value>(_ name: String, _ request: BoardRequest<Value>) async -> Value? {
+      guard names.contains(name), let value = try? await model.send(request),
+        model.generation == signIn
+      else {
+        return nil
+      }
+      return value
+    }
+    if let channels = await load("channels", BoardAPI.channels()) {
+      self.channels = channels
+    }
+    if let proposals = await load("proposals", BoardAPI.proposals()) {
+      self.proposals = proposals
+    }
+    if let members = await load("members", BoardAPI.members()) {
+      self.members = members
+    }
+    if let threads = await load("threads", BoardAPI.threads()) {
+      self.threads = threads
+    }
+    if let requests = await load("requests", BoardAPI.requests()) {
+      self.requests = requests
+      await lookUpMessages(in: requests.map(\.message.body), using: model)
+    }
+    if !names.isDisjoint(with: ["projects", "tasks"]) {
+      await reloadProjects(using: model)
+    }
+  }
+
+  /// The citizens a mention typed as `prefix` offers, as the web's composer offers them: active
+  /// ones with a CLI, in the roster's order, six at most.
+  func mentionable(_ prefix: String) -> [Member] {
+    Array(
+      members.filter { member in
+        member.status == .known(.active) && member.cli != nil && member.name.hasPrefix(prefix)
+      }
+      .prefix(6))
+  }
+
+  /// Why `channel` takes no posts, if it doesn't: it was archived, or its project was. The board
+  /// refuses posts and threads there.
+  func readOnly(_ channel: String) -> ReadOnly? {
+    if let archived = channels.first(where: { $0.ref == channel })?.archived {
+      return .archived(archived)
+    }
+    let parts = channel.split(separator: "/")
+    if parts.count > 1, let project = projects.first(where: { $0.slug == parts[0] }),
+      project.archived != nil
+    {
+      return .projectArchived(project.name)
+    }
+    return nil
+  }
+
+  /// Why a channel takes no posts.
+  enum ReadOnly: Equatable {
+    case archived(ArchivedChannel)
+    case projectArchived(String)
+  }
+
   /// Loads the projects and their tasks again, as an event that touched them asks, leaving the
   /// rest of the board as it was. What comes back once the app has signed out, or in again, is
   /// dropped, and so is a load that fails: the sky keeps what it had.
@@ -265,30 +335,52 @@ extension Proposal {
   /// The thread itself, for a thread: its title, and the channel Back goes to.
   private(set) var thread: BoardThread?
   private(set) var messages: [Message] = []
+  /// Whether an event touched the conversation since it was last read, so it is read again when it
+  /// is next shown.
+  @ObservationIgnored private(set) var stale = false
 
   init(conversation: Conversation) {
     self.conversation = conversation
   }
 
+  func markStale() {
+    stale = true
+  }
+
+  /// Counts loads, so an answer that a later load's overtook changes nothing.
+  @ObservationIgnored private var loads = 0
+
   func load(using model: AppModel) async {
+    loads += 1
+    let load = loads
     if state != .loaded {
       state = .loading
     }
     do {
       switch conversation {
       case .channel(let ref):
-        messages = try await model.send(BoardAPI.channel(ref))
+        let messages = try await model.send(BoardAPI.channel(ref))
+        guard load == loads else {
+          return
+        }
+        self.messages = messages
       case .thread(let id):
         let detail = try await model.send(BoardAPI.thread(id))
+        guard load == loads else {
+          return
+        }
         thread = detail.thread
         messages = detail.messages
       }
       state = .loaded
+      stale = false
       await model.store.lookUpMessages(in: messages.map(\.body), using: model)
     } catch is CancellationError {
       return
     } catch {
-      state = Loading(error)
+      if load == loads, state != .loaded {
+        state = Loading(error)
+      }
     }
   }
 }

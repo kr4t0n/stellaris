@@ -191,7 +191,7 @@
       #expect(try await client.image("01ARZ3NDEKTSV4RRFFQ69G5FAV") == png)
     }
 
-    /// The server's recorded stream, arriving in uneven pieces with a keep-alive ping among them.
+    /// The server's recorded stream, arriving in uneven pieces with a keep-alive ping after it.
     @Test func followsTheEventStream() async throws {
       let fixture = try Fixture("event-stream")
       let text = try #require(fixture.text) + "event: ping\ndata: \n\n"
@@ -206,16 +206,21 @@
           : StubBoard.Answer(status: 400)
       }
       let client = BoardClient(board: board, token: "t", session: session)
-      var types: [String] = []
-      for try await event in client.events(since: since) {
-        types.append(event.type)
+      var items: [String] = []
+      for try await item in client.eventConnection(since: since) {
+        switch item {
+        case .opened: items.append("opened")
+        case .event(let event): items.append(event.type)
+        case .ping: items.append("ping")
+        }
       }
-      // Each of the server's frames, in order, names its event's type; the ping is left out.
+      // The board's answer, then each of the server's frames, in order, named by its type, and
+      // the ping.
       let named = try #require(fixture.text).split(separator: "\n")
         .filter { $0.hasPrefix("event: ") }
         .map { String($0.dropFirst("event: ".count)) }
       #expect(named.count > 30)
-      #expect(types == named)
+      #expect(items == ["opened"] + named + ["ping"])
     }
 
     @Test func endsTheStreamWithTheBoardsRefusal() async throws {
@@ -225,7 +230,7 @@
       }
       let client = BoardClient(board: board, token: "t", session: session)
       await #expect(throws: BoardError(status: 401, code: "UNAUTHORIZED", message: "no")) {
-        for try await _ in client.events(since: "latest") {}
+        for try await _ in client.eventConnection(since: "latest") {}
       }
     }
   }

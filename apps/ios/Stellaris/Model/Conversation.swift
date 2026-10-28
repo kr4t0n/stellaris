@@ -16,6 +16,20 @@ enum Conversation: Hashable, Codable, Sendable {
   }
 }
 
+/// The message a link named in a conversation: marked, and scrolled to once.
+struct MessageMark: Equatable, Sendable {
+  let id: String
+  /// Whether the conversation has scrolled to it, after which a view built again shows where the
+  /// user scrolled.
+  var reached = false
+}
+
+/// A thread being written in a channel's New thread sheet.
+struct NewThreadDraft: Equatable, Sendable {
+  var title = ""
+  var body = ""
+}
+
 /// The app's three tabs.
 enum AppTab: Hashable, Sendable {
   case chat, board, needsYou

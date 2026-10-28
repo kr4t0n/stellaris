@@ -41,11 +41,12 @@ import Observation
   /// Reads an event made stale, gathered while a reload waits.
   @ObservationIgnored private var stale: Set<String> = []
   @ObservationIgnored private var reloading: Task<Void, Never>?
-  /// The last event the board's stream gave, which a reconnect asks after.
-  @ObservationIgnored private var lastEvent: String?
+  /// How many of the sky's views are shown and following the board.
+  @ObservationIgnored private var running = 0
 
-  /// The reads the sky is drawn from, as the web's queries name them (`staleKeys`).
-  static let reads: Set<String> = ["members", "scheduler", "projects", "tasks"]
+  /// The reads of its own the sky is drawn from, as the web's queries name them (`staleKeys`);
+  /// the board store holds the projects and tasks.
+  static let reads: Set<String> = ["members", "scheduler"]
 
   /// The sky for the board as last loaded.
   func model(projects: [Project], tasks: [BoardTask]) -> SkyModel {
@@ -114,12 +115,14 @@ import Observation
 
   // MARK: Loading and following the board
 
-  /// Loads the sky, then follows the board's events, the scheduler's queue, and the live turn
-  /// stream until cancelled, as the sky's view does while it is shown.
+  /// Loads the sky, then follows the scheduler's queue and the live turn stream until cancelled,
+  /// as the sky's view does while it is shown, and reloads what the board's events make stale of
+  /// its reads, which the app's `LiveUpdates` hands it.
   func run(using model: AppModel) async {
+    running += 1
+    defer { running -= 1 }
     await load(using: model)
     await withTaskGroup(of: Void.self) { group in
-      group.addTask { await self.follow(using: model) }
       group.addTask { await self.poll(using: model) }
       group.addTask { await self.listen(using: model) }
     }
@@ -163,32 +166,6 @@ import Observation
     }
   }
 
-  /// Follows the board's events, reloading what each makes stale of what the sky is drawn from,
-  /// and after a drop picks up from the last event it had, so nothing is missed.
-  private func follow(using model: AppModel) async {
-    var wait = 1.0
-    while !Task.isCancelled {
-      let since = lastEvent ?? "latest"
-      guard let events = model.events(since: since) else {
-        return
-      }
-      do {
-        for try await event in events {
-          wait = 1
-          lastEvent = event.id
-          let names = Set(staleKeys(for: event).compactMap { $0.first ?? nil })
-          markStale(names.intersection(SkyStore.reads), using: model)
-        }
-      } catch {
-        if model.ended(by: error) {
-          return
-        }
-      }
-      try? await Task.sleep(for: .seconds(wait))
-      wait = min(wait * 2, 30)
-    }
-  }
-
   /// Listens to the live turn stream: a tool's call flickers its citizen's star, and a post's first
   /// line rises from it. Each connection replays the server's short buffer first, which
   /// `skyCue` leaves be once older than fifteen seconds.
@@ -224,9 +201,11 @@ import Observation
     }
   }
 
-  /// Gathers the reads an event made stale and reloads them a moment later, once for a burst.
-  private func markStale(_ names: Set<String>, using model: AppModel) {
-    guard !names.isEmpty else {
+  /// Gathers the reads of the sky's own an event made stale and reloads them a moment later, once
+  /// for a burst, while the sky is shown; a sky shown again loads afresh.
+  func markStale(_ names: Set<String>, using model: AppModel) {
+    let names = names.intersection(SkyStore.reads)
+    guard running > 0, !names.isEmpty else {
       return
     }
     stale.formUnion(names)
@@ -256,16 +235,12 @@ import Observation
     {
       self.scheduler = scheduler
     }
-    if names.contains("projects") || names.contains("tasks") {
-      await model.store.reloadProjects(using: model)
-    }
   }
 
   func clear() {
     reloading?.cancel()
     reloading = nil
     stale = []
-    lastEvent = nil
     state = .idle
     members = []
     scheduler = nil

@@ -126,10 +126,87 @@ final class SnapshotTests: XCTestCase {
     XCTAssertLessThan(black, pixels / 100, "the draft's row draws black")
   }
 
-  @MainActor private func signedIn() async throws -> AppModel {
+  /// A thread opened from #general, with its first message and its draft, then #general with
+  /// the thread at its foot, where it was opened.
+  @MainActor func testAThreadOpenedOnAChannel() async throws {
+    let model = try await signedIn(token: "snapshot-\(UUID().uuidString)")
+    model.newThreads["general"] = NewThreadDraft(
+      title: "Release checklist for the export view, the empty state, and the narrow widths",
+      body: "Docs first, then the release notes. @eng-1, the empty state is yours.")
+    try await model.openThread(in: "general")
+    await model.feed(for: model.history.current).load(using: model)
+    try await Snapshot.record(ShellView().environment(model), named: "chat-new-thread", in: self)
+    model.goBack()
+    await model.feed(for: .general).load(using: model)
+    try await Snapshot.record(
+      ShellView().environment(model), named: "chat-channel-thread", in: self)
+  }
+
+  /// The New thread sheet, with what it says so far.
+  @MainActor func testNewThreadSheet() async throws {
+    let model = try await signedIn()
+    model.newThreads["general"] = NewThreadDraft(
+      title: "Release checklist", body: "Docs first, then the release notes.")
+    try await Snapshot.record(
+      NewThreadSheet(channel: "general").environment(model), named: "new-thread", in: self)
+  }
+
+  /// The draft at its tallest, five lines and then scrolling, or two where the window is short,
+  /// as the outer display is in landscape; and the citizens a mention offers.
+  @MainActor func testTheComposer() async throws {
+    let model = try await signedIn()
+    model.memory?.setDraft(
+      (1...7).map { "Line \($0) of a long draft, which scrolls past the fifth." }
+        .joined(separator: "\n"), for: .general)
+    let draft = DraftField(conversation: .general).background(MessageColor.island)
+      .environment(model)
+    try await Snapshot.recordWhole(draft, named: "composer-long", in: self)
+    for type in Snapshot.typeSizes {
+      let image = try await Snapshot.image(
+        of: draft.environment(\.verticalSizeClass, .compact),
+        size: CGSize(width: 678, height: 466), type: type, fitting: true)
+      try Snapshot.keep(image, named: "composer-short-window-\(type.name)", in: self)
+    }
+    let list = MentionList(members: model.store.mentionable("")) { _ in }
+      .padding(12).background(MessageColor.island)
+    try await Snapshot.recordWhole(list, named: "mention-list", in: self)
+  }
+
+  /// The message a link named, marked as the web marks it; a closed thread's end; and a channel
+  /// that takes no posts.
+  @MainActor func testMarksAndEnds() async throws {
+    let model = try await signedIn()
+    await model.feed(for: .general).load(using: model)
+    let note = try XCTUnwrap(
+      model.feed(for: .general).messages.first { $0.id == FakeBoard.generalId(30) })
+    try await Snapshot.recordWhole(
+      MessageRow(message: note, marked: true).environment(model).background(MessageColor.island),
+      named: "message-marked", in: self)
+    let closed = try JSONDecoder().decode(
+      BoardThread.self,
+      from: Data(
+        #"""
+        {"id":"00000000000000000000000002","channel":"general","title":"Release notes",
+        "state":"closed","openedBy":"concierge-1","openedAt":"2026-01-01T09:00:00.000Z",
+        "closedBy":"eng-1","closedAt":"2026-01-01T10:00:00.000Z",
+        "body":"Shipped with **the export view** and its empty state."}
+        """#.utf8))
+    try await Snapshot.recordWhole(
+      ClosedThread(thread: closed).environment(model).background(MessageColor.island),
+      named: "thread-closed", in: self)
+    let archived = try JSONDecoder().decode(
+      ArchivedChannel.self,
+      from: Data(
+        #"{"name":"export","at":"2026-01-01T10:00:00.000Z","by":"user","reason":"done"}"#.utf8))
+    try await Snapshot.recordWhole(
+      ReadOnlyLine(readOnly: .archived(archived)).background(MessageColor.island),
+      named: "channel-read-only", in: self)
+  }
+
+  @MainActor private func signedIn(token: String = "fixture-token") async throws -> AppModel {
     let (model, _) = fakeApp()
     await model.start()
-    try await model.signIn(board: FakeBoard.address, token: "fixture-token")
+    try await model.signIn(board: FakeBoard.address, token: token)
     await model.refresh()
     return model
   }

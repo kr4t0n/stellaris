@@ -45,6 +45,16 @@ enum SignInFailure: Error, Equatable {
   private(set) var images = BoardImages()
   /// The image open in the viewer, which the tabs present.
   var viewing: ViewedImage?
+  /// The channel whose New thread sheet is open, which the tabs present.
+  var startingThread: String?
+  /// What each channel's new thread says so far, kept until it opens, so a sheet dismissed or built
+  /// again comes back with its text.
+  var newThreads: [String: NewThreadDraft] = [:]
+  /// The message a link named in each conversation, marked and scrolled to once, as the web marks
+  /// the message its address names.
+  private(set) var marks: [Conversation: MessageMark] = [:]
+  /// Follows the board's events while the app is in front, and reads again what they touch.
+  let live = LiveUpdates()
 
   @ObservationIgnored let environment: AppEnvironment
   @ObservationIgnored private var client: BoardClient?
@@ -153,10 +163,12 @@ enum SignInFailure: Error, Equatable {
     }
   }
 
-  /// The board's events after `since`, from one connection, as the signed-in user; nil when
-  /// signed out.
-  func events(since: String) -> AsyncThrowingStream<BoardEvent, any Error>? {
-    client?.events(since: since)
+  /// Follows the board's events as the signed-in user, across drops; nil when signed out.
+  func eventFollower() -> EventFollower? {
+    guard let client else {
+      return nil
+    }
+    return EventFollower(connect: { client.eventConnection(since: $0) })
   }
 
   /// The live turn stream from the start of the server's buffer; nil when signed out.
@@ -198,10 +210,87 @@ enum SignInFailure: Error, Equatable {
 
   // MARK: Chat
 
-  /// Shows `conversation` in Chat, which Back then leaves for the one shown before.
-  func open(_ conversation: Conversation) {
+  /// Shows `conversation` in Chat, which Back then leaves for the one shown before, marked and
+  /// scrolled to the message `at` names, if any.
+  func open(_ conversation: Conversation, at message: String? = nil) {
+    marks[conversation] = message.map { MessageMark(id: $0) }
     history.open(conversation)
     tab = .chat
+  }
+
+  /// Notes that the conversation has scrolled to its marked message, which a view built again then
+  /// leaves where the user scrolled.
+  func reachedMark(in conversation: Conversation) {
+    marks[conversation]?.reached = true
+  }
+
+  /// Posts `body` to `conversation` as the user, then, without waiting, reads the conversation
+  /// again, and what waits on the user, which a post answers where it was asked, as the web's
+  /// composer does.
+  func post(_ body: String, to conversation: Conversation) async throws -> Message {
+    let request =
+      switch conversation {
+      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body)
+      case .thread(let id): BoardAPI.postMessage(thread: id, body: body)
+      }
+    let message = try await send(request)
+    let feed = feed(for: conversation)
+    Task {
+      await feed.load(using: self)
+      await store.reload(["requests"], using: self)
+    }
+    return message
+  }
+
+  /// Opens the thread `channel`'s draft describes, with its first message if it has one, then shows
+  /// it in Chat and forgets the draft, as the web's New thread does.
+  func openThread(in channel: String) async throws {
+    let draft = newThreads[channel] ?? NewThreadDraft()
+    let thread = try await send(
+      BoardAPI.openThread(
+        channel: channel, title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let first = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !first.isEmpty {
+      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first))
+    }
+    newThreads[channel] = nil
+    if startingThread == channel {
+      startingThread = nil
+    }
+    open(.thread(thread.id))
+    await store.reload(["threads"], using: self)
+  }
+
+  /// Reads again what `keys` name of what the app has loaded, as the web's `refreshFor` makes each
+  /// key's queries stale: the conversation Chat shows, the board's lists, and the sky's while it is
+  /// shown; with `everything`, all of it, as after a drop. Another conversation already read is
+  /// read again when it is next shown, as the web refetches a stale query once it is used.
+  func reread(_ keys: Set<ReadKey>, everything: Bool = false) async {
+    func touched(_ name: String, _ id: String? = nil) -> Bool {
+      everything
+        || keys.contains { key in
+          key.first == name && (key.count < 2 || key[1] == nil || id == nil || key[1] == id)
+        }
+    }
+    for (conversation, feed) in feeds where feed.state == .loaded {
+      let stale =
+        switch conversation {
+        case .channel(let ref): touched("channel", ref)
+        case .thread(let id): touched("thread", id)
+        }
+      if stale, conversation == history.current {
+        await feed.load(using: self)
+      } else if stale {
+        feed.markStale()
+      }
+    }
+    let lists = BoardStore.lists.filter { touched($0) }
+    if everything {
+      await store.refresh(using: self)
+    } else if !lists.isEmpty {
+      await store.reload(lists, using: self)
+    }
+    sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
   }
 
   /// Where Back in Chat goes, if anywhere.
@@ -257,7 +346,9 @@ enum SignInFailure: Error, Equatable {
         open(.thread(entity.id))
         return .opened
       case .message:
-        open(entity.thread.map(Conversation.thread) ?? .channel(entity.channel ?? "general"))
+        open(
+          entity.thread.map(Conversation.thread) ?? .channel(entity.channel ?? "general"),
+          at: entity.id)
         return .opened
       case .cron:
         break
@@ -312,6 +403,9 @@ enum SignInFailure: Error, Equatable {
     self.actor = actor
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
+    marks = [:]
+    newThreads = [:]
+    live.clear()
     feeds = [:]
     documents = [:]
     images = BoardImages()
@@ -331,6 +425,10 @@ enum SignInFailure: Error, Equatable {
     documents = [:]
     images = BoardImages()
     viewing = nil
+    startingThread = nil
+    newThreads = [:]
+    marks = [:]
+    live.clear()
     store.clear()
     sky.clear()
     history = ChatHistory()

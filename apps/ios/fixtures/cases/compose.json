@@ -1,0 +1,226 @@
+[
+  {
+    "name": "a name begun after a space",
+    "text": "hey @ad",
+    "caret": 7,
+    "mention": {
+      "start": 4,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "hey @ada ",
+      "caret": 9
+    }
+  },
+  {
+    "name": "an @ alone",
+    "text": "hey @",
+    "caret": 5,
+    "mention": {
+      "start": 4,
+      "prefix": ""
+    },
+    "completed": {
+      "name": "ada",
+      "text": "hey @ada ",
+      "caret": 9
+    }
+  },
+  {
+    "name": "an @ at the start",
+    "text": "@",
+    "caret": 1,
+    "mention": {
+      "start": 0,
+      "prefix": ""
+    },
+    "completed": {
+      "name": "eng-1",
+      "text": "@eng-1 ",
+      "caret": 7
+    }
+  },
+  {
+    "name": "a mail address is no mention",
+    "text": "mail a@b",
+    "caret": 8,
+    "mention": null
+  },
+  {
+    "name": "no @ at all",
+    "text": "hey ada",
+    "caret": 7,
+    "mention": null
+  },
+  {
+    "name": "only what is before the caret counts",
+    "text": "@ad",
+    "caret": 2,
+    "mention": {
+      "start": 0,
+      "prefix": "a"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "@ada d",
+      "caret": 5
+    }
+  },
+  {
+    "name": "a mention before the rest of the text",
+    "text": "hey @ad, look",
+    "caret": 7,
+    "mention": {
+      "start": 4,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "hey @ada , look",
+      "caret": 9
+    }
+  },
+  {
+    "name": "a mention in the middle, with a space kept after it",
+    "text": "hey @ad and more",
+    "caret": 7,
+    "mention": {
+      "start": 4,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "hey @ada  and more",
+      "caret": 9
+    }
+  },
+  {
+    "name": "two @ together are no mention",
+    "text": "@@ad",
+    "caret": 4,
+    "mention": null
+  },
+  {
+    "name": "an underscore is a word character",
+    "text": "x_@ad",
+    "caret": 5,
+    "mention": null
+  },
+  {
+    "name": "a capital ends the name",
+    "text": "hey @Ad",
+    "caret": 7,
+    "mention": null
+  },
+  {
+    "name": "a name with digits and hyphens",
+    "text": "hey @eng-1",
+    "caret": 10,
+    "mention": {
+      "start": 4,
+      "prefix": "eng-1"
+    },
+    "completed": {
+      "name": "eng-1",
+      "text": "hey @eng-1 ",
+      "caret": 11
+    }
+  },
+  {
+    "name": "after punctuation",
+    "text": "(@ad",
+    "caret": 4,
+    "mention": {
+      "start": 1,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "(@ada ",
+      "caret": 6
+    }
+  },
+  {
+    "name": "after a hyphen",
+    "text": "eng-@",
+    "caret": 5,
+    "mention": {
+      "start": 4,
+      "prefix": ""
+    },
+    "completed": {
+      "name": "ada",
+      "text": "eng-@ada ",
+      "caret": 9
+    }
+  },
+  {
+    "name": "after a line break",
+    "text": "line\n@ad",
+    "caret": 8,
+    "mention": {
+      "start": 5,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "line\n@ada ",
+      "caret": 10
+    }
+  },
+  {
+    "name": "after a letter outside ASCII, which is no word character",
+    "text": "café@ad",
+    "caret": 7,
+    "mention": {
+      "start": 4,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "café@ada ",
+      "caret": 9
+    }
+  },
+  {
+    "name": "after an emoji, two code units",
+    "text": "😀@ad",
+    "caret": 5,
+    "mention": {
+      "start": 2,
+      "prefix": "ad"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "😀@ada ",
+      "caret": 7
+    }
+  },
+  {
+    "name": "an emoji after the caret stays",
+    "text": "@a 😀",
+    "caret": 2,
+    "mention": {
+      "start": 0,
+      "prefix": "a"
+    },
+    "completed": {
+      "name": "ada",
+      "text": "@ada  😀",
+      "caret": 5
+    }
+  },
+  {
+    "name": "a caret past a space ends the mention",
+    "text": "hey @ad ",
+    "caret": 8,
+    "mention": null
+  },
+  {
+    "name": "a caret at the start",
+    "text": "@ad",
+    "caret": 0,
+    "mention": null
+  }
+]

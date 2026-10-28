@@ -46,7 +46,7 @@ final class FoldTests: XCTestCase {
   private let landscape = CGSize(width: 951, height: 669)
   private let portrait = CGSize(width: 669, height: 951)
   private let draftText = "Half a thought"
-  private let anchored = "general-30"
+  private let anchored = FakeBoard.generalId(30)
 
   @MainActor func testTheChatKeepsItsPlaceAsThePhoneOpensTurnsAndFolds() async throws {
     continueAfterFailure = false
@@ -114,6 +114,30 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(model.sky.scene.camera.mode, .manual, "the sky lost its camera")
     XCTAssertEqual(model.sky.scene.camera.target.scale, scale, accuracy: 1e-9)
     _ = try expectTheChat("opened again", in: window, model, after: messages)
+  }
+
+  /// The New thread sheet, open over the chat, stays open with its text as the phone opens, turns,
+  /// and folds: what it says lives in the model.
+  @MainActor func testTheNewThreadSheetKeepsItsTextThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    model.newThreads["general"] = NewThreadDraft(title: "Half a title")
+    model.startingThread = "general"
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    try await window.settle()
+    for (step, size) in [
+      ("folded", outer), ("opened", landscape), ("turned", portrait), ("folded again", outer),
+    ] {
+      window.resize(to: size)
+      try await window.settle()
+      let shown = try await window.until { window.field(showing: "Half a title") != nil }
+      XCTAssertTrue(shown, "\(step): the sheet's title doesn't show")
+      XCTAssertEqual(model.startingThread, "general", "\(step): the sheet closed")
+      try window.keep("fold-new-thread-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+    }
+    XCTAssertEqual(model.newThreads["general"]?.title, "Half a title")
   }
 
   /// Chat still shows #general with its draft and its anchor, in the scroll view it had before, so

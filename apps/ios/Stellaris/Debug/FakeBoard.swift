@@ -10,13 +10,16 @@
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
-  /// web at `images.example.com`, on a runner alone, and gone. Any token signs in, except
+  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads,
+  /// which its reads then show to the token that wrote them alone, so tests signed in with tokens
+  /// of their own see only their own writes. Any token signs in, except
   /// `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
   /// list of the channels after the first fails, as when the network goes once the board loaded,
   /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
   /// nothing, and its turn stream sends the captured one, stamped now, as live; both stay open,
-  /// as the board's do.
+  /// as the board's do. A token starting `replay-` gets its first turn stream's stamps again on every
+  /// later connection, as the board replays its buffer.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     /// The thread of samples, which general's newest message links to.
@@ -29,6 +32,10 @@
     /// Where the samples' image on the web is.
     static let webImages = "images.example.com"
     private static let folder = Mutex<URL?>(nil)
+    /// What each token posted and opened.
+    private static let written = Mutex<[String: Written]>([:])
+    /// The stamp each `replay-` token's turn stream was first given.
+    private static let replayStamps = Mutex<[String: String]>([:])
     /// How many times `fading` has listed the channels.
     private static let fadingListings = Mutex(0)
 
@@ -143,7 +150,14 @@
         guard let text = read("turn-stream")?["text"] as? String else {
           return nil
         }
-        let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        var now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        if let token, token.hasPrefix("Bearer replay-") {
+          now = replayStamps.withLock { stamps in
+            let stamp = stamps[token] ?? now
+            stamps[token] = stamp
+            return stamp
+          }
+        }
         return Data(text.replacingOccurrences(of: "2026-01-01T00:00:00.000Z", with: now).utf8)
       default:
         return nil
@@ -161,6 +175,9 @@
       guard let token, token != "refused", token != "revoked" || path == "/api/me" else {
         return fixture("error-unauthorized")
       }
+      if method == "POST", path == "/api/verbs/post_message" || path == "/api/verbs/open_thread" {
+        return write(path, request: request, token: token)
+      }
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
@@ -168,18 +185,23 @@
       case ("GET", "/api/scheduler"): return fixture("scheduler")
       case ("GET", "/api/projects"): return fixture("projects")
       case ("GET", "/api/channels"): return fixture("channels")
-      case ("GET", "/api/channels/general"): return (200, json(general))
-      case ("GET", "/api/channels/demo/general"): return fixture("channel")
+      case ("GET", "/api/channels/general"):
+        return (200, json(general + posted(in: "general", by: token)))
+      case ("GET", "/api/channels/demo/general"):
+        let captured = body("channel") as? [Any] ?? []
+        return (200, json(captured + posted(in: "demo/general", by: token)))
       case ("GET", "/api/requests"): return fixture("requests")
       case ("GET", "/api/proposals"): return fixture("proposals")
       case ("GET", "/api/projects/demo/tasks"): return fixture("tasks")
-      case ("GET", "/api/threads"): return (200, json(threads))
+      case ("GET", "/api/threads"): return (200, json(threads + opened(by: token)))
       case ("GET", "/api/messages"): return (200, json(lookUp(request)))
       case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
       case ("DELETE", "/api/sign-in"): return fixture("sign-out")
-      case ("GET", _) where path.hasPrefix("/api/channels/"): return (200, json([Any]()))
+      case ("GET", _) where path.hasPrefix("/api/channels/"):
+        let ref = String(path.dropFirst("/api/channels/".count)).removingPercentEncoding ?? ""
+        return (200, json(posted(in: ref, by: token)))
       case ("GET", _) where path.hasPrefix("/api/threads/"):
-        return thread(String(path.dropFirst("/api/threads/".count)))
+        return thread(String(path.dropFirst("/api/threads/".count)), token: token)
       default: return fixture("error-not-found")
       }
     }
@@ -202,6 +224,148 @@
     }
 
     private static func body(_ name: String) -> Any? { read(name)?["body"] }
+
+    // MARK: Writes
+
+    /// A post or a thread a token wrote, as the board would keep it.
+    private struct Post: Sendable {
+      let id: String
+      let channel: String
+      let thread: String?
+      let ts: String
+      let body: String
+    }
+
+    private struct Opened: Sendable {
+      let id: String
+      let channel: String
+      let title: String
+      let openedAt: String
+    }
+
+    private struct Written: Sendable {
+      var posts: [Post] = []
+      var threads: [Opened] = []
+    }
+
+    /// Takes a post or a new thread, as the user, and answers as the board does.
+    private static func write(_ path: String, request: URLRequest, token: String) -> (Int, Data) {
+      let input =
+        bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        as? [String: Any] ?? [:]
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        if path == "/api/verbs/open_thread" {
+          let thread = Opened(
+            id: String(format: "00000000000000000000THR%03d", mine.threads.count + 1),
+            channel: input["channel"] as? String ?? "general",
+            title: input["title"] as? String ?? "", openedAt: now)
+          mine.threads.append(thread)
+          return (200, json(threadRecord(thread)))
+        }
+        let thread = input["thread_id"] as? String
+        let channel =
+          thread.map { id in
+            mine.threads.first { $0.id == id }?.channel
+              ?? (id == samples ? "general" : capturedChannel(of: id))
+          } ?? input["channel"] as? String ?? "general"
+        let post = Post(
+          id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+          channel: channel, thread: thread, ts: now, body: input["body"] as? String ?? "")
+        mine.posts.append(post)
+        return (200, json(record(post)))
+      }
+    }
+
+    /// A request's body, which `URLSession` hands a protocol as a stream.
+    private static func bodyData(of request: URLRequest) -> Data? {
+      if let data = request.httpBody {
+        return data
+      }
+      guard let stream = request.httpBodyStream else {
+        return nil
+      }
+      stream.open()
+      defer { stream.close() }
+      var data = Data()
+      var buffer = [UInt8](repeating: 0, count: 4096)
+      while stream.hasBytesAvailable {
+        let read = stream.read(&buffer, maxLength: buffer.count)
+        guard read > 0 else {
+          break
+        }
+        data.append(buffer, count: read)
+      }
+      return data
+    }
+
+    /// The channel of the captured thread `id`, or general.
+    private static func capturedChannel(of id: String) -> String {
+      guard let detail = body("thread") as? [String: Any],
+        let thread = detail["thread"] as? [String: Any], thread["id"] as? String == id
+      else {
+        return "general"
+      }
+      return thread["channel"] as? String ?? "general"
+    }
+
+    /// What `token` posted in the channel `ref` itself, oldest first.
+    private static func posted(in ref: String, by token: String) -> [[String: Any]] {
+      let posts = written.withLock { $0[token]?.posts ?? [] }
+      return posts.filter { $0.channel == ref && $0.thread == nil }.map(record)
+    }
+
+    /// The threads `token` opened, as the board lists them.
+    private static func opened(by token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token] ?? Written() }
+      return mine.threads.map { thread in
+        var summary = threadRecord(thread)
+        let posts = mine.posts.filter { $0.thread == thread.id }
+        summary["messages"] = posts.count
+        summary["lastMessageId"] = posts.last?.id ?? NSNull()
+        summary["lastAuthor"] = posts.isEmpty ? NSNull() : "user"
+        return summary
+      }
+    }
+
+    private static func record(_ post: Post) -> [String: Any] {
+      var message: [String: Any] = [
+        "id": post.id, "author": "user", "channel": post.channel, "ts": post.ts,
+        "mentions": [String](), "body": post.body,
+      ]
+      message["thread"] = post.thread
+      return message
+    }
+
+    private static func threadRecord(_ thread: Opened) -> [String: Any] {
+      [
+        "id": thread.id, "channel": thread.channel, "title": thread.title, "state": "open",
+        "openedBy": "user", "openedAt": thread.openedAt, "body": "",
+      ]
+    }
+
+    // MARK: Threads
+
+    /// A thread by its id: one `token` opened, the captured task thread, the samples, or one made
+    /// up for a proposal's or a question's, titled as the board would; with what `token` posted in
+    /// it after its own messages.
+    private static func thread(_ id: String, token: String) -> (Int, Data) {
+      let mine = written.withLock { $0[token] ?? Written() }
+      let posts = mine.posts.filter { $0.thread == id }.map(record)
+      if let opened = mine.threads.first(where: { $0.id == id }) {
+        return (200, json(["thread": threadRecord(opened), "messages": posts]))
+      }
+      let (status, data) = thread(id)
+      guard status == 200, !posts.isEmpty,
+        var detail = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+      else {
+        return (status, data)
+      }
+      detail["messages"] = (detail["messages"] as? [Any] ?? []) + posts
+      return (200, json(detail))
+    }
 
     /// A thread by its id: the captured task thread, the samples, or one made up for a proposal's
     /// or a question's, titled as the board would.
@@ -243,6 +407,12 @@
       return (200, json(["thread": thread, "messages": [message]]))
     }
 
+    /// The id of general's message numbered `number`, shaped as the board's ids are, so a link can
+    /// name it.
+    static func generalId(_ number: Int) -> String {
+      String(format: "000000000000000000000GEN%02d", number)
+    }
+
     /// Sixty messages in the society's general channel, of varied lengths.
     private static var general: [[String: Any]] {
       let authors = ["eng-1", "rev-1", "concierge-1", "user"]
@@ -258,8 +428,8 @@
           ? "The [rendering samples](/thread/\(samples)) are in their thread."
           : notes[number % notes.count]
         return message(
-          id: String(format: "general-%02d", number), author: authors[number % authors.count],
-          channel: "general", thread: nil, minute: number, body: "Note \(number). \(note)")
+          id: generalId(number), author: authors[number % authors.count], channel: "general",
+          thread: nil, minute: number, body: "Note \(number). \(note)")
       }
     }
 
@@ -341,7 +511,7 @@
         ),
         (
           "user",
-          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
+          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ, as [note 30](/c/general?message=\(generalId(30))) says."
         ),
       ]
       return bodies.enumerated().map { index, entry in

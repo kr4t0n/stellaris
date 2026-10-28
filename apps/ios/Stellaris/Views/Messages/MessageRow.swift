@@ -4,13 +4,15 @@ import SwiftUI
 /// One message as the web's `MessageItem` lays it out: its author's mark beside the name and when,
 /// over the message's text. At the accessibility sizes the mark sits beside the name, the time
 /// under it, and the text takes the row's whole width. The board's own posts are dimmed, as on the
-/// web.
+/// web, and the message a link named is marked as the web marks it, which VoiceOver reads as
+/// selected.
 struct MessageRow: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
   @ScaledMetric(relativeTo: .body) private var tracking =
     MessageTheme.titleTracking * MessageTheme.textSize
   let message: Message
+  var marked = false
 
   var body: some View {
     Group {
@@ -25,6 +27,7 @@ struct MessageRow: View {
           }
           .accessibilityElement(children: .combine)
           .accessibilityIdentifier("message-\(message.id)")
+          .accessibilityAddTraits(marked ? .isSelected : [])
           MessageBody(document: model.document(for: message))
         }
       } else {
@@ -37,6 +40,7 @@ struct MessageRow: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("message-\(message.id)")
+            .accessibilityAddTraits(marked ? .isSelected : [])
             MessageBody(document: model.document(for: message))
           }
         }
@@ -45,6 +49,15 @@ struct MessageRow: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .background {
+      if marked {
+        // `.message-target`: an amber tint, with a bar down the leading edge.
+        MessageColor.markTint
+          .overlay(alignment: .leading) {
+            Rectangle().fill(MessageColor.markBar).frame(width: 2)
+          }
+      }
+    }
     .opacity(message.author == "board" ? 0.7 : 1)
   }
 
@@ -111,6 +124,20 @@ struct AuthorMark: View {
     }
     .frame(width: size, height: size)
     .accessibilityHidden(true)
+  }
+}
+
+/// A CLI's mark alone, `size` points square, as the web's `CliIcon` draws it.
+struct CliMarkGlyph: View {
+  let cli: OrUnknown<CliKind>
+  let size: CGFloat
+
+  var body: some View {
+    let mark = CliMark.of(cli)
+    CliGlyph(glyph: SkyGlyphs.path(for: mark))
+      .fill(Color(sky: SkyColor(hex: mark.fill)), style: FillStyle(eoFill: true))
+      .frame(width: size, height: size)
+      .accessibilityHidden(true)
   }
 }
 

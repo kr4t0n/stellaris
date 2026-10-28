@@ -1,0 +1,91 @@
+[
+  {
+    "name": "the first paragraph",
+    "markdown": "Merged the export view.\n\nMore detail follows.",
+    "limit": 180,
+    "paragraph": "Merged the export view."
+  },
+  {
+    "name": "a heading is skipped",
+    "markdown": "## The export view\n\nIt is in.",
+    "limit": 180,
+    "paragraph": "It is in."
+  },
+  {
+    "name": "blank lines first, and lines of white space alone",
+    "markdown": "\n\n  \t\n\nIt is in.",
+    "limit": 180,
+    "paragraph": "It is in."
+  },
+  {
+    "name": "marks are dropped",
+    "markdown": "**Done**: `pnpm test` _passes_ > all of it",
+    "limit": 180,
+    "paragraph": "Done: pnpm test passes all of it"
+  },
+  {
+    "name": "a paragraph's lines join with a space",
+    "markdown": "line one\nline two\n\nnext",
+    "limit": 180,
+    "paragraph": "line one line two"
+  },
+  {
+    "name": "CR and LF line ends",
+    "markdown": "first\r\n\r\nsecond",
+    "limit": 180,
+    "paragraph": "first"
+  },
+  {
+    "name": "white space runs keep one space",
+    "markdown": "a  \t b  c",
+    "limit": 180,
+    "paragraph": "a b c"
+  },
+  {
+    "name": "cut at the limit, with an ellipsis",
+    "markdown": "The export view is in, with its empty state and the narrow widths measured at every point from the narrowest Split View to the inner display in landscape, and the release notes drafted beside it in their thread.",
+    "limit": 180,
+    "paragraph": "The export view is in, with its empty state and the narrow widths measured at every point from the narrowest Split View to the inner display in landscape, and the release notes dr…"
+  },
+  {
+    "name": "cut after a space, which goes",
+    "markdown": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+    "limit": 176,
+    "paragraph": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word…"
+  },
+  {
+    "name": "the default limit",
+    "markdown": "The export view is in, with its empty state and the narrow widths measured at every point from the narrowest Split View to the inner display in landscape, and the release notes drafted beside it in their thread. The export view is in, with its empty state and the narrow widths measured at every point from the narrowest Split View to the inner display in landscape, and the release notes drafted beside it in their thread.",
+    "paragraph": "The export view is in, with its empty state and the narrow widths measured at every point from the narrowest Split View to the inner display in landscape, and the release notes drafted beside it in their thread. The exp…"
+  },
+  {
+    "name": "only white space",
+    "markdown": "   \n\t",
+    "limit": 180,
+    "paragraph": ""
+  },
+  {
+    "name": "only a heading",
+    "markdown": "# The export view",
+    "limit": 180,
+    "paragraph": ""
+  },
+  {
+    "name": "a heading's paragraph is skipped whole",
+    "markdown": "# Title\nmore of it\n\nThe body.",
+    "limit": 180,
+    "paragraph": "The body."
+  },
+  {
+    "name": "letters outside ASCII count one unit each",
+    "markdown": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "limit": 180,
+    "paragraph": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…"
+  },
+  {
+    "name": "an emoji counts two units",
+    "markdown": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "limit": 181,
+    "paragraph": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀…"
+  }
+]

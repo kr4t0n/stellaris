@@ -16,6 +16,39 @@ enum Conversation: Hashable, Codable, Sendable {
   }
 }
 
+/// The message a link named in a conversation: marked, and scrolled to once.
+struct MessageMark: Equatable, Sendable {
+  let id: String
+  /// Whether the conversation has scrolled to it, after which a view built again shows where the
+  /// user scrolled.
+  var reached = false
+}
+
+/// A thread being written in a channel's New thread sheet. Its title holds at most the 200 UTF-16
+/// code units `open_thread` takes, as the web's field does, cut at a whole character.
+struct NewThreadDraft: Equatable, Sendable {
+  static let titleLimit = 200
+
+  var title: String {
+    didSet { title = NewThreadDraft.capped(title) }
+  }
+  var body: String
+
+  init(title: String = "", body: String = "") {
+    self.title = NewThreadDraft.capped(title)
+    self.body = body
+  }
+
+  /// `text` cut to the title's limit, never inside a character.
+  static func capped(_ text: String) -> String {
+    var kept = Substring(text)
+    while kept.utf16.count > titleLimit {
+      kept = kept.dropLast()
+    }
+    return String(kept)
+  }
+}
+
 /// The app's three tabs.
 enum AppTab: Hashable, Sendable {
   case chat, board, needsYou

@@ -5,6 +5,7 @@ import SwiftUI
 /// inner display.
 struct RootView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     Group {
@@ -20,6 +21,12 @@ struct RootView: View {
       }
     }
     .task { await model.start() }
+    // The board's events, while signed in and in front; iOS suspends the app in the background.
+    .task(id: model.phase == .signedIn && scenePhase == .active) {
+      if model.phase == .signedIn, scenePhase == .active {
+        await model.live.follow(using: model)
+      }
+    }
   }
 
   /// A debug build launched with `-StellarisSky` shows the sky alone in its window, the plain
@@ -69,7 +76,8 @@ struct ShellView: View {
   }
 }
 
-/// The conversation Chat holds, with Back to the one it came from.
+/// The conversation Chat holds, with Back to the one it came from, and in a channel that takes
+/// posts, New thread, which the bar keeps longest as it runs out of room.
 struct ChatView: View {
   @Environment(AppModel.self) private var model
 
@@ -88,7 +96,42 @@ struct ChatView: View {
               .accessibilityIdentifier("back")
             }
           }
+          if let channel = openChannel {
+            ToolbarItem(placement: .primaryAction) {
+              Button {
+                model.startingThread = channel
+              } label: {
+                Label("New thread", systemImage: "plus.bubble")
+              }
+              .accessibilityIdentifier("new-thread")
+            }
+            .visibilityPriority(.high)
+          }
         }
     }
+    // Presented here rather than by the conversation, which a fold may build again.
+    .sheet(isPresented: startingThread) {
+      if let channel = model.startingThread {
+        NewThreadSheet(channel: channel)
+      }
+    }
+  }
+
+  /// The channel Chat shows, if it takes posts.
+  private var openChannel: String? {
+    guard case .channel(let ref) = model.history.current, model.store.readOnly(ref) == nil else {
+      return nil
+    }
+    return ref
+  }
+
+  private var startingThread: Binding<Bool> {
+    Binding(
+      get: { model.startingThread != nil },
+      set: { shown in
+        if !shown {
+          model.startingThread = nil
+        }
+      })
   }
 }

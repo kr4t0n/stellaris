@@ -48,11 +48,12 @@
       try await bytes(of: BoardAPI.image(id))
     }
 
-    /// The board's events after `since`, from one connection, until it ends or fails. Keep-alive
-    /// pings are left out; following the board across drops is the caller's.
-    public func events(since: String) -> AsyncThrowingStream<BoardEvent, any Error> {
-      frames(of: BoardAPI.eventStream(since: since)) { frame in
-        try JSONDecoder().decode(BoardEvent.self, from: Data(frame.data.utf8))
+    /// One connection to the board's event stream after `since`: `opened` once the board answers,
+    /// then each event and each keep-alive ping, until it ends or fails. `EventFollower` follows the
+    /// board across drops with it.
+    public func eventConnection(since: String) -> AsyncThrowingStream<EventStreamItem, any Error> {
+      frames(of: BoardAPI.eventStream(since: since), opened: .opened, pings: true) { frame in
+        eventStreamItem(frame)
       }
     }
 
@@ -65,10 +66,12 @@
       }
     }
 
-    /// The frames with data a stream at `endpoint` sends, each read by `read`, which leaves a
-    /// frame out by giving nil and ends the stream by throwing.
+    /// The frames a stream at `endpoint` sends, each read by `read`, which leaves a frame out by
+    /// giving nil and ends the stream by throwing: those with data, and the pings too with `pings`.
+    /// `opened` comes first, once the board has answered, when given.
     private func frames<Item: Sendable>(
-      of endpoint: Endpoint, read: @escaping @Sendable (ServerSentEvent) throws -> Item?
+      of endpoint: Endpoint, opened: Item? = nil, pings: Bool = false,
+      read: @escaping @Sendable (ServerSentEvent) throws -> Item?
     ) -> AsyncThrowingStream<Item, any Error> {
       let request = endpoint.urlRequest(board: board, token: token)
       let session = session
@@ -84,9 +87,14 @@
               }
               throw BoardError(status: status, body: body)
             }
+            if let opened {
+              continuation.yield(opened)
+            }
             var parser = ServerSentEventParser()
             for try await byte in bytes {
-              if let frame = parser.push(byte), !frame.data.isEmpty, let item = try read(frame) {
+              if let frame = parser.push(byte), pings || !frame.data.isEmpty,
+                let item = try read(frame)
+              {
                 continuation.yield(item)
               }
             }

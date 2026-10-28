@@ -6,6 +6,10 @@ private let fixtures = URL(fileURLWithPath: #filePath)
   .deletingLastPathComponent()  // ios
   .appendingPathComponent("fixtures/api").path
 
+/// What a message of #general is named by in the fake board, before its number: its id is
+/// shaped as the board's are, so a link can name it.
+let generalMessage = "message-000000000000000000000GEN"
+
 /// The app as someone uses it on the simulator, signed in to the fake board.
 class ShellTestCase: XCTestCase {
   /// Launches the app against the fake board, afresh unless `reset` is false, with `arguments`.
@@ -68,16 +72,16 @@ class ShellTestCase: XCTestCase {
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
   /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
-    app.scrollViews["messages"].staticTexts[String(format: "message-general-%02d", number)]
+    app.scrollViews["messages"].staticTexts[generalMessage + String(format: "%02d", number)]
       .firstMatch
   }
 
   /// The number of the lowest message of #general on screen, if one is.
   @MainActor func lowestShown(_ app: XCUIApplication) -> Int? {
     let shown = app.scrollViews["messages"].staticTexts
-      .matching(NSPredicate(format: "identifier BEGINSWITH 'message-general-'"))
+      .matching(NSPredicate(format: "identifier BEGINSWITH %@", generalMessage))
       .allElementsBoundByIndex.filter { $0.isHittable }
-      .compactMap { Int($0.identifier.dropFirst("message-general-".count)) }
+      .compactMap { Int($0.identifier.dropFirst(generalMessage.count)) }
     return shown.max()
   }
 
@@ -86,13 +90,15 @@ class ShellTestCase: XCTestCase {
   }
 
   /// Drags the conversation down by half its height `times` times, to older messages; the first
-  /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display.
+  /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display. It
+  /// starts below a bar across the top of the conversation, where the inner display's horizontal
+  /// bars put New thread.
   @MainActor func dragDown(_ app: XCUIApplication, times: Int = 1) {
     // By its name: with the keyboard up, the first scroll view is its row of suggestions.
     let messages = app.scrollViews["messages"].firstMatch
     for _ in 0..<times {
-      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.25))
-      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.75))
+      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
+      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.9))
       start.press(forDuration: 0.1, thenDragTo: end)
     }
   }
@@ -161,7 +167,10 @@ final class ShellUITests: ShellTestCase {
     tab(app, "Board")
     pick(app, "channel-governance")
     expectConversation(app, "#governance")
-    XCTAssertTrue(app.staticTexts["No messages"].waitForExistence(timeout: 20))
+    // No messages, but the threads opened on it, a proposal's among them.
+    XCTAssertTrue(
+      app.buttons["thread-00000000000000000000000004"].waitForExistence(timeout: 20),
+      "#governance doesn't show the proposals' threads")
 
     pick(app, "back")
     expectConversation(app, "Member proposal")

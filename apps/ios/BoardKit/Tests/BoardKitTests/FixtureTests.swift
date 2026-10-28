@@ -217,6 +217,18 @@ import Testing
       ])
     // The same stream replayed on connect, sixteen seconds on, is history and moves nothing.
     #expect(items.allSatisfy { skyCue(for: $0, in: model, now: stamped.addingTimeInterval(16)) == nil })
+    // Replayed sooner, by a connection made again, what the sky has played through moves nothing,
+    // and what came after it still does.
+    let last = try #require(items.last)
+    let played = try #require(parseBoardTime(last.ts))
+    #expect(items.allSatisfy { skyCue(for: $0, in: model, now: now, playedThrough: played) == nil })
+    let earlier = played.addingTimeInterval(-0.001)
+    #expect(
+      items.map { skyCue(for: $0, in: model, now: now, playedThrough: earlier) }
+        == items.map { item in
+          parseBoardTime(item.ts).map { $0 > earlier } == true
+            ? skyCue(for: item, in: model, now: now) : nil
+        })
   }
 
   static let checked = [

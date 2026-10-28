@@ -3,7 +3,7 @@ import Testing
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// and link tests run.
+/// link, `mentionAt`, and `firstParagraph` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -190,6 +190,52 @@ import Testing
           }
         }
       #expect(items == each.expected, "\(each.name)")
+    }
+  }
+
+  struct ComposeCase: Decodable {
+    struct Completed: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+    }
+
+    let name: String
+    let text: String
+    let caret: Int
+    let mention: MentionFragment?
+    let completed: Completed?
+  }
+
+  @Test func mentionsAgreeWithTheWeb() throws {
+    let cases = try Fixture.table("compose", as: [ComposeCase].self)
+    #expect(cases.count > 10)
+    for each in cases {
+      let mention = mentionAt(each.text, caret: each.caret)
+      #expect(mention == each.mention, "\(each.name)")
+      if let completed = each.completed, let mention {
+        let done = completeMention(
+          each.text, caret: each.caret, start: mention.start, name: completed.name)
+        #expect(
+          done == CompletedMention(text: completed.text, caret: completed.caret), "\(each.name)")
+      }
+    }
+  }
+
+  struct ParagraphCase: Decodable {
+    let name: String
+    let markdown: String
+    let limit: Int?
+    let paragraph: String
+  }
+
+  @Test func firstParagraphAgreesWithTheWeb() throws {
+    let cases = try Fixture.table("first-paragraph", as: [ParagraphCase].self)
+    #expect(cases.count > 10)
+    for each in cases {
+      let paragraph =
+        each.limit.map { firstParagraph(each.markdown, limit: $0) } ?? firstParagraph(each.markdown)
+      #expect(paragraph == each.paragraph, "\(each.name)")
     }
   }
 }

@@ -27,6 +27,16 @@ import Testing
     }
   }
 
+  /// The marked message's tint and bar, and an open thread's mark, are the classes the web gives
+  /// them, whose colours `MessageTheme` copies.
+  @Test func theMarkedMessageAndAnOpenThreadAreColouredAsOnTheWeb() throws {
+    let css = try SkyMarkTests.web("styles.css")
+    #expect(css.contains("bg-amber-300/[0.06] shadow-[inset_2px_0_0_rgb(252_211_77_/_0.5)]"))
+    #expect(MessageTheme.markBar == SkyColor(red: 252, green: 211, blue: 77))
+    let thread = try SkyMarkTests.web("board/ThreadItem.tsx")
+    #expect(thread.contains("text-emerald-400"))
+  }
+
   @Test func theIslandIsBlendedAsTheBrowserBlendsIt() {
     #expect(MessageTheme.island == SkyColor(red: 20, green: 20, blue: 20))
   }

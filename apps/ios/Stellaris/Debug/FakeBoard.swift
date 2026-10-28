@@ -18,7 +18,8 @@
   /// list of the channels after the first fails, as when the network goes once the board loaded,
   /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
   /// nothing, and its turn stream sends the captured one, stamped now, as live; both stay open,
-  /// as the board's do.
+  /// as the board's do. A token starting `replay-` gets its first turn stream's stamps again on every
+  /// later connection, as the board replays its buffer.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     /// The thread of samples, which general's newest message links to.
@@ -33,6 +34,8 @@
     private static let folder = Mutex<URL?>(nil)
     /// What each token posted and opened.
     private static let written = Mutex<[String: Written]>([:])
+    /// The stamp each `replay-` token's turn stream was first given.
+    private static let replayStamps = Mutex<[String: String]>([:])
     /// How many times `fading` has listed the channels.
     private static let fadingListings = Mutex(0)
 
@@ -147,7 +150,14 @@
         guard let text = read("turn-stream")?["text"] as? String else {
           return nil
         }
-        let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        var now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        if let token, token.hasPrefix("Bearer replay-") {
+          now = replayStamps.withLock { stamps in
+            let stamp = stamps[token] ?? now
+            stamps[token] = stamp
+            return stamp
+          }
+        }
         return Data(text.replacingOccurrences(of: "2026-01-01T00:00:00.000Z", with: now).utf8)
       default:
         return nil

@@ -131,6 +131,91 @@ import Testing
     #expect(try await eventually { model.store.threads.contains { $0.id == opened.id } })
   }
 
+  /// An event that lands while the conversation shown is on its first load reads it again, so an
+  /// answer the board gave before the post leaves nothing out.
+  @Test(.timeLimit(.minutes(1))) func readsAgainAConversationTouchedDuringItsFirstLoad()
+    async throws
+  {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.live.settle = .milliseconds(10)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let first = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    _ = try await model.send(
+      BoardAPI.postMessage(thread: FakeBoard.samples, body: "During the load"))
+    let posted = try event("message.posted", ["channel": "general", "thread": FakeBoard.samples])
+    model.live.take(staleKeys(for: posted), using: model)
+    // The load the event starts, then both answered as the board stood when each was asked.
+    try #require(try await eventually { gate.arrived >= 2 }, "the event read nothing again")
+    gate.answerAsArrived()
+    await first.value
+    #expect(try await eventually { feed.messages.last?.body == "During the load" })
+    #expect(!feed.stale)
+  }
+
+  /// A conversation not shown that an event touches while it loads stays marked through that load,
+  /// whose answer may be older than the event, and is read again when shown.
+  @Test(.timeLimit(.minutes(1))) func keepsTheMarkThroughALoadThatStartedBeforeTheEvent()
+    async throws
+  {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.live.settle = .milliseconds(10)
+    let feed = model.feed(for: samples)
+    let loading = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    let posted = try event("message.posted", ["channel": "general", "thread": FakeBoard.samples])
+    model.live.take(staleKeys(for: posted), using: model)
+    #expect(try await eventually { feed.stale })
+    gate.answerAsArrived()
+    await loading.value
+    #expect(feed.state == .loaded)
+    #expect(feed.stale, "an answer older than the event cleared its mark")
+  }
+
+  /// Following again with no event seen yet starts at the end of the log, so it reads what the app
+  /// shows again once the board answers, as after a drop: what came meanwhile is not left out.
+  @Test(.timeLimit(.minutes(1))) func readsAgainWhenFollowingStartsOverWithNoEventSeen()
+    async throws
+  {
+    let model = try await signedIn()
+    model.live.settle = .milliseconds(10)
+    let general = model.feed(for: .general)
+    await general.load(using: model)
+    let first = Task { await model.live.follow(using: model) }
+    #expect(try await eventually { model.live.followed })
+    first.cancel()
+    await first.value
+    _ = try await model.send(BoardAPI.postMessage(channel: "general", body: "While away"))
+    #expect(general.messages.last?.body != "While away")
+    let again = Task { await model.live.follow(using: model) }
+    defer { again.cancel() }
+    #expect(try await eventually { general.messages.last?.body == "While away" })
+  }
+
+  /// A new thread's title holds at most the 200 UTF-16 code units the board takes, cut at a whole
+  /// character, as the web's field holds it.
+  @Test func capsANewThreadsTitleAtTheBoardsLimit() {
+    var draft = NewThreadDraft(title: String(repeating: "a", count: 250))
+    #expect(draft.title.utf16.count == 200)
+    draft.title = String(repeating: "a", count: 199) + "😀"
+    #expect(draft.title == String(repeating: "a", count: 199))
+    draft.title = String(repeating: "a", count: 198) + "😀"
+    #expect(draft.title.utf16.count == 200)
+    draft.body = String(repeating: "b", count: 500)
+    #expect(draft.body.count == 500)
+  }
+
   @Test func marksTheMessageALinkNamesUntilTheConversationOpensAnotherWay() async throws {
     let model = try await signedIn()
     model.open(.thread(FakeBoard.samples))

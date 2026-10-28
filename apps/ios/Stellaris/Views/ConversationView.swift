@@ -229,12 +229,14 @@ struct ReadOnlyLine: View {
 }
 
 /// The draft of the conversation's next message, kept by conversation as it is typed, in a box
-/// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it.
+/// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it,
+/// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
 /// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
 /// citizens to mention above it, as on the web, and a pick completes the name.
 struct DraftField: View {
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @Environment(\.dynamicTypeSize) private var typeSize
   @FocusState private var focused: Bool
   /// Where the caret is, which the mention being typed is read before.
   @State private var selection: TextSelection?
@@ -260,7 +262,12 @@ struct DraftField: View {
             insertionPoint: String.Index(utf16Offset: done.caret, in: done.text))
         }
       }
-      HStack(alignment: .bottom, spacing: 8) {
+      // One layout or the other around the same field, which keeps its focus as the size changes.
+      let row =
+        typeSize.isAccessibilitySize
+        ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0))
+        : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+      row {
         TextField(
           text: draft, selection: $selection,
           prompt: Text("Message").foregroundStyle(MessageColor.muted), axis: .vertical
@@ -274,7 +281,9 @@ struct DraftField: View {
         .focused($focused)
         .accessibilityIdentifier("draft")
         .padding(.leading, 12)
+        .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
           send(draft.wrappedValue)
         }
@@ -349,6 +358,8 @@ struct SendButton: View {
     Button(action: action) {
       Text(sending ? "Sending…" : "Send")
         .font(MessageType.small(.medium))
+        .lineLimit(1)
+        .fixedSize()
         .foregroundStyle(MessageColor.surface0)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -363,13 +374,17 @@ struct SendButton: View {
 }
 
 /// The citizens a mention being typed offers, as the web's composer lists them on a card above
-/// the box: each one's CLI mark, name, and role.
+/// the box: each one's CLI mark, name, and role. At the accessibility sizes the card takes the
+/// draft's width and each role sits under its name, so the name shows whole.
 struct MentionList: View {
+  @Environment(\.dynamicTypeSize) private var typeSize
+  @ScaledMetric(relativeTo: .body) private var markSize: CGFloat = 14
   let members: [Member]
   let pick: (String) -> Void
 
   var body: some View {
     let card = RoundedRectangle(cornerRadius: 8)
+    let stacked = typeSize.isAccessibilitySize
     VStack(alignment: .leading, spacing: 0) {
       ForEach(members, id: \.name) { member in
         Button {
@@ -377,18 +392,27 @@ struct MentionList: View {
         } label: {
           HStack(spacing: 8) {
             if let cli = member.cli {
-              CliMarkGlyph(cli: cli, size: 14)
+              CliMarkGlyph(cli: cli, size: markSize)
             }
-            Text(member.name)
-              .font(MessageType.text())
-              .foregroundStyle(MessageColor.primary)
-              .lineLimit(1)
-            Spacer(minLength: 8)
-            if let role = member.role {
-              Text(role)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(MessageColor.muted)
+            let words =
+              stacked
+              ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+              : AnyLayout(HStackLayout(spacing: 8))
+            words {
+              Text(member.name)
+                .font(MessageType.text())
+                .foregroundStyle(MessageColor.primary)
                 .lineLimit(1)
+              if !stacked {
+                Spacer(minLength: 8)
+              }
+              if let role = member.role {
+                // The web's 11 pixels, following the type size as everything else does.
+                Text(role)
+                  .font(.system(.caption2, design: .monospaced))
+                  .foregroundStyle(MessageColor.muted)
+                  .lineLimit(1)
+              }
             }
           }
           .padding(.horizontal, 12)
@@ -401,7 +425,7 @@ struct MentionList: View {
       }
     }
     .padding(.vertical, 4)
-    .frame(maxWidth: 240, alignment: .leading)
+    .frame(maxWidth: stacked ? .infinity : 240, alignment: .leading)
     .background(MessageColor.surface1, in: card)
     .overlay(card.strokeBorder(Color.white.opacity(0.06)))
     .shadow(color: .black.opacity(0.5), radius: 6, y: 4)

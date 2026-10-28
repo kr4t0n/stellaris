@@ -335,16 +335,20 @@ extension Proposal {
   /// The thread itself, for a thread: its title, and the channel Back goes to.
   private(set) var thread: BoardThread?
   private(set) var messages: [Message] = []
-  /// Whether an event touched the conversation since it was last read, so it is read again when it
-  /// is next shown.
-  @ObservationIgnored private(set) var stale = false
+  /// The load under way when an event last touched the conversation, which an answer read before
+  /// the event leaves standing; nil once a load that started after it has answered.
+  @ObservationIgnored private var staleSince: Int?
 
   init(conversation: Conversation) {
     self.conversation = conversation
   }
 
+  /// Whether an event touched the conversation since a load that started after it, so it is read
+  /// again when it is next shown.
+  var stale: Bool { staleSince != nil }
+
   func markStale() {
-    stale = true
+    staleSince = loads
   }
 
   /// Counts loads, so an answer that a later load's overtook changes nothing.
@@ -373,7 +377,9 @@ extension Proposal {
         messages = detail.messages
       }
       state = .loaded
-      stale = false
+      if let since = staleSince, load > since {
+        staleSince = nil
+      }
       await model.store.lookUpMessages(in: messages.map(\.body), using: model)
     } catch is CancellationError {
       return

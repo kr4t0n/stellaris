@@ -3,9 +3,12 @@ import SwiftUI
 
 /// A thread in its channel's stream where it was opened, as the web's `ThreadItem` draws it: a
 /// quiet line that opens it, of who opened what, its mark green while it is open, when it opened
-/// or closed, and a closed one's summary under it, cut at two lines.
+/// or closed, and a closed one's summary under it, cut at two lines. At the accessibility sizes the
+/// time sits beside the mark, as a message's does beside its author's, and the line takes the
+/// row's whole width and up to five lines, so the thread's title shows.
 struct ThreadRow: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.dynamicTypeSize) private var typeSize
   let summary: ThreadSummary
 
   var body: some View {
@@ -16,28 +19,32 @@ struct ThreadRow: View {
     Button {
       model.open(.thread(thread.id))
     } label: {
-      HStack(alignment: .top, spacing: 12) {
-        Image(systemName: "arrow.turn.down.right")
-          .font(.system(size: 12, weight: .medium))
-          .foregroundStyle(open ? MessageColor.threadOpen : MessageColor.muted)
-          .frame(width: MessageTheme.avatarSize, height: 20)
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(alignment: .firstTextBaseline, spacing: 12) {
+      Group {
+        if typeSize.isAccessibilitySize {
+          VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+              mark(open: open)
+              time(at)
+            }
             Text(line)
               .font(MessageType.text())
-              .lineLimit(2)
+              .lineLimit(5)
               .frame(maxWidth: .infinity, alignment: .leading)
-            TimelineView(.everyMinute) { context in
-              Text(BoardTime.ago(at, now: context.date))
-                .font(MessageType.small())
-                .foregroundStyle(MessageColor.tertiary)
-            }
+            summaryText(paragraph)
           }
-          if !paragraph.isEmpty {
-            Text(model.store.titled(paragraph))
-              .font(MessageType.text())
-              .foregroundStyle(MessageColor.secondary)
-              .lineLimit(2)
+        } else {
+          HStack(alignment: .top, spacing: 12) {
+            mark(open: open)
+            VStack(alignment: .leading, spacing: 2) {
+              HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(line)
+                  .font(MessageType.text())
+                  .lineLimit(2)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                time(at)
+              }
+              summaryText(paragraph)
+            }
           }
         }
       }
@@ -51,6 +58,33 @@ struct ThreadRow: View {
     .accessibilityLabel(accessibilityLine(open: open))
     .accessibilityAddTraits(.isButton)
     .accessibilityIdentifier("thread-\(thread.id)")
+  }
+
+  /// The turning mark, green while the thread is open.
+  private func mark(open: Bool) -> some View {
+    Image(systemName: "arrow.turn.down.right")
+      .font(.system(size: 12, weight: .medium))
+      .foregroundStyle(open ? MessageColor.threadOpen : MessageColor.muted)
+      .frame(width: MessageTheme.avatarSize, height: 20)
+  }
+
+  /// When the thread opened, or closed, as the web says it.
+  private func time(_ at: String) -> some View {
+    TimelineView(.everyMinute) { context in
+      Text(BoardTime.ago(at, now: context.date))
+        .font(MessageType.small())
+        .foregroundStyle(MessageColor.tertiary)
+    }
+  }
+
+  /// A closed thread's summary, cut at two lines.
+  @ViewBuilder private func summaryText(_ paragraph: String) -> some View {
+    if !paragraph.isEmpty {
+      Text(model.store.titled(paragraph))
+        .font(MessageType.text())
+        .foregroundStyle(MessageColor.secondary)
+        .lineLimit(2)
+    }
   }
 
   /// "eng-1 opened topic thread", in the quiet tone, then the thread's title.

@@ -43,6 +43,13 @@ import Observation
   @ObservationIgnored private var reloading: Task<Void, Never>?
   /// How many of the sky's views are shown and following the board.
   @ObservationIgnored private var running = 0
+  /// The stamp of the newest cue the sky has played, kept across runs: each connection to the turn
+  /// stream replays the server's buffer, which the sky has played up to here already.
+  @ObservationIgnored private(set) var playedThrough: Date?
+  /// How many of the turn stream's events the sky has read, and how many cues it has played, since
+  /// the sign-in, which the tests read.
+  @ObservationIgnored private(set) var heard = 0
+  @ObservationIgnored private(set) var played = 0
 
   /// The reads of its own the sky is drawn from, as the web's queries name them (`staleKeys`);
   /// the board store holds the projects and tasks.
@@ -167,24 +174,32 @@ import Observation
   }
 
   /// Listens to the live turn stream: a tool's call flickers its citizen's star, and a post's first
-  /// line rises from it. Each connection replays the server's short buffer first, which
-  /// `skyCue` leaves be once older than fifteen seconds.
+  /// line rises from it. Each connection replays the server's short buffer first, which `skyCue`
+  /// leaves be once older than fifteen seconds, or once stamped no later than the newest cue played
+  /// before the connection, as when the sky is shown again after the keyboard covered it.
   private func listen(using model: AppModel) async {
     var wait = 1.0
     while !Task.isCancelled {
       guard let turns = model.turns() else {
         return
       }
+      // The cues of this connection that share a stamp all play; a later one replays none of them.
+      let replayed = playedThrough
       do {
         for try await item in turns {
           wait = 1
+          heard += 1
           guard case .toolCall = item.event else {
             continue
           }
           let sky = self.model(projects: model.store.projects, tasks: model.store.tasks)
-          guard let cue = skyCue(for: item, in: sky, now: now()) else {
+          guard let cue = skyCue(for: item, in: sky, now: now(), playedThrough: replayed),
+            let stamped = parseBoardTime(item.ts)
+          else {
             continue
           }
+          playedThrough = max(playedThrough ?? stamped, stamped)
+          played += 1
           let line = cue.line.map { model.store.withEntityTitles($0) }
           scene.play(SkyCue(star: cue.star, line: line))
           if let line, let name = sky.stars.first(where: { $0.id == cue.star })?.name {
@@ -241,6 +256,9 @@ import Observation
     reloading?.cancel()
     reloading = nil
     stale = []
+    playedThrough = nil
+    heard = 0
+    played = 0
     state = .idle
     members = []
     scheduler = nil

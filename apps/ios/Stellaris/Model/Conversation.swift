@@ -24,10 +24,29 @@ struct MessageMark: Equatable, Sendable {
   var reached = false
 }
 
-/// A thread being written in a channel's New thread sheet.
+/// A thread being written in a channel's New thread sheet. Its title holds at most the 200 UTF-16
+/// code units `open_thread` takes, as the web's field does, cut at a whole character.
 struct NewThreadDraft: Equatable, Sendable {
-  var title = ""
-  var body = ""
+  static let titleLimit = 200
+
+  var title: String {
+    didSet { title = NewThreadDraft.capped(title) }
+  }
+  var body: String
+
+  init(title: String = "", body: String = "") {
+    self.title = NewThreadDraft.capped(title)
+    self.body = body
+  }
+
+  /// `text` cut to the title's limit, never inside a character.
+  static func capped(_ text: String) -> String {
+    var kept = Substring(text)
+    while kept.utf16.count > titleLimit {
+      kept = kept.dropLast()
+    }
+    return String(kept)
+  }
 }
 
 /// The app's three tabs.

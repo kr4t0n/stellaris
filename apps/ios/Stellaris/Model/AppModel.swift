@@ -272,16 +272,20 @@ enum SignInFailure: Error, Equatable {
           key.first == name && (key.count < 2 || key[1] == nil || id == nil || key[1] == id)
         }
     }
-    for (conversation, feed) in feeds where feed.state == .loaded {
+    // A conversation never read yet is read when it is shown. One still on its first load counts as
+    // read: an answer the board gave before the event would leave it without what the event says.
+    for (conversation, feed) in feeds where feed.state != .idle {
       let stale =
         switch conversation {
         case .channel(let ref): touched("channel", ref)
         case .thread(let id): touched("thread", id)
         }
-      if stale, conversation == history.current {
+      guard stale else {
+        continue
+      }
+      feed.markStale()
+      if conversation == history.current {
         await feed.load(using: self)
-      } else if stale {
-        feed.markStale()
       }
     }
     let lists = BoardStore.lists.filter { touched($0) }

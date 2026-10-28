@@ -125,6 +125,10 @@ async function slowLink(target: string, bytesPerSecond: number) {
   };
 }
 
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** A repository with one commit of `bytes` random bytes on main, which stay their size in a pack. */
 async function randomRepo(repo: string, bytes: number): Promise<void> {
   await execa("git", ["init", "--quiet", "-b", "main", repo]);
@@ -879,16 +883,15 @@ describe("moving a project to another runner", () => {
 
   it("waits out a move's export and import past the hub's request timeout", async () => {
     const { board, hub, move, request } = await playedRunners({ hubRequestTimeoutMs: 300 });
-    const pause = () => new Promise((resolve) => setTimeout(resolve, 900));
     const moving = move("demo", { runner: "y" });
     const exporting = await request("x", "export");
-    await pause();
+    await pause(900);
     hub.answer("x", exporting.request, {
       ok: true,
       value: { ok: true, refs: { "refs/heads/main": "a".repeat(40) }, bytes: 10 },
     });
     const importing = await request("y", "import");
-    await pause();
+    await pause(900);
     hub.answer("y", importing.request, {
       ok: true,
       value: { refs: { "refs/heads/main": "a".repeat(40) } },

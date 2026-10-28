@@ -605,9 +605,24 @@ export type SweepResult = z.infer<typeof SweepResultSchema>;
 
 /**
  * The most a move carries: the repository's packs as the old runner measures them before it
- * pushes, and what the server's git route for a move reads of one request, held in memory.
+ * pushes, and what the server's git route for a move takes of one request as it streams it to git.
  */
 export const MOVE_PACK_LIMIT_BYTES = 256 * 1024 * 1024;
+
+/**
+ * The slowest a move's transfer may run on average and still finish: half the 34 KB/s that the
+ * slowest measured push between two runners' sites ran at.
+ */
+export const MOVE_FLOOR_BYTES_PER_SECOND = 16 * 1024;
+
+/**
+ * How long a move's push or clone of `bytes` may take before its clock cuts it: the ten minutes any
+ * transfer had before, plus the bytes at the floor rate, so a pack at the cap gets about four hours
+ * and forty minutes. A transfer that stops moving ends far sooner, at git's low-speed limit.
+ */
+export function moveTransferMs(bytes: number): number {
+  return 10 * 60_000 + Math.ceil(bytes / MOVE_FLOOR_BYTES_PER_SECOND) * 1000;
+}
 
 /** A repository's branches and tags by full name (`refs/heads/…`, `refs/tags/…`), each at its object. */
 export const RepoRefsSchema = z.record(
@@ -664,6 +679,8 @@ export const ProjectImportSchema = z.object({
   move: UlidSchema,
   repo: ProjectRepoSchema,
   pullRequests: z.boolean(),
+  /** The packs' size the old runner measured, which the clone's clock is sized from; the cap if unsaid. */
+  bytes: z.number().int().nonnegative().optional(),
 });
 export type ProjectImport = z.infer<typeof ProjectImportSchema>;
 

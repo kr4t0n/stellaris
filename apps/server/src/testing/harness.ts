@@ -2,7 +2,6 @@ import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { serve } from "@hono/node-server";
 import type { Board } from "@stellaris/board-core";
 import {
   createRunner,
@@ -18,6 +17,7 @@ import type { z } from "zod";
 import { createApp, type AppDependencies } from "../app.js";
 import { ModelCatalog } from "../models.js";
 import { QuotaReads } from "../quotas.js";
+import { serveBoard } from "../serve.js";
 import { EnrollmentDesk } from "../enrollment.js";
 import { TurnHub } from "../turn-hub.js";
 import { USER } from "./scripted-backend.js";
@@ -95,7 +95,7 @@ export interface TestSociety {
 export async function startTestSociety(options: TestSocietyOptions): Promise<TestSociety> {
   const { board } = options;
   let fetcher: Hono["fetch"] | null = null;
-  const server = serve({
+  const server = serveBoard({
     fetch: (request, env) => {
       if (options.drop?.(request) === true) {
         env.incoming.socket.destroy();
@@ -108,15 +108,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     },
     port: options.port ?? 0,
     hostname: "127.0.0.1",
-    ...(options.requestTimeoutMs === undefined
-      ? {}
-      : {
-          serverOptions: {
-            requestTimeout: options.requestTimeoutMs,
-            headersTimeout: options.requestTimeoutMs,
-            connectionsCheckingInterval: 100,
-          },
-        }),
+    requestTimeoutMs: options.requestTimeoutMs,
   });
   await once(server, "listening");
   const address = server.address();

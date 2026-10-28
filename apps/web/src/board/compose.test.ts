@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import composeCases from "../../../ios/fixtures/cases/compose.json?raw";
 import { completeMention, listed, mentionAt } from "./compose.js";
 
 describe("composing", () => {
@@ -11,6 +13,32 @@ describe("composing", () => {
       text: "hey @ada , look",
       caret: 9,
     });
+  });
+
+  // The iOS app's port runs the same table (apps/ios/fixtures/cases).
+  it("agrees with the case table the iOS port runs", () => {
+    const cases = z
+      .object({
+        name: z.string(),
+        text: z.string(),
+        caret: z.number(),
+        mention: z.object({ start: z.number(), prefix: z.string() }).nullable(),
+        completed: z.object({ name: z.string(), text: z.string(), caret: z.number() }).optional(),
+      })
+      .array()
+      .parse(JSON.parse(composeCases));
+    expect(cases.length).toBeGreaterThan(10);
+    for (const each of cases) {
+      const mention = mentionAt(each.text, each.caret);
+      expect({ name: each.name, mention }).toEqual({ name: each.name, mention: each.mention });
+      if (each.completed !== undefined && mention !== null) {
+        const { name, ...done } = each.completed;
+        expect({ name: each.name, done }).toEqual({
+          name: each.name,
+          done: completeMention(each.text, each.caret, mention.start, name),
+        });
+      }
+    }
   });
 
   it("lists names as a sentence", () => {

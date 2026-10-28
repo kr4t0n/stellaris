@@ -35,6 +35,18 @@ public enum MessageTheme {
   public static let mention = SkyColor(red: 116, green: 212, blue: 255)
   public static let mentionTint = SkyColor(red: 0, green: 188, blue: 255)
 
+  /// The message a link named, as `.message-target` marks it: a tint of Tailwind's `amber-300`,
+  /// `oklch(87.9% 0.169 91.605)`, the nearest colour in sRGB, at 6%, and a bar of `rgb(252 211
+  /// 77)` at 50% down its leading edge, 2 points wide.
+  public static let markTint = SkyColor(red: 255, green: 210, blue: 48)
+  public static let markBar = SkyColor(red: 252, green: 211, blue: 77)
+  /// An open thread's mark in its channel's stream: Tailwind's `emerald-400`, `oklch(76.5% 0.177
+  /// 163.223)`, the nearest colour in sRGB; a closed one's is `fg-muted`.
+  public static let threadOpen = SkyColor(red: 0, green: 212, blue: 146)
+  /// A post the board didn't take: Tailwind's `red-400`, `oklch(70.4% 0.191 22.216)`, the nearest
+  /// colour in sRGB.
+  public static let failure = SkyColor(red: 255, green: 100, blue: 103)
+
   /// `text-sm`, a message's text and a name: 0.875rem.
   public static let textSize = 14.0
   /// `leading-relaxed`, a message's lines: 1.625 times the text.

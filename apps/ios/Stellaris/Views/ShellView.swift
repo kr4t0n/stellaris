@@ -216,6 +216,7 @@ struct ChatView: View {
               }
           }
           .presentationDetents([.medium, .large])
+          .interactiveDismissDisabled()
         }
       }
     }
@@ -276,7 +277,7 @@ struct ChatView: View {
         case .newThread: model.startingThread = nil
         case .advance: model.advancing = nil
         case .decide: model.deciding = nil
-        case .inspect: model.inspecting = nil
+        case .inspect: break
         }
       })
   }

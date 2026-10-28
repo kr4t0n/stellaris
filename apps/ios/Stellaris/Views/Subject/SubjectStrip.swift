@@ -56,8 +56,9 @@ struct SubjectStrip: View {
 }
 
 /// A task's plan as segments, the stage it is at with its gate, and its phase; then who may hold
-/// the stage and who does, or how the task ended. At the accessibility sizes the phase goes under
-/// the stage, which wraps in full.
+/// the stage and who does, or how the task ended. At the accessibility sizes, where the strip would
+/// take most of a short window, the phase goes under the stage, cut at two lines, and who holds it
+/// is left to the plan; VoiceOver reads it all at every size.
 private struct TaskStrip: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -75,7 +76,8 @@ private struct TaskStrip: View {
           Text(stageLine)
             .font(MessageType.text(.medium))
             .foregroundStyle(MessageColor.primary)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
+            .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
           if task.currentStage?.gate == true {
             GateBadge()
           }
@@ -85,16 +87,27 @@ private struct TaskStrip: View {
         }
         PhaseChip(phase: task.phase, status: task.status.rawValue)
       }
-      TimelineView(.everyMinute) { context in
-        if let meta = meta(now: context.date) {
-          Text(meta)
-            .font(MessageType.small())
-            .foregroundStyle(MessageColor.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
+      if !typeSize.isAccessibilitySize {
+        TimelineView(.everyMinute) { context in
+          if let meta = meta(now: context.date) {
+            Text(meta)
+              .font(MessageType.small())
+              .foregroundStyle(MessageColor.tertiary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
         }
       }
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken)
+  }
+
+  /// The strip in words, all of it at every size.
+  private var spoken: String {
+    let gate = task.currentStage?.gate == true ? ", gate" : ""
+    let phase = task.phase == .unknown ? task.status.rawValue : task.phase.label.lowercased()
+    let meta = meta(now: .now).map { ". \($0)" } ?? ""
+    return "\(stageLine)\(gate), \(phase)\(meta)"
   }
 
   /// "Stage 2 of 3 · Approve the design", or how far the task came.
@@ -127,7 +140,8 @@ private struct TaskStrip: View {
 }
 
 /// A proposal's kind, who proposed it and when, and its status; then who decides it, or the
-/// decision with its reason.
+/// decision with its reason. At the accessibility sizes each line is cut at two, and the status
+/// goes under the first.
 private struct ProposalStrip: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -146,7 +160,8 @@ private struct ProposalStrip: View {
           )
           .font(MessageType.text(.medium))
           .foregroundStyle(MessageColor.primary)
-          .fixedSize(horizontal: false, vertical: true)
+          .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
+          .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
           if !typeSize.isAccessibilitySize {
             Spacer(minLength: 0)
           }
@@ -155,7 +170,8 @@ private struct ProposalStrip: View {
         Text(decision(now: context.date))
           .font(MessageType.small())
           .foregroundStyle(MessageColor.tertiary)
-          .fixedSize(horizontal: false, vertical: true)
+          .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
+          .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
       }
     }
     .accessibilityElement(children: .combine)
@@ -290,21 +306,24 @@ struct StatusChip: View {
   }
 }
 
-/// A rounded chip of small text on a tint.
+/// A rounded chip of small text on a tint, on one line, but for the accessibility sizes, where it
+/// wraps rather than run past the column.
 private struct Chip: View {
+  @Environment(\.dynamicTypeSize) private var typeSize
   let words: String
   let tone: Color
   let ground: Color
 
   var body: some View {
+    let large = typeSize.isAccessibilitySize
     Text(words)
       .font(MessageType.chip(.medium))
       .foregroundStyle(tone)
-      .lineLimit(1)
-      .fixedSize()
+      .lineLimit(large ? nil : 1)
+      .fixedSize(horizontal: !large, vertical: true)
       .padding(.horizontal, 8)
       .padding(.vertical, 2)
-      .background(ground, in: Capsule())
+      .background(ground, in: RoundedRectangle(cornerRadius: large ? 10 : 100))
   }
 }
 

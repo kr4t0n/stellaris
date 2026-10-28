@@ -142,6 +142,12 @@ import Testing
     case "scheduler":
       let scheduler = try check(fixture, BoardAPI.scheduler())
       #expect(scheduler.paused == false)
+    case "task-file":
+      let file = try fixture.decode(BranchFile.self)
+      let task = try Fixture("task").decode(BoardTask.self)
+      try check(fixture, BoardAPI.taskFile(task.id, path: file.path))
+      #expect(file.kind == .known(.file))
+      #expect(file.data?.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47]))
     case "turn-stream":
       expectEndpoint(fixture, BoardAPI.turnStream(since: 0))
       #expect(fixture.status == 200)
@@ -212,7 +218,7 @@ import Testing
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
-    "scheduler", "turn-stream",
+    "scheduler", "task-file", "turn-stream",
   ]
 
   @discardableResult

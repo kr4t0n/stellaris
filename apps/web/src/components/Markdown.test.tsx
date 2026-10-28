@@ -2,9 +2,13 @@ import { mentionsIn } from "@stellaris/shared/mentions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import linksCases from "../../../ios/fixtures/cases/links.json?raw";
 import { createApi } from "../lib/api.js";
+import { entityOfHref } from "../lib/entities.js";
+import { linkTarget } from "../lib/files.js";
 import { SessionContext } from "../lib/session.js";
-import { Markdown } from "./Markdown.js";
+import { Markdown, urlTransform } from "./Markdown.js";
 
 /** The names a text renders highlighted as mentions. */
 function highlighted(text: string): string[] {
@@ -83,6 +87,40 @@ describe("Markdown", () => {
     expect(html).toContain("Loading The runners…");
     expect(html).toContain("<span>the shot</span>");
     expect(html).not.toContain('href="image:');
+  });
+
+  it("reads every link as the iOS client's port does, from the case table both run", () => {
+    const source = z.union([
+      z.object({ kind: z.literal("task"), taskId: z.string() }),
+      z.object({ kind: z.literal("project"), slug: z.string() }),
+    ]);
+    const cases = z
+      .object({
+        name: z.string(),
+        href: z.string(),
+        base: z.object({ source, dir: z.string() }).optional(),
+        kept: z.string(),
+        entity: z.unknown(),
+        target: z.unknown(),
+      })
+      .array()
+      .parse(JSON.parse(linksCases));
+    expect(cases.length).toBeGreaterThan(30);
+    expect(
+      cases.map((each) => ({
+        name: each.name,
+        kept: urlTransform(each.href),
+        entity: entityOfHref(each.href),
+        target: linkTarget(each.href, each.base),
+      })),
+    ).toEqual(
+      cases.map((each) => ({
+        name: each.name,
+        kept: each.kept,
+        entity: each.entity,
+        target: each.target,
+      })),
+    );
   });
 
   it("never renders raw HTML or script URLs from a message", () => {

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/files/evidence/plot.png"
+  },
+  "status": 200,
+  "body": {
+    "kind": "file",
+    "path": "evidence/plot.png",
+    "commit": {
+      "id": "fixture-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "eng-1"
+    },
+    "size": 70,
+    "content": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  }
+}

@@ -4,6 +4,8 @@
 // themselves. A field the schema gives a default is decoded with that default when it is missing,
 // and a value of a closed set is an `OrUnknown`.
 
+import Foundation
+
 /// Who a token signs in as.
 public struct BoardActor: Sendable, Hashable, Codable {
   public let name: String
@@ -497,6 +499,24 @@ public struct Decision: Sendable, Hashable, Codable, Identifiable {
   public let outcome: OrUnknown<Outcome>
   public let reason: String?
   public let ts: String
+}
+
+/// A path on a task's branch as the board reads it from the project's runner: a file, with its
+/// bytes in base64, or a folder.
+public struct BranchFile: Sendable, Hashable, Codable {
+  public enum Kind: String, Sendable, Hashable {
+    case file, dir
+  }
+
+  public let kind: OrUnknown<Kind>
+  public let path: String
+  /// A file's bytes in base64; nil for a folder, or for a file too large for the board to send.
+  public let content: String?
+
+  /// A file's bytes, when the board sent them.
+  public var data: Data? {
+    content.flatMap { Data(base64Encoded: $0) }
+  }
 }
 
 /// A project's status page. `revision` counts its updates.

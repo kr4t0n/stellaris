@@ -1,7 +1,8 @@
-// Ids in a line read as what they name, a port of `withTitles` and `splitEntities` in the web's
-// `apps/web/src/lib/entities.ts`, for places that can't hold a link, as the line a post raises in
-// the sky. Both run the case table in `apps/ios/fixtures/cases`. The web's rule for a message's id,
-// which drops "post" and whose before it, has no port: the app names no messages yet.
+// Ids in text read as what they name, a port of `withTitles` and `splitEntities` in the web's
+// `apps/web/src/lib/entities.ts`: a message's markdown reads them as links named by their titles,
+// and a place that can't hold a link, as the line a post raises in the sky, as the titles alone.
+// Both run the case table in `apps/ios/fixtures/cases`. The web's rule for a message's id, which
+// drops "post" and whose before it, has no port: the app names no messages yet.
 
 /// The 26 characters a ULID is written in, Crockford's base 32.
 private func isULIDUnit(_ unit: UInt16) -> Bool {
@@ -52,34 +53,66 @@ private func idStarts(in units: [UInt16]) -> [Int] {
   return starts
 }
 
-/// `text` with each id `titles` knows read as its title. A title written right after its id,
-/// quoted or after a colon, as agents and the board often write it, is dropped, since the id now
-/// reads as the title.
-public func withTitles(_ text: String, titles: [String: String]) -> String {
-  guard !titles.isEmpty else {
-    return text
+/// What an id in the board's text names, and the words shown in its place.
+public struct EntityTitle: Sendable, Hashable {
+  public let kind: EntityKind
+  public let title: String
+
+  public init(kind: EntityKind, title: String) {
+    self.kind = kind
+    self.title = title
+  }
+}
+
+/// A piece of text cut at the ids an index knows: text as written, or an id the index knows.
+public enum EntityPiece: Sendable, Hashable {
+  case text(String)
+  case entity(id: String, EntityTitle)
+}
+
+/// `text` cut at each id `index` knows, standing alone as the web's `splitEntities` finds one. A
+/// title written right after its id, quoted or after a colon, as agents and the board often write
+/// it, is dropped, since the id now reads as the title. An empty piece of text is left out.
+public func splitEntities(_ text: String, index: [String: EntityTitle]) -> [EntityPiece] {
+  guard !index.isEmpty else {
+    return text.isEmpty ? [] : [.text(text)]
   }
   let units = Array(text.utf16)
   func slice(_ from: Int, _ to: Int) -> String {
     String(decoding: units[from..<to], as: UTF16.self)
   }
-  var pieces: [String] = []
+  var pieces: [EntityPiece] = []
   var last = 0
   for start in idStarts(in: units) {
     let id = slice(start, start + 26)
-    guard let title = titles[id], start >= last else {
+    guard let entity = index[id], start >= last else {
       continue
     }
-    pieces.append(slice(last, start))
-    pieces.append(title)
+    if start > last {
+      pieces.append(.text(slice(last, start)))
+    }
+    pieces.append(.entity(id: id, entity))
     last = start + 26
-    let echo = [" \"\(title)\"", ": \(title)"].first { each in
+    let echo = [" \"\(entity.title)\"", ": \(entity.title)"].first { each in
       let echoed = Array(each.utf16)
       return units.count - last >= echoed.count
         && Array(units[last..<last + echoed.count]) == echoed
     }
     last += echo.map { $0.utf16.count } ?? 0
   }
-  pieces.append(slice(last, units.count))
-  return pieces.joined()
+  if last < units.count {
+    pieces.append(.text(slice(last, units.count)))
+  }
+  return pieces
+}
+
+/// `text` with each id `titles` knows read as its title, as `splitEntities` cuts it.
+public func withTitles(_ text: String, titles: [String: String]) -> String {
+  let index = titles.mapValues { EntityTitle(kind: .task, title: $0) }
+  return splitEntities(text, index: index).map { piece in
+    switch piece {
+    case .text(let text): text
+    case .entity(_, let entity): entity.title
+    }
+  }.joined()
 }

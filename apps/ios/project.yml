@@ -19,6 +19,11 @@ settings:
 packages:
   BoardKit:
     path: BoardKit
+  # What swift-markdown, BoardKit's parser, builds on, held at the version BoardKit's
+  # Package.resolved pins, since the app's project resolves its packages afresh.
+  swift-cmark:
+    url: https://github.com/swiftlang/swift-cmark.git
+    exactVersion: 0.9.0
 targets:
   Stellaris:
     type: application

@@ -148,6 +148,12 @@ public enum BoardAPI {
       method: .get, path: "/api/turns/stream?since=\(since)", body: nil, authenticated: true)
   }
 
+  /// A path on a task's branch, read from its project's runner: a file, or a folder.
+  public static func taskFile(_ id: String, path: String) -> BoardRequest<BranchFile> {
+    let rest = path.split(separator: "/").map { "/" + component(String($0)) }.joined()
+    return read("/api/tasks/\(component(id))/files\(rest)")
+  }
+
   /// An image a citizen uploaded, as its bytes.
   public static func image(_ id: String) -> Endpoint {
     Endpoint(method: .get, path: "/api/images/\(component(id))", body: nil, authenticated: true)

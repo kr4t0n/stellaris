@@ -2,8 +2,8 @@ import Testing
 
 @testable import BoardKit
 
-/// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, and
-/// `withTitles` tests run.
+/// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
+/// and link tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -54,6 +54,90 @@ import Testing
     #expect(cases.count > 10)
     for each in cases {
       #expect(withTitles(each.text, titles: each.titles) == each.line, "\(each.name)")
+    }
+  }
+
+  /// A link's case as the web's `Markdown` test writes what it reads: the address its filter keeps,
+  /// the entity `entityOfHref` gives, and the target `linkTarget` gives, each as the web spells it.
+  struct LinkCase: Decodable {
+    struct Source: Decodable {
+      let kind: String
+      let taskId: String?
+      let slug: String?
+
+      var source: FileSource? {
+        switch kind {
+        case "task": taskId.map(FileSource.task)
+        case "project": slug.map(FileSource.project)
+        default: nil
+        }
+      }
+    }
+
+    struct Base: Decodable {
+      let source: Source
+      let dir: String
+    }
+
+    struct Place: Decodable {
+      let channel: String
+      let thread: String?
+    }
+
+    struct Entity: Decodable {
+      let kind: EntityKind
+      let id: String
+      let place: Place?
+    }
+
+    struct Target: Decodable {
+      let kind: String
+      let source: Source?
+      let path: String?
+      let line: Int?
+      let id: String?
+    }
+
+    let name: String
+    let href: String
+    let base: Base?
+    let kept: String
+    let entity: Entity?
+    let target: Target?
+
+    var expectedEntity: EntityLink? {
+      entity.map {
+        EntityLink(kind: $0.kind, id: $0.id, channel: $0.place?.channel, thread: $0.place?.thread)
+      }
+    }
+
+    var expectedTarget: LinkTarget? {
+      guard let target else {
+        return nil
+      }
+      switch target.kind {
+      case "file":
+        return target.source?.source.map {
+          .file(source: $0, path: target.path ?? "", line: target.line)
+        }
+      case "upload":
+        return target.id.map(LinkTarget.upload)
+      default:
+        return .local
+      }
+    }
+  }
+
+  @Test func linksAgreeWithTheWeb() throws {
+    let cases = try Fixture.table("links", as: [LinkCase].self)
+    #expect(cases.count > 30)
+    for each in cases {
+      let base = each.base.flatMap { base in
+        base.source.source.map { FileBase(source: $0, dir: base.dir) }
+      }
+      #expect(keptHref(each.href) == each.kept, "\(each.name)")
+      #expect(entityOfHref(each.href) == each.expectedEntity, "\(each.name)")
+      #expect(linkTarget(each.href, base: base) == each.expectedTarget, "\(each.name)")
     }
   }
 

@@ -36,9 +36,16 @@ import Testing
     func drop() { dropped += 1 }
     func pause(_ duration: Duration) { pauses.append(duration) }
 
+    /// Records the wait, and yields a moment rather than waiting it, so a follower that keeps
+    /// reconnecting leaves the other tests room.
+    func paused(_ duration: Duration) async {
+      pause(duration)
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+
     nonisolated func follower(silence: Duration = .seconds(45)) -> EventFollower {
       EventFollower(
-        timing: EventFollower.Timing(silence: silence), pause: { await self.pause($0) },
+        timing: EventFollower.Timing(silence: silence), pause: { await self.paused($0) },
         connect: { since in
           AsyncThrowingStream { continuation in
             let playing = Task {
@@ -150,13 +157,15 @@ import Testing
     #expect(await board.dropped >= 1)
   }
 
+  /// Pings a tenth of a second apart for three seconds keep a connection whose limit is two. The
+  /// margin is wide since the tests run side by side, and on a busy simulator a short sleep can
+  /// take several times as long.
   @Test func keepsAConnectionThatPings() async throws {
     let late = event("00000000000000000000000001")
-    let pings = Array(repeating: [Step.wait(.milliseconds(50)), .send(.ping)], count: 12).flatMap {
-      $0
-    }
+    let pings = Array(repeating: [Step.wait(.milliseconds(100)), .send(.ping)], count: 30)
+      .flatMap { $0 }
     let board = ScriptedBoard([[.send(.opened)] + pings + [.send(.event(late))]])
-    let given = try await first(1, of: board.follower(silence: .milliseconds(200)))
+    let given = try await first(1, of: board.follower(silence: .seconds(2)))
     #expect(given == [.event(late)])
     #expect(await board.asked == ["latest"])
   }

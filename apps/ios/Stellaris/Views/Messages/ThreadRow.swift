@@ -5,7 +5,8 @@ import SwiftUI
 /// quiet line that opens it, of who opened what, its mark green while it is open, when it opened
 /// or closed, and a closed one's summary under it, cut at two lines. At the accessibility sizes the
 /// time sits beside the mark, as a message's does beside its author's, and the line takes the
-/// row's whole width and up to five lines, so the thread's title shows.
+/// row's whole width and wraps in full, as a message does, so the thread's title shows: at 320
+/// points "eng-1 opened topic thread" alone takes four lines there.
 struct ThreadRow: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -28,7 +29,7 @@ struct ThreadRow: View {
             }
             Text(line)
               .font(MessageType.text())
-              .lineLimit(5)
+              .fixedSize(horizontal: false, vertical: true)
               .frame(maxWidth: .infinity, alignment: .leading)
             summaryText(paragraph)
           }

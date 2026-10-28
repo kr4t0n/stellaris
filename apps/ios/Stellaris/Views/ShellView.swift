@@ -58,8 +58,6 @@ struct ShellView: View {
     .sheet(isPresented: $model.showsSettings) {
       SettingsView()
     }
-    // From the tabs, as Settings is: on iOS 27.1's simulator, a cover presented from inside Chat's
-    // tab never showed, and the tap that asked for it scrolled the conversation to its top.
     .fullScreenCover(item: $model.viewing) { viewed in
       ImageViewer(image: viewed.image, alt: viewed.alt)
     }

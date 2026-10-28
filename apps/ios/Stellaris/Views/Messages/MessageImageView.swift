@@ -56,29 +56,22 @@ struct MessageImageView: View {
     case .failed:
       words
     case .loaded(let picture):
-      // A tap gesture rather than a button: on iOS 27.1's simulator, a button's tap here never ran
-      // its action, and scrolled the conversation to its top.
-      FittedImage(natural: picture.size, maxHeight: conversationHeight * 0.6) {
-        Image(uiImage: picture)
-          .resizable()
+      Button {
+        if let link = image.link, let url = MessageText.url(for: link) {
+          openURL(url)
+        } else {
+          model.viewing = ViewedImage(image: picture, alt: image.alt)
+        }
+      } label: {
+        FittedImage(natural: picture.size, maxHeight: conversationHeight * 0.6) {
+          Image(uiImage: picture)
+            .resizable()
+        }
+        .clipShape(.rect(cornerRadius: 8))
       }
-      .clipShape(.rect(cornerRadius: 8))
-      .contentShape(.rect)
-      .onTapGesture { open(picture) }
-      .accessibilityElement()
+      .buttonStyle(.plain)
       .accessibilityLabel(image.alt.isEmpty ? "Image" : image.alt)
-      .accessibilityAddTraits([.isButton, .isImage])
-      .accessibilityAction { open(picture) }
       .accessibilityIdentifier("message-image")
-    }
-  }
-
-  /// Opens the picture in the viewer, or follows the link it sits in.
-  private func open(_ picture: UIImage) {
-    if let link = image.link, let url = MessageText.url(for: link) {
-      openURL(url)
-    } else {
-      model.viewing = ViewedImage(image: picture, alt: image.alt)
     }
   }
 

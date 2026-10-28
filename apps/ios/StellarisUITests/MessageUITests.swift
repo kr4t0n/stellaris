@@ -46,12 +46,20 @@ final class MessageUITests: ShellTestCase {
     expectConversation(app, "Add the export view")
   }
 
-  /// Drags the conversation down, to older messages, until `element` is on screen.
+  /// Drags the conversation down, to older messages, until `element` is on screen below the
+  /// window's top 40%. On the outer display a tap in the top band reaches no message: it scrolls the
+  /// conversation to its top, as a tap on the status bar does.
   @MainActor private func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
-    for _ in 0..<12 where !(element.exists && element.isHittable) {
-      dragDown(app)
+    let clear = app.windows.firstMatch.frame.height * 0.4
+    let messages = app.scrollViews["messages"].firstMatch
+    for _ in 0..<24 where !(element.exists && element.isHittable && element.frame.minY > clear) {
+      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
+      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.6))
+      start.press(forDuration: 0.1, thenDragTo: end)
     }
-    XCTAssertTrue(element.exists && element.isHittable, "\(element) isn't on screen")
+    XCTAssertTrue(
+      element.exists && element.isHittable && element.frame.minY > clear,
+      "\(element) isn't on screen below the top band")
   }
 
   /// Keeps a picture of each of the simulator's displays.

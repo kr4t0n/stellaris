@@ -2,7 +2,12 @@ import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
+import {
+  GitIdentityCheck,
+  ZERO_USAGE,
+  type AgentBackend,
+  type TurnResult,
+} from "@stellaris/runner-core";
 import {
   BranchChangesSchema,
   MEMBER_VERBS,
@@ -18,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 
 const USER = { name: "user", role: "user" } as const;
+const QUIET = { info() {}, warn() {}, error() {} };
 
 function completed(summary: string): TurnResult {
   return {
@@ -125,6 +131,8 @@ describe("moving a project to another runner", () => {
       runnerName: "a",
       backends: () => ({ claude: backendOn("a") }),
       extraRunners: [{ name: "b", backends: () => ({ claude: backendOn("b") }) }],
+      // Both runners' accounts have a git identity, which the move asks of b; CI's account has none.
+      gitIdentity: new GitIdentityCheck(QUIET, () => Promise.resolve([])),
     });
     // The citizen's turns outside the project are pinned to a, so the project's first turn lands there.
     await board.setAgentRunner(USER, "eng-1", "a");

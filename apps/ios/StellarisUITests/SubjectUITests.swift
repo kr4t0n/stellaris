@@ -154,16 +154,17 @@ final class SubjectUITests: ShellTestCase {
       .matching(NSPredicate(format: "label CONTAINS %@", "Export view: waiting on the design"))
       .firstMatch
     XCTAssertTrue(dashboard.waitForExistence(timeout: 20), "the project shows no dashboard")
-    // Section headers may be drawn in capitals.
+    // Section headers may be drawn in capitals, and as text or as headers.
     func header(_ words: String) -> XCUIElement {
-      app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", words)).firstMatch
+      app.descendants(matching: .any).matching(NSPredicate(format: "label ==[c] %@", words))
+        .firstMatch
     }
     XCTAssertTrue(
       header("Waiting for a holder · 1").waitForExistence(timeout: 20),
       "the tasks aren't grouped by where they stand")
     XCTAssertTrue(header("Being worked · 1").exists)
     keepScreen("project")
-    pick(app, "task-\(emptyState)")
+    pick(app, "project-task-\(emptyState)")
     expectConversation(app, "Fix the empty state")
   }
 }

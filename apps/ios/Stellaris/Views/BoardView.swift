@@ -85,7 +85,8 @@ private struct ChannelRow: View {
 struct TaskRow: View {
   @Environment(AppModel.self) private var model
   let task: BoardTask
-  /// Whether the row draws the task's plan as segments, as the web's tasks view does.
+  /// Whether the row draws the task's plan as segments, as the web's tasks view does, as it does
+  /// in a project's list, whose rows are named apart from Board's own.
   var plan = false
 
   var body: some View {
@@ -110,7 +111,7 @@ struct TaskRow: View {
       }
     }
     .foregroundStyle(.primary)
-    .accessibilityIdentifier("task-\(task.id)")
+    .accessibilityIdentifier("\(plan ? "project-task" : "task")-\(task.id)")
   }
 
   /// The stage the task is at, or how far it came.

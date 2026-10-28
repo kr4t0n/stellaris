@@ -110,6 +110,22 @@ final class SnapshotTests: XCTestCase {
     XCTAssertGreaterThan(gray, pixels / 3, "the conversation isn't on the island's gray")
   }
 
+  /// The draft is the web's composer: a box of `surface-2` at 50% over the island's gray, which
+  /// blends to 29 in each channel, with nothing black in its row.
+  @MainActor func testTheDraftIsTheWebsComposer() async throws {
+    let model = try await signedIn()
+    let image = try await Snapshot.image(
+      of: DraftField(conversation: .general).background(MessageColor.island).environment(model),
+      size: CGSize(width: 410, height: 100), type: Snapshot.typeSizes[0], fitting: true)
+    try Snapshot.keep(image, named: "proof-draft-composer", in: self)
+    let picture = try XCTUnwrap(image.cgImage)
+    let pixels = picture.width * picture.height
+    let box = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 3)
+    let black = Snapshot.pixels(in: image, near: (red: 0, green: 0, blue: 0), within: 6)
+    XCTAssertGreaterThan(box, pixels / 3, "the draft's box isn't the composer's gray")
+    XCTAssertLessThan(black, pixels / 100, "the draft's row draws black")
+  }
+
   @MainActor private func signedIn() async throws -> AppModel {
     let (model, _) = fakeApp()
     await model.start()

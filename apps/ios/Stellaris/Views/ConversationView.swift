@@ -135,22 +135,38 @@ struct ConversationView: View {
   }
 }
 
-/// The draft of the conversation's next message, kept by conversation as it is typed.
+/// The draft of the conversation's next message, kept by conversation as it is typed, in a box
+/// drawn as the web's `Composer` draws one, on the island's gray below a hairline.
 struct DraftField: View {
   @Environment(AppModel.self) private var model
+  @FocusState private var focused: Bool
   let conversation: Conversation
 
   var body: some View {
     let draft = Binding(
       get: { model.memory?.draft(conversation) ?? "" },
       set: { model.memory?.setDraft($0, for: conversation) })
-    TextField("Message", text: draft, axis: .vertical)
-      .lineLimit(1...5)
-      .textFieldStyle(.roundedBorder)
-      .accessibilityIdentifier("draft")
-      .padding(.horizontal)
-      .padding(.vertical, 8)
-      .background(.bar)
+    let box = RoundedRectangle(cornerRadius: 12)
+    TextField(
+      text: draft, prompt: Text("Message").foregroundStyle(MessageColor.muted), axis: .vertical
+    ) {
+      Text("Message")
+    }
+    .lineLimit(1...5)
+    .textFieldStyle(.plain)
+    .font(MessageType.text())
+    .foregroundStyle(MessageColor.primary)
+    .focused($focused)
+    .accessibilityIdentifier("draft")
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
+    .background(MessageColor.surface2.opacity(0.5), in: box)
+    // The web's inset edge, brighter while the box has the focus.
+    .overlay(box.strokeBorder(Color.white.opacity(focused ? 0.16 : 0.06)))
+    .padding(12)
+    .overlay(alignment: .top) {
+      Rectangle().fill(MessageColor.line).frame(height: 1)
+    }
   }
 }
 

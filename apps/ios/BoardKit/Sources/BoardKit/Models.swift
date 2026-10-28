@@ -501,6 +501,23 @@ public struct Decision: Sendable, Hashable, Codable, Identifiable {
   public let ts: String
 }
 
+/// Where a message is and who wrote it, as the board answers a lookup of the ids a text names.
+public struct MessageRef: Sendable, Hashable, Codable {
+  public let id: String
+  public let author: String
+  public let channel: String
+  public let thread: String?
+  public let ts: String
+
+  public init(id: String, author: String, channel: String, thread: String? = nil, ts: String) {
+    self.id = id
+    self.author = author
+    self.channel = channel
+    self.thread = thread
+    self.ts = ts
+  }
+}
+
 /// A path on a task's branch as the board reads it from the project's runner: a file, with its
 /// bytes in base64, or a folder.
 public struct BranchFile: Sendable, Hashable, Codable {

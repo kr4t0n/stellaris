@@ -99,4 +99,29 @@ import UIKit
       try await model.images.image(.web("http://images.example.com/wide.png"), using: model)
     }
   }
+
+  /// Loading a conversation looks up the ids its messages name that nothing names yet, and a
+  /// message the board finds reads as whose post it is and where, with "post" before it dropped.
+  @Test func namesAMessageTheBoardLooksUp() async throws {
+    let model = try await signedIn()
+    #expect(model.store.entities[FakeBoard.cited] == nil)
+    let samples = Conversation.thread(FakeBoard.samples)
+    await model.feed(for: samples).load(using: model)
+    let post = "eng-1's post in Rendering samples"
+    #expect(
+      model.store.entities[FakeBoard.cited]
+        == EntityTitle(kind: .message, title: post, channel: "general", thread: FakeBoard.samples))
+    let message = try #require(
+      model.feed(for: samples).messages.first { $0.body.contains(FakeBoard.cited) })
+    let place = (channel: "general", thread: FakeBoard.samples)
+    let link = MessageLink.entity(
+      EntityLink(kind: .message, id: FakeBoard.cited, channel: place.channel, thread: place.thread))
+    #expect(
+      model.document(for: message).blocks.first
+        == .paragraph([
+          .run(MessageRun("Before the release, as ")), .run(MessageRun(post, link: link)),
+          .run(MessageRun(" says:")),
+        ]))
+  }
 }
+

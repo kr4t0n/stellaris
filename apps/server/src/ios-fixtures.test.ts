@@ -27,6 +27,7 @@ const TIME = "2026-01-01T00:00:00.000Z";
 
 const IdSchema = z.object({ id: z.string() });
 const TaskRowSchema = z.object({ id: z.string(), title: z.string() });
+const PostSchema = z.object({ id: z.string(), author: z.string() });
 const ProposalRowSchema = z.object({ id: z.string(), kind: z.string() });
 const SessionSchema = z.object({ session: z.string() });
 
@@ -507,8 +508,14 @@ describe("the answers the iOS client reads", () => {
     normaliser.secret(file.commit.id, "fixture-commit");
     await call("task-file", "GET", fileRoute);
 
+    // Where the messages a text names by id are: one the board has, and one it doesn't, which the
+    // answer leaves out.
+    const posts = PostSchema.array().parse(await read("/api/channels/demo/general"));
+    const named = posts.find((post) => post.author === "eng-1")?.id;
+    await call("messages", "GET", `/api/messages?ids=${named},01HZZZZZZZZZZZZZZZZZZZZZZZ`);
+
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(37);
+    expect(captures.size).toBe(38);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

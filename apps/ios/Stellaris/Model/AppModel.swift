@@ -30,7 +30,9 @@ enum SignInFailure: Error, Equatable {
   /// The board signed in to, or the last one, which sign-in offers again.
   private(set) var board: URL?
   /// Who the token signs in as, once the board has said.
-  private(set) var actor: BoardActor?
+  private(set) var actor: BoardActor? {
+    didSet { store.userName = actor?.signIn?.login ?? "you" }
+  }
   /// Why the app is back at sign-in, when the board ended the sign-in.
   private(set) var notice: String?
   var tab: AppTab = .chat

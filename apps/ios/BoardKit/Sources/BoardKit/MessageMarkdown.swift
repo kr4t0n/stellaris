@@ -141,9 +141,11 @@ public struct MessageDocument: Sendable, Hashable {
   }
 }
 
-/// A piece of inline content before its text is read for autolinks, ids, and mentions.
+/// A piece of inline content before its text is read for autolinks, ids, and mentions. Text in a
+/// link, even one that goes nowhere, and raw HTML are written as they are, never read.
 private enum Pending {
-  case text(String, MessageStyle, MessageLink?)
+  case text(String, MessageStyle)
+  case written(String, MessageStyle, MessageLink?)
   case code(String, MessageStyle, MessageLink?)
   case image(MessageImage)
   case lineBreak
@@ -209,25 +211,25 @@ private struct MarkdownReader {
   /// web's plugins read it, outside code and links.
   func inlines(_ children: MarkupChildren) -> [MessageInline] {
     var pending: [Pending] = []
-    collect(children, style: [], link: nil, into: &pending)
+    collect(children, style: [], link: nil, inLink: false, into: &pending)
     var merged: [Pending] = []
     for piece in pending {
-      if case .text(let text, let style, let link) = piece,
-        case .text(let before, let beforeStyle, let beforeLink)? = merged.last,
-        beforeStyle == style, beforeLink == link
-      {
-        merged[merged.count - 1] = .text(before + text, style, link)
-      } else {
+      switch (piece, merged.last) {
+      case (.text(let text, let style), .text(let before, let earlier)?) where earlier == style:
+        merged[merged.count - 1] = .text(before + text, style)
+      case (.written(let text, let style, let link), .written(let before, let earlier, let went)?)
+      where earlier == style && went == link:
+        merged[merged.count - 1] = .written(before + text, style, link)
+      default:
         merged.append(piece)
       }
     }
     let read = merged.flatMap { piece -> [MessageInline] in
       switch piece {
-      case .text(let text, let style, let link):
-        guard link == nil else {
-          return [.run(MessageRun(text, style: style, link: link))]
-        }
+      case .text(let text, let style):
         return read(text, style: style)
+      case .written(let text, let style, let link):
+        return [.run(MessageRun(text, style: style, link: link))]
       case .code(let text, let style, let link):
         return [.run(MessageRun(text, kind: .code, style: style, link: link))]
       case .image(let image):
@@ -251,52 +253,78 @@ private struct MarkdownReader {
     return joined
   }
 
+  /// The pieces of `children`, set in `style`; `link` is where the link they sit in goes, and
+  /// `inLink` says they sit in one, even one that goes nowhere.
   private func collect(
-    _ children: MarkupChildren, style: MessageStyle, link: MessageLink?,
+    _ children: MarkupChildren, style: MessageStyle, link: MessageLink?, inLink: Bool,
     into pending: inout [Pending]
   ) {
+    func words(_ text: String) -> Pending {
+      inLink ? .written(text, style, link) : .text(text, style)
+    }
     for child in children {
       switch child {
       case let text as Markdown.Text:
-        pending.append(.text(text.string, style, link))
+        pending.append(words(text.string))
       case is SoftBreak:
-        pending.append(.text(" ", style, link))
+        pending.append(words(" "))
       case is LineBreak:
         pending.append(.lineBreak)
       case let emphasis as Emphasis:
-        collect(emphasis.children, style: style.union(.emphasis), link: link, into: &pending)
+        collect(
+          emphasis.children, style: style.union(.emphasis), link: link, inLink: inLink,
+          into: &pending)
       case let strong as Strong:
-        collect(strong.children, style: style.union(.strong), link: link, into: &pending)
+        collect(
+          strong.children, style: style.union(.strong), link: link, inLink: inLink, into: &pending)
       case let struck as Strikethrough:
-        collect(struck.children, style: style.union(.strikethrough), link: link, into: &pending)
+        collect(
+          struck.children, style: style.union(.strikethrough), link: link, inLink: inLink,
+          into: &pending)
       case let code as InlineCode:
-        // Agents often quote an id as code; a code span that is nothing but a known id names it.
+        // Agents often quote an id as code; a code span that is nothing but a known id names it,
+        // and a message's drops the "post" and whose before it.
         let id = code.code.trimmingCharacters(in: .whitespaces)
-        if link == nil, let entity = entities[id] {
-          pending.append(.text(entity.title, style, .entity(EntityLink(kind: entity.kind, id: id))))
+        if !inLink, let entity = entities[id] {
+          if entity.kind == .message, case .text(let before, let beforeStyle)? = pending.last {
+            pending[pending.count - 1] = .text(withoutMessageWord(before), beforeStyle)
+          }
+          pending.append(.written(entity.title, style, .entity(entity.link(id))))
         } else {
           pending.append(.code(code.code, style, link))
         }
       case let anchor as Markdown.Link:
         let target = MessageLink(href: keptHref(anchor.destination ?? ""))
-        collect(anchor.children, style: style, link: link ?? target, into: &pending)
+        collect(anchor.children, style: style, link: link ?? target, inLink: true, into: &pending)
       case let image as Markdown.Image:
         pending.append(.image(self.image(image, link: link)))
       case let html as InlineHTML:
-        pending.append(.text(html.rawHTML, style, link))
+        // Raw HTML is shown as written, apart from the text around it, as the web shows it.
+        pending.append(.written(html.rawHTML, style, link))
       case let container as any InlineContainer:
-        collect(container.children, style: style, link: link, into: &pending)
+        collect(container.children, style: style, link: link, inLink: inLink, into: &pending)
       default:
         let text = (child as? any PlainTextConvertibleMarkup)?.plainText ?? child.format()
-        pending.append(.text(text, style, link))
+        pending.append(words(text))
       }
+    }
+  }
+
+  /// A markup's text with code as its words alone, as the web reads an image's description.
+  private func plain(_ markup: any Markup) -> String {
+    switch markup {
+    case let text as Markdown.Text: text.string
+    case let code as InlineCode: code.code
+    case is SoftBreak: " "
+    case is LineBreak: "\n"
+    case let html as InlineHTML: html.rawHTML
+    default: markup.children.map(plain).joined()
     }
   }
 
   private func image(_ image: Markdown.Image, link: MessageLink?) -> MessageImage {
     let source = keptHref(image.source ?? "")
-    let alt = image.children.compactMap { ($0 as? any PlainTextConvertibleMarkup)?.plainText }
-      .joined()
+    let alt = image.children.map(plain).joined()
     let loads: MessageImageSource?
     switch linkTarget(source) {
     case .file(let from, let path, _): loads = .file(source: from, path: path)
@@ -322,7 +350,7 @@ private struct MarkdownReader {
       for part in splitEntities(plain, index: entities) {
         switch part {
         case .entity(let id, let entity):
-          let link = MessageLink.entity(EntityLink(kind: entity.kind, id: id))
+          let link = MessageLink.entity(entity.link(id))
           inlines.append(.run(MessageRun(entity.title, style: style, link: link)))
         case .text(let words):
           for mention in mentioned(words) {
@@ -341,6 +369,13 @@ private struct MarkdownReader {
 
   private func withoutFinalNewline(_ text: String) -> String {
     text.hasSuffix("\n") ? String(text.dropLast()) : text
+  }
+}
+
+extension EntityTitle {
+  /// Where a link to the entity with this title goes.
+  fileprivate func link(_ id: String) -> EntityLink {
+    EntityLink(kind: kind, id: id, channel: channel, thread: thread)
   }
 }
 
@@ -416,16 +451,6 @@ private func startsAfterBoundary(_ text: String, at index: String.Index, email: 
     return false
   }
   return isJavaScriptWhiteSpace(scalar) || isPunctuationOrSymbol(scalar)
-}
-
-private func isJavaScriptWhiteSpace(_ scalar: Unicode.Scalar) -> Bool {
-  switch scalar.value {
-  case 0x09...0x0D, 0x20, 0xA0, 0x1680, 0x2000...0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
-    0xFEFF:
-    true
-  default:
-    false
-  }
 }
 
 private func isPunctuationOrSymbol(_ scalar: Unicode.Scalar) -> Bool {

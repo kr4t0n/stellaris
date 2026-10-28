@@ -142,6 +142,14 @@ import Testing
     case "scheduler":
       let scheduler = try check(fixture, BoardAPI.scheduler())
       #expect(scheduler.paused == false)
+    case "messages":
+      // Asked for one message the board has and one it doesn't, which the answer leaves out.
+      let query = try #require(fixture.path.split(separator: "=").last)
+      let ids = query.split(separator: ",").map(String.init)
+      let refs = try check(fixture, BoardAPI.messages(ids))
+      #expect(ids.count == 2)
+      #expect(refs.map(\.id) == [ids[0]])
+      #expect(refs.first?.channel == "demo/general" && refs.first?.thread == nil)
     case "task-file":
       let file = try fixture.decode(BranchFile.self)
       let task = try Fixture("task").decode(BoardTask.self)
@@ -218,7 +226,7 @@ import Testing
     "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
-    "scheduler", "task-file", "turn-stream",
+    "messages", "scheduler", "task-file", "turn-stream",
   ]
 
   @discardableResult

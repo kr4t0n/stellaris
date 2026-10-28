@@ -39,9 +39,20 @@ enum Loading: Equatable, Sendable {
   private(set) var threads: [ThreadSummary] = [] {
     didSet { index() }
   }
-  /// What each id in the board's text names, as the web's `entityIndex` reads them: a thread by
-  /// its title, as its subject for a task's or a proposal's, then each task and each proposal.
+  /// The messages the board's text has named by id so far, as the board looked them up.
+  private(set) var messageRefs: [MessageRef] = [] {
+    didSet { index() }
+  }
+  /// How the user's own posts are named: the GitHub account signed in, or else "you".
+  var userName = "you" {
+    didSet { index() }
+  }
+  /// What each id in the board's text names, as the web's `entityIndex` reads them: a message as
+  /// whose post it is and where, a thread by its title, as its subject for a task's or a
+  /// proposal's, then each task and each proposal, each later one winning.
   private(set) var entities: [String: EntityTitle] = [:]
+  /// The ids asked about, each once, since a message never moves once posted.
+  @ObservationIgnored private var asked: Set<String> = []
 
   /// What waits on the user, as the web's Needs you lists it.
   var attention: [Attention] {
@@ -90,8 +101,36 @@ enum Loading: Equatable, Sendable {
     members.first { $0.name == author }?.cli
   }
 
+  /// Looks up, as the web's `MessageLookup` does, the ids `texts` name that nothing names yet,
+  /// which may name messages. An id is asked about once; one that names no message, or whose
+  /// lookup failed, stays as written.
+  func lookUpMessages(in texts: [String], using model: AppModel) async {
+    var ids: [String] = []
+    for text in texts {
+      for id in unknownIds(text, index: entities) where !asked.contains(id) {
+        asked.insert(id)
+        ids.append(id)
+      }
+    }
+    let signIn = model.generation
+    var found: [MessageRef] = []
+    for start in stride(from: 0, to: ids.count, by: BoardAPI.messageLookupLimit) {
+      let batch = Array(ids[start..<min(start + BoardAPI.messageLookupLimit, ids.count)])
+      if let refs = try? await model.send(BoardAPI.messages(batch)) {
+        found += refs
+      }
+    }
+    if !found.isEmpty, model.generation == signIn {
+      messageRefs += found
+    }
+  }
+
   private func index() {
-    var index: [String: EntityTitle] = [:]
+    let titles = Dictionary(
+      threads.map { ($0.thread.id, $0.thread.title) }, uniquingKeysWith: { $1 })
+    let user = userName
+    var index = messageTitles(
+      messageRefs, threadTitles: titles, name: { $0 == "user" ? user : $0 })
     for summary in threads {
       let thread = summary.thread
       let kind: EntityKind =
@@ -178,6 +217,7 @@ enum Loading: Equatable, Sendable {
         self.threads = threads
       }
       state = .loaded
+      await lookUpMessages(in: loaded.3.map(\.message.body), using: model)
     } catch is CancellationError {
       return
     } catch {
@@ -203,6 +243,8 @@ enum Loading: Equatable, Sendable {
     requests = []
     members = []
     threads = []
+    messageRefs = []
+    asked = []
   }
 }
 
@@ -241,6 +283,7 @@ extension Proposal {
         messages = detail.messages
       }
       state = .loaded
+      await model.store.lookUpMessages(in: messages.map(\.body), using: model)
     } catch is CancellationError {
       return
     } catch {

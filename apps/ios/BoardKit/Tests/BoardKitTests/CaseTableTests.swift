@@ -46,14 +46,31 @@ import Testing
     let name: String
     let text: String
     let titles: [String: String]
+    let messages: [MessageRef]?
+    let threads: [String: String]?
     let line: String
+
+    /// The index the web's test builds: the messages, then the threads, then the tasks, each later
+    /// one winning, with the user named "you".
+    var index: [String: EntityTitle] {
+      var index = messageTitles(
+        messages ?? [], threadTitles: threads ?? [:], name: { $0 == "user" ? "you" : $0 })
+      for (id, title) in threads ?? [:] {
+        index[id] = EntityTitle(kind: .thread, title: title)
+      }
+      for (id, title) in titles {
+        index[id] = EntityTitle(kind: .task, title: title)
+      }
+      return index
+    }
   }
 
   @Test func withTitlesAgreesWithTheWeb() throws {
     let cases = try Fixture.table("with-titles", as: [TitlesCase].self)
-    #expect(cases.count > 10)
+    #expect(cases.count > 20)
+    #expect(cases.contains { $0.messages != nil })
     for each in cases {
-      #expect(withTitles(each.text, titles: each.titles) == each.line, "\(each.name)")
+      #expect(withTitles(each.text, index: each.index) == each.line, "\(each.name)")
     }
   }
 

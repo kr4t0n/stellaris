@@ -24,6 +24,8 @@
     /// The image uploaded to the board that the samples show, and one it no longer has.
     static let uploaded = "00000000000000000000000PNG"
     static let gone = "00000000000000000000000ZZZ"
+    /// A message a sample names by its id: the first sample, as the board's lookup gives it.
+    static let cited = "0000000000000000000000SM01"
     /// Where the samples' image on the web is.
     static let webImages = "images.example.com"
     private static let folder = Mutex<URL?>(nil)
@@ -171,7 +173,8 @@
       case ("GET", "/api/requests"): return fixture("requests")
       case ("GET", "/api/proposals"): return fixture("proposals")
       case ("GET", "/api/projects/demo/tasks"): return fixture("tasks")
-      case ("GET", "/api/threads"): return fixture("threads")
+      case ("GET", "/api/threads"): return (200, json(threads))
+      case ("GET", "/api/messages"): return (200, json(lookUp(request)))
       case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
       case ("DELETE", "/api/sign-in"): return fixture("sign-out")
       case ("GET", _) where path.hasPrefix("/api/channels/"): return (200, json([Any]()))
@@ -306,7 +309,7 @@
         (
           "concierge-1",
           """
-          Before the release:
+          Before the release, as post \(cited) says:
 
           - [x] Docs
           - [ ] Release notes
@@ -346,6 +349,32 @@
           id: "samples-\(index + 1)", author: entry.0, channel: "general", thread: samples,
           minute: index, body: entry.1)
       }
+    }
+
+    /// The board's threads as captured, and the samples.
+    private static var threads: [Any] {
+      let captured = body("threads") as? [Any] ?? []
+      let thread: [String: Any] = [
+        "id": samples, "channel": "general", "title": "Rendering samples", "state": "open",
+        "openedBy": "eng-1", "openedAt": time(0), "body": "", "messages": 6,
+        "lastMessageId": NSNull(), "lastAuthor": "user",
+      ]
+      return captured + [thread]
+    }
+
+    /// Where the messages a lookup asks about are: the one the samples cite; any other id names
+    /// no message, and the answer leaves it out.
+    private static func lookUp(_ request: URLRequest) -> [[String: Any]] {
+      let query = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+      let ids = query?.queryItems?.first { $0.name == "ids" }?.value?.split(separator: ",") ?? []
+      guard ids.contains(where: { $0 == cited }) else {
+        return []
+      }
+      return [
+        [
+          "id": cited, "author": "eng-1", "channel": "general", "thread": samples, "ts": time(0),
+        ]
+      ]
     }
 
     // MARK: Pictures

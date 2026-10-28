@@ -313,4 +313,59 @@ import Testing
             link: .entity(EntityLink(kind: .task, id: Self.task))))
       ])
   }
+
+  // MARK: Messages, and what reads as written
+
+  @Test func readsAMessagesIdAsWhoseItIsAndWhere() {
+    let message = "01M5A00000000000000000M001"
+    let entities = messageTitles(
+      [MessageRef(id: message, author: "eng-1", channel: "demo/general", thread: Self.task,
+        ts: "2026-01-01T00:00:00.000Z")],
+      threadTitles: [Self.task: "Add the export view"], name: { $0 })
+    let link = MessageLink.entity(
+      EntityLink(kind: .message, id: message, channel: "demo/general", thread: Self.task))
+    let post = "eng-1's post in Add the export view"
+    #expect(
+      runs("See my post \(message).", entities: entities) == [
+        MessageRun("See "), MessageRun(post, link: link), MessageRun("."),
+      ])
+    #expect(
+      runs("See their message `\(message)`.", entities: entities) == [
+        MessageRun("See "), MessageRun(post, link: link), MessageRun("."),
+      ])
+  }
+
+  @Test func asksForTheIdsNothingNamesYetButAnImagesNever() {
+    let unknown = "01M5A00000000000000000Z999"
+    #expect(unknownIds("![the board](image:\(unknown))", index: Self.entities) == [])
+    #expect(
+      unknownIds("\(Self.task) and \(unknown), then \(unknown) again", index: Self.entities)
+        == [unknown])
+  }
+
+  @Test func readsTheTextOfALinkThatGoesNowhereAsWritten() {
+    #expect(runs("[@ada](/tmp/notes.md)") == [MessageRun("@ada")])
+    #expect(runs("[www.example.com](tel:1)") == [MessageRun("www.example.com")])
+    let id = Self.task
+    #expect(runs("[\(id)](\(id))", entities: Self.entities) == [MessageRun(id)])
+  }
+
+  @Test func keepsRawHTMLApartFromTheTextAroundIt() {
+    #expect(
+      runs("see https://a.bc<br>next") == [
+        MessageRun("see "), MessageRun("https://a.bc", link: .web("https://a.bc")),
+        MessageRun("<br>next"),
+      ])
+    #expect(runs("<span title=\"@ada\">x</span>").allSatisfy { $0.kind != .mention })
+  }
+
+  @Test func readsAnImagesDescriptionWithoutCodesBackticks() {
+    let images = inlines("![a `c` b](image:\(Self.image))").compactMap { inline -> MessageImage? in
+      if case .image(let image) = inline {
+        return image
+      }
+      return nil
+    }
+    #expect(images.map(\.alt) == ["a c b"])
+  }
 }

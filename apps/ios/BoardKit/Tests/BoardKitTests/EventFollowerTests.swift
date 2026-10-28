@@ -286,6 +286,23 @@ import Testing
     #expect(await board.asked == ["latest"])
   }
 
+  /// Started again with nothing to ask after, the follower counts its first connection as one
+  /// after a drop, so what came meanwhile is read again.
+  @Test func resumesAtTheFirstConnectionWhenAsked() async throws {
+    let late = event("00000000000000000000000001")
+    let board = ScriptedBoard([[.send(.opened), .send(.event(late))]])
+    let follower = board.follower(clock: ManualClock())
+    var given: [FollowedEvent] = []
+    for try await item in follower.follow(resuming: true) {
+      given.append(item)
+      if given.count == 2 {
+        break
+      }
+    }
+    #expect(given == [.resumed, .event(late)])
+    #expect(await board.asked == ["latest"])
+  }
+
   @Test func stopsWhenTheBoardRefusesTheToken() async throws {
     let refused = BoardError(status: 401, code: "UNAUTHORIZED", message: "unknown token")
     let board = ScriptedBoard([[.fail(refused)]])

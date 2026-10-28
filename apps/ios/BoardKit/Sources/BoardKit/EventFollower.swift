@@ -76,7 +76,11 @@ public struct EventFollower<C: Clock>: Sendable where C.Duration == Duration {
 
   /// The board's events from `since` on, until cancelled. It ends by throwing only when the board
   /// refuses the token, which no connection made again would change.
-  public func follow(since start: String = "latest")
+  ///
+  /// With `resuming`, the first connection that opens counts as one after a drop too, which is how
+  /// a follower started again with no event to ask after, at the end of the log, catches up on
+  /// what came while it was away.
+  public func follow(since start: String = "latest", resuming: Bool = false)
     -> AsyncThrowingStream<FollowedEvent, any Error>
   {
     let clock = clock
@@ -87,7 +91,7 @@ public struct EventFollower<C: Clock>: Sendable where C.Duration == Duration {
       let following = Task {
         var since = start
         var wait = timing.firstWait
-        var dropped = false
+        var dropped = resuming
         while !Task.isCancelled {
           let resumes = dropped
           let reading = await EventFollower.read(

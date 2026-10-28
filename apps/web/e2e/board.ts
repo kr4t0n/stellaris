@@ -1480,6 +1480,30 @@ export async function fakeBoard(
             route,
             member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
           );
+        case "/api/projects/lab/runner": {
+          // laptop, where lab lives, is away: nothing travels unless the user says to go without it.
+          const without = body["withoutBranches"] === true;
+          if (lab.runner === "laptop" && !without) {
+            return json(
+              route,
+              {
+                error: "SOURCE_AWAY",
+                message:
+                  "runner laptop, where lab lives, is not connected, so nothing can travel. Staying on laptop: its local branches and worktrees; its whole history, since lab has no remote (pod would start an empty repository). Move it without them to go ahead",
+              },
+              409,
+            );
+          }
+          const from = lab.runner;
+          lab = { ...lab, runner: String(body["runner"]) };
+          return json(route, {
+            project: lab,
+            carried: without ? null : 12,
+            released: without
+              ? null
+              : { ok: true, detail: `${from} removed 2 worktree(s) and its clone` },
+          });
+        }
         case "/api/agents/desk/runner":
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
           return json(

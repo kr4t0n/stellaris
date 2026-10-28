@@ -28,7 +28,7 @@ export { GhPullRequests } from "./pulls.js";
 export type { PullRequestOps, PullRequestState } from "./pulls.js";
 export { TurnExecutor } from "./executor.js";
 export { readTurnImage, type ImagePlaces } from "./images.js";
-export type { RunnerLog, TurnExecutorOptions } from "./executor.js";
+export type { MoveRemote, RunnerLog, TurnExecutorOptions } from "./executor.js";
 export { createRunner, RunnerDaemon } from "./daemon.js";
 export {
   EnrollmentDeniedError,

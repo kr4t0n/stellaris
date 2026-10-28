@@ -28,6 +28,14 @@ export class RunnerLayout {
     return path.join(this.root, "repos", slug);
   }
 
+  /**
+   * Where a project's repository arriving from another runner is put together before it takes the
+   * place of `repo(slug)`; the dot keeps it apart from every project slug.
+   */
+  incoming(slug: Name): string {
+    return path.join(this.root, "repos", ".incoming", slug);
+  }
+
   worktree(agent: Name, slug: Name): string {
     return path.join(this.root, "worktrees", agent, slug);
   }

@@ -548,6 +548,48 @@ test("a project's name and default branch are edited from its page, and its slug
   ]);
 });
 
+test("the user moves a project to another runner from its page, and without its branches only when told", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/p/lab");
+  const view = page.getByRole("region", { name: "Board content" });
+  await expect(view).toContainText("lab · a local repository · main · on laptop");
+
+  await view.getByRole("button", { name: "Runner…" }).click();
+  const form = page.getByRole("form", { name: "Runner of lab" });
+  const picker = form.getByRole("button", { name: /^Runner: / });
+  await expect(picker).toHaveAccessibleName("Runner: laptop · darwin");
+  await expect(form.getByRole("button", { name: "Move here" })).toBeDisabled();
+  await picker.click();
+  await expect(form).toContainText("here now · disconnected · claude · gpu");
+  await form.getByRole("button", { name: /^pod/ }).click();
+  await form.getByRole("button", { name: "Move here" }).click();
+
+  // laptop is away, so the board says what would stay there, and the user may go ahead without it.
+  await expect(form.getByRole("alert")).toContainText("its whole history, since lab has no remote");
+  await expect(view).toContainText("· on laptop");
+  await form.getByRole("button", { name: "Move without them" }).click();
+  await expect(form).toHaveCount(0);
+  await expect(view).toContainText("lab · a local repository · main · on pod");
+
+  // From a runner that is there, the move carries the branches in one go.
+  await view.getByRole("button", { name: "Runner…" }).click();
+  await page
+    .getByRole("form", { name: "Runner of lab" })
+    .getByRole("button", { name: /^Runner: / })
+    .click();
+  await page.getByRole("button", { name: /^studio/ }).click();
+  await page.getByRole("button", { name: "Move here" }).click();
+  await expect(page.getByRole("form", { name: "Runner of lab" })).toHaveCount(0);
+  await expect(view).toContainText("· on studio");
+  expect(board.writes).toEqual([
+    { path: "/api/projects/lab/runner", body: { runner: "pod" } },
+    { path: "/api/projects/lab/runner", body: { runner: "pod", withoutBranches: true } },
+    { path: "/api/projects/lab/runner", body: { runner: "studio" } },
+  ]);
+});
+
 test("a citizen's view and the citizens list say when its CLI's quota is at its limit", async ({
   page,
 }) => {

@@ -274,6 +274,7 @@ export class RunnerDaemon {
           branchChanges: true,
           quotaReads: true,
           imageReads: true,
+          projectMoves: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
@@ -366,6 +367,15 @@ export class RunnerDaemon {
         return;
       case "image":
         answer(this.executor.readImage(message.read));
+        return;
+      case "export":
+        answer(this.executor.exportProject(message.export, this.client.moveRemote()));
+        return;
+      case "import":
+        answer(this.executor.importProject(message.import, this.client.moveRemote()));
+        return;
+      case "release":
+        answer(this.executor.releaseProject(message.release.slug));
         return;
       case "steer": {
         const control = this.controls.get(message.turnId);

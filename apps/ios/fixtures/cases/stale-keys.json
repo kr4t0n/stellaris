@@ -51,6 +51,16 @@
   },
   {
     "event": {
+      "id": "01M5A00000000000000000E069",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "project.moved",
+      "actor": "user",
+      "payload": {}
+    },
+    "keys": [["projects"], ["channels"], ["society"], ["crons"]]
+  },
+  {
+    "event": {
       "id": "01M5A00000000000000000E006",
       "ts": "2026-10-26T08:00:00.000Z",
       "type": "agent.added",

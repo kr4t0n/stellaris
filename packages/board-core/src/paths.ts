@@ -224,6 +224,17 @@ export class BoardPaths {
     return path.join(this.images(), id);
   }
 
+  /**
+   * The repositories projects travel through between runners, one per move while it runs:
+   * outside the projection, which every runner mirrors, and served only to the move's runners.
+   */
+  moves(): string {
+    return path.join(this.dataDir, "moves");
+  }
+  move(id: Ulid): string {
+    return path.join(this.moves(), `${id}.git`);
+  }
+
   state(): string {
     return path.join(this.dataDir, "state");
   }

@@ -90,13 +90,15 @@ class ShellTestCase: XCTestCase {
   }
 
   /// Drags the conversation down by half its height `times` times, to older messages; the first
-  /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display.
+  /// drag also puts the keyboard away, which covers the side bar's tabs on the outer display. It
+  /// starts below a bar across the top of the conversation, where the inner display's horizontal
+  /// bars put New thread.
   @MainActor func dragDown(_ app: XCUIApplication, times: Int = 1) {
     // By its name: with the keyboard up, the first scroll view is its row of suggestions.
     let messages = app.scrollViews["messages"].firstMatch
     for _ in 0..<times {
-      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.25))
-      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.75))
+      let start = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
+      let end = messages.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.9))
       start.press(forDuration: 0.1, thenDragTo: end)
     }
   }
@@ -165,7 +167,10 @@ final class ShellUITests: ShellTestCase {
     tab(app, "Board")
     pick(app, "channel-governance")
     expectConversation(app, "#governance")
-    XCTAssertTrue(app.staticTexts["No messages"].waitForExistence(timeout: 20))
+    // No messages, but the threads opened on it, a proposal's among them.
+    XCTAssertTrue(
+      app.buttons["thread-00000000000000000000000004"].waitForExistence(timeout: 20),
+      "#governance doesn't show the proposals' threads")
 
     pick(app, "back")
     expectConversation(app, "Member proposal")

@@ -122,9 +122,12 @@ struct TaskRow: View {
 
 /// A project as Board shows it: its dashboard, then its tasks grouped by where they stand, each
 /// group last updated first, as the web's project and tasks views list them. Picking a task opens
-/// it in Chat.
+/// it in Chat. At the accessibility sizes the list is plain and the dashboard's row narrowly inset,
+/// since a grouped list's margins leave a dashboard's words too little room on a narrow window and
+/// break them mid-word.
 struct ProjectView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.dynamicTypeSize) private var typeSize
   let slug: String
 
   var body: some View {
@@ -132,6 +135,9 @@ struct ProjectView: View {
     List {
       Section("Dashboard") {
         dashboard
+          .listRowInsets(
+            typeSize.isAccessibilitySize
+              ? EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8) : nil)
       }
       ForEach(groups) { group in
         Section("\(group.phase.label) · \(group.tasks.count)") {
@@ -147,6 +153,7 @@ struct ProjectView: View {
         }
       }
     }
+    .modifier(ProjectListStyle(plain: typeSize.isAccessibilitySize))
     .navigationTitle(model.store.projectName(slug))
     .refreshable {
       await model.store.loadDashboard(slug, using: model)
@@ -212,6 +219,19 @@ struct BoardState: View {
           }
         }
       }
+    }
+  }
+}
+
+/// A project's list: grouped as Board's is, but plain where `plain` is set.
+private struct ProjectListStyle: ViewModifier {
+  let plain: Bool
+
+  func body(content: Content) -> some View {
+    if plain {
+      content.listStyle(.plain)
+    } else {
+      content.listStyle(.insetGrouped)
     }
   }
 }

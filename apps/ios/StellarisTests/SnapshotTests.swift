@@ -78,7 +78,7 @@ final class SnapshotTests: XCTestCase {
   }
 
   /// Each of the samples, the thread general's newest message links to, alone at every size, on
-  /// the conversation's gray, from its top.
+  /// the conversation's gray, whole.
   @MainActor func testMessages() async throws {
     let model = try await signedIn()
     let samples = Conversation.thread(FakeBoard.samples)
@@ -88,9 +88,8 @@ final class SnapshotTests: XCTestCase {
     for (index, message) in messages.enumerated() {
       let row = MessageRow(message: message)
         .environment(model)
-        .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(red: 20 / 255, green: 20 / 255, blue: 20 / 255))
-      try await Snapshot.record(row, named: "message-\(index + 1)", in: self)
+      try await Snapshot.recordWhole(row, named: "message-\(index + 1)", in: self)
     }
     model.open(samples)
     try await Snapshot.record(ShellView().environment(model), named: "chat-samples", in: self)

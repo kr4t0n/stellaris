@@ -2,7 +2,9 @@ import BoardKit
 import SwiftUI
 
 /// One message as the web's `MessageItem` lays it out: its author's mark beside the name and when,
-/// over the message's text. The board's own posts are dimmed, as on the web.
+/// over the message's text. At the accessibility sizes the mark sits beside the name, the time
+/// under it, and the text takes the row's whole width. The board's own posts are dimmed, as on the
+/// web.
 struct MessageRow: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -11,34 +13,57 @@ struct MessageRow: View {
   let message: Message
 
   var body: some View {
-    // Who and when side by side, or one above the other at the accessibility sizes.
-    let byline =
-      typeSize.isAccessibilitySize
-      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-      : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-    HStack(alignment: .top, spacing: 12) {
-      AuthorMark(author: message.author)
-      VStack(alignment: .leading, spacing: 2) {
-        byline {
-          Text(model.displayName(message.author))
-            .font(MessageType.text(.medium))
-            .tracking(tracking)
-            .foregroundStyle(MessageColor.primary)
-          TimelineView(.everyMinute) { context in
-            Text(BoardTime.ago(message.ts, now: context.date))
-              .font(MessageType.small())
-              .foregroundStyle(MessageColor.tertiary)
+    Group {
+      if typeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 4) {
+          VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+              AuthorMark(author: message.author)
+              name
+            }
+            time
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityIdentifier("message-\(message.id)")
+          MessageBody(document: model.document(for: message))
+        }
+      } else {
+        HStack(alignment: .top, spacing: 12) {
+          AuthorMark(author: message.author)
+          VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+              name
+              time
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("message-\(message.id)")
+            MessageBody(document: model.document(for: message))
           }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("message-\(message.id)")
-        MessageBody(document: model.document(for: message))
       }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
     .frame(maxWidth: .infinity, alignment: .leading)
     .opacity(message.author == "board" ? 0.7 : 1)
+  }
+
+  private var name: some View {
+    Text(model.displayName(message.author))
+      .font(MessageType.text(.medium))
+      .tracking(tracking)
+      .foregroundStyle(MessageColor.primary)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+
+  /// When, as the web says it, wrapping rather than cut where it doesn't fit.
+  private var time: some View {
+    TimelineView(.everyMinute) { context in
+      Text(BoardTime.ago(message.ts, now: context.date))
+        .font(MessageType.small())
+        .foregroundStyle(MessageColor.tertiary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
   }
 }
 

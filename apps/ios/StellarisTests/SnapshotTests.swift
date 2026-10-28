@@ -158,13 +158,19 @@ final class SnapshotTests: XCTestCase {
     model.memory?.setDraft(
       (1...7).map { "Line \($0) of a long draft, which scrolls past the fifth." }
         .joined(separator: "\n"), for: .general)
-    let draft = DraftField(conversation: .general).background(MessageColor.island)
-      .environment(model)
-    try await Snapshot.recordWhole(draft, named: "composer-long", in: self)
+    // In whole windows, at their foot: a window cut to the draft's own height would be short, and
+    // its size class would hold the draft to two lines.
+    let draft = VStack(spacing: 0) {
+      Spacer(minLength: 0)
+      DraftField(conversation: .general)
+    }
+    .background(MessageColor.island)
+    .environment(model)
+    try await Snapshot.record(draft, named: "composer-long", in: self)
     for type in Snapshot.typeSizes {
       let image = try await Snapshot.image(
         of: draft.environment(\.verticalSizeClass, .compact),
-        size: CGSize(width: 678, height: 466), type: type, fitting: true)
+        size: CGSize(width: 678, height: 466), type: type)
       try Snapshot.keep(image, named: "composer-short-window-\(type.name)", in: self)
     }
     let list = MentionList(members: model.store.mentionable("")) { _ in }

@@ -275,7 +275,8 @@ struct ChatView: View {
     if let verdict = model.deciding {
       return .decide(verdict)
     }
-    if !inspectorFits, let id = subjectId, model.inspecting == id {
+    // Once Chat's width is known, so the plan doesn't flash in a sheet before its column.
+    if width > 0, !inspectorFits, let id = subjectId, model.inspecting == id {
       return .inspect(id)
     }
     return nil

@@ -57,8 +57,8 @@ struct SubjectStrip: View {
 
 /// A task's plan as segments, the stage it is at with its gate, and its phase; then who may hold
 /// the stage and who does, or how the task ended. At the accessibility sizes, where the strip would
-/// take most of a short window, the phase goes under the stage, cut at two lines, and who holds it
-/// is left to the plan; VoiceOver reads it all at every size.
+/// take most of a short window, the stage takes the strip's width, cut at two lines, with its gate
+/// and phase under it, and who holds it is left to the plan; VoiceOver reads it all at every size.
 private struct TaskStrip: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -67,27 +67,33 @@ private struct TaskStrip: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       PlanSegments(task: task)
-      let line =
-        typeSize.isAccessibilitySize
-        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-        : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-      line {
+      if typeSize.isAccessibilitySize {
+        // The stage across the strip, then its gate and its phase under it.
+        Text(stageLine)
+          .font(MessageType.text(.medium))
+          .foregroundStyle(MessageColor.primary)
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Text(stageLine)
-            .font(MessageType.text(.medium))
-            .foregroundStyle(MessageColor.primary)
-            .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
-            .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
           if task.currentStage?.gate == true {
             GateBadge()
           }
+          PhaseChip(phase: task.phase, status: task.status.rawValue)
         }
-        if !typeSize.isAccessibilitySize {
+      } else {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(stageLine)
+              .font(MessageType.text(.medium))
+              .foregroundStyle(MessageColor.primary)
+              .fixedSize(horizontal: false, vertical: true)
+            if task.currentStage?.gate == true {
+              GateBadge()
+            }
+          }
           Spacer(minLength: 0)
+          PhaseChip(phase: task.phase, status: task.status.rawValue)
         }
-        PhaseChip(phase: task.phase, status: task.status.rawValue)
-      }
-      if !typeSize.isAccessibilitySize {
         TimelineView(.everyMinute) { context in
           if let meta = meta(now: context.date) {
             Text(meta)
@@ -161,7 +167,7 @@ private struct ProposalStrip: View {
           .font(MessageType.text(.medium))
           .foregroundStyle(MessageColor.primary)
           .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
-          .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
+          .fixedSize(horizontal: false, vertical: true)
           if !typeSize.isAccessibilitySize {
             Spacer(minLength: 0)
           }
@@ -171,7 +177,7 @@ private struct ProposalStrip: View {
           .font(MessageType.small())
           .foregroundStyle(MessageColor.tertiary)
           .lineLimit(typeSize.isAccessibilitySize ? 2 : nil)
-          .fixedSize(horizontal: false, vertical: !typeSize.isAccessibilitySize)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
     .accessibilityElement(children: .combine)

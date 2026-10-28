@@ -165,6 +165,9 @@ describe("config-home rendering", () => {
     expect(text).toContain(
       "Any other wait on someone else, such as the user or an outside party, is a stage of its own, not a held stage.",
     );
+    expect(text).toContain(
+      "names them with update_task blocked_by, and whoever holds its stage then releases it, since the heartbeat still wakes a holder. While any of them is in play, a stage nobody holds wakes nobody, neither when it comes up nor on a heartbeat;",
+    );
     expect(text).not.toContain("Never wait by holding a stage");
     expect(text).not.toContain("Release a stage only to hand it on.");
   });

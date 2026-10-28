@@ -164,7 +164,7 @@ enum SignInFailure: Error, Equatable {
   }
 
   /// Follows the board's events as the signed-in user, across drops; nil when signed out.
-  func eventFollower() -> EventFollower? {
+  func eventFollower() -> EventFollower<ContinuousClock>? {
     guard let client else {
       return nil
     }

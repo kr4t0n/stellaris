@@ -27,44 +27,48 @@ public enum FollowedEvent: Sendable, Hashable {
   case resumed
 }
 
+/// How `EventFollower` waits between connections and how long it lets one stay silent.
+public struct EventStreamTiming: Sendable, Hashable {
+  /// The wait after the first drop, which each further drop doubles.
+  public var firstWait: Duration
+  public var longestWait: Duration
+  /// How long a connection may send nothing before it is dropped.
+  public var silence: Duration
+
+  public init(
+    firstWait: Duration = .seconds(1), longestWait: Duration = .seconds(15),
+    silence: Duration = .seconds(45)
+  ) {
+    self.firstWait = firstWait
+    self.longestWait = longestWait
+    self.silence = silence
+  }
+}
+
 /// Follows the board's event stream across drops, as the web's `followBoardEvents` and
 /// `followStream` do: each connection asks for the events after the last one seen, since the board
 /// reads `since` and not `Last-Event-ID`; after a drop it waits a second, then twice as long each
 /// time up to fifteen seconds, until a connection opens again. It also drops a connection that has
 /// sent nothing for 45 seconds, pings included, which the board writes every fifteen, since a
-/// connection that died unnoticed would otherwise wait for the transport's own timeout.
-public struct EventFollower: Sendable {
-  public struct Timing: Sendable, Hashable {
-    /// The wait after the first drop, which each further drop doubles.
-    public var firstWait: Duration
-    public var longestWait: Duration
-    /// How long a connection may send nothing before it is dropped.
-    public var silence: Duration
-
-    public init(
-      firstWait: Duration = .seconds(1), longestWait: Duration = .seconds(15),
-      silence: Duration = .seconds(45)
-    ) {
-      self.firstWait = firstWait
-      self.longestWait = longestWait
-      self.silence = silence
-    }
-  }
-
+/// connection that died unnoticed would otherwise wait for the transport's own timeout. The
+/// silence is measured on `clock`, which the tests move by hand.
+public struct EventFollower<C: Clock>: Sendable where C.Duration == Duration {
   /// Opens one connection to the stream after the event `since` names, or `latest`.
   public typealias Connect =
     @Sendable (_ since: String) -> AsyncThrowingStream<EventStreamItem, any Error>
 
+  private let clock: C
   private let connect: Connect
-  private let timing: Timing
+  private let timing: EventStreamTiming
   private let pause: @Sendable (Duration) async throws -> Void
 
   /// `pause` waits between connections; the tests pass one that records how long.
   public init(
-    timing: Timing = Timing(), pause: @escaping @Sendable (Duration) async throws -> Void = {
-      try await Task.sleep(for: $0)
-    }, connect: @escaping Connect
+    clock: C, timing: EventStreamTiming = EventStreamTiming(),
+    pause: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+    connect: @escaping Connect
   ) {
+    self.clock = clock
     self.connect = connect
     self.timing = timing
     self.pause = pause
@@ -72,8 +76,10 @@ public struct EventFollower: Sendable {
 
   /// The board's events from `since` on, until cancelled. It ends by throwing only when the board
   /// refuses the token, which no connection made again would change.
-  public func follow(since start: String = "latest") -> AsyncThrowingStream<FollowedEvent, any Error>
+  public func follow(since start: String = "latest")
+    -> AsyncThrowingStream<FollowedEvent, any Error>
   {
+    let clock = clock
     let connect = connect
     let timing = timing
     let pause = pause
@@ -85,7 +91,7 @@ public struct EventFollower: Sendable {
         while !Task.isCancelled {
           let resumes = dropped
           let reading = await EventFollower.read(
-            connect(since), silence: timing.silence,
+            connect(since), clock: clock, silence: timing.silence,
             opened: {
               if resumes {
                 continuation.yield(.resumed)
@@ -135,11 +141,17 @@ public struct EventFollower: Sendable {
 
   /// When a connection was last heard from, and what it gave.
   private actor Heard {
-    var at = ContinuousClock.now
+    let clock: C
+    var at: C.Instant
     var reading = Reading()
 
+    init(clock: C) {
+      self.clock = clock
+      at = clock.now
+    }
+
     func hear(_ item: EventStreamItem) {
-      at = .now
+      at = clock.now
       switch item {
       case .opened: reading.opened = true
       case .event(let event): reading.last = event.id
@@ -150,10 +162,10 @@ public struct EventFollower: Sendable {
 
   /// Reads one connection until it ends, fails, or sends nothing for `silence`, which drops it.
   private static func read(
-    _ items: AsyncThrowingStream<EventStreamItem, any Error>, silence: Duration,
+    _ items: AsyncThrowingStream<EventStreamItem, any Error>, clock: C, silence: Duration,
     opened: @escaping @Sendable () -> Void, event: @escaping @Sendable (BoardEvent) -> Void
   ) async -> Reading {
-    let heard = Heard()
+    let heard = Heard(clock: clock)
     let ending = await withTaskGroup(of: Ending?.self) { group in
       group.addTask {
         do {
@@ -172,13 +184,13 @@ public struct EventFollower: Sendable {
       }
       group.addTask {
         while !Task.isCancelled {
-          let due = await heard.at + silence
+          let due = await heard.at.advanced(by: silence)
           do {
-            try await Task.sleep(until: due, clock: .continuous)
+            try await clock.sleep(until: due, tolerance: nil)
           } catch {
             return nil
           }
-          if await heard.at + silence <= ContinuousClock.now {
+          if await heard.at.advanced(by: silence) <= clock.now {
             return .silent
           }
         }
@@ -193,5 +205,16 @@ public struct EventFollower: Sendable {
       reading.error = error
     }
     return reading
+  }
+}
+
+extension EventFollower where C == ContinuousClock {
+  /// A follower that measures silence in real time.
+  public init(
+    timing: EventStreamTiming = EventStreamTiming(),
+    pause: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+    connect: @escaping Connect
+  ) {
+    self.init(clock: ContinuousClock(), timing: timing, pause: pause, connect: connect)
   }
 }

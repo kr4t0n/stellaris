@@ -11,6 +11,11 @@ final class MessageUITests: ShellTestCase {
     signIn(app)
     expectGeneral(app)
     let messages = app.scrollViews["messages"].firstMatch
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    print("probe status bars, app: \(app.statusBars.allElementsBoundByIndex.map(\.frame))")
+    print("probe status bars, springboard: \(springboard.statusBars.allElementsBoundByIndex.map(\.frame))")
+    print("probe navigation bars: \(app.navigationBars.allElementsBoundByIndex.map(\.frame))")
+    print("probe messages: \(messages.frame)")
     let samples = messages.links["rendering samples"].firstMatch
     XCTAssertTrue(
       samples.waitForExistence(timeout: 20),

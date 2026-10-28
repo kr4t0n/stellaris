@@ -1,6 +1,8 @@
 import {
+  describeCharter,
   MessageFrontmatterSchema,
   ProposalFrontmatterSchema,
+  ProposalKindSchema,
   RoleCharterSchema,
   TaskFrontmatterSchema,
   ThreadFrontmatterSchema,
@@ -11,6 +13,7 @@ import {
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import describeCharterCases from "../../../ios/fixtures/cases/describe-charter.json?raw";
 import needsYouCases from "../../../ios/fixtures/cases/needs-you.json?raw";
 import {
   consequenceOf,
@@ -280,6 +283,16 @@ describe("governance", () => {
     }));
     expect(run).toEqual(cases.map(({ name, expected }) => ({ name, items: expected })));
   });
+
+  it("titles each proposal of the iOS client's charter table as its port does", () => {
+    const cases = CharterCaseSchema.array().parse(JSON.parse(describeCharterCases));
+    const run = cases.map(({ name, kind, charter }) => ({
+      name,
+      line: describeCharter(kind, charter),
+      title: proposalTitle(proposal({ id: skill.id, kind, charter })),
+    }));
+    expect(run).toEqual(cases.map(({ name, line, title }) => ({ name, line, title })));
+  });
 });
 
 /** A case of the table in `apps/ios/fixtures/cases`, which BoardKit's tests run too. */
@@ -305,4 +318,13 @@ const NeedsYouCaseSchema = z.object({
       }),
     ]),
   ),
+});
+
+/** A case of the charter table in `apps/ios/fixtures/cases`, which BoardKit's tests run too. */
+const CharterCaseSchema = z.object({
+  name: z.string(),
+  kind: ProposalKindSchema,
+  charter: z.record(z.string(), z.unknown()),
+  line: z.string(),
+  title: z.string(),
 });

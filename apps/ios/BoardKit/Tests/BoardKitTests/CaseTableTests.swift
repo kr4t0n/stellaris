@@ -1,9 +1,10 @@
+import Foundation
 import Testing
 
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// link, `mentionAt`, and `firstParagraph` tests run.
+/// link, `mentionAt`, `firstParagraph`, and `describeCharter` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -222,6 +223,14 @@ import Testing
     }
   }
 
+  struct CharterCase: Decodable {
+    let name: String
+    let kind: OrUnknown<Proposal.Kind>
+    let charter: [String: JSONValue]
+    let line: String
+    let title: String
+  }
+
   struct ParagraphCase: Decodable {
     let name: String
     let markdown: String
@@ -236,6 +245,24 @@ import Testing
       let paragraph =
         each.limit.map { firstParagraph(each.markdown, limit: $0) } ?? firstParagraph(each.markdown)
       #expect(paragraph == each.paragraph, "\(each.name)")
+    }
+  }
+
+  @Test func describeCharterAgreesWithTheWeb() throws {
+    let cases = try Fixture.table("describe-charter", as: [CharterCase].self)
+    #expect(cases.count > 40)
+    for each in cases {
+      let proposal = try JSONDecoder().decode(
+        Proposal.self,
+        from: JSONEncoder().encode(
+          [
+            "id": .string("01M5A0000000000000000000PA"), "kind": .string(each.kind.rawValue),
+            "proposedBy": .string("concierge-1"), "status": .string("proposed"),
+            "createdAt": .string("2026-10-26T10:00:00.000Z"), "charter": .object(each.charter),
+            "body": .string(""),
+          ] as [String: JSONValue]))
+      #expect(describeCharter(each.kind, each.charter) == each.line, "\(each.name)")
+      #expect(proposalTitle(proposal) == each.title, "\(each.name)")
     }
   }
 }

@@ -811,7 +811,7 @@ describe("buildTurnPrompt", () => {
     const after = (lastTurn: TurnRecord) =>
       buildTurnPrompt({ ...base, dispatch: heartbeat, lastTurn });
     const note =
-      "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is in your turn records.";
+      "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.";
     expect(after({ ...reflected, sessionDropped: true })).toContain(note);
     // A reflection that kept its session, or failed, says nothing of a new one.
     expect(after(reflected)).not.toContain("## Your session started afresh");

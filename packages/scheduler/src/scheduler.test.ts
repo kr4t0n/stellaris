@@ -1485,8 +1485,10 @@ describe("Scheduler", () => {
       runner.dispatches.filter((d) => d.agent === "steward-1").map((d) => d.trigger.kind);
 
     // The user asks for a reflection while a home turn runs, which then ends past the cap: the
-    // reflection queued is the one the cap asks for.
+    // reflection queued is the one the cap asks for. It runs in the same large session, and its
+    // own record past the cap, its session kept as after a stop, asks for no other.
     runner.hold = true;
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
     runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
     await board.requestWake(USER, { agent: "steward-1", project: "society", reason: "work" });
     await scheduler.tick();

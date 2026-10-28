@@ -518,7 +518,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Your session started afresh",
       "",
-      "Your last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is in your turn records.",
+      "Your last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.",
     );
   }
 

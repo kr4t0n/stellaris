@@ -200,9 +200,16 @@ final class FoldTests: XCTestCase {
       window.resize(to: size)
       try await window.settle()
       let presented = try await window.until { window.presentsSheet == sheet }
+      try window.keep("fold-plan-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
       XCTAssertTrue(presented, "\(step): the plan isn't \(sheet ? "in a sheet" : "beside the thread")")
       XCTAssertEqual(model.inspecting, task, "\(step): the plan closed")
-      try window.keep("fold-plan-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      if !sheet {
+        // The plan's scroll view, in the column at the chat's trailing side.
+        let column = try await window.until {
+          window.scrollFrames().contains { $0.minX >= size.width / 2 - 40 && $0.width >= 240 }
+        }
+        XCTAssertTrue(column, "\(step): no column beside the thread: \(window.scrollFrames())")
+      }
     }
   }
 
@@ -287,6 +294,12 @@ final class FoldTests: XCTestCase {
 
   func close() {
     window.isHidden = true
+  }
+
+  /// Where the window's scroll views are, but for text views'.
+  func scrollFrames() -> [CGRect] {
+    views(UIScrollView.self).filter { !($0 is UITextView) && !$0.isHidden && $0.window != nil }
+      .map { frame(of: $0) }
   }
 
   /// Whether the window presents a sheet over its root.

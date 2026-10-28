@@ -163,7 +163,7 @@ final class ShellUITests: ShellTestCase {
     expectConversation(app, "Add the export view")
     tab(app, "Needs you")
     pick(app, "proposal-00000000000000000000000004")
-    expectConversation(app, "Member proposal")
+    expectConversation(app, "Member eng-2 as engineer on claude for demo")
     tab(app, "Board")
     pick(app, "channel-governance")
     expectConversation(app, "#governance")
@@ -173,7 +173,7 @@ final class ShellUITests: ShellTestCase {
       "#governance doesn't show the proposals' threads")
 
     pick(app, "back")
-    expectConversation(app, "Member proposal")
+    expectConversation(app, "Member eng-2 as engineer on claude for demo")
     pick(app, "back")
     expectConversation(app, "Add the export view")
     pick(app, "back")

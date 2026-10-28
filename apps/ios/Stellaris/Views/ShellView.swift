@@ -237,14 +237,13 @@ struct ChatView: View {
     model.inspecting = model.inspecting == id ? nil : id
   }
 
+  /// Whether the inspector shows: the model's alone to say. iOS gives the column no control of its
+  /// own to close it, and SwiftUI writes it closed as a fold moves the plan from its sheet to the
+  /// column, so Plan, the strip, and Done close it, never a write here.
   private var inspectorShown: Binding<Bool> {
     Binding(
       get: { inspectorFits && subjectId != nil && model.inspecting == subjectId },
-      set: { shown in
-        if !shown, inspectorFits {
-          model.inspecting = nil
-        }
-      })
+      set: { _ in })
   }
 
   /// The sheet Chat presents, from what the model says is open: a sheet dismissed by a swipe

@@ -68,18 +68,17 @@ private struct TaskStrip: View {
     VStack(alignment: .leading, spacing: 6) {
       PlanSegments(task: task)
       if typeSize.isAccessibilitySize {
-        // The stage across the strip, then its gate and its phase under it.
+        // The stage across the strip, then its gate and its phase under it, each with the strip's
+        // width, so a phase that wraps breaks between words.
         Text(stageLine)
           .font(MessageType.text(.medium))
           .foregroundStyle(MessageColor.primary)
           .lineLimit(2)
           .fixedSize(horizontal: false, vertical: true)
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          if task.currentStage?.gate == true {
-            GateBadge()
-          }
-          PhaseChip(phase: task.phase, status: task.status.rawValue)
+        if task.currentStage?.gate == true {
+          GateBadge()
         }
+        PhaseChip(phase: task.phase, status: task.status.rawValue)
       } else {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           HStack(alignment: .firstTextBaseline, spacing: 6) {

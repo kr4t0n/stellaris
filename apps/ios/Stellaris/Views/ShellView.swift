@@ -1,7 +1,8 @@
 import BoardKit
 import SwiftUI
 
-/// The app: sign-in until a board takes a token, then the tabs.
+/// The app: sign-in until a board takes a token, then the tabs, with the sky beside them on the
+/// inner display.
 struct RootView: View {
   @Environment(AppModel.self) private var model
 
@@ -14,7 +15,7 @@ struct RootView: View {
         if RootView.showsSkyAlone {
           SkyView()
         } else {
-          ShellView()
+          AppLayout()
         }
       }
     }
@@ -34,7 +35,8 @@ struct RootView: View {
 }
 
 /// Chat, Board, and Needs you, each with its own navigation stack. On a compact width iOS draws the
-/// tab bar in the side bar, where a tab shows its icon alone.
+/// tab bar in the side bar, where a tab shows its icon alone; `AppLayout` places it beside or below
+/// the sky on the inner display.
 struct ShellView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase

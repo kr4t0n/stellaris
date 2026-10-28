@@ -600,6 +600,17 @@ function withResumeFailure(result: TurnResult): TurnResult {
 }
 
 /**
+ * A turn on a saved session that the CLI never opened, however it ended. A result it saw came
+ * before the session, as the zeroed one the CLI writes for a resume it could not make, so it says
+ * nothing of the session's running totals: the board keeps the ones it holds. Once the CLI has
+ * opened the session, a total of nothing is its own, as after a kill that saved none.
+ */
+function unopened(result: TurnResult): TurnResult {
+  const { sessionCostUsd: _zeroed, sessionUsage: _none, ...rest } = result;
+  return withResumeFailure(rest);
+}
+
+/**
  * Claude Code takes a session id only as a UUID, and resumes any other value as a session's title,
  * so an id saved as anything else, such as the `unstarted` runners once saved for a conversation
  * whose first turn never reached its CLI, is never handed to it.
@@ -834,15 +845,16 @@ class ClaudeResident implements ResidentSession {
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the turn ended without a result message";
     }
+    const opened = !this.resuming || this.opened;
     const costUsd = Math.max(0, state.totalCostUsd - this.lastTotalCostUsd);
-    if (state.sawResult) {
+    if (state.sawResult && opened) {
       this.lastTotalCostUsd = state.totalCostUsd;
     }
     // What the session spent between turns, as a background sub-agent that finished, counts here.
     const usage = turnUsage(state, this.lastSessionUsage);
     this.lastSessionUsage = state.sessionUsage ?? this.lastSessionUsage;
     const result = finishTurn(state, costUsd, usage, events, emit);
-    return this.resuming && !this.opened ? withResumeFailure(result) : result;
+    return opened ? result : unopened(result);
   }
 
   async close(): Promise<void> {
@@ -1067,7 +1079,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     const usage = turnUsage(state, resuming ? request.usageSoFar : ZERO_USAGE);
     const result = finishTurn(state, costUsd, usage, events, emit);
     // The CLI announces a session once it has opened it, and says first why it could not.
-    return resuming && !state.initialized ? withResumeFailure(result) : result;
+    return resuming && !state.initialized ? unopened(result) : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */

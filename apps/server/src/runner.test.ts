@@ -148,6 +148,8 @@ class ResidentBackend implements AgentBackend {
 class TotalingBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly startedFrom: number[] = [];
+  /** Whether the next turn fails to resume its session, reporting no running total. */
+  failNext = false;
   private total = 0;
 
   newSession(): Promise<string> {
@@ -156,6 +158,17 @@ class TotalingBackend implements AgentBackend {
 
   runTurn(request: { costSoFarUsd?: number | undefined }): Promise<TurnResult> {
     this.startedFrom.push(request.costSoFarUsd ?? 0);
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.resolve({
+        ...completed(""),
+        costUsd: 0,
+        status: null,
+        exitReason: "error",
+        error: "Claude Code returned an error result",
+        resumeFailed: "retry",
+      });
+    }
     this.total += 0.25;
     const sessionCostUsd = this.total;
     return Promise.resolve({
@@ -1105,6 +1118,12 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
     await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
+    // A turn that reports none, as one whose resume failed, leaves the session's total as it was.
+    backend.failNext = true;
+    const failed = await run(dispatch);
+    expect(failed).toMatchObject({ resumeFailed: "retry", costUsd: 0, sessionCostUsd: 0.75 });
+    await run(dispatch);
+    expect(backend.startedFrom).toEqual([0, 0.25, 0.5, 0.75, 0.75]);
   });
 
   it("hands a resumed session the running usage its last turn reported, and none a record does not hold", async () => {

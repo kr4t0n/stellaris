@@ -28,17 +28,22 @@ describe("composing", () => {
       .array()
       .parse(JSON.parse(composeCases));
     expect(cases.length).toBeGreaterThan(10);
-    for (const each of cases) {
-      const mention = mentionAt(each.text, each.caret);
-      expect({ name: each.name, mention }).toEqual({ name: each.name, mention: each.mention });
-      if (each.completed !== undefined && mention !== null) {
-        const { name, ...done } = each.completed;
-        expect({ name: each.name, done }).toEqual({
+    expect(
+      cases.map((each) => {
+        const mention = mentionAt(each.text, each.caret);
+        const name = each.completed?.name;
+        return {
           name: each.name,
-          done: completeMention(each.text, each.caret, mention.start, name),
-        });
-      }
-    }
+          mention,
+          completed:
+            mention === null || name === undefined
+              ? undefined
+              : { name, ...completeMention(each.text, each.caret, mention.start, name) },
+        };
+      }),
+    ).toEqual(
+      cases.map((each) => ({ name: each.name, mention: each.mention, completed: each.completed })),
+    );
   });
 
   it("lists names as a sentence", () => {

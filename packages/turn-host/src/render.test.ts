@@ -145,4 +145,22 @@ describe("config-home rendering", () => {
     );
     expect(text).toContain("Never put an image or any other file into a message as base64");
   });
+
+  it("has a citizen keep its stage between checks of its own work, and release it only to hand it on", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "Never wait by sleeping or leaving a process running: a turn's board token ends with the turn",
+    );
+    expect(text).toContain(
+      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage",
+    );
+    expect(text).toContain("Release a stage only to hand it on.");
+    expect(text).toContain("is a stage of its own or a blocked_by, not a held stage.");
+    expect(text).not.toContain("Never wait by holding a stage");
+  });
 });

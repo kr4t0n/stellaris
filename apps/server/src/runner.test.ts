@@ -325,6 +325,26 @@ const stewardTurn = {
   priority: 0,
 };
 
+/** A scheduled reflection of a citizen's home in a scope. */
+function reflection(agent: string, project = "society") {
+  return {
+    agent,
+    project,
+    trigger: { kind: "reflection" as const, reason: "scheduled reflection" },
+    priority: 0,
+  };
+}
+
+/** A wake the user asked of a citizen's home in a scope. */
+function manual(agent: string, project: string) {
+  return {
+    agent,
+    project,
+    trigger: { kind: "manual" as const, fromUser: true, reason: "work" },
+    priority: 2,
+  };
+}
+
 /** Logs a spend report worded as the scheduler's `reportCost` words it. */
 async function spendReport(board: Board, turns: number, cost: number): Promise<void> {
   await board.publishSignal({
@@ -1448,6 +1468,147 @@ describe("turns on a runner over the runner protocol", () => {
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
     ]);
+  });
+
+  it("starts a society role's home afresh once a reflection there completes, warm or cold, and tells its next turn", async () => {
+    const { board } = await Board.init(dir, { name: "afresh" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const topic = await board.openThread(USER, { channel: "general", title: "a question" });
+    const handed: Array<[string, string, boolean]> = [];
+    const prompts: string[] = [];
+    const closes: string[] = [];
+    let made = 0;
+    let failNext = false;
+    const ran = (): TurnResult => {
+      if (failNext) {
+        failNext = false;
+        return { ...completed(""), status: null, exitReason: "timeout", error: "turn timed out" };
+      }
+      return { ...completed("ran"), contextTokens: 4_321 };
+    };
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.spec.agent, request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(ran());
+      },
+      startResident: (spec, resident) => {
+        handed.push([spec.agent, resident.session, resident.newSession]);
+        return Promise.resolve({
+          session: resident.session,
+          runTurn: (prompt) => {
+            prompts.push(prompt);
+            return Promise.resolve(ran());
+          },
+          close: () => {
+            closes.push(resident.session);
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    const { run } = await start(board, backend);
+    const steward = { ...stewardTurn, agent: "steward-1" };
+    const save = "This conversation's session ends with this turn";
+    const note = "## Your session started afresh";
+
+    // A cold home, with a thread beside it: the turn records how large its session had grown.
+    const first = await run(steward);
+    expect(first.contextTokens).toBe(4_321);
+    await run({ ...steward, thread: { id: topic.id, task: false } });
+    const reflected = await run(reflection("steward-1"));
+    expect(reflected).toMatchObject({
+      exitReason: "completed",
+      session: "s-1",
+      sessionDropped: true,
+    });
+    expect(prompts.at(-1)).toContain(save);
+    expect(await board.readSessions("steward-1", "society")).toEqual({ runner: "pod" });
+    expect(await board.readSessions("steward-1", "society", topic.id)).toEqual({
+      claude: "s-2",
+      runner: "pod",
+    });
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.completed" && event.payload["trigger"] === "reflection",
+    );
+    expect(ended.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ session: "s-1", sessionDropped: true, contextTokens: 4_321 }),
+    ]);
+    // The next home turn starts a session, told why rather than given the first-turn notes, and
+    // the one after resumes it, told nothing.
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", true]);
+    expect(prompts.at(-1)).toContain(note);
+    expect(prompts.at(-1)).not.toContain("## First turn");
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // A reflection that fails keeps the session.
+    failNext = true;
+    const failed = await run(reflection("steward-1"));
+    expect(failed.exitReason).toBe("timeout");
+    expect(failed.sessionDropped).toBeUndefined();
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // A warm home goes the same way, though its reflection changed no memory: the runner starts
+    // the warm session afresh once the job names none.
+    const concierge = { ...deskPost, agent: "concierge-1" };
+    await run(concierge);
+    expect(handed.at(-1)).toEqual(["concierge-1", "s-4", true]);
+    expect((await run(reflection("concierge-1"))).sessionDropped).toBe(true);
+    expect(closes).toEqual([]);
+    await run(concierge);
+    expect(closes).toEqual(["s-4"]);
+    expect(handed.at(-1)).toEqual(["concierge-1", "s-5", true]);
+    expect(prompts.at(-1)).toContain(note);
+  });
+
+  it("keeps the session after a reflection outside a society role's home", async () => {
+    const { board } = await Board.init(dir, { name: "kept" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const handed: Array<[string, boolean]> = [];
+    const prompts: string[] = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    // A work role's home in its project, and its home outside projects, where it was asked.
+    for (const project of ["demo", "society"]) {
+      await run(manual("eng-1", project));
+      const reflected = await run(reflection("eng-1", project));
+      expect(reflected.sessionDropped).toBeUndefined();
+      expect(prompts.at(-1)).toContain("## Reflection");
+      expect(prompts.at(-1)).not.toContain("This conversation's session ends with this turn");
+      await run(manual("eng-1", project));
+      expect(handed.at(-1)).toEqual([handed.at(-2)?.[0], false]);
+    }
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-1", runner: "pod" });
+    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-2", runner: "pod" });
   });
 
   it("records a turn the model service turned away as transient, and only a failed one", async () => {

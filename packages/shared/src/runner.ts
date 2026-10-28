@@ -284,6 +284,12 @@ export const TurnOutcomeSchema = z.object({
    */
   sessionUsage: UsageSchema.optional(),
   /**
+   * The whole input of the turn's latest model call in the session's own thread, cached or not:
+   * how large the session had grown. Sub-agents' calls are left out. A turn that made no call,
+   * and a runner from before, never send it.
+   */
+  contextTokens: z.number().int().nonnegative().optional(),
+  /**
    * The session the CLI used, which differs from the job's for CLIs that assign their own ids. A
    * turn whose CLI never started, because it failed or was stopped first, reports the job's own,
    * null in a conversation's first turn, so a session never started is not recorded.

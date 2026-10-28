@@ -3,6 +3,7 @@ import {
   CronFrontmatterSchema,
   TaskFrontmatterSchema,
   TriggerSchema,
+  type TurnRecord,
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { buildTurnPrompt } from "./prompt.js";
@@ -764,6 +765,59 @@ describe("buildTurnPrompt", () => {
     expect(listed).toContain("Topics under /data/board/projects/demo/knowledge");
     expect(listed).toContain("- testing: revision 2, updated by eng-1 at 2026-09-28T10:00:00.000Z");
     expect(listed).not.toContain("Run the tests with uv.");
+  });
+
+  it("tells a reflection whose session ends with it to write down what is open, and the next turn that it started afresh", () => {
+    const reflection = TriggerSchema.parse({ kind: "reflection", reason: "scheduled reflection" });
+    const dispatch = {
+      agent: "steward-1",
+      project: "society",
+      trigger: reflection,
+      priority: 0,
+      onboarding: false,
+    };
+    const base = { dispatch, messages: [], heldClaims: [], lastTurn: null, onboarding: null };
+    const save =
+      "- This conversation's session ends with this turn, and the next turn here starts a new one that knows only your home's files and the board: write anything still open into memory/core.md, or the archive it points to, before you end.";
+    const ending = buildTurnPrompt({ ...base, afreshAfterReflection: true });
+    expect(ending).toContain(
+      `${save}\n- Report memoryUpdated: true in the status object when core.md or a skill changed.`,
+    );
+    expect(buildTurnPrompt(base)).not.toContain(save);
+    expect(buildTurnPrompt(base)).toContain("- Report memoryUpdated: true");
+    // Any other turn of such a home is told nothing of it.
+    const heartbeat = { ...dispatch, trigger: TriggerSchema.parse({ kind: "heartbeat" }) };
+    expect(
+      buildTurnPrompt({ ...base, dispatch: heartbeat, afreshAfterReflection: true }),
+    ).not.toContain("session ends with this turn");
+
+    const reflected = {
+      agent: "steward-1",
+      project: "society",
+      runner: "server",
+      cli: "claude" as const,
+      session: "s",
+      trigger: reflection,
+      startedAt: "2026-09-28T09:00:00.000Z",
+      endedAt: "2026-09-28T09:05:00.000Z",
+      exitReason: "completed" as const,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+    };
+    const after = (lastTurn: TurnRecord) =>
+      buildTurnPrompt({ ...base, dispatch: heartbeat, lastTurn });
+    const note =
+      "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is in your turn records.";
+    expect(after({ ...reflected, sessionDropped: true })).toContain(note);
+    // A reflection that kept its session, or failed, says nothing of a new one.
+    expect(after(reflected)).not.toContain("## Your session started afresh");
+    const timedOut = { ...reflected, exitReason: "timeout" as const, error: "turn timed out" };
+    expect(after(timedOut)).not.toContain("## Your session started afresh");
+    expect(after(timedOut)).toContain("## Your previous turn did not finish");
   });
 
   it("makes reconciling a home's conflict copies the first step of a reflection", () => {

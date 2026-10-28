@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -299,6 +300,121 @@ function exitingAfter(frames: readonly SDKMessage[], error: string, waits = fals
     })();
   };
 }
+
+/** The recorded review turn with `frame` put in before its result. */
+async function reviewWith(frame: SDKMessage): Promise<SDKMessage[]> {
+  const frames = await recorded("sdk-review-recorded.jsonl");
+  const result = frames.findIndex((each) => each.type === "result");
+  return [...frames.slice(0, result), frame, ...frames.slice(result)];
+}
+
+/** The recorded review turn's last request, with its usage replaced. */
+async function lastRequest(over: object): Promise<SDKMessage> {
+  const frames = await recorded("sdk-review-recorded.jsonl");
+  const last = frames.findLast((each) => each.type === "assistant");
+  if (last?.type !== "assistant") {
+    throw new Error("the recording holds no request");
+  }
+  return { ...last, message: { ...last.message, usage: { ...last.message.usage, ...over } } };
+}
+
+describe("how large a Claude session has grown", () => {
+  /**
+   * The review turn Claude Code 2.1.283 ran against the Messages API on 2026-09-28, whose last
+   * request read 2 input, 27,995 cache-read and 974 cache-write tokens, as its result's last
+   * iteration says too.
+   */
+  const REVIEW = 2 + 27_995 + 974;
+
+  it("is the whole input of the turn's latest request", async () => {
+    const frames = await recorded("sdk-review-recorded.jsonl");
+    const result = await new ClaudeAgentBackend({ queryFn: replaying(frames) }).runTurn(request);
+    expect(result.contextTokens).toBe(REVIEW);
+    const ended = frames.findLast((each) => each.type === "result");
+    const iteration = ended?.type === "result" ? ended.usage.iterations?.at(-1) : undefined;
+    expect(iteration).toMatchObject({
+      input_tokens: 2,
+      cache_read_input_tokens: 27_995,
+      cache_creation_input_tokens: 974,
+    });
+  });
+
+  it("leaves out a sub-agent's requests, and the CLI's own messages that carry no usage", async () => {
+    const subAgent = await lastRequest({
+      input_tokens: 7_000,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    });
+    const synthetic = await lastRequest({
+      input_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    });
+    for (const frame of [
+      { ...subAgent, parent_tool_use_id: "toolu_spawn_1" },
+      { ...synthetic, uuid: randomUUID() },
+    ]) {
+      const result = await new ClaudeAgentBackend({
+        queryFn: replaying(await reviewWith(frame)),
+      }).runTurn(request);
+      expect(result.contextTokens).toBe(REVIEW);
+    }
+  });
+
+  it("reads a request that sampled several times by its last message iteration", async () => {
+    const looped = await lastRequest({
+      input_tokens: 4 + 6,
+      cache_read_input_tokens: 30_000 + 31_000,
+      cache_creation_input_tokens: 500 + 600,
+      iterations: [
+        {
+          type: "message",
+          input_tokens: 4,
+          output_tokens: 20,
+          cache_read_input_tokens: 30_000,
+          cache_creation_input_tokens: 500,
+        },
+        {
+          type: "message",
+          input_tokens: 6,
+          output_tokens: 30,
+          cache_read_input_tokens: 31_000,
+          cache_creation_input_tokens: 600,
+        },
+        {
+          type: "compaction",
+          input_tokens: 2_000,
+          output_tokens: 300,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      ],
+    });
+    const result = await new ClaudeAgentBackend({
+      queryFn: replaying(await reviewWith(looped)),
+    }).runTurn(request);
+    expect(result.contextTokens).toBe(6 + 31_000 + 600);
+  });
+
+  it("is reported for each turn of a warm session, and not for a turn that made no request", async () => {
+    const frames = await recorded("sdk-warm-subagent-recorded.jsonl");
+    const session = await new ClaudeAgentBackend({ queryFn: replayingWarm(frames) }).startResident(
+      spec,
+      start,
+    );
+    const turns = [
+      await session.runTurn("PARENT-TASK: SPAWN a helper."),
+      await session.runTurn("PARENT-TASK: plain turn."),
+    ];
+    await session.close();
+    // The stub charged each main-loop request 100 input, 2,000 cache-read and 10 cache-write tokens.
+    expect(turns.map((turn) => turn.contextTokens)).toEqual([2_110, 2_110]);
+    const refused = await new ClaudeAgentBackend({
+      queryFn: replaying(await recorded("sdk-refused-after-kill-recorded.jsonl")),
+    }).runTurn(request);
+    expect(refused.contextTokens).toBeUndefined();
+  });
+});
 
 describe("a Claude turn's cost", () => {
   /** Where the session's second turn left it, which the board hands its third. */

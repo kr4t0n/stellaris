@@ -106,6 +106,8 @@ describe("recorded Codex app-server turns", () => {
       cacheReadTokens: 18_176,
       cacheWriteTokens: 0,
     });
+    // How large the thread had grown: the latest request's whole input, its cached input within it.
+    expect(result.contextTokens).toBe(18_495);
   });
 
   it("replays a turn on a resumed thread", async () => {
@@ -125,6 +127,22 @@ describe("recorded Codex app-server turns", () => {
       cacheReadTokens: 18_304,
       cacheWriteTokens: 0,
     });
+    expect(result.contextTokens).toBe(18_556);
+  });
+
+  it("measures a resumed thread by the turn's own requests, never by its previous turn's", async () => {
+    // The update the server sends on resuming is about the thread's previous turn; with the turn's
+    // own update gone, nothing says how large the thread is now.
+    const { spawn } = await replay(
+      "app-server-resume-recorded.jsonl",
+      (line, index, lines) =>
+        !(line.includes('"method":"thread/tokenUsage/updated"') && index > turnStart(lines)),
+    );
+    const result = await new CodexBackend({ spawn }).runTurn(
+      request({ session: "01a0edff-8584-7ee1-91f8-6e8d4549a794", newSession: false }),
+    );
+    expect(result.exitReason).toBe("completed");
+    expect(result.contextTokens).toBeUndefined();
   });
 
   it("replays a resumed turn whose thread's totals never came, counting the same", async () => {
@@ -191,6 +209,7 @@ describe("recorded Codex app-server turns", () => {
       cacheReadTokens: 146_048,
       cacheWriteTokens: 0,
     });
+    expect(result.contextTokens).toBe(30_630);
   });
 
   it("counts a request whose only item is a command still running when its update comes", async () => {

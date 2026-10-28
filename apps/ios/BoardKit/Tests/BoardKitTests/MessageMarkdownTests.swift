@@ -211,9 +211,14 @@ import Testing
         MessageRun("a.b+c@example.com", link: .web("mailto:a.b+c@example.com")),
         MessageRun("."),
       ])
-    for text in ["1http://a.bc", "https://localhost", "www.ex_ample.com", "path/a@b.cd", "a@b.c1"] {
+    for text in ["https://localhost", "www.ex_ample.com", "path/a@b.cd", "a@b.c1"] {
       #expect(runs(text) == [MessageRun(text)], "\(text)")
     }
+    // Where the port differs: the web and GitHub link `http://a.bc` here, by micromark's literals,
+    // which the port leaves out, and keep `&lt;` in the address, which swift-markdown decodes.
+    #expect(runs("1http://a.bc") == [MessageRun("1http://a.bc")])
+    let decoded = "https://a.bc/<x"
+    #expect(runs("https://a.bc/&lt;x") == [MessageRun(decoded, link: .web(decoded))])
   }
 
   // MARK: Ids

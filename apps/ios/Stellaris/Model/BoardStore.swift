@@ -154,10 +154,11 @@ enum Loading: Equatable, Sendable {
     projects.first { $0.slug == slug }?.name ?? slug
   }
 
-  /// A line with each task's id in it read as the task's title where the web's `withTitles` reads
-  /// one: standing alone, not in a path or a file name, with a title it echoes said once.
-  func withTaskTitles(_ line: String) -> String {
-    withTitles(line, titles: Dictionary(tasks.map { ($0.id, $0.title) }, uniquingKeysWith: { $1 }))
+  /// A line with each id the board names in it read as its title, as the web's sky reads a post's
+  /// line with `withTitles` over the whole index: standing alone, not in a path or a file name,
+  /// with a title it echoes said once.
+  func withEntityTitles(_ line: String) -> String {
+    withTitles(line, index: entities)
   }
 
   /// Loads the projects and their tasks again, as an event that touched them asks, leaving the

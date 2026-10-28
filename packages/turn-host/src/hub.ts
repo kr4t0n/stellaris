@@ -8,6 +8,10 @@ import {
   BranchFileSchema,
   MergeOutcomeSchema,
   ModelListSchema,
+  MOVE_PACK_LIMIT_BYTES,
+  ProjectExportedSchema,
+  ProjectImportedSchema,
+  ProjectReleasedSchema,
   RUNNER_PROTOCOL,
   SOCIETY_SCOPE,
   SweepResultSchema,
@@ -19,6 +23,8 @@ import {
   type CliQuota,
   type ModelOption,
   type Name,
+  type ProjectMoved,
+  type RepoRefs,
   projectRepo,
   type ProjectRepo,
   type RunnerAnswer,
@@ -34,6 +40,7 @@ import {
   type TurnJob,
   type ImageRefusal,
   type Ulid,
+  type HeldWork,
   type HeldWorkspace,
   type WorkspaceConversation,
 } from "@stellaris/shared";
@@ -92,6 +99,20 @@ export class RunnerProtocolError extends Error {}
 /** A request a runner could not take: it is not connected, went away, or did not answer in time. */
 export class RunnerAwayError extends Error {}
 
+/**
+ * A move refused because the runner the project lives on is away, so nothing can travel: the
+ * user may move the project without its branches, which stay on that runner.
+ */
+export class MoveSourceAwayError extends Error {}
+
+/** A move under way: its repository on the server, once made, and how far it has come. */
+interface Move {
+  id: Ulid | null;
+  from: Name | null;
+  readonly to: Name;
+  phase: "checking" | "export" | "import" | "recording";
+}
+
 const SILENT: HostLog = { info() {}, warn() {}, error() {} };
 const DEFAULT_GRACE_MS = 2 * 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
@@ -134,6 +155,10 @@ export class RunnerHub implements TurnRunner {
   /** Disconnects being recorded, which `close` waits for. */
   private readonly detaching = new Set<Promise<void>>();
   private readonly runnerListeners = new Set<(runner: Name) => void>();
+  /** The project being moved, by slug: none of its turns is placed and nothing lands there until it ends. */
+  private readonly moving = new Map<Name, Move>();
+  /** Turns of each project placed on a runner and not yet opened, which the board cannot see yet. */
+  private readonly starting = new Map<Name, number>();
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -487,6 +512,9 @@ export class RunnerHub implements TurnRunner {
     if (dispatch.project === SOCIETY_SCOPE) {
       chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);
     } else {
+      if (this.moving.has(dispatch.project)) {
+        return null;
+      }
       const project = await this.board.readProject(dispatch.project);
       let home = project.runner;
       if (home === undefined) {
@@ -520,6 +548,9 @@ export class RunnerHub implements TurnRunner {
       return null;
     }
     chosen.inUse += 1;
+    if (dispatch.project !== SOCIETY_SCOPE) {
+      this.starting.set(dispatch.project, (this.starting.get(dispatch.project) ?? 0) + 1);
+    }
     return { runner: chosen.name };
   }
 
@@ -529,11 +560,24 @@ export class RunnerHub implements TurnRunner {
     }
     const seat = this.seats.get(assignment.runner);
     let turnId: Ulid | null = null;
+    // Once the turn is open the board sees it, which a move checks for; until then the hub counts it.
+    let placed = dispatch.project !== SOCIETY_SCOPE;
+    const opening = (): void => {
+      if (placed) {
+        placed = false;
+        const left = (this.starting.get(dispatch.project) ?? 1) - 1;
+        if (left > 0) {
+          this.starting.set(dispatch.project, left);
+        } else {
+          this.starting.delete(dispatch.project);
+        }
+      }
+    };
     try {
       if (seat === undefined) {
         return await this.host.refuseTurn(dispatch, assignment.runner, "the runner is gone");
       }
-      const opened = await this.host.openTurn(dispatch, this.seatView(seat));
+      const opened = await this.host.openTurn(dispatch, this.seatView(seat)).finally(opening);
       if ("failed" in opened) {
         return opened.failed;
       }
@@ -548,6 +592,7 @@ export class RunnerHub implements TurnRunner {
       turnId = opened.job.turnId;
       return await opened.ended;
     } finally {
+      opening();
       if (seat !== undefined) {
         seat.inUse = Math.max(0, seat.inUse - 1);
         if (turnId !== null) {
@@ -580,6 +625,9 @@ export class RunnerHub implements TurnRunner {
         detail: "no pull request is linked to the task",
       });
       return "done";
+    }
+    if (this.moving.has(project)) {
+      return "deferred";
     }
     let outcome = { ok: true, detail: "nothing to land, since the task left no branch" };
     if (record.runner !== undefined) {
@@ -643,6 +691,9 @@ export class RunnerHub implements TurnRunner {
     ) {
       return "done";
     }
+    if (this.moving.has(project)) {
+      return "deferred";
+    }
     const record = await this.board.readProject(project);
     let outcome = {
       ok: false,
@@ -676,6 +727,229 @@ export class RunnerHub implements TurnRunner {
       detail: outcome.detail,
     });
     return "done";
+  }
+
+  /**
+   * Moves a project to another runner, which only the user does, carrying every branch and tag of
+   * its repository: the project's turns, landings, and pull-request closes wait while it runs.
+   * The old runner pushes to a repository on the server once no worktree of the project holds work
+   * no branch does, the new runner clones it, and the board records the new runner only once that
+   * runner holds every branch and tag at the commit the old one had; until then the project works
+   * where it was. The server's repository goes as the move ends, and the old runner then removes
+   * its copy. With the old runner away nothing can travel, so the move goes ahead only when the
+   * user says `withoutBranches`, and the branches stay there.
+   */
+  async moveProject(
+    actor: Actor,
+    slug: Name,
+    to: Name,
+    options: { readonly withoutBranches?: boolean | undefined } = {},
+  ): Promise<ProjectMoved> {
+    const under = [...this.moving.keys()];
+    if (under.length > 0) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `a move of ${under.join(", ")} is under way; try again once it ends`,
+      );
+    }
+    const move: Move = { id: null, from: null, to, phase: "checking" };
+    this.moving.set(slug, move);
+    let source: Seat | undefined;
+    let moved: { project: ProjectMoved["project"]; carried: number | null };
+    try {
+      if ((this.starting.get(slug) ?? 0) > 0) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `a turn of ${slug} is starting; try again once it has started and ended`,
+        );
+      }
+      const { project, inPlay } = await this.board.prepareProjectMove(actor, slug, to);
+      const from = project.runner;
+      move.from = from;
+      const target = this.seats.get(to);
+      if (target === undefined || target.send === null) {
+        throw new BoardError("INVALID_STATE", `runner ${to} is not connected`);
+      }
+      await this.assertCanHost(target, project, inPlay);
+      source = this.seats.get(from);
+      if (source === undefined || source.send === null) {
+        if (options.withoutBranches !== true) {
+          throw new MoveSourceAwayError(sourceAwayMessage(project, from, to, inPlay));
+        }
+        move.phase = "recording";
+        const recorded = await this.board.recordProjectMove(actor, {
+          slug,
+          from,
+          to,
+          carried: null,
+        });
+        this.log.info({ project: slug, from, to }, "project moved without its branches");
+        return { project: recorded, carried: null, released: null };
+      }
+      if (options.withoutBranches === true) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `runner ${from}, where ${slug} lives, is connected, so the move carries its branches`,
+        );
+      }
+      if (!source.hello.projectMoves) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `runner ${from}, where ${slug} lives, cannot carry a project yet; upgrade it`,
+        );
+      }
+      const repo = projectRepo(project);
+      move.id = await this.board.openMoveRepo();
+      const id = move.id;
+      move.phase = "export";
+      const exported = ProjectExportedSchema.parse(
+        await this.request(source, (request) => ({
+          type: "export",
+          request,
+          export: { move: id, repo },
+        })).catch((error: unknown) => {
+          throw new BoardError(
+            "INVALID_STATE",
+            `${from} could not send ${slug}: ${describe(error)}`,
+          );
+        }),
+      );
+      if (!exported.ok) {
+        throw new BoardError(
+          "INVALID_STATE",
+          exported.held.length === 0
+            ? `${slug}'s repository on ${from} is ${mebibytes(exported.bytes)}, more than a move carries (${mebibytes(MOVE_PACK_LIMIT_BYTES)})`
+            : `${slug} cannot be moved while work no branch holds sits in its worktrees on ${from}: ${exported.held.map(heldLine).join("; ")}. Have each citizen commit it or clear it, then move again`,
+        );
+      }
+      move.phase = "import";
+      const imported = ProjectImportedSchema.parse(
+        await this.request(target, (request) => ({
+          type: "import",
+          request,
+          import: { move: id, repo, pullRequests: project.onDone === "ghpr" },
+        })).catch((error: unknown) => {
+          throw new BoardError("INVALID_STATE", `${to} could not take ${slug}: ${describe(error)}`);
+        }),
+      );
+      move.phase = "recording";
+      const differ = differentRefs(exported.refs, imported.refs);
+      if (differ.length > 0) {
+        await this.releaseOn(target, slug);
+        throw new BoardError(
+          "INVALID_STATE",
+          `${slug} arrived on ${to} unlike it left ${from} (${differ.slice(0, 5).join(", ")}${differ.length > 5 ? ", …" : ""}); it stays on ${from}`,
+        );
+      }
+      const carried = Object.keys(exported.refs).length;
+      const recorded = await this.board
+        .recordProjectMove(actor, { slug, from, to, carried })
+        .catch(async (error: unknown) => {
+          await this.releaseOn(target, slug);
+          throw error;
+        });
+      this.log.info({ project: slug, from, to, carried }, "project moved");
+      moved = { project: recorded, carried };
+    } finally {
+      this.moving.delete(slug);
+      if (move.id !== null) {
+        const id = move.id;
+        await this.board.dropMoveRepo(id).catch((error: unknown) => {
+          this.log.warn({ move: id, error: String(error) }, "could not remove a move's repository");
+        });
+      }
+    }
+    return { ...moved, released: await this.releaseOn(source, slug) };
+  }
+
+  /**
+   * Whether a runner may reach a move's repository on the server: the old runner to push while it
+   * exports, the new one to fetch while it imports. `unknown` for a move that is not under way.
+   */
+  moveAccess(runner: Name, id: string, push: boolean): "allowed" | "refused" | "unknown" {
+    const move = [...this.moving.values()].find((each) => each.id !== null && each.id === id);
+    if (move === undefined) {
+      return "unknown";
+    }
+    const allowed = push
+      ? move.phase === "export" && runner === move.from
+      : move.phase === "import" && runner === move.to;
+    return allowed ? "allowed" : "refused";
+  }
+
+  /** Refuses a runner that cannot take a project's turns: its members' CLIs, the capabilities, a git identity. */
+  private async assertCanHost(
+    seat: Seat,
+    project: ProjectMoved["project"],
+    inPlay: readonly { readonly requiredCapabilities: readonly string[] }[],
+  ): Promise<void> {
+    if (!seat.hello.projectMoves) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name} cannot take a project yet; upgrade it`,
+      );
+    }
+    const lacking: string[] = [];
+    for (const name of project.members) {
+      const agent = await this.board.readAgent(name).catch(() => null);
+      if (
+        agent !== null &&
+        agent.status === "active" &&
+        agent.cli !== null &&
+        !seat.hello.clis.includes(agent.cli)
+      ) {
+        lacking.push(`${agent.cli} for ${agent.name}`);
+      }
+    }
+    const needs = new Set([
+      ...project.requiredCapabilities,
+      ...inPlay.flatMap((task) => task.requiredCapabilities),
+    ]);
+    const missing = [...needs].filter((each) => !seat.hello.capabilities.includes(each));
+    if (missing.length > 0) {
+      lacking.push(
+        `the ${missing.length === 1 ? "capability" : "capabilities"} ${missing.join(", ")}`,
+      );
+    }
+    const identity = seat.hello.gitIdentityMissing ?? [];
+    if (identity.length > 0) {
+      lacking.push(`a git ${identity.join(" and ")} for citizens' commits`);
+    }
+    if (lacking.length > 0) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name} cannot take ${project.slug}: it lacks ${lacking.join("; ")}`,
+      );
+    }
+  }
+
+  /** Asks a runner to remove its copy of a project that lives elsewhere now; how that went, never a throw. */
+  private async releaseOn(
+    seat: Seat | undefined,
+    slug: Name,
+  ): Promise<{ ok: boolean; detail: string } | null> {
+    if (seat === undefined) {
+      return null;
+    }
+    try {
+      const released = ProjectReleasedSchema.parse(
+        await this.request(
+          seat,
+          (request) => ({ type: "release", request, release: { slug } }),
+          SWEEP_TIMEOUT_MS,
+        ),
+      );
+      return {
+        ok: true,
+        detail: `${seat.name} removed ${released.worktrees} worktree(s)${released.clone ? " and its clone" : ""}`,
+      };
+    } catch (error) {
+      this.log.warn(
+        { runner: seat.name, project: slug, error: String(error) },
+        "could not release a project",
+      );
+      return { ok: false, detail: `${seat.name} kept its copy of ${slug}: ${describe(error)}` };
+    }
   }
 
   /**
@@ -1058,4 +1332,55 @@ export class RunnerHub implements TurnRunner {
       }
     });
   }
+}
+
+/** An error's own message, for a refusal the user reads. */
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function mebibytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/** One worktree's work no branch holds, as a refusal names it. */
+function heldLine(held: HeldWork): string {
+  const where =
+    held.conversation === null
+      ? "its own worktree"
+      : held.conversation.kind === "thread"
+        ? `thread ${held.conversation.id}`
+        : held.conversation.kind === "channel"
+          ? `channel ${held.conversation.name}`
+          : `the channels of ${held.conversation.project}`;
+  const parts = [
+    held.uncommitted > 0 ? `${held.uncommitted} uncommitted file(s)` : "",
+    held.onNoBranch > 0 ? `${held.onNoBranch} commit(s) on no branch` : "",
+  ].filter((part) => part !== "");
+  return `${held.agent}, ${where}: ${parts.join(" and ")}`;
+}
+
+/** The refs two lists disagree on, by name: missing from one, or at another object. */
+function differentRefs(left: RepoRefs, right: RepoRefs): string[] {
+  const names = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...names].filter((name) => left[name] !== right[name]).toSorted();
+}
+
+/** What stays on an away runner when a project moves without its branches. */
+function sourceAwayMessage(
+  project: ProjectMoved["project"],
+  from: Name,
+  to: Name,
+  inPlay: readonly { readonly id: string }[],
+): string {
+  const stays = [
+    "its local branches and worktrees",
+    project.repo === null
+      ? `its whole history, since ${project.slug} has no remote (${to} would start an empty repository)`
+      : "",
+    inPlay.length === 0
+      ? ""
+      : `the work of ${inPlay.length} task(s) in play (${inPlay.map((task) => task.id).join(", ")})`,
+  ].filter((part) => part !== "");
+  return `runner ${from}, where ${project.slug} lives, is not connected, so nothing can travel. Staying on ${from}: ${stays.join("; ")}. Move it without them to go ahead`;
 }

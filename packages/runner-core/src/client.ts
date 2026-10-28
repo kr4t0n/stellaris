@@ -13,6 +13,7 @@ import {
   type TurnAck,
   type TurnOutcome,
 } from "@stellaris/shared";
+import type { MoveRemote } from "./executor.js";
 import type { HomeRemote } from "./home.js";
 import type { RemoteTree } from "./sync.js";
 
@@ -184,6 +185,14 @@ export class RunnerClient {
   homeRemote(): HomeRemote {
     return {
       url: (agent) => `${this.baseUrl}/runner/homes/${encodeURIComponent(agent)}/git`,
+      authorization: `Authorization: Bearer ${this.token}`,
+    };
+  }
+
+  /** A move's repository on the server, which this runner pushes to or clones while the move runs. */
+  moveRemote(): MoveRemote {
+    return {
+      url: (move) => `${this.baseUrl}/runner/moves/${encodeURIComponent(move)}/git`,
       authorization: `Authorization: Bearer ${this.token}`,
     };
   }

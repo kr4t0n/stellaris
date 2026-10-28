@@ -23,6 +23,11 @@ export interface PullRequestOps {
   close(url: string, comment: string): Promise<void>;
   /** Deletes a branch of the pull request's repository on GitHub. */
   deleteBranch(url: string, branch: string): Promise<void>;
+  /**
+   * Whether the login here reaches GitHub, which a project that lands through pull requests needs
+   * of the runner it moves to; left out, nothing is checked.
+   */
+  signedIn?(): Promise<boolean>;
 }
 
 const ViewSchema = z.object({
@@ -89,6 +94,17 @@ export class GhPullRequests implements PullRequestOps {
       "DELETE",
       `repos/${match[1]}/${match[2]}/git/refs/heads/${branch}`,
     ]);
+  }
+
+  /** Only the exit code is read: what `gh auth status` prints names the account. */
+  async signedIn(): Promise<boolean> {
+    const result = await execa("gh", ["auth", "status", "--hostname", "github.com"], {
+      reject: false,
+      timeout: 30_000,
+      stdio: "ignore",
+      env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" },
+    });
+    return result.exitCode === 0;
   }
 
   private async gh(args: readonly string[]): Promise<string> {

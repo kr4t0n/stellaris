@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingHttpHeaders } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execa } from "execa";
@@ -9,6 +10,11 @@ const project = { slug: "demo", origin: null, defaultBranch: "main", boardLands:
 
 async function rev(repo: string, ref: string): Promise<string> {
   return (await execa("git", ["rev-parse", ref], { cwd: repo })).stdout.trim();
+}
+
+/** Every commit a repository holds, newest first, with its subject. */
+async function history(repo: string): Promise<string> {
+  return (await execa("git", ["log", "--format=%H %s", "--all"], { cwd: repo })).stdout;
 }
 
 function committer(name: string): string[] {
@@ -870,5 +876,159 @@ describe("ExecaGit", () => {
     expect(outcome.ok).toBe(false);
     const status = await execa("git", ["status", "--porcelain"], { cwd: repoDir });
     expect(status.stdout).toBe("");
+  });
+
+  /** A clone of a remote with a commit on main, as a project's runner holds one. */
+  async function projectClone(): Promise<{ origin: string; clone: string }> {
+    const seed = path.join(dir, "seed");
+    await execa("git", ["init", "--quiet", "-b", "main", seed]);
+    await writeFile(path.join(seed, "README.md"), "demo\n", "utf8");
+    await execa("git", ["add", "README.md"], { cwd: seed });
+    await execa("git", [...committer("u"), "commit", "--quiet", "-m", "root"], { cwd: seed });
+    const origin = path.join(dir, "origin.git");
+    await execa("git", ["clone", "--quiet", "--bare", seed, origin]);
+    const clone = await git.ensureRepo(
+      { ...project, origin },
+      path.join(dir, "old", "repos", "demo"),
+    );
+    return { origin, clone };
+  }
+
+  /** A commit on `branch`, made from the clone's main, as a citizen's turn leaves one. */
+  async function commitOn(clone: string, branch: string, file: string): Promise<void> {
+    const worktree = path.join(dir, "wt", branch.replaceAll("/", "-"));
+    await execa("git", ["worktree", "add", "--quiet", "-b", branch, worktree, "main"], {
+      cwd: clone,
+    });
+    await writeFile(path.join(worktree, file), `${file}\n`, "utf8");
+    await execa("git", ["add", file], { cwd: worktree });
+    await execa("git", [...committer("eng-1"), "commit", "--quiet", "-m", file], {
+      cwd: worktree,
+    });
+  }
+
+  it("carries every branch and tag, made local on the other side, with the project's remote fetched", async () => {
+    const { origin, clone } = await projectClone();
+    await commitOn(clone, "task/01ARZ3NDEKTSV4RRFFQ69G5FAV", "work.txt");
+    await commitOn(clone, "agent/eng-1", "notes.txt");
+    await execa("git", ["branch", "fix/typo", "main"], { cwd: clone });
+    await execa("git", [...committer("u"), "tag", "-a", "-m", "first", "v1", "main"], {
+      cwd: clone,
+    });
+    await execa("git", ["tag", "light", "agent/eng-1"], { cwd: clone });
+    const refs = await git.refs(clone);
+    expect(Object.keys(refs).toSorted()).toEqual([
+      "refs/heads/agent/eng-1",
+      "refs/heads/fix/typo",
+      "refs/heads/main",
+      "refs/heads/task/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "refs/tags/light",
+      "refs/tags/v1",
+    ]);
+    expect(await git.objectBytes(clone)).toBeGreaterThan(0);
+
+    const carry = path.join(dir, "carry.git");
+    await execa("git", ["init", "--quiet", "--bare", carry]);
+    await git.pushEverything(clone, carry, null);
+    const arrived = path.join(dir, "new", "repos", "demo");
+    await git.cloneEverything(carry, null, arrived, { ...project, origin });
+
+    expect(await git.refs(arrived)).toEqual(refs);
+    expect((await execa("git", ["remote", "get-url", "origin"], { cwd: arrived })).stdout).toBe(
+      origin,
+    );
+    expect(await rev(arrived, "origin/main")).toBe(await rev(origin, "main"));
+    expect(
+      (await execa("git", ["rev-parse", "--abbrev-ref", "main@{upstream}"], { cwd: arrived }))
+        .stdout,
+    ).toBe("origin/main");
+    await expect(readFile(path.join(arrived, "README.md"), "utf8")).resolves.toBe("demo\n");
+    // The runner takes it as the project's clone, as if it had always been here.
+    expect(await git.ensureRepo({ ...project, origin }, arrived)).toBe(arrived);
+    const worktree = await git.ensureTaskWorktree(
+      arrived,
+      path.join(dir, "new", "worktrees", "eng-1", ".tasks", "01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      "task/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "main",
+      true,
+    );
+    await expect(readFile(path.join(worktree, "work.txt"), "utf8")).resolves.toBe("work.txt\n");
+  });
+
+  it("carries a project with no remote whole, and refuses a remote the new runner cannot fetch", async () => {
+    const local = await git.ensureRepo(project, path.join(dir, "old", "repos", "lab"));
+    await commitOn(local, "agent/eng-1", "notes.txt");
+    const carry = path.join(dir, "carry.git");
+    await execa("git", ["init", "--quiet", "--bare", carry]);
+    await git.pushEverything(local, carry, null);
+    const arrived = path.join(dir, "new", "repos", "lab");
+    await git.cloneEverything(carry, null, arrived, project);
+    expect(await git.refs(arrived)).toEqual(await git.refs(local));
+    expect((await execa("git", ["remote"], { cwd: arrived })).stdout).toBe("");
+    expect(await history(arrived)).toBe(await history(local));
+
+    await expect(
+      git.cloneEverything(carry, null, path.join(dir, "elsewhere"), {
+        ...project,
+        origin: path.join(dir, "no-such-remote.git"),
+      }),
+    ).rejects.toThrow(/this runner cannot fetch .*no-such-remote\.git/);
+  });
+
+  it("sends the runner's header to the move's address alone, and keeps it out of errors and of the clone's config", async () => {
+    const seen: Array<{ url: string; headers: IncomingHttpHeaders }> = [];
+    const server = createServer((request, response) => {
+      seen.push({ url: request.url ?? "", headers: request.headers });
+      response.statusCode = request.url?.startsWith("/runner/moves/") === true ? 403 : 404;
+      response.end("no");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      const secret = "Authorization: Bearer secret-moving-token";
+      const url = `${base}/runner/moves/01ARZ3NDEKTSV4RRFFQ69G5FAV/git`;
+      const { clone } = await projectClone();
+      const refused = await git.pushEverything(clone, url, { url, header: secret }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(refused).toBeInstanceOf(Error);
+      expect(String(refused)).toContain("the push to the board failed");
+      expect(String(refused)).not.toContain("secret-moving-token");
+      expect(seen.map((each) => each.headers.authorization)).toContain(
+        "Bearer secret-moving-token",
+      );
+
+      // The project's remote, at another address, never sees the header.
+      seen.length = 0;
+      const carry = path.join(dir, "carry.git");
+      await execa("git", ["init", "--quiet", "--bare", carry]);
+      await git.pushEverything(clone, carry, null);
+      const failed = await git
+        .cloneEverything(carry, { url, header: secret }, path.join(dir, "new"), {
+          ...project,
+          origin: `${base}/acme/demo.git`,
+        })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(String(failed)).toContain(`this runner cannot fetch ${base}/acme/demo.git`);
+      expect(String(failed)).not.toContain("secret-moving-token");
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.filter((each) => each.headers.authorization !== undefined)).toEqual([]);
+
+      const arrived = path.join(dir, "arrived");
+      await git.cloneEverything(carry, { url, header: secret }, arrived, project);
+      const kept = await execa("git", ["config", "--get-regexp", "extraheader"], {
+        cwd: arrived,
+        reject: false,
+      });
+      expect(kept.stdout).toBe("");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

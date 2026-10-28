@@ -42,7 +42,7 @@ export interface SocietyView {
 
 /**
  * The machines turns run on, for the society roles that plan: each runner with what it offers, and
- * the projects, each living on the runner that took its first turn.
+ * the projects, each living on the runner that took its first turn until the user moved it.
  */
 export interface RunnersView {
   readonly runners: readonly Runner[];
@@ -559,7 +559,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and never moves. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then.",
       "",
     );
     if (machines.runners.length === 0) {

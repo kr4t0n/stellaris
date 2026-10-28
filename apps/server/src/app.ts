@@ -17,7 +17,12 @@ import {
   WakeRequestSchema,
   type LiveTurnEvent,
 } from "@stellaris/shared";
-import { RunnerAwayError, RunnerProtocolError, type RunnerHub } from "@stellaris/turn-host";
+import {
+  MoveSourceAwayError,
+  RunnerAwayError,
+  RunnerProtocolError,
+  type RunnerHub,
+} from "@stellaris/turn-host";
 import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
@@ -91,6 +96,14 @@ const RunnerBodySchema = z.object({ name: NameSchema });
 const EnrollmentApprovalSchema = z.object({ name: NameSchema });
 /** The runner a citizen's work outside any project runs on, or null to pin it again on its next turn. */
 const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
+/**
+ * The runner to move a project to; `withoutBranches` goes ahead while the runner it lives on is
+ * away, leaving its branches there.
+ */
+const ProjectRunnerBodySchema = z.object({
+  runner: NameSchema,
+  withoutBranches: z.boolean().optional(),
+});
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
@@ -137,6 +150,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     if (error instanceof RunnerAwayError) {
       return c.json({ error: "RUNNER_AWAY", message: error.message }, 503);
+    }
+    if (error instanceof MoveSourceAwayError) {
+      return c.json({ error: "SOURCE_AWAY", message: error.message }, 409);
     }
     return c.json({ error: "INTERNAL", message: error.message }, 500);
   });
@@ -396,6 +412,21 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     return branchFile(c, project.slug, project.defaultBranch, file);
   };
   api.get("/projects/:slug/files", (c) => projectFile(c, ""));
+  // The user moves a project to another runner, carrying its repository; answered once it ends.
+  api.put("/projects/:slug/runner", async (c) => {
+    const body = ProjectRunnerBodySchema.parse(await c.req.json());
+    if (deps.runners === undefined) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to move a project between");
+    }
+    return c.json(
+      await deps.runners.moveProject(
+        c.get("actor"),
+        NameSchema.parse(c.req.param("slug")),
+        body.runner,
+        { withoutBranches: body.withoutBranches },
+      ),
+    );
+  });
   api.get("/projects/:slug/files/:path{.+}", (c) => projectFile(c, c.req.param("path")));
   api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
   api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));

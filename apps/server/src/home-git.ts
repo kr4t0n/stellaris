@@ -1,14 +1,22 @@
+import { MOVE_PACK_LIMIT_BYTES } from "@stellaris/shared";
 import { execa } from "execa";
 
 /** The smart HTTP protocol's three requests; nothing else of a repository is served. */
 const SMART_PATHS = new Set(["/info/refs", "/git-upload-pack", "/git-receive-pack"]);
-/** A home is markdown; a pack past this is refused rather than buffered. */
-const MAX_BYTES = 256 * 1024 * 1024;
+/**
+ * A home is markdown, and a move carries a project's packs, which the old runner measures against
+ * the same limit before it pushes; a pack past this is refused rather than buffered.
+ */
+const MAX_BYTES = MOVE_PACK_LIMIT_BYTES;
 
 export interface HomeGitRequest {
-  /** The directory holding every home, each a repository named for its agent. */
+  /**
+   * The directory holding the repository: every home, each named for its agent, or the moves'
+   * repositories, each named for its move.
+   */
   readonly root: string;
-  readonly agent: string;
+  /** The repository's directory under `root`: an agent's name, or a move's `<id>.git`. */
+  readonly repository: string;
   /** The path after the home's `/git`, such as `/info/refs`. */
   readonly rest: string;
   readonly request: Request;
@@ -56,13 +64,13 @@ export class HomeGit {
     if (input.rest !== "/git-receive-pack") {
       return serveHomeGit(input);
     }
-    const previous = this.pushes.get(input.agent) ?? Promise.resolve();
+    const previous = this.pushes.get(input.repository) ?? Promise.resolve();
     const run = previous.then(
       () => serveHomeGit(input),
       () => serveHomeGit(input),
     );
     this.pushes.set(
-      input.agent,
+      input.repository,
       run.catch(() => undefined),
     );
     return run;
@@ -70,10 +78,10 @@ export class HomeGit {
 }
 
 /**
- * Serves one smart-HTTP request against an agent's home repository through `git http-backend`,
- * which ships with git: clones and fetches through `git-upload-pack`, pushes through
- * `git-receive-pack`, where the home's own hook and `updateInstead` take over. Authentication and
- * the turn-in-flight check happen before this is called.
+ * Serves one smart-HTTP request against a repository on the board, an agent's home or a move's,
+ * through `git http-backend`, which ships with git: clones and fetches through `git-upload-pack`,
+ * pushes through `git-receive-pack`, where a home's own hook and `updateInstead` take over.
+ * Authentication and the check of who may reach the repository happen before this is called.
  */
 export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
   if (!SMART_PATHS.has(input.rest)) {
@@ -82,7 +90,7 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
   const { request } = input;
   const body = Buffer.from(await request.arrayBuffer());
   if (body.length > MAX_BYTES) {
-    return new Response("pack too large for a home", { status: 413 });
+    return new Response("pack too large for the board to take", { status: 413 });
   }
   const url = new URL(request.url);
   const env: Record<string, string> = {
@@ -91,7 +99,7 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
     GIT_PROJECT_ROOT: input.root,
     GIT_HTTP_EXPORT_ALL: "1",
     REQUEST_METHOD: request.method,
-    PATH_INFO: `/${input.agent}${input.rest}`,
+    PATH_INFO: `/${input.repository}${input.rest}`,
     QUERY_STRING: url.search.replace(/^\?/, ""),
     CONTENT_TYPE: request.headers.get("content-type") ?? "",
     CONTENT_LENGTH: String(body.length),

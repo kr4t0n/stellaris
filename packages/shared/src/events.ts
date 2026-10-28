@@ -8,6 +8,7 @@ export const BOARD_EVENT_TYPES = [
   "project.configured",
   "project.archived",
   "project.placed",
+  "project.moved",
   "agent.added",
   "agent.configured",
   "agent.placed",

@@ -338,7 +338,7 @@
         ),
         (
           "user",
-          "Thanks. Merging once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
+          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
         ),
       ]
       return bodies.enumerated().map { index, entry in

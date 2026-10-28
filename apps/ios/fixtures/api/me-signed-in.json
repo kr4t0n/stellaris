@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/me"
+  },
+  "status": 200,
+  "body": {
+    "name": "user",
+    "role": "user",
+    "signIn": {
+      "login": "fixture-login",
+      "avatarUrl": "https://github.com/fixture-login.png"
+    }
+  }
+}

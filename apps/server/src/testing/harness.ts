@@ -7,6 +7,7 @@ import type { Board } from "@stellaris/board-core";
 import {
   createRunner,
   type AgentBackend,
+  type GitIdentityCheck,
   type PullRequestOps,
   type RunnerDaemon,
 } from "@stellaris/runner-core";
@@ -51,6 +52,11 @@ export interface TestSocietyOptions {
   readonly ackTimeoutMs?: number | undefined;
   /** GitHub as the runners see it, for landing `ghpr` tasks. */
   readonly pullRequests?: PullRequestOps | undefined;
+  /**
+   * What every runner reports of its account's git identity, which a move checks the new runner
+   * for; left out, each reads the test account's own, which CI's lacks.
+   */
+  readonly gitIdentity?: GitIdentityCheck | undefined;
   /** More runners, each a machine of its own with a data directory of its own. */
   readonly extraRunners?:
     | ReadonlyArray<{
@@ -59,6 +65,8 @@ export interface TestSocietyOptions {
         readonly capabilities?: readonly string[] | undefined;
       }>
     | undefined;
+  /** Signing in with GitHub, with GitHub itself faked through its `fetch`. */
+  readonly signIn?: AppDependencies["signIn"];
 }
 
 export interface TestSociety {
@@ -129,6 +137,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     enrollments: new EnrollmentDesk(board, { pollIntervalMs: 50 }),
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
+    ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
   });
   options.routes?.(app);
   fetcher = app.fetch;
@@ -158,6 +167,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       // Tests move a project's remote between turns a moment apart.
       fetchIntervalMs: 0,
       pullRequests: options.pullRequests,
+      gitIdentity: options.gitIdentity,
     });
     await daemon.start();
     runners.set(each.name, daemon);

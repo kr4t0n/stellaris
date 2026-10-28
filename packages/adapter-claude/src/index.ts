@@ -143,7 +143,23 @@ interface Block {
 }
 
 interface TurnState {
+  /** The sum of the turn's results, each its own run's main loop alone. */
   usage: Usage;
+  /**
+   * The session's running usage, summed over its models, as the latest result that reported it
+   * said: every request of the query and of the session before it, sub-agents' and the CLI's own.
+   */
+  sessionUsage: Usage | undefined;
+  /**
+   * The most the session can have held before the turn's first result that reported its running
+   * usage: that usage less the run's own, since the run spent its main loop at least.
+   */
+  heldBefore: Usage | undefined;
+  /**
+   * The whole input of the turn's latest call in the session's own thread: how large the session
+   * had grown, which a sub-agent's calls do not say.
+   */
+  contextTokens: number | undefined;
   /** Cumulative for the query: per turn on a cold run, running total on a resident session. */
   totalCostUsd: number;
   finalText: string;
@@ -178,6 +194,9 @@ interface HandlerContext {
 function freshState(model?: string): TurnState {
   return {
     usage: ZERO_USAGE,
+    sessionUsage: undefined,
+    heldBefore: undefined,
+    contextTokens: undefined,
     totalCostUsd: 0,
     finalText: "",
     structured: null,
@@ -231,6 +250,86 @@ function usageOf(raw: unknown): Usage {
     cacheReadTokens: numberField(raw, "cache_read_input_tokens"),
     cacheWriteTokens: numberField(raw, "cache_creation_input_tokens"),
   };
+}
+
+/**
+ * The whole input of one API call: what it read outside the cache, from it, and into it. A call
+ * that sampled several times sums them at the top level, and its last `message` iteration, when
+ * it lists them, holds the context the call ended with, as the SDK's `BetaUsage` documents.
+ */
+function contextOf(raw: unknown): number {
+  const iterations: unknown =
+    typeof raw === "object" && raw !== null ? Reflect.get(raw, "iterations") : null;
+  const last = blocksOf(iterations)
+    .filter((iteration) => iteration.type === "message")
+    .at(-1);
+  const usage = usageOf(last ?? raw);
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+}
+
+/**
+ * A result's `modelUsage` summed over its models, or undefined when it names none: a result the
+ * CLI wrote before it opened the session, as for a resume it could not make, carries an empty one.
+ */
+function sessionUsageOf(raw: unknown): Usage | undefined {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const models: unknown[] = Object.values(raw);
+  if (models.length === 0) {
+    return undefined;
+  }
+  return models.reduce<Usage>(
+    (total, model) =>
+      addUsage(total, {
+        inputTokens: numberField(model, "inputTokens"),
+        outputTokens: numberField(model, "outputTokens"),
+        cacheReadTokens: numberField(model, "cacheReadInputTokens"),
+        cacheWriteTokens: numberField(model, "cacheCreationInputTokens"),
+      }),
+    ZERO_USAGE,
+  );
+}
+
+/** What `now` grew by from `from`, never less than nothing in any count. */
+function grownBy(now: Usage, from: Usage): Usage {
+  return {
+    inputTokens: Math.max(0, now.inputTokens - from.inputTokens),
+    outputTokens: Math.max(0, now.outputTokens - from.outputTokens),
+    cacheReadTokens: Math.max(0, now.cacheReadTokens - from.cacheReadTokens),
+    cacheWriteTokens: Math.max(0, now.cacheWriteTokens - from.cacheWriteTokens),
+  };
+}
+
+/** Whether any count of `usage` is below the same count of `floor`. */
+function fallsShort(usage: Usage, floor: Usage): boolean {
+  return (
+    usage.inputTokens < floor.inputTokens ||
+    usage.outputTokens < floor.outputTokens ||
+    usage.cacheReadTokens < floor.cacheReadTokens ||
+    usage.cacheWriteTokens < floor.cacheWriteTokens
+  );
+}
+
+/**
+ * A turn's own usage: what the session's running usage grew by from where the board left it. It
+ * is the sum of the turn's results instead, which leaves out its sub-agents and the CLI's own
+ * calls, when the growth cannot be measured: on a resumed session whose last turn left no running
+ * usage, and on one the CLI resumed from less than the board held, as after it was killed outright
+ * before it saved its totals.
+ */
+function turnUsage(state: TurnState, soFar: Usage | undefined): Usage {
+  const now = state.sessionUsage;
+  const before = state.heldBefore;
+  if (
+    now === undefined ||
+    before === undefined ||
+    soFar === undefined ||
+    fallsShort(before, soFar)
+  ) {
+    return state.usage;
+  }
+  return grownBy(now, soFar);
 }
 
 /**
@@ -295,6 +394,14 @@ function handleMessage(
       if (message.error === "server_error" || message.error === "overloaded") {
         state.serverError = true;
       }
+      // The session's own calls say how large it has grown, a sub-agent's are another context, and
+      // the CLI's synthetic messages carry no usage.
+      if (message.parent_tool_use_id === null) {
+        const size = contextOf(message.message.usage);
+        if (size > 0) {
+          state.contextTokens = size;
+        }
+      }
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
           emit({ type: "text", delta: block.text });
@@ -340,7 +447,14 @@ function handleMessage(
     case "result": {
       state.sawResult = true;
       // Each result counts only its own run, and a turn can run more than once in one process.
-      state.usage = addUsage(state.usage, usageOf(message.usage));
+      const run = usageOf(message.usage);
+      state.usage = addUsage(state.usage, run);
+      // Like the cost, `modelUsage` is the session's running total.
+      const totals = sessionUsageOf(message.modelUsage);
+      if (totals !== undefined) {
+        state.heldBefore ??= grownBy(totals, run);
+        state.sessionUsage = totals;
+      }
       state.totalCostUsd = message.total_cost_usd;
       state.apiError = message.subtype === "success" && message.is_error;
       // Like the error, the latest run decides whether the turn is worth sending again.
@@ -392,6 +506,7 @@ function handleMessage(
 function finishTurn(
   state: TurnState,
   costUsd: number,
+  usage: Usage,
   events: AgentEvent[],
   emit: (event: AgentEvent) => void,
 ): TurnResult {
@@ -415,7 +530,7 @@ function finishTurn(
   }
   emit({
     type: "turn_completed",
-    usage: state.usage,
+    usage,
     costUsd,
     status,
     exitReason: state.exitReason,
@@ -423,13 +538,15 @@ function finishTurn(
   return {
     events,
     finalText: state.finalText,
-    usage: state.usage,
+    usage,
     costUsd,
     status,
     exitReason: state.exitReason,
     ...(state.error === undefined ? {} : { error: state.error }),
     ...(state.model === undefined ? {} : { model: state.model }),
     ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
+    ...(state.sessionUsage === undefined ? {} : { sessionUsage: state.sessionUsage }),
+    ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
     ...(state.quota === undefined ? {} : { quota: state.quota }),
     ...(state.transient && state.limitText === undefined && state.exitReason === "error"
       ? { transient: true }
@@ -513,6 +630,17 @@ function withResumeFailure(result: TurnResult): TurnResult {
 }
 
 /**
+ * A turn on a saved session that the CLI never opened, however it ended. A result it saw came
+ * before the session, as the zeroed one the CLI writes for a resume it could not make, so it says
+ * nothing of the session's running totals: the board keeps the ones it holds. Once the CLI has
+ * opened the session, a total of nothing is its own, as after a kill that saved none.
+ */
+function unopened(result: TurnResult): TurnResult {
+  const { sessionCostUsd: _zeroed, sessionUsage: _none, ...rest } = result;
+  return withResumeFailure(rest);
+}
+
+/**
  * Claude Code takes a session id only as a UUID, and resumes any other value as a session's title,
  * so an id saved as anything else, such as the `unstarted` runners once saved for a conversation
  * whose first turn never reached its CLI, is never handed to it.
@@ -562,9 +690,9 @@ const INTERRUPT_GRACE_MS = 15_000;
 
 /**
  * A warm Claude Code session: one SDK query over streaming input that stays open between turns.
- * Each pushed user message is a turn that ends with its own result message; costs are reported
- * cumulatively by the SDK, from the total a resumed transcript saved, so the session keeps the
- * running total and hands back the delta.
+ * Each pushed user message is a turn that ends with its own result message; the cost and the
+ * usage are reported cumulatively by the SDK, from the totals a resumed transcript saved, so the
+ * session keeps the running totals and hands back the deltas.
  */
 class ClaudeResident implements ResidentSession {
   session: SessionId;
@@ -575,6 +703,8 @@ class ClaudeResident implements ResidentSession {
   private ended = false;
   private endedWith: string | undefined;
   private lastTotalCostUsd: number;
+  /** The session's running usage when the last turn ended, unknown for a resumed one the board held none for. */
+  private lastSessionUsage: Usage | undefined;
   private model: string | undefined;
   /** Whether the CLI has announced the session, which it does once it has opened it. */
   private opened = false;
@@ -586,12 +716,14 @@ class ClaudeResident implements ResidentSession {
     /** Whether the session is a saved one to resume, which the CLI may fail to do. */
     private readonly resuming: boolean,
     costSoFarUsd: number,
+    usageSoFar: Usage | undefined,
     queryFn: QueryFn,
     options: Options,
     private readonly record: ((lines: readonly string[]) => Promise<void>) | null,
   ) {
     this.session = session;
     this.lastTotalCostUsd = costSoFarUsd;
+    this.lastSessionUsage = usageSoFar;
     this.stream = queryFn({ prompt: this.source, options });
     this.pumping = this.pump();
   }
@@ -743,12 +875,16 @@ class ClaudeResident implements ResidentSession {
     } else if (!state.sawResult && state.error === undefined) {
       state.error = "the turn ended without a result message";
     }
+    const opened = !this.resuming || this.opened;
     const costUsd = Math.max(0, state.totalCostUsd - this.lastTotalCostUsd);
-    if (state.sawResult) {
+    if (state.sawResult && opened) {
       this.lastTotalCostUsd = state.totalCostUsd;
     }
-    const result = finishTurn(state, costUsd, events, emit);
-    return this.resuming && !this.opened ? withResumeFailure(result) : result;
+    // What the session spent between turns, as a background sub-agent that finished, counts here.
+    const usage = turnUsage(state, this.lastSessionUsage);
+    this.lastSessionUsage = state.sessionUsage ?? this.lastSessionUsage;
+    const result = finishTurn(state, costUsd, usage, events, emit);
+    return opened ? result : unopened(result);
   }
 
   async close(): Promise<void> {
@@ -854,7 +990,7 @@ export class ClaudeAgentBackend implements AgentBackend {
     if (resuming && !isUuid(request.session)) {
       const refused = freshState();
       refused.error = notUuid(request.session);
-      return { ...finishTurn(refused, 0, events, emit), resumeFailed: "lost" };
+      return { ...finishTurn(refused, 0, ZERO_USAGE, events, emit), resumeFailed: "lost" };
     }
     const abort = new AbortController();
     const limit = request.limits.timeoutMs;
@@ -969,9 +1105,11 @@ export class ClaudeAgentBackend implements AgentBackend {
     // A resumed session's total starts from what its transcript saved: the earlier turns' cost.
     const costSoFarUsd = resuming ? (request.costSoFarUsd ?? 0) : 0;
     const costUsd = state.sawResult ? Math.max(0, state.totalCostUsd - costSoFarUsd) : 0;
-    const result = finishTurn(state, costUsd, events, emit);
+    // Its usage too, from the running usage the board holds for it, when it holds one.
+    const usage = turnUsage(state, resuming ? request.usageSoFar : ZERO_USAGE);
+    const result = finishTurn(state, costUsd, usage, events, emit);
     // The CLI announces a session once it has opened it, and says first why it could not.
-    return resuming && !state.initialized ? withResumeFailure(result) : result;
+    return resuming && !state.initialized ? unopened(result) : result;
   }
 
   /** A warm session over the SDK's streaming input; every later prompt is one turn on it. */
@@ -1007,6 +1145,7 @@ export class ClaudeAgentBackend implements AgentBackend {
         start.session,
         resuming,
         resuming ? (start.costSoFarUsd ?? 0) : 0,
+        resuming ? start.usageSoFar : ZERO_USAGE,
         this.queryFn,
         this.buildOptions(request, new AbortController(), resuming),
         record,

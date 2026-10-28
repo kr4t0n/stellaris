@@ -1,0 +1,81 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/members"
+  },
+  "status": 200,
+  "body": [
+    {
+      "name": "concierge-1",
+      "role": "concierge",
+      "cli": "claude",
+      "status": "active",
+      "resident": true,
+      "skills": [],
+      "memberships": [],
+      "subscriptions": [
+        "general",
+        "asks"
+      ],
+      "claimsHeld": 0,
+      "tasksDone": 0,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "profile": "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n"
+    },
+    {
+      "name": "eng-1",
+      "role": "engineer",
+      "cli": "codex",
+      "status": "active",
+      "resident": false,
+      "skills": [],
+      "memberships": [
+        "demo"
+      ],
+      "subscriptions": [
+        "general",
+        "demo/general",
+        "demo/release"
+      ],
+      "claimsHeld": 1,
+      "tasksDone": 0,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "profile": "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n"
+    },
+    {
+      "name": "rev-1",
+      "role": "reviewer",
+      "cli": "claude",
+      "status": "active",
+      "resident": false,
+      "skills": [],
+      "memberships": [
+        "demo"
+      ],
+      "subscriptions": [
+        "general",
+        "demo/general"
+      ],
+      "claimsHeld": 0,
+      "tasksDone": 0,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "profile": "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n"
+    },
+    {
+      "name": "user",
+      "role": "user",
+      "cli": null,
+      "status": "active",
+      "resident": false,
+      "skills": [],
+      "memberships": [
+        "demo"
+      ],
+      "subscriptions": [],
+      "claimsHeld": 0,
+      "tasksDone": 0,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "profile": "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n"
+    }
+  ]
+}

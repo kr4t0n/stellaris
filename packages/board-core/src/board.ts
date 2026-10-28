@@ -153,6 +153,7 @@ import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
+import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
 import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
@@ -757,10 +758,12 @@ export class Board {
   >();
   private readonly files = new FileTree();
   private readonly homes: HomeRepos;
+  private readonly moves: MoveRepos;
 
   private constructor(dataDir: string, options: BoardOptions) {
     this.paths = new BoardPaths(dataDir);
     this.homes = new HomeRepos(path.join(this.paths.state(), "home-hooks"));
+    this.moves = new MoveRepos(this.paths.moves());
     this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
     this.now = options.now ?? (() => new Date());
     this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
@@ -792,6 +795,7 @@ export class Board {
     await board.loadRunnerTokens();
     await board.loadSignIns();
     await board.homes.installHooks();
+    await board.moves.clear();
     return board;
   }
 
@@ -2966,14 +2970,18 @@ export class Board {
   }
 
   /**
-   * Refuses to archive a project while a turn runs in it, in a citizen's conversation of its
-   * channels in the society scope, or in a thread its archive closes.
+   * Refuses to archive or move a project while a turn runs in it, in a citizen's conversation of
+   * its channels in the society scope, or in one of its open threads.
    */
-  private async assertProjectQuiet(actor: Actor, slug: Name): Promise<void> {
+  private async assertProjectQuiet(
+    actor: Actor,
+    slug: Name,
+    what = `project ${slug} cannot be archived`,
+  ): Promise<void> {
     const threads = await this.openThreadIds(this.paths.threads(slug), () => true);
     this.assertNoTurnCut(
       actor,
-      `project ${slug} cannot be archived`,
+      what,
       (turn) =>
         turn.scope === slug ||
         turn.place === slug ||
@@ -4302,6 +4310,7 @@ export class Board {
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),
+        ...(parsed.contextTokens === undefined ? {} : { contextTokens: parsed.contextTokens }),
         toolCalls: parsed.toolCalls,
         model: parsed.model,
         summary: parsed.status?.summary ?? null,
@@ -4677,7 +4686,8 @@ export class Board {
 
   /**
    * Places a project on the runner that will hold its repository, unless it already lives on one,
-   * and returns where it lives. Placement is once: every later turn of the project goes there.
+   * and returns where it lives. Placement is once: every later turn of the project goes there,
+   * until the user moves the project (`recordProjectMove`).
    */
   async placeProject(slug: Name, runner: Name): Promise<Name> {
     return this.mutex.run(async () => {
@@ -4808,6 +4818,97 @@ export class Board {
       });
       return next;
     });
+  }
+
+  /**
+   * The board's half of moving a project to another runner, which only the user does, checked
+   * before anything travels and while the hub holds the project's turns: the project is active and
+   * lives on a runner other than `to`, which the board knows; no task there is landing, since its
+   * landing runs on the old runner; and no turn runs in the project. Tasks in play move with their
+   * branches, so the answer lists them for the capabilities the new runner must offer.
+   */
+  async prepareProjectMove(
+    actor: Actor,
+    slug: Name,
+    to: Name,
+  ): Promise<{ project: Project & { runner: Name }; inPlay: Task[] }> {
+    this.assertUser(actor, "only the user may move a project to another runner");
+    const runner = NameSchema.parse(to);
+    return this.mutex.run(async () => {
+      const project = await this.readActiveProject(slug);
+      const from = project.runner;
+      if (from === undefined) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `project ${slug} lives on no runner yet; its first turn places it`,
+        );
+      }
+      if (from === runner) {
+        throw new BoardError("INVALID_STATE", `project ${slug} already lives on ${runner}`);
+      }
+      await this.readRunner(runner);
+      const inPlay = (await this.listTasks(slug)).filter(
+        (task) => task.status === "open" || task.status === "claimed",
+      );
+      const landing = inPlay.filter((task) => task.completing);
+      if (landing.length > 0) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `project ${slug} cannot be moved while ${landing.length} task(s) land on ${from} (${landing.map((task) => task.id).join(", ")}); move it once they have landed`,
+        );
+      }
+      await this.assertProjectQuiet(actor, slug, `project ${slug} cannot be moved`);
+      return { project: { ...project, runner: from }, inPlay };
+    });
+  }
+
+  /**
+   * Records that a project moved, once its new runner holds every branch its old one had, or with
+   * nothing carried when the user moved it while the old runner was away: every later turn of
+   * the project goes to `to`. Refused when the project was archived or moved meanwhile.
+   */
+  async recordProjectMove(
+    actor: Actor,
+    move: { slug: Name; from: Name; to: Name; carried: number | null },
+  ): Promise<Project> {
+    this.assertUser(actor, "only the user may move a project to another runner");
+    return this.mutex.run(async () => {
+      const current = await this.readActiveProject(move.slug);
+      if (current.runner !== move.from) {
+        throw new BoardError(
+          "INVALID_STATE",
+          `project ${move.slug} no longer lives on ${move.from}, so this move no longer applies`,
+        );
+      }
+      await this.readRunner(move.to);
+      const project = await this.updateProject(move.slug, (each) => ({ ...each, runner: move.to }));
+      await this.events.append("project.moved", actor.name, {
+        slug: move.slug,
+        from: move.from,
+        to: move.to,
+        carried: move.carried,
+      });
+      return project;
+    });
+  }
+
+  /**
+   * Makes the repository a move carries a project through, for the server's git route to serve,
+   * and answers the move's id, which names it; `dropMoveRepo` removes it when the move ends.
+   */
+  async openMoveRepo(): Promise<Ulid> {
+    const id = this.newId();
+    await this.moves.open(this.paths.move(id));
+    return id;
+  }
+
+  async dropMoveRepo(id: Ulid): Promise<void> {
+    await this.moves.drop(this.paths.move(UlidSchema.parse(id)));
+  }
+
+  /** Where the moves' repositories live, which the server's git route serves from. */
+  get moveRepos(): string {
+    return this.paths.moves();
   }
 
   /** The projection a runner mirrors for its agents to read, by relative path, with hashes. */

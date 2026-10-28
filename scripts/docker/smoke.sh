@@ -35,12 +35,17 @@ same "the server image's server version" \
   "$(docker run --rm "$server_image" node /app/server/dist/index.js --version)" "$version"
 same "the runner image's runner version" "$(docker run --rm "$runner_image" stellaris-runner --version)" "$version"
 # The account the chart's securityContext and the README's volume steps assume, and the CLIs, git,
-# and kubectl that turns shell out to, on the PATH the image sets. kubectl's --client keeps it from
-# looking for a cluster.
+# kubectl, helm with its diff plugin, and helmfile that turns shell out to, on the PATH the image
+# sets. None of them leaves the container: kubectl's --client keeps it from looking for a cluster,
+# helm's plugin list and `helm diff version` read and run the plugin from climage's root-owned
+# HELM_PLUGINS as this account, and helmfile's --version flag, unlike its version command, asks
+# GitHub for no newer release.
 same "the runner image's account" \
   "$(docker run --rm "$runner_image" sh -c 'echo "$(id -un) $(id -u):$(id -g) $HOME"')" \
   "stellaris 1000:100 /home/stellaris"
-docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version && kubectl version --client'
+docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version &&
+  kubectl version --client && helm version && helm plugin list | grep "^diff[[:space:]]" &&
+  helm diff version && helmfile --version'
 
 docker network create "$run" > /dev/null
 docker volume create "$run-data" > /dev/null

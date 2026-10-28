@@ -186,13 +186,48 @@ export function runnerRoutes(
     const at = c.req.path.indexOf(marker);
     return homeGit.serve({
       root: path.dirname(repository),
-      agent,
+      repository: agent,
       rest: at === -1 ? "" : c.req.path.slice(at + marker.length),
       request: c.req.raw,
       runner: c.get("runner"),
     });
   });
   routes.route("/homes/:agent", home);
+
+  // A move's repository, which only its old runner pushes to while it exports and only its new
+  // runner fetches from while it imports; any other runner, and a move not under way, is refused.
+  routes.all("/moves/:id/git/*", async (c) => {
+    const id = UlidSchema.safeParse(c.req.param("id"));
+    const marker = `/moves/${c.req.param("id")}/git`;
+    const at = c.req.path.indexOf(marker);
+    const rest = at === -1 ? "" : c.req.path.slice(at + marker.length);
+    const service = rest === "/info/refs" ? (c.req.query("service") ?? "") : rest.slice(1);
+    if (service !== "git-upload-pack" && service !== "git-receive-pack") {
+      return c.json({ error: "NOT_FOUND", message: "not a smart HTTP request" }, 404);
+    }
+    const access = id.success
+      ? hub.moveAccess(c.get("runner"), id.data, service === "git-receive-pack")
+      : "unknown";
+    if (access === "unknown") {
+      return c.json({ error: "NOT_FOUND", message: "no such move under way" }, 404);
+    }
+    if (access === "refused" || !id.success) {
+      return c.json(
+        {
+          error: "FORBIDDEN",
+          message: `this runner may not ${service === "git-receive-pack" ? "push to" : "fetch from"} this move now`,
+        },
+        403,
+      );
+    }
+    return homeGit.serve({
+      root: board.moveRepos,
+      repository: `${id.data}.git`,
+      rest,
+      request: c.req.raw,
+      runner: c.get("runner"),
+    });
+  });
 
   return routes;
 }

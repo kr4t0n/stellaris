@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   CliKindSchema,
   HeldWorkspaceSchema,
   HOME_SCRATCH,
+  MOVE_PACK_LIMIT_BYTES,
   PATH_TOKENS,
   SERVER_TOKEN,
   SOCIETY_SCOPE,
@@ -24,11 +25,17 @@ import {
   type CliKind,
   type CliQuota,
   type CloseRequest,
+  type HeldWork,
   type HeldWorkspace,
   type LandRequest,
   type MergeOutcome,
   type ModelOption,
   type Name,
+  type ProjectExport,
+  type ProjectExported,
+  type ProjectImport,
+  type ProjectImported,
+  type ProjectReleased,
   type ProjectRepo,
   type StuckWork,
   type SweepResult,
@@ -42,7 +49,7 @@ import {
 import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
 import { describeError } from "./errors.js";
-import { ExecaGit, taskBranch, type GitOps, type RemoteSync } from "./git.js";
+import { ExecaGit, taskBranch, type GitAuth, type GitOps, type RemoteSync } from "./git.js";
 import { readTurnImage, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
@@ -55,6 +62,19 @@ import {
 } from "./types.js";
 import { GhPullRequests, type PullRequestOps, type PullRequestState } from "./pulls.js";
 import { holdsLeftovers, renderWorkspaceReport, type WorkspaceReport } from "./workspace-report.js";
+
+/** Where the board server keeps a move's repository, and the header that lets this runner reach it. */
+export interface MoveRemote {
+  url(move: string): string;
+  /** An `Authorization` header line, or null for a repository at a local path. */
+  readonly authorization: string | null;
+}
+
+function moveAuth(remote: MoveRemote, move: string): GitAuth | null {
+  return remote.authorization === null
+    ? null
+    : { url: remote.url(move), header: remote.authorization };
+}
 
 export interface RunnerLog {
   info(context: object, message: string): void;
@@ -299,6 +319,7 @@ export class TurnExecutor {
             limits,
             statusSchema,
             costSoFarUsd: job.costSoFarUsd,
+            ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
           },
           collect,
           control,
@@ -367,6 +388,8 @@ export class TurnExecutor {
       usage: result.usage,
       costUsd: result.costUsd,
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
+      ...(result.sessionUsage === undefined ? {} : { sessionUsage: result.sessionUsage }),
+      ...(result.contextTokens === undefined ? {} : { contextTokens: result.contextTokens }),
       session: result.session ?? (started ? session : job.session),
       ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
       ...(result.transient === true && result.exitReason === "error" ? { transient: true } : {}),
@@ -429,6 +452,152 @@ export class TurnExecutor {
       this.log.info({ conversation, kept: kept.map((each) => each.agent) }, "kept workspaces");
     }
     return { kept };
+  }
+
+  /**
+   * Sends a project's repository on its way to another runner: refused, before anything leaves,
+   * while a worktree of the project holds work no branch does or the repository is larger than a
+   * move carries; otherwise every branch and tag goes to the move's repository on the server, and
+   * the answer lists them at their objects. Nothing here changes: the copy stays until the board
+   * has recorded the move and asks for a release.
+   */
+  async exportProject(request: ProjectExport, remote: MoveRemote): Promise<ProjectExported> {
+    const { repo, move } = request;
+    return this.withProjectLock(repo.slug, async () => {
+      const repoDir = await this.repoHere(repo.slug);
+      if (repoDir === null) {
+        throw new Error(`${repo.slug} has no repository on this runner`);
+      }
+      const held: HeldWork[] = [];
+      for (const each of await this.projectWorktrees(repo.slug)) {
+        const state = await this.git.worktreeState(each.dir);
+        if (holdsLeftovers(state)) {
+          held.push({
+            agent: each.agent,
+            conversation: each.conversation,
+            uncommitted: state.uncommitted.total,
+            onNoBranch: state.onNoBranch.total,
+          });
+        }
+      }
+      const bytes = await this.git.objectBytes(repoDir);
+      if (held.length > 0 || bytes > MOVE_PACK_LIMIT_BYTES) {
+        return { ok: false, held, bytes };
+      }
+      const refs = await this.git.refs(repoDir);
+      await this.git.pushEverything(repoDir, remote.url(move), moveAuth(remote, move));
+      this.log.info(
+        { project: repo.slug, move, refs: Object.keys(refs).length, bytes },
+        "sent a project's repository to the board for a move",
+      );
+      return { ok: true, refs, bytes };
+    });
+  }
+
+  /**
+   * Takes a project's repository arriving from another runner: refused while this runner holds a
+   * worktree of the project, from an earlier stay; put together beside `repos/` and moved into
+   * place only once every branch and tag is here, the project's remote answers a fetch, and, for a
+   * project that lands through pull requests, `gh` is signed in. A clone left with no worktrees, by
+   * a move the board never recorded, is replaced.
+   */
+  async importProject(request: ProjectImport, remote: MoveRemote): Promise<ProjectImported> {
+    const { repo, move } = request;
+    return this.withProjectLock(repo.slug, async () => {
+      const there = await this.projectWorktrees(repo.slug);
+      if (there.length > 0) {
+        throw new Error(
+          `this runner still holds ${there.length} worktree(s) of ${repo.slug} (${[...new Set(there.map((each) => each.agent))].join(", ")}) from an earlier stay; remove them first`,
+        );
+      }
+      const staging = this.layout.incoming(repo.slug);
+      try {
+        await this.git.cloneEverything(remote.url(move), moveAuth(remote, move), staging, repo);
+        if (
+          request.pullRequests &&
+          this.pulls.signedIn !== undefined &&
+          !(await this.pulls.signedIn())
+        ) {
+          throw new Error(
+            "gh is not signed in to GitHub on this runner, and the project lands through pull requests",
+          );
+        }
+        const target = this.layout.repo(repo.slug);
+        await rm(target, { recursive: true, force: true });
+        await rename(staging, target);
+        this.fetched.delete(repo.slug);
+        const refs = await this.git.refs(target);
+        this.log.info(
+          { project: repo.slug, move, refs: Object.keys(refs).length },
+          "took a project's repository from another runner",
+        );
+        return { refs };
+      } finally {
+        await rm(staging, { recursive: true, force: true });
+      }
+    });
+  }
+
+  /**
+   * Removes this runner's copy of a project that lives on another runner now: the warm sessions of
+   * its conversations, every worktree of it, and its clone.
+   */
+  async releaseProject(slug: Name): Promise<ProjectReleased> {
+    const warm = [...this.residents.keys()].filter((key) => key.split("/")[1] === slug);
+    for (const key of warm) {
+      await this.closeResident(key, "the project moved to another runner");
+    }
+    return this.withProjectLock(slug, async () => {
+      const worktrees = await this.projectWorktrees(slug);
+      for (const each of worktrees) {
+        await rm(each.dir, { recursive: true, force: true });
+      }
+      const repoDir = this.layout.repo(slug);
+      const clone = await exists(path.join(repoDir, ".git"));
+      await rm(repoDir, { recursive: true, force: true });
+      this.fetched.delete(slug);
+      this.unguarded.delete(slug);
+      this.log.info(
+        { project: slug, worktrees: worktrees.length, clone },
+        "removed a project that moved to another runner",
+      );
+      return { worktrees: worktrees.length, clone };
+    });
+  }
+
+  /**
+   * Every worktree of a project here, by the clone its `.git` points into, whether or not the
+   * clone is still there: each citizen's own on `agent/<name>`, and those of its conversations.
+   */
+  private async projectWorktrees(
+    slug: Name,
+  ): Promise<Array<{ dir: string; agent: Name; conversation: WorkspaceConversation | null }>> {
+    const found: Array<{ dir: string; agent: Name; conversation: WorkspaceConversation | null }> =
+      [];
+    const worktrees = path.join(this.layout.root, "worktrees");
+    for (const agent of await dirs(worktrees)) {
+      const mine = path.join(worktrees, agent);
+      const own = path.join(mine, slug);
+      if ((await this.repoOf(own)) === slug) {
+        found.push({ dir: own, agent, conversation: null });
+      }
+      for (const kind of [".tasks", ".threads"]) {
+        for (const id of await dirs(path.join(mine, kind))) {
+          const dir = path.join(mine, kind, id);
+          if ((await this.repoOf(dir)) === slug) {
+            found.push({ dir, agent, conversation: { kind: "thread", id } });
+          }
+        }
+      }
+      for (const name of await dirs(path.join(mine, ".channels", slug))) {
+        found.push({
+          dir: path.join(mine, ".channels", slug, name),
+          agent,
+          conversation: { kind: "channel", scope: slug, name },
+        });
+      }
+    }
+    return found;
   }
 
   /**
@@ -1087,7 +1256,8 @@ export class TurnExecutor {
   /**
    * One turn on a warm session: start it on first use, run the prompt, then either keep it warm
    * until the idle timeout or recycle it when its instructions went stale. A session given another
-   * token or model than it started with starts afresh, since the CLI read both at its start.
+   * token or model than it started with starts afresh, since the CLI read both at its start, and so
+   * does one whose job names no session, since the server dropped the one it was warm on.
    */
   private async runResident(
     backend: AgentBackend,
@@ -1114,9 +1284,10 @@ export class TurnExecutor {
       (warm.model !== spec.model ||
         warm.effort !== spec.effort ||
         warm.token !== job.mcp.token ||
-        warm.stale)
+        warm.stale ||
+        input.newSession)
     ) {
-      await this.closeResident(resident.key, "model, effort, token, or memory changed");
+      await this.closeResident(resident.key, "model, effort, token, memory, or session changed");
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
@@ -1128,6 +1299,7 @@ export class TurnExecutor {
         limits: input.limits,
         statusSchema: input.statusSchema,
         costSoFarUsd: job.costSoFarUsd,
+        ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
       });
       current = {
         session,

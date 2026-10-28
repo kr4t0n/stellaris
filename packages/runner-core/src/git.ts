@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   patchHunks,
@@ -9,6 +9,7 @@ import {
   type BranchFileDiff,
   type MergeOutcome,
   type ProjectRepo,
+  type RepoRefs,
 } from "@stellaris/shared";
 import { execa } from "execa";
 
@@ -121,6 +122,23 @@ export interface GitOps {
   fetchPullHead(repoDir: string, number: number): Promise<string>;
   /** Whether two commits hold the same files. */
   sameTree(repoDir: string, a: string, b: string): Promise<boolean>;
+  /** Every branch and tag of a repository, at its object. */
+  refs(repoDir: string): Promise<RepoRefs>;
+  /** What a repository's objects take, packed and loose, in bytes: at most what a push of them carries. */
+  objectBytes(repoDir: string): Promise<number>;
+  /** Pushes every branch and tag to `url`, the move's repository on the server, skipping the clone's hooks. */
+  pushEverything(repoDir: string, url: string, auth: GitAuth | null): Promise<void>;
+  /**
+   * Makes `dir` a repository of every branch and tag at `url`, each a local branch or tag, with the
+   * project's remote as `origin`, which must answer a fetch, and the default branch checked out:
+   * the clone `ensureRepo` makes, with the branches the old runner had.
+   */
+  cloneEverything(
+    url: string,
+    auth: GitAuth | null,
+    dir: string,
+    project: ProjectRepo,
+  ): Promise<void>;
   /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
    * then switches back to `home`, or with `home` null detaches, which frees the branch for the
@@ -240,6 +258,32 @@ export interface GitAuthor {
   readonly email: string;
 }
 
+/**
+ * The header that lets the runner reach one address on the board server, which git sends to that
+ * address alone: it travels in git's environment, so no command line, error, or kept config holds it.
+ */
+export interface GitAuth {
+  readonly url: string;
+  readonly header: string;
+}
+
+/** A carried repository is a few MiB on the pods measured; past a 256 MiB pack on a slow line, minutes. */
+const MOVE_TIMEOUT_MS = 10 * 60_000;
+
+/** `http.<url>.extraHeader` for one address, added to whatever configuration the environment gives git. */
+function authEnv(auth: GitAuth | null): Record<string, string> {
+  if (auth === null) {
+    return {};
+  }
+  const given = Number.parseInt(process.env["GIT_CONFIG_COUNT"] ?? "0", 10);
+  const index = Number.isInteger(given) && given > 0 ? given : 0;
+  return {
+    GIT_CONFIG_COUNT: String(index + 1),
+    [`GIT_CONFIG_KEY_${index}`]: `http.${auth.url}.extraHeader`,
+    [`GIT_CONFIG_VALUE_${index}`]: auth.header,
+  };
+}
+
 /** The branch a task's work lives on, shared by whoever holds its stages. */
 export function taskBranch(taskId: string): string {
   return `task/${taskId}`;
@@ -333,12 +377,13 @@ async function git(
   args: readonly string[],
   cwd?: string,
   timeoutMs?: number,
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await execa("git", [...BOARD_IDENTITY, ...args], {
     ...(cwd === undefined ? {} : { cwd }),
     ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
     reject: false,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", [RUNNER_GIT]: "1" },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", [RUNNER_GIT]: "1", ...env },
   });
   return {
     stdout: result.stdout,
@@ -350,6 +395,11 @@ async function git(
 /** Non-empty lines of a command's output. */
 function lines(text: string): string[] {
   return text.split("\n").filter((line) => line.trim() !== "");
+}
+
+/** The last line git wrote, which says why it failed, or `fallback`. */
+function lastLine(text: string, fallback: string): string {
+  return lines(text).at(-1)?.trim() ?? fallback;
 }
 
 /** Branches by name under a ref prefix, with the commit each points at. */
@@ -411,6 +461,118 @@ export class ExecaGit implements GitOps {
     await must(["init", "-b", project.defaultBranch, dir]);
     await must(["commit", "--allow-empty", "-m", `chore: initialize ${project.slug}`], dir);
     return dir;
+  }
+
+  async refs(repoDir: string): Promise<RepoRefs> {
+    const out = await must(
+      ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"],
+      repoDir,
+    );
+    const refs: RepoRefs = {};
+    for (const line of lines(out)) {
+      const space = line.indexOf(" ");
+      refs[line.slice(space + 1)] = line.slice(0, space);
+    }
+    return refs;
+  }
+
+  async objectBytes(repoDir: string): Promise<number> {
+    const out = await must(["count-objects", "-v"], repoDir);
+    let kib = 0;
+    for (const line of lines(out)) {
+      const [key, value] = line.split(":").map((part) => part.trim());
+      if (key === "size" || key === "size-pack") {
+        kib += Number.parseInt(value ?? "0", 10) || 0;
+      }
+    }
+    return kib * 1024;
+  }
+
+  async pushEverything(repoDir: string, url: string, auth: GitAuth | null): Promise<void> {
+    const pushed = await git(
+      [
+        "push",
+        "--quiet",
+        "--no-verify",
+        url,
+        "+refs/heads/*:refs/heads/*",
+        "+refs/tags/*:refs/tags/*",
+      ],
+      repoDir,
+      MOVE_TIMEOUT_MS,
+      authEnv(auth),
+    );
+    if (pushed.exitCode !== 0) {
+      throw new Error(
+        `the push to the board failed: ${lastLine(pushed.stderr, "git push failed")}`,
+      );
+    }
+  }
+
+  async cloneEverything(
+    url: string,
+    auth: GitAuth | null,
+    requestedDir: string,
+    project: ProjectRepo,
+  ): Promise<void> {
+    const dir = path.resolve(requestedDir);
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(path.dirname(dir), { recursive: true });
+    await must(["init", "--quiet", "-b", project.defaultBranch, dir]);
+    // HEAD names the default branch before it exists, so the fetch may write it.
+    const fetched = await git(
+      [
+        "-c",
+        "transfer.fsckObjects=true",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--update-head-ok",
+        url,
+        "+refs/heads/*:refs/heads/*",
+        "+refs/tags/*:refs/tags/*",
+      ],
+      dir,
+      MOVE_TIMEOUT_MS,
+      authEnv(auth),
+    );
+    if (fetched.exitCode !== 0) {
+      throw new Error(
+        `the fetch from the board failed: ${lastLine(fetched.stderr, "git fetch failed")}`,
+      );
+    }
+    if (!(await this.branchExists(dir, project.defaultBranch))) {
+      throw new Error(`what arrived has no ${project.defaultBranch} branch`);
+    }
+    await must(["reset", "--quiet", "--hard"], dir);
+    if (project.origin === null) {
+      return;
+    }
+    await must(["remote", "add", "origin", project.origin], dir);
+    // No tags: one the remote gained since the old runner's last fetch would make the two lists of
+    // refs differ, and the project's next turn fetches it anyway.
+    const remote = await git(
+      ["fetch", "--quiet", "--prune", "--no-tags", "origin"],
+      dir,
+      FETCH_TIMEOUT_MS,
+    );
+    if (remote.exitCode !== 0) {
+      throw new Error(
+        `this runner cannot fetch ${project.origin}: ${lastLine(remote.stderr, "git fetch failed")}`,
+      );
+    }
+    const tracking = `refs/remotes/origin/${project.defaultBranch}`;
+    if ((await git(["rev-parse", "--verify", "--quiet", tracking], dir)).exitCode === 0) {
+      await must(
+        [
+          "branch",
+          "--quiet",
+          `--set-upstream-to=origin/${project.defaultBranch}`,
+          project.defaultBranch,
+        ],
+        dir,
+      );
+    }
   }
 
   /**

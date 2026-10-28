@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/sign-in"
+  },
+  "status": 200,
+  "body": {
+    "signedOut": false
+  }
+}

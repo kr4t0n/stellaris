@@ -1,4 +1,4 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["helm/*/templates/**"]
+  "ignorePatterns": ["helm/*/templates/**", "apps/ios/fixtures/api/**", "apps/ios/fixtures/sky/**"]
 }

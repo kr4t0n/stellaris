@@ -18,7 +18,9 @@ cases=(
 --set server.config.concurrency=4 --set server.config.timings.opsIntervalMs=60000 --set runner.enabled=true \
 --set runner.replicas=2 --set runner.config.capabilities={gpu} --set runner.networkPolicy.enabled=true \
 --set runner.extraVolumes[0].name=ssh-key --set runner.extraVolumes[0].secret.secretName=ssh-key \
---set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37"
+--set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37 \
+--set auth.github.appleAppId=ABCDE12345.com.example.app\
+|            - name: STELLARIS_APPLE_APP_ID|              value: \"ABCDE12345.com.example.app\""
   "runners only|--set server.enabled=false --set runner.enabled=true --set runner.serverUrl=https://stellaris.example.com \
 --set runner.existingSecret=runner-token --set persistence.enabled=false\
 |      serviceAccountName: default|      automountServiceAccountToken: false"
@@ -27,14 +29,31 @@ cases=(
 |      serviceAccountName: runner-reader|      automountServiceAccountToken: true"
   "an existing claim and secret|--set persistence.existingClaim=stellaris-data --set auth.github.enabled=true \
 --set auth.github.clientId=client-1 --set auth.github.existingSecret=github-oauth --set auth.github.users={octocat}"
+  "runner pools|--set runner.enabled=true --set runner.networkPolicy.enabled=true --set runner.config.concurrency=4 \
+--set runner.persistence.size=20Gi --set runner.pools[0].name=main --set runner.pools[1].name=gpu \
+--set runner.pools[1].replicas=2 --set runner.pools[1].config.capabilities={gpu} --set runner.pools[1].persistence.size=200Gi\
+|  name: stellaris-runner-main|  name: stellaris-runner-gpu|      stellaris/runner-pool: \"gpu\"|              value: \"gpu\"\
+|            storage: 20Gi|            storage: 200Gi"
 )
 # Each refusal is the message the chart must fail with, and the --set flags that ask for it.
 refusals=(
   "runner.extraVolumes: home is the runner's claim|--set runner.enabled=true --set runner.extraVolumes[0].name=home \
 --set runner.extraVolumes[0].emptyDir.medium=Memory"
   "auth.github.clientId is required|--set auth.github.enabled=true"
+  "auth.github.appleAppId needs GitHub sign-in|--set auth.github.appleAppId=ABCDE12345.com.example.app"
+  "is not <team id>.<bundle id>|--set auth.github.enabled=true --set auth.github.clientId=client-1 \
+--set auth.github.clientSecret=secret-1 --set auth.github.users={octocat} --set auth.github.appleAppId=com.example.app"
   "runner.existingSecret holds one runner's token|--set runner.enabled=true --set runner.existingSecret=runner-token \
 --set runner.replicas=2"
+  "is not a pool name|--set runner.enabled=true --set runner.pools[0].name=Main"
+  "names two pools|--set runner.enabled=true --set runner.pools[0].name=main --set runner.pools[1].name=main"
+  "networkPolicy is the same for every pool|--set runner.enabled=true --set runner.pools[0].name=main \
+--set runner.pools[0].networkPolicy.enabled=true"
+  "replica is not a runner field|--set runner.enabled=true --set runner.pools[0].name=main --set runner.pools[0].replica=2"
+  "runner.pools[gpu].existingSecret holds one runner's token|--set runner.enabled=true --set runner.pools[0].name=gpu \
+--set runner.pools[0].existingSecret=runner-token --set runner.pools[0].replicas=2"
+  "which runner.pools[main] takes too|--set runner.enabled=true --set runner.existingSecret=runner-token \
+--set runner.pools[0].name=main --set runner.pools[1].name=gpu"
 )
 
 for entry in "${cases[@]}"; do

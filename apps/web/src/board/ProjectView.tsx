@@ -19,6 +19,7 @@ import { ChannelList, NewChannelForm } from "./ChannelForms.js";
 import { CrewList, Section, TopicList } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ProjectFiles } from "./ProjectFiles.js";
+import { ProjectRunnerForm } from "./ProjectRunnerForm.js";
 import { groupTasks, PHASES } from "./tasks.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
@@ -84,8 +85,8 @@ function EditForm({ project, onDone }: { project: Project; onDone: () => void })
 /**
  * A project at a glance: who works in it, its channels, where its tasks stand, how they end, its
  * dashboard, what it knows, and the files on its default branch; an archived one also says when
- * and why. Its name and default branch are edited here, and a channel is opened here for a
- * workstream such as a release.
+ * and why. Its name and default branch are edited here, the user moves it to another runner here,
+ * and a channel is opened here for a workstream such as a release.
  */
 export function ProjectView() {
   const { slug } = useParams({ from: "/p/$slug" });
@@ -97,6 +98,7 @@ export function ProjectView() {
   const knowledge = useKnowledge(slug);
   const now = useNow(30_000);
   const [editing, setEditing] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [opening, setOpening] = useState(false);
 
   const project = projects.data?.find((candidate) => candidate.slug === slug);
@@ -117,11 +119,16 @@ export function ProjectView() {
     <>
       <PaneHeader
         title={project.name}
-        subtitle={`${slug} · ${project.repo ?? "a local repository"} · ${project.defaultBranch}`}
+        subtitle={`${slug} · ${project.repo ?? "a local repository"} · ${project.defaultBranch}${
+          project.runner === undefined ? "" : ` · on ${project.runner}`
+        }`}
         trailing={
           <>
             {editing || project.archived !== undefined ? null : (
               <Button onClick={() => setEditing(true)}>Edit…</Button>
+            )}
+            {moving || project.archived !== undefined || project.runner === undefined ? null : (
+              <Button onClick={() => setMoving(true)}>Runner…</Button>
             )}
             <Link
               to="/p/$slug/tasks"
@@ -134,6 +141,7 @@ export function ProjectView() {
         }
       />
       {editing ? <EditForm project={project} onDone={() => setEditing(false)} /> : null}
+      {moving ? <ProjectRunnerForm project={project} onDone={() => setMoving(false)} /> : null}
       {opening ? <NewChannelForm project={slug} onDone={() => setOpening(false)} /> : null}
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {project.archived === undefined ? null : (

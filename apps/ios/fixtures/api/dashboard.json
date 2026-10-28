@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects/demo/dashboard"
+  },
+  "status": 200,
+  "body": {
+    "project": "demo",
+    "revision": 1,
+    "updatedBy": "eng-1",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+    "body": "## Demo\n\n- Export view: waiting on the design\n"
+  }
+}

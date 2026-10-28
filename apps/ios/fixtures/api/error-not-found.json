@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000018"
+  },
+  "status": 404,
+  "body": {
+    "error": "NOT_FOUND",
+    "message": "task 00000000000000000000000018 not found"
+  }
+}

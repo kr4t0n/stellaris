@@ -20,6 +20,7 @@ import {
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
+  addUsage,
   BranchChangesSchema,
   BranchFileDiffSchema,
   BranchFileSchema,
@@ -33,6 +34,7 @@ import {
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
+  type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -146,6 +148,8 @@ class ResidentBackend implements AgentBackend {
 class TotalingBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly startedFrom: number[] = [];
+  /** Whether the next turn fails to resume its session, reporting no running total. */
+  failNext = false;
   private total = 0;
 
   newSession(): Promise<string> {
@@ -154,6 +158,17 @@ class TotalingBackend implements AgentBackend {
 
   runTurn(request: { costSoFarUsd?: number | undefined }): Promise<TurnResult> {
     this.startedFrom.push(request.costSoFarUsd ?? 0);
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.resolve({
+        ...completed(""),
+        costUsd: 0,
+        status: null,
+        exitReason: "error",
+        error: "Claude Code returned an error result",
+        resumeFailed: "retry",
+      });
+    }
     this.total += 0.25;
     const sessionCostUsd = this.total;
     return Promise.resolve({
@@ -162,6 +177,71 @@ class TotalingBackend implements AgentBackend {
       sessionCostUsd,
     });
   }
+}
+
+const TURN_USAGE: Usage = {
+  inputTokens: 100,
+  outputTokens: 10,
+  cacheReadTokens: 1_000,
+  cacheWriteTokens: 5,
+};
+
+/**
+ * A backend whose session reports its running usage, as Claude's `modelUsage` does, cold or warm:
+ * each turn that sees a result adds `TURN_USAGE` to it, and one that sees none reports none.
+ */
+class UsageTotalingBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  /** The running usage each cold turn and each warm start was handed, in order. */
+  readonly startedFrom: Array<Usage | undefined> = [];
+  /** The folder each cold turn ran in. */
+  readonly cwds: string[] = [];
+  /** Whether the next turn sees no result. */
+  noResult = false;
+  private total: Usage = ZERO_USAGE;
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  runTurn(request: { usageSoFar?: Usage | undefined; spec: { cwd: string } }): Promise<TurnResult> {
+    this.startedFrom.push(request.usageSoFar);
+    this.cwds.push(request.spec.cwd);
+    this.total = request.usageSoFar ?? ZERO_USAGE;
+    return Promise.resolve(this.turn("cold turn"));
+  }
+
+  startResident(
+    _spec: object,
+    start: { session: string; usageSoFar?: Usage | undefined },
+  ): Promise<ResidentSession> {
+    this.startedFrom.push(start.usageSoFar);
+    this.total = start.usageSoFar ?? ZERO_USAGE;
+    return Promise.resolve({
+      session: start.session,
+      runTurn: () => Promise.resolve(this.turn("warm turn")),
+      close: () => Promise.resolve(),
+    });
+  }
+
+  private turn(summary: string): TurnResult {
+    if (this.noResult) {
+      this.noResult = false;
+      return completed(summary);
+    }
+    this.total = addUsage(this.total, TURN_USAGE);
+    return { ...completed(summary), usage: TURN_USAGE, sessionUsage: this.total };
+  }
+}
+
+/** `TURN_USAGE` times `turns`, the running usage after that many turns that saw a result. */
+function turnsOfUsage(turns: number): Usage {
+  return {
+    inputTokens: TURN_USAGE.inputTokens * turns,
+    outputTokens: TURN_USAGE.outputTokens * turns,
+    cacheReadTokens: TURN_USAGE.cacheReadTokens * turns,
+    cacheWriteTokens: TURN_USAGE.cacheWriteTokens * turns,
+  };
 }
 
 /** Commits what a test wrote into a home on the board's side, as an earlier turn's push would have. */
@@ -244,6 +324,26 @@ const stewardTurn = {
   trigger: { kind: "ops_event" as const, from: "board", fromUser: false, reason: "a role gap" },
   priority: 0,
 };
+
+/** A scheduled reflection of a citizen's home in a scope. */
+function reflection(agent: string, project = "society") {
+  return {
+    agent,
+    project,
+    trigger: { kind: "reflection" as const, reason: "scheduled reflection" },
+    priority: 0,
+  };
+}
+
+/** A wake the user asked of a citizen's home in a scope. */
+function manual(agent: string, project: string) {
+  return {
+    agent,
+    project,
+    trigger: { kind: "manual" as const, fromUser: true, reason: "work" },
+    priority: 2,
+  };
+}
 
 /** Logs a spend report worded as the scheduler's `reportCost` words it. */
 async function spendReport(board: Board, turns: number, cost: number): Promise<void> {
@@ -1038,6 +1138,110 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn({ ...legacy, costUsd: 0.5 });
     await run(dispatch);
     expect(backend.startedFrom).toEqual([0, 0.25, 0.5]);
+    // A turn that reports none, as one whose resume failed, leaves the session's total as it was.
+    backend.failNext = true;
+    const failed = await run(dispatch);
+    expect(failed).toMatchObject({ resumeFailed: "retry", costUsd: 0, sessionCostUsd: 0.75 });
+    await run(dispatch);
+    expect(backend.startedFrom).toEqual([0, 0.25, 0.5, 0.75, 0.75]);
+  });
+
+  it("hands a resumed session the running usage its last turn reported, and none a record does not hold", async () => {
+    const { board } = await Board.init(dir, { name: "usage" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const backend = new UsageTotalingBackend();
+    const { run, host } = await start(board, backend);
+    const dispatch = {
+      agent: "steward-1",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+    };
+    await run(dispatch);
+    const second = await run(dispatch);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(1)]);
+    expect(second).toMatchObject({ usage: TURN_USAGE, sessionUsage: turnsOfUsage(2) });
+
+    // A turn that saw no result reports no running usage, and the session's stays as it was.
+    backend.noResult = true;
+    expect((await run(dispatch)).sessionUsage).toEqual(turnsOfUsage(2));
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toEqual(turnsOfUsage(2));
+
+    // A runner from before reports none at all, and the record then holds none.
+    const close = host.closeTurn.bind(host);
+    const older = vi.spyOn(host, "closeTurn").mockImplementation((turnId, outcome) => {
+      const { sessionUsage: _unknown, ...before } = outcome;
+      return close(turnId, before);
+    });
+    const unreported = await run(dispatch);
+    older.mockRestore();
+    expect(unreported).not.toHaveProperty("sessionUsage");
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toBeUndefined();
+
+    // Nor does a record of another session hand its running usage on.
+    const last = await run(dispatch);
+    expect(last.sessionUsage).toBeDefined();
+    await board.finishTurn({ ...last, session: "session-0" });
+    await run(dispatch);
+    expect(backend.startedFrom.at(-1)).toBeUndefined();
+  });
+
+  it("keeps a session's running usage through a turn that never reached its CLI", async () => {
+    const { board } = await Board.init(dir, { name: "usage-unstarted" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const backend = new UsageTotalingBackend();
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const dispatch = {
+      agent: "steward-1",
+      project: "society",
+      thread: { id: ask.id, task: false },
+      trigger: { kind: "manual" as const, fromUser: false, reason: "test" },
+      priority: 1,
+    };
+    await society.run(dispatch);
+    await society.run(dispatch);
+
+    // The board's copy never arrives, so the runner fails the turn before the CLI starts.
+    dropping = true;
+    const unpulled = await society.run(dispatch);
+    dropping = false;
+    expect(unpulled.error).toMatch(/^the runner could not run the turn/);
+    expect(unpulled).toMatchObject({ session: "session-1", sessionUsage: turnsOfUsage(2) });
+
+    // Nor from a workspace that could not be prepared: a file stands where its folder goes.
+    const workspace = backend.cwds.at(-1) ?? "";
+    await rm(workspace, { recursive: true });
+    await writeFile(workspace, "", "utf8");
+    const unprepared = await society.run(dispatch);
+    expect(unprepared.error).toMatch(/^could not prepare the workspace/);
+    expect(unprepared).toMatchObject({ session: "session-1", sessionUsage: turnsOfUsage(2) });
+    await rm(workspace);
+
+    await society.run(dispatch);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(1), turnsOfUsage(2)]);
+  });
+
+  it("hands a warm session that starts on a saved session the running usage its last turn reported", async () => {
+    const { board } = await Board.init(dir, { name: "warm-usage" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const backend = new UsageTotalingBackend();
+    const { run } = await start(board, backend, { residentIdleMs: 60_000 });
+    const post = { ...deskPost, agent: "concierge-1" };
+    await run(post);
+    expect((await run(post)).sessionUsage).toEqual(turnsOfUsage(2));
+    // A new model starts the warm session again, on the saved session.
+    await board.setAgentModel(USER, "concierge-1", "sonnet");
+    const resumed = await run(post);
+    expect(backend.startedFrom).toEqual([undefined, turnsOfUsage(2)]);
+    expect(resumed).toMatchObject({ usage: TURN_USAGE, sessionUsage: turnsOfUsage(3) });
   });
 
   it("keeps no session from a turn whose CLI never started, so the conversation's next turn starts one", async () => {
@@ -1264,6 +1468,147 @@ describe("turns on a runner over the runner protocol", () => {
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
     ]);
+  });
+
+  it("starts a society role's home afresh once a reflection there completes, warm or cold, and tells its next turn", async () => {
+    const { board } = await Board.init(dir, { name: "afresh" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const topic = await board.openThread(USER, { channel: "general", title: "a question" });
+    const handed: Array<[string, string, boolean]> = [];
+    const prompts: string[] = [];
+    const closes: string[] = [];
+    let made = 0;
+    let failNext = false;
+    const ran = (): TurnResult => {
+      if (failNext) {
+        failNext = false;
+        return { ...completed(""), status: null, exitReason: "timeout", error: "turn timed out" };
+      }
+      return { ...completed("ran"), contextTokens: 4_321 };
+    };
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.spec.agent, request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(ran());
+      },
+      startResident: (spec, resident) => {
+        handed.push([spec.agent, resident.session, resident.newSession]);
+        return Promise.resolve({
+          session: resident.session,
+          runTurn: (prompt) => {
+            prompts.push(prompt);
+            return Promise.resolve(ran());
+          },
+          close: () => {
+            closes.push(resident.session);
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    const { run } = await start(board, backend);
+    const steward = { ...stewardTurn, agent: "steward-1" };
+    const save = "This conversation's session ends with this turn";
+    const note = "## Your session started afresh";
+
+    // A cold home, with a thread beside it: the turn records how large its session had grown.
+    const first = await run(steward);
+    expect(first.contextTokens).toBe(4_321);
+    await run({ ...steward, thread: { id: topic.id, task: false } });
+    const reflected = await run(reflection("steward-1"));
+    expect(reflected).toMatchObject({
+      exitReason: "completed",
+      session: "s-1",
+      sessionDropped: true,
+    });
+    expect(prompts.at(-1)).toContain(save);
+    expect(await board.readSessions("steward-1", "society")).toEqual({ runner: "pod" });
+    expect(await board.readSessions("steward-1", "society", topic.id)).toEqual({
+      claude: "s-2",
+      runner: "pod",
+    });
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.completed" && event.payload["trigger"] === "reflection",
+    );
+    expect(ended.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ session: "s-1", sessionDropped: true, contextTokens: 4_321 }),
+    ]);
+    // The next home turn starts a session, told why rather than given the first-turn notes, and
+    // the one after resumes it, told nothing.
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", true]);
+    expect(prompts.at(-1)).toContain(note);
+    expect(prompts.at(-1)).not.toContain("## First turn");
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // A reflection that fails keeps the session.
+    failNext = true;
+    const failed = await run(reflection("steward-1"));
+    expect(failed.exitReason).toBe("timeout");
+    expect(failed.sessionDropped).toBeUndefined();
+    await run(steward);
+    expect(handed.at(-1)).toEqual(["steward-1", "s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // A warm home goes the same way, though its reflection changed no memory: the runner starts
+    // the warm session afresh once the job names none.
+    const concierge = { ...deskPost, agent: "concierge-1" };
+    await run(concierge);
+    expect(handed.at(-1)).toEqual(["concierge-1", "s-4", true]);
+    expect((await run(reflection("concierge-1"))).sessionDropped).toBe(true);
+    expect(closes).toEqual([]);
+    await run(concierge);
+    expect(closes).toEqual(["s-4"]);
+    expect(handed.at(-1)).toEqual(["concierge-1", "s-5", true]);
+    expect(prompts.at(-1)).toContain(note);
+  });
+
+  it("keeps the session after a reflection outside a society role's home", async () => {
+    const { board } = await Board.init(dir, { name: "kept" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const handed: Array<[string, boolean]> = [];
+    const prompts: string[] = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    // A work role's home in its project, and its home outside projects, where it was asked.
+    for (const project of ["demo", "society"]) {
+      await run(manual("eng-1", project));
+      const reflected = await run(reflection("eng-1", project));
+      expect(reflected.sessionDropped).toBeUndefined();
+      expect(prompts.at(-1)).toContain("## Reflection");
+      expect(prompts.at(-1)).not.toContain("This conversation's session ends with this turn");
+      await run(manual("eng-1", project));
+      expect(handed.at(-1)).toEqual([handed.at(-2)?.[0], false]);
+    }
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-1", runner: "pod" });
+    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-2", runner: "pod" });
   });
 
   it("records a turn the model service turned away as transient, and only a failed one", async () => {
@@ -2253,6 +2598,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2382,6 +2728,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: false,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2637,6 +2984,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -2750,6 +3098,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -3343,6 +3692,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: false,
       quotaReads: false,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -3450,6 +3800,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: false,
       quotaReads: false,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -3553,6 +3904,7 @@ describe("turns on a runner over the runner protocol", () => {
           branchChanges: true,
           quotaReads: true,
           imageReads: false,
+          projectMoves: false,
           capabilities: [],
           slots: null,
           turns: society.runner.turns,
@@ -3881,6 +4233,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: false,
       imageReads: false,
+      projectMoves: false,
       capabilities: [],
       slots: null,
       turns: [],

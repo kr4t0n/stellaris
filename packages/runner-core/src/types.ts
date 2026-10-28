@@ -55,6 +55,8 @@ export interface TurnRequest {
   readonly statusSchema: Record<string, unknown>;
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   readonly costSoFarUsd?: number | undefined;
+  /** The session's running usage after its last turn, when the board holds it for the session. */
+  readonly usageSoFar?: Usage | undefined;
 }
 
 export interface TurnResult {
@@ -74,6 +76,13 @@ export interface TurnResult {
   readonly model?: string | undefined;
   /** The session's running total after this turn, for CLIs that report one; `costUsd` is this turn's share. */
   readonly sessionCostUsd?: number | undefined;
+  /** The session's running usage after this turn, for CLIs that report one; `usage` is this turn's share. */
+  readonly sessionUsage?: Usage | undefined;
+  /**
+   * The whole input of the turn's latest model call in the session's own thread, cached or not,
+   * sub-agents' calls left out: how large the session had grown. Absent when it made no call.
+   */
+  readonly contextTokens?: number | undefined;
   /** The CLI's plan quota as the turn's stream last reported it, when it reported any. */
   readonly quota?: CliQuota | undefined;
   /** Set when the CLI could not resume the requested session, which failed the turn before any model call. */
@@ -111,6 +120,8 @@ export interface ResidentStart {
   readonly statusSchema: Record<string, unknown>;
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   readonly costSoFarUsd?: number | undefined;
+  /** The session's running usage after its last turn, when the board holds it for the session. */
+  readonly usageSoFar?: Usage | undefined;
 }
 
 /** A warm session: the CLI process stays alive between turns and each prompt becomes one turn. */

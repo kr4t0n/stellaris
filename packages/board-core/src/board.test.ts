@@ -839,6 +839,121 @@ describe("Board", () => {
     await board.archiveProject(USER, { project: "lab", reason: "done" });
   });
 
+  it("lets only the user move a project, never while a task lands or a turn runs there, and records where it went", async () => {
+    const { board } = await society();
+    await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "lab-box");
+    await expect(board.prepareProjectMove(USER, "demo", "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("its first turn places it"),
+    });
+    await board.placeProject("demo", "pod");
+    const planners: Actor[] = [
+      ENG,
+      { name: "stew", role: "steward" },
+      { name: "concierge-1", role: "concierge" },
+    ];
+    for (const actor of planners) {
+      await expect(board.prepareProjectMove(actor, "demo", "lab-box")).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+      await expect(
+        board.recordProjectMove(actor, { slug: "demo", from: "pod", to: "lab-box", carried: 1 }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    }
+    await expect(board.prepareProjectMove(USER, "demo", "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("already lives on pod"),
+    });
+    await expect(board.prepareProjectMove(USER, "demo", "elsewhere")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+
+    // A task in play moves with its branch; the checks name it, for what the new runner must offer.
+    const inPlay = await board.createTask(USER, {
+      project: "demo",
+      title: "train",
+      required_capabilities: ["gpu"],
+    });
+    const prepared = await board.prepareProjectMove(USER, "demo", "lab-box");
+    expect(prepared.project.runner).toBe("pod");
+    expect(prepared.inPlay.map((task) => [task.id, task.requiredCapabilities])).toEqual([
+      [inPlay.id, ["gpu"]],
+    ]);
+
+    // A turn in any of the project's conversations refuses it, as an archive is refused.
+    let inFlight: TurnInFlight[] = [{ agent: "eng-1", scope: "demo", thread: inPlay.id }];
+    board.watchTurns(() => inFlight);
+    await expect(board.prepareProjectMove(USER, "demo", "lab-box")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("project demo cannot be moved while eng-1 is in a turn"),
+    });
+    inFlight = [{ agent: "concierge-1", scope: "society", place: "demo" }];
+    await expect(board.prepareProjectMove(USER, "demo", "lab-box")).rejects.toMatchObject(
+      cut("concierge-1"),
+    );
+    inFlight = [];
+
+    // A task landing lands on the old runner, so the move waits until it has.
+    await board.configureProject(USER, { project: "demo", on_done: "merge" });
+    const landing = await board.createTask(USER, { project: "demo", title: "land" });
+    await board.claimTask(ENG, { task_id: landing.id });
+    await board.advanceTask(ENG, { task_id: landing.id });
+    await expect(board.prepareProjectMove(USER, "demo", "lab-box")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining(`land on pod (${landing.id})`),
+    });
+    await board.finishCompletion(SYSTEM_ACTOR, { taskId: landing.id, ok: true, detail: "merged" });
+    await board.prepareProjectMove(USER, "demo", "lab-box");
+
+    // Recorded, the project's later turns go to the new runner, and the log says from where.
+    const moved = await board.recordProjectMove(USER, {
+      slug: "demo",
+      from: "pod",
+      to: "lab-box",
+      carried: 3,
+    });
+    expect(moved.runner).toBe("lab-box");
+    expect((await board.readProject("demo")).runner).toBe("lab-box");
+    expect(await board.placeProject("demo", "pod")).toBe("lab-box");
+    const logged = (await board.readEvents(null)).filter((event) => event.type === "project.moved");
+    expect(logged.map((event) => [event.actor, event.payload])).toEqual([
+      ["user", { slug: "demo", from: "pod", to: "lab-box", carried: 3 }],
+    ]);
+    // A record of a move from where the project no longer lives no longer applies.
+    await expect(
+      board.recordProjectMove(USER, { slug: "demo", from: "pod", to: "lab-box", carried: 3 }),
+    ).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: expect.stringContaining("no longer lives on pod"),
+    });
+  });
+
+  it("keeps a move's repository outside the projection, and removes what a crash left as the board opens", async () => {
+    const { board } = await society();
+    const id = await board.openMoveRepo();
+    const repository = path.join(board.moveRepos, `${id}.git`);
+    expect(path.relative(board.paths.board, repository).startsWith("..")).toBe(true);
+    expect(
+      (await execa("git", ["rev-parse", "--is-bare-repository"], { cwd: repository })).stdout,
+    ).toBe("true");
+    expect(
+      (await execa("git", ["config", "receive.fsckObjects"], { cwd: repository })).stdout,
+    ).toBe("true");
+    expect(Object.keys(await board.boardManifest()).filter((file) => file.includes(id))).toEqual(
+      [],
+    );
+    await board.dropMoveRepo(id);
+    await expect(stat(repository)).rejects.toMatchObject({ code: "ENOENT" });
+
+    // A move never outlives the server's process.
+    const left = await board.openMoveRepo();
+    await Board.open(dir, { now });
+    await expect(stat(path.join(board.moveRepos, `${left}.git`))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("refuses to end a conversation under another citizen's turn, but not under the caller's own", async () => {
     const { board } = await society();
     let inFlight: TurnInFlight[] = [];

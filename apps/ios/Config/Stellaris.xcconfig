@@ -1,0 +1,16 @@
+// The settings that name an Apple developer account and a board. A checkout builds for the
+// simulator with these; a build for a device sets its own in Local.xcconfig beside this file,
+// which git ignores (start from Local.xcconfig.example).
+
+// The app's bundle ID, registered with the Associated Domains capability.
+STELLARIS_BUNDLE_ID = com.example.stellaris
+
+// The team that signs the app, from Membership details on developer.apple.com. None is needed to
+// build for the simulator.
+STELLARIS_TEAM =
+
+// The host of the board the app signs in to with GitHub. The app lists it as an associated domain,
+// and the board names the app in its association file when STELLARIS_APPLE_APP_ID is set.
+STELLARIS_BOARD_HOST = board.example.com
+
+#include? "Local.xcconfig"

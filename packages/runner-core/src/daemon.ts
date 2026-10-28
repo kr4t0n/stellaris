@@ -274,6 +274,7 @@ export class RunnerDaemon {
           branchChanges: true,
           quotaReads: true,
           imageReads: true,
+          projectMoves: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
@@ -367,6 +368,15 @@ export class RunnerDaemon {
       case "image":
         answer(this.executor.readImage(message.read));
         return;
+      case "export":
+        answer(this.executor.exportProject(message.export, this.client.moveRemote()));
+        return;
+      case "import":
+        answer(this.executor.importProject(message.import, this.client.moveRemote()));
+        return;
+      case "release":
+        answer(this.executor.releaseProject(message.release.slug));
+        return;
       case "steer": {
         const control = this.controls.get(message.turnId);
         answer(control === undefined ? Promise.resolve(false) : control.steer(message.steer));
@@ -440,6 +450,11 @@ export class RunnerDaemon {
         work: null,
         leftovers: false,
       };
+    }
+    // A turn that reports no running usage, as one that saw no result or never reached its CLI,
+    // leaves the session's as the job gave it.
+    if (outcome.sessionUsage === undefined && job.usageSoFar !== undefined) {
+      outcome = { ...outcome, sessionUsage: job.usageSoFar };
     }
     try {
       await this.homes.publish(job.agent, job.turnId);

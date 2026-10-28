@@ -205,11 +205,43 @@ describe("server config", () => {
       clientId: "Iv1.abc",
       clientSecret: "secret",
       users: ["kr4t0n", "octocat"],
+      appleAppId: null,
     });
     expect(() =>
       loadServerConfig({ ...github, STELLARIS_GITHUB_CLIENT_SECRET: undefined }),
     ).toThrow(/together/);
     expect(() => loadServerConfig({ ...github, STELLARIS_GITHUB_USERS: " " })).toThrow(/together/);
+  });
+
+  it("names the iOS app that may sign in only as Apple names it, and only beside GitHub", () => {
+    const github = {
+      STELLARIS_GITHUB_CLIENT_ID: "Iv1.abc",
+      STELLARIS_GITHUB_CLIENT_SECRET: "secret",
+      STELLARIS_GITHUB_USERS: "octocat",
+    };
+    const appleAppId = (value: string | undefined) =>
+      loadServerConfig({ ...github, STELLARIS_APPLE_APP_ID: value }).github?.appleAppId;
+    expect(appleAppId(undefined)).toBeNull();
+    expect(appleAppId(" ")).toBeNull();
+    expect(appleAppId("ABCDE12345.com.example.app")).toBe("ABCDE12345.com.example.app");
+    expect(appleAppId(" ABCDE12345.com.example.my-app ")).toBe("ABCDE12345.com.example.my-app");
+    // A value the board can't use stops the start, so a typo never leaves the app unable to sign in.
+    for (const value of [
+      "com.example.app",
+      "abcde12345.com.example.app",
+      "ABCDE1234.com.example.app",
+      "ABCDE12345.",
+      "ABCDE12345.com..app",
+      "ABCDE12345.com.example.app/",
+      "ABCDE12345.com.example_app",
+      "true",
+    ]) {
+      expect(() => appleAppId(value)).toThrow(/<team id>\.<bundle id>/);
+    }
+    // Without GitHub sign-in there is nothing for the app to sign in with.
+    expect(() =>
+      loadServerConfig({ STELLARIS_APPLE_APP_ID: "ABCDE12345.com.example.app" }),
+    ).toThrow(/needs GitHub sign-in/);
   });
 });
 

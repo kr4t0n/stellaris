@@ -136,6 +136,8 @@ interface OpenTurn {
   /** The turn's own token, revoked when the turn ends; a warm session's lives on with the session. */
   readonly coldToken: string | null;
   readonly residentKey: string | null;
+  /** Whether a reflection that completes here ends the session: a society role's home. */
+  readonly afreshAfterReflection: boolean;
   readonly keepLeases: ReturnType<typeof setInterval>;
   readonly done: (record: TurnRecord) => void;
   /** Ends the turn for the scheduler when its end could not be recorded. */
@@ -348,11 +350,21 @@ export class TurnHost {
       !newSession && lastTurn?.session === recorded
         ? (lastTurn.sessionCostUsd ?? lastTurn.costUsd)
         : 0;
+    // Its running usage too, which records from before `sessionUsage`, or from a runner that
+    // reports none, do not hold: the adapter then counts the turn without it.
+    const usageSoFar =
+      !newSession && lastTurn?.session === recorded ? lastTurn.sessionUsage : undefined;
     // Failed resumes of this session counted so far, while they come one after another.
     const resumeRetries =
       !newSession && lastTurn?.session === recorded && lastTurn.resumeFailed === "retry"
         ? (lastTurn.resumeRetries ?? 1)
         : 0;
+    // A society role's home keeps no session past a reflection, which saved what it keeps into the
+    // home's files; the turn after one starts afresh, and is no citizen's first turn.
+    const afreshAfterReflection =
+      charter.societyScope && agent.role !== USER_ROLE && societyScope && part === undefined;
+    const afterReflection =
+      lastTurn?.trigger.kind === "reflection" && lastTurn.sessionDropped === true;
 
     // The digest of this turn's conversation only: a citizen's turns in its other conversations
     // may run at the same time, and each reads and acts on its own. A new thread conversation
@@ -379,7 +391,7 @@ export class TurnHost {
         ? []
         : (await this.board.heldClaims(agent.name)).filter((each) => each.id === task.id);
     const onboarding: OnboardingContext | null =
-      dispatch.onboarding || (newSession && part === undefined)
+      dispatch.onboarding || (newSession && part === undefined && !afterReflection)
         ? {
             agentName: agent.name,
             roleSummary: charter.purpose,
@@ -493,6 +505,7 @@ export class TurnHost {
       project,
       lastTurn,
       onboarding,
+      afreshAfterReflection,
       societyView,
       runners,
       knowledge,
@@ -519,6 +532,7 @@ export class TurnHost {
       ...base,
       session: recorded ?? null,
       sessionCostUsd: costSoFarUsd,
+      ...(usageSoFar === undefined ? {} : { sessionUsage: usageSoFar }),
     });
     if (record.id === undefined) {
       throw new Error("the board gave the turn no id");
@@ -536,6 +550,7 @@ export class TurnHost {
       ...(place === undefined ? {} : { place }),
       session: recorded ?? null,
       costSoFarUsd,
+      ...(usageSoFar === undefined ? {} : { usageSoFar }),
       instructions,
       prompt,
       mcp: { url: this.mcpUrl, token },
@@ -576,6 +591,7 @@ export class TurnHost {
       transcript: [],
       coldToken: residentKey === null ? token : null,
       residentKey: residentKey === null ? null : `${runner.name}|${residentKey}`,
+      afreshAfterReflection,
       keepLeases,
       done,
       fail,
@@ -772,8 +788,16 @@ export class TurnHost {
     const dropSession =
       job.session !== null &&
       (outcome.resumeFailed === "lost" || (resumeRetries ?? 0) >= RESUME_RETRIES);
+    // A society role's home starts afresh once a reflection there completed: the runner pushed the
+    // home before it reported the outcome, so the next turn's instructions carry what it kept.
+    const reflected =
+      turn.afreshAfterReflection &&
+      turn.record.trigger.kind === "reflection" &&
+      outcome.exitReason === "completed";
+    // The running usage is the runner's to report: it keeps the job's for a turn that saw none.
+    const { sessionUsage: _started, ...begun } = turn.record;
     const finished: TurnRecord = {
-      ...turn.record,
+      ...begun,
       session: outcome.session,
       endedAt: this.now().toISOString(),
       exitReason: outcome.exitReason,
@@ -782,6 +806,8 @@ export class TurnHost {
       usage: outcome.usage,
       costUsd: outcome.costUsd,
       sessionCostUsd: outcome.sessionCostUsd ?? turn.costSoFarUsd,
+      ...(outcome.sessionUsage === undefined ? {} : { sessionUsage: outcome.sessionUsage }),
+      ...(outcome.contextTokens === undefined ? {} : { contextTokens: outcome.contextTokens }),
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
       model: outcome.model ?? turn.configuredModel,
       ...(outcome.work === null ? {} : { work: outcome.work }),
@@ -789,7 +815,7 @@ export class TurnHost {
       ...(outcome.resumeFailed === undefined ? {} : { resumeFailed: outcome.resumeFailed }),
       ...(outcome.transient === true ? { transient: true } : {}),
       ...(resumeRetries === undefined ? {} : { resumeRetries }),
-      ...(dropSession ? { sessionDropped: true } : {}),
+      ...(dropSession || reflected ? { sessionDropped: true } : {}),
     };
     const ended = await this.conversationEnded(job);
     const closing = turn.record.trigger.kind === "closing";
@@ -810,6 +836,15 @@ export class TurnHost {
             resumeRetries,
           },
           "dropped a session its CLI could not resume",
+        );
+      } else if (reflected) {
+        // The session the reflection ran in goes, and one it started is never kept.
+        if (job.session !== null) {
+          await this.board.dropSession(job.agent, job.scope, job.cli, job.session, part);
+        }
+        this.log.info(
+          { agent: job.agent, project: job.scope, session: outcome.session },
+          "dropped a home session after its reflection",
         );
       } else if (outcome.session !== null && outcome.session !== job.session) {
         // A fresh session's id, or the real one of a CLI that assigns its own, is kept for the next turn.

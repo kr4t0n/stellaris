@@ -61,6 +61,76 @@ app.kubernetes.io/component: runner
 {{- end -}}
 
 {{/*
+A runner StatefulSet's selector labels, given the root and one of stellaris.runner.sets: a pool's
+add the pool's name, so no pool's selector matches another's pods.
+*/}}
+{{- define "stellaris.runner.setSelectorLabels" -}}
+{{- include "stellaris.runner.selectorLabels" .root }}
+{{- with .set.pool }}
+stellaris/runner-pool: {{ . | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The runner StatefulSets, set as .out.sets: the one the runner block describes when it lists no
+pools, else one per pool, each a dict of its name, its pool's name (empty for the one), and its
+values, the runner block's with the pool's fields over them. A pool's field replaces the block's,
+but image, config, and persistence take its fields one at a time. Refuses a pool it would read wrong,
+whichever template asks first.
+*/}}
+{{- define "stellaris.runner.sets" -}}
+{{- $root := .root -}}
+{{- $runner := $root.Values.runner -}}
+{{- $shared := list "enabled" "pools" "serverUrl" "networkPolicy" -}}
+{{- $byField := list "image" "config" "persistence" -}}
+{{- if not (or (empty $runner.pools) (kindIs "slice" $runner.pools)) -}}
+{{- fail "runner.pools must be a list of pools" -}}
+{{- end -}}
+{{- $sets := list -}}
+{{- $names := list -}}
+{{- range $pool := $runner.pools -}}
+{{- if not (and (kindIs "map" $pool) $pool.name) -}}
+{{- fail "runner.pools: each pool is a map with a name" -}}
+{{- end -}}
+{{- $poolName := toString $pool.name -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $poolName) -}}
+{{- fail (printf "runner.pools: %q is not a pool name (lowercase letters, digits, and dashes, starting and ending with a letter or digit)" $poolName) -}}
+{{- end -}}
+{{- if has $poolName $names -}}
+{{- fail (printf "runner.pools: %q names two pools" $poolName) -}}
+{{- end -}}
+{{- $names = append $names $poolName -}}
+{{- $name := printf "%s-runner-%s" (include "stellaris.fullname" $root) $poolName -}}
+{{- if gt (len $name) 52 -}}
+{{- fail (printf "runner.pools: pool %q's StatefulSet, %s, is longer than 52 characters; shorten the pool's name" $poolName $name) -}}
+{{- end -}}
+{{- $values := deepCopy (omit $runner "pools") -}}
+{{- range $key, $value := omit $pool "name" -}}
+{{- if has $key $shared -}}
+{{- fail (printf "runner.pools[%s]: %s is the same for every pool; set it under runner" $poolName $key) -}}
+{{- end -}}
+{{- if not (hasKey $runner $key) -}}
+{{- fail (printf "runner.pools[%s]: %s is not a runner field" $poolName $key) -}}
+{{- end -}}
+{{- if and (has $key $byField) (kindIs "map" $value) -}}
+{{- $merged := index $values $key | default dict -}}
+{{- range $field, $fieldValue := $value -}}
+{{- $_ := set $merged $field $fieldValue -}}
+{{- end -}}
+{{- $_ := set $values $key $merged -}}
+{{- else -}}
+{{- $_ := set $values $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- $sets = append $sets (dict "name" $name "pool" $poolName "values" $values) -}}
+{{- end -}}
+{{- if not $sets -}}
+{{- $sets = list (dict "name" (include "stellaris.runner.fullname" $root) "pool" "" "values" $runner) -}}
+{{- end -}}
+{{- $_ := set .out "sets" $sets -}}
+{{- end -}}
+
+{{/*
 The component's tag, else the top-level tag, else the chart's appVersion.
 */}}
 {{- define "stellaris.server.image" -}}
@@ -69,10 +139,14 @@ The component's tag, else the top-level tag, else the chart's appVersion.
 {{- printf "%s/%s:%s" $registry .Values.server.image.repository $tag -}}
 {{- end -}}
 
+{{/*
+Given the root and a runner StatefulSet's image, since a pool may set its own.
+*/}}
 {{- define "stellaris.runner.image" -}}
-{{- $registry := .Values.image.registry | default "docker.io" -}}
-{{- $tag := default (default .Chart.AppVersion .Values.image.tag) .Values.runner.image.tag -}}
-{{- printf "%s/%s:%s" $registry .Values.runner.image.repository $tag -}}
+{{- $root := .root -}}
+{{- $registry := $root.Values.image.registry | default "docker.io" -}}
+{{- $tag := default (default $root.Chart.AppVersion $root.Values.image.tag) .image.tag -}}
+{{- printf "%s/%s:%s" $registry .image.repository $tag -}}
 {{- end -}}
 
 {{/*
@@ -120,6 +194,13 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- fail (printf "auth.github.users: %q is not a GitHub login or user id" (toString .)) -}}
 {{- end -}}
 {{- end -}}
+{{- with $github.appleAppId -}}
+{{- if not (regexMatch "^[A-Z0-9]{10}[.][A-Za-z0-9-]+([.][A-Za-z0-9-]+)*$" (toString .)) -}}
+{{- fail (printf "auth.github.appleAppId: %q is not <team id>.<bundle id>" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- else if $github.appleAppId -}}
+{{- fail "auth.github.appleAppId needs GitHub sign-in: set auth.github.enabled" -}}
 {{- end -}}
 {{- range .Values.society.citizens -}}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9-]{0,31}$" (toString .name)) -}}
@@ -140,22 +221,36 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- if not (or .Values.server.enabled $runner.serverUrl) -}}
 {{- fail "runner.serverUrl is required when the chart deploys no server" -}}
 {{- end -}}
-{{- if and $runner.existingSecret (gt (int $runner.replicas) 1) -}}
-{{- fail "runner.existingSecret holds one runner's token, so runner.replicas must be 1; leave it empty and each replica enrolls" -}}
+{{- $sets := dict -}}
+{{- $_ := include "stellaris.runner.sets" (dict "root" . "out" $sets) -}}
+{{- $tokens := dict -}}
+{{- range $sets.sets -}}
+{{- $at := ternary "runner" (printf "runner.pools[%s]" .pool) (empty .pool) -}}
+{{- $values := .values -}}
+{{- if $values.existingSecret -}}
+{{- if gt (int $values.replicas) 1 -}}
+{{- fail (printf "%s.existingSecret holds one runner's token, so %s.replicas must be 1; leave it empty and each replica enrolls" $at $at) -}}
 {{- end -}}
-{{- range $runner.config.clis -}}
+{{- $token := printf "%s/%s" $values.existingSecret $values.existingSecretKey -}}
+{{- with index $tokens $token -}}
+{{- fail (printf "%s.existingSecret: %s holds one runner's token, which %s takes too; give each pool its own" $at $token .) -}}
+{{- end -}}
+{{- $_ := set $tokens $token $at -}}
+{{- end -}}
+{{- range $values.config.clis -}}
 {{- if not (has . (list "claude" "codex")) -}}
-{{- fail (printf "runner.config.clis: %q is not claude or codex" (toString .)) -}}
+{{- fail (printf "%s.config.clis: %q is not claude or codex" $at (toString .)) -}}
 {{- end -}}
 {{- end -}}
-{{- range $runner.extraVolumes -}}
+{{- range $values.extraVolumes -}}
 {{- if eq (toString .name) "home" -}}
-{{- fail "runner.extraVolumes: home is the runner's claim, which Kubernetes would put in its place; name the volume otherwise" -}}
+{{- fail (printf "%s.extraVolumes: home is the runner's claim, which Kubernetes would put in its place; name the volume otherwise" $at) -}}
 {{- end -}}
 {{- end -}}
-{{- range $runner.config.capabilities -}}
+{{- range $values.config.capabilities -}}
 {{- if not (regexMatch "^[^,]{1,64}$" (toString .)) -}}
-{{- fail (printf "runner.config.capabilities: %q must be 1 to 64 characters with no comma" (toString .)) -}}
+{{- fail (printf "%s.config.capabilities: %q must be 1 to 64 characters with no comma" $at (toString .)) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

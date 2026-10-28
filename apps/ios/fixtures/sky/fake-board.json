@@ -1,0 +1,756 @@
+[
+  {
+    "name": "the fake board",
+    "answers": {
+      "members": [
+        {
+          "name": "desk",
+          "role": "concierge",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "pod",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": ["lab"],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "stew",
+          "role": "steward",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        }
+      ],
+      "projects": [
+        {
+          "slug": "lab",
+          "name": "Lab",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": ["desk"],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "laptop"
+        }
+      ],
+      "scheduler": {"paused":false,"running":[],"pending":[],"resident":[],"signals":["role_gap:lab:referee"],"turns":[]},
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "project": "lab",
+          "title": "Compare shortest-path algorithms",
+          "status": "open",
+          "createdBy": "desk",
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "updatedAt": "2026-09-29T09:00:00.000Z",
+          "blockedBy": [],
+          "requiredCapabilities": [],
+          "stages": [
+            {"id":"s1","name":"Survey","role":"researcher","gate":false,"holders":["ada"],"completedBy":"ada","completedAt":"2026-09-29T09:00:00.000Z"},
+            {"id":"s2","name":"Sign off","agent":"user","gate":true,"holders":[]}
+          ],
+          "stage": "s2",
+          "stageSince": "2026-09-29T09:00:00.000Z",
+          "stageSeq": 2,
+          "onDone": "ghpr",
+          "pullRequest": {
+            "url": "https://github.com/acme/lab/pull/7",
+            "number": 7,
+            "subject": "feat: compare shortest-path algorithms",
+            "body": "Tabulates twelve methods.\n\nCo-Authored-By: ada <ada@x>",
+            "linkedBy": "ada",
+            "linkedAt": "2026-09-29T09:00:00.000Z"
+          },
+          "completing": false,
+          "body": "Survey the field and tabulate the methods."
+        }
+      ]
+    },
+    "model": {
+      "anchors": [{"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":112},{"id":"lab","label":"Lab","kind":"project","x":0,"y":-280,"radius":58}],
+      "stars": [
+        {"id":"desk","name":"desk","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "title": "Compare shortest-path algorithms",
+          "project": "lab",
+          "phase": "waiting",
+          "stage": "Sign off",
+          "holder": null,
+          "waitingFor": "user",
+          "linked": null,
+          "x": 0,
+          "y": -351
+        }
+      ],
+      "radius": 404
+    },
+    "labels": ["Task Compare shortest-path algorithms at Lab, stage Sign off, waiting for a holder, for user"],
+    "cameras": [
+      {
+        "pose": "a narrow display with a bar on its trailing side",
+        "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5123762376237624},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "the same display on its side",
+        "view": {"width":678,"height":466,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5767326732673267},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.5767326732673267}}]
+      },
+      {
+        "pose": "the leading part of a wide display, under a camera",
+        "view": {"width":519,"height":669,"left":0,"right":0,"top":32,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.6423267326732673},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "above a fold across the display",
+        "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+        "home": {"x":0,"y":0,"scale":0.4962871287128713},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.4962871287128713}}]
+      },
+      {
+        "pose": "the narrowest Split View",
+        "view": {"width":320,"height":678,"left":52,"right":0,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.45},
+        "frames": [{"anchor":"lab","camera":null}]
+      }
+    ]
+  },
+  {
+    "name": "crowded, with a citizen retired, a project archived, and a turn in flight",
+    "answers": {
+      "members": [
+        {
+          "name": "desk",
+          "role": "concierge",
+          "cli": "claude",
+          "model": "opus",
+          "effort": "xhigh",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "stellaris-runner-0",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": ["lab","atlas","beacon","comet"],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "stew",
+          "role": "steward",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "stellaris-runner-0",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "hal",
+          "role": "investigator",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "stellaris-runner-1",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "ada",
+          "role": "researcher",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "pod",
+          "status": "retired",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": "",
+          "retiredAt": "2026-09-29T09:00:00.000Z"
+        }
+      ],
+      "projects": [
+        {
+          "slug": "lab",
+          "name": "Lab",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": ["desk"],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "stellaris-runner-1"
+        },
+        {
+          "slug": "iphone",
+          "name": "iPhone study",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": [],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "laptop",
+          "archived": {"at":"2026-09-29T09:00:00.000Z","by":"user","reason":"merged into lab"}
+        }
+      ],
+      "scheduler": {
+        "paused": false,
+        "running": ["desk/society"],
+        "pending": [],
+        "resident": [],
+        "signals": ["role_gap:lab:referee"],
+        "turns": [{"turnId":"01M3Q2TTTTTTTTTTTTTTTTTTT1","agent":"desk","scope":"society","cli":"claude","askedIn":"general","steerable":true,"stoppable":true}]
+      },
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "project": "lab",
+          "title": "Compare shortest-path algorithms",
+          "status": "open",
+          "createdBy": "desk",
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "updatedAt": "2026-09-29T09:00:00.000Z",
+          "blockedBy": [],
+          "requiredCapabilities": [],
+          "stages": [
+            {"id":"s1","name":"Survey","role":"researcher","gate":false,"holders":["ada"],"completedBy":"ada","completedAt":"2026-09-29T09:00:00.000Z"},
+            {"id":"s2","name":"Sign off","agent":"user","gate":true,"holders":[]}
+          ],
+          "stage": "s2",
+          "stageSince": "2026-09-29T09:00:00.000Z",
+          "stageSeq": 2,
+          "onDone": "ghpr",
+          "pullRequest": {
+            "url": "https://github.com/acme/lab/pull/7",
+            "number": 7,
+            "subject": "feat: compare shortest-path algorithms",
+            "body": "Tabulates twelve methods.\n\nCo-Authored-By: ada <ada@x>",
+            "linkedBy": "ada",
+            "linkedAt": "2026-09-29T09:00:00.000Z"
+          },
+          "completing": false,
+          "body": "Survey the field and tabulate the methods."
+        }
+      ]
+    },
+    "model": {
+      "anchors": [
+        {"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":140.16652224137047},
+        {"id":"lab","label":"Lab","kind":"project","x":0,"y":-280,"radius":58}
+      ],
+      "stars": [
+        {"id":"desk","name":"desk","cli":"claude","state":"working","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"hal","name":"hal","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":-96,"y":-8}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "title": "Compare shortest-path algorithms",
+          "project": "lab",
+          "phase": "waiting",
+          "stage": "Sign off",
+          "holder": null,
+          "waitingFor": "user",
+          "linked": null,
+          "x": 0,
+          "y": -351
+        }
+      ],
+      "radius": 404
+    },
+    "labels": ["Task Compare shortest-path algorithms at Lab, stage Sign off, waiting for a holder, for user"],
+    "cameras": [
+      {
+        "pose": "a narrow display with a bar on its trailing side",
+        "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5123762376237624},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "the same display on its side",
+        "view": {"width":678,"height":466,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5767326732673267},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.5767326732673267}}]
+      },
+      {
+        "pose": "the leading part of a wide display, under a camera",
+        "view": {"width":519,"height":669,"left":0,"right":0,"top":32,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.6423267326732673},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "above a fold across the display",
+        "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+        "home": {"x":0,"y":0,"scale":0.4962871287128713},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.4962871287128713}}]
+      },
+      {
+        "pose": "the narrowest Split View",
+        "view": {"width":320,"height":678,"left":52,"right":0,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.45},
+        "frames": [{"anchor":"lab","camera":null}]
+      }
+    ]
+  },
+  {
+    "name": "a check named for the user before the sign-off",
+    "answers": {
+      "members": [
+        {
+          "name": "desk",
+          "role": "concierge",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "pod",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": ["lab"],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "stew",
+          "role": "steward",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        }
+      ],
+      "projects": [
+        {
+          "slug": "lab",
+          "name": "Lab",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": ["desk"],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "laptop"
+        }
+      ],
+      "scheduler": {"paused":false,"running":[],"pending":[],"resident":[],"signals":["role_gap:lab:referee"],"turns":[]},
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "project": "lab",
+          "title": "Compare shortest-path algorithms",
+          "status": "open",
+          "createdBy": "desk",
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "updatedAt": "2026-09-29T09:00:00.000Z",
+          "blockedBy": [],
+          "requiredCapabilities": [],
+          "stages": [
+            {"id":"s1","name":"Survey","role":"researcher","gate":false,"holders":["ada"],"completedBy":"ada","completedAt":"2026-09-29T09:00:00.000Z"},
+            {"id":"s3","name":"Check","agent":"user","gate":true,"holders":[]},
+            {"id":"s2","name":"Sign off","agent":"user","gate":true,"holders":[]}
+          ],
+          "stage": "s3",
+          "stageSince": "2026-09-29T09:00:00.000Z",
+          "stageSeq": 2,
+          "onDone": "ghpr",
+          "completing": false,
+          "body": "Survey the field and tabulate the methods."
+        }
+      ]
+    },
+    "model": {
+      "anchors": [{"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":112},{"id":"lab","label":"Lab","kind":"project","x":0,"y":-280,"radius":58}],
+      "stars": [
+        {"id":"desk","name":"desk","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "title": "Compare shortest-path algorithms",
+          "project": "lab",
+          "phase": "waiting",
+          "stage": "Check",
+          "holder": null,
+          "waitingFor": "user",
+          "linked": null,
+          "x": 0,
+          "y": -351
+        }
+      ],
+      "radius": 404
+    },
+    "labels": ["Task Compare shortest-path algorithms at Lab, stage Check, waiting for a holder, for user"],
+    "cameras": [
+      {
+        "pose": "a narrow display with a bar on its trailing side",
+        "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5123762376237624},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "the same display on its side",
+        "view": {"width":678,"height":466,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5767326732673267},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.5767326732673267}}]
+      },
+      {
+        "pose": "the leading part of a wide display, under a camera",
+        "view": {"width":519,"height":669,"left":0,"right":0,"top":32,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.6423267326732673},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "above a fold across the display",
+        "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+        "home": {"x":0,"y":0,"scale":0.4962871287128713},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.4962871287128713}}]
+      },
+      {
+        "pose": "the narrowest Split View",
+        "view": {"width":320,"height":678,"left":52,"right":0,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.45},
+        "frames": [{"anchor":"lab","camera":null}]
+      }
+    ]
+  },
+  {
+    "name": "the study landing once the user signs off",
+    "answers": {
+      "members": [
+        {
+          "name": "desk",
+          "role": "concierge",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "pod",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": ["lab"],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "stew",
+          "role": "steward",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        }
+      ],
+      "projects": [
+        {
+          "slug": "lab",
+          "name": "Lab",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": ["desk"],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "laptop"
+        }
+      ],
+      "scheduler": {"paused":false,"running":[],"pending":[],"resident":[],"signals":["role_gap:lab:referee"],"turns":[]},
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "project": "lab",
+          "title": "Compare shortest-path algorithms",
+          "status": "open",
+          "createdBy": "desk",
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "updatedAt": "2026-09-29T09:00:00.000Z",
+          "blockedBy": [],
+          "requiredCapabilities": [],
+          "stages": [
+            {"id":"s1","name":"Survey","role":"researcher","gate":false,"holders":["ada"],"completedBy":"ada","completedAt":"2026-09-29T09:00:00.000Z"},
+            {"id":"s2","name":"Sign off","agent":"user","gate":true,"holders":["user"],"completedBy":"user","completedAt":"2026-09-29T09:00:00.000Z"}
+          ],
+          "stage": "s2",
+          "stageSince": "2026-09-29T09:00:00.000Z",
+          "stageSeq": 2,
+          "onDone": "ghpr",
+          "pullRequest": {
+            "url": "https://github.com/acme/lab/pull/7",
+            "number": 7,
+            "subject": "feat: compare shortest-path algorithms",
+            "body": "Tabulates twelve methods.\n\nCo-Authored-By: ada <ada@x>",
+            "linkedBy": "ada",
+            "linkedAt": "2026-09-29T09:00:00.000Z"
+          },
+          "completing": true,
+          "body": "Survey the field and tabulate the methods."
+        }
+      ]
+    },
+    "model": {
+      "anchors": [{"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":112},{"id":"lab","label":"Lab","kind":"project","x":0,"y":-280,"radius":58}],
+      "stars": [
+        {"id":"desk","name":"desk","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "title": "Compare shortest-path algorithms",
+          "project": "lab",
+          "phase": "landing",
+          "stage": "Sign off",
+          "holder": null,
+          "waitingFor": null,
+          "linked": null,
+          "x": 0,
+          "y": -351
+        }
+      ],
+      "radius": 404
+    },
+    "labels": ["Task Compare shortest-path algorithms at Lab, stage Sign off, landing"],
+    "cameras": [
+      {
+        "pose": "a narrow display with a bar on its trailing side",
+        "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5123762376237624},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "the same display on its side",
+        "view": {"width":678,"height":466,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5767326732673267},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.5767326732673267}}]
+      },
+      {
+        "pose": "the leading part of a wide display, under a camera",
+        "view": {"width":519,"height":669,"left":0,"right":0,"top":32,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.6423267326732673},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "above a fold across the display",
+        "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+        "home": {"x":0,"y":0,"scale":0.4962871287128713},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.4962871287128713}}]
+      },
+      {
+        "pose": "the narrowest Split View",
+        "view": {"width":320,"height":678,"left":52,"right":0,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.45},
+        "frames": [{"anchor":"lab","camera":null}]
+      }
+    ]
+  },
+  {
+    "name": "turns at lab for names the board doesn't list",
+    "answers": {
+      "members": [
+        {
+          "name": "desk",
+          "role": "concierge",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "homeRunner": "pod",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": ["lab"],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        },
+        {
+          "name": "stew",
+          "role": "steward",
+          "cli": "claude",
+          "lastModel": "claude-opus-5-5",
+          "status": "active",
+          "resident": false,
+          "skills": [],
+          "memberships": [],
+          "subscriptions": [],
+          "claimsHeld": 0,
+          "tasksDone": 0,
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "profile": ""
+        }
+      ],
+      "projects": [
+        {
+          "slug": "lab",
+          "name": "Lab",
+          "repo": null,
+          "defaultBranch": "main",
+          "channels": ["general"],
+          "members": ["desk"],
+          "approvers": [],
+          "requiredCapabilities": [],
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "onDone": "none",
+          "runner": "laptop"
+        }
+      ],
+      "scheduler": {"paused":false,"running":["ada/lab","bo/lab","cy/lab"],"pending":["di/lab","eve/lab"],"resident":[],"signals":["role_gap:lab:referee"],"turns":[]},
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "project": "lab",
+          "title": "Compare shortest-path algorithms",
+          "status": "open",
+          "createdBy": "desk",
+          "createdAt": "2026-09-29T09:00:00.000Z",
+          "updatedAt": "2026-09-29T09:00:00.000Z",
+          "blockedBy": [],
+          "requiredCapabilities": [],
+          "stages": [
+            {"id":"s1","name":"Survey","role":"researcher","gate":false,"holders":["ada"],"completedBy":"ada","completedAt":"2026-09-29T09:00:00.000Z"},
+            {"id":"s2","name":"Sign off","agent":"user","gate":true,"holders":[]}
+          ],
+          "stage": "s2",
+          "stageSince": "2026-09-29T09:00:00.000Z",
+          "stageSeq": 2,
+          "onDone": "ghpr",
+          "pullRequest": {
+            "url": "https://github.com/acme/lab/pull/7",
+            "number": 7,
+            "subject": "feat: compare shortest-path algorithms",
+            "body": "Tabulates twelve methods.\n\nCo-Authored-By: ada <ada@x>",
+            "linkedBy": "ada",
+            "linkedAt": "2026-09-29T09:00:00.000Z"
+          },
+          "completing": false,
+          "body": "Survey the field and tabulate the methods."
+        }
+      ]
+    },
+    "model": {
+      "anchors": [{"id":"society","label":"society","kind":"society","x":0,"y":0,"radius":112},{"id":"lab","label":"Lab","kind":"project","x":0,"y":-280,"radius":58}],
+      "stars": [
+        {"id":"desk","name":"desk","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":0,"y":0},
+        {"id":"stew","name":"stew","cli":"claude","state":"idle","resident":false,"anchor":"society","queuedFor":null,"x":46,"y":50}
+      ],
+      "tasks": [
+        {
+          "id": "01M3Q2AAAAAAAAAAAAAAAAAAA1",
+          "title": "Compare shortest-path algorithms",
+          "project": "lab",
+          "phase": "waiting",
+          "stage": "Sign off",
+          "holder": null,
+          "waitingFor": "user",
+          "linked": null,
+          "x": 0,
+          "y": -351
+        }
+      ],
+      "radius": 404
+    },
+    "labels": ["Task Compare shortest-path algorithms at Lab, stage Sign off, waiting for a holder, for user"],
+    "cameras": [
+      {
+        "pose": "a narrow display with a bar on its trailing side",
+        "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5123762376237624},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "the same display on its side",
+        "view": {"width":678,"height":466,"left":0,"right":52,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.5767326732673267},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.5767326732673267}}]
+      },
+      {
+        "pose": "the leading part of a wide display, under a camera",
+        "view": {"width":519,"height":669,"left":0,"right":0,"top":32,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.6423267326732673},
+        "frames": [{"anchor":"lab","camera":null}]
+      },
+      {
+        "pose": "above a fold across the display",
+        "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+        "home": {"x":0,"y":0,"scale":0.4962871287128713},
+        "frames": [{"anchor":"lab","camera":{"x":0,"y":-280,"scale":0.4962871287128713}}]
+      },
+      {
+        "pose": "the narrowest Split View",
+        "view": {"width":320,"height":678,"left":52,"right":0,"top":0,"bottom":0},
+        "home": {"x":0,"y":0,"scale":0.45},
+        "frames": [{"anchor":"lab","camera":null}]
+      }
+    ]
+  }
+]

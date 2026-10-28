@@ -175,6 +175,16 @@ export const TurnRecordSchema = z.object({
    * resumed session starts from it, so the next turn's own cost is measured from here.
    */
   sessionCostUsd: z.number().nonnegative().optional(),
+  /**
+   * The running usage the CLI reported for the session after this turn, when the runner reports
+   * one. A resumed session's next turn measures its own usage from here.
+   */
+  sessionUsage: UsageSchema.optional(),
+  /**
+   * The whole input of the turn's latest model call in the session's own thread, as the runner
+   * reported it: how large the session had grown. Absent for a turn that made no call.
+   */
+  contextTokens: z.number().int().nonnegative().optional(),
   toolCalls: z.number().int().nonnegative().default(0),
   /** The model the CLI reported for this turn, else the model configured for the agent, else null. */
   model: z.string().nullable().default(null),
@@ -188,7 +198,10 @@ export const TurnRecordSchema = z.object({
   transient: z.boolean().optional(),
   /** How many turns in a row, this one included, could not resume the session for a `retry`. */
   resumeRetries: z.number().int().positive().optional(),
-  /** Whether the server dropped the conversation's session after this turn, which the next starts anew. */
+  /**
+   * Whether the server dropped the conversation's session after this turn, which the next starts
+   * anew: one its CLI could not resume, or a society role's home after a reflection completed.
+   */
   sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),

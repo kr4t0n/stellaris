@@ -3,6 +3,7 @@ import {
   CliKindSchema,
   GitIdentityPartSchema,
   ModelOptionSchema,
+  ProjectSchema,
   RunnerOsSchema,
   type Project,
 } from "./board.js";
@@ -77,6 +78,11 @@ export const RunnerHelloSchema = z.object({
   quotaReads: z.boolean().default(false),
   /** Whether the runner reads an image a turn running there uploads; one from before never does. */
   imageReads: z.boolean().default(false),
+  /**
+   * Whether the runner carries a project's repository out to another runner and in from one, and
+   * removes its copy once the project has moved; one from before never does.
+   */
+  projectMoves: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /**
    * What the runner's account lacks of the git identity citizens' own commits carry, checked
@@ -232,6 +238,11 @@ export const TurnJobSchema = z.object({
   session: z.string().min(1).nullable(),
   /** The running total the session reported after its last turn, which a resumed session starts from. */
   costSoFarUsd: z.number().nonnegative(),
+  /**
+   * The session's running usage after its last turn, which a resumed session's own usage is
+   * measured from. Absent when the board holds none for the session, and from a server from before.
+   */
+  usageSoFar: UsageSchema.optional(),
   /** The rendered charter, norms, memory core, and skills index, with `PATH_TOKENS` for places. */
   instructions: z.string(),
   prompt: z.string(),
@@ -273,6 +284,17 @@ export const TurnOutcomeSchema = z.object({
   costUsd: z.number().nonnegative(),
   /** The session's running total after this turn, for CLIs that report one. */
   sessionCostUsd: z.number().nonnegative().optional(),
+  /**
+   * The session's running usage after this turn, for CLIs that report one, else the job's
+   * `usageSoFar`. A runner from before never sends it.
+   */
+  sessionUsage: UsageSchema.optional(),
+  /**
+   * The whole input of the turn's latest model call in the session's own thread, cached or not:
+   * how large the session had grown. Sub-agents' calls are left out. A turn that made no call,
+   * and a runner from before, never send it.
+   */
+  contextTokens: z.number().int().nonnegative().optional(),
   /**
    * The session the CLI used, which differs from the job's for CLIs that assign their own ids. A
    * turn whose CLI never started, because it failed or was stopped first, reports the job's own,
@@ -581,6 +603,97 @@ export const HeldWorkspacesSchema = z.object({ workspaces: z.array(HeldWorkspace
 export const SweepResultSchema = z.object({ kept: z.array(HeldWorkspaceSchema) });
 export type SweepResult = z.infer<typeof SweepResultSchema>;
 
+/**
+ * The most a move carries: the repository's packs as the old runner measures them before it
+ * pushes, and what the server's git route for a move reads of one request, held in memory.
+ */
+export const MOVE_PACK_LIMIT_BYTES = 256 * 1024 * 1024;
+
+/** A repository's branches and tags by full name (`refs/heads/…`, `refs/tags/…`), each at its object. */
+export const RepoRefsSchema = z.record(
+  z.string().regex(/^refs\/(heads|tags)\/\S+$/),
+  z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/),
+);
+export type RepoRefs = z.infer<typeof RepoRefsSchema>;
+
+/**
+ * A project's repository leaving this runner for another: every branch and tag goes to the
+ * move's repository on the server, once no worktree of the project holds work no branch does.
+ */
+export const ProjectExportSchema = z.object({ move: UlidSchema, repo: ProjectRepoSchema });
+export type ProjectExport = z.infer<typeof ProjectExportSchema>;
+
+/**
+ * Work in one of a project's worktrees that no branch holds, which keeps the project from moving:
+ * files not committed and commits on no branch. A citizen's own worktree on `agent/<name>` has no
+ * conversation.
+ */
+export const HeldWorkSchema = z.object({
+  agent: NameSchema,
+  conversation: WorkspaceConversationSchema.nullable(),
+  uncommitted: z.number().int().nonnegative(),
+  onNoBranch: z.number().int().nonnegative(),
+});
+export type HeldWork = z.infer<typeof HeldWorkSchema>;
+
+/**
+ * How an export went: the branches and tags pushed, at their objects, and the size of the packs
+ * measured before; or what kept it from starting, the work no branch holds or a repository too
+ * large to carry.
+ */
+export const ProjectExportedSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    refs: RepoRefsSchema,
+    bytes: z.number().int().nonnegative(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    held: z.array(HeldWorkSchema),
+    bytes: z.number().int().nonnegative(),
+  }),
+]);
+export type ProjectExported = z.infer<typeof ProjectExportedSchema>;
+
+/**
+ * A project's repository arriving on this runner: a clone of the move's repository on the server
+ * with every carried branch made local, its remote the project's own, which must answer a fetch,
+ * and for a project that lands through pull requests a `gh` signed in to the remote's host.
+ */
+export const ProjectImportSchema = z.object({
+  move: UlidSchema,
+  repo: ProjectRepoSchema,
+  pullRequests: z.boolean(),
+});
+export type ProjectImport = z.infer<typeof ProjectImportSchema>;
+
+/** What an import left in `repos/<slug>`: its branches and tags at their objects. */
+export const ProjectImportedSchema = z.object({ refs: RepoRefsSchema });
+export type ProjectImported = z.infer<typeof ProjectImportedSchema>;
+
+/** A project that moved to another runner: this one removes its worktrees and its clone. */
+export const ProjectReleaseSchema = z.object({ slug: NameSchema });
+export type ProjectRelease = z.infer<typeof ProjectReleaseSchema>;
+
+/** What a release removed: the project's worktrees, and whether its clone was there to remove. */
+export const ProjectReleasedSchema = z.object({
+  worktrees: z.number().int().nonnegative(),
+  clone: z.boolean(),
+});
+export type ProjectReleased = z.infer<typeof ProjectReleasedSchema>;
+
+/**
+ * How a move the user asked for ended: the project where it lives now; how many branches and tags
+ * travelled, or null when its old runner was away and nothing did; and whether the old runner
+ * removed its copy, or null when it was not asked to.
+ */
+export const ProjectMovedSchema = z.object({
+  project: ProjectSchema,
+  carried: z.number().int().nonnegative().nullable(),
+  released: z.object({ ok: z.boolean(), detail: z.string() }).nullable(),
+});
+export type ProjectMoved = z.infer<typeof ProjectMovedSchema>;
+
 /** Input for a running turn: what arrived in its conversation since it was last shown anything. */
 export const TurnSteerSchema = z.object({ id: z.uuid(), text: z.string().min(1) });
 export type TurnSteer = z.infer<typeof TurnSteerSchema>;
@@ -621,6 +734,19 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
   }),
   /** Answered with whether the turn was there to stop; it ends `stopped`. */
   z.object({ type: z.literal("stop"), request: z.string().min(1), turnId: UlidSchema }),
+  /**
+   * Answered with a `ProjectExported`. Sent only to runners whose hello says `projectMoves`, as are
+   * the import and the release.
+   */
+  z.object({ type: z.literal("export"), request: z.string().min(1), export: ProjectExportSchema }),
+  /** Answered with a `ProjectImported`. */
+  z.object({ type: z.literal("import"), request: z.string().min(1), import: ProjectImportSchema }),
+  /** Answered with a `ProjectReleased`. */
+  z.object({
+    type: z.literal("release"),
+    request: z.string().min(1),
+    release: ProjectReleaseSchema,
+  }),
   /**
    * A conversation ended: the runner removes every citizen's workspace for it but those a turn
    * still uses, and answers with a `SweepResult` naming those it kept for holding work on no branch.

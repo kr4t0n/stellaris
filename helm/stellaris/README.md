@@ -52,6 +52,8 @@ auth:
 
 Each listed login signs in as the user for 30 days; anyone else is turned away after GitHub says who they are. `clientSecret` puts the secret in a Secret the chart creates instead of one of your own.
 
+The iOS app signs in through the same OAuth app. A board the app signs in to sets `appleAppId` to the app's `<team id>.<bundle id>`, and then serves Apple's association file naming it at `/.well-known/apple-app-site-association`, which lets only that app take the board's `https` sign-in landing. The app's associated domain and its sign-in callback host must be `ingress.host`, the host in the OAuth app's callback URL. Apple's CDN fetches the file, so the board's address needs `https` with a valid certificate, no redirect, and reach from the public internet; the Ingress's default `path: /` sends `/.well-known/` to the server.
+
 ## Runners on other machines
 
 Start a runner on its machine with `STELLARIS_SERVER_URL` set to an address of this server it can reach. Asking to enroll needs no token, so each client address may ask five times in ten minutes; the server finds the client's address behind the chart's Ingress from `X-Forwarded-For`, trusting one proxy, so set `server.config.trustedProxies` to 2 if another proxy that appends to it, such as Cloudflare, sits in front of the Ingress. Approve only the code your own runner printed, since anyone may ask and a request names whatever hostname it likes. With no token, it asks the board to enroll it and prints a code and a link to the board's runners view, where you approve it under a name; it keeps the token approval gives it in its data directory and uses it from then on. A runner registered by hand (`POST /api/runners` with the user token, which shows the runner's token once) starts with `STELLARIS_RUNNER_TOKEN` instead. Each runner's agents reach the MCP endpoint at the runner's server address, unless `server.config.publicUrl` names one for every runner.
@@ -81,7 +83,7 @@ Logging in first means no turn fails for want of a login, since a runner waiting
 
 What a runner needs in its home before it starts, such as an SSH key for git over SSH, comes from a Secret in `runner.extraVolumes` and an init container in `runner.extraInitContainers` that copies it in, mounting the claim by its name, `home`, which no extra volume may take. `fsGroup` has made the home writable by the runner's user and given the Secret's files the same group before any container starts, so with `defaultMode: 0440` the init container needs no root; `values.yaml` shows one.
 
-Each replica is a runner that enrolls by itself. A project lives on the runner that took its first turn, so scaling down leaves the projects on the removed pods waiting until they come back; their claims stay, as they do on `helm uninstall`. Kubernetes refuses a change to a StatefulSet's claim template, so `runner.persistence` is fixed at install; resize a claim itself.
+Each replica is a runner that enrolls by itself. A project lives on the runner that took its first turn until the user moves it, so move the projects off a pod with **Runner…** on each project's page before scaling it away; scaling down leaves the projects still on the removed pods waiting until they come back; their claims stay, as they do on `helm uninstall`. Kubernetes refuses a change to a StatefulSet's claim template, so `runner.persistence` is fixed at install; resize a claim itself.
 
 Agents run with every permission and no sandbox, so a runner pod runs whatever they decide, with the pod's network. The pod gets no service links, and no service-account token unless `runner.automountServiceAccountToken` asks for one. `runner.networkPolicy.enabled` adds a policy that lets the pods reach DNS, the chart's server, and the internet outside `runner.networkPolicy.deniedCidrs` (the private ranges a cluster lives in, the shared range, and link-local, where cloud metadata services answer), and lets nothing in; it takes effect only under a network plugin that enforces NetworkPolicy. A `runner.serverUrl` at a private address, a package mirror in the cluster, or the cluster's API for runners with a service-account token, needs a rule in `runner.networkPolicy.extraEgress`. Agents the cluster should not host at all belong on a runner on another machine.
 
@@ -97,6 +99,76 @@ runner:
 The token gives every agent on those runners the account's permissions, whatever task it is on, so bind the account to no more than the runners' work needs, such as read-only access.
 
 With `runner.networkPolicy.enabled`, the policy is likely to block the API those agents need. They reach the API server through the cluster's `kubernetes` Service, whose address is the first of the service range (10.96.0.1 under kubeadm's default), and the API server's own address is often a private one: both inside `deniedCidrs`. Kubernetes leaves it to the network plugin which of the two a policy sees, so give them a rule in `runner.networkPolicy.extraEgress` for both, the Service's address on port 443 and the addresses and port that `kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes` lists. Nor is the policy a guard the other way, since an API server at a public address is outside `deniedCidrs`: keep the token from runners whose agents should not use the API rather than count on the policy.
+
+## Runner pools
+
+Every replica of `runner` is the same pod, so runners that differ, in where they run, what they offer, or their size, are pools. Each pool is a StatefulSet of its own, `stellaris-runner-<pool>`, whose pods (`stellaris-runner-<pool>-0`, …) and claims (`home-stellaris-runner-<pool>-0`, …) carry its name, and whose pods carry the label `stellaris/runner-pool`. A pool takes a `name` and any field of `runner` but `enabled`, `serverUrl`, `networkPolicy`, and `pools`, which every pool shares. A field it sets replaces `runner`'s, but `image`, `config`, and `persistence` take its fields one at a time, so a pool that sets `config.capabilities` keeps `runner.config.concurrency`:
+
+```yaml
+runner:
+  enabled: true
+  config:
+    concurrency: unlimited
+  pools:
+    - name: main
+      nodeSelector:
+        topology.kubernetes.io/zone: zone-a
+    - name: gpu
+      config:
+        capabilities: [gpu]
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      persistence:
+        size: 200Gi
+```
+
+Listing pools replaces `stellaris-runner`, and the chart then runs only the pools. Each pool's replicas enroll by themselves, its `persistence` is fixed once its StatefulSet exists, and the network policy covers every pool. A pool removed or renamed takes its StatefulSet with it and leaves its claims, so the projects on its runners wait until a pool of that name comes back.
+
+### Moving runners into a pool
+
+Listing pools removes `stellaris-runner` and starts each pool's pods on claims of their own, so a runner of `stellaris-runner` that should live on, with its logins, its token, and the projects on it, needs its volume given to the claim its pod in the pool will use before the pool starts. For `stellaris-runner-0` becoming `stellaris-runner-main-0`, pause the society on the board, wait until no one is working, and stop the runners:
+
+```bash
+kubectl -n stellaris scale statefulset stellaris-runner --replicas=0
+kubectl -n stellaris wait --for=delete pod/stellaris-runner-0 --timeout=20m
+```
+
+Keep the volume when its claim goes, since a provisioned volume has its class's reclaim policy, often `Delete`, then free it from the old claim:
+
+```bash
+pv=$(kubectl -n stellaris get pvc home-stellaris-runner-0 -o jsonpath='{.spec.volumeName}')
+kubectl patch pv "$pv" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+kubectl -n stellaris delete pvc home-stellaris-runner-0
+kubectl patch pv "$pv" --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+```
+
+Make the pool's claim on it, with the pool's labels, the volume's class, and its size:
+
+```bash
+class=$(kubectl get pv "$pv" -o jsonpath='{.spec.storageClassName}')
+size=$(kubectl get pv "$pv" -o jsonpath='{.spec.capacity.storage}')
+kubectl -n stellaris apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-stellaris-runner-main-0
+  labels:
+    app.kubernetes.io/name: stellaris
+    app.kubernetes.io/instance: stellaris
+    app.kubernetes.io/component: runner
+    stellaris/runner-pool: main
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: "$class"
+  volumeName: $pv
+  resources:
+    requests:
+      storage: $size
+EOF
+kubectl -n stellaris get pvc home-stellaris-runner-main-0   # Bound
+```
+
+Then upgrade with the pool listed and resume. The upgrade removes `stellaris-runner`, and `stellaris-runner-main-0` starts on the claim waiting under its name, where its runner finds its token and its logins and connects as the same runner, under the name the board approved; the hostname a runner reports matters only when it enrolls. A further runner, `stellaris-runner-1` into `stellaris-runner-main-1` or another pool's pod, moves the same way, its claim made before the upgrade that starts it.
 
 ## Ingress
 
@@ -144,6 +216,7 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `auth.github.clientSecret`             | empty                                               | Its client secret, for a Secret the chart creates                                |
 | `auth.github.existingSecret`, `Key`    | empty, `client-secret`                              | A Secret of your own holding the client secret, and its key                      |
 | `auth.github.users`                    | empty                                               | GitHub logins or numeric user ids allowed in                                     |
+| `auth.github.appleAppId`               | empty                                               | `STELLARIS_APPLE_APP_ID`, the iOS app that may sign in                           |
 | `server.config.logLevel`               | `info`                                              | `STELLARIS_LOG_LEVEL`                                                            |
 | `server.config.publicUrl`              | empty                                               | `STELLARIS_PUBLIC_URL`, one MCP address for every runner's agents                |
 | `server.config.concurrency`            | empty, no cap beyond each runner's                  | `STELLARIS_CONCURRENCY`, turns at once across the society                        |
@@ -161,6 +234,7 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `ingress.*`                            | disabled                                            | One Ingress for the server: `className`, `host`, `path`, `annotations`, `tls`    |
 | `runner.enabled`                       | `false`                                             | Run runners in the cluster                                                       |
 | `runner.replicas`                      | `1`                                                 | Runners, each enrolled by itself                                                 |
+| `runner.pools`                         | empty, one StatefulSet                              | Runners that differ, each pool a `name` and the `runner` fields it sets          |
 | `runner.image.repository`, `tag`       | `kr4t0n/stellaris-runner`, the chart's `appVersion` | The runner image                                                                 |
 | `runner.serverUrl`                     | empty, the chart's Service                          | `STELLARIS_SERVER_URL`; required with `server.enabled: false`                    |
 | `runner.existingSecret`, `Key`         | empty, `token`                                      | A Secret holding a token registered by hand, for one replica                     |

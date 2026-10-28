@@ -108,6 +108,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
       webDir,
       webBuilt,
       signIn: config.github === null ? "token" : `github (${config.github.users.join(", ")})`,
+      appleAppId: config.github?.appleAppId ?? null,
       trustedProxies: config.trustedProxies,
     },
     "board server listening",

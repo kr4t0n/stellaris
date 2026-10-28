@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/proposals"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": "00000000000000000000000004",
+      "kind": "member",
+      "proposedBy": "concierge-1",
+      "status": "proposed",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "charter": {
+        "name": "eng-2",
+        "role": "engineer",
+        "cli": "claude",
+        "memberships": [
+          "demo"
+        ],
+        "subscriptions": []
+      },
+      "body": "The backlog has grown past one engineer.\n"
+    },
+    {
+      "id": "00000000000000000000000006",
+      "kind": "channel",
+      "proposedBy": "eng-1",
+      "status": "proposed",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "charter": {
+        "project": "demo",
+        "name": "release",
+        "purpose": "The 0.4.0 release."
+      },
+      "body": "The release needs a workstream of its own.\n"
+    },
+    {
+      "id": "00000000000000000000000008",
+      "kind": "reallocation",
+      "proposedBy": "rev-1",
+      "status": "proposed",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "charter": {
+        "role": "reviewer",
+        "changes": {
+          "maxReplicas": 2
+        },
+        "description": "Two reviewers per project."
+      },
+      "body": "Reviews wait a day.\n"
+    }
+  ]
+}

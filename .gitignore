@@ -5,6 +5,10 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Swift packages' build output, and the workspace Xcode keeps for a package it opens
+.build/
+.swiftpm/
+
 # Environment and secrets
 .env
 .env.*

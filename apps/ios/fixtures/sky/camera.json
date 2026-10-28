@@ -1,0 +1,1907 @@
+[
+  {"name":"islands closed","view":{"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},"op":"freeWidth","expected":1600},
+  {"name":"islands closed","view":{"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},"op":"viewCenter","expected":{"x":800,"y":500}},
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1.35}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":1.25}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":200,"y":-100,"scale":2}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-100,"y":50,"scale":0.8}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":266.66666666666663,"y":-133.33333333333331,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-2266.666666666667,"y":1133.3333333333335,"scale":0.15}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":1}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":300,"y":-150,"scale":2}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":0,"y":0,"scale":0.8}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":366.66666666666663,"y":-183.33333333333331,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-2166.666666666667,"y":1083.3333333333335,"scale":0.15}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":1}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-33.333333333333286,"y":16.666666666666643,"scale":2.4000000000000004}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-2533.3333333333335,"y":1266.6666666666667,"scale":0.15}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":1.3565217391304347}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-16.987179487179503,"y":1.9935897435897516,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-75.96153846153845,"y":31.480769230769226,"scale":2.08}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-16.987179487179503,"y":1.9935897435897516,"scale":3}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-2550.320512820513,"y":1268.6602564102566,"scale":0.15}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":2.6}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":2.6}
+  },
+  {
+    "name": "islands closed",
+    "view": {"width":1600,"height":1000,"left":0,"right":0,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":1.3565217391304347}
+  },
+  {"name":"islands open","view":{"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},"op":"freeWidth","expected":600},
+  {"name":"islands open","view":{"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},"op":"viewCenter","expected":{"x":588,"y":500}},
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1.35}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.75}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":306,"y":-100,"scale":2}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-153,"y":50,"scale":0.8}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":408,"y":-133.33333333333331,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-3468,"y":1133.3333333333335,"scale":0.15}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.8695652173913043}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":406,"y":-150,"scale":2}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-53,"y":0,"scale":0.8}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":508,"y":-183.33333333333331,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-3368,"y":1083.3333333333335,"scale":0.15}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.8695652173913043}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-50.99999999999997,"y":16.666666666666643,"scale":2.4000000000000004}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-3876,"y":1266.6666666666667,"scale":0.15}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":2.6086956521739135}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":2.6086956521739135}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.8695652173913043}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-6.115384615384613,"y":1.9935897435897516,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-96.34615384615384,"y":31.480769230769226,"scale":2.08}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-6.115384615384613,"y":1.9935897435897516,"scale":3}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":1200,"y":300},
+    "expected": {"x":-3882.1153846153848,"y":1268.6602564102566,"scale":0.15}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":2.6}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":2.6}
+  },
+  {
+    "name": "islands open",
+    "view": {"width":1600,"height":1000,"left":288,"right":712,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.8695652173913043}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "freeWidth",
+    "expected": 414
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "viewCenter",
+    "expected": {"x":207,"y":339}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1.35}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.5175}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":71.25,"y":-67.8,"scale":2}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-35.625,"y":33.89999999999998,"scale":0.8}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":95,"y":-90.4,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-807.5,"y":768.4,"scale":0.15}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.6}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":171.25,"y":-117.8,"scale":2}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":64.375,"y":-16.100000000000023,"scale":0.8}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":195,"y":-140.4,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-707.5,"y":718.4,"scale":0.15}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.6}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-11.874999999999993,"y":11.29999999999999,"scale":2.4000000000000004}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-902.5,"y":858.8,"scale":0.15}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.8000000000000003}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.8000000000000003}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.6}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-30.192307692307693,"y":5.296153846153842,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-51.20192307692308,"y":25.28846153846154,"scale":2.08}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-30.192307692307693,"y":5.296153846153842,"scale":3}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":349.5,"y":203.4},
+    "expected": {"x":-932.6923076923077,"y":864.0961538461538,"scale":0.15}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.8000000000000003}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.8000000000000003}
+  },
+  {
+    "name": "a narrow display with a bar on its trailing side",
+    "view": {"width":466,"height":678,"left":0,"right":52,"top":0,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.6}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "freeWidth",
+    "expected": 669
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "viewCenter",
+    "expected": {"x":334.5,"y":510.5}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1.35}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.83625}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":83.625,"y":-88.1,"scale":2}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-41.8125,"y":44.04999999999998,"scale":0.8}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":111.5,"y":-117.46666666666667,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-947.75,"y":998.4666666666667,"scale":0.15}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.9695652173913043}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":183.625,"y":-138.1,"scale":2}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":58.1875,"y":-5.950000000000017,"scale":0.8}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":211.5,"y":-167.46666666666667,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-847.75,"y":948.4666666666667,"scale":0.15}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.9695652173913043}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-13.937499999999986,"y":14.68333333333333,"scale":2.4000000000000004}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-1059.25,"y":1115.9333333333334,"scale":0.15}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":2.9086956521739133}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":2.9086956521739133}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.9695652173913043}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-28.92307692307692,"y":3.214102564102568,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-53.58173076923076,"y":29.192307692307693,"scale":2.08}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-28.92307692307692,"y":3.214102564102568,"scale":3}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":334.3},
+    "expected": {"x":-1088.173076923077,"y":1119.147435897436,"scale":0.15}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":2.6}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":2.6}
+  },
+  {
+    "name": "a tall display with a bar and a camera at its top",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":70,"bottom":0},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.9695652173913043}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "freeWidth",
+    "expected": 669
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "viewCenter",
+    "expected": {"x":334.5,"y":224.5}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1.35}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.50125}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":83.625,"y":-40.099999999999994,"scale":2}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-41.8125,"y":20.049999999999997,"scale":0.8}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":111.5,"y":-53.466666666666654,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-947.75,"y":454.46666666666664,"scale":0.15}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.48840579710144927}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":183.625,"y":-90.1,"scale":2}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":58.1875,"y":-29.950000000000003,"scale":0.8}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":211.5,"y":-103.46666666666665,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-847.75,"y":404.46666666666664,"scale":0.15}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": null
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.48840579710144927}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-13.937499999999986,"y":6.6833333333333265,"scale":2.4000000000000004}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-1059.25,"y":507.9333333333333,"scale":0.15}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.465217391304348}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.465217391304348}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.48840579710144927}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-28.92307692307692,"y":8.137179487179491,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-53.58173076923076,"y":19.96153846153846,"scale":2.08}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-28.92307692307692,"y":8.137179487179491,"scale":3}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":501.75,"y":144.3},
+    "expected": {"x":-1088.173076923077,"y":516.0705128205128,"scale":0.15}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.465217391304348}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.465217391304348}
+  },
+  {
+    "name": "a fold across the middle as a bottom inset",
+    "view": {"width":669,"height":951,"left":0,"right":0,"top":24,"bottom":526},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.48840579710144927}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "freeWidth",
+    "expected": 240
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "viewCenter",
+    "expected": {"x":172,"y":344}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":1}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":34,"y":-62.8,"scale":2}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-17,"y":31.399999999999977,"scale":0.8}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":45.33333333333333,"y":-83.73333333333332,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-385.33333333333337,"y":711.7333333333333,"scale":0.15}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.34782608695652173}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":134,"y":-112.8,"scale":2}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":83,"y":-18.600000000000023,"scale":0.8}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":145.33333333333334,"y":-133.73333333333332,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-285.33333333333337,"y":661.7333333333333,"scale":0.15}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.34782608695652173}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-5.666666666666661,"y":10.466666666666654,"scale":2.4000000000000004}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-430.6666666666667,"y":795.4666666666667,"scale":0.15}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.0434782608695654}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.0434782608695654}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.34782608695652173}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-34.01282051282051,"y":5.8089743589743605,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-44.03846153846154,"y":24.326923076923073,"scale":2.08}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-34.01282051282051,"y":5.8089743589743605,"scale":3}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":240,"y":218.4},
+    "expected": {"x":-464.67948717948724,"y":801.2756410256411,"scale":0.15}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":1.0434782608695654}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":1.0434782608695654}
+  },
+  {
+    "name": "insets that leave less than the narrowest free sky",
+    "view": {"width":320,"height":678,"left":52,"right":40,"top":30,"bottom":20},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.34782608695652173}
+  },
+  {"name":"insets past the height","view":{"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},"op":"freeWidth","expected":400},
+  {"name":"insets past the height","view":{"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},"op":"viewCenter","expected":{"x":200,"y":150}},
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "homeCamera",
+    "radius": 120,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "homeCamera",
+    "radius": 400,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "homeCamera",
+    "radius": 4000,
+    "expected": {"x":0,"y":0,"scale":0.45}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 2,
+    "at": {"x":300,"y":170},
+    "expected": {"x":50,"y":10,"scale":2}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.8,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-25,"y":-5,"scale":0.8}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 100,
+    "at": {"x":300,"y":170},
+    "expected": {"x":66.66666666666666,"y":13.333333333333332,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":1},
+    "factor": 0.001,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-566.6666666666667,"y":-113.33333333333334,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 2,
+    "at": {"x":300,"y":170},
+    "expected": {"x":150,"y":-40,"scale":2}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.8,
+    "at": {"x":300,"y":170},
+    "expected": {"x":75,"y":-55,"scale":0.8}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 100,
+    "at": {"x":300,"y":170},
+    "expected": {"x":166.66666666666666,"y":-36.666666666666664,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "factor": 0.001,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-466.66666666666674,"y":-163.33333333333334,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":100,"y":-50,"scale":1},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 2,
+    "at": {"x":300,"y":170},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.8,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-8.333333333333321,"y":-1.6666666666666652,"scale":2.4000000000000004}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 100,
+    "at": {"x":300,"y":170},
+    "expected": {"x":0,"y":0,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":0,"y":0,"scale":3},
+    "factor": 0.001,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-633.3333333333334,"y":-126.66666666666667,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":0,"y":0,"scale":3},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 2,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-32.371794871794876,"y":13.275641025641026,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.8,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-47.11538461538461,"y":10.326923076923078,"scale":2.08}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 100,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-32.371794871794876,"y":13.275641025641026,"scale":3}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "zoomAt",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "factor": 0.001,
+    "at": {"x":300,"y":170},
+    "expected": {"x":-665.7051282051283,"y":-113.39102564102565,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":200,"y":0,"reach":100},
+    "expected": {"x":200,"y":0,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":900,"y":300,"reach":100},
+    "expected": {"x":900,"y":300,"scale":0.15}
+  },
+  {
+    "name": "insets past the height",
+    "view": {"width":400,"height":300,"left":0,"right":0,"top":200,"bottom":200},
+    "op": "frameSphere",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "sphere": {"x":2000,"y":0,"reach":300},
+    "expected": {"x":2000,"y":0,"scale":0.15}
+  },
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":1},"dx":40,"dy":-20,"expected":{"x":-40,"y":20,"scale":1}},
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":1},"dx":-13.5,"dy":7,"expected":{"x":13.5,"y":-7,"scale":1}},
+  {"name":"a drag","op":"panBy","camera":{"x":100,"y":-50,"scale":1},"dx":40,"dy":-20,"expected":{"x":60,"y":-30,"scale":1}},
+  {"name":"a drag","op":"panBy","camera":{"x":100,"y":-50,"scale":1},"dx":-13.5,"dy":7,"expected":{"x":113.5,"y":-57,"scale":1}},
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":3},"dx":40,"dy":-20,"expected":{"x":-13.333333333333334,"y":6.666666666666667,"scale":3}},
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":3},"dx":-13.5,"dy":7,"expected":{"x":4.5,"y":-2.3333333333333335,"scale":3}},
+  {
+    "name": "a drag",
+    "op": "panBy",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "dx": 40,
+    "dy": -20,
+    "expected": {"x":-52.88461538461539,"y":19.942307692307693,"scale":2.6}
+  },
+  {
+    "name": "a drag",
+    "op": "panBy",
+    "camera": {"x":-37.5,"y":12.25,"scale":2.6},
+    "dx": -13.5,
+    "dy": 7,
+    "expected": {"x":-32.30769230769231,"y":9.557692307692308,"scale":2.6}
+  },
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":2},"dx":40,"dy":-20,"expected":{"x":-20,"y":10,"scale":2}},
+  {"name":"a drag","op":"panBy","camera":{"x":0,"y":0,"scale":2},"dx":-13.5,"dy":7,"expected":{"x":6.75,"y":-3.5,"scale":2}}
+]

@@ -26,6 +26,7 @@ import {
   OpsSignalSchema,
   parseSessionKey,
   PendingEnrollmentSchema,
+  ProjectMovedSchema,
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
@@ -74,11 +75,15 @@ export async function authConfig(): Promise<{ github: boolean }> {
   }
 }
 
-/** A failed API call. Status 0 means the board server could not be reached at all. */
+/**
+ * A failed API call. Status 0 means the board server could not be reached at all; `code` is the
+ * board's name for the refusal, such as `SOURCE_AWAY`, when it gave one.
+ */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code: string | null = null,
   ) {
     super(message);
   }
@@ -169,7 +174,7 @@ function branchPath(path: string): string {
 }
 
 /** Why the board refused a request, when it said. */
-const ErrorBodySchema = z.object({ message: z.string() });
+const ErrorBodySchema = z.object({ error: z.string().optional(), message: z.string() });
 
 /** A read with the board's token; the board's refusal comes back as an ApiError with its reason. */
 async function fetchOk(path: string, token: string): Promise<Response> {
@@ -184,6 +189,7 @@ async function fetchOk(path: string, token: string): Promise<Response> {
     throw new ApiError(
       response.status,
       detail.success ? detail.data.message : `${path} answered ${response.status}`,
+      detail.success ? (detail.data.error ?? null) : null,
     );
   }
   return response;
@@ -234,6 +240,7 @@ async function write<T>(
     throw new ApiError(
       response.status,
       detail.success ? detail.data.message : `${path} answered ${response.status}`,
+      detail.success ? (detail.data.error ?? null) : null,
     );
   }
   return schema.parse(await response.json());
@@ -459,6 +466,18 @@ export function createApi(token: string) {
       ),
     denyEnrollment: (code: string) =>
       write("POST", `/api/enrollments/${encodeURIComponent(code)}/deny`, token, {}, DeniedSchema),
+    /**
+     * Moves a project to another runner, carrying its repository, and answers once the move ends;
+     * `withoutBranches` goes ahead while the runner it lives on is away.
+     */
+    moveProject: (slug: string, runner: string, withoutBranches: boolean) =>
+      write(
+        "PUT",
+        `/api/projects/${encodeURIComponent(slug)}/runner`,
+        token,
+        withoutBranches ? { runner, withoutBranches } : { runner },
+        ProjectMovedSchema,
+      ),
     /**
      * Sets the runner a citizen's work outside any project runs on, from its next turn, or null to
      * pin it again on that turn.

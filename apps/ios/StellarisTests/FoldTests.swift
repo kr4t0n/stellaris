@@ -46,7 +46,7 @@ final class FoldTests: XCTestCase {
   private let landscape = CGSize(width: 951, height: 669)
   private let portrait = CGSize(width: 669, height: 951)
   private let draftText = "Half a thought"
-  private let anchored = "general-30"
+  private let anchored = FakeBoard.generalId(30)
 
   @MainActor func testTheChatKeepsItsPlaceAsThePhoneOpensTurnsAndFolds() async throws {
     continueAfterFailure = false

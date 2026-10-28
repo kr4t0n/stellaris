@@ -243,6 +243,12 @@
       return (200, json(["thread": thread, "messages": [message]]))
     }
 
+    /// The id of general's message numbered `number`, shaped as the board's ids are, so a link can
+    /// name it.
+    static func generalId(_ number: Int) -> String {
+      String(format: "000000000000000000000GEN%02d", number)
+    }
+
     /// Sixty messages in the society's general channel, of varied lengths.
     private static var general: [[String: Any]] {
       let authors = ["eng-1", "rev-1", "concierge-1", "user"]
@@ -258,8 +264,8 @@
           ? "The [rendering samples](/thread/\(samples)) are in their thread."
           : notes[number % notes.count]
         return message(
-          id: String(format: "general-%02d", number), author: authors[number % authors.count],
-          channel: "general", thread: nil, minute: number, body: "Note \(number). \(note)")
+          id: generalId(number), author: authors[number % authors.count], channel: "general",
+          thread: nil, minute: number, body: "Note \(number). \(note)")
       }
     }
 
@@ -341,7 +347,7 @@
         ),
         (
           "user",
-          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
+          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ, as [note 30](/c/general?message=\(generalId(30))) says."
         ),
       ]
       return bodies.enumerated().map { index, entry in

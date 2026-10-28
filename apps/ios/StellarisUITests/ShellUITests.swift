@@ -6,6 +6,10 @@ private let fixtures = URL(fileURLWithPath: #filePath)
   .deletingLastPathComponent()  // ios
   .appendingPathComponent("fixtures/api").path
 
+/// What a message of #general is named by in the fake board, before its number: its id is
+/// shaped as the board's are, so a link can name it.
+let generalMessage = "message-000000000000000000000GEN"
+
 /// The app as someone uses it on the simulator, signed in to the fake board.
 class ShellTestCase: XCTestCase {
   /// Launches the app against the fake board, afresh unless `reset` is false, with `arguments`.
@@ -68,16 +72,16 @@ class ShellTestCase: XCTestCase {
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
   /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
-    app.scrollViews["messages"].staticTexts[String(format: "message-general-%02d", number)]
+    app.scrollViews["messages"].staticTexts[generalMessage + String(format: "%02d", number)]
       .firstMatch
   }
 
   /// The number of the lowest message of #general on screen, if one is.
   @MainActor func lowestShown(_ app: XCUIApplication) -> Int? {
     let shown = app.scrollViews["messages"].staticTexts
-      .matching(NSPredicate(format: "identifier BEGINSWITH 'message-general-'"))
+      .matching(NSPredicate(format: "identifier BEGINSWITH %@", generalMessage))
       .allElementsBoundByIndex.filter { $0.isHittable }
-      .compactMap { Int($0.identifier.dropFirst("message-general-".count)) }
+      .compactMap { Int($0.identifier.dropFirst(generalMessage.count)) }
     return shown.max()
   }
 

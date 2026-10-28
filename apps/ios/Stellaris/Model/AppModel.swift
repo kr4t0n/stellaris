@@ -67,6 +67,12 @@ enum SignInFailure: Error, Equatable {
   /// The task or the proposal whose plan or charter is open beside its thread, or in a sheet where
   /// there is no room beside it.
   var inspecting: String?
+  /// The tasks and the proposals whose advance or decision is on its way to the board. Neither goes
+  /// again until the board answers: an advance names no stage, so a second would finish the next.
+  private(set) var underWay: Set<String> = []
+  /// Why a task's advance or a proposal's decision didn't go, in words for its sheet, by the task's
+  /// or the proposal's id, kept until the next try, so a sheet built again shows it still.
+  private(set) var refusals: [String: String] = [:]
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
 
@@ -291,13 +297,27 @@ enum SignInFailure: Error, Equatable {
   /// Finishes the task's current stage as the user, with the note its sheet holds for the task's
   /// thread, as the web's form at a stage that names the user does; then shows the task as the
   /// board answered, and reads its thread and the board's tasks and questions again. Only a stage
-  /// that waits on the user is finished here, though the board takes the user's advance of any.
+  /// that waits on the user is finished here, though the board takes the user's advance of any,
+  /// and only one advance of a task is on its way at a time.
   func advance(_ id: String) async throws {
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
     guard let task = store.task(id), stageForYou(task) != nil else {
+      refusals[id] = "This stage no longer waits on you."
       throw SubjectRefusal.notYours
     }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
     let note = (advanceNotes[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let advanced = try await send(BoardAPI.advanceTask(id, note: note.isEmpty ? nil : note))
+    let advanced: BoardTask
+    do {
+      advanced = try await send(BoardAPI.advanceTask(id, note: note.isEmpty ? nil : note))
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
+    }
     store.replace(advanced)
     advanceNotes[id] = nil
     if advancing == id {
@@ -312,32 +332,55 @@ enum SignInFailure: Error, Equatable {
 
   /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
   /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
-  /// which the decision closes, again. Only a proposal that waits on the user is decided here.
+  /// which the decision closes, again. Only a proposal that waits on the user is decided here, and
+  /// only one decision of it is on its way at a time.
   func decide(_ verdict: Verdict) async throws {
-    guard let proposal = store.proposal(verdict.proposal), waitingOnYou(proposal) else {
+    let id = verdict.proposal
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
+    guard let proposal = store.proposal(id), waitingOnYou(proposal) else {
+      refusals[id] = "This proposal no longer waits on you."
       throw SubjectRefusal.notYours
     }
     let reason = (reasons[verdict] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    switch verdict.choice {
-    case .approve:
-      _ = try await send(BoardAPI.approve(verdict.proposal, reason: reason.isEmpty ? nil : reason))
-    case .reject:
-      guard !reason.isEmpty else {
-        throw SubjectRefusal.noReason
+    if verdict.choice == .reject, reason.isEmpty {
+      refusals[id] = "A rejection needs its reason."
+      throw SubjectRefusal.noReason
+    }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
+    do {
+      switch verdict.choice {
+      case .approve:
+        _ = try await send(BoardAPI.approve(id, reason: reason.isEmpty ? nil : reason))
+      case .reject:
+        _ = try await send(BoardAPI.reject(id, reason: reason))
       }
-      _ = try await send(BoardAPI.reject(verdict.proposal, reason: reason))
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
     }
     for choice in Verdict.Choice.allCases {
-      reasons[Verdict(proposal: verdict.proposal, choice: choice)] = nil
+      reasons[Verdict(proposal: id, choice: choice)] = nil
     }
-    if deciding?.proposal == verdict.proposal {
+    if deciding?.proposal == id {
       deciding = nil
     }
-    let feed = feed(for: .thread(verdict.proposal))
+    let feed = feed(for: .thread(id))
     Task {
       await feed.load(using: self)
       await store.reload(["proposals", "threads", "members", "channels"], using: self)
     }
+  }
+
+  /// A failed send in words: the board's refusal in its own, or that it didn't take it.
+  private static func words(for error: any Error) -> String {
+    if let refusal = error as? BoardError, refusal.status != 0 {
+      return refusal.message
+    }
+    return "The board did not take it."
   }
 
   /// Reads again what `keys` name of what the app has loaded, as the web's `refreshFor` makes each
@@ -373,10 +416,12 @@ enum SignInFailure: Error, Equatable {
     } else if !lists.isEmpty {
       await store.reload(lists, using: self)
     }
-    for id in store.lookedUpTasks.keys where touched("task", id) {
+    // Every task read alone and every dashboard read, on its first read or failed too: an answer
+    // the board gave before the event would leave out what the event says.
+    for id in store.taskReads.keys where touched("task", id) {
       await store.lookUpTask(id, using: self)
     }
-    for project in store.dashboards.keys where touched("dashboard", project) {
+    for project in store.dashboardReads.keys where touched("dashboard", project) {
       await store.loadDashboard(project, using: self)
     }
     sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
@@ -524,6 +569,8 @@ enum SignInFailure: Error, Equatable {
     deciding = nil
     reasons = [:]
     inspecting = nil
+    underWay = []
+    refusals = [:]
   }
 
   private func leave(notice: String?) {

@@ -2,14 +2,11 @@ import BoardKit
 import SwiftUI
 
 /// Finishing a stage that waits on the user, as the web's form at that stage does: the stage, and
-/// an optional note for the task's thread. What the note says lives in the model by task until the
-/// stage is finished or the note cancelled, so a sheet dismissed or built again keeps it.
+/// an optional note for the task's thread. What the note says, whether the advance is on its way,
+/// and why it didn't go live in the model by task, so a sheet dismissed or built again keeps them.
 struct AdvanceSheet: View {
   @Environment(AppModel.self) private var model
   @FocusState private var focused: Bool
-  @State private var sending = false
-  /// The board's reason for not taking it, in its own words.
-  @State private var failure: String?
   let taskId: String
 
   var body: some View {
@@ -18,6 +15,7 @@ struct AdvanceSheet: View {
       set: { model.advanceNotes[taskId] = $0 })
     let task = model.store.task(taskId)
     let stage = task.flatMap(stageForYou)
+    let sending = model.underWay.contains(taskId)
     NavigationStack {
       Form {
         Section {
@@ -30,7 +28,7 @@ struct AdvanceSheet: View {
             .focused($focused)
             .accessibilityIdentifier("advance-note")
         }
-        if let failure {
+        if let failure = model.refusals[taskId] {
           Section {
             Text(failure)
               .foregroundStyle(MessageColor.failure)
@@ -72,32 +70,19 @@ struct AdvanceSheet: View {
     return "\(stage.name) waits on you.\(unlinked ? " No pull request linked yet." : "")"
   }
 
+  /// Sends the advance; the model keeps whether it is on its way and why it didn't go.
   private func send() {
-    sending = true
-    failure = nil
-    Task {
-      do {
-        try await model.advance(taskId)
-      } catch let refusal as BoardError where refusal.status != 0 {
-        failure = refusal.message
-      } catch SubjectRefusal.notYours {
-        failure = "This stage no longer waits on you."
-      } catch {
-        failure = "The board did not take it."
-      }
-      sending = false
-    }
+    Task { try? await model.advance(taskId) }
   }
 }
 
 /// Approving or rejecting a proposal that waits on the user, as the web's decision bar does: a
 /// reason, which a rejection needs, then the decision. What the reason says lives in the model by
-/// proposal and choice until the proposal is decided or the reason cancelled.
+/// proposal and choice until the proposal is decided or the reason cancelled, and whether the
+/// decision is on its way and why it didn't go by proposal.
 struct DecisionSheet: View {
   @Environment(AppModel.self) private var model
   @FocusState private var focused: Bool
-  @State private var sending = false
-  @State private var failure: String?
   let verdict: Verdict
 
   var body: some View {
@@ -107,6 +92,7 @@ struct DecisionSheet: View {
     let approving = verdict.choice == .approve
     let missing =
       !approving && reason.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let sending = model.underWay.contains(verdict.proposal)
     NavigationStack {
       Form {
         Section {
@@ -121,7 +107,7 @@ struct DecisionSheet: View {
           .focused($focused)
           .accessibilityIdentifier("decision-reason")
         }
-        if let failure {
+        if let failure = model.refusals[verdict.proposal] {
           Section {
             Text(failure)
               .foregroundStyle(MessageColor.failure)
@@ -157,20 +143,8 @@ struct DecisionSheet: View {
     .onAppear { focused = true }
   }
 
+  /// Sends the decision; the model keeps whether it is on its way and why it didn't go.
   private func send() {
-    sending = true
-    failure = nil
-    Task {
-      do {
-        try await model.decide(verdict)
-      } catch let refusal as BoardError where refusal.status != 0 {
-        failure = refusal.message
-      } catch SubjectRefusal.notYours {
-        failure = "This proposal no longer waits on you."
-      } catch {
-        failure = "The board did not take it."
-      }
-      sending = false
-    }
+    Task { try? await model.decide(verdict) }
   }
 }

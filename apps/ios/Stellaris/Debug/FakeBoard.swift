@@ -11,8 +11,9 @@
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
   /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads, the
-  /// user's advance of a task's stage, and the user's approval or rejection of a proposal, which
-  /// its reads then show to the token that wrote them alone, so tests signed in with tokens of
+  /// user's advance of a task's stage, the user's approval or rejection of a proposal, and a new
+  /// dashboard for the demo project, which its reads then show to the token that wrote them alone,
+  /// so tests signed in with tokens of
   /// their own see only their own writes. Any token signs in, except
   /// `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
@@ -185,6 +186,9 @@
       if method == "POST", path == "/api/verbs/approve" || path == "/api/verbs/reject" {
         return decide(path, request: request, token: token)
       }
+      if method == "POST", path == "/api/verbs/update_dashboard" {
+        return updateDashboard(request: request, token: token)
+      }
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
@@ -200,7 +204,11 @@
       case ("GET", "/api/requests"): return fixture("requests")
       case ("GET", "/api/proposals"): return (200, json(proposals(for: token)))
       case ("GET", "/api/projects/demo/tasks"): return (200, json(tasks(for: token)))
-      case ("GET", "/api/projects/demo/dashboard"): return fixture("dashboard")
+      case ("GET", "/api/projects/demo/dashboard"):
+        guard let written = written.withLock({ $0[token]?.dashboard }) else {
+          return fixture("dashboard")
+        }
+        return (200, written)
       case ("GET", "/api/threads"): return (200, json(threads + opened(by: token)))
       case ("GET", "/api/messages"): return (200, json(lookUp(request)))
       case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
@@ -269,9 +277,11 @@
     private struct Written: Sendable {
       var posts: [Post] = []
       var threads: [Opened] = []
-      /// Tasks the token advanced and proposals it decided, as JSON, by id.
+      /// Tasks the token advanced and proposals it decided, as JSON, by id, and the demo
+      /// project's dashboard as the token last wrote it.
       var tasks: [String: Data] = [:]
       var proposals: [String: Data] = [:]
+      var dashboard: Data?
     }
 
     /// Takes a post or a new thread, as the user, and answers as the board does.
@@ -437,6 +447,26 @@
         var answer = decision
         answer["reason"] = reason
         return (200, json(answer))
+      }
+    }
+
+    /// Writes the demo project's dashboard, as a citizen does with `update_dashboard`, so a test can
+    /// change it while the app reads it; the app itself writes no dashboard.
+    private static func updateDashboard(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        let before = mine.dashboard.flatMap(object) ?? body("dashboard") as? [String: Any] ?? [:]
+        let dashboard: [String: Any] = [
+          "project": input["project"] as? String ?? "demo",
+          "revision": (before["revision"] as? Int ?? 0) + 1,
+          "updatedBy": "user",
+          "updatedAt": Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now),
+          "body": input["body"] as? String ?? "",
+        ]
+        mine.dashboard = json(dashboard)
+        return (200, json(dashboard))
       }
     }
 

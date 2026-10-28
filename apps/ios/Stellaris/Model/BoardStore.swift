@@ -48,6 +48,11 @@ enum Loading: Equatable, Sendable {
   /// Each project's dashboard as last read, and how its read went.
   private(set) var dashboards: [String: Dashboard] = [:]
   private(set) var dashboardStates: [String: Loading] = [:]
+  /// How many times each lone task and each dashboard has been read, from the first read on, so an
+  /// event reads again what is on its first read or failed it too, and an answer a later read
+  /// overtook changes nothing.
+  @ObservationIgnored private(set) var taskReads: [String: Int] = [:]
+  @ObservationIgnored private(set) var dashboardReads: [String: Int] = [:]
   /// How the user's own posts are named: the GitHub account signed in, or else "you".
   var userName = "you" {
     didSet { index() }
@@ -114,11 +119,16 @@ enum Loading: Equatable, Sendable {
     }
   }
 
-  /// Reads the task alone, for a thread whose subject the lists leave out; a read that fails, or
-  /// that comes back once the app has signed out or in again, changes nothing.
+  /// Reads the task alone, for a thread whose subject the lists leave out; a read that fails, that
+  /// a later read overtook, or that comes back once the app has signed out or in again, changes
+  /// nothing.
   func lookUpTask(_ id: String, using model: AppModel) async {
     let signIn = model.generation
-    guard let task = try? await model.send(BoardAPI.task(id)), model.generation == signIn else {
+    let read = (taskReads[id] ?? 0) + 1
+    taskReads[id] = read
+    guard let task = try? await model.send(BoardAPI.task(id)), model.generation == signIn,
+      taskReads[id] == read
+    else {
       return
     }
     if tasks.contains(where: { $0.id == id }) {
@@ -128,15 +138,18 @@ enum Loading: Equatable, Sendable {
     }
   }
 
-  /// Reads a project's dashboard, keeping the last one read through a read that fails.
+  /// Reads a project's dashboard, keeping the last one read through a read that fails; an answer a
+  /// later read overtook changes nothing.
   func loadDashboard(_ project: String, using model: AppModel) async {
     let signIn = model.generation
+    let read = (dashboardReads[project] ?? 0) + 1
+    dashboardReads[project] = read
     if dashboards[project] == nil {
       dashboardStates[project] = .loading
     }
     do {
       let dashboard = try await model.send(BoardAPI.dashboard(project: project))
-      guard model.generation == signIn else {
+      guard model.generation == signIn, dashboardReads[project] == read else {
         return
       }
       dashboards[project] = dashboard
@@ -144,7 +157,7 @@ enum Loading: Equatable, Sendable {
     } catch is CancellationError {
       return
     } catch {
-      if model.generation == signIn, dashboards[project] == nil {
+      if model.generation == signIn, dashboardReads[project] == read, dashboards[project] == nil {
         dashboardStates[project] = Loading(error)
       }
     }
@@ -384,6 +397,8 @@ enum Loading: Equatable, Sendable {
     lookedUpTasks = [:]
     dashboards = [:]
     dashboardStates = [:]
+    taskReads = [:]
+    dashboardReads = [:]
   }
 }
 

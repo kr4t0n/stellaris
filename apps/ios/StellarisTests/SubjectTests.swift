@@ -26,6 +26,28 @@ import Testing
     return model
   }
 
+  /// Signed in with the requests `gate` names held until the test settles them.
+  private func signedIn(holding gate: HeldBoard.Gate) async throws -> AppModel {
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    return model
+  }
+
+  private struct DashboardInput: Encodable {
+    let project: String
+    let body: String
+    let revision: Int
+  }
+
+  /// Writes the demo project's dashboard, as a citizen does while the app reads it.
+  private func writeDashboard(_ body: String, _ model: AppModel) async throws {
+    let request: BoardRequest<Dashboard> = try BoardAPI.verb(
+      "update_dashboard", DashboardInput(project: "demo", body: body, revision: 1))
+    _ = try await model.send(request)
+  }
+
   /// Waits up to five seconds for `done`.
   private func eventually(_ done: () -> Bool) async throws -> Bool {
     for _ in 0..<100 where !done() {
@@ -184,5 +206,127 @@ import Testing
     #expect(model.store.dashboards["demo"]?.body.contains("Export view") == true)
     let groups = groupTasks(model.store.tasks(of: "demo"))
     #expect(groups.map(\.phase) == [.waiting, .working])
+  }
+
+  /// An advance on its way is the only one: the sheet swiped away mid-send, then Advance again
+  /// from the bar, sends nothing more, since an advance names no stage and a second would finish
+  /// the next.
+  @Test(.timeLimit(.minutes(1))) func sendsOneAdvanceWhileOneIsUnderWay() async throws {
+    let gate = HeldBoard.Gate(paths: ["/api/verbs/advance_task"])
+    let model = try await signedIn(holding: gate)
+    model.advancing = exportView
+    let first = Task { try await model.advance(exportView) }
+    await gate.arrivals(1)
+    #expect(model.underWay.contains(exportView))
+    model.advancing = nil
+    model.advancing = exportView
+    await #expect(throws: SubjectRefusal.underWay) { try await model.advance(exportView) }
+    // As the board answered the one that went, which the fake board carried out as it arrived.
+    gate.answerAsArrived()
+    try await first.value
+    #expect(!model.underWay.contains(exportView))
+    #expect(model.store.task(exportView)?.stage == "s3")
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(gate.arrived == 1, "a second advance went")
+  }
+
+  /// A decision on its way is the only one, Approve and Reject alike.
+  @Test(.timeLimit(.minutes(1))) func sendsOneDecisionWhileOneIsUnderWay() async throws {
+    let gate = HeldBoard.Gate(paths: ["/api/verbs/approve", "/api/verbs/reject"])
+    let model = try await signedIn(holding: gate)
+    let first = Task { try await model.decide(Verdict(proposal: reallocation, choice: .approve)) }
+    await gate.arrivals(1)
+    #expect(model.underWay.contains(reallocation))
+    let reject = Verdict(proposal: reallocation, choice: .reject)
+    model.reasons[reject] = "Too late."
+    await #expect(throws: SubjectRefusal.underWay) { try await model.decide(reject) }
+    // As the board answered the one that went, which the fake board carried out as it arrived.
+    gate.answerAsArrived()
+    try await first.value
+    #expect(!model.underWay.contains(reallocation))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(gate.arrived == 1, "a second decision went")
+  }
+
+  /// The board's refusal of an advance stays in the model, so a sheet built again still says it.
+  @Test func keepsTheBoardsRefusalForTheSheet() async throws {
+    let model = try await signedIn()
+    // Finished elsewhere, while the app's copy still has the stage waiting on the user.
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    #expect(model.store.task(exportView).flatMap(stageForYou) != nil)
+    await #expect(throws: BoardError.self) { try await model.advance(exportView) }
+    #expect(model.refusals[exportView]?.contains("not in play") == true)
+    #expect(!model.underWay.contains(exportView))
+  }
+
+  /// An event that lands while a dashboard is on its first read reads it again, and the later
+  /// read's answer stands, so one the board gave before the update leaves nothing out.
+  @Test(.timeLimit(.minutes(1))) func readsAgainADashboardAnEventTouchesDuringItsFirstRead()
+    async throws
+  {
+    let gate = HeldBoard.Gate(paths: ["/api/projects/demo/dashboard"])
+    let model = try await signedIn(holding: gate)
+    let first = Task { await model.store.loadDashboard("demo", using: model) }
+    await gate.arrivals(1)
+    try await writeDashboard("## Demo\n\nThe export view is in.\n", model)
+    let rereading = Task { await model.reread([["dashboard", "demo"]]) }
+    try #require(try await eventually { gate.arrived >= 2 }, "the event read nothing again")
+    gate.answerAsArrived()
+    await first.value
+    await rereading.value
+    #expect(model.store.dashboards["demo"]?.body == "## Demo\n\nThe export view is in.\n")
+    #expect(model.store.dashboardStates["demo"] == .loaded)
+  }
+
+  /// An event reads again a dashboard whose first read failed.
+  @Test(.timeLimit(.minutes(1))) func readsAgainADashboardWhoseFirstReadFailed() async throws {
+    let gate = HeldBoard.Gate(paths: ["/api/projects/demo/dashboard"])
+    let model = try await signedIn(holding: gate)
+    let first = Task { await model.store.loadDashboard("demo", using: model) }
+    await gate.arrivals(1)
+    gate.fail()
+    await first.value
+    #expect(model.store.dashboardStates["demo"] == .failed(Loading.unreachable))
+    try await writeDashboard("## Demo\n\nThe export view is in.\n", model)
+    let rereading = Task { await model.reread([["dashboard", "demo"]]) }
+    try #require(try await eventually { gate.arrived >= 2 }, "the event read nothing again")
+    gate.answer()
+    await rereading.value
+    #expect(model.store.dashboards["demo"]?.body == "## Demo\n\nThe export view is in.\n")
+    #expect(model.store.dashboardStates["demo"] == .loaded)
+  }
+
+  /// An event that lands while a task is read alone reads it again, and the later answer stands.
+  @Test(.timeLimit(.minutes(1))) func readsAgainALoneTaskAnEventTouchesDuringItsRead()
+    async throws
+  {
+    let gate = HeldBoard.Gate(paths: ["/api/tasks/\(exportView)"])
+    let model = try await signedIn(holding: gate)
+    let first = Task { await model.store.lookUpTask(exportView, using: model) }
+    await gate.arrivals(1)
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    let rereading = Task { await model.reread([["task", exportView]]) }
+    try #require(try await eventually { gate.arrived >= 2 }, "the event read nothing again")
+    gate.answerAsArrived()
+    await first.value
+    await rereading.value
+    #expect(model.store.task(exportView)?.stage == "s3")
+  }
+
+  /// An event reads again a task whose read alone failed.
+  @Test(.timeLimit(.minutes(1))) func readsAgainALoneTaskWhoseReadFailed() async throws {
+    let gate = HeldBoard.Gate(paths: ["/api/tasks/\(exportView)"])
+    let model = try await signedIn(holding: gate)
+    let first = Task { await model.store.lookUpTask(exportView, using: model) }
+    await gate.arrivals(1)
+    gate.fail()
+    await first.value
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    let rereading = Task { await model.reread([["task", exportView]]) }
+    try #require(try await eventually { gate.arrived >= 2 }, "the event read nothing again")
+    gate.answer()
+    await rereading.value
+    #expect(model.store.task(exportView)?.stage == "s3")
   }
 }

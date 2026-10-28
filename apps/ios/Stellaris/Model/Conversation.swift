@@ -73,6 +73,8 @@ enum SubjectRefusal: Error, Equatable {
   case notYours
   /// A rejection needs its reason, as the verb does.
   case noReason
+  /// The task's advance, or the proposal's decision, is on its way already.
+  case underWay
 }
 
 /// The app's three tabs.

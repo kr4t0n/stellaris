@@ -137,6 +137,7 @@ struct ChatView: View {
               } label: {
                 Label("Advance", systemImage: "checkmark.circle")
               }
+              .disabled(model.underWay.contains(task.id))
               .accessibilityIdentifier("advance")
             }
           }
@@ -158,6 +159,7 @@ struct ChatView: View {
               } label: {
                 Label("Approve", systemImage: "checkmark.seal")
               }
+              .disabled(model.underWay.contains(proposal.id))
               .accessibilityIdentifier("approve")
             }
             ToolbarItem(placement: .primaryAction) {
@@ -166,6 +168,7 @@ struct ChatView: View {
               } label: {
                 Label("Reject", systemImage: "xmark.seal")
               }
+              .disabled(model.underWay.contains(proposal.id))
               .accessibilityIdentifier("reject")
             }
             .visibilityPriority(.high)

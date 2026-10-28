@@ -58,6 +58,11 @@ struct ShellView: View {
     .sheet(isPresented: $model.showsSettings) {
       SettingsView()
     }
+    // From the tabs, as Settings is: on iOS 27.1's simulator, a cover presented from inside Chat's
+    // tab never showed, and the tap that asked for it scrolled the conversation to its top.
+    .fullScreenCover(item: $model.viewing) { viewed in
+      ImageViewer(image: viewed.image, alt: viewed.alt)
+    }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
         Task { await model.refresh() }
@@ -71,7 +76,6 @@ struct ChatView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    @Bindable var model = model
     NavigationStack {
       ConversationView(feed: model.feed(for: model.history.current))
         .id(model.history.current)
@@ -87,10 +91,6 @@ struct ChatView: View {
             }
           }
         }
-    }
-    // Presented here rather than from a message's row, which the lazy stack may drop or build again.
-    .fullScreenCover(item: $model.viewing) { viewed in
-      ImageViewer(image: viewed.image, alt: viewed.alt)
     }
   }
 }

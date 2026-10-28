@@ -41,7 +41,7 @@ enum SignInFailure: Error, Equatable {
   let sky = SkyStore()
   /// The images messages show, uploaded ones kept by id for as long as the sign-in lasts.
   private(set) var images = BoardImages()
-  /// The image open in the viewer, which Chat presents, outside the lazy rows of a conversation.
+  /// The image open in the viewer, which the tabs present.
   var viewing: ViewedImage?
 
   @ObservationIgnored let environment: AppEnvironment

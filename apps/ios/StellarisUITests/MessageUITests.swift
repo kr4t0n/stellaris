@@ -16,7 +16,9 @@ final class MessageUITests: ShellTestCase {
       samples.waitForExistence(timeout: 20),
       "general's newest message holds no link to the samples")
     samples.tap()
-    expectConversation(app, "Rendering samples")
+    // The thread opens at its newest message, far below its title.
+    let newest = messages.staticTexts["message-samples-6"].firstMatch
+    XCTAssertTrue(newest.waitForExistence(timeout: 20), "the samples don't open in Chat")
     keepDisplays("samples")
 
     // Newest first, from the foot up: the image, then the code, then the task's id.

@@ -103,7 +103,8 @@ final class ChangingScheduler: URLProtocol {
     await model.start()
     try await model.signIn(board: board, token: gate.token)
     let loading = Task { await model.sky.load(using: model) }
-    await gate.arrivals(1)
+    // The board's store asks for the roster too, for each author's mark.
+    await gate.arrivals(2)
     #expect(model.sky.state == .loading)
     gate.fail()
     await loading.value

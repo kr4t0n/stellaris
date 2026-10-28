@@ -191,7 +191,8 @@ private struct CodeBlock: View {
 }
 
 /// A table as the web's scrolls: sideways when it is wider than the column, each cell wrapping at
-/// 240 points so one long cell can't stretch it forever, with the web's hairlines between cells.
+/// 240 points so one long cell can't stretch it forever, with the web's hairlines around its cells.
+/// The lines are rules of the grid's own, which span it or fill a row, so no cell has to stretch.
 private struct TableBlock: View {
   @ScaledMetric(relativeTo: .caption) private var cap = 240.0
   let table: MessageTable
@@ -203,24 +204,41 @@ private struct TableBlock: View {
 
   var body: some View {
     ScrollView(.horizontal) {
-      Grid(alignment: .leading, horizontalSpacing: 1, verticalSpacing: 1) {
+      Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+        across
         GridRow {
+          down
           ForEach(0..<columns, id: \.self) { column in
             cell(table.head[safe: column] ?? [], column: column, header: true)
+            down
           }
         }
+        across
         ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
           GridRow {
+            down
             ForEach(0..<columns, id: \.self) { column in
               cell(row[safe: column] ?? [], column: column, header: false)
+              down
             }
           }
+          across
         }
       }
-      .padding(1)
-      .background(MessageColor.line)
     }
     .fixedSize(horizontal: false, vertical: true)
+  }
+
+  /// A hairline across the table, between its rows.
+  private var across: some View {
+    Rectangle().fill(MessageColor.line).frame(height: 1)
+      .gridCellUnsizedAxes(.horizontal)
+  }
+
+  /// A hairline down a row, between its cells.
+  private var down: some View {
+    Rectangle().fill(MessageColor.line).frame(width: 1)
+      .gridCellUnsizedAxes(.vertical)
   }
 
   private func cell(_ inlines: [MessageInline], column: Int, header: Bool) -> some View {
@@ -235,8 +253,7 @@ private struct TableBlock: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 4)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment.frame)
-    .background(MessageColor.island)
+    .frame(maxWidth: .infinity, alignment: alignment.frame)
   }
 }
 
@@ -251,9 +268,9 @@ extension MessageAlignment {
 
   fileprivate var frame: Alignment {
     switch self {
-    case .leading: .topLeading
-    case .center: .top
-    case .trailing: .topTrailing
+    case .leading: .leading
+    case .center: .center
+    case .trailing: .trailing
     }
   }
 }

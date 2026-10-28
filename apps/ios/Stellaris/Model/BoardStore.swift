@@ -26,9 +26,22 @@ enum Loading: Equatable, Sendable {
   private(set) var channels: [ChannelSummary] = []
   private(set) var projects: [Project] = []
   /// Every project's tasks.
-  private(set) var tasks: [BoardTask] = []
-  private(set) var proposals: [Proposal] = []
+  private(set) var tasks: [BoardTask] = [] {
+    didSet { index() }
+  }
+  private(set) var proposals: [Proposal] = [] {
+    didSet { index() }
+  }
   private(set) var requests: [UserRequest] = []
+  /// The roster, for each author's CLI mark.
+  private(set) var members: [Member] = []
+  /// Every thread, for the titles its id reads as.
+  private(set) var threads: [ThreadSummary] = [] {
+    didSet { index() }
+  }
+  /// What each id in the board's text names, as the web's `entityIndex` reads them: a thread by
+  /// its title, as its subject for a task's or a proposal's, then each task and each proposal.
+  private(set) var entities: [String: EntityTitle] = [:]
 
   /// What waits on the user, as the web's Needs you lists it.
   var attention: [Attention] {
@@ -60,6 +73,42 @@ enum Loading: Equatable, Sendable {
       case .returned, .waiting, .working, .landing, .unknown: return true
       }
     }
+  }
+
+  /// A line with each id the board names read as its title, for a place that can't hold a link.
+  func titled(_ line: String) -> String {
+    splitEntities(line, index: entities).map { piece in
+      switch piece {
+      case .text(let text): text
+      case .entity(_, let entity): entity.title
+      }
+    }.joined()
+  }
+
+  /// The CLI `author` runs on; nil for the user, the board, or a name the roster doesn't have.
+  func cli(of author: String) -> OrUnknown<CliKind>? {
+    members.first { $0.name == author }?.cli
+  }
+
+  private func index() {
+    var index: [String: EntityTitle] = [:]
+    for summary in threads {
+      let thread = summary.thread
+      let kind: EntityKind =
+        switch thread.subject?.kind {
+        case .known(.task)?: .task
+        case .known(.proposal)?: .proposal
+        default: .thread
+        }
+      index[thread.id] = EntityTitle(kind: kind, title: thread.title)
+    }
+    for task in tasks {
+      index[task.id] = EntityTitle(kind: .task, title: task.title)
+    }
+    for proposal in proposals {
+      index[proposal.id] = EntityTitle(kind: .proposal, title: proposal.title)
+    }
+    entities = index
   }
 
   func projectName(_ slug: String) -> String {
@@ -105,7 +154,11 @@ enum Loading: Equatable, Sendable {
       async let projects = model.send(BoardAPI.projects())
       async let proposals = model.send(BoardAPI.proposals())
       async let requests = model.send(BoardAPI.requests())
+      // The roster and the threads only dress what the rest shows, so the board loads without them.
+      async let members = try? model.send(BoardAPI.members())
+      async let threads = try? model.send(BoardAPI.threads())
       let loaded = try await (channels, projects, proposals, requests)
+      let dressing = await (members, threads)
       var tasks: [BoardTask] = []
       for project in loaded.1 where project.archived == nil {
         tasks += try await model.send(BoardAPI.tasks(project: project.slug))
@@ -118,6 +171,12 @@ enum Loading: Equatable, Sendable {
       self.proposals = loaded.2
       self.requests = loaded.3
       self.tasks = tasks
+      if let members = dressing.0 {
+        self.members = members
+      }
+      if let threads = dressing.1 {
+        self.threads = threads
+      }
       state = .loaded
     } catch is CancellationError {
       return
@@ -142,6 +201,16 @@ enum Loading: Equatable, Sendable {
     tasks = []
     proposals = []
     requests = []
+    members = []
+    threads = []
+  }
+}
+
+extension Proposal {
+  /// What a proposal is called: its kind, and the name its charter gives, as "Member · eng-2".
+  var title: String {
+    let name = charter["name"]?.string ?? charter["role"]?.string
+    return [kind.rawValue.capitalized, name].compactMap { $0 }.joined(separator: " · ")
   }
 }
 

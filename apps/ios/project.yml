@@ -43,6 +43,14 @@ targets:
         UILaunchScreen: {}
         # Dark only, as the web is: every window of the app, whatever the system's setting.
         UIUserInterfaceStyle: Dark
+        # Instrument Sans, the web's text face, from Fonts/ with its licence (SIL OFL 1.1).
+        UIAppFonts:
+          - InstrumentSans-Regular.ttf
+          - InstrumentSans-Italic.ttf
+          - InstrumentSans-Medium.ttf
+          - InstrumentSans-MediumItalic.ttf
+          - InstrumentSans-SemiBold.ttf
+          - InstrumentSans-SemiBoldItalic.ttf
         # One scene in v1: the app's one window resizes with the display it is on.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

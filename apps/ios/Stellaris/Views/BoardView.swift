@@ -1,13 +1,15 @@
 import BoardKit
 import SwiftUI
 
-/// The board's places: the society's channels, then each project's channels and tasks in play.
-/// Picking one opens it in Chat.
+/// The board's places: the society's channels, then each project's dashboard and tasks, channels,
+/// and tasks in play. Picking a channel or a task opens it in Chat; a project's dashboard and tasks
+/// open here, kept in the model as the place Board shows.
 struct BoardView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    NavigationStack {
+    @Bindable var model = model
+    NavigationStack(path: $model.boardPath) {
       List {
         Section("Society") {
           ForEach(model.store.societyChannels, id: \.ref) { channel in
@@ -16,6 +18,10 @@ struct BoardView: View {
         }
         ForEach(model.store.openProjects, id: \.slug) { project in
           Section(project.name) {
+            NavigationLink(value: project.slug) {
+              Label("Dashboard and tasks", systemImage: "rectangle.grid.1x2")
+            }
+            .accessibilityIdentifier("project-\(project.slug)")
             ForEach(model.store.channels(of: project.slug), id: \.ref) { channel in
               ChannelRow(channel: channel)
             }
@@ -41,6 +47,9 @@ struct BoardView: View {
           }
           .accessibilityIdentifier("settings")
         }
+      }
+      .navigationDestination(for: String.self) { slug in
+        ProjectView(slug: slug)
       }
     }
   }
@@ -73,9 +82,11 @@ private struct ChannelRow: View {
   }
 }
 
-private struct TaskRow: View {
+struct TaskRow: View {
   @Environment(AppModel.self) private var model
   let task: BoardTask
+  /// Whether the row draws the task's plan as segments, as the web's tasks view does.
+  var plan = false
 
   var body: some View {
     Button {
@@ -85,11 +96,13 @@ private struct TaskRow: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(task.title)
             .lineLimit(2)
-          if let stage = task.stages.first(where: { $0.id == task.stage }) {
-            Text(stage.name)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
+          Text(line)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+          if plan {
+            PlanSegments(task: task)
+              .padding(.top, 4)
           }
         }
       } icon: {
@@ -98,6 +111,75 @@ private struct TaskRow: View {
     }
     .foregroundStyle(.primary)
     .accessibilityIdentifier("task-\(task.id)")
+  }
+
+  /// The stage the task is at, or how far it came.
+  private var line: String {
+    task.currentStage.map { "\(task.progress) · \($0.name)" } ?? task.progress
+  }
+}
+
+/// A project as Board shows it: its dashboard, then its tasks grouped by where they stand, each
+/// group last updated first, as the web's project and tasks views list them. Picking a task opens
+/// it in Chat.
+struct ProjectView: View {
+  @Environment(AppModel.self) private var model
+  let slug: String
+
+  var body: some View {
+    let groups = groupTasks(model.store.tasks(of: slug))
+    List {
+      Section("Dashboard") {
+        dashboard
+      }
+      ForEach(groups) { group in
+        Section("\(group.phase.label) · \(group.tasks.count)") {
+          ForEach(group.tasks) { task in
+            TaskRow(task: task, plan: true)
+          }
+        }
+      }
+      if groups.isEmpty, model.store.state == .loaded {
+        Section("Tasks") {
+          Text("No tasks")
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .navigationTitle(model.store.projectName(slug))
+    .refreshable {
+      await model.store.loadDashboard(slug, using: model)
+      await model.refresh()
+    }
+    .task(id: slug) {
+      await model.store.loadDashboard(slug, using: model)
+    }
+    .modifier(FollowsBoardLinks())
+  }
+
+  /// The dashboard's text, read as a message is, or how its read stands.
+  @ViewBuilder private var dashboard: some View {
+    if let page = model.store.dashboards[slug] {
+      let text = page.body.trimmingCharacters(in: .whitespacesAndNewlines)
+      if text.isEmpty {
+        Text("No dashboard yet")
+          .foregroundStyle(.secondary)
+      } else {
+        MessageBody(document: model.document(id: "dashboard:\(slug)", markdown: page.body))
+          .accessibilityIdentifier("dashboard-\(slug)")
+      }
+    } else {
+      switch model.store.dashboardStates[slug] ?? .idle {
+      case .failed(let reason):
+        Label(reason, systemImage: "wifi.exclamationmark")
+          .foregroundStyle(.secondary)
+        Button("Retry") {
+          Task { await model.store.loadDashboard(slug, using: model) }
+        }
+      case .idle, .loading, .loaded:
+        ProgressView()
+      }
+    }
   }
 }
 

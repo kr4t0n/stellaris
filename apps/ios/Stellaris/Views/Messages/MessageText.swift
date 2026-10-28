@@ -34,6 +34,12 @@ enum MessageType {
     .custom(face(weight, italic: italic), size: MessageTheme.metaSize, relativeTo: .caption)
   }
 
+  /// A chip's words, a task's phase or a step, at the web's 11 pixels, scaling as the smallest
+  /// caption does.
+  static func chip(_ weight: Weight = .regular) -> Font {
+    .custom(face(weight, italic: false), size: 11, relativeTo: .caption2)
+  }
+
   static let code = Font.system(.caption, design: .monospaced)
 
   /// The space between a message's lines for the web's `leading-relaxed`, at the default size:

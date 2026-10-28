@@ -140,6 +140,72 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(model.newThreads["general"]?.title, "Half a title")
   }
 
+  /// The Advance sheet's note and the Reject sheet's reason, open over a task's and a proposal's
+  /// thread, stay with their sheets as the phone opens, turns, and folds: what they say lives in
+  /// the model.
+  @MainActor func testTheAdvanceNoteAndARejectionsReasonKeepTheirTextThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let task = "00000000000000000000000010"
+    let proposal = "00000000000000000000000008"
+    let reject = Verdict(proposal: proposal, choice: .reject)
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    for (kind, text) in [("advance", "Half a note"), ("reject", "Half a reason")] {
+      if kind == "advance" {
+        model.open(.thread(task))
+        model.advanceNotes[task] = text
+        model.advancing = task
+      } else {
+        model.advancing = nil
+        model.open(.thread(proposal))
+        model.reasons[reject] = text
+        model.deciding = reject
+      }
+      for (step, size) in [
+        ("folded", outer), ("opened", landscape), ("turned", portrait), ("folded again", outer),
+      ] {
+        window.resize(to: size)
+        try await window.settle()
+        let shown = try await window.until { window.field(showing: text) != nil }
+        XCTAssertTrue(shown, "\(kind), \(step): the sheet's text doesn't show")
+        XCTAssertTrue(window.presentsSheet, "\(kind), \(step): no sheet")
+        XCTAssertTrue(
+          kind == "advance" ? model.advancing == task : model.deciding == reject,
+          "\(kind), \(step): the sheet closed")
+        try window.keep("fold-\(kind)-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      }
+    }
+    XCTAssertEqual(model.advanceNotes[task], "Half a note")
+    XCTAssertEqual(model.reasons[reject], "Half a reason")
+  }
+
+  /// The plan, open over a task's thread, stays open as the phone opens, turns, and folds: in a
+  /// sheet on the outer display and beside the sky in landscape, where the chat has half the
+  /// window, and in a column beside the thread below the sky in portrait.
+  @MainActor func testThePlanStaysOpenThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let task = "00000000000000000000000010"
+    model.open(.thread(task))
+    model.inspecting = task
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    for (step, size, sheet) in [
+      ("folded", outer, true), ("opened", landscape, true), ("turned", portrait, false),
+      ("folded again", outer, true),
+    ] {
+      window.resize(to: size)
+      try await window.settle()
+      let presented = try await window.until { window.presentsSheet == sheet }
+      XCTAssertTrue(presented, "\(step): the plan isn't \(sheet ? "in a sheet" : "beside the thread")")
+      XCTAssertEqual(model.inspecting, task, "\(step): the plan closed")
+      try window.keep("fold-plan-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+    }
+  }
+
   /// Chat still shows #general with its draft and its anchor, in the scroll view it had before, so
   /// the split built nothing again.
   @MainActor private func expectTheChat(
@@ -221,6 +287,11 @@ final class FoldTests: XCTestCase {
 
   func close() {
     window.isHidden = true
+  }
+
+  /// Whether the window presents a sheet over its root.
+  var presentsSheet: Bool {
+    host.presentedViewController != nil
   }
 
   /// The conversation's scroll view: of the window's scroll views other than text views, the one

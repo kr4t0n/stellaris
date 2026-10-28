@@ -76,12 +76,20 @@ struct ShellView: View {
   }
 }
 
-/// The conversation Chat holds, with Back to the one it came from, and in a channel that takes
-/// posts, New thread, which the bar keeps longest as it runs out of room.
+/// The conversation Chat holds, with Back to the one it came from. A channel that takes posts has
+/// New thread in the bar, which the bar keeps longest as it runs out of room. A task's thread has
+/// Advance pinned at the bar's end while its stage waits on the user, then Plan; a proposal's has
+/// Approve pinned while it waits on the user, then Reject, then Charter. The plan or the charter
+/// opens beside the thread where it leaves the thread a column of its own, and in a sheet
+/// otherwise; the forms open in system sheets, which iOS moves off a fold.
 struct ChatView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  /// How wide Chat is, which decides whether the plan or the charter fits beside the thread.
+  @State private var width: CGFloat = 0
 
   var body: some View {
+    let subject = model.subject(of: model.history.current)
     NavigationStack {
       ConversationView(feed: model.feed(for: model.history.current))
         .id(model.history.current)
@@ -107,12 +115,91 @@ struct ChatView: View {
             }
             .visibilityPriority(.high)
           }
+          if case .task(let task)? = subject {
+            if stageForYou(task) != nil {
+              ToolbarItem(placement: .topBarPinnedTrailing) {
+                Button {
+                  model.advancing = task.id
+                } label: {
+                  Label("Advance", systemImage: "checkmark.circle")
+                }
+                .accessibilityIdentifier("advance")
+              }
+            }
+            ToolbarItem(placement: .primaryAction) {
+              Button {
+                toggleInspector(task.id)
+              } label: {
+                Label("Plan", systemImage: "list.number")
+              }
+              .accessibilityIdentifier("plan")
+            }
+            .visibilityPriority(.high)
+          }
+          if case .proposal(let proposal)? = subject {
+            if waitingOnYou(proposal) {
+              ToolbarItem(placement: .topBarPinnedTrailing) {
+                Button {
+                  model.deciding = Verdict(proposal: proposal.id, choice: .approve)
+                } label: {
+                  Label("Approve", systemImage: "checkmark.seal")
+                }
+                .accessibilityIdentifier("approve")
+              }
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  model.deciding = Verdict(proposal: proposal.id, choice: .reject)
+                } label: {
+                  Label("Reject", systemImage: "xmark.seal")
+                }
+                .accessibilityIdentifier("reject")
+              }
+              .visibilityPriority(.high)
+            }
+            ToolbarItem(placement: .primaryAction) {
+              Button {
+                toggleInspector(proposal.id)
+              } label: {
+                Label("Charter", systemImage: "doc.text")
+              }
+              .accessibilityIdentifier("charter")
+            }
+          }
+        }
+        .inspector(isPresented: inspectorShown) {
+          if let subject {
+            SubjectDetail(subject: subject)
+              .inspectorColumnWidth(min: 280, ideal: 320, max: 400)
+          }
         }
     }
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     // Presented here rather than by the conversation, which a fold may build again.
-    .sheet(isPresented: startingThread) {
-      if let channel = model.startingThread {
+    .sheet(item: sheet) { shown in
+      switch shown {
+      case .newThread(let channel):
         NewThreadSheet(channel: channel)
+      case .advance(let task):
+        AdvanceSheet(taskId: task)
+      case .decide(let verdict):
+        DecisionSheet(verdict: verdict)
+      case .inspect:
+        if let subject {
+          NavigationStack {
+            SubjectDetail(subject: subject)
+              .navigationTitle(subject.isTask ? "Plan" : "Charter")
+              .navigationBarTitleDisplayMode(.inline)
+              .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                  Button("Done") {
+                    model.inspecting = nil
+                  }
+                  .accessibilityIdentifier("inspector-done")
+                }
+              }
+          }
+          .presentationDetents([.medium, .large])
+        }
       }
     }
   }
@@ -125,13 +212,104 @@ struct ChatView: View {
     return ref
   }
 
-  private var startingThread: Binding<Bool> {
+  private var inspectorFits: Bool {
+    ChatView.inspectorFits(regular: sizeClass == .regular, width: width)
+  }
+
+  /// Whether the plan or the charter fits beside the thread: with a regular width, and room for
+  /// the thread and the inspector each to have a column of 320 points. On the inner display that
+  /// is portrait, flat or folded on a table, where the chat has the window's width; in landscape,
+  /// flat or folded like a book, the chat has half, and the plan opens in a sheet.
+  static func inspectorFits(regular: Bool, width: CGFloat) -> Bool {
+    regular && width >= 640
+  }
+
+  /// The id of the task or the proposal Chat shows.
+  private var subjectId: String? {
+    guard case .thread(let id) = model.history.current, model.subject(of: .thread(id)) != nil
+    else {
+      return nil
+    }
+    return id
+  }
+
+  private func toggleInspector(_ id: String) {
+    model.inspecting = model.inspecting == id ? nil : id
+  }
+
+  private var inspectorShown: Binding<Bool> {
     Binding(
-      get: { model.startingThread != nil },
+      get: { inspectorFits && subjectId != nil && model.inspecting == subjectId },
       set: { shown in
-        if !shown {
-          model.startingThread = nil
+        if !shown, inspectorFits {
+          model.inspecting = nil
         }
       })
+  }
+
+  /// The sheet Chat presents, from what the model says is open: a sheet dismissed by a swipe
+  /// closes what it shows, and one taken away because the model changed closes nothing more.
+  private var sheet: Binding<ChatSheet?> {
+    Binding(
+      get: { shownSheet },
+      set: { next in
+        guard next == nil, let shown = shownSheet else {
+          return
+        }
+        switch shown {
+        case .newThread: model.startingThread = nil
+        case .advance: model.advancing = nil
+        case .decide: model.deciding = nil
+        case .inspect: model.inspecting = nil
+        }
+      })
+  }
+
+  private var shownSheet: ChatSheet? {
+    if let channel = model.startingThread {
+      return .newThread(channel)
+    }
+    if let task = model.advancing {
+      return .advance(task)
+    }
+    if let verdict = model.deciding {
+      return .decide(verdict)
+    }
+    if !inspectorFits, let id = subjectId, model.inspecting == id {
+      return .inspect(id)
+    }
+    return nil
+  }
+}
+
+/// A sheet Chat presents.
+enum ChatSheet: Hashable, Identifiable {
+  case newThread(String)
+  case advance(String)
+  case decide(Verdict)
+  case inspect(String)
+
+  var id: Self { self }
+}
+
+/// A task's plan or a proposal's charter.
+struct SubjectDetail: View {
+  @Environment(AppModel.self) private var model
+  let subject: Subject
+
+  var body: some View {
+    Group {
+      switch subject {
+      case .task(let task): PlanView(task: task)
+      case .proposal(let proposal): CharterView(proposal: proposal)
+      }
+    }
+    .modifier(FollowsBoardLinks { model.inspecting = nil })
+  }
+}
+
+extension Subject {
+  var isTask: Bool {
+    if case .task = self { true } else { false }
   }
 }

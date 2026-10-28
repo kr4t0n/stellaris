@@ -192,6 +192,20 @@ runner:
   # suggests the pod's. A project lives on the runner of its first turn, so scaling down leaves
   # the projects on the runners removed waiting for them to come back.
   replicas: 1
+
+  # Runners that differ, in where they run, what they offer, or their size, as pools: each a
+  # StatefulSet of its own, <fullname>-runner-<name>, whose pods carry the label
+  # stellaris/runner-pool. A pool takes a name and any field of this block but enabled, pools,
+  # serverUrl, and networkPolicy, which every pool shares; a field it sets replaces this block's,
+  # but image, config, and persistence take its fields one at a time. Listing pools replaces the
+  # one StatefulSet, <fullname>-runner, so move its runners' claims first (see the chart's README):
+  #   pools:
+  #     - name: main
+  #     - name: gpu
+  #       config: {capabilities: [gpu]}
+  #       nodeSelector: {nvidia.com/gpu.present: "true"}
+  pools: []
+
   image:
     repository: kr4t0n/stellaris-runner
     tag: ""

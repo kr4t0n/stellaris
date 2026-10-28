@@ -2,7 +2,10 @@
 {{- $ns := .Release.Namespace -}}
 {{- $github := .Values.auth.github -}}
 {{- $runner := .Values.runner -}}
-{{- $runnerName := include "stellaris.runner.fullname" . -}}
+{{- $sets := dict -}}
+{{- if $runner.enabled -}}
+{{- $_ := include "stellaris.runner.sets" (dict "root" . "out" $sets) -}}
+{{- end -}}
 {{- $url := printf "http://127.0.0.1:%v" .Values.server.service.port -}}
 {{- if .Values.ingress.enabled -}}
 {{- $url = printf "http%s://%s" (ternary "s" "" .Values.ingress.tls.enabled) .Values.ingress.host -}}
@@ -51,15 +54,24 @@ Connect a runner
 {{- if .Values.server.enabled }}
 
 {{ end -}}
+{{- $first := index $sets.sets 0 -}}
+{{- $enrolls := not $first.values.existingSecret -}}
+{{- $runnerName := $first.name -}}
 Runners in the cluster
-  {{ $runnerName }} runs {{ $runner.replicas }} runner{{ if ne (int $runner.replicas) 1 }}s{{ end }} ({{ $runnerName }}-0{{ if gt (int $runner.replicas) 1 }} to {{ $runnerName }}-{{ sub (int $runner.replicas) 1 }}{{ end }}) against
-  {{ include "stellaris.runner.serverUrl" . }}. A pod keeps its CLI logins{{ if not $runner.existingSecret }} and its token{{ end }} on a
-  volume of its own, and its CLIs start logged out: log each pod in once{{ if not $runner.existingSecret }}, and approve its enrollment{{ end }}.
+{{- range $sets.sets }}
+{{- $replicas := int .values.replicas }}
+  {{ .name }} runs {{ $replicas }} runner{{ if ne $replicas 1 }}s{{ end }}{{ if gt $replicas 0 }} ({{ .name }}-0{{ if gt $replicas 1 }} to {{ .name }}-{{ sub $replicas 1 }}{{ end }}){{ end }}{{ if eq (len $sets.sets) 1 }} against{{ else }},{{ end }}
+{{- end }}
+{{- if gt (len $sets.sets) 1 }}
+  each against
+{{- end }}
+  {{ include "stellaris.runner.serverUrl" . }}. A pod keeps its CLI logins{{ if $enrolls }} and its token{{ end }} on a
+  volume of its own, and its CLIs start logged out: log each pod in once{{ if $enrolls }}, and approve its enrollment{{ end }}.
   For the first pod:
 
     kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- claude auth login
     kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- codex login --device-auth
-{{- if not $runner.existingSecret }}
+{{- if $enrolls }}
     kubectl -n {{ $ns }} logs {{ $runnerName }}-0 -c runner | grep approve
 
   The last line carries the code to approve on the board under runners, where the pod's name is
@@ -70,13 +82,15 @@ Runners in the cluster
   Agents run with every permission, so these pods run whatever they decide with the pod's network.
   runner.networkPolicy.enabled keeps them from the cluster's private addresses.
 {{- end }}
-{{- if eq (toString ($runner.automountServiceAccountToken | default false)) "true" }}
+{{- range $sets.sets }}
+{{- if eq (toString (.values.automountServiceAccountToken | default false)) "true" }}
 
-  Every agent on these pods holds the token of the ServiceAccount {{ $runner.serviceAccountName | default "default" }}, and with it the
+  Every agent on {{ if eq (len $sets.sets) 1 }}these pods{{ else }}{{ .name }}'s pods{{ end }} holds the token of the ServiceAccount {{ .values.serviceAccountName | default "default" }}, and with it the
   account's permissions in the cluster.
   {{- if $runner.networkPolicy.enabled }} The network policy is likely to block the API: allow it in
   runner.networkPolicy.extraEgress, as the chart's README describes.
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 

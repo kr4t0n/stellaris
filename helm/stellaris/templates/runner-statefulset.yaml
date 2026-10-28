@@ -1,15 +1,21 @@
 {{- if .Values.runner.enabled -}}
-{{- $runner := .Values.runner -}}
+{{- $sets := dict -}}
+{{- $_ := include "stellaris.runner.sets" (dict "root" $ "out" $sets) -}}
+{{- range $i, $set := $sets.sets -}}
+{{- $runner := $set.values -}}
 {{- $config := $runner.config -}}
 {{- $persistence := $runner.persistence -}}
+{{- if $i }}
+---
+{{ end -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "stellaris.runner.fullname" . }}
+  name: {{ $set.name }}
   labels:
-    {{- include "stellaris.labels" . | nindent 4 }}
+    {{- include "stellaris.labels" $ | nindent 4 }}
     app.kubernetes.io/component: runner
-  {{- with .Values.commonAnnotations }}
+  {{- with $.Values.commonAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -17,17 +23,20 @@ spec:
   # Each pod is a runner of its own, with a name that stays, which the board suggests when it
   # enrolls, and a volume that follows it. Nothing connects to a runner, so the governing Service
   # is never created and the pods have no DNS names.
-  serviceName: {{ include "stellaris.runner.fullname" . }}
+  serviceName: {{ $set.name }}
   replicas: {{ $runner.replicas }}
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      {{- include "stellaris.runner.selectorLabels" . | nindent 6 }}
+      {{- include "stellaris.runner.setSelectorLabels" (dict "root" $ "set" $set) | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "stellaris.labels" . | nindent 8 }}
+        {{- include "stellaris.labels" $ | nindent 8 }}
         app.kubernetes.io/component: runner
+        {{- with $set.pool }}
+        stellaris/runner-pool: {{ . | quote }}
+        {{- end }}
         {{- with $runner.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -36,7 +45,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with $.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -57,11 +66,11 @@ spec:
       {{- end }}
       containers:
         - name: runner
-          image: {{ include "stellaris.runner.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: {{ include "stellaris.runner.image" (dict "root" $ "image" $runner.image) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
           env:
             - name: STELLARIS_SERVER_URL
-              value: {{ include "stellaris.runner.serverUrl" . | quote }}
+              value: {{ include "stellaris.runner.serverUrl" $ | quote }}
             {{- with $config.logLevel }}
             - name: STELLARIS_LOG_LEVEL
               value: {{ . | quote }}
@@ -133,7 +142,7 @@ spec:
     - metadata:
         name: home
         labels:
-          {{- include "stellaris.runner.selectorLabels" . | nindent 10 }}
+          {{- include "stellaris.runner.setSelectorLabels" (dict "root" $ "set" $set) | nindent 10 }}
         {{- with $persistence.annotations }}
         annotations:
           {{- toYaml . | nindent 10 }}
@@ -147,4 +156,5 @@ spec:
         resources:
           requests:
             storage: {{ $persistence.size }}
+{{- end }}
 {{- end }}

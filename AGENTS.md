@@ -154,7 +154,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A release, only when the user asks, is a `chore(release): x.y.z` commit on `dev` bumping `STELLARIS_VERSION` and the chart's `version` and `appVersion`, then a pull request from `dev` into `main` merged by hand with a merge commit, then a `v<x.y.z>` tag. `STELLARIS_VERSION` in `shared` is the one version of the CLI, the server, the runner, and the packages.
 - Images build from the repository root. The runner's image builds on its target platform, since the Agent SDK's Claude Code binary is a per-platform package. An image added to `publish.yml`'s build matrix needs its name in the merge matrix too.
 - The npm packages bundle the workspace with esbuild, and every other import becomes a dependency at its pinned version; one that no workspace package declares fails the pack.
-- The Helm chart runs one server replica with `Recreate`, since the server is the only writer, and runners as a StatefulSet; `stellaris.validate` refuses what the first start could not create.
+- The Helm chart runs one server replica with `Recreate`, since the server is the only writer, and runners as a StatefulSet, or one per entry of `runner.pools`, whose fields go over `runner`'s in `stellaris.runner.sets`; `stellaris.validate` refuses what the first start could not create.
 
 ### Tests ([testing.md](./docs/internals/testing.md))
 

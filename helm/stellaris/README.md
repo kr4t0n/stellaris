@@ -100,6 +100,76 @@ The token gives every agent on those runners the account's permissions, whatever
 
 With `runner.networkPolicy.enabled`, the policy is likely to block the API those agents need. They reach the API server through the cluster's `kubernetes` Service, whose address is the first of the service range (10.96.0.1 under kubeadm's default), and the API server's own address is often a private one: both inside `deniedCidrs`. Kubernetes leaves it to the network plugin which of the two a policy sees, so give them a rule in `runner.networkPolicy.extraEgress` for both, the Service's address on port 443 and the addresses and port that `kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes` lists. Nor is the policy a guard the other way, since an API server at a public address is outside `deniedCidrs`: keep the token from runners whose agents should not use the API rather than count on the policy.
 
+## Runner pools
+
+Every replica of `runner` is the same pod, so runners that differ, in where they run, what they offer, or their size, are pools. Each pool is a StatefulSet of its own, `stellaris-runner-<pool>`, whose pods (`stellaris-runner-<pool>-0`, …) and claims (`home-stellaris-runner-<pool>-0`, …) carry its name, and whose pods carry the label `stellaris/runner-pool`. A pool takes a `name` and any field of `runner` but `enabled`, `serverUrl`, `networkPolicy`, and `pools`, which every pool shares. A field it sets replaces `runner`'s, but `image`, `config`, and `persistence` take its fields one at a time, so a pool that sets `config.capabilities` keeps `runner.config.concurrency`:
+
+```yaml
+runner:
+  enabled: true
+  config:
+    concurrency: unlimited
+  pools:
+    - name: main
+      nodeSelector:
+        topology.kubernetes.io/zone: zone-a
+    - name: gpu
+      config:
+        capabilities: [gpu]
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      persistence:
+        size: 200Gi
+```
+
+Listing pools replaces `stellaris-runner`, and the chart then runs only the pools. Each pool's replicas enroll by themselves, its `persistence` is fixed once its StatefulSet exists, and the network policy covers every pool. A pool removed or renamed takes its StatefulSet with it and leaves its claims, so the projects on its runners wait until a pool of that name comes back.
+
+### Moving runners into a pool
+
+Listing pools removes `stellaris-runner` and starts each pool's pods on claims of their own, so a runner of `stellaris-runner` that should live on, with its logins, its token, and the projects on it, needs its volume given to the claim its pod in the pool will use before the pool starts. For `stellaris-runner-0` becoming `stellaris-runner-main-0`, pause the society on the board, wait until no one is working, and stop the runners:
+
+```bash
+kubectl -n stellaris scale statefulset stellaris-runner --replicas=0
+kubectl -n stellaris wait --for=delete pod/stellaris-runner-0 --timeout=20m
+```
+
+Keep the volume when its claim goes, since a provisioned volume has its class's reclaim policy, often `Delete`, then free it from the old claim:
+
+```bash
+pv=$(kubectl -n stellaris get pvc home-stellaris-runner-0 -o jsonpath='{.spec.volumeName}')
+kubectl patch pv "$pv" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+kubectl -n stellaris delete pvc home-stellaris-runner-0
+kubectl patch pv "$pv" --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
+```
+
+Make the pool's claim on it, with the pool's labels, the volume's class, and its size:
+
+```bash
+class=$(kubectl get pv "$pv" -o jsonpath='{.spec.storageClassName}')
+size=$(kubectl get pv "$pv" -o jsonpath='{.spec.capacity.storage}')
+kubectl -n stellaris apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-stellaris-runner-main-0
+  labels:
+    app.kubernetes.io/name: stellaris
+    app.kubernetes.io/instance: stellaris
+    app.kubernetes.io/component: runner
+    stellaris/runner-pool: main
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: "$class"
+  volumeName: $pv
+  resources:
+    requests:
+      storage: $size
+EOF
+kubectl -n stellaris get pvc home-stellaris-runner-main-0   # Bound
+```
+
+Then upgrade with the pool listed and resume. The upgrade removes `stellaris-runner`, and `stellaris-runner-main-0` starts on the claim waiting under its name, where its runner finds its token and its logins and connects as the same runner, under the name the board approved; the hostname a runner reports matters only when it enrolls. A further runner, `stellaris-runner-1` into `stellaris-runner-main-1` or another pool's pod, moves the same way, its claim made before the upgrade that starts it.
+
 ## Ingress
 
 One host serves everything. Browsers and runners hold server-sent event streams open, and runners push agents' homes over git, so the proxy needs long read timeouts, no response buffering, and room for a push. With ingress-nginx:
@@ -164,6 +234,7 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `ingress.*`                            | disabled                                            | One Ingress for the server: `className`, `host`, `path`, `annotations`, `tls`    |
 | `runner.enabled`                       | `false`                                             | Run runners in the cluster                                                       |
 | `runner.replicas`                      | `1`                                                 | Runners, each enrolled by itself                                                 |
+| `runner.pools`                         | empty, one StatefulSet                              | Runners that differ, each pool a `name` and the `runner` fields it sets          |
 | `runner.image.repository`, `tag`       | `kr4t0n/stellaris-runner`, the chart's `appVersion` | The runner image                                                                 |
 | `runner.serverUrl`                     | empty, the chart's Service                          | `STELLARIS_SERVER_URL`; required with `server.enabled: false`                    |
 | `runner.existingSecret`, `Key`         | empty, `token`                                      | A Secret holding a token registered by hand, for one replica                     |

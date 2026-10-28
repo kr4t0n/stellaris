@@ -29,6 +29,11 @@ cases=(
 |      serviceAccountName: runner-reader|      automountServiceAccountToken: true"
   "an existing claim and secret|--set persistence.existingClaim=stellaris-data --set auth.github.enabled=true \
 --set auth.github.clientId=client-1 --set auth.github.existingSecret=github-oauth --set auth.github.users={octocat}"
+  "runner pools|--set runner.enabled=true --set runner.networkPolicy.enabled=true --set runner.config.concurrency=4 \
+--set runner.persistence.size=20Gi --set runner.pools[0].name=main --set runner.pools[1].name=gpu \
+--set runner.pools[1].replicas=2 --set runner.pools[1].config.capabilities={gpu} --set runner.pools[1].persistence.size=200Gi\
+|  name: stellaris-runner-main|  name: stellaris-runner-gpu|      stellaris/runner-pool: \"gpu\"|              value: \"gpu\"\
+|            storage: 20Gi|            storage: 200Gi"
 )
 # Each refusal is the message the chart must fail with, and the --set flags that ask for it.
 refusals=(
@@ -40,6 +45,15 @@ refusals=(
 --set auth.github.clientSecret=secret-1 --set auth.github.users={octocat} --set auth.github.appleAppId=com.example.app"
   "runner.existingSecret holds one runner's token|--set runner.enabled=true --set runner.existingSecret=runner-token \
 --set runner.replicas=2"
+  "is not a pool name|--set runner.enabled=true --set runner.pools[0].name=Main"
+  "names two pools|--set runner.enabled=true --set runner.pools[0].name=main --set runner.pools[1].name=main"
+  "networkPolicy is the same for every pool|--set runner.enabled=true --set runner.pools[0].name=main \
+--set runner.pools[0].networkPolicy.enabled=true"
+  "replica is not a runner field|--set runner.enabled=true --set runner.pools[0].name=main --set runner.pools[0].replica=2"
+  "runner.pools[gpu].existingSecret holds one runner's token|--set runner.enabled=true --set runner.pools[0].name=gpu \
+--set runner.pools[0].existingSecret=runner-token --set runner.pools[0].replicas=2"
+  "which runner.pools[main] takes too|--set runner.enabled=true --set runner.existingSecret=runner-token \
+--set runner.pools[0].name=main --set runner.pools[1].name=gpu"
 )
 
 for entry in "${cases[@]}"; do

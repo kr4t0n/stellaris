@@ -955,6 +955,26 @@ describe("ExecaGit", () => {
     await expect(readFile(path.join(worktree, "work.txt"), "utf8")).resolves.toBe("work.txt\n");
   });
 
+  it("carries the refs the old runner had, not a tag the remote gained since its last fetch", async () => {
+    const { origin, clone } = await projectClone();
+    await execa("git", ["tag", "v1", "main"], { cwd: origin });
+    await git.syncRemote(clone, "main", true);
+    const refs = await git.refs(clone);
+    expect(Object.keys(refs)).toContain("refs/tags/v1");
+    // A release is tagged on the remote after the old runner's last fetch.
+    await execa("git", ["tag", "v2", "main"], { cwd: origin });
+
+    const carry = path.join(dir, "carry.git");
+    await execa("git", ["init", "--quiet", "--bare", carry]);
+    await git.pushEverything(clone, carry, null);
+    const arrived = path.join(dir, "new", "repos", "demo");
+    await git.cloneEverything(carry, null, arrived, { ...project, origin });
+    expect(await git.refs(arrived)).toEqual(refs);
+    // The next turn's fetch brings it, as on any runner.
+    await git.syncRemote(arrived, "main", true);
+    expect(Object.keys(await git.refs(arrived))).toContain("refs/tags/v2");
+  });
+
   it("carries a project with no remote whole, and refuses a remote the new runner cannot fetch", async () => {
     const local = await git.ensureRepo(project, path.join(dir, "old", "repos", "lab"));
     await commitOn(local, "agent/eng-1", "notes.txt");

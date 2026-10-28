@@ -159,6 +159,8 @@ export class RunnerHub implements TurnRunner {
   private readonly moving = new Map<Name, Move>();
   /** Turns of each project placed on a runner and not yet opened, which the board cannot see yet. */
   private readonly starting = new Map<Name, number>();
+  /** Moves started since the hub did, so a placement that a move overtook gives its turn back. */
+  private moveStarts = 0;
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -492,6 +494,7 @@ export class RunnerHub implements TurnRunner {
   }
 
   async assign(dispatch: TurnDispatch): Promise<TurnAssignment | null> {
+    const starts = this.moveStarts;
     const agent = await this.board.readAgent(dispatch.agent).catch(() => null);
     if (agent === null) {
       return { refused: `no agent ${dispatch.agent}` };
@@ -545,6 +548,14 @@ export class RunnerHub implements TurnRunner {
       chosen = seat !== undefined && free(seat) ? seat : undefined;
     }
     if (chosen === undefined) {
+      return null;
+    }
+    // A move that started while this placement read the board may have the project held, or moved
+    // already, so the runner read above is no longer where it lives: the turn waits for the next pass.
+    if (
+      dispatch.project !== SOCIETY_SCOPE &&
+      (this.moving.has(dispatch.project) || this.moveStarts !== starts)
+    ) {
       return null;
     }
     chosen.inUse += 1;
@@ -754,6 +765,7 @@ export class RunnerHub implements TurnRunner {
     }
     const move: Move = { id: null, from: null, to, phase: "checking" };
     this.moving.set(slug, move);
+    this.moveStarts += 1;
     let source: Seat | undefined;
     let moved: { project: ProjectMoved["project"]; carried: number | null };
     try {

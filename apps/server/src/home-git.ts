@@ -119,6 +119,9 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
     extendEnv: false,
     input: body,
     encoding: "buffer",
+    // The blank line that ends the headers ends the whole answer when the body is empty, as for
+    // the 4-byte probe git sends before a pack too large for one post; stripped, it reads as none.
+    stripFinalNewline: false,
     reject: false,
     maxBuffer: MAX_BYTES,
   });

@@ -549,7 +549,13 @@ export class ExecaGit implements GitOps {
       return;
     }
     await must(["remote", "add", "origin", project.origin], dir);
-    const remote = await git(["fetch", "--quiet", "--prune", "origin"], dir, FETCH_TIMEOUT_MS);
+    // No tags: one the remote gained since the old runner's last fetch would make the two lists of
+    // refs differ, and the project's next turn fetches it anyway.
+    const remote = await git(
+      ["fetch", "--quiet", "--prune", "--no-tags", "origin"],
+      dir,
+      FETCH_TIMEOUT_MS,
+    );
     if (remote.exitCode !== 0) {
       throw new Error(
         `this runner cannot fetch ${project.origin}: ${lastLine(remote.stderr, "git fetch failed")}`,

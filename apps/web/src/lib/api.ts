@@ -467,10 +467,6 @@ export function createApi(token: string) {
     denyEnrollment: (code: string) =>
       write("POST", `/api/enrollments/${encodeURIComponent(code)}/deny`, token, {}, DeniedSchema),
     /**
-     * Sets the runner a citizen's work outside any project runs on, from its next turn, or null to
-     * pin it again on that turn.
-     */
-    /**
      * Moves a project to another runner, carrying its repository, and answers once the move ends;
      * `withoutBranches` goes ahead while the runner it lives on is away.
      */
@@ -482,6 +478,10 @@ export function createApi(token: string) {
         withoutBranches ? { runner, withoutBranches } : { runner },
         ProjectMovedSchema,
       ),
+    /**
+     * Sets the runner a citizen's work outside any project runs on, from its next turn, or null to
+     * pin it again on that turn.
+     */
     setRunner: (name: string, runner: string | null) =>
       write(
         "PUT",

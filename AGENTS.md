@@ -142,7 +142,8 @@ One long-running process, the board server, hosts the only writer of the data di
 - The app is dark only, as the web is: `UIUserInterfaceStyle` is `Dark` in `project.yml`'s Info.plist, and views use the system's semantic colours.
 - State a fold, a rotation, or a rebuilt view could lose lives in the model (`AppModel`, `ConversationMemory`, `SkyStore`), never only in a view. A fresh start opens the society's general channel; nothing about where the app was is restored at launch.
 - The app's tests run against `FakeBoard`, a debug-only `URLProtocol` answering from `apps/ios/fixtures/api`; a screen the app gains gets a fake answer there, a UI test, and a `Snapshot.record` in `SnapshotTests`, whose pictures are for review and are never committed. The sky, which shows only on the inner display, is driven alone in a debug build launched with `-StellarisSky`, and drawn with a fixed clock and Reduce Motion in `SkySnapshotTests`.
-- `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run and the `screens` artifact its `app` job keeps.
+- Launched against the fake board, the app sends its standard output and error to `/dev/null` (`silenceConsole`): launched by XCTest, it otherwise logs to a terminal xcodebuild reads, XCTest's own automation in it included, and a write that waits on a throttled xcodebuild stops the app inside XCTest's query. A UI test reads the app through its interface, never its console.
+- `ios.yml` runs on changes under `apps/ios` and is not a required check; a reviewer reads its run and the `screens` and `stuck-app` artifacts its `app` job keeps. Its test step fails when a copy of the app launched against the fake board writes to a terminal.
 
 ### Delivery and commits ([delivery.md](./docs/internals/delivery.md))
 

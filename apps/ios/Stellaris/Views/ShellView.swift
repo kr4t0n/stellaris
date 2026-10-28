@@ -71,6 +71,7 @@ struct ChatView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
+    @Bindable var model = model
     NavigationStack {
       ConversationView(feed: model.feed(for: model.history.current))
         .id(model.history.current)
@@ -86,6 +87,10 @@ struct ChatView: View {
             }
           }
         }
+    }
+    // Presented here rather than from a message's row, which the lazy stack may drop or build again.
+    .fullScreenCover(item: $model.viewing) { viewed in
+      ImageViewer(image: viewed.image, alt: viewed.alt)
     }
   }
 }

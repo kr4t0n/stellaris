@@ -1,6 +1,13 @@
 import BoardKit
 import UIKit
 
+/// An image open in the viewer, with its description.
+struct ViewedImage: Identifiable {
+  let id = UUID()
+  let image: UIImage
+  let alt: String
+}
+
 /// Why an image in a message can't be shown.
 enum ImageFailure: Error {
   /// Its bytes aren't an image, or the board sent none, as for a file too large to send.

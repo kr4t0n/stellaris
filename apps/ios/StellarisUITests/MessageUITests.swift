@@ -29,6 +29,8 @@ final class MessageUITests: ShellTestCase {
     XCTAssertTrue(done.waitForExistence(timeout: 20), "the image doesn't open in a viewer")
     keepScreen("image-viewer")
     done.tap()
+    XCTAssertTrue(image.waitForExistence(timeout: 20) && image.isHittable,
+      "the conversation moved while the image was open")
 
     let code = messages.scrollViews["code-block"].firstMatch
     reveal(app, code)

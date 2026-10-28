@@ -18,7 +18,6 @@ struct MessageImageView: View {
   @Environment(\.openURL) private var openURL
   let image: MessageImage
   @State private var state = Loading.loading
-  @State private var viewing = false
 
   private enum Loading {
     case loading, failed
@@ -61,7 +60,7 @@ struct MessageImageView: View {
         if let link = image.link, let url = MessageText.url(for: link) {
           openURL(url)
         } else {
-          viewing = true
+          model.viewing = ViewedImage(image: picture, alt: image.alt)
         }
       } label: {
         FittedImage(natural: picture.size, maxHeight: conversationHeight * 0.6) {
@@ -73,9 +72,6 @@ struct MessageImageView: View {
       .buttonStyle(.plain)
       .accessibilityLabel(image.alt.isEmpty ? "Image" : image.alt)
       .accessibilityIdentifier("message-image")
-      .fullScreenCover(isPresented: $viewing) {
-        ImageViewer(image: picture, alt: image.alt)
-      }
     }
   }
 
@@ -118,7 +114,7 @@ private struct FittedImage: Layout {
 }
 
 /// An image on its own, fitted to the screen, which a pinch or a double tap zooms.
-private struct ImageViewer: View {
+struct ImageViewer: View {
   @Environment(\.dismiss) private var dismiss
   let image: UIImage
   let alt: String

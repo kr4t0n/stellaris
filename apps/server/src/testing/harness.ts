@@ -54,6 +54,8 @@ export interface TestSocietyOptions {
   readonly hubRequestTimeoutMs?: number | undefined;
   /** How long a request may take to arrive whole before the server cuts it; Node's 300 s if left out. */
   readonly requestTimeoutMs?: number | undefined;
+  /** How long a request's headers may take to arrive, checked every 100 ms; Node's 60 s if left out. */
+  readonly headersTimeoutMs?: number | undefined;
   /** GitHub as the runners see it, for landing `ghpr` tasks. */
   readonly pullRequests?: PullRequestOps | undefined;
   /**
@@ -109,6 +111,9 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     port: options.port ?? 0,
     hostname: "127.0.0.1",
     requestTimeoutMs: options.requestTimeoutMs,
+    ...(options.headersTimeoutMs === undefined
+      ? {}
+      : { headersTimeoutMs: options.headersTimeoutMs, connectionsCheckingIntervalMs: 100 }),
   });
   await once(server, "listening");
   const address = server.address();

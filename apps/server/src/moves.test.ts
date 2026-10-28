@@ -881,6 +881,22 @@ describe("moving a project to another runner", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 
+  it("cuts a request whose headers take longer than the headers timeout, which needs no token", async () => {
+    const { url } = await playedRunners({ headersTimeoutMs: 1_000 });
+    const { port } = new URL(url);
+    const socket = net.connect(Number(port), "127.0.0.1");
+    socket.on("error", () => undefined);
+    await once(socket, "connect");
+    // Headers that never end: one more byte of a header every 100 ms.
+    socket.write("GET /health HTTP/1.1\r\nHost: board.test\r\nX-Slow: ");
+    const drip = setInterval(() => socket.write("a"), 100);
+    const closed = new Promise((resolve) => socket.on("close", () => resolve(true)));
+    const cut = await Promise.race([closed, pause(5_000).then(() => false)]);
+    clearInterval(drip);
+    socket.destroy();
+    expect(cut).toBe(true);
+  });
+
   it("waits out a move's export and import past the hub's request timeout", async () => {
     const { board, hub, move, request } = await playedRunners({ hubRequestTimeoutMs: 300 });
     const moving = move("demo", { runner: "y" });
@@ -891,6 +907,8 @@ describe("moving a project to another runner", () => {
       value: { ok: true, refs: { "refs/heads/main": "a".repeat(40) }, bytes: 10 },
     });
     const importing = await request("y", "import");
+    // y times its clone by the size x measured.
+    expect(importing.type === "import" ? importing.import.bytes : null).toBe(10);
     await pause(900);
     hub.answer("y", importing.request, {
       ok: true,

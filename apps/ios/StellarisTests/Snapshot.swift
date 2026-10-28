@@ -83,8 +83,11 @@ import XCTest
     }
   }
 
-  /// How many of the image's pixels are close to `red`, `green`, and `blue`, each from 0 to 255.
-  static func pixels(in image: UIImage, near color: (red: Int, green: Int, blue: Int)) -> Int {
+  /// How many of the image's pixels are within `within` of `red`, `green`, and `blue` in each
+  /// channel, each from 0 to 255.
+  static func pixels(
+    in image: UIImage, near color: (red: Int, green: Int, blue: Int), within: Int = 24
+  ) -> Int {
     guard let cgImage = image.cgImage else {
       return 0
     }
@@ -108,7 +111,9 @@ import XCTest
     var count = 0
     for start in stride(from: 0, to: bytes.count, by: 4) {
       let (red, green, blue) = (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
-      if abs(red - color.red) < 24, abs(green - color.green) < 24, abs(blue - color.blue) < 24 {
+      if abs(red - color.red) < within, abs(green - color.green) < within,
+        abs(blue - color.blue) < within
+      {
         count += 1
       }
     }

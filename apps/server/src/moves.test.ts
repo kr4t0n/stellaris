@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -21,7 +23,7 @@ import {
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, type TestSociety, type TestSocietyOptions } from "./testing/harness.js";
 
 const USER = { name: "user", role: "user" } as const;
 const QUIET = { info() {}, warn() {}, error() {} };
@@ -85,6 +87,56 @@ async function exists(file: string): Promise<boolean> {
   );
 }
 
+/**
+ * A proxy in front of `target` passing what a client sends at `bytesPerSecond` at most, as a slow
+ * link between a runner and the server does, and what comes back at once.
+ */
+async function slowLink(target: string, bytesPerSecond: number) {
+  const { hostname, port } = new URL(target);
+  const sockets = new Set<net.Socket>();
+  const proxy = net.createServer((client) => {
+    const upstream = net.connect(Number(port), hostname);
+    for (const each of [client, upstream]) {
+      sockets.add(each);
+      each.on("close", () => sockets.delete(each));
+      each.on("error", () => undefined);
+    }
+    client.on("data", (chunk: Buffer) => {
+      upstream.write(chunk);
+      client.pause();
+      setTimeout(() => client.resume(), (chunk.length / bytesPerSecond) * 1000);
+    });
+    client.on("end", () => upstream.end());
+    client.on("close", () => upstream.destroy());
+    upstream.pipe(client);
+    upstream.on("close", () => client.destroy());
+  });
+  proxy.listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  const address = proxy.address();
+  return {
+    url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`,
+    close: async () => {
+      for (const each of sockets) {
+        each.destroy();
+      }
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    },
+  };
+}
+
+/** A repository with one commit of `bytes` random bytes on main, which stay their size in a pack. */
+async function randomRepo(repo: string, bytes: number): Promise<void> {
+  await execa("git", ["init", "--quiet", "-b", "main", repo]);
+  await writeFile(path.join(repo, "weights.bin"), randomBytes(bytes));
+  await execa("git", ["add", "weights.bin"], { cwd: repo });
+  await execa(
+    "git",
+    ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-qm", "weights"],
+    { cwd: repo },
+  );
+}
+
 describe("moving a project to another runner", () => {
   let dir: string;
   let society: TestSociety | null = null;
@@ -103,7 +155,12 @@ describe("moving a project to another runner", () => {
    * A society with one citizen in `slug` and in each of `others`, which have a `dev` channel
    * beside general, and two runners, a and b, each with its own backend.
    */
-  async function twoRunners(slug: string, repo: string | null, others: readonly string[] = []) {
+  async function twoRunners(
+    slug: string,
+    repo: string | null,
+    others: readonly string[] = [],
+    options: Partial<TestSocietyOptions> = {},
+  ) {
     const { board, userToken } = await Board.init(path.join(dir, "data"), { name: "moves" });
     await board.addProject(USER, { slug, repo, onDone: "none" });
     for (const other of others) {
@@ -140,6 +197,7 @@ describe("moving a project to another runner", () => {
       extraRunners: [{ name: "b", backends: () => ({ claude: backendOn("b") }) }],
       // Both runners' accounts have a git identity, which the move asks of b; CI's account has none.
       gitIdentity: new GitIdentityCheck(QUIET, () => Promise.resolve([])),
+      ...options,
     });
     // The citizen's turns outside the project are pinned to a, so the project's first turn lands there.
     await board.setAgentRunner(USER, "eng-1", "a");
@@ -305,6 +363,28 @@ describe("moving a project to another runner", () => {
     expect((await board.readProject("lab")).runner).toBe("b");
   });
 
+  it("carries a 20 MiB pack from runner to runner within a bound", async () => {
+    const { ran, turn, move, runner, script } = await twoRunners("lab", null);
+    script(async (cwd) => {
+      await writeFile(path.join(cwd, "weights.bin"), randomBytes(20 * 1024 * 1024));
+      await execa("git", ["add", "weights.bin"], { cwd });
+      await execa(
+        "git",
+        ["-c", "user.name=eng-1", "-c", "user.email=eng-1@x", "commit", "-qm", "weights"],
+        { cwd },
+      );
+    });
+    await turn();
+    expect(ran.map((each) => each.runner)).toEqual(["a"]);
+    const before = await history(runner("a").paths.repo("lab"));
+
+    // The push into the server and the clone out of it, on loopback, at 1 MiB/s or more.
+    const started = Date.now();
+    expect((await move({ runner: "b" })).status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(await history(runner("b").paths.repo("lab"))).toBe(before);
+  });
+
   it("removes the moved project's worktrees and clone from the old runner, and nothing of another project's", async () => {
     const origin = await remote();
     const { board, move, turnIn, runner } = await twoRunners("demo", origin, ["lab"]);
@@ -429,7 +509,7 @@ describe("moving a project to another runner", () => {
    * the protocol, so a move stops wherever it waits on one: each message a runner is sent is kept
    * in `sent`, and the test answers it with `hub.answer`.
    */
-  async function playedRunners() {
+  async function playedRunners(options: Partial<TestSocietyOptions> = {}) {
     const { board, userToken } = await Board.init(path.join(dir, "data"), { name: "gate" });
     await board.addProject(USER, { slug: "demo" });
     await board.addProject(USER, { slug: "lab" });
@@ -450,7 +530,7 @@ describe("moving a project to another runner", () => {
       newSession: () => Promise.resolve("session-1"),
       runTurn: () => Promise.resolve(completed("done")),
     };
-    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }), ...options });
     const { app, hub, url } = society;
     // Runners played by the test through the protocol, so a move stops wherever it waits on one.
     const tokens: Record<string, string> = {};
@@ -507,7 +587,7 @@ describe("moving a project to another runner", () => {
         { timeout: 10_000 },
       );
     const tok = (name: string): string => tokens[name] ?? "";
-    return { board, userToken, engToken, hub, sent, detach, seat, move, probe, request, tok };
+    return { board, userToken, engToken, hub, url, sent, detach, seat, move, probe, request, tok };
   }
 
   it("gives back a placement that a move overtook, whether the move is still running or done", async () => {
@@ -734,5 +814,88 @@ describe("moving a project to another runner", () => {
         message: "runner y, where demo lives, is connected, so the move carries its branches",
       },
     });
+  });
+
+  it("lands a move's push whose pack takes longer to arrive than the server's request timeout", async () => {
+    const { board, hub, url, move, request, tok } = await playedRunners({
+      requestTimeoutMs: 1_000,
+    });
+    const moving = move("demo", { runner: "y" });
+    const exporting = await request("x", "export");
+    const id = exporting.type === "export" ? exporting.export.move : "";
+
+    // 2 MiB over a link passing 512 KiB/s takes about four times the request timeout to arrive.
+    const repo = path.join(dir, "slow");
+    await randomRepo(repo, 2 * 1024 * 1024);
+    const link = await slowLink(url, 512 * 1024);
+    const target = `${link.url}/runner/moves/${id}/git`;
+    const started = Date.now();
+    const pushed = await execa("git", ["push", "--quiet", target, "main"], {
+      cwd: repo,
+      reject: false,
+      env: {
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: `http.${target}.extraHeader`,
+        GIT_CONFIG_VALUE_0: `Authorization: Bearer ${tok("x")}`,
+      },
+    });
+    const took = Date.now() - started;
+    await link.close();
+    expect(pushed.stderr).toBe("");
+    expect(pushed.exitCode).toBe(0);
+    expect(took).toBeGreaterThan(2_000);
+    expect(await refsOf(path.join(board.moveRepos, `${id}.git`))).toEqual(await refsOf(repo));
+
+    hub.answer("x", exporting.request, { ok: false, error: "stopped by the test" });
+    expect((await moving).status).toBe(409);
+  });
+
+  it("still cuts any other request whose body takes longer than the request timeout", async () => {
+    const { url, tok } = await playedRunners({ requestTimeoutMs: 1_000 });
+    const { port } = new URL(url);
+    const socket = net.connect(Number(port), "127.0.0.1");
+    socket.on("error", () => undefined);
+    await once(socket, "connect");
+    // A hello from a runner with a valid token, one byte every 100 ms: whole only after 100 s.
+    socket.write(
+      [
+        "POST /runner/hello HTTP/1.1",
+        "Host: board.test",
+        `Authorization: Bearer ${tok("x")}`,
+        "Content-Type: application/json",
+        "Content-Length: 1000",
+        "",
+        "{",
+      ].join("\r\n"),
+    );
+    const started = Date.now();
+    const drip = setInterval(() => socket.write(" "), 100);
+    // A write after the cut fails with EPIPE, which `once` would throw.
+    await new Promise((resolve) => socket.on("close", resolve));
+    clearInterval(drip);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("waits out a move's export and import past the hub's request timeout", async () => {
+    const { board, hub, move, request } = await playedRunners({ hubRequestTimeoutMs: 300 });
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 900));
+    const moving = move("demo", { runner: "y" });
+    const exporting = await request("x", "export");
+    await pause();
+    hub.answer("x", exporting.request, {
+      ok: true,
+      value: { ok: true, refs: { "refs/heads/main": "a".repeat(40) }, bytes: 10 },
+    });
+    const importing = await request("y", "import");
+    await pause();
+    hub.answer("y", importing.request, {
+      ok: true,
+      value: { refs: { "refs/heads/main": "a".repeat(40) } },
+    });
+    const released = await request("x", "release");
+    hub.answer("x", released.request, { ok: true, value: { worktrees: 0, clone: true } });
+    expect(await moving).toMatchObject({ status: 200, body: { carried: 1 } });
+    expect((await board.readProject("demo")).runner).toBe("y");
   });
 });

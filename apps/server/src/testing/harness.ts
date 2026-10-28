@@ -50,6 +50,10 @@ export interface TestSocietyOptions {
   readonly graceMs?: number | undefined;
   /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
   readonly ackTimeoutMs?: number | undefined;
+  /** How long the hub waits for a runner's answer to a request. */
+  readonly hubRequestTimeoutMs?: number | undefined;
+  /** How long a request may take to arrive whole before the server cuts it; Node's 300 s if left out. */
+  readonly requestTimeoutMs?: number | undefined;
   /** GitHub as the runners see it, for landing `ghpr` tasks. */
   readonly pullRequests?: PullRequestOps | undefined;
   /**
@@ -104,6 +108,15 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     },
     port: options.port ?? 0,
     hostname: "127.0.0.1",
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : {
+          serverOptions: {
+            requestTimeout: options.requestTimeoutMs,
+            headersTimeout: options.requestTimeoutMs,
+            connectionsCheckingInterval: 100,
+          },
+        }),
   });
   await once(server, "listening");
   const address = server.address();
@@ -124,6 +137,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     version: "test",
     graceMs: options.graceMs ?? 5_000,
     ackTimeoutMs: options.ackTimeoutMs,
+    requestTimeoutMs: options.hubRequestTimeoutMs,
   });
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));

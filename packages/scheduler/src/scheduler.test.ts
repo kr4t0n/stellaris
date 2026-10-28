@@ -1415,6 +1415,110 @@ describe("Scheduler", () => {
     expect(Object.keys(state.lastReflection).toSorted()).toEqual(["eng-1", "rev-1"]);
   });
 
+  it("asks a society member's home for one reflection right after a turn leaves its session past the cap", async () => {
+    const { board, runner, scheduler } = await setup({
+      record: true,
+      timings: { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const topic = await board.openThread(USER, { channel: "general", title: "a question" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const turns = (): Array<[string, string, string, string | null]> =>
+      runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.thread?.id ?? null]);
+    /** One turn of a member, whose record says how large its session had grown. */
+    const turn = async (
+      agent: Name,
+      project: Name,
+      outcome: Partial<TurnRecord>,
+    ): Promise<void> => {
+      runner.outcomes.push(outcome);
+      await board.requestWake(USER, { agent, project, reason: "work" });
+      await scheduler.tick();
+      await scheduler.drain();
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+
+    // Below the cap nothing follows; at it, a reflection in the home, before any other wake.
+    await turn("steward-1", "society", { session: "s-1", contextTokens: 999 });
+    await turn("steward-1", "society", { session: "s-1", contextTokens: 1_000 });
+    expect(turns()).toEqual([
+      ["steward-1", "society", "manual", null],
+      ["steward-1", "society", "manual", null],
+      ["steward-1", "society", "reflection", null],
+    ]);
+    expect(runner.dispatches.at(-1)?.trigger).toMatchObject({
+      reason: "home session past the cap",
+    });
+    runner.dispatches.length = 0;
+
+    // A session asks once: one whose reflection left it standing waits for the cadence. A new
+    // session asks again.
+    await turn("steward-1", "society", { session: "s-1", contextTokens: 2_000 });
+    await turn("steward-1", "society", { session: "s-2", contextTokens: 1_500 });
+    expect(turns().map(([, , kind]) => kind)).toEqual(["manual", "manual", "reflection"]);
+    runner.dispatches.length = 0;
+
+    // Neither a thread of the member's, a work role's home, nor its home outside projects asks.
+    await turn("steward-1", "society", { session: "s-3", contextTokens: 5_000, thread: topic.id });
+    await turn("eng-1", "demo", { session: "s-4", contextTokens: 5_000 });
+    await turn("eng-1", "society", { session: "s-5", contextTokens: 5_000 });
+    expect(turns().map(([agent, project, kind]) => [agent, project, kind])).toEqual([
+      ["steward-1", "society", "manual"],
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "society", "manual"],
+    ]);
+  });
+
+  it("asks for no second reflection while one is queued", async () => {
+    const { board, runner, scheduler } = await setup({
+      record: true,
+      timings: { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const kinds = (): string[] =>
+      runner.dispatches.filter((d) => d.agent === "steward-1").map((d) => d.trigger.kind);
+
+    // The user asks for a reflection while a home turn runs, which then ends past the cap: the
+    // reflection queued is the one the cap asks for. It runs in the same large session, and its
+    // own record past the cap, its session kept as after a stop, asks for no other.
+    runner.hold = true;
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "steward-1", project: "society", reason: "work" });
+    await scheduler.tick();
+    await board.requestWake(USER, {
+      agent: "steward-1",
+      project: "society",
+      reason: "reflect now",
+      kind: "reflection",
+    });
+    await scheduler.tick();
+    expect(kinds()).toEqual(["manual"]);
+    runner.hold = false;
+    runner.releaseHeld();
+    for (let i = 0; i < 4; i += 1) {
+      await scheduler.drain();
+      advance(1_000);
+      await scheduler.tick();
+    }
+    await scheduler.drain();
+    expect(kinds()).toEqual(["manual", "reflection"]);
+    // Nor does a home turn after it bring a second.
+    runner.outcomes.push({ session: "s-2", contextTokens: 10 });
+    await board.requestWake(USER, { agent: "steward-1", project: "society", reason: "work" });
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    expect(kinds()).toEqual(["manual", "reflection", "manual"]);
+  });
+
   it("lets a pass under way finish and save its cursor before it stops", async () => {
     const { board, scheduler } = await setup();
     await board.postMessage(USER, {

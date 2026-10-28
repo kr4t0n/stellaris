@@ -163,6 +163,11 @@ export interface SchedulerTimings {
   /** Cadence of reflection turns for roles that reflect, counted from the scheduler's first sight of the member. */
   readonly reflectionMs: number;
   /**
+   * A society role's home session whose latest model call read this many tokens asks for a
+   * reflection ahead of the cadence, after which the home starts afresh.
+   */
+  readonly sessionCapTokens: number;
+  /**
    * After a turn the model service turned away for now, the same wake goes again after each of
    * these delays in turn, one per refusal in a row; once they are spent, the heartbeat takes over.
    */
@@ -185,6 +190,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   homeConflictMs: 24 * 3_600_000,
   scaleCooldownMs: 3_600_000,
   reflectionMs: 24 * 3_600_000,
+  sessionCapTokens: 300_000,
   transientRetryMs: [60_000, 3 * 60_000, 10 * 60_000],
 });
 
@@ -206,6 +212,7 @@ export const SchedulerTimingsSchema = z
     homeConflictMs: z.number().positive(),
     scaleCooldownMs: z.number().positive(),
     reflectionMs: z.number().positive(),
+    sessionCapTokens: z.number().int().positive(),
     transientRetryMs: z.array(z.number().positive()),
   })
   .partial();
@@ -266,6 +273,13 @@ const StateSchema = z.object({
   turnsSinceReport: z.number().int().nonnegative().default(0),
   /** When each member last reflected, or was first seen; the cadence counts from here. */
   lastReflection: z.record(z.string(), z.string()).default({}),
+  /**
+   * The home session each society member last asked for an early reflection for, once per
+   * session, and whether that reflection still waits to be queued.
+   */
+  earlyReflection: z
+    .record(z.string(), z.object({ session: z.string(), due: z.boolean() }))
+    .default({}),
 });
 type State = z.infer<typeof StateSchema>;
 
@@ -693,6 +707,7 @@ export class Scheduler {
         const cost = payload["costUsd"];
         this.state.costSinceReport += typeof cost === "number" ? cost : 0;
         this.state.turnsSinceReport += 1;
+        await this.checkSessionSize(event);
         return;
       }
       case "wake.requested": {
@@ -1642,8 +1657,60 @@ export class Scheduler {
   }
 
   /**
+   * A society role's home session that a turn left at `sessionCapTokens` or more, by its latest
+   * model call, asks for a reflection ahead of the cadence, which `checkReflections` queues once
+   * none of the member's turns is queued or running; the reflection's end starts the home afresh
+   * (`TurnHost`), so its history goes only once a reflection saved what to keep. A session asks
+   * once, so a reflection that fails leaves the next to the cadence, and none asks while a
+   * reflection is queued or running.
+   */
+  private async checkSessionSize(event: BoardEvent): Promise<void> {
+    const { payload } = event;
+    const tokens = payload["contextTokens"];
+    const session = stringOf(payload["session"]);
+    if (
+      typeof tokens !== "number" ||
+      tokens < this.timings.sessionCapTokens ||
+      session === null ||
+      payload["project"] !== SOCIETY_SCOPE ||
+      payload["thread"] !== undefined ||
+      payload["channel"] !== undefined ||
+      payload["place"] !== undefined ||
+      payload["trigger"] === "reflection" ||
+      payload["sessionDropped"] === true
+    ) {
+      return;
+    }
+    const agent = await this.tryReadAgent(event.actor);
+    if (agent === null || agent.status !== "active") {
+      return;
+    }
+    const charter = await this.board.readRole(agent.role).catch(() => null);
+    if (charter === null || !charter.societyScope || !charter.reflects) {
+      return;
+    }
+    if (this.state.earlyReflection[agent.name]?.session === session) {
+      return;
+    }
+    const ofAgent = (key: string): boolean => parseSessionKey(key)?.agent === agent.name;
+    const reflecting =
+      [...this.pending].some(
+        ([key, item]) => ofAgent(key) && item.dispatch.trigger.kind === "reflection",
+      ) || [...this.exclusive].some(([key, kind]) => ofAgent(key) && kind === "reflection");
+    if (reflecting) {
+      return;
+    }
+    this.state.earlyReflection[agent.name] = { session, due: true };
+    this.log.info(
+      { agent: agent.name, contextTokens: tokens, cap: this.timings.sessionCapTokens },
+      "home session past the cap; a reflection is due",
+    );
+  }
+
+  /**
    * Every `reflectionMs`, a member whose charter reflects takes a reflection turn in the scope of
-   * its latest working turn, unless it has not worked since its last reflection.
+   * its latest working turn, unless it has not worked since its last reflection; a society member
+   * whose home session passed the cap takes one in its home ahead of the cadence, which restarts it.
    */
   private async checkReflections(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -1652,6 +1719,20 @@ export class Scheduler {
       }
       const charter = await this.board.readRole(agent.role);
       if (!charter.reflects) {
+        continue;
+      }
+      const early = this.state.earlyReflection[agent.name];
+      if (early?.due === true) {
+        if (!this.busy(agent.name)) {
+          this.state.lastReflection[agent.name] = iso(now);
+          this.state.earlyReflection[agent.name] = { ...early, due: false };
+          this.enqueue(
+            agent.name,
+            SOCIETY_SCOPE,
+            { kind: "reflection", reason: "home session past the cap" },
+            now,
+          );
+        }
         continue;
       }
       const last = this.state.lastReflection[agent.name];
@@ -1667,12 +1748,7 @@ export class Scheduler {
         this.state.lastReflection[agent.name] = iso(now);
         continue;
       }
-      // Busy anywhere: try again next tick rather than merge the reflection into a working turn
-      // or run it beside turns writing the memory it consolidates.
-      const busy = [...this.pending.keys(), ...this.running.keys()].some(
-        (key) => parseSessionKey(key)?.agent === agent.name,
-      );
-      if (busy) {
+      if (this.busy(agent.name)) {
         continue;
       }
       this.state.lastReflection[agent.name] = iso(now);
@@ -1686,6 +1762,16 @@ export class Scheduler {
         now,
       );
     }
+  }
+
+  /**
+   * Whether a member has a turn queued or running anywhere, so a reflection waits for the next tick
+   * rather than merge into a working turn or run beside turns writing the memory it consolidates.
+   */
+  private busy(agent: Name): boolean {
+    return [...this.pending.keys(), ...this.running.keys()].some(
+      (key) => parseSessionKey(key)?.agent === agent,
+    );
   }
 
   /** The member's most recent turn that was not itself a reflection, with the scope it ran in. */
@@ -2239,6 +2325,11 @@ export class Scheduler {
         this.exclusive.set(key, "onboarding");
       } else if (dispatch.trigger.kind === "reflection") {
         this.exclusive.set(key, "reflection");
+        // Any reflection that starts is the one an early request waited for.
+        const early = this.state.earlyReflection[dispatch.agent];
+        if (early?.due === true) {
+          this.state.earlyReflection[dispatch.agent] = { ...early, due: false };
+        }
       }
     }
   }

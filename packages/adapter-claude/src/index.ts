@@ -155,6 +155,11 @@ interface TurnState {
    * usage: that usage less the run's own, since the run spent its main loop at least.
    */
   heldBefore: Usage | undefined;
+  /**
+   * The whole input of the turn's latest call in the session's own thread: how large the session
+   * had grown, which a sub-agent's calls do not say.
+   */
+  contextTokens: number | undefined;
   /** Cumulative for the query: per turn on a cold run, running total on a resident session. */
   totalCostUsd: number;
   finalText: string;
@@ -191,6 +196,7 @@ function freshState(model?: string): TurnState {
     usage: ZERO_USAGE,
     sessionUsage: undefined,
     heldBefore: undefined,
+    contextTokens: undefined,
     totalCostUsd: 0,
     finalText: "",
     structured: null,
@@ -244,6 +250,21 @@ function usageOf(raw: unknown): Usage {
     cacheReadTokens: numberField(raw, "cache_read_input_tokens"),
     cacheWriteTokens: numberField(raw, "cache_creation_input_tokens"),
   };
+}
+
+/**
+ * The whole input of one API call: what it read outside the cache, from it, and into it. A call
+ * that sampled several times sums them at the top level, and its last `message` iteration, when
+ * it lists them, holds the context the call ended with, as the SDK's `BetaUsage` documents.
+ */
+function contextOf(raw: unknown): number {
+  const iterations: unknown =
+    typeof raw === "object" && raw !== null ? Reflect.get(raw, "iterations") : null;
+  const last = blocksOf(iterations)
+    .filter((iteration) => iteration.type === "message")
+    .at(-1);
+  const usage = usageOf(last ?? raw);
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
 
 /**
@@ -372,6 +393,14 @@ function handleMessage(
       // After its own retries, Claude Code says `server_error` for a 5xx or a 529.
       if (message.error === "server_error" || message.error === "overloaded") {
         state.serverError = true;
+      }
+      // The session's own calls say how large it has grown, a sub-agent's are another context, and
+      // the CLI's synthetic messages carry no usage.
+      if (message.parent_tool_use_id === null) {
+        const size = contextOf(message.message.usage);
+        if (size > 0) {
+          state.contextTokens = size;
+        }
       }
       for (const block of blocksOf(message.message.content)) {
         if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
@@ -517,6 +546,7 @@ function finishTurn(
     ...(state.model === undefined ? {} : { model: state.model }),
     ...(state.sawResult ? { sessionCostUsd: state.totalCostUsd } : {}),
     ...(state.sessionUsage === undefined ? {} : { sessionUsage: state.sessionUsage }),
+    ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
     ...(state.quota === undefined ? {} : { quota: state.quota }),
     ...(state.transient && state.limitText === undefined && state.exitReason === "error"
       ? { transient: true }

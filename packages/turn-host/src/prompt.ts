@@ -70,6 +70,8 @@ export interface TurnPromptInput {
   readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
   readonly onboarding: OnboardingContext | null;
+  /** Whether a reflection that completes in this conversation ends its session: a society role's home. */
+  readonly afreshAfterReflection?: boolean | undefined;
   /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;
   /** Present for society roles, which plan where work runs; absent for everyone else. */
@@ -129,8 +131,14 @@ const REFLECTION_STEPS = [
   '- Extract a skill: a procedure you have followed twice is a candidate, and one that makes a citizen better at a kind of work on any project goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps, with any script or reference it uses in the same folder. Propose it with kind "skill" when more than one citizen would use it and nothing in it is tied to one place; one only you use stays yours.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
   "- Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel; a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
-  "- Report memoryUpdated: true in the status object when core.md or a skill changed.",
 ];
+
+/** The step a reflection takes where the session ends with it. */
+const SAVE_WHAT_IS_OPEN =
+  "- This conversation's session ends with this turn, and the next turn here starts a new one that knows only your home's files and the board: write anything still open into memory/core.md, or the archive it points to, before you end.";
+
+const REFLECTION_REPORT =
+  "- Report memoryUpdated: true in the status object when core.md or a skill changed.";
 
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
@@ -469,6 +477,8 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       REFLECTION_INTRO,
       ...(conflicts.length > 0 ? [RECONCILE] : []),
       ...REFLECTION_STEPS,
+      ...(input.afreshAfterReflection === true ? [SAVE_WHAT_IS_OPEN] : []),
+      REFLECTION_REPORT,
     );
   }
 
@@ -497,6 +507,18 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
           ]
         : []),
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
+    );
+  }
+  if (
+    last?.trigger.kind === "reflection" &&
+    last.exitReason === "completed" &&
+    last.sessionDropped === true
+  ) {
+    lines.push(
+      "",
+      "## Your session started afresh",
+      "",
+      "Your last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.",
     );
   }
 

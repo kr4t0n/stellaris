@@ -369,6 +369,7 @@ export class TurnExecutor {
       costUsd: result.costUsd,
       ...(result.sessionCostUsd === undefined ? {} : { sessionCostUsd: result.sessionCostUsd }),
       ...(result.sessionUsage === undefined ? {} : { sessionUsage: result.sessionUsage }),
+      ...(result.contextTokens === undefined ? {} : { contextTokens: result.contextTokens }),
       session: result.session ?? (started ? session : job.session),
       ...(result.resumeFailed === undefined ? {} : { resumeFailed: result.resumeFailed }),
       ...(result.transient === true && result.exitReason === "error" ? { transient: true } : {}),
@@ -1089,7 +1090,8 @@ export class TurnExecutor {
   /**
    * One turn on a warm session: start it on first use, run the prompt, then either keep it warm
    * until the idle timeout or recycle it when its instructions went stale. A session given another
-   * token or model than it started with starts afresh, since the CLI read both at its start.
+   * token or model than it started with starts afresh, since the CLI read both at its start, and so
+   * does one whose job names no session, since the server dropped the one it was warm on.
    */
   private async runResident(
     backend: AgentBackend,
@@ -1116,9 +1118,10 @@ export class TurnExecutor {
       (warm.model !== spec.model ||
         warm.effort !== spec.effort ||
         warm.token !== job.mcp.token ||
-        warm.stale)
+        warm.stale ||
+        input.newSession)
     ) {
-      await this.closeResident(resident.key, "model, effort, token, or memory changed");
+      await this.closeResident(resident.key, "model, effort, token, memory, or session changed");
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {

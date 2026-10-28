@@ -585,6 +585,8 @@ interface TurnCollector {
    * turn it never answered used no tokens, whatever the thread's totals say about the turns before it.
    */
   answered: boolean;
+  /** The whole input of the turn's latest request in this thread: how large the thread had grown. */
+  contextTokens: number | undefined;
 }
 
 /**
@@ -901,6 +903,14 @@ export class CodexAppServerSession implements ResidentSession {
           : this.threadTotal;
         turn.baselineKnown = true;
       }
+      // The turn's own latest request says how large the thread had grown, its input counting the
+      // cached input within it.
+      if (turn.turnId !== null && (owner === undefined || owner === turn.turnId)) {
+        const context = threadTokensOf(usage["last"]).input;
+        if (context > 0) {
+          turn.contextTokens = context;
+        }
+      }
       return;
     }
     if (turn === null) {
@@ -1036,6 +1046,7 @@ export class CodexAppServerSession implements ResidentSession {
       limited: false,
       transient: false,
       answered: false,
+      contextTokens: undefined,
     };
     this.active = turn;
     emit({
@@ -1131,6 +1142,7 @@ export class CodexAppServerSession implements ResidentSession {
       ...(turn.error === undefined ? {} : { error: turn.error }),
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
+      ...(turn.contextTokens === undefined ? {} : { contextTokens: turn.contextTokens }),
       ...(quota === undefined ? {} : { quota }),
       ...(turn.transient && !turn.limited && exitReason === "error" ? { transient: true } : {}),
     };

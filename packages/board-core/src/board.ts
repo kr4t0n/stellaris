@@ -4302,6 +4302,7 @@ export class Board {
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),
+        ...(parsed.contextTokens === undefined ? {} : { contextTokens: parsed.contextTokens }),
         toolCalls: parsed.toolCalls,
         model: parsed.model,
         summary: parsed.status?.summary ?? null,

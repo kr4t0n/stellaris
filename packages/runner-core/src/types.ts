@@ -78,6 +78,11 @@ export interface TurnResult {
   readonly sessionCostUsd?: number | undefined;
   /** The session's running usage after this turn, for CLIs that report one; `usage` is this turn's share. */
   readonly sessionUsage?: Usage | undefined;
+  /**
+   * The whole input of the turn's latest model call in the session's own thread, cached or not,
+   * sub-agents' calls left out: how large the session had grown. Absent when it made no call.
+   */
+  readonly contextTokens?: number | undefined;
   /** The CLI's plan quota as the turn's stream last reported it, when it reported any. */
   readonly quota?: CliQuota | undefined;
   /** Set when the CLI could not resume the requested session, which failed the turn before any model call. */

@@ -151,5 +151,405 @@
       "01M5A00000000000000000T002": "Fix the empty state"
     },
     "line": "→Add the export view and éAdd the export view"
+  },
+  {
+    "name": "a message's id after msg",
+    "text": "As msg 01M5A00000000000000000M001 says.",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "As msg eng-1's post in #general says."
+  },
+  {
+    "name": "whose post before a message's id",
+    "text": "See my post 01M5A00000000000000000M001.",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "See eng-1's post in #general."
+  },
+  {
+    "name": "a name's message in a thread",
+    "text": "Per rev-1's message 01M5A00000000000000000M002, the docs go first.",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "Per rev-1's post in Release notes, the docs go first."
+  },
+  {
+    "name": "the user's own post",
+    "text": "Your post 01M5A00000000000000000M003 asked it.",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "your post in #demo/general asked it."
+  },
+  {
+    "name": "a thread the index doesn't name",
+    "text": "In post 01M5A00000000000000000M004 it says",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "In eng-1's post in a thread in #general it says"
+  },
+  {
+    "name": "post at the end of a line",
+    "text": "The post\n01M5A00000000000000000M001 is the plan",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "The eng-1's post in #general is the plan"
+  },
+  {
+    "name": "postal is no post",
+    "text": "postal 01M5A00000000000000000M001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "postal eng-1's post in #general"
+  },
+  {
+    "name": "a name with a curly apostrophe",
+    "text": "rev-1’s post 01M5A00000000000000000M001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "eng-1's post in #general"
+  },
+  {
+    "name": "a message the board doesn't have",
+    "text": "msg 01M5A00000000000000000M999 too",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "msg 01M5A00000000000000000M999 too"
+  },
+  {
+    "name": "post before a task's id stays",
+    "text": "post 01M5A00000000000000000T001",
+    "titles": {
+      "01M5A00000000000000000T001": "Add the export view",
+      "01M5A00000000000000000T002": "Fix the empty state"
+    },
+    "messages": [
+      {
+        "id": "01M5A00000000000000000M001",
+        "author": "eng-1",
+        "channel": "general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M002",
+        "author": "rev-1",
+        "channel": "demo/release",
+        "thread": "01M5A00000000000000000H001",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M003",
+        "author": "user",
+        "channel": "demo/general",
+        "ts": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "01M5A00000000000000000M004",
+        "author": "eng-1",
+        "channel": "general",
+        "thread": "01M5A00000000000000000H002",
+        "ts": "2026-01-01T00:00:00.000Z"
+      }
+    ],
+    "threads": {
+      "01M5A00000000000000000H001": "Release notes"
+    },
+    "line": "post Add the export view"
   }
 ]

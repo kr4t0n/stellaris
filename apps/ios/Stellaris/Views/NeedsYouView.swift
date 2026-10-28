@@ -54,8 +54,7 @@ struct AttentionItem: Identifiable {
     case .proposal(let proposal, let since):
       id = "proposal-\(proposal.id)"
       kind = .proposal
-      let name = proposal.charter["name"]?.string ?? proposal.charter["role"]?.string
-      title = [proposal.kind.rawValue.capitalized, name].compactMap { $0 }.joined(separator: " · ")
+      title = proposal.title
       meta = "proposed by \(proposal.proposedBy) \(BoardTime.ago(since))"
       conversation = .thread(proposal.id)
     case .stage(let task, let stage, let since):
@@ -95,9 +94,9 @@ private struct AttentionRow: View {
       model.open(item.conversation)
     } label: {
       VStack(alignment: .leading, spacing: 4) {
-        Text(item.title)
+        Text(model.store.titled(item.title))
           .lineLimit(2)
-        Text(item.meta)
+        Text(model.store.titled(item.meta))
           .font(.caption)
           .foregroundStyle(.secondary)
           .lineLimit(2)

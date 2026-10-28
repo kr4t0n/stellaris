@@ -59,7 +59,13 @@ private struct ChannelRow: View {
           Text(channel.messages, format: .number)
         }
       } label: {
-        Label(channel.name, systemImage: "number")
+        Label {
+          Text(channel.name)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        } icon: {
+          Image(systemName: "number")
+        }
       }
     }
     .foregroundStyle(.primary)

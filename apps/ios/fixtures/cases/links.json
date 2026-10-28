@@ -1,0 +1,536 @@
+[
+  {
+    "name": "a task's view",
+    "href": "/task/01M5A00000000000000000T001",
+    "kept": "/task/01M5A00000000000000000T001",
+    "entity": {
+      "kind": "task",
+      "id": "01M5A00000000000000000T001"
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a proposal's view",
+    "href": "/proposal/01M5A00000000000000000P001",
+    "kept": "/proposal/01M5A00000000000000000P001",
+    "entity": {
+      "kind": "proposal",
+      "id": "01M5A00000000000000000P001"
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a thread's view",
+    "href": "/thread/01M5A00000000000000000H001",
+    "kept": "/thread/01M5A00000000000000000H001",
+    "entity": {
+      "kind": "thread",
+      "id": "01M5A00000000000000000H001"
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a cron in the crons view",
+    "href": "/crons?cron=01M5A00000000000000000C001",
+    "kept": "/crons?cron=01M5A00000000000000000C001",
+    "entity": {
+      "kind": "cron",
+      "id": "01M5A00000000000000000C001"
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "the crons view for a citizen, no entity",
+    "href": "/crons?agent=eng-1",
+    "kept": "/crons?agent=eng-1",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a message in its thread",
+    "href": "/thread/01M5A00000000000000000H001?message=01M5A00000000000000000M001",
+    "kept": "/thread/01M5A00000000000000000H001?message=01M5A00000000000000000M001",
+    "entity": {
+      "kind": "message",
+      "id": "01M5A00000000000000000M001",
+      "place": {
+        "channel": "",
+        "thread": "01M5A00000000000000000H001"
+      }
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a message in the society's channel",
+    "href": "/c/general?message=01M5A00000000000000000M001",
+    "kept": "/c/general?message=01M5A00000000000000000M001",
+    "entity": {
+      "kind": "message",
+      "id": "01M5A00000000000000000M001",
+      "place": {
+        "channel": "general"
+      }
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a message in a project's channel",
+    "href": "/c/demo/release?message=01M5A00000000000000000M001",
+    "kept": "/c/demo/release?message=01M5A00000000000000000M001",
+    "entity": {
+      "kind": "message",
+      "id": "01M5A00000000000000000M001",
+      "place": {
+        "channel": "demo/release"
+      }
+    },
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a task's files, not its view",
+    "href": "/task/01M5A00000000000000000T001/files",
+    "kept": "/task/01M5A00000000000000000T001/files",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a task's view with an id that isn't one",
+    "href": "/task/not-an-id",
+    "kept": "/task/not-an-id",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "the board's path on another host",
+    "href": "https://example.com/task/01M5A00000000000000000T001",
+    "kept": "https://example.com/task/01M5A00000000000000000T001",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a path through a runner's task worktree",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md"
+    }
+  },
+  {
+    "name": "a worktree path from its worktrees folder, with a dot segment",
+    "href": "worktrees/eng-1/.tasks/01M5A00000000000000000T001/./report.md",
+    "kept": "worktrees/eng-1/.tasks/01M5A00000000000000000T001/./report.md",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md"
+    }
+  },
+  {
+    "name": "a worktree path with a query and a fragment",
+    "href": "/data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md?raw=1#top",
+    "kept": "/data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md?raw=1#top",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md"
+    }
+  },
+  {
+    "name": "a worktree path with an escaped space",
+    "href": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/evidence/analysis/policy%20diagnostics.png",
+    "kept": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/evidence/analysis/policy%20diagnostics.png",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "evidence/analysis/policy diagnostics.png"
+    }
+  },
+  {
+    "name": "the worktree itself",
+    "href": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001",
+    "kept": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": ""
+    }
+  },
+  {
+    "name": "a worktree path climbing out of the worktree",
+    "href": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/../../x",
+    "kept": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/../../x",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a later worktree in the path wins",
+    "href": "/a/worktrees/x/.tasks/01M5A00000000000000000T001x/worktrees/y/.tasks/01M5A00000000000000000T001/notes.md",
+    "kept": "/a/worktrees/x/.tasks/01M5A00000000000000000T001x/worktrees/y/.tasks/01M5A00000000000000000T001/notes.md",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "notes.md"
+    }
+  },
+  {
+    "name": "a cited line",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md:67",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md:67",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md",
+      "line": 67
+    }
+  },
+  {
+    "name": "a cited line and column",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/src/run.py:12:5",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/src/run.py:12:5",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "src/run.py",
+      "line": 12
+    }
+  },
+  {
+    "name": "a cited line behind an escaped colon",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md%3A67",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md%3A67",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md",
+      "line": 67
+    }
+  },
+  {
+    "name": "a line range as GitHub links one",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md#L40-L52",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md#L40-L52",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md",
+      "line": 40
+    }
+  },
+  {
+    "name": "line zero is no line",
+    "href": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md:0",
+    "kept": "/home/tiger/runner-data/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md:0",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md:0"
+    }
+  },
+  {
+    "name": "a relative file citing a line, in a file",
+    "href": "plot.png:3",
+    "base": {
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "dir": "docs"
+    },
+    "kept": "plot.png:3",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "docs/plot.png",
+      "line": 3
+    }
+  },
+  {
+    "name": "a relative file citing a line, in a message",
+    "href": "report.md:67",
+    "kept": "report.md:67",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a relative link in a file",
+    "href": "evidence/plot.png",
+    "base": {
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "dir": "docs"
+    },
+    "kept": "evidence/plot.png",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "docs/evidence/plot.png"
+    }
+  },
+  {
+    "name": "a relative link up a folder",
+    "href": "../metrics-plan.md",
+    "base": {
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "dir": "docs"
+    },
+    "kept": "../metrics-plan.md",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "metrics-plan.md"
+    }
+  },
+  {
+    "name": "a relative link climbing out of the branch",
+    "href": "../../etc/passwd",
+    "base": {
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "dir": "docs"
+    },
+    "kept": "../../etc/passwd",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a relative link in a project's file, with a line",
+    "href": "../internals/board.md#L12",
+    "base": {
+      "source": {
+        "kind": "project",
+        "slug": "demo"
+      },
+      "dir": "docs/guide"
+    },
+    "kept": "../internals/board.md#L12",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "project",
+        "slug": "demo"
+      },
+      "path": "docs/internals/board.md",
+      "line": 12
+    }
+  },
+  {
+    "name": "a worktree path inside a project's file",
+    "href": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md",
+    "base": {
+      "source": {
+        "kind": "project",
+        "slug": "demo"
+      },
+      "dir": "docs/guide"
+    },
+    "kept": "/r/worktrees/eng-1/.tasks/01M5A00000000000000000T001/report.md",
+    "entity": null,
+    "target": {
+      "kind": "file",
+      "source": {
+        "kind": "task",
+        "taskId": "01M5A00000000000000000T001"
+      },
+      "path": "report.md"
+    }
+  },
+  {
+    "name": "a path on a machine",
+    "href": "/tmp/run/plot.png",
+    "kept": "/tmp/run/plot.png",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "a path with a colon after a folder",
+    "href": "notes/v2:draft.md",
+    "kept": "notes/v2:draft.md",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  },
+  {
+    "name": "an uploaded image",
+    "href": "image:01M5A00000000000000000G001",
+    "kept": "image:01M5A00000000000000000G001",
+    "entity": null,
+    "target": {
+      "kind": "upload",
+      "id": "01M5A00000000000000000G001"
+    }
+  },
+  {
+    "name": "an image address with no id",
+    "href": "image:not-an-id",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a fragment",
+    "href": "#top",
+    "kept": "#top",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "an address without a scheme",
+    "href": "//example.com/x",
+    "kept": "//example.com/x",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a mail address",
+    "href": "mailto:a@example.com",
+    "kept": "mailto:a@example.com",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "an https address in capitals",
+    "href": "HTTPS://Example.com/x",
+    "kept": "HTTPS://Example.com/x",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a script",
+    "href": "javascript:alert(1)",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a script in mixed case",
+    "href": "JavaScript:alert(1)",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "data",
+    "href": "data:text/html,<b>x</b>",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "ftp",
+    "href": "ftp://example.com/f",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "a Windows path",
+    "href": "C:\\Users\\x.png",
+    "kept": "",
+    "entity": null,
+    "target": null
+  },
+  {
+    "name": "nothing",
+    "href": "",
+    "kept": "",
+    "entity": null,
+    "target": {
+      "kind": "local"
+    }
+  }
+]

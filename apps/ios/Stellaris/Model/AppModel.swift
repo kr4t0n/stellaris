@@ -2,6 +2,13 @@ import BoardKit
 import Foundation
 import Observation
 
+/// What following a link did: opened what it names in Chat, asks for Safari, or went nowhere.
+enum LinkOutcome: Equatable {
+  case opened
+  case safari(URL)
+  case nowhere
+}
+
 /// Why a sign-in didn't take.
 enum SignInFailure: Error, Equatable {
   /// The board answered that it doesn't take the token.
@@ -23,7 +30,9 @@ enum SignInFailure: Error, Equatable {
   /// The board signed in to, or the last one, which sign-in offers again.
   private(set) var board: URL?
   /// Who the token signs in as, once the board has said.
-  private(set) var actor: BoardActor?
+  private(set) var actor: BoardActor? {
+    didSet { store.userName = actor?.signIn?.login ?? "you" }
+  }
   /// Why the app is back at sign-in, when the board ended the sign-in.
   private(set) var notice: String?
   var tab: AppTab = .chat
@@ -32,6 +41,10 @@ enum SignInFailure: Error, Equatable {
   private(set) var memory: ConversationMemory?
   let store = BoardStore()
   let sky = SkyStore()
+  /// The images messages show, uploaded ones kept by id for as long as the sign-in lasts.
+  private(set) var images = BoardImages()
+  /// The image open in the viewer, which the tabs present.
+  var viewing: ViewedImage?
 
   @ObservationIgnored let environment: AppEnvironment
   @ObservationIgnored private var client: BoardClient?
@@ -40,6 +53,9 @@ enum SignInFailure: Error, Equatable {
   @ObservationIgnored private(set) var generation = 0
   /// Each conversation's messages as last loaded, kept while the app is signed in.
   @ObservationIgnored private var feeds: [Conversation: ConversationFeed] = [:]
+  /// Each message's markdown as last read, with the text and the ids it was read with.
+  @ObservationIgnored private var documents:
+    [String: (body: String, entities: [String: EntityTitle], document: MessageDocument)] = [:]
 
   private static let boardKey = "board"
 
@@ -112,6 +128,23 @@ enum SignInFailure: Error, Equatable {
     let sent = generation
     do {
       return try await client.send(request)
+    } catch let error as BoardError where error.isUnauthorized {
+      if sent == generation {
+        endSignIn()
+      }
+      throw error
+    }
+  }
+
+  /// An uploaded image's bytes, as the signed-in user; a token the board no longer takes ends the
+  /// sign-in, as for any other request.
+  func imageData(_ id: String) async throws -> Data {
+    guard let client else {
+      throw CancellationError()
+    }
+    let sent = generation
+    do {
+      return try await client.image(id)
     } catch let error as BoardError where error.isUnauthorized {
       if sent == generation {
         endSignIn()
@@ -209,6 +242,52 @@ enum SignInFailure: Error, Equatable {
     return String(channel[..<slash])
   }
 
+  /// Where a link in a message goes. A task's, a proposal's, or a thread's link, or a message's,
+  /// opens it in Chat; a cron's or a file's opens the board's own page for it in Safari, as does an
+  /// address on the web; anything else goes nowhere.
+  func follow(_ url: URL) -> LinkOutcome {
+    guard url.scheme == nil else {
+      let scheme = url.scheme?.lowercased() ?? ""
+      return ["http", "https", "mailto"].contains(scheme) ? .safari(url) : .nowhere
+    }
+    let href = url.relativeString
+    if let entity = entityOfHref(href) {
+      switch entity.kind {
+      case .task, .proposal, .thread:
+        open(.thread(entity.id))
+        return .opened
+      case .message:
+        open(entity.thread.map(Conversation.thread) ?? .channel(entity.channel ?? "general"))
+        return .opened
+      case .cron:
+        break
+      }
+    }
+    guard href.hasPrefix("/"), let board else {
+      return .nowhere
+    }
+    let base = board.absoluteString.hasSuffix("/")
+      ? String(board.absoluteString.dropLast()) : board.absoluteString
+    return URL(string: base + href).map(LinkOutcome.safari) ?? .nowhere
+  }
+
+  /// A message's markdown, read once for its text and the ids the board names.
+  func document(for message: Message) -> MessageDocument {
+    let entities = store.entities
+    if let kept = documents[message.id], kept.body == message.body, kept.entities == entities {
+      return kept.document
+    }
+    let document = MessageDocument(markdown: message.body, entities: entities)
+    documents[message.id] = (message.body, entities, document)
+    return document
+  }
+
+  /// How the board names an author, as the web's `displayName` does: the user by the GitHub
+  /// account signed in, or else as "you".
+  func displayName(_ author: String) -> String {
+    author == "user" ? (actor?.signIn?.login ?? "you") : author
+  }
+
   /// What a conversation is called: `#general`, or a thread's title once it is known.
   func name(of conversation: Conversation) -> String {
     switch conversation {
@@ -234,6 +313,8 @@ enum SignInFailure: Error, Equatable {
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
     feeds = [:]
+    documents = [:]
+    images = BoardImages()
     sky.clear()
     tab = .chat
     notice = nil
@@ -247,6 +328,9 @@ enum SignInFailure: Error, Equatable {
     actor = nil
     memory = nil
     feeds = [:]
+    documents = [:]
+    images = BoardImages()
+    viewing = nil
     store.clear()
     sky.clear()
     history = ChatHistory()

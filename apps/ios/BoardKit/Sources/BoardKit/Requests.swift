@@ -148,6 +148,21 @@ public enum BoardAPI {
       method: .get, path: "/api/turns/stream?since=\(since)", body: nil, authenticated: true)
   }
 
+  /// The most message ids one lookup takes, as the board's `MESSAGE_LOOKUP_LIMIT`.
+  public static let messageLookupLimit = 50
+
+  /// Where the messages `ids` name are and who wrote them; an id that names no message is left
+  /// out of the answer.
+  public static func messages(_ ids: [String]) -> BoardRequest<[MessageRef]> {
+    read("/api/messages?ids=\(ids.map(component).joined(separator: ","))")
+  }
+
+  /// A path on a task's branch, read from its project's runner: a file, or a folder.
+  public static func taskFile(_ id: String, path: String) -> BoardRequest<BranchFile> {
+    let rest = path.split(separator: "/").map { "/" + component(String($0)) }.joined()
+    return read("/api/tasks/\(component(id))/files\(rest)")
+  }
+
   /// An image a citizen uploaded, as its bytes.
   public static func image(_ id: String) -> Endpoint {
     Endpoint(method: .get, path: "/api/images/\(component(id))", body: nil, authenticated: true)

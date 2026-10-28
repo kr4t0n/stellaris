@@ -208,7 +208,7 @@ import Observation
           guard let cue = skyCue(for: item, in: sky, now: now()) else {
             continue
           }
-          let line = cue.line.map { model.store.withTaskTitles($0) }
+          let line = cue.line.map { model.store.withEntityTitles($0) }
           scene.play(SkyCue(star: cue.star, line: line))
           if let line, let name = sky.stars.first(where: { $0.id == cue.star })?.name {
             lastSaid[name] = line

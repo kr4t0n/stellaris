@@ -40,7 +40,11 @@ import XCTest
   /// `view` drawn in a window `size` big, with a regular width from 600 points up. iOS places its
   /// vertical bar by the display the simulator shows, the outer one, so in a window wider than that
   /// the bars fall back to the horizontal ones, as on the inner display in portrait.
-  static func image(of view: some View, size: CGSize, type: TypeSize) async throws -> UIImage {
+  /// With `fitting`, the window then takes the height `view` lays out at, from its top, with no
+  /// safe area, so a picture holds the whole of a view taller or shorter than `size`.
+  static func image(
+    of view: some View, size: CGSize, type: TypeSize, fitting: Bool = false
+  ) async throws -> UIImage {
     let scene = try XCTUnwrap(
       UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
       "the test host has no window scene")
@@ -52,6 +56,9 @@ import XCTest
         BarAxis(horizontal: wider)))
     host.traitOverrides.horizontalSizeClass = size.width >= 600 ? .regular : .compact
     host.traitOverrides.preferredContentSizeCategory = type.category
+    if fitting {
+      host.safeAreaRegions = []
+    }
     window.rootViewController = host
     window.isHidden = false
     defer { window.isHidden = true }
@@ -59,6 +66,14 @@ import XCTest
     // Lists lay out their cells, and views run their tasks, while the main actor is free.
     try await Task.sleep(for: .milliseconds(600))
     host.view.layoutIfNeeded()
+    if fitting {
+      let tall = CGSize(width: size.width, height: .greatestFiniteMagnitude)
+      let height = ceil(max(host.sizeThatFits(in: tall).height, 1))
+      window.frame = CGRect(origin: .zero, size: CGSize(width: size.width, height: height))
+      host.view.layoutIfNeeded()
+      try await Task.sleep(for: .milliseconds(100))
+      host.view.layoutIfNeeded()
+    }
     return UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
       _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
     }
@@ -83,8 +98,23 @@ import XCTest
     }
   }
 
-  /// How many of the image's pixels are close to `red`, `green`, and `blue`, each from 0 to 255.
-  static func pixels(in image: UIImage, near color: (red: Int, green: Int, blue: Int)) -> Int {
+  /// Draws `view` at every width and type size as tall as it lays out, from its top, and keeps each
+  /// picture as `<name>-<width>-<type>`.
+  static func recordWhole(_ view: some View, named name: String, in test: XCTestCase) async throws
+  {
+    for size in sizes {
+      for type in typeSizes {
+        let image = try await image(of: view, size: size.size, type: type, fitting: true)
+        try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
+      }
+    }
+  }
+
+  /// How many of the image's pixels are within `within` of `red`, `green`, and `blue` in each
+  /// channel, each from 0 to 255.
+  static func pixels(
+    in image: UIImage, near color: (red: Int, green: Int, blue: Int), within: Int = 24
+  ) -> Int {
     guard let cgImage = image.cgImage else {
       return 0
     }
@@ -108,7 +138,9 @@ import XCTest
     var count = 0
     for start in stride(from: 0, to: bytes.count, by: 4) {
       let (red, green, blue) = (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
-      if abs(red - color.red) < 24, abs(green - color.green) < 24, abs(blue - color.blue) < 24 {
+      if abs(red - color.red) < within, abs(green - color.green) < within,
+        abs(blue - color.blue) < within
+      {
         count += 1
       }
     }

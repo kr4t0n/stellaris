@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
-import { BoardEventSchema, ULID_PATTERN } from "@stellaris/shared";
+import { ZERO_USAGE, type AgentBackend } from "@stellaris/runner-core";
+import { BoardEventSchema, BranchFileSchema, ULID_PATTERN } from "@stellaris/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
@@ -26,8 +27,39 @@ const TIME = "2026-01-01T00:00:00.000Z";
 
 const IdSchema = z.object({ id: z.string() });
 const TaskRowSchema = z.object({ id: z.string(), title: z.string() });
+const PostSchema = z.object({ id: z.string(), author: z.string() });
 const ProposalRowSchema = z.object({ id: z.string(), kind: z.string() });
 const SessionSchema = z.object({ session: z.string() });
+
+/** A one-pixel PNG, the image a turn leaves on a task's branch for the app to read. */
+const PLOT = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/** eng-1's CLI: its one turn leaves a plot on the task's branch. */
+const plotting: AgentBackend = {
+  kind: "codex",
+  newSession: () => Promise.resolve("session-1"),
+  runTurn: async (request) => {
+    await mkdir(path.join(request.spec.cwd, "evidence"), { recursive: true });
+    await writeFile(path.join(request.spec.cwd, "evidence", "plot.png"), PLOT);
+    return {
+      events: [],
+      finalText: "Plotted.",
+      usage: ZERO_USAGE,
+      costUsd: 0,
+      status: {
+        summary: "Plotted.",
+        claimsHeld: [],
+        blockedOn: [],
+        needsUserDecision: false,
+        memoryUpdated: false,
+      },
+      exitReason: "completed",
+    };
+  },
+};
 
 /** The app's PKCE pair: RFC 7636's example in its appendix B, a verifier and its S256 challenge. */
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -197,7 +229,7 @@ describe("the answers the iOS client reads", () => {
     society = await startTestSociety({
       board,
       runnerName: "runner-1",
-      backends: () => ({}),
+      backends: () => ({ codex: plotting }),
       turns,
       signIn: {
         github: {
@@ -462,8 +494,28 @@ describe("the answers the iOS client reads", () => {
       text: normaliser.text(turnText),
     });
 
+    // An image on the task's branch, which a message links by its path in a worktree: a turn
+    // leaves it, and the board reads it from the project's runner. The commit's id varies by run.
+    await society.run({
+      agent: "eng-1",
+      project: "demo",
+      thread: { id: task?.id ?? "", task: true },
+      trigger: { kind: "manual", fromUser: true, reason: "fixture" },
+      priority: 2,
+    });
+    const fileRoute = `/api/tasks/${task?.id}/files/evidence/plot.png`;
+    const file = BranchFileSchema.parse(await read(fileRoute));
+    normaliser.secret(file.commit.id, "fixture-commit");
+    await call("task-file", "GET", fileRoute);
+
+    // Where the messages a text names by id are: one the board has, and one it doesn't, which the
+    // answer leaves out.
+    const posts = PostSchema.array().parse(await read("/api/channels/demo/general"));
+    const named = posts.find((post) => post.author === "eng-1")?.id;
+    await call("messages", "GET", `/api/messages?ids=${named},01HZZZZZZZZZZZZZZZZZZZZZZZ`);
+
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(36);
+    expect(captures.size).toBe(38);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

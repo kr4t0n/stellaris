@@ -58,6 +58,9 @@ struct ShellView: View {
     .sheet(isPresented: $model.showsSettings) {
       SettingsView()
     }
+    .fullScreenCover(item: $model.viewing) { viewed in
+      ImageViewer(image: viewed.image, alt: viewed.alt)
+    }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
         Task { await model.refresh() }

@@ -103,7 +103,8 @@ final class ChangingScheduler: URLProtocol {
     await model.start()
     try await model.signIn(board: board, token: gate.token)
     let loading = Task { await model.sky.load(using: model) }
-    await gate.arrivals(1)
+    // The board's store asks for the roster too, for each author's mark.
+    await gate.arrivals(2)
     #expect(model.sky.state == .loading)
     gate.fail()
     await loading.value
@@ -180,22 +181,37 @@ final class ChangingScheduler: URLProtocol {
     let name: String
     let text: String
     let titles: [String: String]
+    let messages: [MessageRef]?
     let line: String
   }
 
   /// A post's task ids read as their titles where the web's `withTitles` reads them, over the cases
-  /// in `apps/ios/fixtures/cases` the web runs too: an id standing alone, never one in a path or a
-  /// file name, and a title it echoes said once.
+  /// in `apps/ios/fixtures/cases` the web runs too that name tasks alone, which the store takes
+  /// here: an id standing alone, never one in a path or a file name, and a title it echoes said
+  /// once. BoardKit's `CaseTableTests` run the rest.
   @Test func readsTaskIdsInALineAsTheWebDoes() throws {
     let table = fixturesFolder.deletingLastPathComponent().appendingPathComponent(
       "cases/with-titles.json")
     let cases = try JSONDecoder().decode([TitlesCase].self, from: Data(contentsOf: table))
-    #expect(cases.count > 10)
+    let tasksAlone = cases.filter { $0.messages == nil }
+    #expect(tasksAlone.count > 10)
     let (model, _) = fakeApp()
-    for each in cases {
+    for each in tasksAlone {
       model.store.show(projects: [], tasks: SkySample.tasks(titled: each.titles))
-      #expect(model.store.withTaskTitles(each.text) == each.line, "\(each.name)")
+      #expect(model.store.withEntityTitles(each.text) == each.line, "\(each.name)")
     }
+  }
+
+  /// A post's line reads every id the board names, a message's included, as the web's sky reads it
+  /// with the whole index.
+  @Test func readsAMessagesIdInALineAsTheWebsSkyDoes() async throws {
+    let (model, _) = fakeApp()
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: "fixture-token")
+    try await waitUntilLoaded(model)
+    let line = "As post \(FakeBoard.cited) says"
+    await model.store.lookUpMessages(in: [line], using: model)
+    #expect(model.store.withEntityTitles(line) == "As eng-1's post in Rendering samples says")
   }
 
   /// A pinch that ends at or past the whole sky's zoom goes back to the whole sky, which follows the

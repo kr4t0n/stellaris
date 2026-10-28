@@ -86,7 +86,7 @@ const COMPONENTS: Components = { a: BoardLink, img: BoardImage };
  * The default refusal of unsafe URLs, which would also refuse `report.md:67` and an uploaded
  * image's `image:<id>` as schemes.
  */
-function urlTransform(url: string): string {
+export function urlTransform(url: string): string {
   return isCitedPath(url) || uploadedImageId(url) !== null ? url : defaultUrlTransform(url);
 }
 

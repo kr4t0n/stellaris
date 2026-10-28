@@ -2,12 +2,16 @@
   import BoardKit
   import Foundation
   import Synchronization
+  import UIKit
 
   /// A board at `https://board.example.com` that answers from the fixtures the server's tests
   /// captured, for the UI tests and the screenshots; debug builds only. The app uses it when
   /// launched with `STELLARIS_FAKE_BOARD` set to `apps/ios/fixtures/api`, and starts afresh when
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
-  /// enough to scroll. Any token signs in, except `refused`, which the board doesn't take, and
+  /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
+  /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
+  /// web at `images.example.com`, on a runner alone, and gone. Any token signs in, except
+  /// `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
   /// list of the channels after the first fails, as when the network goes once the board loaded,
   /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
@@ -15,6 +19,15 @@
   /// as the board's do.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
+    /// The thread of samples, which general's newest message links to.
+    static let samples = "0000000000000000000000SAMP"
+    /// The image uploaded to the board that the samples show, and one it no longer has.
+    static let uploaded = "00000000000000000000000PNG"
+    static let gone = "00000000000000000000000ZZZ"
+    /// A message a sample names by its id: the first sample, as the board's lookup gives it.
+    static let cited = "0000000000000000000000SM01"
+    /// Where the samples' image on the web is.
+    static let webImages = "images.example.com"
     private static let folder = Mutex<URL?>(nil)
     /// How many times `fading` has listed the channels.
     private static let fadingListings = Mutex(0)
@@ -50,7 +63,7 @@
       guard let host = request.url?.host() else {
         return false
       }
-      return host == address.host() || host.hasSuffix(".invalid")
+      return host == address.host() || host == webImages || host.hasSuffix(".invalid")
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -72,6 +85,15 @@
           client?.urlProtocol(self, didLoad: stream)
         }
         // Held open until the app lets go of it.
+        return
+      }
+      if let picture = FakeBoard.picture(request) {
+        let response = HTTPURLResponse(
+          url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+          headerFields: ["Content-Type": "image/png"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: picture)
+        client?.urlProtocolDidFinishLoading(self)
         return
       }
       let (status, body) = FakeBoard.answer(request)
@@ -151,6 +173,9 @@
       case ("GET", "/api/requests"): return fixture("requests")
       case ("GET", "/api/proposals"): return fixture("proposals")
       case ("GET", "/api/projects/demo/tasks"): return fixture("tasks")
+      case ("GET", "/api/threads"): return (200, json(threads))
+      case ("GET", "/api/messages"): return (200, json(lookUp(request)))
+      case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
       case ("DELETE", "/api/sign-in"): return fixture("sign-out")
       case ("GET", _) where path.hasPrefix("/api/channels/"): return (200, json([Any]()))
       case ("GET", _) where path.hasPrefix("/api/threads/"):
@@ -178,9 +203,16 @@
 
     private static func body(_ name: String) -> Any? { read(name)?["body"] }
 
-    /// A thread by its id: the captured task thread, or one made up for a proposal's or a
-    /// question's, titled as the board would.
+    /// A thread by its id: the captured task thread, the samples, or one made up for a proposal's
+    /// or a question's, titled as the board would.
     private static func thread(_ id: String) -> (Int, Data) {
+      if id == samples {
+        let thread: [String: Any] = [
+          "id": samples, "channel": "general", "title": "Rendering samples", "state": "open",
+          "openedBy": "eng-1", "openedAt": time(0), "body": "",
+        ]
+        return (200, json(["thread": thread, "messages": sampleMessages]))
+      }
       if let detail = body("thread") as? [String: Any],
         (detail["thread"] as? [String: Any])?["id"] as? String == id
       {
@@ -221,10 +253,188 @@
         "Merged. The runner picked up the new image within a minute and every turn since has passed.",
       ]
       return (1...60).map { number in
-        message(
+        let note =
+          number == 60
+          ? "The [rendering samples](/thread/\(samples)) are in their thread."
+          : notes[number % notes.count]
+        return message(
           id: String(format: "general-%02d", number), author: authors[number % authors.count],
-          channel: "general", thread: nil, minute: number,
-          body: "Note \(number). \(notes[number % notes.count])")
+          channel: "general", thread: nil, minute: number, body: "Note \(number). \(note)")
+      }
+    }
+
+    /// What a message can hold, one kind to a message, as citizens write them.
+    private static var sampleMessages: [[String: Any]] {
+      let task = "00000000000000000000000010"
+      let bodies: [(String, String)] = [
+        (
+          "eng-1",
+          """
+          ## The export view is in
+
+          **Done:** the export view, with *its empty state* and ~~the old CSV path~~. @rev-1, \
+          it's ready for review: \(task), with the design in [its thread](/thread/\(task)).
+
+          Run `pnpm test` before you start. The spec is at https://example.com/specs/export, and \
+          the notes at www.example.com/notes.
+          """
+        ),
+        (
+          "rev-1",
+          """
+          Two findings:
+
+          1. The export drops the last line when a body ends without a newline.
+          2. The empty state reads `undefined` at the narrowest width.
+
+          ```ts
+          export function exportChannel(messages: readonly Message[], options: { readonly steps: boolean }): string {
+            return messages.map((message) => `${message.author}: ${message.body}`).join("\\n");
+          }
+          ```
+          """
+        ),
+        (
+          "eng-1",
+          """
+          Measured at each width:
+
+          | Width | Lines | Wraps | Where |
+          |:------|------:|:-----:|:------|
+          | 320 pt | 14 | yes | The narrowest Split View, where each long cell wraps at 240 points, so one cell never stretches the table past the column |
+          | 410 pt | 11 | no | The outer display less its bar |
+          | 669 pt | 9 | no | The inner display in portrait |
+          """
+        ),
+        (
+          "concierge-1",
+          """
+          Before the release, as post \(cited) says:
+
+          - [x] Docs
+          - [ ] Release notes
+            - the export view first
+            - then the empty state
+          - [ ] The changelog
+
+          > The export goes out before the release.
+
+          ---
+
+          Next: the empty state.
+          """
+        ),
+        (
+          "eng-1",
+          """
+          The export view at 410 pt:
+
+          ![The export view at 410 pt](image:\(uploaded))
+
+          A capture wider than the column: ![The export view at 1600 px](https://\(webImages)/wide.png)
+
+          The plot on the task's branch: ![The plot](/data/worktrees/eng-1/.tasks/\(plot.task)/\(plot.path))
+
+          On the runner alone: ![the run log](/tmp/run/log.png). And one the board no longer has: \
+          ![The first draft](image:\(gone))
+          """
+        ),
+        (
+          "user",
+          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
+        ),
+      ]
+      return bodies.enumerated().map { index, entry in
+        message(
+          id: "samples-\(index + 1)", author: entry.0, channel: "general", thread: samples,
+          minute: index, body: entry.1)
+      }
+    }
+
+    /// The board's threads as captured, and the samples.
+    private static var threads: [Any] {
+      let captured = body("threads") as? [Any] ?? []
+      let thread: [String: Any] = [
+        "id": samples, "channel": "general", "title": "Rendering samples", "state": "open",
+        "openedBy": "eng-1", "openedAt": time(0), "body": "", "messages": 6,
+        "lastMessageId": NSNull(), "lastAuthor": "user",
+      ]
+      return captured + [thread]
+    }
+
+    /// Where the messages a lookup asks about are: the one the samples cite; any other id names
+    /// no message, and the answer leaves it out.
+    private static func lookUp(_ request: URLRequest) -> [[String: Any]] {
+      let query = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+      let ids = query?.queryItems?.first { $0.name == "ids" }?.value?.split(separator: ",") ?? []
+      guard ids.contains(where: { $0 == cited }) else {
+        return []
+      }
+      return [
+        [
+          "id": cited, "author": "eng-1", "channel": "general", "thread": samples, "ts": time(0),
+        ]
+      ]
+    }
+
+    // MARK: Pictures
+
+    /// The image on the task's branch that the samples show.
+    private static let plot = (task: "00000000000000000000000010", path: "evidence/plot.png")
+
+    /// The board's answer for the plot, as it reads the file from the project's runner.
+    private static var plotFile: [String: Any] {
+      let png = drawing(width: 600, height: 360, label: "plot.png", hue: 0.33)
+      return [
+        "kind": "file", "path": plot.path, "size": png.count,
+        "commit": ["id": "fixture-commit", "at": time(0), "author": "eng-1"],
+        "content": png.base64EncodedString(),
+      ]
+    }
+
+    /// A picture the fake board serves: the uploaded image the samples show, and the one on the
+    /// web; nil for any other request.
+    private static func picture(_ request: URLRequest) -> Data? {
+      guard let url = request.url, request.httpMethod ?? "GET" == "GET" else {
+        return nil
+      }
+      if url.host() == webImages {
+        return url.path() == "/wide.png"
+          ? drawing(width: 1600, height: 400, label: "1600 × 400 px", hue: 0.58) : nil
+      }
+      guard url.path(percentEncoded: true) == "/api/images/\(uploaded)",
+        request.value(forHTTPHeaderField: "Authorization") != nil
+      else {
+        return nil
+      }
+      return drawing(width: 820, height: 492, label: "820 × 492 px", hue: 0.08)
+    }
+
+    /// A PNG `width` by `height` pixels: a field of `hue` with bars across it and `label`.
+    private static func drawing(width: Int, height: Int, label: String, hue: CGFloat) -> Data {
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = 1
+      let size = CGSize(width: width, height: height)
+      return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+        UIColor(hue: hue, saturation: 0.45, brightness: 0.32, alpha: 1).setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+        UIColor(hue: hue, saturation: 0.55, brightness: 0.75, alpha: 1).setFill()
+        let bars = 8
+        let slot = size.width / CGFloat(bars + 1)
+        for bar in 0..<bars {
+          let tall = size.height * (0.25 + 0.5 * CGFloat((bar * 5) % bars) / CGFloat(bars))
+          context.fill(
+            CGRect(
+              x: slot * (CGFloat(bar) + 0.6), y: size.height - tall - 24, width: slot * 0.7,
+              height: tall))
+        }
+        let text = label as NSString
+        text.draw(
+          at: CGPoint(x: 24, y: 20),
+          withAttributes: [
+            .font: UIFont.systemFont(ofSize: size.height / 9, weight: .semibold),
+            .foregroundColor: UIColor.white,
+          ])
       }
     }
 

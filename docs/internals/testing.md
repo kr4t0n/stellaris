@@ -72,6 +72,10 @@ With a concurrency cap of one, a leftover onboarding dispatch merges with a late
 
 The server notices a closed stream asynchronously and then writes the runner's state and a `runner.changed` event. A test that stopped its runner and removed the data directory at once failed one run in three with `ENOTEMPTY` on `events/`; `RunnerHub.close` marks every stream closed and waits for the disconnects under way, and the test harness and the server's shutdown call it.
 
+### CI's account has no git identity
+
+A runner reports what its account lacks of a git identity in its hello, and a move refuses a new runner that lacks one, so a test whose runners must have one passes `gitIdentity` to `startTestSociety`, as `moves.test.ts` does. Every runner otherwise reads the test account's own, which is there on a developer's machine and missing on CI: PR #85's two-runner moves passed locally and were refused on CI. To see what CI sees, run the tests with `HOME` pointed at an empty folder, where git finds no global configuration.
+
 ### Claude Code will not wait on a foreground `sleep`
 
 It refuses `sleep N && …` in the foreground ("use Monitor") and backgrounds long waits, and a background task dies with the CLI when a cold turn ends. A live test that needs a turn to stay busy waits with something else, such as `python3 -c "import time; time.sleep(30)"`. Interrupting a turn while a background task runs makes the CLI exit with code 1 once its input ends, which the adapter reports as the stop.

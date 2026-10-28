@@ -113,7 +113,7 @@ import Testing
 
   /// Who may decide a proposal, on the cases the web's `governance.test.ts` checks.
   @Test func namesWhoMayDecideLeavingOutTheProposer() throws {
-    func proposal(_ kind: String, by proposer: String = "stew") throws -> Proposal {
+    func proposal(_ kind: String, by proposer: String = "steward-1") throws -> Proposal {
       let charter: [String: JSONValue] =
         kind == "skill" ? ["name": .string("refereed-research"), "summary": .string("Plan.")] : [:]
       let fields: [String: JSONValue] = [

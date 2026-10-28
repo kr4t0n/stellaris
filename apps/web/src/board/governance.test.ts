@@ -28,7 +28,7 @@ import {
 
 function proposal(overrides: Partial<Proposal> & Pick<Proposal, "id" | "kind">): Proposal {
   return {
-    proposedBy: "stew",
+    proposedBy: "steward-1",
     status: "proposed",
     createdAt: "2026-09-29T10:00:00.000Z",
     charter: {},
@@ -230,14 +230,14 @@ describe("governance", () => {
       { role: "user" },
       {
         status: "claimed",
-        claimedBy: "stew",
+        claimedBy: "steward-1",
       },
     );
     const notMine = task("01M3Q2AAAAAAAAAAAAAAAAAAA4", { role: "referee" });
     const landing = task("01M3Q2AAAAAAAAAAAAAAAAAAA5", { agent: "user" }, { completing: true });
     // The board lists only unanswered questions; the view keeps them oldest first after the rest.
     const later = {
-      ...message("01M3Q2BBBBBBBBBBBBBBBBBBB3", "stew", ["user"]),
+      ...message("01M3Q2BBBBBBBBBBBBBBBBBBB3", "steward-1", ["user"]),
       ts: "2026-09-29T09:31:00.000Z",
     };
     const earlier = message("01M3Q2BBBBBBBBBBBBBBBBBBB1", "ada", ["user"]);

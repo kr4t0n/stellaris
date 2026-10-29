@@ -2,7 +2,6 @@ import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { serve } from "@hono/node-server";
 import type { Board } from "@stellaris/board-core";
 import {
   createRunner,
@@ -18,6 +17,7 @@ import type { z } from "zod";
 import { createApp, type AppDependencies } from "../app.js";
 import { ModelCatalog } from "../models.js";
 import { QuotaReads } from "../quotas.js";
+import { serveBoard } from "../serve.js";
 import { EnrollmentDesk } from "../enrollment.js";
 import { TurnHub } from "../turn-hub.js";
 import { USER } from "./scripted-backend.js";
@@ -50,6 +50,12 @@ export interface TestSocietyOptions {
   readonly graceMs?: number | undefined;
   /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
   readonly ackTimeoutMs?: number | undefined;
+  /** How long the hub waits for a runner's answer to a request. */
+  readonly hubRequestTimeoutMs?: number | undefined;
+  /** How long a request may take to arrive whole before the server cuts it; Node's 300 s if left out. */
+  readonly requestTimeoutMs?: number | undefined;
+  /** How long a request's headers may take to arrive, checked every 100 ms; Node's 60 s if left out. */
+  readonly headersTimeoutMs?: number | undefined;
   /** GitHub as the runners see it, for landing `ghpr` tasks. */
   readonly pullRequests?: PullRequestOps | undefined;
   /**
@@ -91,7 +97,7 @@ export interface TestSociety {
 export async function startTestSociety(options: TestSocietyOptions): Promise<TestSociety> {
   const { board } = options;
   let fetcher: Hono["fetch"] | null = null;
-  const server = serve({
+  const server = serveBoard({
     fetch: (request, env) => {
       if (options.drop?.(request) === true) {
         env.incoming.socket.destroy();
@@ -104,6 +110,10 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     },
     port: options.port ?? 0,
     hostname: "127.0.0.1",
+    requestTimeoutMs: options.requestTimeoutMs,
+    ...(options.headersTimeoutMs === undefined
+      ? {}
+      : { headersTimeoutMs: options.headersTimeoutMs, connectionsCheckingIntervalMs: 100 }),
   });
   await once(server, "listening");
   const address = server.address();
@@ -124,6 +134,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     version: "test",
     graceMs: options.graceMs ?? 5_000,
     ackTimeoutMs: options.ackTimeoutMs,
+    requestTimeoutMs: options.hubRequestTimeoutMs,
   });
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));

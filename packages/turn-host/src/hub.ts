@@ -9,6 +9,7 @@ import {
   MergeOutcomeSchema,
   ModelListSchema,
   MOVE_PACK_LIMIT_BYTES,
+  moveTransferMs,
   ProjectExportedSchema,
   ProjectImportedSchema,
   ProjectReleasedSchema,
@@ -814,12 +815,15 @@ export class RunnerHub implements TurnRunner {
       move.id = await this.board.openMoveRepo();
       const id = move.id;
       move.phase = "export";
+      // A push and a clone are timed on their runners by the pack's size, at a floor rate a slow
+      // link between sites still beats, and end early when they stall; the hub waits them out,
+      // and a runner that leaves fails its request at once.
       const exported = ProjectExportedSchema.parse(
-        await this.request(source, (request) => ({
-          type: "export",
-          request,
-          export: { move: id, repo },
-        })).catch((error: unknown) => {
+        await this.request(
+          source,
+          (request) => ({ type: "export", request, export: { move: id, repo } }),
+          moveTransferMs(MOVE_PACK_LIMIT_BYTES) + this.requestTimeoutMs,
+        ).catch((error: unknown) => {
           throw new BoardError(
             "INVALID_STATE",
             `${from} could not send ${slug}: ${describe(error)}`,
@@ -836,11 +840,20 @@ export class RunnerHub implements TurnRunner {
       }
       move.phase = "import";
       const imported = ProjectImportedSchema.parse(
-        await this.request(target, (request) => ({
-          type: "import",
-          request,
-          import: { move: id, repo, pullRequests: project.onDone === "ghpr" },
-        })).catch((error: unknown) => {
+        await this.request(
+          target,
+          (request) => ({
+            type: "import",
+            request,
+            import: {
+              move: id,
+              repo,
+              pullRequests: project.onDone === "ghpr",
+              bytes: exported.bytes,
+            },
+          }),
+          moveTransferMs(exported.bytes) + this.requestTimeoutMs,
+        ).catch((error: unknown) => {
           throw new BoardError("INVALID_STATE", `${to} could not take ${slug}: ${describe(error)}`);
         }),
       );

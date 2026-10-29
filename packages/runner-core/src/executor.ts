@@ -9,6 +9,7 @@ import {
   HeldWorkspaceSchema,
   HOME_SCRATCH,
   MOVE_PACK_LIMIT_BYTES,
+  moveTransferMs,
   PATH_TOKENS,
   SERVER_TOKEN,
   SOCIETY_SCOPE,
@@ -485,7 +486,12 @@ export class TurnExecutor {
         return { ok: false, held, bytes };
       }
       const refs = await this.git.refs(repoDir);
-      await this.git.pushEverything(repoDir, remote.url(move), moveAuth(remote, move));
+      await this.git.pushEverything(
+        repoDir,
+        remote.url(move),
+        moveAuth(remote, move),
+        moveTransferMs(bytes),
+      );
       this.log.info(
         { project: repo.slug, move, refs: Object.keys(refs).length, bytes },
         "sent a project's repository to the board for a move",
@@ -512,7 +518,13 @@ export class TurnExecutor {
       }
       const staging = this.layout.incoming(repo.slug);
       try {
-        await this.git.cloneEverything(remote.url(move), moveAuth(remote, move), staging, repo);
+        await this.git.cloneEverything(
+          remote.url(move),
+          moveAuth(remote, move),
+          staging,
+          repo,
+          moveTransferMs(request.bytes ?? MOVE_PACK_LIMIT_BYTES),
+        );
         if (
           request.pullRequests &&
           this.pulls.signedIn !== undefined &&

@@ -1173,6 +1173,8 @@ export class ClaudeAgentBackend implements AgentBackend {
       // The home holds memory and skills the agent authors; the board projection is what it searches.
       additionalDirectories: [request.spec.configHome, request.spec.boardDir],
       ...(resuming ? { resume: request.session } : { sessionId: request.session }),
+      // A resumed session keeps the system prompt it began with, whatever `append` says, until a
+      // compaction; the host's prompt carries a change to the instructions.
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

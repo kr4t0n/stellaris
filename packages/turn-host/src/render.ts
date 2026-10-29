@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HOME_FILE_LIMIT_BYTES, HOME_SCRATCH, type Name, type Skill } from "@stellaris/shared";
 
 export interface OnboardingContext {
@@ -37,7 +38,7 @@ const TURN_CONTRACT = [
   "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; how a codebase behaves (architecture, conventions, gotchas, how to build, test, and verify it) goes in its AGENTS.md or README, committed on a task's branch like any change to the code, or proposed in the task's thread or the project channel when it is outside the task at hand; a durable fact about a project as a place (runners, access, flow, where results live) goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, and anything about one task, in the task's thread.",
   '- A procedure you have followed twice is a candidate for a skill, which it is when it makes a citizen better at a kind of work on any project: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Files the steps use, such as scripts/ and references/, go in the same folder, named in SKILL.md by paths relative to it. Propose it with kind "skill" when more than one citizen would use it and nothing in it is tied to one place; a skill only you use stays yours, however many projects you use it on.',
   "- To take a published skill for yourself, install it in a temporary folder and copy it into your home: in a folder from `mktemp -d`, `npx -y skills add <source> --skill <name> -a universal --copy -y` writes `.agents/skills/<name>/` and a lock file there, and you copy that skill folder to skills/<name>/ in your home, named in lowercase letters, digits, and hyphens. Never install one inside a worktree, where it would be committed into the project, or with -g, which writes to the runner's own home, shared by every citizen on it and listed in no skills index.",
-  "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill, so a warm session restarts with the new instructions.",
+  "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill. A change to your instructions reaches each of your conversations at its next turn, whose prompt then carries them whole, replacing what that conversation had; a turn already running keeps what it started with.",
   "- Other turns of yours may be running at the same time and share your home. Change a file there with your edit tool, which refuses a file changed since you read it, and never rewrite one whole from an earlier read, with a shell redirect or a script, or you erase what another of your turns wrote.",
   "- To ask the user something, mention @user where the question belongs: the task's thread for a task, the proposal's thread for a proposal, and for anything else a thread you open on your scope's general channel, titled with the question. The user answers in the same thread, and the answer comes back to that thread's conversation. A proposal waiting on the user is already in front of them and needs no mention.",
   "- End every turn with the status object: summary, claims held, what is blocked, and whether the user must decide. If you report that the user must decide, mentioned @user nowhere this turn, and proposed nothing for the user to decide, the runner asks in this turn's thread when it has one, and otherwise opens a thread on your scope's general channel with your summary as the question.",
@@ -151,4 +152,13 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     sections.push("", "## First turn", "", renderOnboardingPreamble(input.onboarding));
   }
   return `${sections.join("\n")}\n`;
+}
+
+/**
+ * What a session keeps of its instructions, as a SHA-256 in hex: the render without the first
+ * turn's section, which a session's later turns never carry, so a difference there alone is no change.
+ */
+export function instructionsHash(input: RenderInstructionsInput): string {
+  const { onboarding: _first, ...kept } = input;
+  return createHash("sha256").update(renderInstructions(kept)).digest("hex");
 }

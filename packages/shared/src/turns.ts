@@ -181,6 +181,12 @@ export const TurnRecordSchema = z.object({
    */
   sessionUsage: UsageSchema.optional(),
   /**
+   * The SHA-256 of the instructions the session holds after this turn, the first turn's section
+   * left out (`instructionsHash` in `turn-host`): those it began with, or the latest a prompt
+   * carried. Absent when the board does not know them, as for records from before it kept them.
+   */
+  sessionInstructionsHash: z.string().optional(),
+  /**
    * The whole input of the turn's latest model call in the session's own thread, as the runner
    * reported it: how large the session had grown. Absent for a turn that made no call.
    */

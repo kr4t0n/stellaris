@@ -346,8 +346,9 @@ export class TurnExecutor {
       result = { ...result, exitReason: "stopped" };
     }
     if (result.status?.memoryUpdated === true) {
-      // The citizen's warm sessions started with the memory this turn changed; each restarts at
-      // its next turn, not mid-turn.
+      // The citizen's warm processes started with the memory this turn changed; each restarts at
+      // its next turn, not mid-turn. A restart resumes the same session, which keeps the
+      // instructions it began with: the server's prompt carries a change (`TurnHost.openTurn`).
       for (const [key, warm] of this.residents) {
         if (key.startsWith(`${job.agent}/`)) {
           warm.stale = true;
@@ -1267,7 +1268,7 @@ export class TurnExecutor {
 
   /**
    * One turn on a warm session: start it on first use, run the prompt, then either keep it warm
-   * until the idle timeout or recycle it when its instructions went stale. A session given another
+   * until the idle timeout or recycle it when its citizen's memory changed or the turn failed. A session given another
    * token or model than it started with starts afresh, since the CLI read both at its start, and so
    * does one whose job names no session, since the server dropped the one it was warm on.
    */
@@ -1340,7 +1341,7 @@ export class TurnExecutor {
     }
     const stale = result.status?.memoryUpdated === true || result.exitReason !== "completed";
     if (stale) {
-      // The instructions carry the memory core; a changed memory or a broken turn means a fresh start next time.
+      // A changed memory or a broken turn means a new process next time, on the same session.
       await this.closeResident(resident.key, "instructions changed or turn failed");
     } else {
       const active = current;

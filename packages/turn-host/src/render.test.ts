@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderInstructions } from "./render.js";
+import { instructionsHash, renderInstructions } from "./render.js";
 
 const places = { homeDir: "/data/agents/eng-1", boardDir: "/data/board" };
 
@@ -170,5 +170,34 @@ describe("config-home rendering", () => {
     );
     expect(text).not.toContain("Never wait by holding a stage");
     expect(text).not.toContain("Release a stage only to hand it on.");
+  });
+
+  it("hashes what a session keeps of its instructions: a change counts, the first turn's section does not", () => {
+    const input = { agentName: "eng-1", roleCharter: "# engineer", memoryCore: "- one", ...places };
+    const onboarding = {
+      agentName: "eng-1",
+      roleSummary: "Builds things.",
+      project: "demo",
+      worktree: "/tmp/wt",
+    };
+    const later = instructionsHash(input);
+    expect(later).toMatch(/^[0-9a-f]{64}$/);
+    expect(renderInstructions({ ...input, onboarding })).not.toBe(renderInstructions(input));
+    expect(instructionsHash({ ...input, onboarding })).toBe(later);
+    expect(instructionsHash({ ...input, memoryCore: "- one\n- two" })).not.toBe(later);
+    expect(instructionsHash({ ...input, norms: "Be kind." })).not.toBe(later);
+  });
+
+  it("tells a citizen when a change to its instructions reaches its conversations, and nothing of a warm session", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill. A change to your instructions reaches each of your conversations at its next turn, whose prompt then carries them whole, replacing what that conversation had; a turn already running keeps what it started with.",
+    );
+    expect(text).not.toContain("so a warm session restarts with the new instructions");
   });
 });

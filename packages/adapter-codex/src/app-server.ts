@@ -709,6 +709,8 @@ export class CodexAppServerSession implements ResidentSession {
       cwd: this.spec.cwd,
       approvalPolicy: "never",
       sandbox: this.options.sandbox,
+      // A resumed thread keeps the developer message it began with until a compaction, which
+      // applies these; the host's prompt carries a change to the instructions.
       developerInstructions: this.start.instructions,
       ...(model === undefined ? {} : { model }),
     };

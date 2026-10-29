@@ -162,7 +162,7 @@ kubectl -n <namespace> rollout restart deploy/<server deployment>
 
    Apple also gives builds run from Xcode a way past the CDN, the `developer` alternate mode: the associated domain becomes `webcredentials:<host>?mode=developer`, and an iPhone with **Associated Domains Development** on under **Settings > Developer** reads the file from the board itself. This build doesn't offer it: `project.yml` writes the domain from `STELLARIS_BOARD_HOST`, which the app also compares with the board's host, so a `?mode=developer` in that setting hides **Sign in with GitHub**.
 
-Then, in the app, enter the board's address, tap **Sign in with GitHub**, tap **Continue** if iOS asks whether Stellaris may use the board's address to sign in, and sign in on GitHub. The app lands back on the board's sign-in landing and trades its one-time code for a session that lasts 30 days.
+Then, in the app, enter the board's address, tap **Sign in with GitHub**, tap **Continue** when iOS asks whether Stellaris may use the board's address to sign in, and sign in on GitHub. The app lands back on the board's sign-in landing and trades its one-time code for a session that lasts 30 days.
 
 ## Which board the app needs
 
@@ -196,6 +196,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 **Signing in and the system's own screens**
 
 - GitHub sign-in end to end, and a token.
+- Cancelling GitHub's sheet leaves the sign-in as it was, with nothing said, while a sign-in iOS refuses shows iOS's reason.
 - On the inner display folded like a book, the sign-in form keeps off the fold, on the wider side.
 - The launch screen, which no test or picture covers.
 - Whether iOS's GitHub sign-in sheet is dark: iOS draws it, not the app, so it may not follow the app's setting.
@@ -271,6 +272,7 @@ Automatic signing fixes most signing errors by itself. When the Signing section 
 - **"Signing in to the app is off on this board" (a 403)** in the sign-in sheet. The board's `STELLARIS_APPLE_APP_ID` was unset after the app read its configuration. Set it, restart the server, and tap **Change** and **Continue** in the app to read the configuration again.
 - **The board doesn't start after `STELLARIS_APPLE_APP_ID` is set.** The value isn't `<team ID>.<bundle ID>`: a 10-character team ID of capitals and digits, a dot, then the bundle ID. The server refuses it at start, and the chart refuses `auth.github.appleAppId` when it renders.
 - **A 404 at `/.well-known/apple-app-site-association`.** The board names no app: `STELLARIS_APPLE_APP_ID` is unset, or the server hasn't restarted since. If the server answers it on its own address but not on the public one, the proxy in front of it doesn't send `/.well-known/` to the server.
+- **"iOS ended the sign-in: Application with identifier … is not associated with domain …"**, or, in a build from before the app showed it, nothing at all when you tap **Sign in with GitHub**. iOS refused the sign-in before showing GitHub, since the iPhone holds no association between this build and the board's host. The iPhone fetches the association file when the app is installed and checks again about once a week, so an app installed before the board served the file keeps refusing: delete it and run it again from Xcode. If that doesn't help, check that the team and bundle ID in **Signing & Capabilities** are the two halves of the ID in the board's file, and that Associated Domains lists `webcredentials:<host>`.
 - **The sign-in sheet stays on the board's page, or the app says "GitHub's sign-in ended somewhere the app doesn't know."** iOS didn't hand the landing to the app, since it doesn't hold the board's association for this app yet. Check that the ID in the board's file is exactly `<team ID>.<bundle ID>` of this build and what the CDN holds, as in [With GitHub](#with-github), then delete the app and run it again from Xcode, so the install fetches the file.
 - **"This GitHub account isn't one the board lets in."** Add the login, or its numeric id, to `STELLARIS_GITHUB_USERS` (the chart's `auth.github.users`).
 - **"The sign-in took too long to finish."** The one-time code expired before the app traded it. Try again.

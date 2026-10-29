@@ -196,7 +196,8 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 **Signing in and the system's own screens**
 
 - GitHub sign-in end to end, and a token.
-- Cancelling GitHub's sheet leaves the sign-in as it was, with nothing said, while a sign-in iOS refuses shows iOS's reason.
+- Two cancels say nothing: **Cancel** at iOS's prompt asking whether Stellaris may use the board's address to sign in, and closing GitHub's sheet. Either one showing "iOS ended the sign-in: …" would mean iOS gives a person's cancel a reason too.
+- A sign-in iOS refuses shows iOS's reason. To bring a refusal back once the iPhone holds the association, build once with a `STELLARIS_BUNDLE_ID` the board's file doesn't name (automatic signing registers its App ID), run it, and tap **Sign in with GitHub**: the app should say "iOS ended the sign-in: …" in red. Then delete that build from the iPhone and set the bundle ID back.
 - On the inner display folded like a book, the sign-in form keeps off the fold, on the wider side.
 - The launch screen, which no test or picture covers.
 - Whether iOS's GitHub sign-in sheet is dark: iOS draws it, not the app, so it may not follow the app's setting.

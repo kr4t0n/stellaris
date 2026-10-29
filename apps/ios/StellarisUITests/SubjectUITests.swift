@@ -165,7 +165,17 @@ final class SubjectUITests: ShellTestCase {
       ])
     expectGeneral(app)
     tab(app, "Needs you")
-    pick(app, "stage-\(exportView)")
+    // At this size the proposals push the stage below the screen, where the list builds no row.
+    let list = app.collectionViews.firstMatch
+    XCTAssertTrue(list.waitForExistence(timeout: 20), "Needs you shows no list")
+    let row = app.buttons["stage-\(exportView)"].firstMatch
+    for _ in 0..<12 where !(row.exists && row.isHittable) {
+      let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.7))
+      let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.3))
+      start.press(forDuration: 0.1, thenDragTo: end)
+    }
+    XCTAssertTrue(row.exists && row.isHittable, "the stage isn't in Needs you")
+    row.tap()
     pick(app, "plan")
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")

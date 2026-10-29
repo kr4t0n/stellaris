@@ -93,7 +93,7 @@ A free Apple Account can run apps from Xcode on its own devices, with profiles t
    xcodegen generate
    ```
 
-   It writes `Stellaris.xcodeproj` and, in `Generated/`, the app's `Info.plist` and entitlements, none of which git tracks. Run it again after every pull that changes `project.yml`. A change to `Local.xcconfig` needs no new project, only a new build.
+   It writes `Stellaris.xcodeproj` and, in `Generated/`, the app's `Info.plist` and entitlements, none of which git tracks. Run it again after every pull, and after any change under `apps/ios`: the project lists the app's source files as they were when it was generated, so a file a pull adds is missing from the build until you do. A change to `Local.xcconfig` needs no new project, only a new build.
 
 ## 4. Connect the iPhone
 
@@ -120,7 +120,12 @@ Enter the board's address, `https://<host>` or the host alone, and tap **Continu
 
 This works on any board the iPhone reaches over `https`. Paste the user token into **Token** and tap **Sign in with the token**. The app keeps the token in the iPhone's Keychain only once the board takes it.
 
-The user token is the one `stellaris init` printed, or, on a board installed with the Helm chart without GitHub sign-in, the one its first start left in `/data/initial-user-token` ([the chart's first start](../../helm/stellaris/README.md#first-start)). The board keeps only a hash of it, so a lost one can't be shown again: `stellaris user token --rotate` issues a new one and stops the old one everywhere, the browsers that use it included, and a running server takes it only after a restart.
+The user token is the one `stellaris init` printed, or, on a board installed with the Helm chart without GitHub sign-in, the one its first start left in `/data/initial-user-token` ([the chart's first start](../../helm/stellaris/README.md#first-start)). A chart install with GitHub sign-in on leaves no such file. The board keeps only a hash of the token, so a lost one can't be shown again: `stellaris user token --rotate` issues a new one and stops the old one everywhere, the browsers that use it included, and a running server takes it only after a restart. With the chart, run it in the server's pod, as the chart's README does. `kubectl -n <namespace> get deploy` lists the server's deployment, `stellaris-server` for a release named `stellaris`:
+
+```bash
+kubectl -n <namespace> exec deploy/<server deployment> -c server -- stellaris user token --rotate
+kubectl -n <namespace> rollout restart deploy/<server deployment>
+```
 
 ### With GitHub
 
@@ -148,14 +153,14 @@ The user token is the one `stellaris init` printed, or, on a board installed wit
 
    Apple reads the file only at that address, with no redirect, so an Ingress or a proxy in front of the board must pass `/.well-known/` to the server rather than redirect it.
 
-4. Check that Apple's CDN has it. The iPhone doesn't read the file from the board: Apple's CDN fetches it, which Apple says happens within 24 hours, and the iPhone reads the CDN's copy when the app is installed. Nothing makes the CDN fetch it sooner. Ask the CDN what it holds:
+4. Install the app once the board serves the file. The iPhone doesn't read the file from the board but from Apple's CDN, when the app is installed, and the CDN asks the board for it then if it holds no copy or an outdated one. Apple says the CDN requests the file within 24 hours, and an installed app checks for a newer one about once a week. So an app installed before the board served the file holds no association for days: delete it from the iPhone and run it again from Xcode. To see what the CDN holds:
 
    ```bash
    curl -sS https://app-site-association.cdn-apple.com/a/v1/<host>
-   # Not Found, until the CDN has the file; then the same JSON as the board's
+   # the same JSON as the board's once the CDN holds the file, Not Found while it holds none
    ```
 
-   Once it answers with your app's ID, delete the app from the iPhone if it is on it, and run it again from Xcode. An installed app reads the CDN again only about once a week, and an app installed before the CDN had the file holds no association.
+   Apple also gives builds run from Xcode a way past the CDN, the `developer` alternate mode: the associated domain becomes `webcredentials:<host>?mode=developer`, and an iPhone with **Associated Domains Development** on under **Settings > Developer** reads the file from the board itself. This build doesn't offer it: `project.yml` writes the domain from `STELLARIS_BOARD_HOST`, which the app also compares with the board's host, so a `?mode=developer` in that setting hides **Sign in with GitHub**.
 
 Then, in the app, enter the board's address, tap **Sign in with GitHub**, tap **Continue** if iOS asks whether Stellaris may use the board's address to sign in, and sign in on GitHub. The app lands back on the board's sign-in landing and trades its one-time code for a session that lasts 30 days.
 
@@ -170,7 +175,7 @@ curl -sS https://<host>/health
 
 Signing in with GitHub needs a board of 0.3.27 or later, the first release with the `https` sign-in landing. An older board answers `/auth/config` without `appLanding`, so the app offers the token alone.
 
-Beyond that, the app reads the board's answers as the server at the app's own commit gives them: the server's test `apps/server/src/ios-fixtures.test.ts` captures every answer the app reads into `apps/ios/fixtures/api`. So an app built from a release's tag works with a board of that release. To check an app from a later commit against an older board, run the commit's capture test against the board's release, with the README's [prerequisites](../../README.md#prerequisites) for the server (Node and pnpm). From the checkout's root, where `HUSKY=0` keeps the install from setting up the commit hook for your checkout, which the worktree shares:
+Beyond that, the app reads the board's answers as the server at the app's own commit gives them: the server's test `apps/server/src/ios-fixtures.test.ts` captures every answer the app reads into `apps/ios/fixtures/api`. So an app built from a release's tag works with a board of that release. To check an app from a later commit against an older board, run the commit's capture test against the board's release, with the README's [prerequisites](../../README.md#prerequisites) for the server (Node and pnpm). Run it from the checkout's root. `HUSKY=0` keeps the install from setting the commit hook on your checkout, which the worktree shares:
 
 ```bash
 git worktree add ../stellaris-board v<board version>
@@ -182,32 +187,45 @@ cp -R apps/ios/fixtures/api ../stellaris-board/apps/ios/fixtures/api
 git worktree remove --force ../stellaris-board
 ```
 
-A pass means the release gives the app every answer it reads, as its own commit's server does. A failure names the answer that differs, or the test needs something of the server's test harness that the release lacks. Either way, build the app from the release's tag, or update the board.
+A pass means the release gives the app every answer it reads, as its own commit's server does. A failing test names the answer that differs. A failure at `pnpm build` instead, a type error in `ios-fixtures.test.ts` such as `TS2353 … 'signIn' does not exist in type 'TestSocietyOptions'` against 0.3.26, means the test needs something of the server's test harness that the release lacks, so it can't tell. Either way, build the app from the release's tag, or update the board.
 
 ## What to try on the device
 
-The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn't rotate, and runs no VoiceOver. These are what only an iPhone shows. The ones about the inner display and folding need a phone that folds.
+The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn't rotate, and runs no VoiceOver. These are what only a device shows. The ones about the inner display, folding and the poses need a phone that folds, or Device Hub's iPhone Duo simulator, which shows both displays and every pose.
 
-**Signing in**
+**Signing in and the system's own screens**
 
 - GitHub sign-in end to end, and a token.
 - On the inner display folded like a book, the sign-in form keeps off the fold, on the wider side.
+- The launch screen, which no test or picture covers.
+- Whether iOS's GitHub sign-in sheet is dark: iOS draws it, not the app, so it may not follow the app's setting.
 
-**Touch on the outer display**
+**Touch and the keyboard on the outer display**
 
 - A link or an image in the top-leading part of Chat opens. On the simulator, a tap inside the status bar's frame there, 223 by 317 points from the window's corner, reaches no message and scrolls the conversation to its top instead.
 - At the largest text size (Settings > Accessibility > Display & Text Size > Larger Text), the plan's half-height sheet closes with a drag down on its bar, at its middle or its foot. In CI, only a drag on its content closed it.
+- The keyboard covers the side bar, its tabs included, until a scroll puts it away.
+- The image viewer's ✕ over the top-right corner of a full-width image.
 
 **Turning and folding**
 
 - Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles.
 - Unfolding brings the sky in with a fade, beside the chat in landscape and above it in portrait; folding takes it away. The chat stays where it was through both, with its draft and its scroll.
 - A partial fold, as when the phone stands half open on a table, moves nothing.
+- On a tabletop fold, whether the card below the fold, and Advance and Approve at the bar's trailing end, are easy to reach.
 - The fold's band: the sky's camera keeps it clear, and a card a tap opens stays clear of it and of the inner display's camera. The tests assume a band 21 points wide at the middle, and no camera.
 - In portrait on the inner display: whether the card a star opens covers the sphere it describes, and whether the whole sky shows the top of the first project's orbit.
+- A pan of the sky near an edge, against the system's edge swipes.
+- The plan opens beside the thread in portrait, and in a sheet in landscape and on the outer display.
 - Split View at its narrowest on the inner display shows the chat alone.
-- The keyboard: typing on a book fold, and whether the keyboard stays up and the composer keeps its place through a turn or an unfold.
+- The composer and the keyboard in each pose, and whether the keyboard stays up and the composer keeps its place through a fold, a turn or an unfold.
+- New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
 - The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
+
+**Text**
+
+- A New thread title pasted past 200 characters. The cap lives in the model, behind a binding, and is tested only there; a field that shows more than 200 opens a thread with the first 200.
+- A task's strip at 320 points wide and the largest text size: how tall it stands.
 
 **VoiceOver**
 
@@ -233,9 +251,13 @@ Automatic signing fixes most signing errors by itself. When the Signing section 
 - **The team doesn't support Associated Domains.** It is a free account's personal team ([What the membership is for](#what-the-membership-is-for)).
 - **The profile lacks Associated Domains.** Enable it for the App ID on developer.apple.com ([The bundle ID and its capability](#the-bundle-id-and-its-capability)).
 
+**The build**
+
+- **"Cannot find '…' in scope" after a pull.** The project predates a file the pull added, since it lists the source files as they were when it was generated. Run `xcodegen generate` in `apps/ios` again ([Configure and generate the project](#3-configure-and-generate-the-project)).
+
 **The iPhone**
 
-- **The iPhone isn't among the run destinations.** It isn't paired, or Developer Mode is off ([Connect the iPhone](#4-connect-the-iphone)). An iPhone on iOS older than 27.0 shows, but can't run the app, whose deployment target is 27.0.
+- **The iPhone isn't among the run destinations.** It isn't paired, or Developer Mode is off ([Connect the iPhone](#4-connect-the-iphone)). An iPhone pairs again after every update of its iOS. An iPhone on iOS older than 27.0 shows, but can't run the app, whose deployment target is 27.0.
 - **Xcode can't build for the iPhone, and its run destination offers Get.** The iOS platform isn't installed: click **Get**, or install it under **Xcode > Settings > Components**.
 - **The developer isn't trusted.** Trust it under **Settings > General > VPN & Device Management** ([Build and run](#5-build-and-run)).
 
@@ -247,7 +269,8 @@ Automatic signing fixes most signing errors by itself. When the Signing section 
 - **"The board ended this sign-in."** The board stopped taking the token: a GitHub sign-in ends after 30 days or when you sign out, and the user token when it is rotated. Sign in again.
 - **No Sign in with GitHub.** One of three things is missing. `curl https://<host>/auth/config` must answer `{"github":true,"appLanding":true}`: `github` false means GitHub sign-in is off, and `appLanding` false means `STELLARIS_APPLE_APP_ID` isn't set or the server hasn't restarted since, or the board is older than 0.3.27. If both are true, the address you entered isn't on the host in `STELLARIS_BOARD_HOST`: change one of them, then build again.
 - **"Signing in to the app is off on this board" (a 403)** in the sign-in sheet. The board's `STELLARIS_APPLE_APP_ID` was unset after the app read its configuration. Set it, restart the server, and tap **Change** and **Continue** in the app to read the configuration again.
+- **The board doesn't start after `STELLARIS_APPLE_APP_ID` is set.** The value isn't `<team ID>.<bundle ID>`: a 10-character team ID of capitals and digits, a dot, then the bundle ID. The server refuses it at start, and the chart refuses `auth.github.appleAppId` when it renders.
 - **A 404 at `/.well-known/apple-app-site-association`.** The board names no app: `STELLARIS_APPLE_APP_ID` is unset, or the server hasn't restarted since. If the server answers it on its own address but not on the public one, the proxy in front of it doesn't send `/.well-known/` to the server.
-- **The sign-in sheet stays on the board's page, or the app says "GitHub's sign-in ended somewhere the app doesn't know."** iOS didn't hand the landing to the app, since it doesn't hold the board's association for this app yet. Check the CDN as in [With GitHub](#with-github), check that the ID in the file is exactly `<team ID>.<bundle ID>` of this build, then delete the app and run it again from Xcode.
+- **The sign-in sheet stays on the board's page, or the app says "GitHub's sign-in ended somewhere the app doesn't know."** iOS didn't hand the landing to the app, since it doesn't hold the board's association for this app yet. Check that the ID in the board's file is exactly `<team ID>.<bundle ID>` of this build and what the CDN holds, as in [With GitHub](#with-github), then delete the app and run it again from Xcode, so the install fetches the file.
 - **"This GitHub account isn't one the board lets in."** Add the login, or its numeric id, to `STELLARIS_GITHUB_USERS` (the chart's `auth.github.users`).
 - **"The sign-in took too long to finish."** The one-time code expired before the app traded it. Try again.

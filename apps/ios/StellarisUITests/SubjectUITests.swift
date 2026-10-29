@@ -150,6 +150,47 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(charter.waitForNonExistence(timeout: 20), "Done leaves the charter open")
   }
 
+  /// At the largest type size, the plan's Done, Advance's Cancel, and Settings' Done still stand
+  /// in the side column. The app is signed in at the default size and launched again at the
+  /// largest, which the snapshot harness can't show, since its sheets never cover the column.
+  @MainActor func testKeepsTheSheetsButtonsInTheSideColumnAtTheLargestSize() {
+    var app = launch()
+    signIn(app)
+    expectGeneral(app)
+    app.terminate()
+    app = launch(
+      reset: false,
+      arguments: [
+        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+      ])
+    expectGeneral(app)
+    tab(app, "Needs you")
+    pick(app, "stage-\(exportView)")
+    pick(app, "plan")
+    let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
+    XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
+    keepScreen("plan-largest")
+    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
+    pick(app, "inspector-done")
+    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "Done leaves the plan open")
+    pick(app, "advance")
+    let note = app.textFields["advance-note"].firstMatch
+    XCTAssertTrue(note.waitForExistence(timeout: 20), "Advance opens no sheet")
+    keepScreen("advance-largest")
+    expectInTheSideColumn(app, app.buttons["advance-cancel"].firstMatch)
+    pick(app, "advance-cancel")
+    XCTAssertTrue(note.waitForNonExistence(timeout: 20), "Cancel leaves the sheet open")
+    tab(app, "Board")
+    pick(app, "settings")
+    XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
+    keepScreen("settings-largest")
+    let done = app.buttons["Done"].firstMatch
+    expectInTheSideColumn(app, done)
+    done.tap()
+    let board = app.staticTexts["settings-board"].firstMatch
+    XCTAssertTrue(board.waitForNonExistence(timeout: 20), "Done leaves Settings open")
+  }
+
   /// A project's dashboard and its tasks by where they stand open under Board; a task opens in
   /// Chat.
   @MainActor func testOpensAProjectsDashboardAndTasks() {

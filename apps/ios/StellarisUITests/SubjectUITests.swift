@@ -174,7 +174,8 @@ final class SubjectUITests: ShellTestCase {
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
     keepScreen("plan-largest")
-    dragAway(app, app.navigationBars["Plan"].firstMatch)
+    // At this size a drag from the sheet's bar left it where it was, so it starts in the content.
+    dragAway(app, app.navigationBars["Plan"].firstMatch, from: CGVector(dx: 0.5, dy: 1.6))
     XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "a drag down leaves the plan open")
     pick(app, "advance")
     let note = app.textFields["advance-note"].firstMatch
@@ -187,7 +188,7 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings-largest")
-    dragAway(app, app.navigationBars["Settings"].firstMatch)
+    dragAway(app, app.navigationBars["Settings"].firstMatch, from: CGVector(dx: 0.5, dy: 1.6))
     let board = app.staticTexts["settings-board"].firstMatch
     XCTAssertTrue(board.waitForNonExistence(timeout: 20), "a drag down leaves Settings open")
   }

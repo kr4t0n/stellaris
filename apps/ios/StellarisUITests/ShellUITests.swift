@@ -69,15 +69,18 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
-  /// Closes a sheet by dragging it down from its bar to the window's foot, right of the status
-  /// bar's frame at the top-leading corner, which takes touches there.
-  @MainActor func dragAway(_ app: XCUIApplication, _ bar: XCUIElement) {
+  /// Closes a sheet by dragging it down to the window's foot from `start`, a point relative to its
+  /// bar: by default on the bar, right of the status bar's frame at the top-leading corner, which
+  /// takes touches there.
+  @MainActor func dragAway(
+    _ app: XCUIApplication, _ bar: XCUIElement, from start: CGVector = CGVector(dx: 0.8, dy: 0.5)
+  ) {
     XCTAssertTrue(bar.waitForExistence(timeout: 20))
-    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+    bar.coordinate(withNormalizedOffset: start)
       .press(
         forDuration: 0.1,
         thenDragTo: app.windows.firstMatch.coordinate(
-          withNormalizedOffset: CGVector(dx: 0.8, dy: 0.98)))
+          withNormalizedOffset: CGVector(dx: start.dx, dy: 0.98)))
   }
 
   /// Checks that a sheet's `button` stands in the side column at the window's trailing edge, where

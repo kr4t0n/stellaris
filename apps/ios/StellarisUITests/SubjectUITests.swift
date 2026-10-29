@@ -174,9 +174,29 @@ final class SubjectUITests: ShellTestCase {
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
     keepScreen("plan-largest")
-    // At this size a drag from the sheet's bar left it where it was, so it starts in the content.
-    dragAway(app, app.navigationBars["Plan"].firstMatch, from: CGVector(dx: 0.5, dy: 1.6))
-    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "a drag down leaves the plan open")
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    print("probe: status bars \(springboard.statusBars.allElementsBoundByIndex.map { $0.frame })")
+    let planBar = app.navigationBars["Plan"].firstMatch
+    print("probe: plan bar \(planBar.frame)")
+    let grabber = app.buttons["Sheet Grabber"].firstMatch
+    print("probe: grabber \(grabber.exists ? "\(grabber.frame)" : "none")")
+    dragAway(app, planBar)
+    let onBar = stage.waitForNonExistence(timeout: 8)
+    print("probe: plan, drag on the bar's middle closed it: \(onBar)")
+    keepScreen("probe-plan-bar")
+    if !onBar {
+      dragAway(app, planBar, from: CGVector(dx: 0.8, dy: 0.95))
+      let low = stage.waitForNonExistence(timeout: 8)
+      print("probe: plan, drag on the bar's foot closed it: \(low)")
+      keepScreen("probe-plan-bar-foot")
+      if !low {
+        dragAway(app, planBar, from: CGVector(dx: 0.5, dy: 1.6))
+        let content = stage.waitForNonExistence(timeout: 8)
+        print("probe: plan, drag in the content closed it: \(content)")
+        keepScreen("probe-plan-content")
+      }
+    }
+    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "no drag closed the plan")
     pick(app, "advance")
     let note = app.textFields["advance-note"].firstMatch
     XCTAssertTrue(note.waitForExistence(timeout: 20), "Advance opens no sheet")
@@ -188,9 +208,18 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings-largest")
-    dragAway(app, app.navigationBars["Settings"].firstMatch, from: CGVector(dx: 0.5, dy: 1.6))
+    let settingsBar = app.navigationBars["Settings"].firstMatch
+    print("probe: settings bar \(settingsBar.frame)")
+    print("probe: status bars \(springboard.statusBars.allElementsBoundByIndex.map { $0.frame })")
     let board = app.staticTexts["settings-board"].firstMatch
-    XCTAssertTrue(board.waitForNonExistence(timeout: 20), "a drag down leaves Settings open")
+    dragAway(app, settingsBar)
+    let settingsOnBar = board.waitForNonExistence(timeout: 8)
+    print("probe: settings, drag on the bar's middle closed it: \(settingsOnBar)")
+    if !settingsOnBar {
+      dragAway(app, settingsBar, from: CGVector(dx: 0.5, dy: 1.6))
+      print("probe: settings, drag in the content closed it: \(board.waitForNonExistence(timeout: 8))")
+    }
+    XCTAssertTrue(board.waitForNonExistence(timeout: 20), "no drag closed Settings")
   }
 
   /// A project's dashboard and its tasks by where they stand open under Board; a task opens in

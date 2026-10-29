@@ -210,9 +210,14 @@ struct ChatView: View {
               .navigationTitle(subject.isTask ? "Plan" : "Charter")
               .navigationBarTitleDisplayMode(.inline)
               .toolbar {
+                // A symbol, as the other sheets' buttons have: on the outer display a bar's
+                // symbols go to the side column at the window's edge, while text stays in a bar
+                // across the top that ends short of it.
                 ToolbarItem(placement: .confirmationAction) {
-                  Button("Done") {
+                  Button {
                     model.inspecting = nil
+                  } label: {
+                    Label("Done", systemImage: "checkmark")
                   }
                   .accessibilityIdentifier("inspector-done")
                 }

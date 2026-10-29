@@ -130,8 +130,13 @@ struct ImageViewer: View {
         .navigationTitle(alt)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+          // A symbol, which the outer display puts in the side column at the window's edge.
           ToolbarItem(placement: .confirmationAction) {
-            Button("Done") { dismiss() }
+            Button {
+              dismiss()
+            } label: {
+              Label("Done", systemImage: "checkmark")
+            }
           }
         }
     }

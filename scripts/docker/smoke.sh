@@ -46,6 +46,17 @@ same "the runner image's account" \
 docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version &&
   kubectl version --client && helm version && helm plugin list | grep "^diff[[:space:]]" &&
   helm diff version && helmfile --version'
+# The runner's Claude turns run the Agent SDK's own Claude Code, not the claude on the PATH: the
+# binary in the SDK's per-platform package, found here as the SDK finds it. Brotli 1.2.1, the fix
+# for CVE-2026-111497, added this error code, so a binary without it embeds an older decoder.
+sdk_claude=$(docker run --rm "$runner_image" node -e '
+  const { createRequire } = require("node:module");
+  const adapter = createRequire("/opt/stellaris-runner/package.json").resolve("@stellaris/adapter-claude");
+  const sdk = createRequire(adapter).resolve("@anthropic-ai/claude-agent-sdk");
+  console.log(createRequire(sdk).resolve(`@anthropic-ai/claude-agent-sdk-linux-${process.arch}/claude`));')
+docker run --rm "$runner_image" grep -aq _ERROR_FORMAT_BLOCK_SWITCH "$sdk_claude" ||
+  { echo "the Agent SDK's Claude Code at $sdk_claude has a Brotli older than 1.2.1"; exit 1; }
+echo "the Agent SDK's Claude Code at $sdk_claude has Brotli 1.2.1 or later"
 
 docker network create "$run" > /dev/null
 docker volume create "$run-data" > /dev/null

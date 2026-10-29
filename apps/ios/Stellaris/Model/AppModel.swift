@@ -36,6 +36,8 @@ enum SignInFailure: Error, Equatable {
   /// Why the app is back at sign-in, when the board ended the sign-in.
   private(set) var notice: String?
   var tab: AppTab = .chat
+  /// The projects Board has opened, the last one shown, kept here so a fold keeps Board's place.
+  var boardPath: [String] = []
   var showsSettings = false
   private(set) var history = ChatHistory()
   private(set) var memory: ConversationMemory?
@@ -53,6 +55,24 @@ enum SignInFailure: Error, Equatable {
   /// The message a link named in each conversation, marked and scrolled to once, as the web marks
   /// the message its address names.
   private(set) var marks: [Conversation: MessageMark] = [:]
+  /// The task whose Advance sheet is open, which Chat presents.
+  var advancing: String?
+  /// What each task's Advance note says so far, kept until the stage is finished or the note is
+  /// cancelled, so a sheet dismissed or built again comes back with its text.
+  var advanceNotes: [String: String] = [:]
+  /// The proposal whose decision sheet is open, and which way it decides, which Chat presents.
+  var deciding: Verdict?
+  /// What each decision's reason says so far, kept as the notes are.
+  var reasons: [Verdict: String] = [:]
+  /// The task or the proposal whose plan or charter is open beside its thread, or in a sheet where
+  /// there is no room beside it.
+  var inspecting: String?
+  /// The tasks and the proposals whose advance or decision is on its way to the board. Neither goes
+  /// again until the board answers: an advance names no stage, so a second would finish the next.
+  private(set) var underWay: Set<String> = []
+  /// Why a task's advance or a proposal's decision didn't go, in words for its sheet, by the task's
+  /// or the proposal's id, kept until the next try, so a sheet built again shows it still.
+  private(set) var refusals: [String: String] = [:]
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
 
@@ -261,6 +281,108 @@ enum SignInFailure: Error, Equatable {
     await store.reload(["threads"], using: self)
   }
 
+  // MARK: Tasks and proposals
+
+  /// What the thread `conversation` is about: a task or a proposal, as the board last gave it.
+  func subject(of conversation: Conversation) -> Subject? {
+    guard case .thread(let id) = conversation else {
+      return nil
+    }
+    if let task = store.task(id) {
+      return .task(task)
+    }
+    return store.proposal(id).map(Subject.proposal)
+  }
+
+  /// Finishes the task's current stage as the user, with the note its sheet holds for the task's
+  /// thread, as the web's form at a stage that names the user does; then shows the task as the
+  /// board answered, and reads its thread and the board's tasks and questions again. Only a stage
+  /// that waits on the user is finished here, though the board takes the user's advance of any,
+  /// and only one advance of a task is on its way at a time.
+  func advance(_ id: String) async throws {
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
+    guard let task = store.task(id), stageForYou(task) != nil else {
+      refusals[id] = "This stage no longer waits on you."
+      throw SubjectRefusal.notYours
+    }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
+    let note = (advanceNotes[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let advanced: BoardTask
+    do {
+      advanced = try await send(BoardAPI.advanceTask(id, note: note.isEmpty ? nil : note))
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
+    }
+    store.replace(advanced)
+    advanceNotes[id] = nil
+    if advancing == id {
+      advancing = nil
+    }
+    let feed = feed(for: .thread(id))
+    Task {
+      await feed.load(using: self)
+      await store.reload(["tasks", "requests"], using: self)
+    }
+  }
+
+  /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
+  /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
+  /// which the decision closes, again. Only a proposal that waits on the user is decided here, and
+  /// only one decision of it is on its way at a time.
+  func decide(_ verdict: Verdict) async throws {
+    let id = verdict.proposal
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
+    guard let proposal = store.proposal(id), waitingOnYou(proposal) else {
+      refusals[id] = "This proposal no longer waits on you."
+      throw SubjectRefusal.notYours
+    }
+    let reason = (reasons[verdict] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if verdict.choice == .reject, reason.isEmpty {
+      refusals[id] = "A rejection needs its reason."
+      throw SubjectRefusal.noReason
+    }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
+    do {
+      switch verdict.choice {
+      case .approve:
+        _ = try await send(BoardAPI.approve(id, reason: reason.isEmpty ? nil : reason))
+      case .reject:
+        _ = try await send(BoardAPI.reject(id, reason: reason))
+      }
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
+    }
+    for choice in Verdict.Choice.allCases {
+      reasons[Verdict(proposal: id, choice: choice)] = nil
+    }
+    if deciding?.proposal == id {
+      deciding = nil
+    }
+    let feed = feed(for: .thread(id))
+    Task {
+      await feed.load(using: self)
+      await store.reload(["proposals", "threads", "members", "channels"], using: self)
+    }
+  }
+
+  /// A failed send in words: the board's refusal in its own, or that it didn't take it.
+  private static func words(for error: any Error) -> String {
+    if let refusal = error as? BoardError, refusal.status != 0 {
+      return refusal.message
+    }
+    return "The board did not take it."
+  }
+
   /// Reads again what `keys` name of what the app has loaded, as the web's `refreshFor` makes each
   /// key's queries stale: the conversation Chat shows, the board's lists, and the sky's while it is
   /// shown; with `everything`, all of it, as after a drop. Another conversation already read is
@@ -293,6 +415,14 @@ enum SignInFailure: Error, Equatable {
       await store.refresh(using: self)
     } else if !lists.isEmpty {
       await store.reload(lists, using: self)
+    }
+    // Every task read alone and every dashboard read, on its first read or failed too: an answer
+    // the board gave before the event would leave out what the event says.
+    for id in store.taskReads.keys where touched("task", id) {
+      await store.lookUpTask(id, using: self)
+    }
+    for project in store.dashboardReads.keys where touched("dashboard", project) {
+      await store.loadDashboard(project, using: self)
     }
     sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
   }
@@ -368,12 +498,18 @@ enum SignInFailure: Error, Equatable {
 
   /// A message's markdown, read once for its text and the ids the board names.
   func document(for message: Message) -> MessageDocument {
+    document(id: message.id, markdown: message.body)
+  }
+
+  /// Markdown the board keeps under `id`, a message's, a task's brief, or a dashboard, read as a
+  /// message is, once for its text and the ids the board names.
+  func document(id: String, markdown: String) -> MessageDocument {
     let entities = store.entities
-    if let kept = documents[message.id], kept.body == message.body, kept.entities == entities {
+    if let kept = documents[id], kept.body == markdown, kept.entities == entities {
       return kept.document
     }
-    let document = MessageDocument(markdown: message.body, entities: entities)
-    documents[message.id] = (message.body, entities, document)
+    let document = MessageDocument(markdown: markdown, entities: entities)
+    documents[id] = (markdown, entities, document)
     return document
   }
 
@@ -389,10 +525,14 @@ enum SignInFailure: Error, Equatable {
     case .channel(let ref):
       return "#" + (ref.split(separator: "/").last.map(String.init) ?? ref)
     case .thread(let id):
+      // A proposal's thread is titled as the board announced it, which the web titles the proposal.
+      if let proposal = store.proposal(id) {
+        return proposal.title
+      }
       if let thread = feeds[conversation]?.thread {
         return thread.title
       }
-      return store.tasks.first { $0.id == id }?.title ?? "the thread"
+      return store.task(id)?.title ?? "the thread"
     }
   }
 
@@ -407,8 +547,10 @@ enum SignInFailure: Error, Equatable {
     self.actor = actor
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
+    boardPath = []
     marks = [:]
     newThreads = [:]
+    forgetSubjects()
     live.clear()
     feeds = [:]
     documents = [:]
@@ -418,6 +560,17 @@ enum SignInFailure: Error, Equatable {
     notice = nil
     phase = .signedIn
     Task { await store.refresh(using: self) }
+  }
+
+  /// Closes the sheets and the inspector of tasks and proposals, and drops what they said.
+  private func forgetSubjects() {
+    advancing = nil
+    advanceNotes = [:]
+    deciding = nil
+    reasons = [:]
+    inspecting = nil
+    underWay = []
+    refusals = [:]
   }
 
   private func leave(notice: String?) {
@@ -431,11 +584,13 @@ enum SignInFailure: Error, Equatable {
     viewing = nil
     startingThread = nil
     newThreads = [:]
+    forgetSubjects()
     marks = [:]
     live.clear()
     store.clear()
     sky.clear()
     history = ChatHistory()
+    boardPath = []
     showsSettings = false
     self.notice = notice
     phase = .signedOut

@@ -4,7 +4,6 @@ import SwiftUI
 /// The board's address, who the app is signed in as, and signing out.
 struct SettingsView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
@@ -33,15 +32,8 @@ struct SettingsView: View {
         }
       }
       .navigationTitle("Settings")
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button {
-            dismiss()
-          } label: {
-            Label("Done", systemImage: "checkmark")
-          }
-        }
-      }
     }
+    // No button: nothing here is saved, so a drag down closes it, which the grabber shows.
+    .presentationDragIndicator(.visible)
   }
 }

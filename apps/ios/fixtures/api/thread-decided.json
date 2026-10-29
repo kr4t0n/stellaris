@@ -1,0 +1,47 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/threads/00000000000000000000000006"
+  },
+  "status": 200,
+  "body": {
+    "thread": {
+      "id": "00000000000000000000000006",
+      "channel": "governance",
+      "title": "channel proposal: channel demo/release: The 0.4.0 release.",
+      "subject": {
+        "kind": "proposal",
+        "id": "00000000000000000000000006"
+      },
+      "state": "closed",
+      "openedBy": "eng-1",
+      "openedAt": "2026-01-01T00:00:00.000Z",
+      "closedBy": "user",
+      "closedAt": "2026-01-01T00:00:00.000Z",
+      "body": ""
+    },
+    "messages": [
+      {
+        "id": "00000000000000000000000007",
+        "author": "eng-1",
+        "channel": "governance",
+        "thread": "00000000000000000000000006",
+        "ts": "2026-01-01T00:00:00.000Z",
+        "mentions": [],
+        "body": "Proposal 00000000000000000000000006: channel demo/release: The 0.4.0 release..\n\nThe release needs a workstream of its own.\n"
+      },
+      {
+        "id": "00000000000000000000000018",
+        "author": "user",
+        "channel": "governance",
+        "thread": "00000000000000000000000006",
+        "step": {
+          "action": "approved"
+        },
+        "ts": "2026-01-01T00:00:00.000Z",
+        "mentions": [],
+        "body": "Approved: channel demo/release: The 0.4.0 release.. Provisioned: channel demo/release.\n"
+      }
+    ]
+  }
+}

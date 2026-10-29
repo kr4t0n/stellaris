@@ -130,8 +130,15 @@ struct ImageViewer: View {
         .navigationTitle(alt)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-          ToolbarItem(placement: .confirmationAction) {
-            Button("Done") { dismiss() }
+          // A full-screen cover can't be dragged away, so it has Close: in the cancelling place,
+          // drawn plain as Cancel is, and a symbol, which the outer display puts in the side
+          // column at the window's edge.
+          ToolbarItem(placement: .cancellationAction) {
+            Button {
+              dismiss()
+            } label: {
+              Label("Close", systemImage: "xmark")
+            }
           }
         }
     }

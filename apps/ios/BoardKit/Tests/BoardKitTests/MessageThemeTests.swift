@@ -37,6 +37,40 @@ import Testing
     #expect(thread.contains("text-emerald-400"))
   }
 
+  /// A task's phase, its plan's segments, a gate, and a proposal's status take the classes the
+  /// web's task and proposal views give them, whose colours `MessageTheme` copies.
+  @Test func phasesPlansAndStatusesAreColouredAsOnTheWeb() throws {
+    let tasks = try SkyMarkTests.web("board/tasks.ts")
+    for chip in [
+      "returned: \"bg-orange-500/15 text-orange-300\"", "waiting: \"bg-amber-500/15 text-amber-300\"",
+      "working: \"bg-emerald-500/15 text-emerald-300\"", "landing: \"bg-sky-500/15 text-sky-300\"",
+      "done: \"bg-surface-2 text-fg-secondary\"", "abandoned: \"bg-surface-2 text-fg-muted\"",
+      "\"bg-red-500/15 text-red-300\"",
+    ] {
+      #expect(tasks.contains(chip), "\(chip)")
+    }
+    let strip = try SkyMarkTests.web("board/PlanStrip.tsx")
+    for fill in ["bg-emerald-400/60", "bg-fg-primary/90", "bg-amber-300/80", "ring-sky-300/70"] {
+      #expect(strip.contains(fill), "\(fill)")
+    }
+    let task = try SkyMarkTests.web("board/TaskView.tsx")
+    for style in ["bg-sky-400/10 px-1.5 py-px text-[11px] text-sky-300", "bg-emerald-400/20 text-emerald-300"] {
+      #expect(task.contains(style), "\(style)")
+    }
+    let proposals = try SkyMarkTests.web("board/ProposalsView.tsx")
+    for status in [
+      "proposed: \"bg-amber-500/15 text-amber-300\"",
+      "provisioned: \"bg-emerald-500/15 text-emerald-300\"",
+      "rejected: \"bg-red-500/15 text-red-300\"", "retired: \"bg-surface-2 text-fg-muted\"",
+    ] {
+      #expect(proposals.contains(status), "\(status)")
+    }
+    #expect(MessageTheme.sky300 == MessageTheme.mention)
+    #expect(MessageTheme.sky400 == MessageTheme.mentionTint)
+    #expect(MessageTheme.amber300 == MessageTheme.markTint)
+    #expect(MessageTheme.emerald400 == MessageTheme.threadOpen)
+  }
+
   @Test func theIslandIsBlendedAsTheBrowserBlendsIt() {
     #expect(MessageTheme.island == SkyColor(red: 20, green: 20, blue: 20))
   }

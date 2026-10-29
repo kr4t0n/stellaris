@@ -265,6 +265,8 @@ class InstructionsBackend implements AgentBackend {
   remember: string | null = null;
   /** Whether the next turn fails. */
   failNext = false;
+  /** Whether the next turn is stopped, and whether a model call answered before the stop. */
+  stopNext: "before a model call" | "after a model call" | null = null;
 
   newSession(): Promise<string> {
     return Promise.resolve("session-1");
@@ -306,6 +308,16 @@ class InstructionsBackend implements AgentBackend {
   }
 
   private async turn(home: string): Promise<TurnResult> {
+    if (this.stopNext !== null) {
+      const answered = this.stopNext === "after a model call";
+      this.stopNext = null;
+      return {
+        ...completed(""),
+        status: null,
+        exitReason: "stopped",
+        ...(answered ? { contextTokens: 1_000 } : {}),
+      };
+    }
     if (this.failNext) {
       this.failNext = false;
       return { ...completed(""), status: null, exitReason: "error", error: "the CLI ended" };
@@ -2063,6 +2075,22 @@ describe("turns on a runner over the runner protocol", () => {
     expect(again.instructions).toContain("- MARKER-TWO");
     expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
 
+    // A stop can come before the CLI took the prompt, so it counts once a model call answered.
+    const two = await held();
+    backend.remember = "- MARKER-THREE";
+    await turn();
+    backend.stopNext = "before a model call";
+    expect(changedIn((await turn()).prompt).times).toBe(1);
+    expect(await board.readLastTurn("steward-1", "society")).toMatchObject({
+      exitReason: "stopped",
+      session: "session-1",
+      sessionInstructionsHash: two,
+    });
+    backend.stopNext = "after a model call";
+    const resent = await turn();
+    expect(changedIn(resent.prompt)).toEqual({ text: resent.instructions?.trimEnd(), times: 1 });
+    expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+
     // A record from before the board kept them says nothing of what the session holds.
     const last = await board.readLastTurn("steward-1", "society");
     if (last === null) {
@@ -2074,34 +2102,45 @@ describe("turns on a runner over the runner protocol", () => {
     expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
   });
 
-  it("carries changed instructions into a warm session's prompt, which keeps the session warm", async () => {
+  it("carries changed instructions into a warm session's prompt, and starts its process afresh on them", async () => {
     const { board } = await Board.init(dir, { name: "warm-instructions" });
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
     const backend = new InstructionsBackend();
     const { run } = await start(board, backend, { residentIdleMs: 60_000 });
-    const prompt = async (): Promise<string> => {
+    const turn = async (): Promise<HandedTurn | undefined> => {
       await run({ ...deskPost, agent: "concierge-1" });
-      return backend.turns.at(-1)?.prompt ?? "";
+      return backend.turns.at(-1);
     };
 
-    expect(changedIn(await prompt())).toEqual(UNCHANGED);
+    expect(changedIn((await turn())?.prompt ?? "")).toEqual(UNCHANGED);
     expect(backend.turns[0]).toMatchObject({ newSession: true });
-    expect(changedIn(await prompt())).toEqual(UNCHANGED);
+    // The first turn's section going is no change, so the process stays warm.
+    expect(await turn()).toMatchObject({ instructions: null });
+    expect(changedIn(backend.turns[1]?.prompt ?? "")).toEqual(UNCHANGED);
+    expect(backend.starts).toEqual(["session-1"]);
 
-    // The society's norms change while the session is warm; its CLI was given the old ones.
+    // The society's norms change while the session is warm; its CLI was given the old ones, which
+    // a compaction in it would put back, so a process starts afresh on the new ones.
     await board.writeKnowledge(USER, {
       project: null,
       topic: "norms",
       body: "MARKER-NORMS: summaries close threads.",
       revision: 0,
     });
-    const changed = changedIn(await prompt());
+    const after = await turn();
+    expect(backend.starts).toEqual(["session-1", "session-1"]);
+    expect(after?.newSession).toBe(false);
+    expect(after?.instructions).toContain(
+      "## Society norms\n\nMARKER-NORMS: summaries close threads.",
+    );
+    const changed = changedIn(after?.prompt ?? "");
     expect(changed.times).toBe(1);
     expect(changed.text).toMatch(/^# concierge-1\n/);
-    expect(changed.text).toContain("## Society norms\n\nMARKER-NORMS: summaries close threads.");
+    expect(changed.text).toBe(after?.instructions?.trimEnd());
     expect(changed.text).not.toContain(PATH_TOKENS.home);
-    expect(changedIn(await prompt())).toEqual(UNCHANGED);
-    expect(backend.starts).toEqual(["session-1"]);
+    expect(await turn()).toMatchObject({ instructions: null });
+    expect(changedIn(backend.turns.at(-1)?.prompt ?? "")).toEqual(UNCHANGED);
+    expect(backend.starts).toHaveLength(2);
   });
 
   it("brings an agent's own files back to the board after a turn, and never the board's records", async () => {

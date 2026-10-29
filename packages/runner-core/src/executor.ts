@@ -150,6 +150,11 @@ interface Resident {
   readonly model: string | undefined;
   /** The effort the session started with, which it keeps for good, as it does its model. */
   readonly effort: string | undefined;
+  /**
+   * The instructions the process started with, by the job's `instructionsHash` or else their text:
+   * a compaction puts these back, so a process given others starts afresh.
+   */
+  readonly instructions: string;
   timer: ReturnType<typeof setTimeout> | null;
   /** Set when another turn of the citizen changed its memory, which this session read at its start. */
   stale: boolean;
@@ -347,8 +352,8 @@ export class TurnExecutor {
     }
     if (result.status?.memoryUpdated === true) {
       // The citizen's warm processes started with the memory this turn changed; each restarts at
-      // its next turn, not mid-turn. A restart resumes the same session, which keeps the
-      // instructions it began with: the server's prompt carries a change (`TurnHost.openTurn`).
+      // its next turn, not mid-turn, on the instructions that job carries. The session itself keeps
+      // the instructions it began with, so the server's prompt carries a change (`TurnHost.openTurn`).
       for (const [key, warm] of this.residents) {
         if (key.startsWith(`${job.agent}/`)) {
           warm.stale = true;
@@ -1269,8 +1274,9 @@ export class TurnExecutor {
   /**
    * One turn on a warm session: start it on first use, run the prompt, then either keep it warm
    * until the idle timeout or recycle it when its citizen's memory changed or the turn failed. A session given another
-   * token or model than it started with starts afresh, since the CLI read both at its start, and so
-   * does one whose job names no session, since the server dropped the one it was warm on.
+   * token, model, or instructions than it started with starts afresh, since the CLI read them at its
+   * start and a compaction puts its instructions back, and so does one whose job names no session,
+   * since the server dropped the one it was warm on.
    */
   private async runResident(
     backend: AgentBackend,
@@ -1291,16 +1297,21 @@ export class TurnExecutor {
     if (backend.startResident === undefined || resident === undefined) {
       throw new Error("backend cannot host resident sessions");
     }
+    const instructions = job.instructionsHash ?? input.instructions;
     const warm = this.residents.get(resident.key);
     if (
       warm !== undefined &&
       (warm.model !== spec.model ||
         warm.effort !== spec.effort ||
         warm.token !== job.mcp.token ||
+        warm.instructions !== instructions ||
         warm.stale ||
         input.newSession)
     ) {
-      await this.closeResident(resident.key, "model, effort, token, memory, or session changed");
+      await this.closeResident(
+        resident.key,
+        "model, effort, token, instructions, memory, or session changed",
+      );
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
@@ -1319,6 +1330,7 @@ export class TurnExecutor {
         token: job.mcp.token,
         model: spec.model,
         effort: spec.effort,
+        instructions,
         timer: null,
         stale: false,
       };

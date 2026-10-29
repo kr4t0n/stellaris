@@ -569,6 +569,7 @@ export class TurnHost {
       costSoFarUsd,
       ...(usageSoFar === undefined ? {} : { usageSoFar }),
       instructions,
+      instructionsHash: instructionsNow,
       prompt,
       mcp: { url: this.mcpUrl, token },
       limits: { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns },
@@ -814,18 +815,23 @@ export class TurnHost {
       outcome.exitReason === "completed";
     // The running usage is the runner's to report: it keeps the job's for a turn that saw none.
     const { sessionUsage: _started, sessionInstructionsHash: heldBefore, ...begun } = turn.record;
-    // A new session began with the job's instructions, and a resumed one has them once the turn's
-    // prompt, which carried any change, counts as delivered, as its digest does below.
+    // The digest counts as delivered at a turn's end as below, a stop included, since a stop is the
+    // user's decision on the work.
     const promptDelivered =
       outcome.exitReason === "completed" ||
       outcome.exitReason === "blocked" ||
       outcome.exitReason === "stopped";
+    // A new session began with the job's instructions. A resumed one has them once its prompt, which
+    // carried any change, was delivered, and for a stop, which can come before the CLI took the
+    // prompt, once a model call answered (`contextTokens`); else the next turn carries them again.
+    const instructionsTaken =
+      outcome.exitReason === "stopped" ? outcome.contextTokens !== undefined : promptDelivered;
     const instructionsHeld =
       job.session === null
         ? outcome.session === null
           ? undefined
           : turn.instructionsNow
-        : promptDelivered
+        : instructionsTaken
           ? turn.instructionsNow
           : heldBefore;
     const finished: TurnRecord = {

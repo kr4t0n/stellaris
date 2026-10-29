@@ -32,6 +32,7 @@ final class SubjectUITests: ShellTestCase {
     note.tap()
     note.typeText("The design is approved.")
     keepScreen("advance")
+    expectInTheSideColumn(app, app.buttons["advance-confirm"].firstMatch)
     pick(app, "advance-confirm")
     let posted = app.scrollViews["messages"].staticTexts
       .matching(NSPredicate(format: "label == %@", "The design is approved.")).firstMatch
@@ -87,6 +88,7 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "reject")
     XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet again")
     XCTAssertEqual(reason.value as? String, "One reviewer keeps up for now.")
+    expectInTheSideColumn(app, app.buttons["decision-confirm"].firstMatch)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Rejected by"), evaluatedWith: strip)
@@ -108,6 +110,7 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "approve")
     XCTAssertTrue(
       app.textFields["decision-reason"].waitForExistence(timeout: 20), "Approve opens no sheet")
+    expectInTheSideColumn(app, app.buttons["decision-confirm"].firstMatch)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Approved by"), evaluatedWith: strip)
@@ -116,7 +119,8 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("approved")
   }
 
-  /// Plan opens a task's stages, and Charter a proposal's charter, each closed again by Done.
+  /// Plan opens a task's stages, and Charter a proposal's charter, each closed again by Done in
+  /// the side column.
   @MainActor func testOpensThePlanAndTheCharter() {
     let app = launch()
     signIn(app)
@@ -128,6 +132,7 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
     XCTAssertTrue(stage.label.contains("gate"), "the stage doesn't say it is a gate")
     keepScreen("plan")
+    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
     pick(app, "inspector-done")
     XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "Done leaves the plan open")
 
@@ -140,6 +145,9 @@ final class SubjectUITests: ShellTestCase {
       .matching(NSPredicate(format: "label CONTAINS %@", "CLI and model")).firstMatch
     XCTAssertTrue(field.waitForExistence(timeout: 20), "the charter shows no member's fields")
     keepScreen("charter")
+    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
+    pick(app, "inspector-done")
+    XCTAssertTrue(charter.waitForNonExistence(timeout: 20), "Done leaves the charter open")
   }
 
   /// A project's dashboard and its tasks by where they stand open under Board; a task opens in

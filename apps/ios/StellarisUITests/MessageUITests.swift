@@ -37,7 +37,9 @@ final class MessageUITests: ShellTestCase {
     let done = app.buttons["Done"].firstMatch
     XCTAssertTrue(done.waitForExistence(timeout: 20), "the image doesn't open in a viewer")
     keepScreen("image-viewer")
+    expectInTheSideColumn(app, done)
     done.tap()
+    XCTAssertTrue(done.waitForNonExistence(timeout: 20), "Done leaves the image open")
     XCTAssertTrue(
       image.waitForExistence(timeout: 20) && image.isHittable,
       "the conversation moved while the image was open")

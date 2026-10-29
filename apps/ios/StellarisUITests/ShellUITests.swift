@@ -69,6 +69,17 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// Checks that a sheet's `button` stands in the side column at the window's trailing edge, where
+  /// the outer display puts a bar's symbols, and not in a bar across the top, which ends about 85
+  /// points short of the edge, where that column begins.
+  @MainActor func expectInTheSideColumn(_ app: XCUIApplication, _ button: XCUIElement) {
+    XCTAssertTrue(button.waitForExistence(timeout: 20))
+    let edge = app.windows.firstMatch.frame.maxX
+    XCTAssertGreaterThan(
+      button.frame.midX, edge - 70,
+      "\(button.label) stands \(Int(edge - button.frame.maxX)) pt short of the window's edge")
+  }
+
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
   /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
@@ -319,7 +330,9 @@ final class ScreenUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings")
-    app.buttons["Done"].firstMatch.tap()
+    let done = app.buttons["Done"].firstMatch
+    expectInTheSideColumn(app, done)
+    done.tap()
     pick(app, "task-00000000000000000000000010")
     expectConversation(app, "Add the export view")
     keepScreen("thread")

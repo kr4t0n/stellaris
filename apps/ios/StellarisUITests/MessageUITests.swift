@@ -34,12 +34,12 @@ final class MessageUITests: ShellTestCase {
     let image = messages.buttons["The export view at 410 pt"].firstMatch
     reveal(app, image)
     image.tap()
-    let done = app.buttons["Done"].firstMatch
-    XCTAssertTrue(done.waitForExistence(timeout: 20), "the image doesn't open in a viewer")
+    let close = app.buttons["Close"].firstMatch
+    XCTAssertTrue(close.waitForExistence(timeout: 20), "the image doesn't open in a viewer")
     keepScreen("image-viewer")
-    expectInTheSideColumn(app, done)
-    done.tap()
-    XCTAssertTrue(done.waitForNonExistence(timeout: 20), "Done leaves the image open")
+    expectInTheSideColumn(app, close)
+    close.tap()
+    XCTAssertTrue(close.waitForNonExistence(timeout: 20), "Close leaves the image open")
     XCTAssertTrue(
       image.waitForExistence(timeout: 20) && image.isHittable,
       "the conversation moved while the image was open")

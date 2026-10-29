@@ -69,6 +69,17 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// Closes a sheet by dragging it down from its bar to the window's foot, right of the status
+  /// bar's frame at the top-leading corner, which takes touches there.
+  @MainActor func dragAway(_ app: XCUIApplication, _ bar: XCUIElement) {
+    XCTAssertTrue(bar.waitForExistence(timeout: 20))
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+      .press(
+        forDuration: 0.1,
+        thenDragTo: app.windows.firstMatch.coordinate(
+          withNormalizedOffset: CGVector(dx: 0.8, dy: 0.98)))
+  }
+
   /// Checks that a sheet's `button` stands in the side column at the window's trailing edge, where
   /// the outer display puts a bar's symbols, and not in a bar across the top, which ends about 88
   /// points short of the edge, where that column begins.
@@ -330,9 +341,11 @@ final class ScreenUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings")
-    let done = app.buttons["Done"].firstMatch
-    expectInTheSideColumn(app, done)
-    done.tap()
+    XCTAssertFalse(app.buttons["Done"].exists, "Settings has a Done")
+    dragAway(app, app.navigationBars["Settings"].firstMatch)
+    XCTAssertTrue(
+      app.staticTexts["settings-board"].waitForNonExistence(timeout: 20),
+      "a drag down leaves Settings open")
     pick(app, "task-00000000000000000000000010")
     expectConversation(app, "Add the export view")
     keepScreen("thread")

@@ -77,13 +77,7 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet")
     reason.tap()
     reason.typeText("One reviewer keeps up for now.")
-    // Swiped away from the sheet's bar, right of the status bar's frame at the top-leading corner.
-    let bar = app.navigationBars["Reject"].firstMatch
-    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
-      .press(
-        forDuration: 0.1,
-        thenDragTo: app.windows.firstMatch.coordinate(
-          withNormalizedOffset: CGVector(dx: 0.8, dy: 0.98)))
+    dragAway(app, app.navigationBars["Reject"].firstMatch)
     XCTAssertTrue(reason.waitForNonExistence(timeout: 20), "the sheet doesn't go")
     pick(app, "reject")
     XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet again")
@@ -119,8 +113,8 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("approved")
   }
 
-  /// Plan opens a task's stages, and Charter a proposal's charter, each closed again by Done in
-  /// the side column.
+  /// Plan opens a task's stages, and Charter a proposal's charter, in a sheet with no button,
+  /// each closed again by a drag down.
   @MainActor func testOpensThePlanAndTheCharter() {
     let app = launch()
     signIn(app)
@@ -132,9 +126,9 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
     XCTAssertTrue(stage.label.contains("gate"), "the stage doesn't say it is a gate")
     keepScreen("plan")
-    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
-    pick(app, "inspector-done")
-    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "Done leaves the plan open")
+    XCTAssertFalse(app.buttons["Done"].exists, "the plan's sheet has a Done")
+    dragAway(app, app.navigationBars["Plan"].firstMatch)
+    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "a drag down leaves the plan open")
 
     tab(app, "Needs you")
     pick(app, "proposal-\(memberProposal)")
@@ -145,15 +139,15 @@ final class SubjectUITests: ShellTestCase {
       .matching(NSPredicate(format: "label CONTAINS %@", "CLI and model")).firstMatch
     XCTAssertTrue(field.waitForExistence(timeout: 20), "the charter shows no member's fields")
     keepScreen("charter")
-    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
-    pick(app, "inspector-done")
-    XCTAssertTrue(charter.waitForNonExistence(timeout: 20), "Done leaves the charter open")
+    XCTAssertFalse(app.buttons["Done"].exists, "the charter's sheet has a Done")
+    dragAway(app, app.navigationBars["Charter"].firstMatch)
+    XCTAssertTrue(charter.waitForNonExistence(timeout: 20), "a drag down leaves the charter open")
   }
 
-  /// At the largest type size, the plan's Done, Advance's Cancel, and Settings' Done still stand
-  /// in the side column. The app is signed in at the default size and launched again at the
-  /// largest, which the snapshot harness can't show, since its sheets never cover the column.
-  @MainActor func testKeepsTheSheetsButtonsInTheSideColumnAtTheLargestSize() {
+  /// At the largest type size, the plan and Settings close with a drag down, and Advance's Cancel
+  /// still stands in the side column. The app is signed in at the default size and launched again
+  /// at the largest, which the snapshot harness can't show: its sheets never cover the column.
+  @MainActor func testClosesTheSheetsAtTheLargestSize() {
     var app = launch()
     signIn(app)
     expectGeneral(app)
@@ -180,9 +174,8 @@ final class SubjectUITests: ShellTestCase {
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
     XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
     keepScreen("plan-largest")
-    expectInTheSideColumn(app, app.buttons["inspector-done"].firstMatch)
-    pick(app, "inspector-done")
-    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "Done leaves the plan open")
+    dragAway(app, app.navigationBars["Plan"].firstMatch)
+    XCTAssertTrue(stage.waitForNonExistence(timeout: 20), "a drag down leaves the plan open")
     pick(app, "advance")
     let note = app.textFields["advance-note"].firstMatch
     XCTAssertTrue(note.waitForExistence(timeout: 20), "Advance opens no sheet")
@@ -194,11 +187,9 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings-largest")
-    let done = app.buttons["Done"].firstMatch
-    expectInTheSideColumn(app, done)
-    done.tap()
+    dragAway(app, app.navigationBars["Settings"].firstMatch)
     let board = app.staticTexts["settings-board"].firstMatch
-    XCTAssertTrue(board.waitForNonExistence(timeout: 20), "Done leaves Settings open")
+    XCTAssertTrue(board.waitForNonExistence(timeout: 20), "a drag down leaves Settings open")
   }
 
   /// A project's dashboard and its tasks by where they stand open under Board; a task opens in

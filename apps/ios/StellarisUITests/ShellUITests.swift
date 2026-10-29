@@ -70,7 +70,7 @@ class ShellTestCase: XCTestCase {
   }
 
   /// Checks that a sheet's `button` stands in the side column at the window's trailing edge, where
-  /// the outer display puts a bar's symbols, and not in a bar across the top, which ends about 85
+  /// the outer display puts a bar's symbols, and not in a bar across the top, which ends about 88
   /// points short of the edge, where that column begins.
   @MainActor func expectInTheSideColumn(_ app: XCUIApplication, _ button: XCUIElement) {
     XCTAssertTrue(button.waitForExistence(timeout: 20))

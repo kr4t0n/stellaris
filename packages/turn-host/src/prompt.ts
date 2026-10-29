@@ -69,6 +69,11 @@ export interface TurnPromptInput {
   /** The turn's project, or null in the society scope. */
   readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
+  /**
+   * The citizen's instructions as they are now, for a resumed session that holds others: the
+   * prompt carries them whole, marked as replacing what the session had. Absent otherwise.
+   */
+  readonly changedInstructions?: string | null | undefined;
   readonly onboarding: OnboardingContext | null;
   /** Whether a reflection that completes in this conversation ends its session: a society role's home. */
   readonly afreshAfterReflection?: boolean | undefined;
@@ -140,6 +145,8 @@ const SAVE_WHAT_IS_OPEN =
 const REFLECTION_REPORT =
   "- Report memoryUpdated: true in the status object when core.md or a skill changed.";
 
+const INSTRUCTIONS_CHANGED =
+  "Your instructions changed since this conversation last received them. Between the tags below are the whole of them now: they replace the instructions this conversation began with and any earlier text like this, so where the two differ, follow these, and a rule missing from them no longer applies.";
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
 
@@ -394,6 +401,22 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
       "The user posted. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
+    );
+  }
+
+  // A resumed session keeps the instructions it began with whatever its CLI is given, so a change
+  // reaches its model only here.
+  const changed = input.changedInstructions ?? null;
+  if (changed !== null) {
+    lines.push(
+      "",
+      "## Your instructions changed",
+      "",
+      INSTRUCTIONS_CHANGED,
+      "",
+      "<instructions>",
+      changed.trimEnd(),
+      "</instructions>",
     );
   }
 

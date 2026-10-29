@@ -245,6 +245,12 @@ export const TurnJobSchema = z.object({
   usageSoFar: UsageSchema.optional(),
   /** The rendered charter, norms, memory core, and skills index, with `PATH_TOKENS` for places. */
   instructions: z.string(),
+  /**
+   * The hash of `instructions` without the first turn's section (`instructionsHash` in
+   * `turn-host`): a warm process started on other instructions starts afresh, so a compaction in
+   * it puts back the current ones. Absent from a server from before, when the text is compared.
+   */
+  instructionsHash: z.string().optional(),
   prompt: z.string(),
   mcp: z.object({ url: z.string().min(1), token: z.string().min(1) }),
   limits: z.object({

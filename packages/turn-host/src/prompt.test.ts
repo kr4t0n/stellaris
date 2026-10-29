@@ -34,6 +34,18 @@ const cronlessDispatch = {
   onboarding: false,
 };
 
+/** A heartbeat's prompt, given the instructions it carries as changed, if any. */
+function promptWith(changedInstructions?: string | null): string {
+  return buildTurnPrompt({
+    dispatch: cronlessDispatch,
+    messages: [],
+    heldClaims: [],
+    lastTurn: null,
+    onboarding: null,
+    ...(changedInstructions === undefined ? {} : { changedInstructions }),
+  });
+}
+
 describe("buildTurnPrompt", () => {
   it("tells the time in the society's zone, and quotes each cron that woke the turn", () => {
     const cron = {
@@ -222,6 +234,24 @@ describe("buildTurnPrompt", () => {
     });
     expect(prompt).toContain("This is your first turn as eng-1");
     expect(prompt).toContain("Nothing new.");
+  });
+
+  it("carries changed instructions whole, once, marked as replacing the earlier ones, and nothing otherwise", () => {
+    const instructions = "# eng-1\n\n## Role\n\n# engineer\n\n## Core memory\n\n- A new lesson.\n";
+    const changed = promptWith(instructions);
+    expect(changed.split("## Your instructions changed").length - 1).toBe(1);
+    expect(changed).toContain(
+      "Between the tags below are the whole of them now: they replace the instructions this conversation began with and any earlier text like this, so where the two differ, follow these, and a rule missing from them no longer applies.",
+    );
+    expect(changed).toContain(`<instructions>\n${instructions.trimEnd()}\n</instructions>\n`);
+    // Before the conversation, so the turn reads its rules before its work.
+    expect(changed.indexOf("</instructions>")).toBeLessThan(
+      changed.indexOf("## This conversation"),
+    );
+    for (const unchanged of [promptWith(), promptWith(null)]) {
+      expect(unchanged).not.toContain("## Your instructions changed");
+      expect(unchanged).not.toContain("<instructions>");
+    }
   });
 
   it("says a dropped session's turn starts anew, and why, and says nothing of it otherwise", () => {

@@ -209,6 +209,68 @@ final class SnapshotTests: XCTestCase {
       named: "channel-read-only", in: self)
   }
 
+  /// A task's thread with its strip and a step's chip, at a gate that waits on the user, and a
+  /// proposal's thread waiting on the user, in Chat.
+  @MainActor func testATasksAndAProposalsThread() async throws {
+    let model = try await signedIn()
+    for (name, id) in [("chat-task", exportView), ("chat-proposal", memberProposal)] {
+      model.open(.thread(id))
+      await model.feed(for: .thread(id)).load(using: model)
+      try await Snapshot.record(ShellView().environment(model), named: name, in: self)
+    }
+  }
+
+  /// The plan and the charter opened from the bar: beside the thread from 640 points wide, and in
+  /// a sheet at the narrower widths, a column of the inner display folded like a book among them.
+  @MainActor func testThePlanAndTheCharterBesideTheThreadOrInASheet() async throws {
+    let model = try await signedIn()
+    for (name, id) in [("chat-plan", exportView), ("chat-charter", memberProposal)] {
+      model.open(.thread(id))
+      await model.feed(for: .thread(id)).load(using: model)
+      model.inspecting = id
+      try await Snapshot.record(ShellView().environment(model), named: name, in: self)
+    }
+  }
+
+  /// A task's plan whole, and each captured proposal's charter.
+  @MainActor func testPlansAndCharters() async throws {
+    let model = try await signedIn()
+    let task = try XCTUnwrap(model.store.task(exportView))
+    try await Snapshot.recordWhole(
+      PlanView(task: task).environment(model), named: "plan", in: self)
+    for proposal in model.store.proposals {
+      try await Snapshot.recordWhole(
+        CharterView(proposal: proposal).environment(model),
+        named: "charter-\(proposal.kind.rawValue)", in: self)
+    }
+  }
+
+  /// The Advance and Reject sheets, with what they say so far.
+  @MainActor func testTheAdvanceAndRejectSheets() async throws {
+    let model = try await signedIn()
+    model.advanceNotes[exportView] =
+      "The design is approved; the empty state follows in its own task."
+    try await Snapshot.record(
+      AdvanceSheet(taskId: exportView).environment(model), named: "advance", in: self)
+    let reject = Verdict(proposal: "00000000000000000000000008", choice: .reject)
+    model.reasons[reject] = "One reviewer keeps up for now."
+    try await Snapshot.record(
+      DecisionSheet(verdict: reject).environment(model), named: "reject", in: self)
+  }
+
+  /// A project's dashboard and its tasks by where they stand, under Board.
+  @MainActor func testAProject() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    model.boardPath = ["demo"]
+    try await Snapshot.record(ShellView().environment(model), named: "board-project", in: self)
+  }
+
+  /// A task at a gate that waits on the user, and a member proposal that waits on the user.
+  private let exportView = "00000000000000000000000010"
+  private let memberProposal = "00000000000000000000000004"
+
   @MainActor private func signedIn(token: String = "fixture-token") async throws -> AppModel {
     let (model, _) = fakeApp()
     await model.start()

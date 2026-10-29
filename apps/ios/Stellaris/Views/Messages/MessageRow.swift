@@ -1,9 +1,10 @@
 import BoardKit
 import SwiftUI
 
-/// One message as the web's `MessageItem` lays it out: its author's mark beside the name and when,
-/// over the message's text. At the accessibility sizes the mark sits beside the name, the time
-/// under it, and the text takes the row's whole width. The board's own posts are dimmed, as on the
+/// One message as the web's `MessageItem` lays it out: its author's mark beside the name, what a
+/// task's or a proposal's step did, and when, over the message's text. At the accessibility sizes
+/// the mark sits beside the name, the step and the time under it, and the text takes the row's
+/// whole width. The board's own posts are dimmed, as on the
 /// web, and the message a link named is marked as the web marks it, which VoiceOver reads as
 /// selected.
 struct MessageRow: View {
@@ -23,6 +24,7 @@ struct MessageRow: View {
               AuthorMark(author: message.author)
               name
             }
+            step
             time
           }
           .accessibilityElement(children: .combine)
@@ -36,6 +38,7 @@ struct MessageRow: View {
           VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
               name
+              step
               time
             }
             .accessibilityElement(children: .combine)
@@ -69,6 +72,16 @@ struct MessageRow: View {
       .fixedSize(horizontal: false, vertical: true)
   }
 
+  /// What a task's or a proposal's step did, as the web's `stepLabel` says it, with the stages
+  /// named from the task the thread is about.
+  @ViewBuilder private var step: some View {
+    if let step = message.step,
+      let label = stepLabel(step, task: message.thread.flatMap { model.store.task($0) })
+    {
+      StepChip(text: label.text, tone: label.tone)
+    }
+  }
+
   /// When, as the web says it, wrapping rather than cut where it doesn't fit.
   private var time: some View {
     TimelineView(.everyMinute) { context in
@@ -77,6 +90,32 @@ struct MessageRow: View {
         .foregroundStyle(MessageColor.tertiary)
         .fixedSize(horizontal: false, vertical: true)
     }
+  }
+}
+
+/// A step's chip, coloured as the web's `stepLabel` tones it, cut where the byline runs out of room.
+struct StepChip: View {
+  let text: String
+  let tone: StepTone
+
+  var body: some View {
+    let colours: (text: Color, ground: Color) =
+      switch tone {
+      case .finished: PhaseChip.tone(.working)
+      case .returned: PhaseChip.tone(.returned)
+      case .abandoned: PhaseChip.tone(.abandoned)
+      case .landed: PhaseChip.tone(.landing)
+      case .failed: (TaskColor.failed, TaskColor.failedGround.opacity(0.15))
+      }
+    Text(text)
+      .font(MessageType.chip())
+      .foregroundStyle(colours.text)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 1)
+      .background(colours.ground, in: RoundedRectangle(cornerRadius: 6))
+      .layoutPriority(-1)
   }
 }
 

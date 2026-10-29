@@ -2,10 +2,11 @@ import BoardKit
 import SwiftUI
 
 /// A channel's or a thread's messages, newest at the foot, with its draft below, on the web's
-/// island gray; a channel's also holds each thread opened on it, where it was opened. The view
-/// opens where the user left it: at the message its scroll was anchored at, or at the newest, or,
-/// once, centred at the message a link named, which it marks. A link to a task, a proposal, a
-/// thread, or a message opens it here, and any other in Safari.
+/// island gray; a channel's also holds each thread opened on it, where it was opened, and a task's
+/// or a proposal's thread has what it is about in a strip above. The view opens where the user
+/// left it: at the message its scroll was anchored at, or at the newest, or, once, centred at the
+/// message a link named, which it marks. A link to a task, a proposal, a thread, or a message
+/// opens it here, and any other in Safari.
 struct ConversationView: View {
   @Environment(AppModel.self) private var model
   let feed: ConversationFeed
@@ -18,6 +19,9 @@ struct ConversationView: View {
     // The draft is a row below the messages, not laid over them, so the foot of the messages'
     // view is the top of the draft and the newest message stays in sight above it.
     VStack(spacing: 0) {
+      if let subject = model.subject(of: feed.conversation) {
+        SubjectStrip(subject: subject)
+      }
       ScrollViewReader { proxy in
         // One scroll view from the first frame, empty while the messages load: anchored at the
         // bottom, it keeps the foot in view as they come in.
@@ -53,6 +57,12 @@ struct ConversationView: View {
           if feed.state != .loaded || feed.stale {
             await feed.load(using: model)
           }
+          // A task the lists leave out, as an archived project's, is read alone for its strip.
+          if let subject = feed.thread?.subject, subject.kind == .known(.task),
+            model.store.task(subject.id) == nil
+          {
+            await model.store.lookUpTask(subject.id, using: model)
+          }
           if await reachMark(with: proxy) {
             return
           }
@@ -73,15 +83,7 @@ struct ConversationView: View {
       foot
     }
     .background(MessageColor.island)
-    .environment(
-      \.openURL,
-      OpenURLAction { url in
-        switch model.follow(url) {
-        case .opened, .nowhere: .handled
-        case .safari(let address): .systemAction(address)
-        }
-      }
-    )
+    .modifier(FollowsBoardLinks())
     .onChange(of: anchor) { _, id in
       if let id {
         model.memory?.setAnchor(id, for: feed.conversation)
@@ -196,6 +198,29 @@ struct ConversationView: View {
         }
       }
     }
+  }
+}
+
+/// Follows a link in the board's text as `AppModel.follow` says: what the board names opens in Chat,
+/// after `opened`, an address on the web in Safari, and anything else nowhere.
+struct FollowsBoardLinks: ViewModifier {
+  @Environment(AppModel.self) private var model
+  var opened: () -> Void = {}
+
+  func body(content: Content) -> some View {
+    content.environment(
+      \.openURL,
+      OpenURLAction { url in
+        switch model.follow(url) {
+        case .opened:
+          opened()
+          return .handled
+        case .nowhere:
+          return .handled
+        case .safari(let address):
+          return .systemAction(address)
+        }
+      })
   }
 }
 

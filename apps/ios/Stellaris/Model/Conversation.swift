@@ -1,3 +1,5 @@
+import BoardKit
+
 /// What Chat shows: a channel by its ref (`general`, `demo/general`), or a thread by its id, where
 /// a task's or a proposal's thread has its subject's id.
 enum Conversation: Hashable, Codable, Sendable {
@@ -47,6 +49,32 @@ struct NewThreadDraft: Equatable, Sendable {
     }
     return String(kept)
   }
+}
+
+/// What a thread is about: the task or the proposal whose id it takes.
+enum Subject: Equatable, Sendable {
+  case task(BoardTask)
+  case proposal(Proposal)
+}
+
+/// A decision on a proposal being written: which proposal, and which way.
+struct Verdict: Hashable, Sendable {
+  enum Choice: CaseIterable, Sendable {
+    case approve, reject
+  }
+
+  let proposal: String
+  let choice: Choice
+}
+
+/// Why the app didn't send a task's advance or a proposal's decision.
+enum SubjectRefusal: Error, Equatable {
+  /// The stage, or the proposal, doesn't wait on the user.
+  case notYours
+  /// A rejection needs its reason, as the verb does.
+  case noReason
+  /// The task's advance, or the proposal's decision, is on its way already.
+  case underWay
 }
 
 /// The app's three tabs.

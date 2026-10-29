@@ -43,6 +43,16 @@ enum Loading: Equatable, Sendable {
   private(set) var messageRefs: [MessageRef] = [] {
     didSet { index() }
   }
+  /// Tasks read alone, as a thread whose subject the lists leave out, an archived project's.
+  private(set) var lookedUpTasks: [String: BoardTask] = [:]
+  /// Each project's dashboard as last read, and how its read went.
+  private(set) var dashboards: [String: Dashboard] = [:]
+  private(set) var dashboardStates: [String: Loading] = [:]
+  /// How many times each lone task and each dashboard has been read, from the first read on, so an
+  /// event reads again what is on its first read or failed it too, and an answer a later read
+  /// overtook changes nothing.
+  @ObservationIgnored private(set) var taskReads: [String: Int] = [:]
+  @ObservationIgnored private(set) var dashboardReads: [String: Int] = [:]
   /// How the user's own posts are named: the GitHub account signed in, or else "you".
   var userName = "you" {
     didSet { index() }
@@ -82,6 +92,73 @@ enum Loading: Equatable, Sendable {
       switch TaskPhase(of: task) {
       case .done, .abandoned: return false
       case .returned, .waiting, .working, .landing, .unknown: return true
+      }
+    }
+  }
+
+  /// The task by its id, as the lists or a read of it alone last gave it.
+  func task(_ id: String) -> BoardTask? {
+    tasks.first { $0.id == id } ?? lookedUpTasks[id]
+  }
+
+  func proposal(_ id: String) -> Proposal? {
+    proposals.first { $0.id == id }
+  }
+
+  /// A project's tasks, in play and ended, as the lists last gave them.
+  func tasks(of project: String) -> [BoardTask] {
+    tasks.filter { $0.project == project }
+  }
+
+  /// Shows `task` as the board just answered it, ahead of the next read of the lists.
+  func replace(_ task: BoardTask) {
+    if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+      tasks[index] = task
+    } else {
+      lookedUpTasks[task.id] = task
+    }
+  }
+
+  /// Reads the task alone, for a thread whose subject the lists leave out; a read that fails, that
+  /// a later read overtook, or that comes back once the app has signed out or in again, changes
+  /// nothing.
+  func lookUpTask(_ id: String, using model: AppModel) async {
+    let signIn = model.generation
+    let read = (taskReads[id] ?? 0) + 1
+    taskReads[id] = read
+    guard let task = try? await model.send(BoardAPI.task(id)), model.generation == signIn,
+      taskReads[id] == read
+    else {
+      return
+    }
+    if tasks.contains(where: { $0.id == id }) {
+      replace(task)
+    } else {
+      lookedUpTasks[id] = task
+    }
+  }
+
+  /// Reads a project's dashboard, keeping the last one read through a read that fails; an answer a
+  /// later read overtook changes nothing.
+  func loadDashboard(_ project: String, using model: AppModel) async {
+    let signIn = model.generation
+    let read = (dashboardReads[project] ?? 0) + 1
+    dashboardReads[project] = read
+    if dashboards[project] == nil {
+      dashboardStates[project] = .loading
+    }
+    do {
+      let dashboard = try await model.send(BoardAPI.dashboard(project: project))
+      guard model.generation == signIn, dashboardReads[project] == read else {
+        return
+      }
+      dashboards[project] = dashboard
+      dashboardStates[project] = .loaded
+    } catch is CancellationError {
+      return
+    } catch {
+      if model.generation == signIn, dashboardReads[project] == read, dashboards[project] == nil {
+        dashboardStates[project] = Loading(error)
       }
     }
   }
@@ -145,7 +222,8 @@ enum Loading: Equatable, Sendable {
       index[task.id] = EntityTitle(kind: .task, title: task.title)
     }
     for proposal in proposals {
-      index[proposal.id] = EntityTitle(kind: .proposal, title: proposal.title)
+      index[proposal.id] = EntityTitle(
+        kind: .proposal, title: describeCharter(proposal.kind, proposal.charter))
     }
     entities = index
   }
@@ -316,15 +394,18 @@ enum Loading: Equatable, Sendable {
     threads = []
     messageRefs = []
     asked = []
+    lookedUpTasks = [:]
+    dashboards = [:]
+    dashboardStates = [:]
+    taskReads = [:]
+    dashboardReads = [:]
   }
 }
 
 extension Proposal {
-  /// What a proposal is called: its kind, and the name its charter gives, as "Member · eng-2".
-  var title: String {
-    let name = charter["name"]?.string ?? charter["role"]?.string
-    return [kind.rawValue.capitalized, name].compactMap { $0 }.joined(separator: " · ")
-  }
+  /// What a proposal is called, as the web's `proposalTitle` says it: "Member eng-2 as engineer on
+  /// claude for demo".
+  var title: String { proposalTitle(self) }
 }
 
 /// A conversation's messages as last loaded, kept by conversation so a view built again shows them

@@ -47,6 +47,7 @@ final class ConversationUITests: ShellTestCase {
     first.tap()
     first.typeText("Docs first.")
     keepScreen("new-thread")
+    expectInTheSideColumn(app, app.buttons["open-thread"].firstMatch)
     pick(app, "open-thread")
 
     expectConversation(app, "Release checklist")

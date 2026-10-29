@@ -73,6 +73,13 @@ import Testing
       try check(fixture, BoardAPI.thread(detail.thread.id))
       let step = try #require(detail.messages.first?.step)
       #expect(step == .task(TaskStep(action: .known(.advanced), stage: "s1", to: "s2")))
+    case "thread-decided":
+      let detail = try fixture.decode(ThreadDetail.self)
+      try check(fixture, BoardAPI.thread(detail.thread.id))
+      #expect(detail.thread.subject?.kind == .known(.proposal))
+      #expect(detail.thread.state == .known(.closed))
+      let step = try #require(detail.messages.last?.step)
+      #expect(step == .proposal(ProposalStep(action: .known(.approved))))
     case "requests":
       let requests = try check(fixture, BoardAPI.requests())
       #expect(requests.map { $0.thread == nil } == [true, false])
@@ -235,7 +242,8 @@ import Testing
     "auth-config", "app-sign-in", "app-landing", "app-landing-refused", "app-token",
     "error-app-token", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
     "channels", "channel", "channel-notice", "threads",
-    "thread", "requests", "tasks", "task", "proposals", "proposal", "dashboard", "post-message",
+    "thread", "thread-decided", "requests", "tasks", "task", "proposals", "proposal", "dashboard",
+    "post-message",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
     "messages", "scheduler", "task-file", "turn-stream",

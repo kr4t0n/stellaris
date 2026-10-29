@@ -398,6 +398,8 @@ describe("the answers the iOS client reads", () => {
       proposal_id: proposals.find((each) => each.kind === "reallocation")?.id,
       reason: "One reviewer keeps up for now.",
     });
+    // A decided proposal's thread: its decision's post carries the step, and the decision closed it.
+    await call("thread-decided", "GET", `/api/threads/${channel?.id}`);
     await call("sign-out", "DELETE", "/api/sign-in");
     // The same two under a GitHub sign-in, the app's own way in, which names the account.
     const signedIn = await board.signIn("fixture-login", 60 * 60 * 1000);
@@ -515,7 +517,7 @@ describe("the answers the iOS client reads", () => {
     await call("messages", "GET", `/api/messages?ids=${named},01HZZZZZZZZZZZZZZZZZZZZZZZ`);
 
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(38);
+    expect(captures.size).toBe(39);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

@@ -69,6 +69,31 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// Closes a sheet by dragging it down to the window's foot from `start`, a point relative to its
+  /// bar: by default on the bar, right of the status bar's frame at the top-leading corner, which
+  /// takes touches there.
+  @MainActor func dragAway(
+    _ app: XCUIApplication, _ bar: XCUIElement, from start: CGVector = CGVector(dx: 0.8, dy: 0.5)
+  ) {
+    XCTAssertTrue(bar.waitForExistence(timeout: 20))
+    bar.coordinate(withNormalizedOffset: start)
+      .press(
+        forDuration: 0.1,
+        thenDragTo: app.windows.firstMatch.coordinate(
+          withNormalizedOffset: CGVector(dx: start.dx, dy: 0.98)))
+  }
+
+  /// Checks that a sheet's `button` stands in the side column at the window's trailing edge, where
+  /// the outer display puts a bar's symbols, and not in a bar across the top, which ends about 88
+  /// points short of the edge, where that column begins.
+  @MainActor func expectInTheSideColumn(_ app: XCUIApplication, _ button: XCUIElement) {
+    XCTAssertTrue(button.waitForExistence(timeout: 20))
+    let edge = app.windows.firstMatch.frame.maxX
+    XCTAssertGreaterThan(
+      button.frame.midX, edge - 70,
+      "\(button.label) stands \(Int(edge - button.frame.maxX)) pt short of the window's edge")
+  }
+
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
   /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {
@@ -163,7 +188,7 @@ final class ShellUITests: ShellTestCase {
     expectConversation(app, "Add the export view")
     tab(app, "Needs you")
     pick(app, "proposal-00000000000000000000000004")
-    expectConversation(app, "Member proposal")
+    expectConversation(app, "Member eng-2 as engineer on claude for demo")
     tab(app, "Board")
     pick(app, "channel-governance")
     expectConversation(app, "#governance")
@@ -173,7 +198,7 @@ final class ShellUITests: ShellTestCase {
       "#governance doesn't show the proposals' threads")
 
     pick(app, "back")
-    expectConversation(app, "Member proposal")
+    expectConversation(app, "Member eng-2 as engineer on claude for demo")
     pick(app, "back")
     expectConversation(app, "Add the export view")
     pick(app, "back")
@@ -319,7 +344,11 @@ final class ScreenUITests: ShellTestCase {
     pick(app, "settings")
     XCTAssertTrue(app.staticTexts["settings-board"].waitForExistence(timeout: 20))
     keepScreen("settings")
-    app.buttons["Done"].firstMatch.tap()
+    XCTAssertFalse(app.buttons["Done"].exists, "Settings has a Done")
+    dragAway(app, app.navigationBars["Settings"].firstMatch)
+    XCTAssertTrue(
+      app.staticTexts["settings-board"].waitForNonExistence(timeout: 20),
+      "a drag down leaves Settings open")
     pick(app, "task-00000000000000000000000010")
     expectConversation(app, "Add the export view")
     keepScreen("thread")

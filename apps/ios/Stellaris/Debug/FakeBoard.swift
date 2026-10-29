@@ -10,9 +10,11 @@
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
-  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads,
-  /// which its reads then show to the token that wrote them alone, so tests signed in with tokens
-  /// of their own see only their own writes. Any token signs in, except
+  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads, the
+  /// user's advance of a task's stage, the user's approval or rejection of a proposal, and a new
+  /// dashboard for the demo project, which its reads then show to the token that wrote them alone,
+  /// so tests signed in with tokens of
+  /// their own see only their own writes. Any token signs in, except
   /// `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
   /// list of the channels after the first fails, as when the network goes once the board loaded,
@@ -178,6 +180,15 @@
       if method == "POST", path == "/api/verbs/post_message" || path == "/api/verbs/open_thread" {
         return write(path, request: request, token: token)
       }
+      if method == "POST", path == "/api/verbs/advance_task" {
+        return advance(request: request, token: token)
+      }
+      if method == "POST", path == "/api/verbs/approve" || path == "/api/verbs/reject" {
+        return decide(path, request: request, token: token)
+      }
+      if method == "POST", path == "/api/verbs/update_dashboard" {
+        return updateDashboard(request: request, token: token)
+      }
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
@@ -191,8 +202,13 @@
         let captured = body("channel") as? [Any] ?? []
         return (200, json(captured + posted(in: "demo/general", by: token)))
       case ("GET", "/api/requests"): return fixture("requests")
-      case ("GET", "/api/proposals"): return fixture("proposals")
-      case ("GET", "/api/projects/demo/tasks"): return fixture("tasks")
+      case ("GET", "/api/proposals"): return (200, json(proposals(for: token)))
+      case ("GET", "/api/projects/demo/tasks"): return (200, json(tasks(for: token)))
+      case ("GET", "/api/projects/demo/dashboard"):
+        guard let written = written.withLock({ $0[token]?.dashboard }) else {
+          return fixture("dashboard")
+        }
+        return (200, written)
       case ("GET", "/api/threads"): return (200, json(threads + opened(by: token)))
       case ("GET", "/api/messages"): return (200, json(lookUp(request)))
       case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
@@ -202,6 +218,19 @@
         return (200, json(posted(in: ref, by: token)))
       case ("GET", _) where path.hasPrefix("/api/threads/"):
         return thread(String(path.dropFirst("/api/threads/".count)), token: token)
+      case ("GET", _) where path.hasPrefix("/api/tasks/"):
+        let id = String(path.dropFirst("/api/tasks/".count))
+        guard let task = tasks(for: token).first(where: { $0["id"] as? String == id }) else {
+          return fixture("error-not-found")
+        }
+        return (200, json(task))
+      case ("GET", _) where path.hasPrefix("/api/proposals/"):
+        let id = String(path.dropFirst("/api/proposals/".count))
+        guard let proposal = proposals(for: token).first(where: { $0["id"] as? String == id })
+        else {
+          return fixture("error-not-found")
+        }
+        return (200, json(proposal))
       default: return fixture("error-not-found")
       }
     }
@@ -234,6 +263,8 @@
       let thread: String?
       let ts: String
       let body: String
+      /// What a verb recorded on the post, as JSON.
+      var step: Data? = nil
     }
 
     private struct Opened: Sendable {
@@ -246,6 +277,11 @@
     private struct Written: Sendable {
       var posts: [Post] = []
       var threads: [Opened] = []
+      /// Tasks the token advanced and proposals it decided, as JSON, by id, and the demo
+      /// project's dashboard as the token last wrote it.
+      var tasks: [String: Data] = [:]
+      var proposals: [String: Data] = [:]
+      var dashboard: Data?
     }
 
     /// Takes a post or a new thread, as the user, and answers as the board does.
@@ -276,6 +312,161 @@
           channel: channel, thread: thread, ts: now, body: input["body"] as? String ?? "")
         mine.posts.append(post)
         return (200, json(record(post)))
+      }
+    }
+
+    // MARK: Tasks and proposals
+
+    /// The captured tasks, as `token` advanced them.
+    private static func tasks(for token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token]?.tasks ?? [:] }
+      return (body("tasks") as? [[String: Any]] ?? []).map { task in
+        (task["id"] as? String).flatMap { mine[$0] }.flatMap(object) ?? task
+      }
+    }
+
+    /// The captured proposals, as `token` decided them.
+    private static func proposals(for token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token]?.proposals ?? [:] }
+      return (body("proposals") as? [[String: Any]] ?? []).map { proposal in
+        (proposal["id"] as? String).flatMap { mine[$0] }.flatMap(object) ?? proposal
+      }
+    }
+
+    private static func object(_ data: Data) -> [String: Any]? {
+      (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// The board's refusal, as it words the state that refused it.
+    private static func refusal(_ message: String) -> (Int, Data) {
+      (409, json(["error": "INVALID_STATE", "message": message]))
+    }
+
+    /// Finishes the task's current stage as the user, as the board does: the stage done by the
+    /// user, the task at the next stage, open, or done after its last; the note posted in its
+    /// thread with the step.
+    private static func advance(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      let id = input["task_id"] as? String ?? ""
+      guard var task = tasks(for: token).first(where: { $0["id"] as? String == id }) else {
+        return fixture("error-not-found")
+      }
+      guard ["open", "claimed"].contains(task["status"] as? String ?? ""),
+        task["completing"] as? Bool != true
+      else {
+        return refusal("task \(id) is \(task["status"] as? String ?? "") and not in play")
+      }
+      var stages = task["stages"] as? [[String: Any]] ?? []
+      guard let index = stages.firstIndex(where: { $0["id"] as? String == task["stage"] as? String })
+      else {
+        return refusal("task \(id) has no stage \(task["stage"] as? String ?? "")")
+      }
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      let next = stages.indices.contains(index + 1) ? stages[index + 1] : nil
+      if next == nil, task["onDone"] as? String == "ghpr", task["pullRequest"] == nil {
+        return refusal("task \(id) lands through its pull request")
+      }
+      var holders = stages[index]["holders"] as? [String] ?? []
+      if !holders.contains("user") {
+        holders.append("user")
+      }
+      stages[index]["holders"] = holders
+      stages[index]["completedBy"] = "user"
+      stages[index]["completedAt"] = now
+      let stageId = stages[index]["id"] as? String ?? ""
+      task["stages"] = stages
+      task["claimedBy"] = nil
+      task["leaseExpiresAt"] = nil
+      task["updatedAt"] = now
+      if let next, let nextId = next["id"] as? String {
+        task["status"] = "open"
+        task["stage"] = nextId
+        task["stageSince"] = now
+      } else {
+        task["status"] = "done"
+      }
+      let step: [String: Any] = [
+        "action": "advanced", "stage": stageId, "to": next?["id"] as? String ?? NSNull(),
+      ]
+      let note = input["note"] as? String
+      written.withLock { written in
+        var mine = written[token] ?? Written()
+        mine.tasks[id] = json(task)
+        if let note {
+          mine.posts.append(
+            Post(
+              id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+              channel: task["channel"] as? String == "general"
+                ? "\(task["project"] as? String ?? "demo")/general"
+                : task["channel"] as? String ?? "general",
+              thread: id, ts: now, body: note, step: json(step)))
+        }
+        written[token] = mine
+      }
+      return (200, json(task))
+    }
+
+    /// Approves or rejects the proposal as the user, as the board does: the proposal decided, with
+    /// the reason; the decision posted in its thread with the step, which closes the thread.
+    private static func decide(_ path: String, request: URLRequest, token: String) -> (Int, Data)
+    {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      let id = input["proposal_id"] as? String ?? ""
+      guard var proposal = proposals(for: token).first(where: { $0["id"] as? String == id }) else {
+        return fixture("error-not-found")
+      }
+      guard proposal["status"] as? String == "proposed" else {
+        return refusal("proposal \(id) is already \(proposal["status"] as? String ?? "")")
+      }
+      let approved = path.hasSuffix("/approve")
+      let reason = input["reason"] as? String
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      proposal["status"] = approved ? "provisioned" : "rejected"
+      proposal["decidedBy"] = "user"
+      proposal["decidedAt"] = now
+      proposal["reason"] = reason
+      let line =
+        (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
+        .map { describeCharter($0.kind, $0.charter) } ?? id
+      let post =
+        "\(approved ? "Approved" : "Rejected"): \(line).\(reason.map { " Reason: \($0)." } ?? "")"
+      let outcome = approved ? "approved" : "rejected"
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        mine.proposals[id] = json(proposal)
+        mine.posts.append(
+          Post(
+            id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+            channel: "governance", thread: id, ts: now, body: post,
+            step: json(["action": outcome])))
+        let decision: [String: Any] = [
+          "id": String(format: "00000000000000000000DEC%03d", mine.proposals.count),
+          "proposalId": id, "decidedBy": "user", "outcome": outcome, "ts": now,
+        ]
+        var answer = decision
+        answer["reason"] = reason
+        return (200, json(answer))
+      }
+    }
+
+    /// Writes the demo project's dashboard, as a citizen does with `update_dashboard`, so a test can
+    /// change it while the app reads it; the app itself writes no dashboard.
+    private static func updateDashboard(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        let before = mine.dashboard.flatMap(object) ?? body("dashboard") as? [String: Any] ?? [:]
+        let dashboard: [String: Any] = [
+          "project": input["project"] as? String ?? "demo",
+          "revision": (before["revision"] as? Int ?? 0) + 1,
+          "updatedBy": "user",
+          "updatedAt": Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now),
+          "body": input["body"] as? String ?? "",
+        ]
+        mine.dashboard = json(dashboard)
+        return (200, json(dashboard))
       }
     }
 
@@ -336,6 +527,7 @@
         "mentions": [String](), "body": post.body,
       ]
       message["thread"] = post.thread
+      message["step"] = post.step.flatMap(object)
       return message
     }
 
@@ -364,6 +556,13 @@
         return (status, data)
       }
       detail["messages"] = (detail["messages"] as? [Any] ?? []) + posts
+      // A decision closes its proposal's thread.
+      if let decided = mine.proposals[id].flatMap(object), var thread = detail["thread"] as? [String: Any] {
+        thread["state"] = "closed"
+        thread["closedBy"] = decided["decidedBy"]
+        thread["closedAt"] = decided["decidedAt"]
+        detail["thread"] = thread
+      }
       return (200, json(detail))
     }
 
@@ -384,11 +583,25 @@
       }
       var title = "A thread"
       var channel = "general"
+      var subject: [String: Any]?
       if let proposals = body("proposals") as? [[String: Any]],
         let proposal = proposals.first(where: { $0["id"] as? String == id })
       {
-        title = "\((proposal["kind"] as? String ?? "").capitalized) proposal"
+        // As the board titles a proposal's thread: its kind, then its charter in one line.
+        let line =
+          (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
+          .map { describeCharter($0.kind, $0.charter) } ?? ""
+        title = "\(proposal["kind"] as? String ?? "") proposal: \(line)"
         channel = "governance"
+        subject = ["kind": "proposal", "id": id]
+      }
+      // As the board titles a task's thread: the task's title, on its project's channel.
+      if let tasks = body("tasks") as? [[String: Any]],
+        let task = tasks.first(where: { $0["id"] as? String == id })
+      {
+        title = task["title"] as? String ?? title
+        channel = "\(task["project"] as? String ?? "demo")/\(task["channel"] as? String ?? "general")"
+        subject = ["kind": "task", "id": id]
       }
       if let requests = body("requests") as? [[String: Any]],
         let asked = requests.compactMap({ $0["thread"] as? [String: Any] })
@@ -397,10 +610,11 @@
         title = asked["title"] as? String ?? title
         channel = asked["channel"] as? String ?? channel
       }
-      let thread: [String: Any] = [
+      var thread: [String: Any] = [
         "id": id, "channel": channel, "title": title, "state": "open",
         "openedBy": "concierge-1", "openedAt": time(0), "body": "",
       ]
+      thread["subject"] = subject
       let message = message(
         id: "\(id)-1", author: "concierge-1", channel: channel, thread: id, minute: 0,
         body: "Opened for the decision.")

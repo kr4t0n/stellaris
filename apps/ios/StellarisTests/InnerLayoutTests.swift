@@ -39,6 +39,18 @@ import Testing
     #expect(!split.chatCoversSky)
   }
 
+  /// The plan or the charter opens beside the thread where the chat's part leaves each a column of
+  /// 320 points: with the sky above, in portrait, and not with the sky beside, in landscape, where
+  /// a third column would leave the thread too narrow, nor at a compact width.
+  @Test func opensThePlanBesideTheThreadOnlyWhereItFits() {
+    let book = parts(landscape, divisions: [upright])
+    let tabletop = parts(portrait, divisions: [across])
+    #expect(!ChatView.inspectorFits(regular: true, width: book.chat.width))
+    #expect(ChatView.inspectorFits(regular: true, width: tabletop.chat.width))
+    #expect(!ChatView.inspectorFits(regular: false, width: 951))
+    #expect(!ChatView.inspectorFits(regular: true, width: 639))
+  }
+
   @Test func putsTheSkyAboveTheChatAtAFoldThatRunsAcross() {
     let split = parts(portrait, divisions: [across])
     #expect(split.arrangement == .stacked)

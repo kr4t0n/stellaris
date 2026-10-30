@@ -65,6 +65,24 @@ import Testing
     #expect(String(decoding: body, as: UTF8.self) == #"{"code":"c","code_verifier":"v"}"#)
   }
 
+  /// iOS's refusal of a callback host the app isn't associated with, as developers quote it: the
+  /// session's domain, code 1 (`canceledLogin`), and the reason as a failure reason or as the
+  /// description.
+  @Test func tellsIOSsRefusalFromAPersonsCancel() {
+    let domain = "com.apple.AuthenticationServices.WebAuthenticationSession"
+    let reason =
+      "Application with identifier com.example.stellaris is not associated with domain "
+      + "board.example.com. Using HTTPS callbacks requires Associated Domains using the "
+      + "`webcredentials` service type for board.example.com."
+    let refusal = { (userInfo: [String: Any]) in
+      AppSignIn.refusal(ofCanceled: NSError(domain: domain, code: 1, userInfo: userInfo))
+    }
+    #expect(refusal([NSLocalizedFailureReasonErrorKey: reason]) == reason)
+    #expect(refusal([NSLocalizedDescriptionKey: reason]) == reason)
+    #expect(refusal([:]) == nil)
+    #expect(refusal([NSLocalizedFailureReasonErrorKey: " \n"]) == nil)
+  }
+
   @Test func readsABoardThatDoesNotSayWhetherItTakesTheApp() throws {
     let config = try JSONDecoder().decode(AuthConfig.self, from: Data(#"{"github":true}"#.utf8))
     #expect(config.github && !config.appLanding)

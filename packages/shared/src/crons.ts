@@ -92,6 +92,11 @@ export const CronRunSchema = z.object({
   turnId: UlidSchema,
   at: IsoDateTimeSchema,
   outcome: z.enum(["completed", "failed", "stopped"]),
+  /**
+   * For a failed one, the first turn of the cron's citizen in its conversation that was shown the
+   * failure and completed, and when it ended.
+   */
+  caughtUp: z.object({ turnId: UlidSchema, at: IsoDateTimeSchema }).optional(),
 });
 export type CronRun = z.infer<typeof CronRunSchema>;
 
@@ -183,17 +188,28 @@ export function firesInTask(
 }
 
 /**
+ * The run of a cron's latest fire when its turn failed and no turn has caught it up since, else
+ * null. A later fire's run replaces it, and the citizen's first completed turn in the cron's
+ * conversation that was shown the failure catches it up (`caughtUp`).
+ */
+export function cronFailure(cron: CronFrontmatter): CronRun | null {
+  return cron.lastRun?.outcome === "failed" && cron.lastRun.caughtUp === undefined
+    ? cron.lastRun
+    : null;
+}
+
+/**
  * When a cron stopped being pending, whichever came first: paused, ended, or the turn of its latest
- * fire failed; null while it is. A failed fire stops counting once a later fire's turn completes,
- * and a turn the user stopped is no failure. The heartbeat and the lease read pending here alone,
- * so a failed check wakes its citizen and lets the lease run out as if the cron were paused.
+ * fire failed (`cronFailure`); null while it is. A failed fire stops counting once a later fire's
+ * turn completes or a turn of the citizen's that was shown the failure completes in the cron's
+ * conversation, and a turn the user stopped is no failure. The heartbeat and the lease read
+ * pending here alone, so a failed check wakes its citizen and lets the lease run out as if the
+ * cron were paused, until its citizen has seen the failure through.
  */
 export function cronStoppedAt(cron: CronFrontmatter): string | null {
-  const times = [
-    cron.paused?.at,
-    cron.ended?.at,
-    cron.lastRun?.outcome === "failed" ? cron.lastRun.at : undefined,
-  ].filter((at): at is string => at !== undefined);
+  const times = [cron.paused?.at, cron.ended?.at, cronFailure(cron)?.at].filter(
+    (at): at is string => at !== undefined,
+  );
   return times.reduce<string | null>(
     (first, at) => (first === null || Date.parse(at) < Date.parse(first) ? at : first),
     null,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalTimeZone,
+  cronFailure,
   CronFrontmatterSchema,
   cronStoppedAt,
   CronScheduleSchema,
@@ -102,6 +103,25 @@ describe("crons", () => {
     expect(cronStoppedAt(cron({ ...paused, ...run("failed", "2026-10-10T12:02:00.000Z") }))).toBe(
       "2026-10-10T12:00:00.000Z",
     );
+  });
+
+  it("counts a failed fire no more once a turn has caught it up, and a pause or an end as before", () => {
+    const failed = run("failed", "2026-10-10T11:02:00.000Z");
+    const caughtUp = {
+      lastRun: {
+        ...failed.lastRun,
+        caughtUp: { turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAX", at: "2026-10-10T11:20:00.000Z" },
+      },
+    };
+    expect(cronFailure(cron(failed))).toEqual(failed.lastRun);
+    expect(cronFailure(cron(caughtUp))).toBeNull();
+    expect(cronStoppedAt(cron(caughtUp))).toBeNull();
+    expect(
+      cronStoppedAt(cron({ ...caughtUp, paused: { at: "2026-10-10T12:00:00.000Z", by: "eng-1" } })),
+    ).toBe("2026-10-10T12:00:00.000Z");
+    expect(cronFailure(cron(run("completed", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    expect(cronFailure(cron(run("stopped", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    expect(cronFailure(cron())).toBeNull();
   });
 
   it("takes time zones by their IANA names, as Intl canonicalizes them, and five fields only", () => {

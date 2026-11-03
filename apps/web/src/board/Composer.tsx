@@ -247,12 +247,17 @@ export function Composer({
     }
     setUploading((count) => count - 1);
   };
-  /** Takes an image's markdown, or its upload's line, out of the draft. */
+  /**
+   * Takes an image's markdown, or its upload's line, out of the draft, and puts the keyboard back
+   * in the box: the × it came from goes with its thumbnail, which would leave the focus on the page,
+   * whose shortcuts would take the next keys.
+   */
   const remove = (image: DraftImage): void => {
     const removed = removeDraftImage(text, box.current?.selectionStart ?? caret, image);
     pendingCaret.current = removed.caret;
     setText(removed.text);
     setCaret(removed.caret);
+    box.current?.focus();
   };
   const images = draftImages(text, [...previews.keys()]);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -316,7 +321,11 @@ export function Composer({
               )}
               <button
                 type="button"
-                aria-label={`Remove ${image.alt === "" ? "the image" : image.alt}`}
+                aria-label={
+                  image.id === null
+                    ? `Remove ${image.alt}, still uploading`
+                    : `Remove ${image.alt === "" ? "the image" : image.alt}`
+                }
                 title="Remove"
                 onClick={() => remove(image)}
                 className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/60 text-xs text-white hover:bg-black/80"

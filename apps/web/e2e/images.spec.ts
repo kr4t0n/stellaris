@@ -715,6 +715,9 @@ test("an image in the draft shows as a thumbnail above the box, from the file wh
   // While it uploads, the file's own bytes, dimmed, saying so.
   await expect(row.getByRole("listitem")).toHaveCount(1);
   await expect(row).toContainText("Uploading…");
+  await expect(
+    row.getByRole("button", { name: "Remove board.png, still uploading" }),
+  ).toBeVisible();
   await expect(row.locator("img")).toHaveAttribute("src", /^blob:/);
   await expect
     .poll(() => row.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth))
@@ -749,9 +752,25 @@ test("a thumbnail's × takes its image out of the draft, and an image typed away
   await row.getByRole("button", { name: "Remove a.png" }).click();
   await expect(box).toHaveValue("Before  after");
   await expect(row).toHaveCount(0);
+  // The × went with its thumbnail, so the keyboard is back in the box, where the image stood,
+  // rather than on the page, whose shortcuts would take the keys and Escape would close the view.
+  await expect(box).toBeFocused();
+  await page.keyboard.type("more");
+  await page.keyboard.press("Escape");
+  await expect(box).toHaveValue("Before more after");
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 
+  // The same from the keyboard alone.
   await deliver(box, "paste", [{ name: "b.png", type: "image/png", bytes: [...png(40, 40)] }]);
   await expect(row.getByRole("img", { name: "b.png" })).toBeVisible();
+  await row.getByRole("button", { name: "Remove b.png" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(box).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(box).toHaveValue("Before more! after");
+
+  await deliver(box, "paste", [{ name: "c.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(row.getByRole("img", { name: "c.png" })).toBeVisible();
   await box.fill("Words alone");
   await expect(row).toHaveCount(0);
 });

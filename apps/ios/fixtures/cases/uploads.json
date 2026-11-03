@@ -273,7 +273,7 @@
           "start": 0,
           "text": "![Uploading image.png…]()",
           "id": null,
-          "alt": ""
+          "alt": "image.png"
         },
         {
           "kind": "kept",
@@ -366,6 +366,27 @@
           "alt": "shot.png"
         }
       ]
+    },
+    {
+      "name": "two uploads of one name, told apart",
+      "text": "![Uploading image.png…]()\n![Uploading image.png (2)…]()",
+      "held": ["![Uploading image.png (2)…]()", "![Uploading image.png…]()"],
+      "images": [
+        {
+          "kind": "uploading",
+          "start": 0,
+          "text": "![Uploading image.png…]()",
+          "id": null,
+          "alt": "image.png"
+        },
+        {
+          "kind": "uploading",
+          "start": 26,
+          "text": "![Uploading image.png (2)…]()",
+          "id": null,
+          "alt": "image.png (2)"
+        }
+      ]
     }
   ],
   "removals": [
@@ -442,7 +463,7 @@
         "start": 2,
         "text": "![Uploading image.png…]()",
         "id": null,
-        "alt": ""
+        "alt": "image.png"
       },
       "result": {
         "text": "A  B",

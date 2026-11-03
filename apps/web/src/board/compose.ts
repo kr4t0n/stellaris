@@ -86,8 +86,9 @@ export function settleUpload(
 
 /**
  * An image a draft holds, where it stands: one the board kept, by its id and description, or one
- * still uploading, by the line an upload holds. `start` and `text` place it in the draft, in UTF-16
- * code units, as the string's own indices count.
+ * still uploading, by the line an upload holds, described by what that line names, such as
+ * `image.png (2)`, which tells two uploads of one name apart. `start` and `text` place it in the
+ * draft, in UTF-16 code units, as the string's own indices count.
  */
 export interface DraftImage {
   readonly kind: "kept" | "uploading";
@@ -96,6 +97,10 @@ export interface DraftImage {
   readonly id: string | null;
   readonly alt: string;
 }
+
+/** What comes before and after the words of a line holding an upload's place. */
+const UPLOADING_FROM = "![Uploading ";
+const UPLOADING_TO = "…]()";
 
 /** An uploaded image in markdown: its description, then `image:` and a ULID. */
 const KEPT_IMAGE = /!\[([^\]\n]*)\]\(image:([0-9A-HJKMNP-TV-Z]{26})\)/g;
@@ -118,7 +123,8 @@ export function draftImages(text: string, held: readonly string[]): DraftImage[]
   for (const line of held) {
     const start = text.indexOf(line);
     if (start !== -1) {
-      found.push({ kind: "uploading", start, text: line, id: null, alt: "" });
+      const alt = line.slice(UPLOADING_FROM.length, -UPLOADING_TO.length);
+      found.push({ kind: "uploading", start, text: line, id: null, alt });
     }
   }
   return found.toSorted((a, b) => a.start - b.start);

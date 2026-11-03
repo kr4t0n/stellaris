@@ -73,6 +73,10 @@ describe("board events", () => {
       ["models"],
       ["server-version"],
     ]);
+    // A pause changes the record alone, so no runner is asked for its models again.
+    for (const type of ["runner.paused", "runner.resumed"] as const) {
+      expect(staleKeys(event(type, { name: "merlin", cli: "claude" }, id))).toEqual([["runners"]]);
+    }
     expect(staleKeys(event("knowledge.written", { topic: "x", project: null }, id))).toEqual([
       ["knowledge", "society"],
     ]);

@@ -559,6 +559,10 @@ export const RunnerOsSchema = z.enum(["linux", "windows", "darwin"]);
 export const GitIdentityPartSchema = z.enum(["name", "email"]);
 export type GitIdentityPart = z.infer<typeof GitIdentityPartSchema>;
 
+/** When the user paused a runner, or one CLI on it, and who that was. */
+export const RunnerPauseSchema = z.object({ at: IsoDateTimeSchema, by: NameSchema });
+export type RunnerPause = z.infer<typeof RunnerPauseSchema>;
+
 export const RunnerSchema = z.object({
   name: NameSchema,
   os: RunnerOsSchema,
@@ -578,8 +582,40 @@ export const RunnerSchema = z.object({
    * read; absent until one has.
    */
   quotas: z.partialRecord(CliKindSchema, CliQuotaSchema).optional(),
+  /** The user's pause of the whole runner: no turn starts on it until the user resumes it. */
+  paused: RunnerPauseSchema.optional(),
+  /**
+   * The user's pauses of single CLIs on the runner, each apart from the runner's own: no turn of
+   * that CLI starts on it until the user resumes it.
+   */
+  pausedClis: z.partialRecord(CliKindSchema, RunnerPauseSchema).optional(),
 });
 export type Runner = z.infer<typeof RunnerSchema>;
+
+/**
+ * The user's pause that holds `cli`'s turns on a runner, the whole runner's first, or undefined
+ * when they may start there.
+ */
+export function runnerPause(runner: Runner, cli: CliKind): RunnerPause | undefined {
+  return runner.paused ?? runner.pausedClis?.[cli];
+}
+
+/**
+ * Whether a citizen's turns in a place would wait for the user's resume: the runner they would run
+ * on, the project's for a project's turns and the citizen's home runner for its society scope's,
+ * paused as a whole or for the citizen's CLI. Neither placed yet holds nothing.
+ */
+export function heldOn(
+  runners: readonly Runner[],
+  runner: Name | undefined,
+  cli: CliKind | null,
+): boolean {
+  if (runner === undefined || cli === null) {
+    return false;
+  }
+  const record = runners.find((each) => each.name === runner);
+  return record !== undefined && runnerPause(record, cli) !== undefined;
+}
 
 export const ProposalKindSchema = z.enum([
   "role",

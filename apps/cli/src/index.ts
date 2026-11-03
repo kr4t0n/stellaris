@@ -217,15 +217,38 @@ runner
         : runners
             .map(
               (each) =>
-                `${each.name}  ${each.status}  ${each.os}${
+                `${each.name}  ${each.status}${each.paused === undefined ? "" : "  paused"}  ${each.os}${
                   each.version === undefined ? "" : `  v${each.version}`
                 }  ${each.clis.join(",") || "no CLIs yet"}${
                   each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
-                }`,
+                }${Object.keys(each.pausedClis ?? {})
+                  .map((cli) => `  ${cli} paused`)
+                  .join("")}`,
             )
             .join("\n"),
     );
   });
+
+for (const [verb, paused] of [
+  ["pause", true],
+  ["resume", false],
+] as const) {
+  runner
+    .command(`${verb} <name> [cli]`)
+    .description(
+      paused
+        ? "Start no more turns on a runner, or with one of its CLIs, until resumed; turns in flight finish"
+        : "Let a paused runner, or a paused CLI on it, take turns again",
+    )
+    .action(async (name: string, cli: string | undefined) => {
+      const board = await open();
+      const updated = await board.setRunnerPaused(board.userActor(), name, {
+        paused,
+        ...(cli === undefined ? {} : { cli: CliKindSchema.parse(cli) }),
+      });
+      print(updated, () => `${cli === undefined ? name : `${cli} on ${name}`} ${verb}d`);
+    });
+}
 
 const agent = program.command("agent").description("Manage agents");
 

@@ -14,6 +14,7 @@ import {
   ProjectImportedSchema,
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
+  heldOn,
   SOCIETY_SCOPE,
   SweepResultSchema,
   TurnImageSchema,
@@ -507,11 +508,15 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
+    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed. It is
+    // still there and still has the CLI, so a project living on it and a citizen pinned to it wait.
+    const runners = await this.board.listRunners();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
       !seat.unconfirmed &&
       seat.hello.clis.includes(cli) &&
-      (seat.hello.slots === null || seat.inUse < seat.hello.slots);
+      (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
+      !heldOn(runners, seat.name, cli);
     let chosen: Seat | undefined;
     if (dispatch.project === SOCIETY_SCOPE) {
       chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);

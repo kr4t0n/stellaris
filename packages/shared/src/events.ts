@@ -48,6 +48,8 @@ export const BOARD_EVENT_TYPES = [
   "user.token_rotated",
   "runner.changed",
   "runner.quota",
+  "runner.paused",
+  "runner.resumed",
   "ops.signal",
   "paused.changed",
   "wake.requested",

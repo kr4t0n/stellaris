@@ -37,11 +37,15 @@ describe("asks", () => {
     ).toEqual([newer.id, ASK]);
   });
 
-  it("are titled by their first line, cut at a word", () => {
+  it("are titled by their first line, an image as its description, cut at a word", () => {
     expect(askTitle("  # Merge the phone projects\n\nBoth study phones.")).toBe(
       "Merge the phone projects",
     );
     expect(askTitle("   ")).toBe("Ask");
+    // An image pasted first reads as what it shows, not as its markdown.
+    expect(
+      askTitle("![image.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) why does this fail?\n\nMore."),
+    ).toBe("image.png why does this fail?");
     const long = askTitle(`${"word ".repeat(30)}end`);
     expect(long.length).toBeLessThanOrEqual(80);
     expect(long).toMatch(/word…$/);

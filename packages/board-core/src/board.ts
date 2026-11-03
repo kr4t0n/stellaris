@@ -29,6 +29,7 @@ import {
   githubRepository,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
+  imageDescription,
   ImageNameSchema,
   imageTypeOf,
   IsoDateTimeSchema,
@@ -2608,7 +2609,7 @@ export class Board {
         type,
         size: bytes.byteLength,
       });
-      const description = name.replaceAll(/[[\]\\\r\n]/g, "");
+      const description = imageDescription(name);
       return {
         id,
         type,

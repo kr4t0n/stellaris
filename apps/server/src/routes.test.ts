@@ -556,9 +556,9 @@ describe("board server routes", () => {
     }
     expect(await kept()).toBe(4);
     const named = UploadedImageSchema.parse(
-      await (await post(png, `?name=${encodeURIComponent("a [b]\\c\nd.png")}`)).json(),
+      await (await post(png, `?name=${encodeURIComponent("a [b]\\c\nd`e`.png")}`)).json(),
     );
-    expect(named.markdown).toBe(`![a bcd.png](image:${named.id})`);
+    expect(named.markdown).toBe(`![a bcde.png](image:${named.id})`);
     const unnamed = UploadedImageSchema.parse(await (await post(png)).json());
     expect(unnamed.markdown).toBe(`![](image:${unnamed.id})`);
     expect(await kept()).toBe(6);

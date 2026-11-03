@@ -69,6 +69,15 @@ export const ImagePathSchema = z
  */
 export const ImageNameSchema = z.string().max(1024);
 
+/**
+ * A file's name as an image's description in markdown: no brackets, backslashes, or line breaks,
+ * which would end the description, and no backticks, which would open a code span that a later one
+ * in the post closes, so the image never renders.
+ */
+export function imageDescription(name: string): string {
+  return name.replaceAll(/[[\]\\\r\n`]/g, "");
+}
+
 /** How an uploaded image is written in a post's markdown: `image:` and its id. */
 export const IMAGE_SCHEME = "image:";
 

@@ -627,3 +627,54 @@ test("images dropped on a composer or picked upload too, and one the board refus
     { name: "wide.png", size: png(400, 100).length },
   ]);
 });
+
+/**
+ * Pastes two images both named `image.png`, as a browser names every image it pastes, the first
+ * answered only once the second has settled; gives the box.
+ */
+async function pasteTwoAlike(page: Page, second: number[]): Promise<Locator> {
+  const first = png(640, 400);
+  const answered = Promise.withResolvers<void>();
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route) => {
+      if (route.request().postDataBuffer()?.length === first.length) {
+        await answered.promise;
+      }
+      await route.fallback();
+    },
+  );
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  await box.fill("Before: ");
+  await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: [...first] }]);
+  await expect(box).toHaveValue("Before: ![Uploading image.png…]()");
+  await box.pressSequentially(" After: ");
+  await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: second }]);
+  // The first is still on its way.
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  answered.resolve();
+  return box;
+}
+
+test("two images pasted under one name each land where they were pasted, whichever answers first", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const box = await pasteTwoAlike(page, [...png(20, 20)]);
+  // The second, answered first, took the board's first id; the first took the next.
+  await expect(box).toHaveValue(
+    `Before: ![image.png](image:${POSTED_IMAGES[1]}) After: ![image.png](image:${POSTED_IMAGES[0]})`,
+  );
+});
+
+test("an image the board refuses takes only its own line from another of the same name", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const box = await pasteTwoAlike(page, [...Buffer.from("not a picture")]);
+  await expect(box).toHaveValue(`Before: ![image.png](image:${POSTED_IMAGES[0]}) After: `);
+  await expect(page.getByRole("alert")).toHaveText(
+    "image.png is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+  );
+});

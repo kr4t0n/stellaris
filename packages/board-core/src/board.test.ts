@@ -3970,7 +3970,8 @@ describe("Board", () => {
       });
     }
 
-    const named = await board.postImage(USER, png, "the board [before].png");
+    // Brackets, backslashes, line breaks, and backticks would break the markdown, so they go.
+    const named = await board.postImage(USER, png, "the `board` [before].png");
     expect(named).toEqual({
       id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
       type: "png",

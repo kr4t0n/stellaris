@@ -9,6 +9,7 @@ import {
   mentionAt,
   settleUpload,
   uploadingImage,
+  uploadPlaceholder,
 } from "./compose.js";
 
 describe("composing", () => {
@@ -82,6 +83,15 @@ describe("composing", () => {
             result: Draft.nullable(),
           })
           .array(),
+        numbered: z
+          .object({
+            name: z.string(),
+            file: z.string(),
+            text: z.string(),
+            held: z.string().array(),
+            placeholder: z.string(),
+          })
+          .array(),
       })
       .parse(JSON.parse(uploadCases));
     expect(cases.settles.length).toBeGreaterThan(5);
@@ -98,6 +108,15 @@ describe("composing", () => {
       }).toEqual({
         name: each.name,
         result: each.result,
+      });
+    }
+    for (const each of cases.numbered) {
+      expect({
+        name: each.name,
+        placeholder: uploadPlaceholder(each.file, each.text, each.held),
+      }).toEqual({
+        name: each.name,
+        placeholder: each.placeholder,
       });
     }
     for (const each of cases.settles) {

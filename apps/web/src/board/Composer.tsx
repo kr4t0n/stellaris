@@ -13,7 +13,13 @@ import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
 import { useMembers, useSession } from "../lib/session.js";
 import { askTitle } from "./asks.js";
-import { completeMention, insertAt, mentionAt, settleUpload, uploadingImage } from "./compose.js";
+import {
+  completeMention,
+  insertAt,
+  mentionAt,
+  settleUpload,
+  uploadPlaceholder,
+} from "./compose.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -37,8 +43,9 @@ function filesDragged(event: DragEvent): boolean {
 /**
  * Posts as the user into a channel or a thread, in one row with Send beside the box. Enter sends
  * and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
- * or picked uploads to the board, holding its place in the text with a line that says so until the
- * markdown that shows it, described by its file's name, takes the line's place; Send waits for it.
+ * or picked uploads to the board, holding its place in the text with a line of its own that says so
+ * until the markdown that shows it, described by its file's name, takes that line's place; Send
+ * waits for it.
  */
 export function Composer({
   target,
@@ -73,6 +80,8 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  /** The lines of the uploads on their way, each its own, which only its upload fills. */
+  const held = useRef<string[]>([]);
   // Where the caret goes once a completed mention has rendered; set in the same frame, before
   // the next keystroke can land.
   const pendingCaret = useRef<number | null>(null);
@@ -158,7 +167,11 @@ export function Composer({
       return;
     }
     const element = box.current;
-    const placeholders = files.map((file) => uploadingImage(file.name));
+    const placeholders: string[] = [];
+    for (const file of files) {
+      placeholders.push(uploadPlaceholder(file.name, text, [...held.current, ...placeholders]));
+    }
+    held.current.push(...placeholders);
     const inserted = insertAt(
       text,
       element?.selectionStart ?? text.length,
@@ -171,7 +184,7 @@ export function Composer({
     setUploadFailure(null);
     files.forEach((file, index) => void upload(file, placeholders[index] ?? ""));
   };
-  const upload = async (file: File, held: string): Promise<void> => {
+  const upload = async (file: File, line: string): Promise<void> => {
     setUploading((count) => count + 1);
     let markdown = "";
     try {
@@ -195,7 +208,7 @@ export function Composer({
       const settled = settleUpload(
         current,
         element?.selectionStart ?? current.length,
-        held,
+        line,
         markdown,
       );
       if (settled === null) {
@@ -205,6 +218,7 @@ export function Composer({
       pendingCaret.current = settled.caret;
       return settled.text;
     });
+    held.current = held.current.filter((each) => each !== line);
     setUploading((count) => count - 1);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {

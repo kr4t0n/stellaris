@@ -14,6 +14,11 @@
       "name": "a name beyond ASCII",
       "file": "écran 👋.png",
       "placeholder": "![Uploading écran 👋.png…]()"
+    },
+    {
+      "name": "a backtick left out, which would open a code span",
+      "file": "x`y.png",
+      "placeholder": "![Uploading xy.png…]()"
     }
   ],
   "inserts": [
@@ -180,6 +185,61 @@
         "text": "👋 ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) x",
         "caret": 50
       }
+    },
+    {
+      "name": "a numbered line settles alone",
+      "text": "![Uploading image.png…]()\n![Uploading image.png (2)…]()",
+      "caret": 0,
+      "placeholder": "![Uploading image.png (2)…]()",
+      "markdown": "![image.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "![Uploading image.png…]()\n![image.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "caret": 0
+      }
+    }
+  ],
+  "numbered": [
+    {
+      "name": "nothing holds it yet",
+      "file": "image.png",
+      "text": "See: ",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
+    },
+    {
+      "name": "the draft holds it",
+      "file": "image.png",
+      "text": "See: ![Uploading image.png…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png (2)…]()"
+    },
+    {
+      "name": "an upload holds it, its line deleted",
+      "file": "image.png",
+      "text": "See: ",
+      "held": ["![Uploading image.png…]()"],
+      "placeholder": "![Uploading image.png (2)…]()"
+    },
+    {
+      "name": "the first two taken, one in the draft and one held",
+      "file": "image.png",
+      "text": "![Uploading image.png…]()",
+      "held": ["![Uploading image.png (2)…]()"],
+      "placeholder": "![Uploading image.png (3)…]()"
+    },
+    {
+      "name": "another name's line takes nothing",
+      "file": "image.png",
+      "text": "![Uploading other.png…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
+    },
+    {
+      "name": "a longer number hides no shorter one",
+      "file": "image.png",
+      "text": "![Uploading image.png (12)…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
     }
   ]
 }

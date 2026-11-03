@@ -1,3 +1,5 @@
+import { imageDescription } from "@stellaris/shared";
+
 /** The `@name` being typed where the caret is: where it starts and what is typed so far. */
 export function mentionAt(text: string, caret: number): { start: number; prefix: string } | null {
   const match = /(^|[^\w@])@([a-z0-9-]*)$/.exec(text.slice(0, caret));
@@ -19,14 +21,27 @@ export function completeMention(
   };
 }
 
-/** A file's name as an image's description in markdown, as the board writes one: no brackets, backslashes, or line breaks. */
-export function imageDescription(name: string): string {
-  return name.replaceAll(/[[\]\\\r\n]/g, "");
+/**
+ * What holds an image's place in a draft while it uploads, in the words that say so, numbered from
+ * the second line of one name on.
+ */
+export function uploadingImage(name: string, number = 1): string {
+  const described = imageDescription(name);
+  return number === 1 ? `![Uploading ${described}…]()` : `![Uploading ${described} (${number})…]()`;
 }
 
-/** What holds an image's place in a draft while it uploads, in the words that say so. */
-export function uploadingImage(name: string): string {
-  return `![Uploading ${imageDescription(name)}…]()`;
+/**
+ * A line of its own for an upload of an image named `name`: the first numbering found neither in
+ * `text` nor among `held`, the lines of uploads still on their way, so each upload fills its own
+ * line even when every image pasted has the same name, as a browser names each `image.png`.
+ */
+export function uploadPlaceholder(name: string, text: string, held: readonly string[]): string {
+  for (let number = 1; ; number += 1) {
+    const line = uploadingImage(name, number);
+    if (!text.includes(line) && !held.includes(line)) {
+      return line;
+    }
+  }
 }
 
 /** The text with `inserted` in place of what is selected from `start` to `end`, and the caret after it. */

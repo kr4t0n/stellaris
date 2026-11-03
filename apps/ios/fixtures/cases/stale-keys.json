@@ -547,6 +547,31 @@
   },
   {
     "event": {
+      "id": "01M5A00000000000000000E070",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.paused",
+      "actor": "user",
+      "payload": {
+        "name": "runner-1",
+        "cli": "claude"
+      }
+    },
+    "keys": [["runners"]]
+  },
+  {
+    "event": {
+      "id": "01M5A00000000000000000E071",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.resumed",
+      "actor": "user",
+      "payload": {
+        "name": "runner-1"
+      }
+    },
+    "keys": [["runners"]]
+  },
+  {
+    "event": {
       "id": "01M5A00000000000000000E049",
       "ts": "2026-10-26T08:00:00.000Z",
       "type": "ops.signal",

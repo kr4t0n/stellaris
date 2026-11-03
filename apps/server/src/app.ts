@@ -261,6 +261,24 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     }
     return c.json(await quotas.read(runner, cli));
   });
+  // The user's pause of a runner, or of one CLI on it, and its resume; the board refuses anyone else.
+  for (const [verb, paused] of [
+    ["pause", true],
+    ["resume", false],
+  ] as const) {
+    for (const path of [`/runners/:name/${verb}`, `/runners/:name/${verb}/:cli`]) {
+      api.post(path, async (c) => {
+        const name = NameSchema.parse(c.req.param("name"));
+        const cli = c.req.param("cli");
+        return c.json(
+          await board.setRunnerPaused(c.get("actor"), name, {
+            paused,
+            ...(cli === undefined ? {} : { cli: CliKindSchema.parse(cli) }),
+          }),
+        );
+      });
+    }
+  }
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.
   api.post("/runners", async (c) => {
     const body = RunnerBodySchema.parse(await c.req.json());

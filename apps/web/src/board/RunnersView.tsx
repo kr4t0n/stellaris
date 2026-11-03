@@ -1,7 +1,7 @@
-import type { PendingEnrollment, Runner } from "@stellaris/shared";
+import type { CliKind, PendingEnrollment, Runner } from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
@@ -107,15 +107,79 @@ function WaitingRunner({
   );
 }
 
+/** Two bars to pause, a triangle to resume. Decorative: its button's label says what it does. */
+function PauseMark({ paused }: { paused: boolean }) {
+  return (
+    <svg viewBox="0 0 12 12" width={12} height={12} aria-hidden="true" className="shrink-0">
+      <path
+        d={paused ? "M3 1.5v9l7.5-4.5z" : "M2.5 1.5h2.5v9h-2.5zM7 1.5h2.5v9h-2.5z"}
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/** What a runner's row says of it: away or connected, and what of it the user paused. */
+function runnerState(runner: Runner, now: number): { label: string; detail: string; tone: string } {
+  const pausedClis = runner.clis.filter((cli) => runner.pausedClis?.[cli] !== undefined);
+  const paused =
+    runner.paused !== undefined
+      ? [`paused ${ago(runner.paused.at, now)}`]
+      : runner.clis.flatMap((cli) => {
+          const pause = runner.pausedClis?.[cli];
+          return pause === undefined ? [] : [`${cli} paused ${ago(pause.at, now)}`];
+        });
+  if (runner.status !== "connected") {
+    const away = `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`;
+    return {
+      label: runner.paused === undefined ? "away" : "away · paused",
+      detail: [away, ...paused].join("; "),
+      tone: "text-amber-300",
+    };
+  }
+  if (runner.paused === undefined && pausedClis.length === 0) {
+    return { label: "connected", detail: "connected", tone: "text-fg-muted" };
+  }
+  return {
+    label: runner.paused === undefined ? `${pausedClis.join(", ")} paused` : "paused",
+    detail: ["connected", ...paused].join("; "),
+    tone: "text-amber-300",
+  };
+}
+
 /**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
- * marked when it is not the server's, capabilities, the projects living on it, and whether it is
- * connected; above them, those asking to join. A runner started without a token asks the board to
- * enroll it and prints a link here with its code; approving it under a name registers it, and the
- * runner picks up its token on its next poll. Under them, each CLI login's plan quota.
+ * marked when it is not the server's, capabilities, the projects living on it, whether it is
+ * connected or paused, and its pause; above them, those asking to join. A runner started without a
+ * token asks the board to enroll it and prints a link here with its code; approving it under a name
+ * registers it, and the runner picks up its token on its next poll. Each CLI's mark pauses that CLI
+ * on the runner alone. Under them, each CLI login's plan quota.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
+  const { api } = useSession();
+  const client = useQueryClient();
+  // Pending until the runners are read again, so a control never offers the state it just left.
+  // A press meanwhile does nothing, a second one before the next render included, which is why
+  // a ref holds it; the control stays enabled, so it keeps the keyboard's focus.
+  const changing = useRef(false);
+  const pause = useMutation({
+    mutationFn: ({ runner, paused, cli }: { runner: string; paused: boolean; cli?: CliKind }) =>
+      api.setRunnerPaused(runner, paused, cli),
+    onSettled: async () => {
+      try {
+        await client.invalidateQueries({ queryKey: ["runners"] });
+      } finally {
+        changing.current = false;
+      }
+    },
+  });
+  const toggle = (change: { runner: string; paused: boolean; cli?: CliKind }): void => {
+    if (!changing.current) {
+      changing.current = true;
+      pause.mutate(change);
+    }
+  };
   const enrollments = useEnrollments();
   const runners = useRunners();
   const projects = useProjects();
@@ -128,6 +192,11 @@ export function RunnersView() {
   const away = registered.length - connected;
   const off = registered.filter((runner) => offVersion(runner, server)).length;
   const unidentified = registered.filter((runner) => identityGap(runner) !== null).length;
+  const paused = registered.filter(
+    (runner) =>
+      runner.paused !== undefined ||
+      runner.clis.some((cli) => runner.pausedClis?.[cli] !== undefined),
+  ).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
@@ -144,6 +213,7 @@ export function RunnersView() {
         subtitle={[
           `${connected} connected`,
           ...(away === 0 ? [] : [`${away} away`]),
+          ...(paused === 0 ? [] : [`${paused} paused`]),
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
           ...(server === undefined ? [] : [`server v${server}`]),
           ...(off === 0 ? [] : [`${off} on another version`]),
@@ -177,30 +247,37 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto] gap-x-3"
+          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
             const places = living(runner);
             const lives = places.length === 0 ? "no projects" : places.join(", ");
             const gap = identityGap(runner);
-            const state =
-              runner.status === "connected"
-                ? { label: "connected", detail: "connected", tone: "text-fg-muted" }
-                : {
-                    label: "away",
-                    detail: `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`,
-                    tone: "text-amber-300",
-                  };
+            const state = runnerState(runner, now);
             return (
               <li
                 key={runner.name}
                 className="col-span-full grid grid-cols-subgrid items-center rounded-lg px-2 py-1.5 text-sm"
               >
-                <span className="flex items-center gap-1" title={clis}>
-                  {runner.clis.map((cli) => (
-                    <CliIcon key={cli} cli={cli} size={13} />
-                  ))}
+                <span className="flex items-center">
+                  {runner.clis.map((cli) => {
+                    const held = runner.pausedClis?.[cli] !== undefined;
+                    const label = `${held ? "Resume" : "Pause"} ${cli} on ${runner.name}`;
+                    return (
+                      <button
+                        key={cli}
+                        type="button"
+                        aria-label={label}
+                        title={label}
+                        aria-disabled={pause.isPending}
+                        onClick={() => toggle({ runner: runner.name, paused: !held, cli })}
+                        className={`rounded p-0.5 transition-opacity hover:bg-surface-2/70 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${held ? "opacity-30 hover:opacity-60" : ""}`}
+                      >
+                        <CliIcon cli={cli} size={13} />
+                      </button>
+                    );
+                  })}
                   <span className="sr-only">{clis}</span>
                 </span>
                 {/* A gap in the account's git identity sits under the name, so it takes no column. */}
@@ -235,10 +312,25 @@ export function RunnersView() {
                 <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
                   {state.label}
                 </span>
+                <button
+                  type="button"
+                  aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                  title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                  aria-disabled={pause.isPending}
+                  onClick={() =>
+                    toggle({ runner: runner.name, paused: runner.paused === undefined })
+                  }
+                  className="-mr-1 rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                >
+                  <PauseMark paused={runner.paused !== undefined} />
+                </button>
               </li>
             );
           })}
         </ul>
+        <div className="px-2">
+          <Failure error={pause.error} />
+        </div>
         <PlanQuota runners={registered} now={now} />
       </div>
     </>

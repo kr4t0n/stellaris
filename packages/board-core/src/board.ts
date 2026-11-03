@@ -9,6 +9,7 @@ import {
   currentStage,
   channelRef,
   ChannelProposalSchema,
+  CliKindSchema,
   CommitIdSchema,
   conflictCopyOf,
   CRON_FLOOR_MS,
@@ -17,6 +18,7 @@ import {
   cronStoppedAt,
   fireTimes,
   firesInTask,
+  heldOn,
   isOneTime,
   shortestGapMs,
   TimeZoneSchema,
@@ -555,6 +557,11 @@ function proposedFrom(origin: ProposalOrigin | undefined, where: ProposalOrigin)
     origin.channel === where.channel &&
     origin.place === where.place
   );
+}
+
+/** The later of two leases given as ISO times, either of which may be null. */
+function latestLease(a: string | null, b: string | null): string | null {
+  return a === null ? b : b === null || a >= b ? a : b;
 }
 
 function megabytes(bytes: number): string {
@@ -1717,6 +1724,52 @@ export class Board {
   }
 
   /**
+   * Pauses or resumes a runner, the user's alone: the whole runner, or with `cli` that CLI on it
+   * alone, each apart from the other. While either holds, no turn it covers starts there; their
+   * wakes wait in the scheduler's queue, and a turn under way finishes. Pausing what is paused, or
+   * resuming what is not, changes nothing and logs nothing.
+   */
+  async setRunnerPaused(
+    actor: Actor,
+    name: Name,
+    change: { paused: boolean; cli?: CliKind | undefined },
+  ): Promise<Runner> {
+    this.assertUser(actor, "only the user may pause or resume a runner");
+    const cli = change.cli === undefined ? undefined : CliKindSchema.parse(change.cli);
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const { paused, pausedClis, ...rest } = doc.data;
+      // A pause the runner could not show, and no turn would meet; a resume still clears one.
+      if (cli !== undefined && change.paused && !doc.data.clis.includes(cli)) {
+        throw new BoardError("INVALID_STATE", `runner ${name} has no ${cli} to pause`);
+      }
+      const current = cli === undefined ? paused : pausedClis?.[cli];
+      if ((current !== undefined) === change.paused) {
+        return doc.data;
+      }
+      const pause = change.paused ? { at: this.now().toISOString(), by: actor.name } : undefined;
+      const clis = cli === undefined ? { ...pausedClis } : { ...pausedClis, [cli]: pause };
+      const kept = Object.entries(clis).filter(([, each]) => each !== undefined);
+      const whole = cli === undefined ? pause : paused;
+      const next: Runner = RunnerSchema.parse({
+        ...rest,
+        ...(whole === undefined ? {} : { paused: whole }),
+        ...(kept.length === 0 ? {} : { pausedClis: Object.fromEntries(kept) }),
+      });
+      await writeMarkdown(file, next, doc.body);
+      await this.events.append(change.paused ? "runner.paused" : "runner.resumed", actor.name, {
+        name,
+        ...(cli === undefined ? {} : { cli }),
+      });
+      return next;
+    });
+  }
+
+  /**
    * Logs an operations signal as an `ops.signal` event. No channel carries it: the scheduler wakes
    * its readers from the event, the runner lists it in their prompts, and the interface's log shows
    * it to the user.
@@ -1818,13 +1871,20 @@ export class Board {
       const expired: Task[] = [];
       const now = this.now();
       let crons: readonly Cron[] | undefined;
+      let runners: readonly Runner[] | undefined;
       for (const project of await listDirs(this.paths.projects())) {
+        let place: Project | undefined;
         for (const task of await this.listTasks(project)) {
           if (task.status !== "claimed") {
             continue;
           }
           crons ??= await this.listCrons();
-          const kept = this.keptLease(task, crons, now);
+          runners ??= await this.listRunners();
+          place ??= await this.readProject(project);
+          const kept = latestLease(
+            this.keptLease(task, crons, now),
+            await this.pausedLease(task, runners, place.runner, now),
+          );
           if (kept !== null) {
             await this.writeTask(project, { ...task, leaseExpiresAt: kept });
             continue;
@@ -6391,6 +6451,29 @@ export class Board {
         ? lease
         : stopped + this.leaseMs;
     return kept > lease ? new Date(kept).toISOString() : null;
+  }
+
+  /**
+   * The lease a holder keeps while the user's pause holds its turns in the task's project
+   * (`heldOn`), when later than the one it has, else null. It is renewed for a full lease once less
+   * than half is left, as for a pending cron, so it never lapses while the holder cannot take a
+   * turn there, and after the resume the holder has at least half a lease to come back to it.
+   */
+  private async pausedLease(
+    task: Task,
+    runners: readonly Runner[],
+    runner: Name | undefined,
+    now: Date,
+  ): Promise<string | null> {
+    if (task.claimedBy === undefined || task.leaseExpiresAt === undefined) {
+      return null;
+    }
+    const holder = await this.readAgent(task.claimedBy).catch(() => null);
+    if (holder === null || !heldOn(runners, runner, holder.cli)) {
+      return null;
+    }
+    const lease = Date.parse(task.leaseExpiresAt);
+    return lease - now.getTime() < this.leaseMs / 2 ? this.leaseEnd(now) : null;
   }
 
   private leaseExpired(task: Task, now: Date): boolean {

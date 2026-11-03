@@ -121,7 +121,7 @@ A turn the plan's limit refused fails, `exitReason: "error"` with `usage limit r
 
 The user may also ask a runner to read a CLI's quota without a turn, `POST /api/runners/:name/quota/:cli`: `QuotaReads` in `apps/server` shares a read under way and answers a successful one again for a minute, since each starts a CLI process, and `RunnerHub.quota` sends a `quota` request, refused at once with a 409 to a runner whose hello lacks `quotaReads`, and records the answer. The runner's `TurnExecutor.quota` asks the backend's `readQuota`: Claude's is the SDK's `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })` on a query that sends no prompt, typed from the SDK's own `Query` so a release that renames it fails the type check, whose windows' `utilization` is already a percentage; Codex's is `account/rateLimits/read` with `excludeResetCreditDetails`, on an app server that opens no thread, whose answer's `accountId` the adapter drops. Both read the CLI's usage endpoint and make no model call; Claude Code's own `quota_check`, a one-token message it sends to read rate-limit headers, is billed, and nothing here may trigger it.
 
-The scheduler still dispatches turns of a CLI that is limited on their runner; holding them until the reset is not built.
+The scheduler still dispatches turns of a CLI that is limited on their runner unless the user pauses that CLI there, which holds them until the user resumes it (see [a paused runner](conversations.md#a-paused-runner-holds-its-turns-in-the-queue-and-what-waits-on-it-stays-quiet)); holding them until the reset by itself is not built.
 
 ## Running the server and runners
 

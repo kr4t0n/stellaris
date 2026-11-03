@@ -5,7 +5,14 @@ import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Board, BoardError, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
+import {
+  Board,
+  BoardError,
+  SYSTEM_ACTOR,
+  type Actor,
+  type BoardOptions,
+  type TurnInFlight,
+} from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -74,11 +81,12 @@ describe("Board", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function society() {
+  /** A society whose leases last a minute, unless `options` gives the board's own. */
+  async function society(options: BoardOptions = { leaseMs: 60_000 }) {
     const { board, userToken } = await Board.init(
       dir,
       { name: "test society" },
-      { now, leaseMs: 60_000 },
+      { now, ...options },
     );
     // A second channel, beside the default general, for topics that do not belong in it.
     await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
@@ -1268,6 +1276,59 @@ describe("Board", () => {
     expect((await board.readEvents(null)).filter((e) => e.type === "lease.expired")).toHaveLength(
       2,
     );
+  });
+
+  it("keeps a holder's lease while its cron in the task's thread is pending, then a lease from its pause or end", async () => {
+    // The board's own lease, thirty minutes.
+    const { board } = await society({});
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    const lapses = async () =>
+      (await board.readEvents(null)).filter((e) => e.type === "lease.expired").length;
+    const stage = (title: string) =>
+      board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", agent: "eng-1" }],
+      });
+    const watched = await stage("watched");
+    const other = await stage("watched from home");
+    const inTask = { ...ENG, scope: "demo", thread: watched.id };
+    await board.claimTask(inTask, { task_id: watched.id });
+    await board.claimTask({ ...ENG, scope: "demo", thread: other.id }, { task_id: other.id });
+    const daily = { note: "Read the run.", cron: "0 12 * * *" };
+    const cron = await board.createCron(inTask, { title: "Check", ...daily });
+    // A cron at the holder's home keeps nothing: that claim lapses as before.
+    await board.createCron({ ...ENG, scope: "demo" }, { title: "Elsewhere", ...daily });
+
+    await sweep(120);
+    expect(await holder(watched.id)).toBe("eng-1");
+    expect(await holder(other.id)).toBeUndefined();
+    expect(await lapses()).toBe(1);
+
+    // Paused, the cron leaves the holder a whole lease from then, not from the last renewal.
+    await board.updateCron(inTask, { cron_id: cron.id, paused: true });
+    await sweep(29);
+    expect(await holder(watched.id)).toBe("eng-1");
+    await sweep(1);
+    expect(await holder(watched.id)).toBeUndefined();
+    expect(await lapses()).toBe(2);
+
+    // Resumed and held again, then ended: the same from its end.
+    await board.updateCron(inTask, { cron_id: cron.id, paused: false });
+    await board.claimTask(inTask, { task_id: watched.id });
+    await sweep(50);
+    await board.removeCron(inTask, { cron_id: cron.id, reason: "the run is done" });
+    await sweep(29);
+    expect(await holder(watched.id)).toBe("eng-1");
+    await sweep(1);
+    expect(await holder(watched.id)).toBeUndefined();
+    expect(await lapses()).toBe(3);
   });
 
   it("enforces role charters and the lifecycle's ends", async () => {

@@ -30,7 +30,7 @@ Cursors and "since" comparisons rely on this; never switch ids to a non-time-ord
 
 ### Leases, not locks
 
-A claim held past its lease is treated as open by `claim_task` and by the sweep. Turns renew the leases of claims they still hold on completion.
+A claim held past its lease is treated as open by `claim_task` and by the sweep. Turns renew the leases of claims they still hold on completion. The sweep (`expireLeases`) keeps the lease of a holder with a cron of its own pending in the task's thread (`keptLease`): it renews it for a full lease once less than half is left, so it never lapses between fires that may be hours apart, and keeps the stored lease ahead for `claim_task` and the turn host, which read it. Once every such cron is paused or ended, the lease runs a full lease from when the last of them stopped, whatever was left of the renewed one, so the heartbeat, which counts the stage again from then, reaches the holder while it still holds it.
 
 ## Threads and messages
 

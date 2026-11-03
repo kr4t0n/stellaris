@@ -87,6 +87,9 @@ class FakeRunner implements TurnRunner {
     const record: TurnRecord = {
       agent: dispatch.agent,
       project: dispatch.project,
+      ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread.id }),
+      ...(dispatch.channel === undefined ? {} : { channel: dispatch.channel }),
+      ...(dispatch.place === undefined ? {} : { place: dispatch.place }),
       runner: "test",
       cli: "claude",
       session: "s",
@@ -165,6 +168,14 @@ const logs = async (board: Board, key: string, unit = 1): Promise<Array<[number,
   (await board.listSignals(10_000))
     .filter((record) => record.signal.key === key)
     .map((record) => [Math.floor(record.signal.value / unit), record.signal.wakes]);
+
+/** The heartbeats dispatched so far: whom, in which thread, and what each woke for. */
+const heartbeats = (runner: FakeRunner) =>
+  runner.dispatches.map((d) => [d.agent, d.thread?.id, d.trigger.kind, d.trigger.heartbeat]);
+
+/** Claims the sweep has released for a lapsed lease. */
+const expiries = async (board: Board): Promise<number> =>
+  (await board.readEvents(null)).filter((e) => e.type === "lease.expired").length;
 
 /** The cron wakes dispatched so far: whom, where, and which crons each carried. */
 const cronTurns = (runner: FakeRunner) =>
@@ -2522,6 +2533,145 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(cronTurns(runner)).toEqual([]);
+  });
+
+  /** A task whose one stage is eng-1's, held by eng-1 with a cron of its own in the task's thread. */
+  async function watched(options: { release?: boolean; elsewhere?: boolean } = {}) {
+    const harness = await setup();
+    const { board, runner, scheduler } = harness;
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "watch the run",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const inTask = { ...ENG, scope: "demo", thread: task.id };
+    await board.claimTask(inTask, { task_id: task.id });
+    // Daily at noon, so it never comes due here: whatever wakes eng-1 is the heartbeat.
+    const cron = await board.createCron(
+      options.elsewhere === true ? { ...ENG, scope: "demo" } : inTask,
+      { title: "Check the run", note: "Read the run.", cron: "0 12 * * *" },
+    );
+    if (options.release === true) {
+      await board.releaseTask(inTask, { task_id: task.id });
+    }
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    return { ...harness, task, cron, inTask };
+  }
+
+  /** Heartbeats of the setup's cadence, each run to its end. */
+  async function beats(scheduler: Scheduler, count: number): Promise<void> {
+    for (let i = 0; i < count; i += 1) {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+  }
+
+  describe("a cron in a task's thread", () => {
+    it("leaves a held stage to it: no heartbeat, and the lease holds past its length", async () => {
+      const { board, runner, scheduler, task } = await watched();
+      // Thirty heartbeats, across five leases of a minute.
+      await beats(scheduler, 30);
+      expect(heartbeats(runner)).toEqual([]);
+      expect((await board.getTask(USER, { task_id: task.id })).claimedBy).toBe("eng-1");
+      expect(await expiries(board)).toBe(0);
+    });
+
+    it("wakes a held stage as before once the cron is paused, with a full lease from the pause", async () => {
+      const { board, runner, scheduler, task, cron, inTask } = await watched();
+      await beats(scheduler, 12);
+      await board.updateCron(inTask, { cron_id: cron.id, paused: true });
+      await beats(scheduler, 5);
+      expect(heartbeats(runner)).toEqual(
+        Array.from({ length: 5 }, () => ["eng-1", task.id, "heartbeat", "held"]),
+      );
+      // Fifty seconds after the pause the stage is still held; at the minute, the lease runs out.
+      expect((await board.getTask(USER, { task_id: task.id })).claimedBy).toBe("eng-1");
+      await beats(scheduler, 1);
+      expect((await board.getTask(USER, { task_id: task.id })).status).toBe("open");
+      expect(await expiries(board)).toBe(1);
+    });
+
+    it("wakes a held stage as before once the cron has ended", async () => {
+      const { board, runner, scheduler, task, cron } = await watched();
+      await board.removeCron(USER, { cron_id: cron.id, reason: "the run is done" });
+      await beats(scheduler, 1);
+      expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "held"]]);
+    });
+
+    it("changes nothing when the cron fires in another conversation", async () => {
+      const { board, runner, scheduler, task } = await watched({ elsewhere: true });
+      await beats(scheduler, 1);
+      expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "held"]]);
+      await beats(scheduler, 6);
+      expect(await expiries(board)).toBe(1);
+    });
+
+    it("leaves a released stage that waits for its citizen alone to it", async () => {
+      const { board, runner, scheduler, task } = await watched({ release: true });
+      expect((await board.getTask(USER, { task_id: task.id })).status).toBe("open");
+      await beats(scheduler, 6);
+      expect(heartbeats(runner)).toEqual([]);
+    });
+
+    it("still wakes its citizen for a post there it has not read", async () => {
+      const { board, runner, scheduler, task } = await watched();
+      await board.postMessage(REV, { thread_id: task.id, body: "the run went green" });
+      await beats(scheduler, 1);
+      expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "unread"]]);
+    });
+  });
+
+  it("says in each heartbeat what it woke for, news first, and the turn's record keeps it", async () => {
+    const { board, runner, scheduler } = await setup({ record: true, concurrency: 6 });
+    const stage = (title: string) =>
+      board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", agent: "eng-1" }],
+      });
+    const held = await stage("held");
+    const waiting = await stage("waiting");
+    const both = await stage("held, with news");
+    for (const task of [held, both]) {
+      await board.claimTask({ ...ENG, scope: "demo", thread: task.id }, { task_id: task.id });
+    }
+    await board.postMessage(REV, { thread_id: both.id, body: "news" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const want = { [held.id]: "held", [waiting.id]: "waiting", [both.id]: "unread" };
+    expect(
+      Object.fromEntries(
+        runner.dispatches
+          .filter((d) => d.agent === "eng-1")
+          .map((d) => [d.thread?.id, d.trigger.heartbeat]),
+      ),
+    ).toEqual(want);
+    const records = await Promise.all(
+      [held, waiting, both].map(async (task) => [
+        task.id,
+        (await board.readLastTurn("eng-1", "demo", task.id))?.trigger.heartbeat,
+      ]),
+    );
+    expect(Object.fromEntries(records)).toEqual(want);
+    const completed = (await board.readEvents(null)).filter(
+      (e) =>
+        e.type === "turn.completed" && e.actor === "eng-1" && e.payload["trigger"] === "heartbeat",
+    );
+    expect(
+      Object.fromEntries(completed.map((e) => [e.payload["thread"], e.payload["heartbeat"]])),
+    ).toEqual(want);
   });
 
   it("signals a cron whose turns keep failing, without waking the steward", async () => {

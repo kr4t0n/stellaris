@@ -2457,11 +2457,7 @@ export class Board {
    * a turn uploads. `name`, the file's, describes it in the markdown answered; without one the
    * description is empty, for the user to write.
    */
-  async postImage(
-    actor: Actor,
-    bytes: Uint8Array,
-    name?: string | undefined,
-  ): Promise<UploadedImage> {
+  async postImage(actor: Actor, bytes: Uint8Array, name?: string): Promise<UploadedImage> {
     this.assertUser(
       actor,
       "only the user posts an image's bytes; a turn uploads one with upload_image",

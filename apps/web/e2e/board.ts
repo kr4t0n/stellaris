@@ -1338,7 +1338,7 @@ export async function fakeBoard(
     await page.route(BROKEN_URL, (route) => route.fulfill({ status: 404, body: "" }));
   }
   // Images the user posted from a composer, by id; the fake keeps PNGs alone, which the tests post.
-  const posted = new Map<string, Buffer>();
+  const userImages = new Map<string, Buffer>();
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname, searchParams } = new URL(request.url());
@@ -1356,8 +1356,8 @@ export async function fakeBoard(
           400,
         );
       }
-      const id = POSTED_IMAGES[posted.size] ?? "";
-      posted.set(id, bytes);
+      const id = POSTED_IMAGES[userImages.size] ?? "";
+      userImages.set(id, bytes);
       return json(route, {
         id,
         type: "png",
@@ -1653,7 +1653,7 @@ export async function fakeBoard(
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
     if (pathname.startsWith("/api/images/")) {
-      const kept = posted.get(pathname.slice("/api/images/".length));
+      const kept = userImages.get(pathname.slice("/api/images/".length));
       if (kept !== undefined) {
         return route.fulfill({ contentType: "image/png", body: kept });
       }

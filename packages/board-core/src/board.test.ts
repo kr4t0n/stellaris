@@ -3605,7 +3605,7 @@ describe("Board", () => {
       code: "VALIDATION",
       message: `big.png is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608 an image may be`,
     });
-    await expect(board.postImage(USER, png, "x".repeat(1025))).rejects.toThrow();
+    await expect(board.postImage(USER, png, "x".repeat(1025))).rejects.toThrow(/1024/);
     expect((await readdir(path.join(dir, "images"))).toSorted()).toEqual(
       [named.id, unnamed.id].toSorted(),
     );

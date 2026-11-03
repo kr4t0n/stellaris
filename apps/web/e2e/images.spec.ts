@@ -491,9 +491,9 @@ interface PageFile {
 /** Dispatches `kind` on the box with the files in its data, as a paste or a drop delivers them. */
 function deliver(box: Locator, kind: "paste" | "drop", files: PageFile[]): Promise<void> {
   return box.evaluate(
-    (element, { kind, files }) => {
+    (element, given) => {
       const data = new DataTransfer();
-      for (const file of files) {
+      for (const file of given.files) {
         let bytes = new Uint8Array(file.bytes ?? []);
         if (file.bytes === undefined) {
           bytes = new Uint8Array(file.size ?? 0);
@@ -502,7 +502,7 @@ function deliver(box: Locator, kind: "paste" | "drop", files: PageFile[]): Promi
         data.items.add(new File([bytes], file.name, { type: file.type }));
       }
       const init = { bubbles: true, cancelable: true };
-      if (kind === "paste") {
+      if (given.kind === "paste") {
         element.dispatchEvent(new ClipboardEvent("paste", { ...init, clipboardData: data }));
         return;
       }

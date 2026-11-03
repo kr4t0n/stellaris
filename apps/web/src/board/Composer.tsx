@@ -29,6 +29,11 @@ const MAX_CANDIDATES = 6;
 /** The kinds of image the board keeps, which the file picker offers. */
 const IMAGE_TYPES = Object.values(IMAGE_MEDIA_TYPES).join(",");
 
+/** Whether a drag carries files, rather than text or a link. */
+function filesDragged(event: DragEvent): boolean {
+  return event.dataTransfer.types.includes("Files");
+}
+
 /**
  * Posts as the user into a channel or a thread, in one row with Send beside the box. Enter sends
  * and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
@@ -166,7 +171,7 @@ export function Composer({
     setUploadFailure(null);
     files.forEach((file, index) => void upload(file, placeholders[index] ?? ""));
   };
-  const upload = async (file: File, placeholder: string): Promise<void> => {
+  const upload = async (file: File, held: string): Promise<void> => {
     setUploading((count) => count + 1);
     let markdown = "";
     try {
@@ -190,7 +195,7 @@ export function Composer({
       const settled = settleUpload(
         current,
         element?.selectionStart ?? current.length,
-        placeholder,
+        held,
         markdown,
       );
       if (settled === null) {
@@ -202,7 +207,6 @@ export function Composer({
     });
     setUploading((count) => count - 1);
   };
-  const filesDragged = (event: DragEvent): boolean => event.dataTransfer.types.includes("Files");
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (candidates.length > 0) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {

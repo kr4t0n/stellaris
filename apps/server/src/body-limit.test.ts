@@ -149,19 +149,21 @@ describe("request body limits", () => {
     expect(await purpose()).toBe("Reviews.");
   });
 
+  /** An image's bytes posted as the user posts them from a composer. */
+  const send = (body: Uint8Array | ReadableStream<Uint8Array>, token = userToken) =>
+    fetch(`${url}/api/images?name=shot.png`, {
+      method: "POST",
+      headers: { "content-type": "image/png", authorization: `Bearer ${token}` },
+      body,
+      ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
+    });
+  /** How many images the board has kept. */
+  const kept = async () =>
+    (await board.readEvents(null, 1_000)).filter((event) => event.type === "image.uploaded").length;
+
   it("takes an image the user posts up to 8 MiB, past the cap on other writes, and refuses one over it with a 413", async () => {
     const png = Buffer.from("89504e470d0a1a0a", "hex");
     const image = (size: number) => Buffer.concat([png, Buffer.alloc(size - png.length)]);
-    const send = (body: Uint8Array | ReadableStream<Uint8Array>, token = userToken) =>
-      fetch(`${url}/api/images?name=shot.png`, {
-        method: "POST",
-        headers: { "content-type": "image/png", authorization: `Bearer ${token}` },
-        body,
-        ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
-      });
-    const kept = async () =>
-      (await board.readEvents(null, 1_000)).filter((event) => event.type === "image.uploaded")
-        .length;
 
     const over = await send(image(8 * MiB + 1));
     expect(over.status).toBe(413);

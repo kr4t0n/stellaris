@@ -288,8 +288,13 @@ enum SignInFailure: Error, Equatable {
   /// Uploads an image's bytes, made into a kind and a size the board keeps, then puts the board's
   /// markdown for it where `placeholder` held its place in the conversation's draft, or takes the
   /// place away and keeps why it failed. Nil bytes, which Photos or the pasteboard couldn't give,
-  /// fail too. The markdown is lost when the user deleted the line, as on the web.
-  func upload(_ data: Data?, holding placeholder: String, in conversation: Conversation) async {
+  /// fail too. The markdown is lost when the user deleted the line, as on the web. `caret` says
+  /// where the draft's caret is as the line is replaced, in UTF-16 code units; the draft that
+  /// gives back says where it goes then, among the same words, for the field to move it there.
+  @discardableResult func upload(
+    _ data: Data?, holding placeholder: String, in conversation: Conversation,
+    caret: () -> Int? = { nil }
+  ) async -> DraftEdit? {
     let sent = generation
     var markdown = ""
     var failure: String?
@@ -306,7 +311,7 @@ enum SignInFailure: Error, Equatable {
       failure = "The image was not uploaded."
     }
     guard sent == generation else {
-      return
+      return nil
     }
     let key = conversation.key
     let left = (uploading[key] ?? 1) - 1
@@ -314,11 +319,15 @@ enum SignInFailure: Error, Equatable {
     if let failure {
       uploadFailures[key] = failure
     }
-    if let settled = settleUpload(
-      memory?.draft(conversation) ?? "", caret: 0, placeholder: placeholder, markdown: markdown)
-    {
-      memory?.setDraft(settled.text, for: conversation)
+    let draft = memory?.draft(conversation) ?? ""
+    guard
+      let settled = settleUpload(
+        draft, caret: caret() ?? draft.utf16.count, placeholder: placeholder, markdown: markdown)
+    else {
+      return nil
     }
+    memory?.setDraft(settled.text, for: conversation)
+    return settled
   }
 
   /// Opens the thread `channel`'s draft describes, with its first message if it has one, then shows

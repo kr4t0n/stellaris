@@ -380,7 +380,7 @@ struct DraftField: View {
     for item in items {
       Task {
         let data = try? await item.loadTransferable(type: Data.self)
-        await model.upload(data, holding: held, in: conversation)
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
       }
     }
   }
@@ -393,12 +393,36 @@ struct DraftField: View {
     let held = hold(providers.count)
     for provider in providers {
       let type = provider.registeredContentTypes.first { $0.conforms(to: .image) } ?? .image
-      _ = provider.loadDataRepresentation(for: type) { [model, conversation] data, _ in
-        Task { @MainActor in
-          await model.upload(data, holding: held, in: conversation)
+      Task {
+        let data: Data? = await withCheckedContinuation { loaded in
+          _ = provider.loadDataRepresentation(for: type) { data, _ in
+            loaded.resume(returning: data)
+          }
         }
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
       }
     }
+  }
+
+  /// Where the draft's caret is, in UTF-16 code units, once the field has had one.
+  private func caret() -> Int? {
+    let text = model.memory?.draft(conversation) ?? ""
+    guard let selection, case .selection(let range) = selection.indices,
+      range.lowerBound <= text.endIndex
+    else {
+      return nil
+    }
+    return text.utf16.distance(from: text.startIndex, to: range.lowerBound)
+  }
+
+  /// Moves the caret to where an image's markdown left it, among the same words: the field would
+  /// otherwise keep its offset, which the markdown, longer than its line, moved into other words.
+  private func follow(_ settled: DraftEdit?) {
+    guard let settled, selection != nil else {
+      return
+    }
+    selection = TextSelection(
+      insertionPoint: String.Index(utf16Offset: settled.caret, in: settled.text))
   }
 
   /// Holds the place of `count` images where the caret last was, in place of what was selected, or

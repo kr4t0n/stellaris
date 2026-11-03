@@ -33,11 +33,15 @@ import Testing
     #expect(model.memory?.draft(general) == "Before ![Uploading image…]() after")
     #expect(model.uploading[general.key] == 1)
 
-    await model.upload(png, holding: held.placeholder, in: general)
+    // The caret, just after the line, goes after the markdown that takes its place.
+    let settled = try #require(
+      await model.upload(png, holding: held.placeholder, in: general) { held.caret })
     let draft = try #require(model.memory?.draft(general))
     #expect(
       draft.wholeMatch(of: /Before !\[image\.png\]\(image:00000000000000000000PHT001\) after/)
         != nil, "\(draft)")
+    #expect(settled.text == draft)
+    #expect(settled.caret == draft.utf16.count - " after".utf16.count)
     #expect(model.uploading[general.key] == nil)
     #expect(model.uploadFailures[general.key] == nil)
   }

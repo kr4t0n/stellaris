@@ -35,6 +35,11 @@ final class ConversationUITests: ShellTestCase {
       "the image's markdown doesn't take its place in the draft")
     XCTAssertTrue(app.buttons["send"].firstMatch.isEnabled, "Send stays off once the image is in")
     keepScreen("image-pasted")
+    // The caret follows the image's markdown, so what is typed next goes after it.
+    box.typeText(" Done.")
+    XCTAssertTrue(
+      draft(box, matches: #"The plot: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\) Done\."#),
+      "what is typed after the image lands inside its markdown")
 
     app.buttons["send"].firstMatch.tap()
     let image = app.scrollViews["messages"].buttons

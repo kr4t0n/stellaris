@@ -507,6 +507,16 @@ export class TurnHost {
         crons.push(cron);
       }
     }
+    // A failed turn that a cron's fire started is named with that cron, which may have ended with it.
+    const lastTurnCrons = new Map<Ulid, Cron>();
+    if (lastTurn?.exitReason === "error" || lastTurn?.exitReason === "timeout") {
+      for (const id of lastTurn.crons ?? []) {
+        const cron = await this.board.readCron(id).catch(() => null);
+        if (cron !== null) {
+          lastTurnCrons.set(id, cron);
+        }
+      }
+    }
     const prompt = buildTurnPrompt({
       dispatch,
       clock: { now: this.now(), timeZone: society.timezone },
@@ -519,6 +529,7 @@ export class TurnHost {
       waitingStages: waiting,
       project,
       lastTurn,
+      lastTurnCrons,
       ...(changedInstructions ? { changedInstructions: instructions } : {}),
       onboarding,
       afreshAfterReflection,

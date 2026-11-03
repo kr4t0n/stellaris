@@ -118,6 +118,112 @@ describe("buildTurnPrompt", () => {
     ).not.toContain("## Crons");
   });
 
+  it("names each cron whose fire the failed previous turn carried, with its note, and keeps any other failure's notice", () => {
+    const once = {
+      ...CronFrontmatterSchema.parse({
+        id: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        title: "Look again",
+        agent: "eng-1",
+        scope: "demo",
+        schedule: { at: "2026-10-10T10:00:00.000Z" },
+        createdBy: "eng-1",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        since: "2026-10-10T08:00:00.000Z",
+        lastFiredAt: "2026-10-10T10:00:00.000Z",
+        lastRun: {
+          turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          at: "2026-10-10T10:03:00.000Z",
+          outcome: "failed",
+        },
+        failures: 1,
+        ended: { at: "2026-10-10T10:00:00.000Z", by: "board", reason: "fired once, as set" },
+      }),
+      note: "Is the fix live?",
+    };
+    const uncronned: TurnRecord = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "server",
+      cli: "claude",
+      session: "s",
+      trigger: TriggerSchema.parse({ kind: "cron", reason: 'cron "Look again" came due' }),
+      startedAt: "2026-10-10T10:00:00.000Z",
+      endedAt: "2026-10-10T10:03:00.000Z",
+      exitReason: "error",
+      status: null,
+      error: "the CLI ended",
+      usage: null,
+      costUsd: 0,
+      toolCalls: 2,
+      model: null,
+    };
+    const failed = { ...uncronned, crons: [once.id] };
+    const next = (lastTurn: TurnRecord, crons: readonly (typeof once)[] = []) =>
+      buildTurnPrompt({
+        dispatch: cronlessDispatch,
+        clock: { now: new Date("2026-10-10T10:20:00.000Z"), timeZone: "UTC" },
+        messages: [],
+        heldClaims: [],
+        lastTurn,
+        lastTurnCrons: new Map(crons.map((cron) => [cron.id, cron])),
+        onboarding: null,
+      });
+    const worktree =
+      "The worktree may hold uncommitted changes. Run git status before doing anything else.";
+    expect(next(failed, [once])).toContain(
+      [
+        "## Your previous turn did not finish",
+        "",
+        "It ended with error: the CLI ended.",
+        "",
+        "It carried the fire of this cron, so what its note asks may not be done:",
+        "",
+        `- "Look again" (cron ${once.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires once at 2026-10-10T10:00:00.000Z. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. It fired once, as set, and has ended.`,
+        "",
+        "  Is the fix live?",
+        "",
+        worktree,
+      ].join("\n"),
+    );
+
+    // Several: a recurring one with when it fires next or that it is paused, and one removed since.
+    const hourly = {
+      ...once,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+      title: "Check the deploy",
+      schedule: { cron: "0 * * * *" },
+      ended: undefined,
+      note: "Read the deploy log.",
+    };
+    const paused = {
+      ...hourly,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      title: "Check the queue",
+      paused: { at: "2026-10-10T10:10:00.000Z", by: "user" },
+    };
+    const gone = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
+    const several = next({ ...failed, crons: [hourly.id, paused.id, gone] }, [hourly, paused]);
+    expect(several).toContain(
+      "It carried the fire of these crons, so what their notes ask may not be done:",
+    );
+    expect(several).toContain(
+      `- "Check the deploy" (cron ${hourly.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires \`0 * * * *\` in the society's time zone, UTC. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. Next it fires at 2026-10-10T11:00:00.000Z.\n\n  Read the deploy log.`,
+    );
+    expect(several).toContain(
+      `(cron ${paused.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires \`0 * * * *\` in the society's time zone, UTC. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. user has paused it since it fired, so it fires no more until resumed.`,
+    );
+    expect(several).toContain(`- Cron ${gone}, which the board no longer has.\n\n${worktree}`);
+
+    // A failed turn no cron started keeps the notice as it was, and a completed one has none.
+    expect(next(uncronned)).toContain(
+      `## Your previous turn did not finish\n\nIt ended with error: the CLI ended.\n${worktree}`,
+    );
+    expect(next(uncronned)).not.toContain("It carried the fire of");
+    expect(next({ ...failed, exitReason: "completed", error: null }, [once])).not.toContain(
+      "## Your previous turn did not finish",
+    );
+  });
+
   it("carries the trigger, held claims, unread messages with thread titles, and a failed-turn note", () => {
     const prompt = buildTurnPrompt({
       dispatch: {

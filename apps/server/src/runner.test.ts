@@ -998,6 +998,74 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
   });
 
+  it("names a one-time cron whose fire's turn failed in the next turn's notice, with its note", async () => {
+    const { board } = await Board.init(dir, { name: "cron-failed" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const cron = await board.createCron(
+      { name: "eng-1", role: "engineer", scope: "demo" },
+      {
+        title: "Look again",
+        note: "Is the fix live?",
+        at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    );
+    const prompts: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve(
+          prompts.length === 1
+            ? { ...completed(""), status: null, exitReason: "error", error: "the CLI ended" }
+            : completed("looked"),
+        );
+      },
+    };
+    const { run } = await start(board, backend);
+    // The scheduler records the fire, which ends a one-time cron, then dispatches its turn.
+    await board.cronFired(cron.id, new Date().toISOString());
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: {
+        kind: "cron",
+        fromUser: false,
+        reason: 'cron "Look again" came due',
+        cronId: cron.id,
+      },
+      priority: 1,
+      crons: [cron.id],
+    });
+    expect(await board.readCron(cron.id)).toMatchObject({
+      ended: { reason: "fired once, as set" },
+      lastRun: { outcome: "failed" },
+    });
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    expect(prompts[1]).toContain(
+      "It ended with error: the CLI ended.\n\nIt carried the fire of this cron, so what its note asks may not be done:",
+    );
+    expect(prompts[1]).toContain(`- "Look again" (cron ${cron.id}), set by eng-1 at`);
+    expect(prompts[1]).toContain("It fired once, as set, and has ended.\n\n  Is the fix live?");
+  });
+
   it("sums the spend reports logged since a reader's last turn into one line", async () => {
     const { board } = await Board.init(dir, { name: "signals" });
     await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });

@@ -6300,7 +6300,8 @@ export class Board {
    * The lease a holder's own crons in the task's thread keep its claim to, when later than the one
    * it has, else null. While one of them is pending, the lease is renewed for a full lease once less
    * than half is left, so it never lapses between fires that may be hours apart; once every one is
-   * paused or ended, it runs a full lease from when the last of them stopped.
+   * paused, ended, or failed at its latest fire (`cronStoppedAt`), it runs a full lease from when
+   * the last of them stopped.
    */
   private keptLease(task: Task, crons: readonly Cron[], now: Date): string | null {
     if (task.leaseExpiresAt === undefined) {

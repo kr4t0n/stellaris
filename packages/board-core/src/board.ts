@@ -412,14 +412,22 @@ export interface UnreadConversation {
 /**
  * A message of a digest, with the conversation it is filed in: its scope and, but for the home,
  * its part, a thread's id, `#channel`, or `~project` as `conversationPart` gives. News is read by
- * any general conversation.
+ * any general conversation. `asked` marks a post that mentions the reader, or the user's post for
+ * the front desk.
  */
 interface DigestEntry {
   scope: Name;
   part: string | null;
   message: Message;
   news?: true;
+  asked?: true;
 }
+
+/**
+ * Which of a thread's posts ask a reader for a turn: none once it has closed, every one, only
+ * those that ask the reader, or those and the ones that mention the user, for a task's creator.
+ */
+type ThreadCount = "none" | "every" | "asked" | "asks-user";
 
 /** Where a conversation's cursor is kept. */
 function conversationKey(scope: string, part: string | null): string {
@@ -1876,21 +1884,34 @@ export class Board {
    * general channel, one of its other channels, one of its threads, or, in the society scope, a
    * project's channels. The heartbeat asks, so that it wakes a member where its unread
    * messages are and nowhere else. Society channels count only for a member woken in the society
-   * scope; a project member reads them at its next turn. Two kinds of post are in the digest but not
+   * scope; a project member reads them at its next turn. Some posts are in the digest but not
    * counted, and are read when the member wakes for something else: a task step's, which wakes
-   * whoever it hands work to, and the board's own, operations signals and landing announcements,
-   * whose signals that call for action wake their readers directly. A closed thread counts for
-   * nothing: its conversation has ended, and a turn there could only read its posts and be refused
-   * a reply, while a wake queued before it closed, as for a mention, still runs there.
+   * whoever it hands work to; the board's own, operations signals and landing announcements, whose
+   * signals that call for action wake their readers directly; and a knowledge topic's notice, which
+   * asks nothing of anyone. In a task's thread a post counts only for whoever the current stage is
+   * for, its holder or, while nobody holds it, a member who may take it, and for the task's creator
+   * when it mentions the user, so the creator can put a wait on the user in; a post that asks the
+   * reader counts wherever it is. A closed thread counts for nothing: its conversation has ended,
+   * and a turn there could only read its posts and be refused a reply, while a wake queued before
+   * it closed, as for a mention, still runs there.
    */
   async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
     const counts = new Map<string, UnreadConversation>();
-    const closed = new Map<Ulid, boolean>();
+    const threadCounts = new Map<Ulid, ThreadCount>();
     const unscoped = { name: actor.name, role: actor.role };
-    for (const { scope, part, message, news } of await this.digestSince(unscoped, cursors, upto)) {
+    for (const { scope, part, message, news, asked } of await this.digestSince(
+      unscoped,
+      cursors,
+      upto,
+    )) {
       // News waits for the citizen's next turn; it is never a reason for one.
-      if (news === true || message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
+      if (
+        news === true ||
+        message.step !== undefined ||
+        message.author === SYSTEM_ACTOR.name ||
+        message.notice?.kind === "knowledge"
+      ) {
         continue;
       }
       const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
@@ -1899,12 +1920,16 @@ export class Board {
       }
       const thread = threadOfPart(part);
       if (thread !== undefined) {
-        let ended = closed.get(thread);
-        if (ended === undefined) {
-          ended = (await this.tryFindThread(thread))?.thread.state === "closed";
-          closed.set(thread, ended);
+        let counted = threadCounts.get(thread);
+        if (counted === undefined) {
+          counted = await this.threadCount(actor, thread);
+          threadCounts.set(thread, counted);
         }
-        if (ended) {
+        const forReader =
+          counted === "every" ||
+          (counted !== "none" && asked === true) ||
+          (counted === "asks-user" && message.mentions.includes(USER_NAME));
+        if (!forReader) {
           continue;
         }
       }
@@ -2101,7 +2126,7 @@ export class Board {
         include = participates;
       }
       if (include && message.author !== actor.name) {
-        collected.push({ scope: filedIn, part, message });
+        collected.push({ scope: filedIn, part, message, ...(asked ? { asked: true } : {}) });
       }
     }
     return collected.toSorted(byId);
@@ -6417,11 +6442,7 @@ export class Board {
         ) {
           return true;
         }
-        if (task.status !== "open" || task.completing) {
-          return false;
-        }
-        const agent = await this.readAgent(actor.name);
-        return agent.memberships.includes(task.project) && mayHoldStage(actor, task);
+        return await this.mayTakeStage(actor, task);
       }
       if (subject?.kind === "proposal") {
         const proposal = await this.readProposal(subject.id);
@@ -6439,6 +6460,45 @@ export class Board {
       return false;
     }
     return false;
+  }
+
+  /** Whether a task's current stage waits for a holder and the member may take it. */
+  private async mayTakeStage(actor: Actor, task: Task): Promise<boolean> {
+    if (task.status !== "open" || task.completing) {
+      return false;
+    }
+    const agent = await this.readAgent(actor.name);
+    return agent.memberships.includes(task.project) && mayHoldStage(actor, task);
+  }
+
+  /**
+   * Which of a thread's posts count toward a reader's heartbeat (see `unreadByConversation`). A
+   * thread, or a task, the board cannot find counts as an open topic's would.
+   */
+  private async threadCount(actor: Actor, id: Ulid): Promise<ThreadCount> {
+    const found = await this.tryFindThread(id);
+    if (found?.thread.state === "closed") {
+      return "none";
+    }
+    const subject = found?.thread.subject;
+    const task =
+      subject?.kind === "task"
+        ? await this.findTask(subject.id).then(
+            (location) => location.task,
+            () => null,
+          )
+        : null;
+    if (task === null) {
+      return "every";
+    }
+    const stageIsTheirs =
+      task.status === "claimed"
+        ? task.claimedBy === actor.name
+        : await this.mayTakeStage(actor, task);
+    if (stageIsTheirs) {
+      return "every";
+    }
+    return task.createdBy === actor.name ? "asks-user" : "asked";
   }
 
   private async threadScopes(): Promise<string[]> {

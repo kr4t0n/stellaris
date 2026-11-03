@@ -923,8 +923,9 @@ function metrics(window: string) {
       idle: 3,
       unknown: 1,
       byTrigger: [
-        { trigger: "heartbeat", turns: 4, idle: 3 },
+        { trigger: "heartbeat", heartbeat: "held", turns: 3, idle: 3 },
         { trigger: "stage", turns: 8, idle: 0 },
+        { trigger: "heartbeat", turns: 1, idle: 0 },
       ],
       byAgent: [
         { agent: "stew", role: "steward", turns: 4, idle: 3 },

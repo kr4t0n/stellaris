@@ -266,7 +266,10 @@ export function isTaskStep(step: MessageStep): step is TaskStep {
   return "stage" in step;
 }
 
-/** A knowledge topic written, written again, or removed, of a project or, with null, of the society. */
+/**
+ * A knowledge topic written, written again, or removed, of a project or, with null, of the society.
+ * Its post asks nothing of anyone, so it counts toward no heartbeat and is read at the next turn.
+ */
 export const KnowledgeNoticeSchema = z.object({
   kind: z.literal("knowledge"),
   action: z.enum(["written", "updated", "removed"]),
@@ -277,7 +280,8 @@ export type KnowledgeNotice = z.infer<typeof KnowledgeNoticeSchema>;
 
 /**
  * What a verb recorded on the post it made about its work outside any thread, which the interface
- * draws as a notice rather than as talk. Unlike a step, it changes no wake. One member per kind.
+ * draws as a notice rather than as talk. Each kind says whether its post counts toward a
+ * heartbeat. One member per kind.
  */
 export const MessageNoticeSchema = z.discriminatedUnion("kind", [KnowledgeNoticeSchema]);
 export type MessageNotice = z.infer<typeof MessageNoticeSchema>;

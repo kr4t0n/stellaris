@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalTimeZone,
+  cronFailure,
   CronFrontmatterSchema,
+  cronStoppedAt,
   CronScheduleSchema,
   fireTimes,
   localTime,
@@ -27,6 +29,11 @@ function cron(fields: Partial<CronFrontmatter> = {}): CronFrontmatter {
 }
 
 const iso = (date: Date | null) => date?.toISOString() ?? null;
+
+/** How the turn of a cron's latest fire ended, and when. */
+const run = (outcome: "completed" | "failed" | "stopped", at: string) => ({
+  lastRun: { turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAW", at, outcome },
+});
 
 describe("crons", () => {
   it("reads an expression in its own zone, else the society's", () => {
@@ -74,6 +81,47 @@ describe("crons", () => {
     const once = { schedule: { at: "2026-10-10T12:00:00.000Z" } };
     expect(iso(nextFire(cron(once), "UTC"))).toBe("2026-10-10T12:00:00.000Z");
     expect(nextFire(cron({ ...once, lastFiredAt: "2026-10-10T12:00:01.000Z" }), "UTC")).toBeNull();
+  });
+
+  it("counts a cron pending until it is paused, ended, or its latest fire's turn failed, whichever came first", () => {
+    const paused = { paused: { at: "2026-10-10T12:00:00.000Z", by: "eng-1" } };
+    const ended = { ended: { at: "2026-10-10T13:00:00.000Z", by: "eng-1", reason: "done" } };
+    expect(cronStoppedAt(cron())).toBeNull();
+    expect(cronStoppedAt(cron(paused))).toBe("2026-10-10T12:00:00.000Z");
+    expect(cronStoppedAt(cron(ended))).toBe("2026-10-10T13:00:00.000Z");
+    expect(cronStoppedAt(cron({ ...paused, ...ended }))).toBe("2026-10-10T12:00:00.000Z");
+    expect(cronStoppedAt(cron(run("failed", "2026-10-10T11:02:00.000Z")))).toBe(
+      "2026-10-10T11:02:00.000Z",
+    );
+    // A completed turn, or one the user stopped, leaves it pending.
+    expect(cronStoppedAt(cron(run("completed", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    expect(cronStoppedAt(cron(run("stopped", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    // A failure before a pause stopped it first; a turn that failed after the pause, later.
+    expect(cronStoppedAt(cron({ ...paused, ...run("failed", "2026-10-10T11:02:00.000Z") }))).toBe(
+      "2026-10-10T11:02:00.000Z",
+    );
+    expect(cronStoppedAt(cron({ ...paused, ...run("failed", "2026-10-10T12:02:00.000Z") }))).toBe(
+      "2026-10-10T12:00:00.000Z",
+    );
+  });
+
+  it("counts a failed fire no more once a turn has caught it up, and a pause or an end as before", () => {
+    const failed = run("failed", "2026-10-10T11:02:00.000Z");
+    const caughtUp = {
+      lastRun: {
+        ...failed.lastRun,
+        caughtUp: { turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAX", at: "2026-10-10T11:20:00.000Z" },
+      },
+    };
+    expect(cronFailure(cron(failed))).toEqual(failed.lastRun);
+    expect(cronFailure(cron(caughtUp))).toBeNull();
+    expect(cronStoppedAt(cron(caughtUp))).toBeNull();
+    expect(
+      cronStoppedAt(cron({ ...caughtUp, paused: { at: "2026-10-10T12:00:00.000Z", by: "eng-1" } })),
+    ).toBe("2026-10-10T12:00:00.000Z");
+    expect(cronFailure(cron(run("completed", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    expect(cronFailure(cron(run("stopped", "2026-10-10T11:02:00.000Z")))).toBeNull();
+    expect(cronFailure(cron())).toBeNull();
   });
 
   it("takes time zones by their IANA names, as Intl canonicalizes them, and five fields only", () => {

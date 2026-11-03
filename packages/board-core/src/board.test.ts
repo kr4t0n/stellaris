@@ -1,11 +1,26 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
+import {
+  cronFailure,
+  cronStoppedAt,
+  IMAGE_LIMIT_BYTES,
+  MEMBER_VERBS,
+  VERB_DESCRIPTIONS,
+  type TurnExitReason,
+  type Ulid,
+} from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Board, BoardError, SYSTEM_ACTOR, type Actor, type TurnInFlight } from "./index.js";
+import {
+  Board,
+  BoardError,
+  SYSTEM_ACTOR,
+  type Actor,
+  type BoardOptions,
+  type TurnInFlight,
+} from "./index.js";
 
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
@@ -74,11 +89,12 @@ describe("Board", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function society() {
+  /** A society whose leases last a minute, unless `options` gives the board's own. */
+  async function society(options: BoardOptions = { leaseMs: 60_000 }) {
     const { board, userToken } = await Board.init(
       dir,
       { name: "test society" },
-      { now, leaseMs: 60_000 },
+      { now, ...options },
     );
     // A second channel, beside the default general, for topics that do not belong in it.
     await board.addProject(USER, { slug: "demo", channels: ["general", "dev"] });
@@ -615,11 +631,12 @@ describe("Board", () => {
     });
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
     const open = await board.openThread(ENG, { channel: "demo/dev", title: "and the date?" });
-    // A front desk, in no project, takes part in the task's thread from the society scope.
+    // A front desk, in no project, takes part in the task's thread from the society scope, where
+    // the user's posts ask it for a turn.
     const FRONT: Actor = { name: "concierge-1", role: "concierge" };
     await board.addAgent(USER, { name: FRONT.name, role: FRONT.role, cli: "claude" });
     await board.postMessage(FRONT, { thread_id: task.id, body: "who takes this?" });
-    const inTask = await board.postMessage(REV, { thread_id: task.id, body: "the spec" });
+    const inTask = await board.postMessage(USER, { thread_id: task.id, body: "the spec" });
     await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
     await board.postMessage(REV, { thread_id: open.id, body: "next week" });
     await board.postMessage(REV, { thread_id: open.id, body: "or the week after" });
@@ -645,6 +662,115 @@ describe("Board", () => {
         await board.readDigest({ ...ENG, scope: "demo", thread: task.id }, { advance: false })
       ).messages.map((m) => m.id),
     ).toContain(inTask.id);
+  });
+
+  it("counts a task's thread for whoever its stage is for, and for its creator a post asking the user", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const unread = async (actor: Actor, thread: Ulid): Promise<number> =>
+      (await board.unreadByConversation(actor)).find((entry) => entry.thread === thread)?.count ??
+      0;
+    // rev-1 files it, eng-1 builds, and eng-2's check waits for a holder.
+    const task = await board.createTask(REV, {
+      project: "demo",
+      title: "build",
+      stages: [
+        { name: "build", agent: "eng-1" },
+        { name: "check", agent: "eng-2" },
+      ],
+    });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id, note: "Built." });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which cache?" });
+
+    // While nobody holds the stage, a post asks a turn of whoever may take it, not of the earlier
+    // holder or the creator, who read it at their next turn there.
+    await board.postMessage(USER, { thread_id: task.id, body: "Is the cache warm?" });
+    expect(await unread(ENG2, task.id)).toBe(1);
+    expect(await unread(ENG, task.id)).toBe(0);
+    expect(await unread(REV, task.id)).toBe(0);
+    expect(
+      (
+        await board.readDigest({ ...REV, scope: "demo", thread: task.id }, { advance: false })
+      ).messages.map((m) => m.body),
+    ).toEqual(["Built.\n", "Is the cache warm?\n"]);
+
+    // Held, it asks the holder's; a post asking the user asks the creator's too.
+    await board.claimTask(ENG2, { task_id: task.id });
+    await board.postMessage(ENG, { thread_id: task.id, body: "@user ship it today?" });
+    expect(await unread(ENG2, task.id)).toBe(2);
+    expect(await unread(REV, task.id)).toBe(1);
+    expect(await unread(ENG, task.id)).toBe(0);
+
+    // A mention asks whoever it names, wherever the stage is.
+    await board.postMessage(ENG2, { thread_id: task.id, body: "@eng-1 which flag?" });
+    expect(await unread(ENG, task.id)).toBe(1);
+    expect(await unread(REV, task.id)).toBe(1);
+
+    // A topic's thread asks every participant, as before.
+    await board.postMessage(ENG2, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "or a fresh one" });
+    expect(await unread(ENG, topic.id)).toBe(2);
+    expect(await unread(ENG2, topic.id)).toBe(1);
+
+    // A blocked task's stage wakes nobody by itself, but a post in its thread still asks a turn of
+    // whoever may take it, and of nobody else.
+    const later = await board.createTask(REV, {
+      project: "demo",
+      title: "ship",
+      stages: [{ name: "ship", agent: "eng-1" }],
+    });
+    await board.updateTask(REV, { task_id: later.id, blocked_by: [task.id] });
+    await board.postMessage(ENG2, { thread_id: later.id, body: "Waiting on the check." });
+    expect(await unread(ENG, later.id)).toBe(1);
+    expect(await unread(REV, later.id)).toBe(0);
+  });
+
+  it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
+    const { board } = await society();
+    const STEW: Actor = { name: "stew", role: "steward" };
+    await board.addAgent(USER, { ...STEW, cli: "claude" });
+    const home = async (actor: Actor, scope: string): Promise<number> =>
+      (await board.unreadByConversation(actor)).find(
+        (entry) =>
+          entry.scope === scope &&
+          entry.thread === null &&
+          entry.channel === null &&
+          entry.place === null,
+      )?.count ?? 0;
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Warm.",
+      revision: 0,
+    });
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Cold.",
+      revision: 1,
+    });
+    await board.removeKnowledge(REV, { project: "demo", topic: "cache" });
+    await board.writeKnowledge(USER, {
+      project: null,
+      topic: "style",
+      body: "Short.",
+      revision: 0,
+    });
+    expect(await home(ENG, "demo")).toBe(0);
+    expect(await home(STEW, "society")).toBe(0);
+    // The notices stay in the digest, read at the next turn.
+    expect(
+      (await board.readDigest({ ...ENG, scope: "demo" }, { advance: false })).messages.map(
+        (m) => m.notice?.action,
+      ),
+    ).toEqual(["written", "updated", "removed", "written"]);
+
+    await board.postMessage(REV, { channel: "demo/general", body: "the cache is cold" });
+    await board.postMessage(ENG, { channel: "general", body: "the style guide is short" });
+    expect(await home(ENG, "demo")).toBe(1);
+    expect(await home(STEW, "society")).toBe(1);
   });
 
   it("files a channel's posts beside general in a conversation of its own, until it is archived", async () => {
@@ -1160,6 +1286,59 @@ describe("Board", () => {
     );
   });
 
+  it("keeps a holder's lease while its cron in the task's thread is pending, then a lease from its pause or end", async () => {
+    // The board's own lease, thirty minutes.
+    const { board } = await society({});
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    const lapses = async () =>
+      (await board.readEvents(null)).filter((e) => e.type === "lease.expired").length;
+    const stage = (title: string) =>
+      board.createTask(USER, {
+        project: "demo",
+        title,
+        stages: [{ name: "build", agent: "eng-1" }],
+      });
+    const watched = await stage("watched");
+    const other = await stage("watched from home");
+    const inTask = { ...ENG, scope: "demo", thread: watched.id };
+    await board.claimTask(inTask, { task_id: watched.id });
+    await board.claimTask({ ...ENG, scope: "demo", thread: other.id }, { task_id: other.id });
+    const daily = { note: "Read the run.", cron: "0 12 * * *" };
+    const cron = await board.createCron(inTask, { title: "Check", ...daily });
+    // A cron at the holder's home keeps nothing: that claim lapses as before.
+    await board.createCron({ ...ENG, scope: "demo" }, { title: "Elsewhere", ...daily });
+
+    await sweep(120);
+    expect(await holder(watched.id)).toBe("eng-1");
+    expect(await holder(other.id)).toBeUndefined();
+    expect(await lapses()).toBe(1);
+
+    // Paused, the cron leaves the holder a whole lease from then, not from the last renewal.
+    await board.updateCron(inTask, { cron_id: cron.id, paused: true });
+    await sweep(29);
+    expect(await holder(watched.id)).toBe("eng-1");
+    await sweep(1);
+    expect(await holder(watched.id)).toBeUndefined();
+    expect(await lapses()).toBe(2);
+
+    // Resumed and held again, then ended: the same from its end.
+    await board.updateCron(inTask, { cron_id: cron.id, paused: false });
+    await board.claimTask(inTask, { task_id: watched.id });
+    await sweep(50);
+    await board.removeCron(inTask, { cron_id: cron.id, reason: "the run is done" });
+    await sweep(29);
+    expect(await holder(watched.id)).toBe("eng-1");
+    await sweep(1);
+    expect(await holder(watched.id)).toBeUndefined();
+    expect(await lapses()).toBe(3);
+  });
+
   it("enforces role charters and the lifecycle's ends", async () => {
     const { board } = await society();
     await expect(
@@ -1282,9 +1461,12 @@ describe("Board", () => {
         { id: "s3", name: "referee review", role: "researcher", gate: true },
       ],
     ];
+    // The refusal says how to ask, since a plain post in the thread wakes only whoever the
+    // current stage is for.
     for (const stages of refused) {
       await expect(board.planTask(RES, { task_id: task.id, stages })).rejects.toMatchObject({
         code: "FORBIDDEN",
+        message: expect.stringMatching(/; ask one of them in the task's thread, with a mention$/),
       });
     }
     await expect(
@@ -3419,6 +3601,52 @@ describe("Board", () => {
     expect(fired?.ended).toMatchObject({ by: "board", reason: "fired once, as set" });
     // An ended cron does not fire again, though the scheduler read it before it ended.
     expect(await board.cronFired(once.id, "2026-09-28T15:00:01.000Z")).toBeNull();
+  });
+
+  it("marks a cron's failed fire caught up by a completed turn shown it, and that failure alone", async () => {
+    const { board } = await society();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Hourly", note: "Check.", cron: "0 * * * *" },
+    );
+    const fire = async () => {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, clock.toISOString()),
+        crons: [cron.id],
+      });
+      await board.finishTurn({ ...turn, endedAt: clock.toISOString(), exitReason: "error" });
+      return turn.id ?? "";
+    };
+    const shown = async (turnId: string, exitReason: TurnExitReason) => {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, clock.toISOString()),
+        cronFailures: [{ cron: cron.id, turnId }],
+      });
+      await board.finishTurn({ ...turn, endedAt: clock.toISOString(), exitReason });
+      return { id: turn.id, cron: await board.readCron(cron.id) };
+    };
+    const first = await fire();
+    // A turn that failed, timed out, was stopped, or was interrupted saw nothing through.
+    for (const exitReason of ["error", "timeout", "stopped", "interrupted"] as const) {
+      expect(cronFailure((await shown(first, exitReason)).cron)).not.toBeNull();
+    }
+    // A later failure is not the one an earlier turn was shown.
+    const second = await fire();
+    expect(cronFailure((await shown(first, "completed")).cron)).not.toBeNull();
+    clock = new Date(clock.getTime() + 60_000);
+    const caught = await shown(second, "completed");
+    expect(caught.cron).toMatchObject({
+      failures: 2,
+      lastRun: {
+        turnId: second,
+        outcome: "failed",
+        caughtUp: { turnId: caught.id, at: clock.toISOString() },
+      },
+    });
+    expect(cronStoppedAt(caught.cron)).toBeNull();
+    // The next fire's run replaces it whole.
+    await fire();
+    expect((await board.readCron(cron.id)).lastRun?.caughtUp).toBeUndefined();
   });
 
   it("ends a cron with the conversation it fires in", async () => {

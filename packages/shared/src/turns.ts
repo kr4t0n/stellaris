@@ -30,6 +30,14 @@ export const TriggerKindSchema = z.enum([
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 
+/**
+ * What a heartbeat woke a conversation for, the first that applies: `unread`, posts it has not
+ * read; `held`, a stage it holds; `waiting`, a stage it may take. News comes first, since a held or
+ * waiting stage alone would wake it on every heartbeat.
+ */
+export const HeartbeatCauseSchema = z.enum(["unread", "held", "waiting"]);
+export type HeartbeatCause = z.infer<typeof HeartbeatCauseSchema>;
+
 export const TriggerSchema = z.object({
   kind: TriggerKindSchema,
   from: NameSchema.optional(),
@@ -41,6 +49,8 @@ export const TriggerSchema = z.object({
   channel: ChannelRefSchema.optional(),
   /** The cron that came due, for a `cron` wake. */
   cronId: UlidSchema.optional(),
+  /** What a `heartbeat` woke for; absent on records from before the board kept it. */
+  heartbeat: HeartbeatCauseSchema.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;
@@ -211,6 +221,12 @@ export const TurnRecordSchema = z.object({
   sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),
+  /**
+   * The failed fires its prompt named: each of its citizen's crons in its conversation whose latest
+   * fire's turn failed with nothing catching it up (`cronFailure`), but those it carries, with that
+   * turn. Completing it catches each up.
+   */
+  cronFailures: z.array(z.object({ cron: UlidSchema, turnId: UlidSchema })).optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 

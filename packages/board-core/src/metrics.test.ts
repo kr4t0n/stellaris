@@ -1,4 +1,9 @@
-import { TaskFrontmatterSchema, type BoardEvent, type Task } from "@stellaris/shared";
+import {
+  MetricsSchema,
+  TaskFrontmatterSchema,
+  type BoardEvent,
+  type Task,
+} from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { computeMetrics, type MetricsInput } from "./metrics.js";
 
@@ -19,8 +24,20 @@ function event(ts: string, type: BoardEvent["type"], actor: string, payload: obj
   };
 }
 
-function turn(ts: string, agent: string, trigger: string, turnId: string): BoardEvent {
-  return event(ts, "turn.completed", agent, { turnId, project: "lab", thread: A, trigger });
+function turn(
+  ts: string,
+  agent: string,
+  trigger: string,
+  turnId: string,
+  heartbeat?: string,
+): BoardEvent {
+  return event(ts, "turn.completed", agent, {
+    turnId,
+    project: "lab",
+    thread: A,
+    trigger,
+    ...(heartbeat === undefined ? {} : { heartbeat }),
+  });
 }
 
 function mention(ts: string, name: string, channel: string, thread?: string): BoardEvent {
@@ -95,6 +112,41 @@ function input(events: BoardEvent[], extra: Partial<MetricsInput> = {}): Metrics
 }
 
 describe("metrics", () => {
+  it("splits heartbeats by what each woke for, and keeps those recorded without it as plain", () => {
+    const metrics = computeMetrics(
+      input(
+        [
+          turn("10-01T08:00:00", "eng-1", "heartbeat", "T1", "held"),
+          turn("10-01T08:15:00", "eng-1", "heartbeat", "T2", "held"),
+          turn("10-01T08:30:00", "eng-1", "heartbeat", "T3", "unread"),
+          turn("10-01T08:45:00", "rev-1", "heartbeat", "T4", "waiting"),
+          turn("10-01T09:00:00", "rev-1", "heartbeat", "T5"),
+          turn("10-01T09:15:00", "rev-1", "heartbeat", "T6", "a cause from a later board"),
+          turn("10-01T09:30:00", "eng-1", "stage", "T7"),
+        ],
+        {
+          actions: new Map([
+            ["T1", 0],
+            ["T2", 0],
+            ["T3", 2],
+            ["T4", 0],
+            ["T5", 0],
+            ["T6", 1],
+            ["T7", 3],
+          ]),
+        },
+      ),
+    );
+    expect(metrics.idle.byTrigger).toEqual([
+      { trigger: "heartbeat", heartbeat: "held", turns: 2, idle: 2 },
+      { trigger: "heartbeat", turns: 2, idle: 1 },
+      { trigger: "heartbeat", heartbeat: "waiting", turns: 1, idle: 1 },
+      { trigger: "heartbeat", heartbeat: "unread", turns: 1, idle: 0 },
+      { trigger: "stage", turns: 1, idle: 0 },
+    ]);
+    expect(MetricsSchema.parse(metrics)).toEqual(metrics);
+  });
+
   it("counts turns that changed nothing, leaving reflections out and turns without transcripts apart", () => {
     const metrics = computeMetrics(
       input(

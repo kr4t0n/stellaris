@@ -18,7 +18,11 @@ test("the metrics open from the top bar, and the window is part of the address",
   await expect(view).toContainText("3 of 12 working turns changed nothing on the board 25%");
   await expect(view).toContainText("1 turn kept no transcript and could not be counted.");
   const woken = view.getByRole("table", { name: "By what woke them" });
-  await expect(woken.getByRole("row", { name: /a heartbeat/ })).toContainText("4375%");
+  // A heartbeat says what it woke for, unless it was recorded before the board kept that.
+  await expect(woken.getByRole("row", { name: /a heartbeat, for a held stage/ })).toContainText(
+    "33100%",
+  );
+  await expect(woken.getByRole("cell", { name: "a heartbeat", exact: true })).toBeVisible();
   await expect(woken.getByRole("row", { name: /a stage to take/ })).not.toContainText("%");
   await expect(view).toContainText("1 of 2 finished tasks were sent back, 1 time in all");
   await expect(view).toContainText("4.5 posts a task, across 2 finished tasks");

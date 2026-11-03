@@ -129,7 +129,19 @@ describe("config-home rendering", () => {
       ...places,
     });
     expect(text).toContain(
-      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread.",
+      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread, with a mention.",
+    );
+  });
+
+  it("says whom a post in a task's thread wakes, as the heartbeat counts it", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change.",
     );
   });
 
@@ -157,7 +169,10 @@ describe("config-home rendering", () => {
       "Never wait by sleeping or leaving a process running: a turn's board token ends with the turn",
     );
     expect(text).toContain(
-      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and your turns in the task's thread renew its lease.",
+      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and while it is pending in the task's thread, neither ended nor paused, with its latest fire's turn not failed or a turn of yours there completed since, the board keeps your lease and the heartbeat leaves the stage to it, waking you there only for a post you have not read.",
+    );
+    expect(text).toContain(
+      "Holding a stage is a lease; every turn that touches the task renews it, and so does the board while a cron of yours in the task's thread is pending.",
     );
     expect(text).toContain(
       "Release a stage only to hand it on, or once its task's blocked_by names the tasks it waits on: the stage then wakes nobody until the last of them ends.",

@@ -25,6 +25,7 @@ import {
   BranchFileDiffSchema,
   BranchFileSchema,
   CliQuotaSchema,
+  cronStoppedAt,
   HOME_FILE_LIMIT_BYTES,
   MEMBER_VERBS,
   PATH_TOKENS,
@@ -996,6 +997,275 @@ describe("turns on a runner over the runner protocol", () => {
         /^turn_cost: 2 turn\(s\) completed for \$3\.00 in 2 hourly report\(s\) /,
       ),
     ]);
+  });
+
+  it("names a one-time cron whose fire's turn failed in the next turn's notice, with its note", async () => {
+    const { board } = await Board.init(dir, { name: "cron-failed" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const cron = await board.createCron(
+      { name: "eng-1", role: "engineer", scope: "demo" },
+      {
+        title: "Look again",
+        note: "Is the fix live?",
+        at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    );
+    const prompts: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve(
+          prompts.length === 1
+            ? { ...completed(""), status: null, exitReason: "error", error: "the CLI ended" }
+            : completed("looked"),
+        );
+      },
+    };
+    const { run } = await start(board, backend);
+    // The scheduler records the fire, which ends a one-time cron, then dispatches its turn.
+    await board.cronFired(cron.id, new Date().toISOString());
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: {
+        kind: "cron",
+        fromUser: false,
+        reason: 'cron "Look again" came due',
+        cronId: cron.id,
+      },
+      priority: 1,
+      crons: [cron.id],
+    });
+    expect(await board.readCron(cron.id)).toMatchObject({
+      ended: { reason: "fired once, as set" },
+      lastRun: { outcome: "failed" },
+    });
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual", fromUser: false, reason: "test" },
+      priority: 1,
+    });
+    expect(prompts[1]).toContain(
+      "## Cron fires that did not finish\n\nThe turn of this cron's latest fire here failed, so what its note asks may not be done:",
+    );
+    expect(prompts[1]).toContain(`- "Look again" (cron ${cron.id}), set by eng-1 at`);
+    expect(prompts[1]).toContain("It fired once, as set, and has ended.\n\n  Is the fix live?");
+  });
+
+  /**
+   * A task whose one stage eng-1 holds, with a daily cron of eng-1's in the task's thread whose
+   * fire's turn has just failed, and a scheduler over the runner whose heartbeat comes every ten
+   * seconds, all on one clock, with leases of a minute. Each turn ends as `outcomes` says, else
+   * completes; `turns` keeps who took each and its prompt.
+   */
+  async function failedFire(name: string) {
+    let clock = Date.parse("2026-10-10T10:00:00.000Z");
+    const now = () => new Date(clock);
+    const { board } = await Board.init(dir, { name }, { now, leaseMs: 60_000 });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const agent of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, {
+        name: agent,
+        role: "engineer",
+        cli: "claude",
+        memberships: ["demo"],
+      });
+    }
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "watch the run",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const inTask = { name: "eng-1", role: "engineer", scope: "demo", thread: task.id };
+    await board.claimTask(inTask, { task_id: task.id });
+    const cron = await board.createCron(inTask, {
+      title: "Check the run",
+      note: "Read the run.",
+      cron: "0 12 * * *",
+    });
+    const turns: Array<{ agent: string; prompt: string }> = [];
+    const outcomes: TurnResult[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(randomUUID()),
+      runTurn: (request) => {
+        turns.push({ agent: request.spec.agent, prompt: request.prompt });
+        return Promise.resolve(outcomes.shift() ?? completed("done"));
+      },
+    };
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }), now });
+    const { run } = society;
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now,
+      timings: {
+        debounceMs: 0,
+        userDebounceMs: 0,
+        heartbeatMs: 10_000,
+        waitingStageMs: 3_600_000,
+        leaseSweepMs: 1_000,
+      },
+    });
+    // Onboarding and the stage's wake run first, and the heartbeat's cadence starts.
+    for (let i = 0; i < 4; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    const inThread = { thread: { id: task.id, task: true } };
+    await board.cronFired(cron.id, now().toISOString());
+    outcomes.push(failure);
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      ...inThread,
+      trigger: { kind: "cron", fromUser: false, reason: "", cronId: cron.id },
+      priority: 1,
+      crons: [cron.id],
+    });
+    expect(await board.readCron(cron.id)).toMatchObject({ lastRun: { outcome: "failed" } });
+    /** Heartbeats of the cadence, each run to its end, and eng-1's heartbeats in the thread among them. */
+    const beats = async (count: number): Promise<number> => {
+      const before = await heldBeats();
+      for (let i = 0; i < count; i += 1) {
+        clock += 10_000;
+        await scheduler.tick();
+        await scheduler.drain();
+      }
+      return (await heldBeats()) - before;
+    };
+    const heldBeats = async (): Promise<number> =>
+      (await board.readEvents(null)).filter(
+        (event) =>
+          event.type === "turn.started" &&
+          event.actor === "eng-1" &&
+          event.payload["thread"] === task.id &&
+          event.payload["trigger"] === "heartbeat",
+      ).length;
+    // The cron is never paused or ended here, so only its failed fire can stop it.
+    const stillFailed = async (): Promise<boolean> =>
+      cronStoppedAt(await board.readCron(cron.id)) !== null;
+    const leaseKept = async (): Promise<boolean> =>
+      (await board.getTask(USER, { task_id: task.id })).claimedBy === "eng-1" &&
+      (await board.readEvents(null)).every((event) => event.type !== "lease.expired");
+    return { board, task, cron, run, turns, outcomes, inThread, beats, stillFailed, leaseKept };
+  }
+
+  /** A turn its CLI ended before it finished. */
+  const failure: TurnResult = {
+    ...completed(""),
+    status: null,
+    exitReason: "error",
+    error: "the CLI ended",
+  };
+
+  it("ends the heartbeat's wakes for a failed cron fire once the holder's next turn there, shown it, completes, and keeps the lease", async () => {
+    const { board, cron, turns, beats, stillFailed, leaseKept } = await failedFire("catch-up");
+    // The first heartbeat wakes the holder, whose turn is shown the failure and completes.
+    expect(await beats(1)).toBe(1);
+    const shown = turns.at(-1)?.prompt ?? "";
+    // Thirty heartbeats across five leases of a minute: none wakes it, and the lease holds.
+    expect(await beats(30)).toBe(0);
+    expect(await leaseKept()).toBe(true);
+    expect(await stillFailed()).toBe(false);
+    expect(shown).toContain(
+      "## Cron fires that did not finish\n\nThe turn of this cron's latest fire here failed, so what its note asks may not be done:",
+    );
+    expect(shown).toContain(`- "Check the run" (cron ${cron.id}),`);
+    expect(shown).toContain("  Read the run.");
+    // The cron's schedule and its run of failures are as they were.
+    expect(await board.readCron(cron.id)).toMatchObject({
+      schedule: { cron: "0 12 * * *" },
+      failures: 1,
+      lastRun: { outcome: "failed", caughtUp: { at: expect.any(String) } },
+    });
+  });
+
+  it("counts no turn elsewhere, no other citizen's, and no stopped one as catching a failed fire up", async () => {
+    const { board, task, run, turns, outcomes, inThread, beats, stillFailed } =
+      await failedFire("not-caught");
+    const exitOf = async (agent: string, thread?: string) =>
+      (await board.readLastTurn(agent, "demo", thread))?.exitReason;
+    // eng-1's own home conversation.
+    await run(manual("eng-1", "demo"));
+    expect(await exitOf("eng-1")).toBe("completed");
+    expect(turns.at(-1)?.prompt).not.toContain("## Cron fires that did not finish");
+    expect(await stillFailed()).toBe(true);
+    // Another citizen in the task's thread.
+    await run({ ...manual("eng-2", "demo"), ...inThread });
+    expect(await exitOf("eng-2", task.id)).toBe("completed");
+    expect(turns.at(-1)?.prompt).not.toContain("## Cron fires that did not finish");
+    expect(await stillFailed()).toBe(true);
+    // eng-1's turn in the thread that the user stopped, though it was shown the failure.
+    outcomes.push({ ...completed(""), status: null, exitReason: "stopped" });
+    await run({ ...manual("eng-1", "demo"), ...inThread });
+    expect(await exitOf("eng-1", task.id)).toBe("stopped");
+    expect(turns.at(-1)?.prompt).toContain("## Cron fires that did not finish");
+    expect(await stillFailed()).toBe(true);
+    // So the heartbeat still wakes the holder for the stage.
+    expect(await beats(1)).toBe(1);
+  });
+
+  it("names a failed fire again after a failed turn between, and ends the wakes only once a turn completes", async () => {
+    const { cron, turns, outcomes, beats, stillFailed, leaseKept } = await failedFire("between");
+    // A heartbeat's turn that fails, as the fire's did.
+    outcomes.push(failure);
+    expect(await beats(1)).toBe(1);
+    expect(turns.at(-1)?.prompt).toContain(`- "Check the run" (cron ${cron.id}),`);
+    expect(await stillFailed()).toBe(true);
+    // The next is shown it still, though the turn before it carried no cron, and completes.
+    expect(await beats(1)).toBe(1);
+    const shown = turns.at(-1)?.prompt ?? "";
+    expect(shown).toContain("## Your previous turn did not finish");
+    expect(shown).toContain(
+      `## Cron fires that did not finish\n\nThe turn of this cron's latest fire here failed, so what its note asks may not be done:\n\n- "Check the run" (cron ${cron.id}),`,
+    );
+    expect(await stillFailed()).toBe(false);
+    expect(await beats(30)).toBe(0);
+    expect(await leaseKept()).toBe(true);
+  });
+
+  it("quotes a failed cron's note once in a turn that carries the cron again", async () => {
+    const { board, cron, run, turns, inThread } = await failedFire("note-once");
+    // The fire again, as a transient retry or the cron's next fire brings it.
+    await run({
+      agent: "eng-1",
+      project: "demo",
+      ...inThread,
+      trigger: { kind: "cron", fromUser: false, reason: "", cronId: cron.id },
+      priority: 1,
+      crons: [cron.id],
+    });
+    const prompt = turns.at(-1)?.prompt ?? "";
+    expect(prompt.split("  Read the run.")).toHaveLength(2);
+    expect(prompt).toContain(
+      `(cron ${cron.id}), set by eng-1 at ${cron.createdAt}, fires \`0 12 * * *\` in the society's time zone, UTC. The turn of its previous fire failed at`,
+    );
+    expect(prompt).not.toContain("## Cron fires that did not finish");
+    expect(prompt).toContain("## Your previous turn did not finish");
+    // Its own run settles it, as before.
+    expect(await board.readCron(cron.id)).toMatchObject({ lastRun: { outcome: "completed" } });
   });
 
   it("sums the spend reports logged since a reader's last turn into one line", async () => {

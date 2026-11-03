@@ -2,6 +2,7 @@ import {
   addUsage,
   SOCIETY_SCOPE,
   type CitizenTokens,
+  type HeartbeatCause,
   type Member,
   type MetricsWindow,
   type TurnHistoryEntry,
@@ -35,6 +36,20 @@ export function scopeChoices(scopes: readonly string[]): Choice[] {
 /** How long a finished turn ran, from the start the log recorded; null when that is missing. */
 export function turnLength(entry: TurnHistoryEntry): string | null {
   return entry.startedAt === undefined ? null : elapsed(entry.startedAt, Date.parse(entry.ts));
+}
+
+/** What a heartbeat woke for, in words, after the trigger's: Metrics and the Turns tab both read it. */
+export const HEARTBEATS: Readonly<Record<HeartbeatCause, string>> = {
+  unread: "for unread posts",
+  held: "for a held stage",
+  waiting: "for a stage to take",
+};
+
+/** What woke a finished turn: its trigger, and for a heartbeat what it woke for, once the board kept it. */
+export function wokenBy(entry: TurnHistoryEntry): string {
+  return entry.heartbeat === undefined
+    ? entry.trigger
+    : `${entry.trigger} ${HEARTBEATS[entry.heartbeat]}`;
 }
 
 const ENDINGS: Readonly<Record<string, string>> = {

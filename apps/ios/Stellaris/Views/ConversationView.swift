@@ -260,8 +260,9 @@ struct ReadOnlyLine: View {
 /// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
 /// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
 /// citizens to mention above it, as on the web, and a pick completes the name. Photos and Paste
-/// beside Send put images in it as the web's composer does: each holds its place at the caret with
-/// a line saying it uploads, which the board's markdown for it replaces, and Send waits for them.
+/// beside Send, and Paste in the draft's own menu, put images in it as the web's composer does:
+/// each holds its place at the caret with a line saying it uploads, which the board's markdown for
+/// it replaces, and Send waits for them.
 struct DraftField: View {
   /// What Paste takes, most precise first: the kinds the board keeps, then any image, which goes as
   /// a JPEG.
@@ -315,6 +316,11 @@ struct DraftField: View {
         .foregroundStyle(MessageColor.primary)
         .focused($focused)
         .accessibilityIdentifier("draft")
+        // The draft's own Paste, from its menu, hands over an image it can't hold as text; text
+        // still pastes as the field's own.
+        .pasteDestination(for: PastedImage.self) { images in
+          upload(images.map(\.data))
+        }
         .padding(.leading, 12)
         .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 10)
@@ -380,6 +386,19 @@ struct DraftField: View {
     for item in items {
       Task {
         let data = try? await item.loadTransferable(type: Data.self)
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
+      }
+    }
+  }
+
+  /// Uploads the images the draft's own Paste handed over.
+  private func upload(_ images: [Data]) {
+    guard !images.isEmpty else {
+      return
+    }
+    let held = hold(images.count)
+    for data in images {
+      Task {
         follow(await model.upload(data, holding: held, in: conversation) { caret() })
       }
     }
@@ -484,6 +503,16 @@ struct DraftField: View {
       }
       sending = false
     }
+  }
+}
+
+/// An image on the pasteboard as its bytes, in whatever kind of image it is, for the draft's own
+/// Paste.
+struct PastedImage: Transferable, Sendable {
+  let data: Data
+
+  static var transferRepresentation: some TransferRepresentation {
+    DataRepresentation(importedContentType: .image) { data in PastedImage(data: data) }
   }
 }
 

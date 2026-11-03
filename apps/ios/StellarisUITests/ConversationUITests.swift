@@ -49,6 +49,49 @@ final class ConversationUITests: ShellTestCase {
     keepScreen("image-posted")
   }
 
+  /// The draft's own Paste, from the menu a long press opens, puts an image copied in the draft as
+  /// the Paste button does.
+  @MainActor func testPastesAnImageFromTheDraftsOwnMenu() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("Long: ")
+    let size = CGSize(width: 320, height: 200)
+    UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { context in
+      UIColor.systemOrange.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+    }
+    box.press(forDuration: 1.2)
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "the draft's menu has no Paste for an image")
+    keepScreen("draft-menu-image")
+    paste.tap()
+    XCTAssertTrue(
+      draft(box, matches: #"Long: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\)"#),
+      "the image pasted from the draft's menu isn't in the draft")
+    keepScreen("draft-menu-pasted")
+  }
+
+  /// With text copied, the draft's own Paste pastes the text, as it did before it took images.
+  @MainActor func testStillPastesTextFromTheDraftsOwnMenu() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("Text: ")
+    UIPasteboard.general.string = "plain words"
+    box.press(forDuration: 1.2)
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "the draft's menu has no Paste for text")
+    paste.tap()
+    XCTAssertTrue(
+      draft(box, matches: #"Text: plain words"#),
+      "text pasted from the draft's menu isn't in the draft")
+  }
+
   /// Waits for the draft's text to match `pattern` whole.
   @MainActor private func draft(_ box: XCUIElement, matches pattern: String) -> Bool {
     let matching = XCTNSPredicateExpectation(

@@ -820,6 +820,62 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("on done none; not placed on a runner yet");
   });
 
+  it("says which runners, and which CLIs on one, the user paused, beside the quota", () => {
+    const pause = { at: "2026-10-13T08:00:00.000Z", by: "user" };
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "eng-1",
+        project: "society",
+        trigger: TriggerSchema.parse({ kind: "user_post", fromUser: true }),
+        priority: 2,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      runners: {
+        runners: [
+          {
+            name: "pod",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+            paused: pause,
+          },
+          {
+            name: "merlin",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+            pausedClis: { claude: pause },
+            quotas: {
+              claude: CliQuotaSchema.parse({
+                observedAt: "2026-10-13T11:00:00.000Z",
+                source: "turn",
+                status: "limited",
+                limitedUntil: "2026-10-20T05:11:58.000Z",
+              }),
+            },
+          },
+        ],
+        projects: [listedProject("lab", "pod")],
+      },
+      clock: { now: new Date("2026-10-13T12:00:00.000Z"), timeZone: "UTC" },
+    });
+    expect(prompt).toContain(
+      "- pod: connected, paused by the user since 2026-10-13T08:00:00.000Z; linux; CLIs claude, codex; offers nothing beyond its CLIs; projects lab\n",
+    );
+    expect(prompt).toContain(
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; claude paused by the user since 2026-10-13T08:00:00.000Z; quota claude limited until 2026-10-20T05:11:58.000Z\n",
+    );
+    expect(prompt).toContain(
+      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it",
+    );
+  });
+
   it("tells a turn outside projects when it was asked from a project the citizen is not in", () => {
     const base = { messages: [], heldClaims: [], lastTurn: null, onboarding: null };
     const asked = (channel: string, project = "society"): string =>

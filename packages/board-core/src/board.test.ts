@@ -1,7 +1,13 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
+import {
+  CliQuotaSchema,
+  IMAGE_LIMIT_BYTES,
+  MEMBER_VERBS,
+  VERB_DESCRIPTIONS,
+  type Ulid,
+} from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1329,6 +1335,100 @@ describe("Board", () => {
     await sweep(1);
     expect(await holder(watched.id)).toBeUndefined();
     expect(await lapses()).toBe(3);
+  });
+
+  it("pauses a runner, or one CLI on it apart from it, for the user alone, through a reconnect and a reopen", async () => {
+    const { board } = await society();
+    await board.addRunner(USER, "pod");
+    const paused = await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    expect(paused.pausedClis).toEqual({ claude: { at: clock.toISOString(), by: "user" } });
+    expect(paused.paused).toBeUndefined();
+    await expect(board.setRunnerPaused(ENG, "pod", { paused: false })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.setRunnerPaused(USER, "ghost", { paused: true })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+
+    // The whole runner's pause is apart from its CLI's: resuming one leaves the other.
+    clock = new Date(clock.getTime() + 60_000);
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    // What is paused already keeps when it was paused, and logs nothing.
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    const both = await board.readRunner("pod");
+    expect(both.paused).toEqual({ at: clock.toISOString(), by: "user" });
+    expect(both.pausedClis?.claude?.at).toBe(paused.pausedClis?.claude?.at);
+    await board.setRunnerPaused(USER, "pod", { paused: false });
+    expect((await board.readRunner("pod")).paused).toBeUndefined();
+    expect((await board.readRunner("pod")).pausedClis).toEqual(paused.pausedClis);
+
+    // A runner reconnecting, or reporting its quota, keeps the user's pause.
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({ observedAt: clock.toISOString(), source: "turn", status: "limited" }),
+    );
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.readRunner("pod")).pausedClis).toEqual(paused.pausedClis);
+    await reopened.setRunnerPaused(USER, "pod", { paused: false, cli: "claude" });
+    expect((await reopened.readRunner("pod")).pausedClis).toBeUndefined();
+
+    const events = (await reopened.readEvents(null)).filter((event) =>
+      ["runner.paused", "runner.resumed"].includes(event.type),
+    );
+    expect(events.map(({ type, actor, payload }) => ({ type, actor, payload }))).toEqual([
+      { type: "runner.paused", actor: "user", payload: { name: "pod", cli: "claude" } },
+      { type: "runner.paused", actor: "user", payload: { name: "pod" } },
+      { type: "runner.resumed", actor: "user", payload: { name: "pod" } },
+      { type: "runner.resumed", actor: "user", payload: { name: "pod", cli: "claude" } },
+    ]);
+  });
+
+  it("keeps the lease of a holder the user's pause holds, then lets it lapse from at least half a lease after", async () => {
+    // The board's own lease, thirty minutes.
+    const { board } = await society({});
+    await board.addRunner(USER, "pod");
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    // A project on no runner yet may start its turns on any, so no pause holds its holders.
+    const early = await board.createTask(USER, { project: "demo", title: "early" });
+    await board.claimTask(ENG, { task_id: early.id });
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    await sweep(31);
+    expect(await holder(early.id)).toBeUndefined();
+    await board.setRunnerPaused(USER, "pod", { paused: false });
+    await board.placeProject("demo", "pod");
+    const built = await board.createTask(USER, { project: "demo", title: "build" });
+    const reviewed = await board.createTask(USER, { project: "demo", title: "review" });
+    await board.claimTask(ENG, { task_id: built.id });
+    await board.claimTask(REV, { task_id: reviewed.id });
+
+    // Claude is paused on the project's runner: eng-1's turns there wait, rev-1's on Codex do not.
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    await sweep(120);
+    expect(await holder(built.id)).toBe("eng-1");
+    expect(await holder(reviewed.id)).toBeUndefined();
+
+    // The runner's own pause holds Codex too.
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    await board.claimTask(REV, { task_id: reviewed.id });
+    await sweep(120);
+    expect(await holder(reviewed.id)).toBe("rev-1");
+
+    await board.setRunnerPaused(USER, "pod", { paused: false });
+    await board.setRunnerPaused(USER, "pod", { paused: false, cli: "claude" });
+    await sweep(15);
+    expect(await holder(built.id)).toBe("eng-1");
+    expect(await holder(reviewed.id)).toBe("rev-1");
+    await sweep(15);
+    expect(await holder(built.id)).toBeUndefined();
+    expect(await holder(reviewed.id)).toBeUndefined();
   });
 
   it("enforces role charters and the lifecycle's ends", async () => {

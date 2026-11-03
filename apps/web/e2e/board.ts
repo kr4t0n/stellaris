@@ -1195,6 +1195,54 @@ export async function fakeBoard(
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
   // laptop's, taken with pod's, so their resets match to the minute whenever the view asks.
   const laptopQuotas = { claude: claudeQuota(120, 35) };
+  // The user's pauses, by runner: the whole runner's, and each CLI's on it.
+  const runnerPauses = new Map<
+    string,
+    { paused?: { at: string; by: string }; pausedClis: Record<string, { at: string; by: string }> }
+  >();
+  const pausesOf = (runner: string): Record<string, unknown> => {
+    const pauses = runnerPauses.get(runner);
+    return {
+      ...(pauses?.paused === undefined ? {} : { paused: pauses.paused }),
+      ...(pauses === undefined || Object.keys(pauses.pausedClis).length === 0
+        ? {}
+        : { pausedClis: pauses.pausedClis }),
+    };
+  };
+  const runnerRecords = (): Array<Record<string, unknown>> => [
+    {
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "codex"],
+      capabilities: [],
+      version: "0.3.11",
+      gitIdentityMissing: ["email"],
+      status: "connected",
+      quotas: podQuotas,
+      ...pausesOf("pod"),
+    },
+    {
+      name: "studio",
+      os: "darwin",
+      clis: ["claude"],
+      capabilities: [],
+      version: "0.3.11",
+      gitIdentityMissing: [],
+      status: "connected",
+      quotas: studioQuotas,
+      ...pausesOf("studio"),
+    },
+    {
+      name: "laptop",
+      os: "darwin",
+      clis: ["claude"],
+      capabilities: ["gpu"],
+      version: "0.3.10",
+      status: "disconnected",
+      quotas: laptopQuotas,
+      ...pausesOf("laptop"),
+    },
+  ];
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1340,6 +1388,26 @@ export async function fakeBoard(
     if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
+      const pause = /^\/api\/runners\/([^/]+)\/(pause|resume)(?:\/([^/]+))?$/.exec(pathname);
+      if (pause !== null) {
+        const [, runner = "", verb, cli] = pause;
+        const pauses = runnerPauses.get(runner) ?? { pausedClis: {} };
+        const now = { at: new Date().toISOString(), by: "user" };
+        if (cli === undefined && verb === "pause") {
+          pauses.paused ??= now;
+        } else if (cli === undefined) {
+          delete pauses.paused;
+        } else if (verb === "pause") {
+          pauses.pausedClis[cli] ??= now;
+        } else {
+          delete pauses.pausedClis[cli];
+        }
+        runnerPauses.set(runner, pauses);
+        return json(
+          route,
+          runnerRecords().find((each) => each["name"] === runner),
+        );
+      }
       switch (pathname) {
         case "/api/runners/pod/quota/claude":
           podQuotas["claude"] = { ...claudeQuota(0, 41), source: "read" };
@@ -1704,37 +1772,7 @@ export async function fakeBoard(
       case "/api/version":
         return json(route, { version: "0.3.11" });
       case "/api/runners":
-        return json(route, [
-          {
-            name: "pod",
-            os: "linux",
-            clis: ["claude", "codex"],
-            capabilities: [],
-            version: "0.3.11",
-            gitIdentityMissing: ["email"],
-            status: "connected",
-            quotas: podQuotas,
-          },
-          {
-            name: "studio",
-            os: "darwin",
-            clis: ["claude"],
-            capabilities: [],
-            version: "0.3.11",
-            gitIdentityMissing: [],
-            status: "connected",
-            quotas: studioQuotas,
-          },
-          {
-            name: "laptop",
-            os: "darwin",
-            clis: ["claude"],
-            capabilities: ["gpu"],
-            version: "0.3.10",
-            status: "disconnected",
-            quotas: laptopQuotas,
-          },
-        ]);
+        return json(route, runnerRecords());
       case "/api/agents/desk/models":
         return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
       case "/api/agents/desk/turns":

@@ -800,6 +800,74 @@ describe("Scheduler", () => {
     expect(waiting[0]?.signal.summary).toContain("for user");
   });
 
+  it("signals no idle member or waiting stage the user's pause holds, and counts a stage's wait from the resume", async () => {
+    const { board, runner, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await board.addRunner(USER, "pod");
+    await board.placeProject("demo", "pod");
+    // eng-1 and rev-1 are on Claude; eng-2, an engineer too, is on Codex.
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "codex",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    const held = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-1's alone",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const shared = await board.createTask(USER, {
+      project: "demo",
+      title: "any engineer's",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    const keys = async (): Promise<string[]> =>
+      (await board.listSignals()).map((record) => record.signal.key);
+
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    advance(3 * DAY + 5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    // eng-2 could take the shared stage, and is idle, since its CLI is not paused.
+    expect(await keys()).toEqual(
+      expect.arrayContaining([`waiting_stage:${shared.id}:s1`, "idle_member:eng-2"]),
+    );
+    expect(await keys()).not.toContain(`waiting_stage:${held.id}:s1`);
+    expect(await keys()).not.toContain("idle_member:eng-1");
+    expect(await keys()).not.toContain("idle_member:rev-1");
+
+    // Restarted, then resumed: the stage has waited only since the last pass the pause held it,
+    // and the citizens have been idle only since then too.
+    const restarted = new Scheduler({
+      board,
+      runner,
+      now,
+      timings: {
+        debounceMs: 1_000,
+        userDebounceMs: 0,
+        heartbeatMs: 10_000,
+        waitingStageMs: 5_000,
+        leaseSweepMs: 1_000,
+        ...OFF_REFLECTION,
+      },
+    });
+    await board.setRunnerPaused(USER, "pod", { paused: false, cli: "claude" });
+    advance(1_000);
+    await restarted.tick();
+    await restarted.drain();
+    expect(await keys()).not.toContain(`waiting_stage:${held.id}:s1`);
+    advance(5_000);
+    await restarted.tick();
+    await restarted.drain();
+    expect(await keys()).toContain(`waiting_stage:${held.id}:s1`);
+    advance(10 * 60_000);
+    await restarted.tick();
+    await restarted.drain();
+    expect(await keys()).not.toContain("idle_member:eng-1");
+  });
+
   it("wakes every member who may take a stage that names nobody, on entry and on heartbeat", async () => {
     const { board, runner, scheduler } = await setup();
     const settle = async (): Promise<void> => {

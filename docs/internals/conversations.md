@@ -104,6 +104,20 @@ The scheduler replays the event log from the beginning on its first start becaus
 
 Queued dispatches are persisted in `data/state/scheduler.json` alongside the cursor, so a restart while paused keeps the held wakes. Before Phase 4 they lived only in memory and a restart dropped them.
 
+### A paused runner holds its turns in the queue, and what waits on it stays quiet
+
+The society's pause stops the pass from checking crons, heartbeats, waiting stages, reflections, and operations, and from dispatching. The user's pause of one runner, or of one CLI on it, is narrower and lives on the runner's record (`paused`, `pausedClis`; `Board.setRunnerPaused`, logged as `runner.paused` and `runner.resumed`), so it outlives a restart. The pass runs as usual, and the hold is in the one place that decides where a turn runs, `RunnerHub.assign`: it counts a runner not free for a CLI while the runner or that CLI there is paused. So a turn of a project living there, or of a citizen pinned there, gets no assignment, and the scheduler keeps its wake queued as for a runner that is away, one per conversation and persisted with the rest. A citizen's pin moves only when its runner is away past the grace or lacks the CLI, and a paused runner is neither, so it stays. A new project or an unpinned citizen is placed on another runner. A turn under way finishes, and steering into it still works. Landing and closing pull requests are not turns and go on. On resume the next pass dispatches the queued wakes, a stage wake rechecked as always.
+
+Everything else that reads a pause asks `heldOn` from `@stellaris/shared`: the runner a citizen's turns in a place would run on (the project's `runner`, or its `homeRunner` for the society scope), paused as a whole or for the citizen's CLI.
+
+- The lease sweep renews a holder held in the task's project for a full lease once less than half is left, as for a pending cron (`pausedLease`). The claim never lapses while its holder cannot take a turn, and after the resume the holder has at least half a lease. Releasing it would only make churn: a stage named for the holder waits for it anyway, and the work is in its worktree.
+- `idle_member` counts a citizen's idle time from the last operations pass that held it in any place it works (`idleHeld`), so it is not logged during a pause, or the moment one ends.
+- `waiting_stage` skips a stage while everyone who may take it (`mayHoldStage`) is held in its project. The scheduler keeps the last pass that held it (`waitingHeld`) and counts the wait from there, so a stage that waited through a pause is not logged the moment it ends.
+- Both times are kept in `state/scheduler.json`, so a restart during the pause counts from them too.
+- `turn_refused` needs a turn the model service turned away, and a held wake never reaches a runner.
+
+`backlog`, the scaling rule, and `stale_thread` still count what the pause holds. So a long pause can add a replica of a role whose stages wait, which copies its template's CLI and runner and waits too, and a topic thread among held citizens goes stale as one among idle ones would. Turns that fail on a spent plan leave the same counts.
+
 ### A stopped scheduler finishes its pass
 
 `stop()` once cleared its timer and waited for running turns, but not for a pass under way, which saves the event cursor last: a SIGTERM during a pass lost the cursor of the events it had acted on, and the next start replayed them. The exit test found it as a data directory deleted under a pass still writing its state. `tick()` keeps the pass as a promise, and `stop()` waits for it.

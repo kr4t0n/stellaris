@@ -453,6 +453,18 @@ export function createApi(token: string) {
         {},
         CliQuotaSchema,
       ),
+    /**
+     * Pauses or resumes a runner, or one CLI on it: while paused it starts none of the turns it
+     * would run, which wait, and a turn under way finishes.
+     */
+    setRunnerPaused: (runner: string, paused: boolean, cli?: CliKind) =>
+      write(
+        "POST",
+        `/api/runners/${encodeURIComponent(runner)}/${paused ? "pause" : "resume"}${cli === undefined ? "" : `/${cli}`}`,
+        token,
+        {},
+        RunnerSchema,
+      ),
     /** Runners that asked to join and wait for the user's approval, newest first. */
     enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),
     /** Registers a waiting runner under `name`; the runner picks up its token on its next poll. */

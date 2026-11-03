@@ -148,14 +148,14 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   // checked, are not.
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   await expect(rows).toHaveText([
-    /^claude, codex\s*pod\s*no git user\.email\s*linux\s*v0\.3\.11\s*no projects\s*connected$/,
-    /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected$/,
-    /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away$/,
+    /^claude, codex\s*pod\s*no git user\.email\s*linux\s*v0\.3\.11\s*no projects\s*connected\s*Pause$/,
+    /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected\s*Pause$/,
+    /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away\s*Pause$/,
   ]);
-  // Every row keeps the same seven cells, so each column holds the same thing.
+  // Every row keeps the same eight cells, so each column holds the same thing.
   const cells = (row: number) => rows.nth(row).locator(":scope > *");
   for (const row of [0, 1, 2]) {
-    await expect(cells(row)).toHaveCount(7);
+    await expect(cells(row)).toHaveCount(8);
   }
   await expect(cells(2)).toHaveText([
     /claude/,
@@ -165,6 +165,7 @@ test("Runners in the top bar opens the runners view and closes it again", async 
     "gpu",
     "lab",
     "away",
+    "Pause",
   ]);
   await expect(rows.nth(2).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(2).getByText("v0.3.10")).toHaveClass(/text-amber-300/);
@@ -177,6 +178,53 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   await expect(runners).toHaveAttribute("aria-pressed", "true");
   await runners.click();
   await expect(page).toHaveURL("/");
+});
+
+test("the user pauses a runner, and one CLI on it apart from it, then resumes each", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/runners");
+  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  const pod = rows.nth(0);
+  const state = pod.locator(":scope > *").nth(6);
+  await expect(state).toHaveText("connected");
+
+  // A CLI's mark pauses that CLI on that runner alone.
+  await pod.getByRole("button", { name: "Pause claude on pod" }).click();
+  await expect(pod.getByRole("button", { name: "Resume claude on pod" })).toHaveClass(/opacity-30/);
+  await expect(pod.getByRole("button", { name: "Pause codex on pod" })).not.toHaveClass(
+    /opacity-30/,
+  );
+  await expect(state).toHaveText("claude paused");
+  await expect(state).toHaveClass(/text-amber-300/);
+  await expect(state).toHaveAttribute("title", /^connected; claude paused /);
+  await expect(page.getByText("2 connected · 1 away · 1 paused ·")).toBeVisible();
+  await expect(rows.nth(1).locator(":scope > *").nth(6)).toHaveText("connected");
+
+  // The runner's own pause, from the keyboard, covers every CLI and keeps the CLI's apart.
+  await pod.getByRole("button", { name: "Pause pod" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(pod.getByRole("button", { name: "Resume pod" })).toHaveText("Resume");
+  await expect(state).toHaveText("paused");
+  await pod.getByRole("button", { name: "Resume pod" }).click();
+  await expect(state).toHaveText("claude paused");
+  await pod.getByRole("button", { name: "Resume claude on pod" }).click();
+  await expect(state).toHaveText("connected");
+  await expect(state).not.toHaveClass(/text-amber-300/);
+
+  // An away runner can be paused too, so it takes no turns when it comes back.
+  const laptop = rows.nth(2);
+  await laptop.getByRole("button", { name: "Pause laptop" }).click();
+  await expect(laptop.locator(":scope > *").nth(6)).toHaveText("away · paused");
+
+  expect(board.writes).toEqual([
+    { path: "/api/runners/pod/pause/claude", body: {} },
+    { path: "/api/runners/pod/pause", body: {} },
+    { path: "/api/runners/pod/resume", body: {} },
+    { path: "/api/runners/pod/resume/claude", body: {} },
+    { path: "/api/runners/laptop/pause", body: {} },
+  ]);
 });
 
 test("a code nobody waits with says so, and a denial sends no name", async ({ page }) => {

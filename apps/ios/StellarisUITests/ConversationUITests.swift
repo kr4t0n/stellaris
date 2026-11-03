@@ -4,9 +4,10 @@ import XCTest
 /// Talking in a conversation: posting from the composer, mentioning a citizen, putting an image in
 /// a post, opening a thread, and following a link to a message.
 final class ConversationUITests: ShellTestCase {
-  /// Paste puts the image copied into the draft at the caret: a line holds its place while it
-  /// uploads, with Send off, then the board's markdown for it, and Send shows it in the post. The
-  /// fake board answers the token `slow-uploads` late, so the upload can be seen under way.
+  /// Paste, from the menu a long press on the draft opens, puts the image copied into the draft at
+  /// the caret: a line holds its place while it uploads, with Send off, then the board's markdown
+  /// for it, the caret after it, and Send shows it in the post. The fake board answers the token
+  /// `slow-uploads` late, so the upload can be seen under way.
   @MainActor func testPastesAnImageIntoAPost() {
     let app = launch()
     signIn(app, token: "slow-uploads")
@@ -19,10 +20,10 @@ final class ConversationUITests: ShellTestCase {
       UIColor.systemTeal.setFill()
       context.fill(CGRect(origin: .zero, size: size))
     }
-    // The system draws Paste; it may answer to its own label rather than the identifier.
-    let paste = app.buttons
-      .matching(NSPredicate(format: "identifier == 'paste-image' OR label == 'Paste'")).firstMatch
-    XCTAssertTrue(paste.waitForExistence(timeout: 20), "the composer has no Paste for an image")
+    box.press(forDuration: 1.2)
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "the draft's menu has no Paste for an image")
+    keepScreen("image-menu")
     paste.tap()
 
     XCTAssertTrue(
@@ -47,31 +48,6 @@ final class ConversationUITests: ShellTestCase {
     XCTAssertTrue(image.waitForExistence(timeout: 20), "the post doesn't show the image")
     XCTAssertLessThanOrEqual(image.frame.maxY, box.frame.minY, "the post is under the draft")
     keepScreen("image-posted")
-  }
-
-  /// The draft's own Paste, from the menu a long press opens, puts an image copied in the draft as
-  /// the Paste button does.
-  @MainActor func testPastesAnImageFromTheDraftsOwnMenu() {
-    let app = launch()
-    signIn(app)
-    expectGeneral(app)
-    let box = draft(app)
-    box.tap()
-    box.typeText("Long: ")
-    let size = CGSize(width: 320, height: 200)
-    UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { context in
-      UIColor.systemOrange.setFill()
-      context.fill(CGRect(origin: .zero, size: size))
-    }
-    box.press(forDuration: 1.2)
-    let paste = app.menuItems["Paste"].firstMatch
-    XCTAssertTrue(paste.waitForExistence(timeout: 10), "the draft's menu has no Paste for an image")
-    keepScreen("draft-menu-image")
-    paste.tap()
-    XCTAssertTrue(
-      draft(box, matches: #"Long: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\)"#),
-      "the image pasted from the draft's menu isn't in the draft")
-    keepScreen("draft-menu-pasted")
   }
 
   /// With text copied, the draft's own Paste pastes the text, as it did before it took images.

@@ -259,15 +259,11 @@ struct ReadOnlyLine: View {
 /// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it,
 /// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
 /// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
-/// citizens to mention above it, as on the web, and a pick completes the name. Photos and Paste
-/// beside Send, and Paste in the draft's own menu, put images in it as the web's composer does:
-/// each holds its place at the caret with a line saying it uploads, which the board's markdown for
-/// it replaces, and Send waits for them.
+/// citizens to mention above it, as on the web, and a pick completes the name. Photos beside Send,
+/// and Paste in the menu a long press on the draft opens, put images in it as the web's composer
+/// does: each holds its place at the caret with a line saying it uploads, which the board's
+/// markdown for it replaces, and Send waits for them.
 struct DraftField: View {
-  /// What Paste takes, most precise first: the kinds the board keeps, then any image, which goes as
-  /// a JPEG.
-  private static let pastable: [UTType] = [.png, .jpeg, .gif, .webP, .image]
-
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -334,16 +330,6 @@ struct DraftField: View {
           }
           .accessibilityLabel("Add photos")
           .accessibilityIdentifier("add-photos")
-          PasteButton(supportedContentTypes: Self.pastable) { providers in
-            paste(providers)
-          }
-          .labelStyle(.iconOnly)
-          .buttonBorderShape(.roundedRectangle(radius: 6))
-          .tint(MessageColor.surface2)
-          .controlSize(.small)
-          // As tall as Send: at its own height, 35 points, it made the box taller than a line.
-          .frame(height: 28)
-          .accessibilityIdentifier("paste-image")
           SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
             send(draft.wrappedValue)
           }
@@ -399,25 +385,6 @@ struct DraftField: View {
     let held = hold(images.count)
     for data in images {
       Task {
-        follow(await model.upload(data, holding: held, in: conversation) { caret() })
-      }
-    }
-  }
-
-  /// Uploads the images pasted, each as the most precise kind of image the pasteboard has.
-  private func paste(_ providers: [NSItemProvider]) {
-    guard !providers.isEmpty else {
-      return
-    }
-    let held = hold(providers.count)
-    for provider in providers {
-      let type = provider.registeredContentTypes.first { $0.conforms(to: .image) } ?? .image
-      Task {
-        let data: Data? = await withCheckedContinuation { loaded in
-          _ = provider.loadDataRepresentation(for: type) { data, _ in
-            loaded.resume(returning: data)
-          }
-        }
         follow(await model.upload(data, holding: held, in: conversation) { caret() })
       }
     }

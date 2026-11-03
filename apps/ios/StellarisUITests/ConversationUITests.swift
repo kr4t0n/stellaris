@@ -1,8 +1,54 @@
+import UIKit
 import XCTest
 
-/// Talking in a conversation: posting from the composer, mentioning a citizen, opening a thread,
-/// and following a link to a message.
+/// Talking in a conversation: posting from the composer, mentioning a citizen, putting an image in
+/// a post, opening a thread, and following a link to a message.
 final class ConversationUITests: ShellTestCase {
+  /// Paste puts the image copied into the draft at the caret: a line holds its place while it
+  /// uploads, with Send off, then the board's markdown for it, and Send shows it in the post. The
+  /// fake board answers the token `slow-uploads` late, so the upload can be seen under way.
+  @MainActor func testPastesAnImageIntoAPost() {
+    let app = launch()
+    signIn(app, token: "slow-uploads")
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("The plot: ")
+    let size = CGSize(width: 320, height: 200)
+    UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { context in
+      UIColor.systemTeal.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+    }
+    let paste = app.buttons["paste-image"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 20), "the composer has no Paste for an image")
+    paste.tap()
+
+    XCTAssertTrue(
+      draft(box, matches: #"The plot: !\[Uploading image\.(png|jpeg)…\]\(\)"#),
+      "the draft holds no place for the image while it uploads")
+    XCTAssertFalse(app.buttons["send"].firstMatch.isEnabled, "Send is on while an image uploads")
+    keepScreen("image-uploading")
+    XCTAssertTrue(
+      draft(box, matches: #"The plot: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\)"#),
+      "the image's markdown doesn't take its place in the draft")
+    XCTAssertTrue(app.buttons["send"].firstMatch.isEnabled, "Send stays off once the image is in")
+    keepScreen("image-pasted")
+
+    app.buttons["send"].firstMatch.tap()
+    let image = app.scrollViews["messages"].buttons
+      .matching(NSPredicate(format: "label MATCHES %@", #"image\.(png|jpeg)"#)).firstMatch
+    XCTAssertTrue(image.waitForExistence(timeout: 20), "the post doesn't show the image")
+    XCTAssertLessThanOrEqual(image.frame.maxY, box.frame.minY, "the post is under the draft")
+    keepScreen("image-posted")
+  }
+
+  /// Waits for the draft's text to match `pattern` whole.
+  @MainActor private func draft(_ box: XCUIElement, matches pattern: String) -> Bool {
+    let matching = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value MATCHES %@", pattern), object: box)
+    return XCTWaiter().wait(for: [matching], timeout: 20) == .completed
+  }
+
   /// Typing `@` offers the citizens to mention, a pick completes the name, and Send posts the draft
   /// to the foot of the conversation and empties the box.
   @MainActor func testPostsFromTheComposerWithAMention() {

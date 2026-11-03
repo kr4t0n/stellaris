@@ -106,6 +106,20 @@ import Testing
       let (channel, body) = (try fixture.field("channel"), try fixture.field("body"))
       let message = try check(fixture, BoardAPI.postMessage(channel: channel, body: body))
       #expect(message.thread == nil)
+    case "upload-image":
+      let image = try #require(fixture.image)
+      let request = BoardAPI.uploadImage(image, name: try queryName(fixture))
+      expectUpload(fixture, request.endpoint)
+      #expect(fixture.status == 200)
+      let uploaded = try request.decode(fixture.body)
+      #expect(uploaded.type == .known(.png) && uploaded.size == image.count)
+      #expect(uploaded.markdown == "![plot.png](image:\(uploaded.id))")
+    case "error-upload-image":
+      let request = BoardAPI.uploadImage(try #require(fixture.image), name: try queryName(fixture))
+      expectUpload(fixture, request.endpoint)
+      let error = BoardError(status: fixture.status, body: fixture.body)
+      #expect(error.status == 400 && error.code == "VALIDATION")
+      #expect(error.message == "notes.txt is not a PNG, JPEG, GIF, or WebP image by its first bytes")
     case "post-message-thread":
       let (thread, body) = (try fixture.field("thread_id"), try fixture.field("body"))
       let message = try check(fixture, BoardAPI.postMessage(thread: thread, body: body))
@@ -243,7 +257,7 @@ import Testing
     "error-app-token", "me", "me-signed-in", "sign-out", "sign-out-signed-in", "society", "projects",
     "channels", "channel", "channel-notice", "threads",
     "thread", "thread-decided", "requests", "tasks", "task", "proposals", "proposal", "dashboard",
-    "post-message",
+    "post-message", "upload-image", "error-upload-image",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
     "messages", "scheduler", "task-file", "turn-stream",
@@ -273,6 +287,20 @@ import Testing
     let location = try #require(fixture.location)
     let address = try #require(URL(string: location, relativeTo: board))
     return AppSignIn.landing(address.absoluteURL)
+  }
+
+  /// The file name an image was posted under, from its request's query.
+  private func queryName(_ fixture: Fixture) throws -> String {
+    let query = try #require(URLComponents(string: fixture.path)?.queryItems)
+    return try #require(query.first { $0.name == "name" }?.value)
+  }
+
+  /// An image's request: its bytes are the body, of the media type its first bytes tell.
+  private func expectUpload(_ fixture: Fixture, _ endpoint: Endpoint) {
+    #expect(endpoint.method.rawValue == fixture.method)
+    #expect(endpoint.path == fixture.path)
+    #expect(endpoint.contentType == fixture.contentType)
+    #expect(endpoint.body == fixture.image)
   }
 
   private func expectEndpoint(_ fixture: Fixture, _ endpoint: Endpoint) {

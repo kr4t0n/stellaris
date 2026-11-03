@@ -52,6 +52,40 @@ import Testing
     #expect(String(decoding: body, as: UTF8.self) == #"{"body":"Hello","channel":"general"}"#)
   }
 
+  @Test func postsAnImageAsItsBytesUnderItsName() throws {
+    let png = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1])
+    let request = BoardAPI.uploadImage(png, name: "the plot [v2].png").endpoint
+      .urlRequest(board: board, token: "secret")
+    #expect(request.httpMethod == "POST")
+    #expect(
+      request.url?.absoluteString
+        == "https://board.example/api/images?name=the%20plot%20%5Bv2%5D.png")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+    #expect(request.value(forHTTPHeaderField: "Content-Type") == "image/png")
+    #expect(request.httpBody == png)
+    // Bytes of no kind the board keeps go as they are, for the board to refuse in its own words.
+    let text = BoardAPI.uploadImage(Data("notes".utf8), name: "notes.txt").endpoint
+    #expect(text.contentType == "application/octet-stream")
+    // A verb's body is still JSON.
+    #expect(BoardAPI.approve(id).endpoint.contentType == "application/json")
+  }
+
+  @Test func tellsAnImagesKindByItsFirstBytesAsTheBoardDoes() {
+    #expect(imageType(of: Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0])) == .png)
+    #expect(imageType(of: Data([0xff, 0xd8, 0xff, 0xe0])) == .jpeg)
+    #expect(imageType(of: Data("GIF87a".utf8)) == .gif)
+    #expect(imageType(of: Data("GIF89a".utf8)) == .gif)
+    #expect(imageType(of: Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVP8 ".utf8)) == .webp)
+    #expect(imageType(of: Data("RIFF\u{0}\u{0}\u{0}\u{0}WAVE".utf8)) == nil)
+    #expect(imageType(of: Data("<svg/>".utf8)) == nil)
+    #expect(imageType(of: Data([0x89, 0x50, 0x4e])) == nil)
+    #expect(imageType(of: Data()) == nil)
+    // As a slice of a larger buffer, whose indices don't start at zero.
+    let framed = Data([0, 0, 0xff, 0xd8, 0xff, 0xe0])
+    #expect(imageType(of: framed[2...]) == .jpeg)
+    #expect(ImageType.webp.mediaType == "image/webp")
+  }
+
   @Test func leavesOutWhatTheUserLeftEmpty() throws {
     let approve = try #require(BoardAPI.approve(id).endpoint.body)
     #expect(String(decoding: approve, as: UTF8.self) == #"{"proposal_id":"\#(id)"}"#)

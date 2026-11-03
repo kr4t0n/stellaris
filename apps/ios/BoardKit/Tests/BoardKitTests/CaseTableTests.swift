@@ -4,7 +4,7 @@ import Testing
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// link, `mentionAt`, `firstParagraph`, and `describeCharter` tests run.
+/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -220,6 +220,53 @@ import Testing
         #expect(
           done == CompletedMention(text: completed.text, caret: completed.caret), "\(each.name)")
       }
+    }
+  }
+
+  struct UploadCases: Decodable {
+    struct Placeholder: Decodable {
+      let name: String
+      let file: String
+      let placeholder: String
+    }
+
+    struct Insert: Decodable {
+      let name: String
+      let text: String
+      let start: Int
+      let end: Int
+      let inserted: String
+      let result: DraftEdit
+    }
+
+    struct Settle: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let placeholder: String
+      let markdown: String
+      let result: DraftEdit?
+    }
+
+    let placeholders: [Placeholder]
+    let inserts: [Insert]
+    let settles: [Settle]
+  }
+
+  @Test func uploadsHoldTheirPlaceAsOnTheWeb() throws {
+    let cases = try Fixture.table("uploads", as: UploadCases.self)
+    #expect(cases.settles.count > 5)
+    for each in cases.placeholders {
+      #expect(uploadingImage(each.file) == each.placeholder, "\(each.name)")
+    }
+    for each in cases.inserts {
+      let done = insertAt(each.text, start: each.start, end: each.end, inserted: each.inserted)
+      #expect(done == each.result, "\(each.name)")
+    }
+    for each in cases.settles {
+      let settled = settleUpload(
+        each.text, caret: each.caret, placeholder: each.placeholder, markdown: each.markdown)
+      #expect(settled == each.result, "\(each.name)")
     }
   }
 

@@ -2562,6 +2562,40 @@ describe("Scheduler", () => {
     return { ...harness, task, cron, inTask };
   }
 
+  /** Records a turn of a cron's fire in a task's thread, ending now as `exitReason` says. */
+  async function fireTurn(
+    board: Board,
+    taskId: Ulid,
+    cronId: Ulid,
+    exitReason: "completed" | "error" | "stopped",
+  ): Promise<void> {
+    const turn = await board.beginTurn({
+      agent: "eng-1",
+      project: "demo",
+      thread: taskId,
+      runner: "test",
+      cli: "claude",
+      session: null,
+      trigger: { kind: "cron", fromUser: false, reason: "", cronId },
+      startedAt: now().toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+      crons: [cronId],
+    });
+    await board.finishTurn({
+      ...turn,
+      endedAt: now().toISOString(),
+      exitReason,
+      ...(exitReason === "error" ? { error: "the CLI ended" } : {}),
+    });
+  }
+
   /** Heartbeats of the setup's cadence, each run to its end. */
   async function beats(scheduler: Scheduler, count: number): Promise<void> {
     for (let i = 0; i < count; i += 1) {
@@ -2601,6 +2635,49 @@ describe("Scheduler", () => {
       await board.removeCron(USER, { cron_id: cron.id, reason: "the run is done" });
       await beats(scheduler, 1);
       expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "held"]]);
+    });
+
+    it("wakes a held stage again once a fire's turn fails, with a full lease from the failure", async () => {
+      const { board, runner, scheduler, task, cron } = await watched();
+      await beats(scheduler, 12);
+      await fireTurn(board, task.id, cron.id, "error");
+      await beats(scheduler, 5);
+      expect(heartbeats(runner)).toEqual(
+        Array.from({ length: 5 }, () => ["eng-1", task.id, "heartbeat", "held"]),
+      );
+      // The cron keeps its schedule; only what it covers changed.
+      expect(await board.readCron(cron.id)).toMatchObject({
+        schedule: { cron: "0 12 * * *" },
+        failures: 1,
+      });
+      expect((await board.readCron(cron.id)).paused).toBeUndefined();
+      expect((await board.readCron(cron.id)).ended).toBeUndefined();
+      // No turn here touches the task, so a minute after the failure the lease runs out.
+      expect((await board.getTask(USER, { task_id: task.id })).claimedBy).toBe("eng-1");
+      await beats(scheduler, 1);
+      expect((await board.getTask(USER, { task_id: task.id })).status).toBe("open");
+      expect(await expiries(board)).toBe(1);
+    });
+
+    it("leaves the stage to it again once a later fire's turn completes", async () => {
+      const { board, runner, scheduler, task, cron } = await watched();
+      await fireTurn(board, task.id, cron.id, "error");
+      await beats(scheduler, 1);
+      expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "held"]]);
+      await fireTurn(board, task.id, cron.id, "completed");
+      await beats(scheduler, 30);
+      expect(heartbeats(runner)).toEqual([["eng-1", task.id, "heartbeat", "held"]]);
+      expect((await board.getTask(USER, { task_id: task.id })).claimedBy).toBe("eng-1");
+      expect(await expiries(board)).toBe(0);
+    });
+
+    it("still leaves the stage to it after a fire's turn the user stopped", async () => {
+      const { board, runner, scheduler, task, cron } = await watched();
+      await fireTurn(board, task.id, cron.id, "stopped");
+      await beats(scheduler, 30);
+      expect(heartbeats(runner)).toEqual([]);
+      expect((await board.getTask(USER, { task_id: task.id })).claimedBy).toBe("eng-1");
+      expect(await expiries(board)).toBe(0);
     });
 
     it("changes nothing when the cron fires in another conversation", async () => {

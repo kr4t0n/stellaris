@@ -182,9 +182,22 @@ export function firesInTask(
   return cron.scope === task.project && cron.thread === task.id;
 }
 
-/** When a cron stopped being pending, paused or ended, whichever came first; null while it is. */
+/**
+ * When a cron stopped being pending, whichever came first: paused, ended, or the turn of its latest
+ * fire failed; null while it is. A failed fire stops counting once a later fire's turn completes,
+ * and a turn the user stopped is no failure. The heartbeat and the lease read pending here alone,
+ * so a failed check wakes its citizen and lets the lease run out as if the cron were paused.
+ */
 export function cronStoppedAt(cron: CronFrontmatter): string | null {
-  return cron.paused?.at ?? cron.ended?.at ?? null;
+  const times = [
+    cron.paused?.at,
+    cron.ended?.at,
+    cron.lastRun?.outcome === "failed" ? cron.lastRun.at : undefined,
+  ].filter((at): at is string => at !== undefined);
+  return times.reduce<string | null>(
+    (first, at) => (first === null || Date.parse(at) < Date.parse(first) ? at : first),
+    null,
+  );
 }
 
 /**

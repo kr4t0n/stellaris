@@ -1462,8 +1462,9 @@ export class Scheduler {
    * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
    * scope: the unread messages of its home, of each other channel, and of each thread, a stage the
    * member holds, and a stage of an unblocked task waiting that it may take, each in its task's
-   * thread. A stage counts for neither while the member has a cron pending in its task's thread,
-   * whose fires are its checks there. Each conversation with something wakes on its own, so a
+   * thread. A stage counts for neither while the member has a cron pending in its task's thread
+   * (`cronStoppedAt`: neither paused nor ended, and its latest fire's turn did not fail), whose
+   * fires are its checks there. Each conversation with something wakes on its own, so a
    * heartbeat never brings one task's business into another's turn, and its trigger says what it
    * woke for (`heartbeatCause`).
    */

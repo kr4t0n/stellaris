@@ -221,6 +221,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The plan opens beside the thread in portrait, and in a sheet in landscape and on the outer display.
 - Split View at its narrowest on the inner display shows the chat alone.
 - The composer and the keyboard in each pose, and whether the keyboard stays up and the composer keeps its place through a fold, a turn or an unfold.
+- Photos and Paste beside Send. Pick several photos at once, among them one the camera took (HEIC, which goes as a JPEG), a screenshot (PNG, which goes as it is), and one from iCloud that has to download first. Paste an image copied in another app, such as Safari or Photos. Check whether Paste looks like the composer's other buttons and is easy to hit, and that the caret stays where the image went. CI pastes only an image the test put on the pasteboard, and picks no photo.
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
 - The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
 

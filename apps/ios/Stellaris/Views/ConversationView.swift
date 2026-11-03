@@ -1,5 +1,7 @@
 import BoardKit
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A channel's or a thread's messages, newest at the foot, with its draft below, on the web's
 /// island gray; a channel's also holds each thread opened on it, where it was opened, and a task's
@@ -257,8 +259,14 @@ struct ReadOnlyLine: View {
 /// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it,
 /// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
 /// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
-/// citizens to mention above it, as on the web, and a pick completes the name.
+/// citizens to mention above it, as on the web, and a pick completes the name. Photos and Paste
+/// beside Send put images in it as the web's composer does: each holds its place at the caret with
+/// a line saying it uploads, which the board's markdown for it replaces, and Send waits for them.
 struct DraftField: View {
+  /// What Paste takes, most precise first: the kinds the board keeps, then any image, which goes as
+  /// a JPEG.
+  private static let pastable: [UTType] = [.png, .jpeg, .gif, .webP, .image]
+
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -268,6 +276,8 @@ struct DraftField: View {
   @State private var sending = false
   /// The board's reason for not taking the last post, in its own words.
   @State private var failure: String?
+  /// The photos just picked, until their uploads start.
+  @State private var picked: [PhotosPickerItem] = []
   let conversation: Conversation
 
   var body: some View {
@@ -309,8 +319,25 @@ struct DraftField: View {
         .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
-          send(draft.wrappedValue)
+        HStack(spacing: 2) {
+          PhotosPicker(
+            selection: $picked, maxSelectionCount: 10, matching: .images,
+            preferredItemEncoding: .compatible
+          ) {
+            ComposerGlyph(symbol: "photo")
+          }
+          .accessibilityLabel("Add photos")
+          .accessibilityIdentifier("add-photos")
+          PasteButton(supportedContentTypes: Self.pastable) { providers in
+            paste(providers)
+          }
+          .labelStyle(.iconOnly)
+          .buttonBorderShape(.roundedRectangle(radius: 6))
+          .tint(MessageColor.surface2)
+          .accessibilityIdentifier("paste-image")
+          SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
+            send(draft.wrappedValue)
+          }
         }
         .padding(.trailing, 6)
         .padding(.bottom, 6)
@@ -324,11 +351,70 @@ struct DraftField: View {
           .foregroundStyle(MessageColor.failure)
           .accessibilityIdentifier("post-failed")
       }
+      if let refused = model.uploadFailures[conversation.key] {
+        Text(refused)
+          .font(MessageType.small())
+          .foregroundStyle(MessageColor.failure)
+          .accessibilityIdentifier("upload-failed")
+      }
     }
     .padding(12)
     .overlay(alignment: .top) {
       Rectangle().fill(MessageColor.line).frame(height: 1)
     }
+    .onChange(of: picked) { _, items in
+      guard !items.isEmpty else {
+        return
+      }
+      picked = []
+      attach(items)
+    }
+  }
+
+  /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.
+  private func attach(_ items: [PhotosPickerItem]) {
+    let held = hold(items.count)
+    for item in items {
+      Task {
+        let data = try? await item.loadTransferable(type: Data.self)
+        await model.upload(data, holding: held, in: conversation)
+      }
+    }
+  }
+
+  /// Uploads the images pasted, each as the most precise kind of image the pasteboard has.
+  private func paste(_ providers: [NSItemProvider]) {
+    guard !providers.isEmpty else {
+      return
+    }
+    let held = hold(providers.count)
+    for provider in providers {
+      let type = provider.registeredContentTypes.first { $0.conforms(to: .image) } ?? .image
+      _ = provider.loadDataRepresentation(for: type) { [model, conversation] data, _ in
+        Task { @MainActor in
+          await model.upload(data, holding: held, in: conversation)
+        }
+      }
+    }
+  }
+
+  /// Holds the place of `count` images where the caret last was, in place of what was selected, or
+  /// at the end of a draft never typed in, and puts the caret after them; gives the line each holds.
+  private func hold(_ count: Int) -> String {
+    let text = model.memory?.draft(conversation) ?? ""
+    var range = (start: text.utf16.count, end: text.utf16.count)
+    if let selection, case .selection(let selected) = selection.indices,
+      selected.upperBound <= text.endIndex
+    {
+      range = (
+        text.utf16.distance(from: text.startIndex, to: selected.lowerBound),
+        text.utf16.distance(from: text.startIndex, to: selected.upperBound)
+      )
+    }
+    let held = model.holdImages(count, in: conversation, start: range.start, end: range.end)
+    let now = model.memory?.draft(conversation) ?? ""
+    selection = TextSelection(insertionPoint: String.Index(utf16Offset: held.caret, in: now))
+    return held.placeholder
   }
 
   /// The mention being typed before the caret, and where the caret is, in UTF-16 code units as the
@@ -344,7 +430,8 @@ struct DraftField: View {
   }
 
   private func sendable(_ text: String) -> Bool {
-    !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !sending && model.uploading[conversation.key] == nil
+      && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   /// Posts the draft, then empties it unless it was changed while the post went.
@@ -370,6 +457,25 @@ struct DraftField: View {
       }
       sending = false
     }
+  }
+}
+
+/// An icon in the draft's box, as the web's quiet button draws one: the tertiary text colour, in a
+/// target as tall as Send.
+struct ComposerGlyph: View {
+  let symbol: String
+
+  /// Off the main actor too, since Photos draws its button's label from a `@Sendable` closure.
+  nonisolated init(symbol: String) {
+    self.symbol = symbol
+  }
+
+  var body: some View {
+    Image(systemName: symbol)
+      .font(MessageType.text())
+      .foregroundStyle(MessageColor.tertiary)
+      .frame(minWidth: 28, minHeight: 28)
+      .contentShape(Rectangle())
   }
 }
 

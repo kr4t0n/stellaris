@@ -73,6 +73,12 @@ enum SignInFailure: Error, Equatable {
   /// Why a task's advance or a proposal's decision didn't go, in words for its sheet, by the task's
   /// or the proposal's id, kept until the next try, so a sheet built again shows it still.
   private(set) var refusals: [String: String] = [:]
+  /// How many images are on their way into each conversation's draft, by the conversation's key.
+  /// Its Send waits for them, so a line holding an image's place never goes out.
+  private(set) var uploading: [String: Int] = [:]
+  /// Why the last image that failed in each conversation didn't go, in the board's words when it
+  /// gave them, kept until the next image or post there, so a view built again shows it still.
+  private(set) var uploadFailures: [String: String] = [:]
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
 
@@ -254,12 +260,65 @@ enum SignInFailure: Error, Equatable {
       case .thread(let id): BoardAPI.postMessage(thread: id, body: body)
       }
     let message = try await send(request)
+    uploadFailures[conversation.key] = nil
     let feed = feed(for: conversation)
     Task {
       await feed.load(using: self)
       await store.reload(["requests"], using: self)
     }
     return message
+  }
+
+  /// Holds the place of `count` images in the conversation's draft, one a line, in place of what is
+  /// selected from `start` to `end` in UTF-16 code units, as the web's composer does: gives the
+  /// caret after them, and the line each holds, which `upload` fills.
+  func holdImages(_ count: Int, in conversation: Conversation, start: Int, end: Int)
+    -> (caret: Int, placeholder: String)
+  {
+    let placeholder = uploadingImage("image")
+    let held = insertAt(
+      memory?.draft(conversation) ?? "", start: start, end: end,
+      inserted: Array(repeating: placeholder, count: count).joined(separator: "\n"))
+    memory?.setDraft(held.text, for: conversation)
+    uploading[conversation.key, default: 0] += count
+    uploadFailures[conversation.key] = nil
+    return (held.caret, placeholder)
+  }
+
+  /// Uploads an image's bytes, made into a kind and a size the board keeps, then puts the board's
+  /// markdown for it where `placeholder` held its place in the conversation's draft, or takes the
+  /// place away and keeps why it failed. Nil bytes, which Photos or the pasteboard couldn't give,
+  /// fail too. The markdown is lost when the user deleted the line, as on the web.
+  func upload(_ data: Data?, holding placeholder: String, in conversation: Conversation) async {
+    let sent = generation
+    var markdown = ""
+    var failure: String?
+    do {
+      guard let data, let image = await ComposerImage.prepare(data) else {
+        throw ComposerImage.Unreadable()
+      }
+      markdown = try await send(BoardAPI.uploadImage(image.data, name: image.name)).markdown
+    } catch let refusal as BoardError where refusal.status != 0 {
+      failure = refusal.message
+    } catch is ComposerImage.Unreadable {
+      failure = "The image could not be read."
+    } catch {
+      failure = "The image was not uploaded."
+    }
+    guard sent == generation else {
+      return
+    }
+    let key = conversation.key
+    let left = (uploading[key] ?? 1) - 1
+    uploading[key] = left > 0 ? left : nil
+    if let failure {
+      uploadFailures[key] = failure
+    }
+    if let settled = settleUpload(
+      memory?.draft(conversation) ?? "", caret: 0, placeholder: placeholder, markdown: markdown)
+    {
+      memory?.setDraft(settled.text, for: conversation)
+    }
   }
 
   /// Opens the thread `channel`'s draft describes, with its first message if it has one, then shows
@@ -562,7 +621,8 @@ enum SignInFailure: Error, Equatable {
     Task { await store.refresh(using: self) }
   }
 
-  /// Closes the sheets and the inspector of tasks and proposals, and drops what they said.
+  /// Closes the sheets and the inspector of tasks and proposals, and drops what they said, and
+  /// what the drafts' images on their way and their failures were.
   private func forgetSubjects() {
     advancing = nil
     advanceNotes = [:]
@@ -571,6 +631,8 @@ enum SignInFailure: Error, Equatable {
     inspecting = nil
     underWay = []
     refusals = [:]
+    uploading = [:]
+    uploadFailures = [:]
   }
 
   private func leave(notice: String?) {

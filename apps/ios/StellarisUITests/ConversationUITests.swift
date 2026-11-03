@@ -24,7 +24,7 @@ final class ConversationUITests: ShellTestCase {
     paste.tap()
 
     XCTAssertTrue(
-      draft(box, matches: #"The plot: !\[Uploading image\.(png|jpeg)…\]\(\)"#),
+      draft(box, matches: #"The plot: !\[Uploading image…\]\(\)"#),
       "the draft holds no place for the image while it uploads")
     XCTAssertFalse(app.buttons["send"].firstMatch.isEnabled, "Send is on while an image uploads")
     keepScreen("image-uploading")

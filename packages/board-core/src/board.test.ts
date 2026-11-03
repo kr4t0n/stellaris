@@ -623,11 +623,12 @@ describe("Board", () => {
     });
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which library?" });
     const open = await board.openThread(ENG, { channel: "demo/dev", title: "and the date?" });
-    // A front desk, in no project, takes part in the task's thread from the society scope.
+    // A front desk, in no project, takes part in the task's thread from the society scope, where
+    // the user's posts ask it for a turn.
     const FRONT: Actor = { name: "concierge-1", role: "concierge" };
     await board.addAgent(USER, { name: FRONT.name, role: FRONT.role, cli: "claude" });
     await board.postMessage(FRONT, { thread_id: task.id, body: "who takes this?" });
-    const inTask = await board.postMessage(REV, { thread_id: task.id, body: "the spec" });
+    const inTask = await board.postMessage(USER, { thread_id: task.id, body: "the spec" });
     await board.postMessage(REV, { thread_id: topic.id, body: "try zod" });
     await board.postMessage(REV, { thread_id: open.id, body: "next week" });
     await board.postMessage(REV, { thread_id: open.id, body: "or the week after" });
@@ -653,6 +654,115 @@ describe("Board", () => {
         await board.readDigest({ ...ENG, scope: "demo", thread: task.id }, { advance: false })
       ).messages.map((m) => m.id),
     ).toContain(inTask.id);
+  });
+
+  it("counts a task's thread for whoever its stage is for, and for its creator a post asking the user", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const unread = async (actor: Actor, thread: Ulid): Promise<number> =>
+      (await board.unreadByConversation(actor)).find((entry) => entry.thread === thread)?.count ??
+      0;
+    // rev-1 files it, eng-1 builds, and eng-2's check waits for a holder.
+    const task = await board.createTask(REV, {
+      project: "demo",
+      title: "build",
+      stages: [
+        { name: "build", agent: "eng-1" },
+        { name: "check", agent: "eng-2" },
+      ],
+    });
+    await board.claimTask(ENG, { task_id: task.id });
+    await board.advanceTask(ENG, { task_id: task.id, note: "Built." });
+    const topic = await board.openThread(ENG, { channel: "demo/dev", title: "which cache?" });
+
+    // While nobody holds the stage, a post asks a turn of whoever may take it, not of the earlier
+    // holder or the creator, who read it at their next turn there.
+    await board.postMessage(USER, { thread_id: task.id, body: "Is the cache warm?" });
+    expect(await unread(ENG2, task.id)).toBe(1);
+    expect(await unread(ENG, task.id)).toBe(0);
+    expect(await unread(REV, task.id)).toBe(0);
+    expect(
+      (
+        await board.readDigest({ ...REV, scope: "demo", thread: task.id }, { advance: false })
+      ).messages.map((m) => m.body),
+    ).toEqual(["Built.\n", "Is the cache warm?\n"]);
+
+    // Held, it asks the holder's; a post asking the user asks the creator's too.
+    await board.claimTask(ENG2, { task_id: task.id });
+    await board.postMessage(ENG, { thread_id: task.id, body: "@user ship it today?" });
+    expect(await unread(ENG2, task.id)).toBe(2);
+    expect(await unread(REV, task.id)).toBe(1);
+    expect(await unread(ENG, task.id)).toBe(0);
+
+    // A mention asks whoever it names, wherever the stage is.
+    await board.postMessage(ENG2, { thread_id: task.id, body: "@eng-1 which flag?" });
+    expect(await unread(ENG, task.id)).toBe(1);
+    expect(await unread(REV, task.id)).toBe(1);
+
+    // A topic's thread asks every participant, as before.
+    await board.postMessage(ENG2, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "or a fresh one" });
+    expect(await unread(ENG, topic.id)).toBe(2);
+    expect(await unread(ENG2, topic.id)).toBe(1);
+
+    // A blocked task's stage wakes nobody by itself, but a post in its thread still asks a turn of
+    // whoever may take it, and of nobody else.
+    const later = await board.createTask(REV, {
+      project: "demo",
+      title: "ship",
+      stages: [{ name: "ship", agent: "eng-1" }],
+    });
+    await board.updateTask(REV, { task_id: later.id, blocked_by: [task.id] });
+    await board.postMessage(ENG2, { thread_id: later.id, body: "Waiting on the check." });
+    expect(await unread(ENG, later.id)).toBe(1);
+    expect(await unread(REV, later.id)).toBe(0);
+  });
+
+  it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
+    const { board } = await society();
+    const STEW: Actor = { name: "stew", role: "steward" };
+    await board.addAgent(USER, { ...STEW, cli: "claude" });
+    const home = async (actor: Actor, scope: string): Promise<number> =>
+      (await board.unreadByConversation(actor)).find(
+        (entry) =>
+          entry.scope === scope &&
+          entry.thread === null &&
+          entry.channel === null &&
+          entry.place === null,
+      )?.count ?? 0;
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Warm.",
+      revision: 0,
+    });
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Cold.",
+      revision: 1,
+    });
+    await board.removeKnowledge(REV, { project: "demo", topic: "cache" });
+    await board.writeKnowledge(USER, {
+      project: null,
+      topic: "style",
+      body: "Short.",
+      revision: 0,
+    });
+    expect(await home(ENG, "demo")).toBe(0);
+    expect(await home(STEW, "society")).toBe(0);
+    // The notices stay in the digest, read at the next turn.
+    expect(
+      (await board.readDigest({ ...ENG, scope: "demo" }, { advance: false })).messages.map(
+        (m) => m.notice?.action,
+      ),
+    ).toEqual(["written", "updated", "removed", "written"]);
+
+    await board.postMessage(REV, { channel: "demo/general", body: "the cache is cold" });
+    await board.postMessage(ENG, { channel: "general", body: "the style guide is short" });
+    expect(await home(ENG, "demo")).toBe(1);
+    expect(await home(STEW, "society")).toBe(1);
   });
 
   it("files a channel's posts beside general in a conversation of its own, until it is archived", async () => {
@@ -1343,9 +1453,12 @@ describe("Board", () => {
         { id: "s3", name: "referee review", role: "researcher", gate: true },
       ],
     ];
+    // The refusal says how to ask, since a plain post in the thread wakes only whoever the
+    // current stage is for.
     for (const stages of refused) {
       await expect(board.planTask(RES, { task_id: task.id, stages })).rejects.toMatchObject({
         code: "FORBIDDEN",
+        message: expect.stringMatching(/; ask one of them in the task's thread, with a mention$/),
       });
     }
     await expect(

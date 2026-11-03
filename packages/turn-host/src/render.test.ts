@@ -129,7 +129,19 @@ describe("config-home rendering", () => {
       ...places,
     });
     expect(text).toContain(
-      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread.",
+      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread, with a mention.",
+    );
+  });
+
+  it("says whom a post in a task's thread wakes, as the heartbeat counts it", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change.",
     );
   });
 

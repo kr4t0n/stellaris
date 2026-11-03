@@ -1029,6 +1029,117 @@ describe("Scheduler", () => {
     ]);
   });
 
+  it("wakes no heartbeat for a knowledge topic's notice, in a project or the society", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.setRoleCharter(USER, {
+      name: "lead",
+      purpose: "Leads.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+      societyScope: true,
+    });
+    await board.addAgent(USER, { name: "lead-1", role: "lead", cli: "claude" });
+    const beat = async (): Promise<void> => {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await beat();
+    runner.dispatches.length = 0;
+    await board.writeKnowledge(ENG, {
+      project: "demo",
+      topic: "cache",
+      body: "Warm.",
+      revision: 0,
+    });
+    await board.writeKnowledge(USER, {
+      project: null,
+      topic: "style",
+      body: "Short.",
+      revision: 0,
+    });
+    await beat();
+    await beat();
+    expect(runner.dispatches).toEqual([]);
+
+    // A post beside them still wakes its readers.
+    await board.postMessage(ENG, { channel: "demo/general", body: "the cache is warm" });
+    await board.postMessage(ENG, { channel: "general", body: "the style guide is short" });
+    await beat();
+    expect(
+      runner.dispatches
+        .map((d) => [d.agent, d.project, d.trigger.kind])
+        .toSorted((a, b) => String(a).localeCompare(String(b))),
+    ).toEqual([
+      ["lead-1", "society", "heartbeat"],
+      ["rev-1", "demo", "heartbeat"],
+    ]);
+  });
+
+  it("wakes a task's thread on heartbeat for whoever its stage is for, and its creator for a post asking the user", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const woken = () =>
+      runner.dispatches
+        .filter((d) => d.thread !== undefined)
+        .map((d) => [d.agent, d.trigger.kind])
+        .toSorted((a, b) => String(a).localeCompare(String(b)));
+    const beat = async (): Promise<void> => {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const task = await board.createTask(REV, {
+      project: "demo",
+      title: "build",
+      stages: [
+        { name: "build", agent: "eng-1" },
+        { name: "check", agent: "eng-2" },
+      ],
+    });
+    const inThread = (actor: Actor) => ({ ...actor, scope: "demo", thread: task.id });
+    await board.claimTask(inThread(ENG), { task_id: task.id });
+    await board.advanceTask(inThread(ENG), { task_id: task.id, note: "Built." });
+    await beat();
+    await beat();
+    runner.dispatches.length = 0;
+
+    // The check waits for eng-2; the user's question there wakes neither the builder nor the
+    // task's creator.
+    await board.postMessage(USER, { thread_id: task.id, body: "Is the cache warm?" });
+    await beat();
+    expect(woken()).toEqual([["eng-2", "heartbeat"]]);
+    runner.dispatches.length = 0;
+
+    // A post that asks the user wakes the creator beside the holder, so it can plan the wait.
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.claimTask(inThread(ENG2), { task_id: task.id });
+    const asks = await board.postMessage(ENG2, {
+      thread_id: task.id,
+      body: "@user ship it today?",
+    });
+    await beat();
+    expect(woken()).toEqual([
+      ["eng-2", "heartbeat"],
+      ["rev-1", "heartbeat"],
+    ]);
+    runner.dispatches.length = 0;
+    await board.setDigestCursor("rev-1", "demo", asks.id, task.id);
+
+    // A mention wakes whoever it names, and nobody else.
+    await board.postMessage(ENG2, { thread_id: task.id, body: "@eng-1 which flag?" });
+    await scheduler.tick();
+    advance(1_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(woken()).toEqual([["eng-1", "mention"]]);
+  });
+
   it("wakes a citizen where it was asked, and outside its projects for anything asked elsewhere", async () => {
     const { board, runner, scheduler } = await setup();
     await board.addProject(USER, { slug: "lab" });

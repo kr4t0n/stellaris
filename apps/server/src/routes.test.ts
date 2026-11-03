@@ -10,6 +10,7 @@ import {
   TokenUseSchema,
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
+  UploadedImageSchema,
   type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
@@ -504,6 +505,94 @@ describe("board server routes", () => {
     ]);
     expect((await app.request("/api/messages?ids=not-an-id", { headers })).status).toBe(400);
     expect((await app.request("/api/messages", { headers })).status).toBe(400);
+  });
+
+  it("keeps an image the user posts as its bytes, of the four kinds a turn may upload, and serves it back", async () => {
+    const app = createApp({ board, version: "t" });
+    const post = (body: Uint8Array, query = "", token: string | null = userToken, type = "") =>
+      app.request(`/api/images${query}`, {
+        method: "POST",
+        headers: {
+          ...(type === "" ? {} : { "content-type": type }),
+          ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body,
+      });
+    const Answer = z.object({ error: z.string(), message: z.string() });
+    const kept = () =>
+      board.readEvents(null, 1_000).then((events) => {
+        return events.filter((event) => event.type === "image.uploaded").length;
+      });
+    // Each kind by its first bytes, whatever the request's content type says.
+    const images: Array<{ type: string; bytes: Buffer; sent: string }> = [
+      {
+        type: "png",
+        bytes: Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"),
+        sent: "image/png",
+      },
+      { type: "jpeg", bytes: Buffer.from("ffd8ffe000104a464946", "hex"), sent: "image/jpeg" },
+      { type: "gif", bytes: Buffer.from("GIF89a\x01\x00\x01\x00", "latin1"), sent: "" },
+      {
+        type: "webp",
+        bytes: Buffer.from("RIFF\x24\x00\x00\x00WEBPVP8 ", "latin1"),
+        sent: "application/octet-stream",
+      },
+    ];
+    const png = images[0]?.bytes ?? Buffer.alloc(0);
+    for (const image of images) {
+      const name = `shot.${image.type}`;
+      const answer = await post(image.bytes, `?name=${name}`, userToken, image.sent);
+      expect(answer.status).toBe(200);
+      const uploaded = UploadedImageSchema.parse(await answer.json());
+      expect(uploaded).toEqual({
+        id: uploaded.id,
+        type: image.type,
+        size: image.bytes.length,
+        markdown: `![${name}](image:${uploaded.id})`,
+      });
+      const served = await app.request(`/api/images/${uploaded.id}`, { headers });
+      expect(served.headers.get("content-type")).toBe(`image/${image.type}`);
+      expect(Buffer.from(await served.arrayBuffer())).toEqual(image.bytes);
+    }
+    expect(await kept()).toBe(4);
+    const named = UploadedImageSchema.parse(
+      await (await post(png, `?name=${encodeURIComponent("a [b]\\c\nd.png")}`)).json(),
+    );
+    expect(named.markdown).toBe(`![a bcd.png](image:${named.id})`);
+    const unnamed = UploadedImageSchema.parse(await (await post(png)).json());
+    expect(unnamed.markdown).toBe(`![](image:${unnamed.id})`);
+    expect(await kept()).toBe(6);
+
+    // No document posing as an image, nor nothing at all.
+    const svg = await post(
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+      "?name=shape.svg",
+      userToken,
+      "image/svg+xml",
+    );
+    expect(svg.status).toBe(400);
+    expect(Answer.parse(await svg.json())).toEqual({
+      error: "VALIDATION",
+      message: "shape.svg is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+    });
+    const empty = await post(new Uint8Array());
+    expect(empty.status).toBe(400);
+    expect(Answer.parse(await empty.json()).message).toBe(
+      "the image is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+    );
+    expect((await post(png, `?name=${"x".repeat(1025)}`)).status).toBe(400);
+    // Only the user posts bytes: no token, a stranger's, or a citizen's turn, which uploads with
+    // upload_image instead.
+    expect((await post(png, "", null)).status).toBe(401);
+    expect((await post(png, "", "stl_nothing")).status).toBe(401);
+    const turn = board.issueTurnToken("eng-1", "engineer", 60_000, "demo");
+    const citizen = await post(png, "?name=shot.png", turn);
+    expect(citizen.status).toBe(403);
+    expect(Answer.parse(await citizen.json())).toEqual({
+      error: "FORBIDDEN",
+      message: "only the user posts an image's bytes",
+    });
+    expect(await kept()).toBe(6);
   });
 
   it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {

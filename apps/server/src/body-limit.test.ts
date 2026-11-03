@@ -149,6 +149,47 @@ describe("request body limits", () => {
     expect(await purpose()).toBe("Reviews.");
   });
 
+  it("takes an image the user posts up to 8 MiB, past the cap on other writes, and refuses one over it with a 413", async () => {
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const image = (size: number) => Buffer.concat([png, Buffer.alloc(size - png.length)]);
+    const send = (body: Uint8Array | ReadableStream<Uint8Array>, token = userToken) =>
+      fetch(`${url}/api/images?name=shot.png`, {
+        method: "POST",
+        headers: { "content-type": "image/png", authorization: `Bearer ${token}` },
+        body,
+        ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
+      });
+    const kept = async () =>
+      (await board.readEvents(null, 1_000)).filter((event) => event.type === "image.uploaded")
+        .length;
+
+    const over = await send(image(8 * MiB + 1));
+    expect(over.status).toBe(413);
+    expect(over.headers.get("connection")).toBe("close");
+    expect(await over.json()).toMatchObject({ error: "PAYLOAD_TOO_LARGE" });
+    const bytes = image(8 * MiB + 1);
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let at = 0; at < bytes.length; at += MiB) {
+          controller.enqueue(bytes.subarray(at, at + MiB));
+        }
+        controller.close();
+      },
+    });
+    expect((await send(streamed)).status).toBe(413);
+    // The token is checked first: a stranger's body gets a 401, not a 413.
+    expect((await send(image(8 * MiB + 1), "stl_nothing")).status).toBe(401);
+    expect(await kept()).toBe(0);
+
+    // Twice what any other write takes, and the largest image the board keeps.
+    for (const size of [2 * MiB, 8 * MiB]) {
+      const at = await send(image(size));
+      expect(at.status).toBe(200);
+      expect(await at.json()).toMatchObject({ type: "png", size });
+    }
+    expect(await kept()).toBe(2);
+  });
+
   it("refuses a runner's post over 8 MiB, and an answer over 16 MiB, with a 413 its client takes as final", async () => {
     const { token } = await board.addRunner(USER, "laptop");
     const client = new RunnerClient(url, token);

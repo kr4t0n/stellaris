@@ -2,8 +2,9 @@ import { z } from "zod";
 import { UlidSchema } from "./ids.js";
 
 /**
- * Images a citizen uploads with `upload_image`: the runner its turn runs on reads the file, the
- * board keeps the bytes, and a post shows it as `![what it shows](image:<id>)`.
+ * Images a citizen uploads with `upload_image`, where the runner its turn runs on reads the file,
+ * and the user posts from a composer as its bytes: the board keeps them, and a post shows one as
+ * `![what it shows](image:<id>)`.
  */
 
 /** The largest image the board takes. */
@@ -62,6 +63,12 @@ export const ImagePathSchema = z
   .max(4096)
   .refine((value) => !value.includes("\0"), { message: "a path with no NUL character" });
 
+/**
+ * The file name of an image the user posts from a composer, sent beside its bytes as
+ * `POST /api/images?name=…`, which becomes the image's description in the markdown answered.
+ */
+export const ImageNameSchema = z.string().max(1024);
+
 /** How an uploaded image is written in a post's markdown: `image:` and its id. */
 export const IMAGE_SCHEME = "image:";
 
@@ -74,7 +81,10 @@ export function uploadedImageId(href: string): string | null {
   return UlidSchema.safeParse(id).success ? id : null;
 }
 
-/** What `upload_image` answers: the image's id and the markdown that shows it in a post. */
+/**
+ * What `upload_image` and `POST /api/images` answer: the image's id and the markdown that shows it
+ * in a post.
+ */
 export const UploadedImageSchema = z.object({
   id: UlidSchema,
   type: ImageTypeSchema,

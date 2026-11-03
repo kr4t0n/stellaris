@@ -5,6 +5,7 @@ import {
   CliKindSchema,
   EffortSchema,
   IMAGE_MEDIA_TYPES,
+  ImageNameSchema,
   MESSAGE_LOOKUP_LIMIT,
   MetricsWindowSchema,
   ModelNameSchema,
@@ -27,7 +28,7 @@ import { Hono, type Context } from "hono";
 import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
-import { API_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
+import { API_BODY_LIMIT_BYTES, IMAGE_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import {
   appleAppSiteAssociation,
@@ -172,6 +173,18 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   const api = new Hono<Env>();
   api.use("*", authenticate);
+  // An image the user posts from a composer: the body is its bytes, whatever its content type says,
+  // and `name` the file's name, which describes it in the markdown answered. It answers before the
+  // cap every other write takes, below, so it is held to its own, the image limit. A citizen's
+  // token is refused before the body is read, since a turn uploads with `upload_image`.
+  api.post("/images", limitBody(IMAGE_BODY_LIMIT_BYTES), async (c) => {
+    if (c.get("actor").role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user posts an image's bytes");
+    }
+    const name = ImageNameSchema.optional().parse(c.req.query("name"));
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    return c.json(await board.postImage(c.get("actor"), bytes, name));
+  });
   // After the token check, so a body without a valid token is never buffered. Only the methods that
   // carry one, since the limit makes `@hono/node-server` build a whole request to look for a body.
   api.on(["POST", "PUT", "PATCH", "DELETE"], "*", limitBody(API_BODY_LIMIT_BYTES));

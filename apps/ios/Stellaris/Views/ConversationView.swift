@@ -334,6 +334,9 @@ struct DraftField: View {
           .labelStyle(.iconOnly)
           .buttonBorderShape(.roundedRectangle(radius: 6))
           .tint(MessageColor.surface2)
+          .controlSize(.small)
+          // As tall as Send: at its own height, 35 points, it made the box taller than a line.
+          .frame(height: 28)
           .accessibilityIdentifier("paste-image")
           SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
             send(draft.wrappedValue)

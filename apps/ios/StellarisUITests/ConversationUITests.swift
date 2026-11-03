@@ -84,6 +84,9 @@ final class ConversationUITests: ShellTestCase {
     XCTAssertTrue(remove.waitForExistence(timeout: 20), "the draft's thumbnail has no ×")
     remove.tap()
     XCTAssertTrue(draft(box, matches: #"Long: "#), "× leaves the image's markdown in the draft")
+    // The draft keeps the keyboard, at the image's place.
+    box.typeText("more")
+    XCTAssertTrue(draft(box, matches: #"Long: more"#), "what is typed after × doesn't reach the draft")
     XCTAssertTrue(
       app.otherElements.matching(identifier: "draft-image").firstMatch
         .waitForNonExistence(timeout: 20), "the thumbnail stays once its image is out")

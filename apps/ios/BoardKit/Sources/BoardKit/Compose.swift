@@ -140,8 +140,9 @@ public func settleUpload(_ text: String, caret: Int, placeholder: String, markdo
 }
 
 /// An image a draft holds, where it stands: one the board kept, by its id and description, or one
-/// still uploading, by the line an upload holds. `start` and `text` place it in the draft, `start`
-/// in UTF-16 code units, as the web counts them.
+/// still uploading, by the line an upload holds, described by what that line names, such as
+/// `image (2)`, which tells two uploads of one name apart. `start` and `text` place it in the
+/// draft, `start` in UTF-16 code units, as the web counts them.
 public struct DraftImage: Sendable, Hashable, Decodable {
   public enum Kind: String, Sendable, Hashable, Decodable {
     case kept, uploading
@@ -196,7 +197,9 @@ public func draftImages(_ text: String, held: [String]) -> [DraftImage] {
   }
   for line in held {
     if let start = firstUnit(of: Array(line.utf16), in: units) {
-      found.append(DraftImage(kind: .uploading, start: start, text: line, id: nil, alt: ""))
+      // The words between `![Uploading ` and `…]()`, as `uploadingImage` writes the line.
+      let alt = String(line.dropFirst("![Uploading ".count).dropLast("…]()".count))
+      found.append(DraftImage(kind: .uploading, start: start, text: line, id: nil, alt: alt))
     }
   }
   return found.enumerated().sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }

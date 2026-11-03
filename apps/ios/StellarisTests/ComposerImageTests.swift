@@ -148,7 +148,7 @@ import Testing
     await gate.arrivals(1)
     #expect(
       model.draftImages(in: general)
-        == [DraftImage(kind: .uploading, start: 4, text: line, id: nil, alt: "")])
+        == [DraftImage(kind: .uploading, start: 4, text: line, id: nil, alt: "image")])
     #if canImport(UIKit)
       let preview = try #require(model.uploadPreviews[general.key]?[line])
       let picture = try #require(UIImage(data: preview))

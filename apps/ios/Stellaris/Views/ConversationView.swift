@@ -548,7 +548,10 @@ struct DraftImageView: View {
       }
       .buttonStyle(.plain)
       .padding(4)
-      .accessibilityLabel(image.alt.isEmpty ? "Remove the image" : "Remove \(image.alt)")
+      .accessibilityLabel(
+        image.id == nil
+          ? "Remove \(image.alt), still uploading"
+          : image.alt.isEmpty ? "Remove the image" : "Remove \(image.alt)")
       .accessibilityIdentifier("remove-draft-image")
     }
     .accessibilityElement(children: .contain)

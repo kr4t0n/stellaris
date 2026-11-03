@@ -30,6 +30,14 @@ export const TriggerKindSchema = z.enum([
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 
+/**
+ * What a heartbeat woke a conversation for, the first that applies: `unread`, posts it has not
+ * read; `held`, a stage it holds; `waiting`, a stage it may take. News comes first, since a held or
+ * waiting stage alone would wake it on every heartbeat.
+ */
+export const HeartbeatCauseSchema = z.enum(["unread", "held", "waiting"]);
+export type HeartbeatCause = z.infer<typeof HeartbeatCauseSchema>;
+
 export const TriggerSchema = z.object({
   kind: TriggerKindSchema,
   from: NameSchema.optional(),
@@ -41,6 +49,8 @@ export const TriggerSchema = z.object({
   channel: ChannelRefSchema.optional(),
   /** The cron that came due, for a `cron` wake. */
   cronId: UlidSchema.optional(),
+  /** What a `heartbeat` woke for; absent on records from before the board kept it. */
+  heartbeat: HeartbeatCauseSchema.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;

@@ -1,4 +1,5 @@
 import {
+  HeartbeatCauseSchema,
   METRICS_WINDOW_MS,
   channelConversation,
   parseChannelRef,
@@ -6,6 +7,7 @@ import {
   USER_NAME,
   wakeScope,
   type BoardEvent,
+  type HeartbeatCause,
   type Metrics,
   type MetricsWindow,
   type Task,
@@ -34,7 +36,8 @@ export interface MetricsInput {
 }
 
 // A turn's events carry its thread as the thread's id, its channel by name, and a project's channels'
-// conversation by the project, all absent for a home turn.
+// conversation by the project, all absent for a home turn. A heartbeat's carry what it woke for,
+// since the board kept it; one it does not know counts as a heartbeat without one.
 const TurnPayload = z.object({
   turnId: z.string().optional(),
   project: z.string(),
@@ -42,6 +45,7 @@ const TurnPayload = z.object({
   channel: z.string().optional(),
   place: z.string().optional(),
   trigger: z.string(),
+  heartbeat: HeartbeatCauseSchema.optional().catch(undefined),
 });
 const TaskPayload = z.object({
   taskId: z.string(),
@@ -152,8 +156,11 @@ export function computeMetrics(input: MetricsInput): Metrics {
   const tasks = new Map(input.tasks.map((task) => [task.id, task]));
   const citizens = new Map(input.citizens.map((citizen) => [citizen.name, citizen]));
 
-  // Turns that changed nothing on the board.
-  const turnRows = new Map<string, { turns: number; idle: number }>();
+  // Turns that changed nothing on the board, by trigger and, for a heartbeat, what it woke for.
+  const turnRows = new Map<
+    string,
+    { trigger: string; heartbeat: HeartbeatCause | undefined; turns: number; idle: number }
+  >();
   const agentRows = new Map<string, { turns: number; idle: number }>();
   let turns = 0;
   let idle = 0;
@@ -198,13 +205,12 @@ export function computeMetrics(input: MetricsInput): Metrics {
         const nothing = actions === 0 ? 1 : 0;
         turns += 1;
         idle += nothing;
-        for (const [rows, key] of [
-          [turnRows, turn.data.trigger],
-          [agentRows, event.actor],
-        ] as const) {
-          const row = rows.get(key) ?? { turns: 0, idle: 0 };
-          rows.set(key, { turns: row.turns + 1, idle: row.idle + nothing });
-        }
+        const { trigger, heartbeat } = turn.data;
+        const key = heartbeat === undefined ? trigger : `${trigger}\u0000${heartbeat}`;
+        const row = turnRows.get(key) ?? { trigger, heartbeat, turns: 0, idle: 0 };
+        turnRows.set(key, { ...row, turns: row.turns + 1, idle: row.idle + nothing });
+        const own = agentRows.get(event.actor) ?? { turns: 0, idle: 0 };
+        agentRows.set(event.actor, { turns: own.turns + 1, idle: own.idle + nothing });
         break;
       }
       case "turn.started": {
@@ -374,8 +380,11 @@ export function computeMetrics(input: MetricsInput): Metrics {
       turns,
       idle,
       unknown,
-      byTrigger: [...turnRows]
-        .map(([trigger, row]) => ({ trigger, ...row }))
+      byTrigger: [...turnRows.values()]
+        .map(({ heartbeat, ...row }) => ({
+          ...row,
+          ...(heartbeat === undefined ? {} : { heartbeat }),
+        }))
         .toSorted((a, b) => b.idle - a.idle || b.turns - a.turns),
       byAgent: [...agentRows]
         .map(([agent, row]) => ({ agent, role: citizens.get(agent)?.role ?? null, ...row }))

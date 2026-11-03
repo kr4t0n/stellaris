@@ -5,6 +5,8 @@ import {
   placeConversation,
   CRON_FAILING_RUNS,
   currentStage,
+  firesInTask,
+  cronStoppedAt,
   nextFire,
   parseSessionKey,
   mayHoldStage,
@@ -39,7 +41,7 @@ import {
   type WorkspaceConversation,
 } from "@stellaris/shared";
 import { z } from "zod";
-import { decideWake } from "./wake.js";
+import { decideWake, heartbeatCause } from "./wake.js";
 
 /**
  * A conversation beside a scope's home: a thread's, a channel's other than general, or, in the
@@ -1460,10 +1462,13 @@ export class Scheduler {
    * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
    * scope: the unread messages of its home, of each other channel, and of each thread, a stage the
    * member holds, and a stage of an unblocked task waiting that it may take, each in its task's
-   * thread. Each conversation with something wakes on its own, so a heartbeat never brings one
-   * task's business into another's turn.
+   * thread. A stage counts for neither while the member has a cron pending in its task's thread,
+   * whose fires are its checks there. Each conversation with something wakes on its own, so a
+   * heartbeat never brings one task's business into another's turn, and its trigger says what it
+   * woke for (`heartbeatCause`).
    */
   private async checkHeartbeats(now: number): Promise<void> {
+    let pendingCrons: readonly Cron[] | undefined;
     for (const agent of await this.board.listAgents()) {
       if (agent.status !== "active" || agent.cli === null) {
         continue;
@@ -1490,6 +1495,12 @@ export class Scheduler {
         this.state.lastHeartbeat[cadence] = iso(now);
         unread ??= await this.board.unreadByConversation(actor);
         held ??= await this.board.heldClaims(agent.name);
+        pendingCrons ??= (await this.board.listCrons()).filter(
+          (cron) => cronStoppedAt(cron) === null,
+        );
+        const crons = pendingCrons;
+        const leftToCron = (task: Task): boolean =>
+          crons.some((cron) => cron.agent === agent.name && firesInTask(cron, task));
         const reasons = new Map<
           string,
           {
@@ -1523,7 +1534,7 @@ export class Scheduler {
           }
         }
         for (const task of held) {
-          if (task.project === project) {
+          if (task.project === project && !leftToCron(task)) {
             reasonsIn({ thread: { id: task.id, task: true } }).claimsHeld += 1;
           }
         }
@@ -1531,6 +1542,7 @@ export class Scheduler {
           for (const task of await this.board.openTasks(project)) {
             if (
               mayHoldStage(agent, task) &&
+              !leftToCron(task) &&
               (await this.blockersInPlay(task.blockedBy)).length === 0
             ) {
               reasonsIn({ thread: { id: task.id, task: true } }).waiting += 1;
@@ -1541,7 +1553,16 @@ export class Scheduler {
           if (this.pending.has(key) || this.running.has(key)) {
             continue;
           }
-          const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
+          const cause = heartbeatCause({
+            digestSize: reason.digestSize,
+            claimsHeld: reason.claimsHeld,
+            waitingStages: reason.waiting,
+          });
+          const trigger = TriggerSchema.parse({
+            kind: "heartbeat",
+            reason: "heartbeat",
+            ...(cause === null ? {} : { heartbeat: cause }),
+          });
           const decision = decideWake({
             trigger,
             digestSize: reason.digestSize,

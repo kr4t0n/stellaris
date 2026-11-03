@@ -1,6 +1,7 @@
 // The mention being typed in a draft, a port of `mentionAt` and `completeMention` in the web's
 // `apps/web/src/board/compose.ts`, and the place an image holds in it while it uploads, a port of
-// `uploadingImage`, `insertAt`, and `settleUpload` there. Both run the case tables
+// `uploadingImage`, `uploadPlaceholder`, `insertAt`, and `settleUpload` there, and of
+// `imageDescription` in `packages/shared/src/images.ts`. Both run the case tables
 // `apps/ios/fixtures/cases/compose.json` and `uploads.json`. Positions count UTF-16 code units, as
 // the web's string indices do.
 
@@ -77,14 +78,33 @@ public struct DraftEdit: Sendable, Hashable, Decodable {
 }
 
 /// A file's name as an image's description in markdown, as the board writes one: no brackets,
-/// backslashes, or line breaks.
+/// backslashes, or line breaks, which would end the description, and no backticks, which would open
+/// a code span that a later one in the post closes.
 public func imageDescription(_ name: String) -> String {
-  String(name.unicodeScalars.filter { !"[]\\\r\n".unicodeScalars.contains($0) }.map(Character.init))
+  String(
+    name.unicodeScalars.filter { !"[]\\\r\n`".unicodeScalars.contains($0) }.map(Character.init))
 }
 
-/// What holds an image's place in a draft while it uploads, in the words that say so.
-public func uploadingImage(_ name: String) -> String {
-  "![Uploading \(imageDescription(name))…]()"
+/// What holds an image's place in a draft while it uploads, in the words that say so, numbered
+/// from the second line of one name on.
+public func uploadingImage(_ name: String, number: Int = 1) -> String {
+  number == 1
+    ? "![Uploading \(imageDescription(name))…]()"
+    : "![Uploading \(imageDescription(name)) (\(number))…]()"
+}
+
+/// A line of its own for an upload of an image named `name`: the first numbering found neither in
+/// `text` nor among `held`, the lines of uploads still on their way, so each upload fills its own
+/// line even when every image has the same name, as every image the app posts does.
+public func uploadPlaceholder(for name: String, in text: String, held: [String]) -> String {
+  var number = 1
+  while true {
+    let line = uploadingImage(name, number: number)
+    if firstUnit(of: Array(line.utf16), in: Array(text.utf16)) == nil, !held.contains(line) {
+      return line
+    }
+    number += 1
+  }
 }
 
 /// `text` with `inserted` in place of what is selected from `start` to `end`, and the caret after
@@ -108,11 +128,7 @@ public func settleUpload(_ text: String, caret: Int, placeholder: String, markdo
 {
   let units = Array(text.utf16)
   let held = Array(placeholder.utf16)
-  guard !held.isEmpty, units.count >= held.count,
-    let start = (0...(units.count - held.count)).first(where: {
-      units[$0..<$0 + held.count].elementsEqual(held)
-    })
-  else {
+  guard let start = firstUnit(of: held, in: units) else {
     return nil
   }
   let end = start + held.count
@@ -121,6 +137,17 @@ public func settleUpload(_ text: String, caret: Int, placeholder: String, markdo
     text: String(decoding: units[..<start], as: UTF16.self) + markdown
       + String(decoding: units[end...], as: UTF16.self),
     caret: caret <= start ? caret : caret >= end ? caret - held.count + length : start + length)
+}
+
+/// Where `needle` first starts in `units`, in UTF-16 code units, as a JavaScript string's `indexOf`
+/// finds it; nil for an empty needle or none.
+private func firstUnit(of needle: [UInt16], in units: [UInt16]) -> Int? {
+  guard !needle.isEmpty, units.count >= needle.count else {
+    return nil
+  }
+  return (0...(units.count - needle.count)).first {
+    units[$0..<$0 + needle.count].elementsEqual(needle)
+  }
 }
 
 private let at = UInt16(UInt8(ascii: "@"))

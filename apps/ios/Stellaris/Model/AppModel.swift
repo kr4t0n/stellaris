@@ -79,6 +79,9 @@ enum SignInFailure: Error, Equatable {
   /// Why the last image that failed in each conversation didn't go, in the board's words when it
   /// gave them, kept until the next image or post there, so a view built again shows it still.
   private(set) var uploadFailures: [String: String] = [:]
+  /// The lines the uploads on their way hold in each conversation's draft, by its key, each its own,
+  /// which only its upload fills.
+  @ObservationIgnored private var heldLines: [String: [String]] = [:]
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
 
@@ -271,18 +274,26 @@ enum SignInFailure: Error, Equatable {
 
   /// Holds the place of `count` images in the conversation's draft, one a line, in place of what is
   /// selected from `start` to `end` in UTF-16 code units, as the web's composer does: gives the
-  /// caret after them, and the line each holds, which `upload` fills.
+  /// caret after them, and the lines they hold, each its own and numbered past those the draft and
+  /// the uploads on their way hold, one for each `upload` to fill.
   func holdImages(_ count: Int, in conversation: Conversation, start: Int, end: Int)
-    -> (caret: Int, placeholder: String)
+    -> (caret: Int, placeholders: [String])
   {
-    let placeholder = uploadingImage("image")
+    let key = conversation.key
+    let draft = memory?.draft(conversation) ?? ""
+    var placeholders: [String] = []
+    for _ in 0..<count {
+      placeholders.append(
+        uploadPlaceholder(
+          for: "image", in: draft, held: (heldLines[key] ?? []) + placeholders))
+    }
     let held = insertAt(
-      memory?.draft(conversation) ?? "", start: start, end: end,
-      inserted: Array(repeating: placeholder, count: count).joined(separator: "\n"))
+      draft, start: start, end: end, inserted: placeholders.joined(separator: "\n"))
     memory?.setDraft(held.text, for: conversation)
-    uploading[conversation.key, default: 0] += count
-    uploadFailures[conversation.key] = nil
-    return (held.caret, placeholder)
+    heldLines[key, default: []] += placeholders
+    uploading[key, default: 0] += count
+    uploadFailures[key] = nil
+    return (held.caret, placeholders)
   }
 
   /// Uploads an image's bytes, made into a kind and a size the board keeps, then puts the board's
@@ -316,6 +327,7 @@ enum SignInFailure: Error, Equatable {
     let key = conversation.key
     let left = (uploading[key] ?? 1) - 1
     uploading[key] = left > 0 ? left : nil
+    heldLines[key]?.removeAll { $0 == placeholder }
     if let failure {
       uploadFailures[key] = failure
     }
@@ -642,6 +654,7 @@ enum SignInFailure: Error, Equatable {
     refusals = [:]
     uploading = [:]
     uploadFailures = [:]
+    heldLines = [:]
   }
 
   private func leave(notice: String?) {

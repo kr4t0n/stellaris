@@ -248,9 +248,18 @@ import Testing
       let result: DraftEdit?
     }
 
+    struct Numbered: Decodable {
+      let name: String
+      let file: String
+      let text: String
+      let held: [String]
+      let placeholder: String
+    }
+
     let placeholders: [Placeholder]
     let inserts: [Insert]
     let settles: [Settle]
+    let numbered: [Numbered]
   }
 
   @Test func uploadsHoldTheirPlaceAsOnTheWeb() throws {
@@ -262,6 +271,11 @@ import Testing
     for each in cases.inserts {
       let done = insertAt(each.text, start: each.start, end: each.end, inserted: each.inserted)
       #expect(done == each.result, "\(each.name)")
+    }
+    for each in cases.numbered {
+      #expect(
+        uploadPlaceholder(for: each.file, in: each.text, held: each.held) == each.placeholder,
+        "\(each.name)")
     }
     for each in cases.settles {
       let settled = settleUpload(

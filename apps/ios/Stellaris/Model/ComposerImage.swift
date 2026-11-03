@@ -1,8 +1,8 @@
 import BoardKit
 import Foundation
 
-#if canImport(UIKit)
-  import UIKit
+#if canImport(ImageIO)
+  import ImageIO
 #endif
 
 /// An image picked from Photos or pasted, as the app posts it: of a kind and a size the board keeps.
@@ -17,40 +17,58 @@ struct ComposerImage: Sendable, Equatable {
   /// Bytes that hold no picture the app can read.
   struct Unreadable: Error {}
 
-  /// `data` as it is when the board keeps its kind and its size; otherwise the picture it holds,
-  /// such as a HEIC photo or one past the limit, as a JPEG, scaled down until it fits. Nil when it
-  /// holds no picture. Off the main actor: a large photo takes a while to draw again.
+  /// The longest side, in pixels, a picture the app draws again starts at.
+  static let largestSide = 4096
+
+  /// `data` as it is when the board keeps its kind and its size, as for the JPEG Photos gives in its
+  /// most compatible encoding; otherwise the picture it holds, such as a HEIC or TIFF pasted, or a
+  /// photo past the limit, as a JPEG, scaled down until it fits. Nil when it holds no picture. Off
+  /// the main actor, and decoded at the size it goes at, never whole: a 48-megapixel photo is about
+  /// 195 MB as a bitmap, and ten may come at once.
   @concurrent nonisolated static func prepare(_ data: Data, limit: Int = imageLimitBytes) async
     -> ComposerImage?
   {
     if let type = imageType(of: data), data.count <= limit {
       return ComposerImage(data: data, type: type)
     }
-    #if canImport(UIKit)
-      guard let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else {
+    #if canImport(ImageIO)
+      guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
         return nil
       }
-      let pixels = CGSize(
-        width: image.size.width * image.scale, height: image.size.height * image.scale)
-      let format = UIGraphicsImageRendererFormat()
-      format.scale = 1
-      format.opaque = true
-      var factor: CGFloat = 1
-      while factor > 0.02 {
-        let size = CGSize(
-          width: max(1, (pixels.width * factor).rounded()),
-          height: max(1, (pixels.height * factor).rounded()))
-        // Drawn upright, as the photo shows, with nothing of its metadata kept.
-        let jpeg = UIGraphicsImageRenderer(size: size, format: format)
-          .jpegData(withCompressionQuality: 0.85) { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-          }
-        if jpeg.count <= limit {
+      var side = largestSide
+      while side >= 32 {
+        // Upright, as the photo shows, with nothing of its metadata kept.
+        let options: [CFString: Any] = [
+          kCGImageSourceCreateThumbnailFromImageAlways: true,
+          kCGImageSourceCreateThumbnailWithTransform: true,
+          kCGImageSourceThumbnailMaxPixelSize: side,
+        ]
+        guard let picture = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else {
+          return nil
+        }
+        if let jpeg = jpeg(picture), jpeg.count <= limit {
           return ComposerImage(data: jpeg, type: .jpeg)
         }
-        factor *= 0.7
+        side = Int(Double(max(picture.width, picture.height)) * 0.7)
       }
     #endif
     return nil
   }
+
+  #if canImport(ImageIO)
+    /// `picture` as a JPEG of the quality a photo keeps its detail at.
+    nonisolated private static func jpeg(_ picture: CGImage) -> Data? {
+      let data = NSMutableData()
+      guard
+        let destination = CGImageDestinationCreateWithData(
+          data as CFMutableData, "public.jpeg" as CFString, 1, nil)
+      else {
+        return nil
+      }
+      let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.85]
+      CGImageDestinationAddImage(destination, picture, options as CFDictionary)
+      return CGImageDestinationFinalize(destination) ? data as Data : nil
+    }
+  #endif
 }

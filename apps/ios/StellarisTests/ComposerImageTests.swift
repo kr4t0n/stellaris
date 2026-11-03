@@ -8,10 +8,11 @@ import Testing
 
 @testable import Stellaris
 
-/// Images put in a draft over the fake board: each holds its place where the caret was, one a
-/// line, until the board's markdown for it takes the place; bytes that hold no picture leave a
-/// reason and no line, which the next post clears; and Send waits while one is on its way. Each
-/// test signs in with a token of its own, which the fake board keeps its writes under.
+/// Images put in a draft over the fake board: each holds its place where the caret was, on a line
+/// of its own, until the board's markdown for it takes that place, in whatever order the uploads
+/// end; bytes that hold no picture leave a reason and no line, which the next post clears; and Send
+/// waits while one is on its way. Each test signs in with a token of its own, which the fake board
+/// keeps its writes under.
 @MainActor @Suite(.serialized) struct ComposerImageTests {
   private let general = Conversation.general
   private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13])
@@ -28,14 +29,15 @@ import Testing
     let model = try await signedIn()
     model.memory?.setDraft("Before  after", for: general)
     let held = model.holdImages(1, in: general, start: 7, end: 7)
-    #expect(held.placeholder == "![Uploading image…]()")
-    #expect(held.caret == 7 + held.placeholder.utf16.count)
+    let line = try #require(held.placeholders.first)
+    #expect(held.placeholders == ["![Uploading image…]()"])
+    #expect(held.caret == 7 + line.utf16.count)
     #expect(model.memory?.draft(general) == "Before ![Uploading image…]() after")
     #expect(model.uploading[general.key] == 1)
 
     // The caret, just after the line, goes after the markdown that takes its place.
     let settled = try #require(
-      await model.upload(png, holding: held.placeholder, in: general) { held.caret })
+      await model.upload(png, holding: line, in: general) { held.caret })
     let draft = try #require(model.memory?.draft(general))
     #expect(
       draft.wholeMatch(of: /Before !\[image\.png\]\(image:00000000000000000000PHT001\) after/)
@@ -50,21 +52,22 @@ import Testing
     let model = try await signedIn()
     model.memory?.setDraft("See: ", for: general)
     let held = model.holdImages(2, in: general, start: 5, end: 5)
-    #expect(model.memory?.draft(general) == "See: \(held.placeholder)\n\(held.placeholder)")
+    #expect(held.placeholders == ["![Uploading image…]()", "![Uploading image (2)…]()"])
+    #expect(model.memory?.draft(general) == "See: \(held.placeholders.joined(separator: "\n"))")
 
-    await model.upload(Data("<svg/>".utf8), holding: held.placeholder, in: general)
+    await model.upload(Data("<svg/>".utf8), holding: held.placeholders[0], in: general)
     #expect(model.uploadFailures[general.key] == "The image could not be read.")
-    #expect(model.memory?.draft(general) == "See: \n\(held.placeholder)")
+    #expect(model.memory?.draft(general) == "See: \n\(held.placeholders[1])")
     #expect(model.uploading[general.key] == 1)
     // Photos or the pasteboard gave nothing at all.
-    await model.upload(nil, holding: held.placeholder, in: general)
+    await model.upload(nil, holding: held.placeholders[1], in: general)
     #expect(model.memory?.draft(general) == "See: \n")
     #expect(model.uploading[general.key] == nil)
 
     // The next image clears the reason, and so does a post.
-    _ = model.holdImages(1, in: general, start: 0, end: 0)
+    let next = model.holdImages(1, in: general, start: 0, end: 0)
     #expect(model.uploadFailures[general.key] == nil)
-    await model.upload(nil, holding: held.placeholder, in: general)
+    await model.upload(nil, holding: next.placeholders[0], in: general)
     #expect(model.uploadFailures[general.key] != nil)
     _ = try await model.post("Without it.", to: general)
     #expect(model.uploadFailures[general.key] == nil)
@@ -74,9 +77,40 @@ import Testing
     let model = try await signedIn()
     let held = model.holdImages(1, in: general, start: 0, end: 0)
     model.memory?.setDraft("Changed my mind.", for: general)
-    await model.upload(png, holding: held.placeholder, in: general)
+    await model.upload(png, holding: held.placeholders[0], in: general)
     #expect(model.memory?.draft(general) == "Changed my mind.")
     #expect(model.uploading[general.key] == nil)
+  }
+
+  /// Photos picked together, or pasted one after another, whose uploads end in the other order,
+  /// each land where they were put: every image has the same name, so the lines differ by number.
+  @Test func imagesLandWhereTheyWerePutWhicheverEndsFirst() async throws {
+    let model = try await signedIn()
+    model.memory?.setDraft("A: ", for: general)
+    let first = model.holdImages(1, in: general, start: 3, end: 3)
+    let draft = model.memory?.draft(general) ?? ""
+    model.memory?.setDraft(draft + " B: ", for: general)
+    let end = draft.utf16.count + " B: ".utf16.count
+    let second = model.holdImages(1, in: general, start: end, end: end)
+    #expect(first.placeholders == ["![Uploading image…]()"])
+    #expect(second.placeholders == ["![Uploading image (2)…]()"])
+
+    // The second ends first and takes the board's first id, into its own line.
+    await model.upload(png, holding: second.placeholders[0], in: general)
+    await model.upload(png, holding: first.placeholders[0], in: general)
+    let kept = (first: "00000000000000000000PHT002", second: "00000000000000000000PHT001")
+    #expect(
+      model.memory?.draft(general)
+        == "A: ![image.png](image:\(kept.first)) B: ![image.png](image:\(kept.second))")
+
+    // A line an upload still holds, though the user deleted it, is not given to the next image.
+    let third = model.holdImages(1, in: general, start: 0, end: 0)
+    model.memory?.setDraft("", for: general)
+    let fourth = model.holdImages(1, in: general, start: 0, end: 0)
+    #expect(third.placeholders == ["![Uploading image…]()"])
+    #expect(fourth.placeholders == ["![Uploading image (2)…]()"])
+    await model.upload(png, holding: third.placeholders[0], in: general)
+    #expect(model.memory?.draft(general) == fourth.placeholders[0])
   }
 
   @Test func keepsWhatTheBoardTakesAsItIs() async throws {
@@ -103,8 +137,9 @@ import Testing
       let prepared = try #require(await ComposerImage.prepare(large, limit: limit))
       #expect(prepared.type == .jpeg && prepared.data.count <= limit)
       #expect(imageType(of: prepared.data) == .jpeg)
+      // Upright and of the same shape, to the pixel it was rounded to.
       let picture = try #require(UIImage(data: prepared.data))
-      #expect(picture.size.width / picture.size.height == 1.5)
+      #expect(abs(picture.size.width / picture.size.height - 1.5) < 0.01)
     }
   #endif
 }

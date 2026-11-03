@@ -368,8 +368,7 @@ struct DraftField: View {
 
   /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.
   private func attach(_ items: [PhotosPickerItem]) {
-    let held = hold(items.count)
-    for item in items {
+    for (item, held) in zip(items, hold(items.count)) {
       Task {
         let data = try? await item.loadTransferable(type: Data.self)
         follow(await model.upload(data, holding: held, in: conversation) { caret() })
@@ -382,8 +381,7 @@ struct DraftField: View {
     guard !images.isEmpty else {
       return
     }
-    let held = hold(images.count)
-    for data in images {
+    for (data, held) in zip(images, hold(images.count)) {
       Task {
         follow(await model.upload(data, holding: held, in: conversation) { caret() })
       }
@@ -412,8 +410,9 @@ struct DraftField: View {
   }
 
   /// Holds the place of `count` images where the caret last was, in place of what was selected, or
-  /// at the end of a draft never typed in, and puts the caret after them; gives the line each holds.
-  private func hold(_ count: Int) -> String {
+  /// at the end of a draft never typed in, and puts the caret after them; gives the lines they
+  /// hold, each its own.
+  private func hold(_ count: Int) -> [String] {
     let text = model.memory?.draft(conversation) ?? ""
     var range = (start: text.utf16.count, end: text.utf16.count)
     if let selection, case .selection(let selected) = selection.indices,
@@ -427,7 +426,7 @@ struct DraftField: View {
     let held = model.holdImages(count, in: conversation, start: range.start, end: range.end)
     let now = model.memory?.draft(conversation) ?? ""
     selection = TextSelection(insertionPoint: String.Index(utf16Offset: held.caret, in: now))
-    return held.placeholder
+    return held.placeholders
   }
 
   /// The mention being typed before the caret, and where the caret is, in UTF-16 code units as the

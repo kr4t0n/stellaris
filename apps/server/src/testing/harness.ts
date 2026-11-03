@@ -73,6 +73,8 @@ export interface TestSocietyOptions {
     | undefined;
   /** Signing in with GitHub, with GitHub itself faked through its `fetch`. */
   readonly signIn?: AppDependencies["signIn"];
+  /** The turn host's clock, for a test whose board and scheduler keep one of their own. */
+  readonly now?: (() => Date) | undefined;
 }
 
 export interface TestSociety {
@@ -126,6 +128,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     turnTimeoutMs: options.turnTimeoutMs,
     maxTurns: options.maxTurns,
     residentIdleMs: options.residentIdleMs ?? 60_000,
+    ...(options.now === undefined ? {} : { now: options.now }),
     onEvent: (agent, scope, event, conversation) => turns.push(agent, scope, event, conversation),
   });
   const hub = new RunnerHub({

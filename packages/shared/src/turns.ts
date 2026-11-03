@@ -221,6 +221,12 @@ export const TurnRecordSchema = z.object({
   sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),
+  /**
+   * The failed fires its prompt named: each of its citizen's crons in its conversation whose latest
+   * fire's turn failed with nothing catching it up (`cronFailure`), but those it carries, with that
+   * turn. Completing it catches each up.
+   */
+  cronFailures: z.array(z.object({ cron: UlidSchema, turnId: UlidSchema })).optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 

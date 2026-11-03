@@ -169,7 +169,7 @@ describe("config-home rendering", () => {
       "Never wait by sleeping or leaving a process running: a turn's board token ends with the turn",
     );
     expect(text).toContain(
-      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and while it is pending in the task's thread, neither ended nor paused, with its latest fire's turn not failed, the board keeps your lease and the heartbeat leaves the stage to it, waking you there only for a post you have not read.",
+      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and while it is pending in the task's thread, neither ended nor paused, with its latest fire's turn not failed or a turn of yours there completed since, the board keeps your lease and the heartbeat leaves the stage to it, waking you there only for a post you have not read.",
     );
     expect(text).toContain(
       "Holding a stage is a lease; every turn that touches the task renews it, and so does the board while a cron of yours in the task's thread is pending.",

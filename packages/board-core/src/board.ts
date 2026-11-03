@@ -12,6 +12,7 @@ import {
   CommitIdSchema,
   conflictCopyOf,
   CRON_FLOOR_MS,
+  cronFailure,
   CronFrontmatterSchema,
   cronStoppedAt,
   fireTimes,
@@ -4339,6 +4340,13 @@ export class Board {
       for (const id of parsed.crons ?? []) {
         await this.recordCronRun(id, parsed, failed);
       }
+      // A turn shown a cron's failed fire sees it through by completing, as a turn whose prompt
+      // was delivered and that the user did not stop.
+      if (parsed.exitReason === "completed" || parsed.exitReason === "blocked") {
+        for (const shown of parsed.cronFailures ?? []) {
+          await this.catchUpCron(shown, parsed);
+        }
+      }
       if (parsed.exitReason === "stopped") {
         await this.events.append("turn.stopped", parsed.stoppedBy ?? USER_NAME, {
           ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
@@ -4511,6 +4519,31 @@ export class Board {
       lastRun: { turnId: record.id, at: record.endedAt ?? this.now().toISOString(), outcome },
       failures:
         outcome === "failed" ? cron.failures + 1 : outcome === "completed" ? 0 : cron.failures,
+    });
+  }
+
+  /**
+   * Marks a cron's failed fire caught up by a completed turn whose prompt named it, while that
+   * failure is still its latest run. Its schedule and its run of failures stay as they are.
+   */
+  private async catchUpCron(
+    shown: { cron: Ulid; turnId: Ulid },
+    record: TurnRecord,
+  ): Promise<void> {
+    if (record.id === undefined || !(await exists(this.paths.cron(shown.cron)))) {
+      return;
+    }
+    const cron = await this.readCron(shown.cron);
+    const failure = cronFailure(cron);
+    if (failure === null || failure.turnId !== shown.turnId) {
+      return;
+    }
+    await this.writeCron({
+      ...cron,
+      lastRun: {
+        ...failure,
+        caughtUp: { turnId: record.id, at: record.endedAt ?? this.now().toISOString() },
+      },
     });
   }
 
@@ -6300,8 +6333,8 @@ export class Board {
    * The lease a holder's own crons in the task's thread keep its claim to, when later than the one
    * it has, else null. While one of them is pending, the lease is renewed for a full lease once less
    * than half is left, so it never lapses between fires that may be hours apart; once every one is
-   * paused, ended, or failed at its latest fire (`cronStoppedAt`), it runs a full lease from when
-   * the last of them stopped.
+   * paused, ended, or failed at its latest fire with nothing catching it up (`cronStoppedAt`), it
+   * runs a full lease from when the last of them stopped.
    */
   private keptLease(task: Task, crons: readonly Cron[], now: Date): string | null {
     if (task.leaseExpiresAt === undefined) {

@@ -2,10 +2,13 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "n
 import os from "node:os";
 import path from "node:path";
 import {
+  cronFailure,
+  cronStoppedAt,
   IMAGE_LIMIT_BYTES,
   MEMBER_VERBS,
   VERB_DESCRIPTIONS,
   type HeartbeatCause,
+  type TurnExitReason,
   type Ulid,
 } from "@stellaris/shared";
 import { execa } from "execa";
@@ -3668,6 +3671,52 @@ describe("Board", () => {
     expect(fired?.ended).toMatchObject({ by: "board", reason: "fired once, as set" });
     // An ended cron does not fire again, though the scheduler read it before it ended.
     expect(await board.cronFired(once.id, "2026-09-28T15:00:01.000Z")).toBeNull();
+  });
+
+  it("marks a cron's failed fire caught up by a completed turn shown it, and that failure alone", async () => {
+    const { board } = await society();
+    const cron = await board.createCron(
+      { ...ENG, scope: "demo" },
+      { title: "Hourly", note: "Check.", cron: "0 * * * *" },
+    );
+    const fire = async () => {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, clock.toISOString()),
+        crons: [cron.id],
+      });
+      await board.finishTurn({ ...turn, endedAt: clock.toISOString(), exitReason: "error" });
+      return turn.id ?? "";
+    };
+    const shown = async (turnId: string, exitReason: TurnExitReason) => {
+      const turn = await board.beginTurn({
+        ...turnIn(undefined, clock.toISOString()),
+        cronFailures: [{ cron: cron.id, turnId }],
+      });
+      await board.finishTurn({ ...turn, endedAt: clock.toISOString(), exitReason });
+      return { id: turn.id, cron: await board.readCron(cron.id) };
+    };
+    const first = await fire();
+    // A turn that failed, timed out, was stopped, or was interrupted saw nothing through.
+    for (const exitReason of ["error", "timeout", "stopped", "interrupted"] as const) {
+      expect(cronFailure((await shown(first, exitReason)).cron)).not.toBeNull();
+    }
+    // A later failure is not the one an earlier turn was shown.
+    const second = await fire();
+    expect(cronFailure((await shown(first, "completed")).cron)).not.toBeNull();
+    clock = new Date(clock.getTime() + 60_000);
+    const caught = await shown(second, "completed");
+    expect(caught.cron).toMatchObject({
+      failures: 2,
+      lastRun: {
+        turnId: second,
+        outcome: "failed",
+        caughtUp: { turnId: caught.id, at: clock.toISOString() },
+      },
+    });
+    expect(cronStoppedAt(caught.cron)).toBeNull();
+    // The next fire's run replaces it whole.
+    await fire();
+    expect((await board.readCron(cron.id)).lastRun?.caughtUp).toBeUndefined();
   });
 
   it("ends a cron with the conversation it fires in", async () => {

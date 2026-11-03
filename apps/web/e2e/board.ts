@@ -550,6 +550,72 @@ const DESK_TURN = {
   toolCalls: 4,
 };
 
+/**
+ * The task ren's heartbeats woke it for, a thread whose title is as long as three in four of a
+ * real board's task titles.
+ */
+const BENCH_TASK = "01M3Q2AAAAAAAAAAAAAAAAAAT1";
+const BENCH_THREAD = {
+  id: BENCH_TASK,
+  channel: "lab/general",
+  title: "Benchmark the shortest-path solvers on three city road graphs again",
+  subject: { kind: "task", id: BENCH_TASK },
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
+  body: "",
+};
+
+/**
+ * ren's heartbeat turns, newest last: one from before the board kept what a heartbeat woke for,
+ * then one for the stage it held in the task's thread and one, failed, for a stage there it could
+ * take, where the scheduler runs both.
+ */
+const REN_TURNS = [
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE1",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE2",
+    ts: "2026-09-29T08:02:00.000Z",
+    outcome: "completed",
+    project: "lab",
+    trigger: "heartbeat",
+    exitReason: "completed",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: "Nothing new in lab.",
+    error: null,
+    startedAt: "2026-09-29T08:00:00.000Z",
+    toolCalls: 2,
+  },
+  {
+    ...DESK_TURN,
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE3",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE4",
+    ts: "2026-09-29T09:03:00.000Z",
+    thread: BENCH_TASK,
+    trigger: "heartbeat",
+    heartbeat: "held",
+    summary: "The benchmark is still running; nothing to do yet.",
+  },
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE5",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE6",
+    ts: "2026-09-29T09:31:00.000Z",
+    outcome: "failed",
+    project: "lab",
+    thread: BENCH_TASK,
+    trigger: "heartbeat",
+    heartbeat: "waiting",
+    exitReason: "error",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: null,
+    error: "The runner went away.",
+    startedAt: "2026-09-29T09:30:00.000Z",
+    toolCalls: 0,
+  },
+];
+
 /** The steps desk's turn kept: what it said, a command that failed, and a board verb. */
 const DESK_TRANSCRIPT = [
   {
@@ -1167,6 +1233,8 @@ export async function fakeBoard(
     earlyApproval?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
+    /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
+    heartbeats?: boolean;
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
@@ -1700,6 +1768,7 @@ export async function fakeBoard(
           ...(options.retired === true
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),
+          ...(options.heartbeats === true ? [member("ren", "researcher", ["lab"])] : []),
         ]);
       case "/api/version":
         return json(route, { version: "0.3.11" });
@@ -1741,6 +1810,8 @@ export async function fakeBoard(
         return json(route, [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
         return json(route, DESK_TRANSCRIPT);
+      case "/api/agents/ren/turns":
+        return json(route, options.heartbeats === true ? REN_TURNS : []);
       case "/api/agents/desk/memory":
         return json(route, { body: "# Core memory\n\n- The user writes names plainly." });
       case "/api/agents/desk/skills":
@@ -1813,6 +1884,9 @@ export async function fakeBoard(
             messages: threadMessages.length,
             lastMessageId: threadMessages.at(-1)?.["id"] ?? null,
           },
+          ...(options.heartbeats === true
+            ? [{ ...BENCH_THREAD, messages: 0, lastMessageId: null }]
+            : []),
           {
             ...proposalThread(),
             messages: proposalMessages.length,

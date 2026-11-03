@@ -86,6 +86,7 @@ import {
   type Dashboard,
   type Decision,
   type GitIdentityPart,
+  type HeartbeatCause,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
@@ -324,7 +325,10 @@ const SignInsSchema = z.object({
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
-const TurnStartPayloadSchema = z.object({ turnId: UlidSchema });
+const TurnStartPayloadSchema = z.object({
+  turnId: UlidSchema,
+  heartbeat: TurnHistoryPayloadSchema.shape.heartbeat,
+});
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -1740,15 +1744,18 @@ export class Board {
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     const entries: TurnHistoryEntry[] = [];
-    // A turn's start pairs with its end by the turn's id.
-    const starts = new Map<string, string>();
+    // A turn's start pairs with its end by the turn's id, and gives what a heartbeat woke for to
+    // an end that lacks it.
+    const starts = new Map<string, { ts: string; heartbeat: HeartbeatCause | undefined }>();
     for (const event of events) {
       if (event.actor !== agent) {
         continue;
       }
       if (event.type === "turn.started") {
         const start = TurnStartPayloadSchema.safeParse(event.payload);
-        if (start.success) starts.set(start.data.turnId, event.ts);
+        if (start.success) {
+          starts.set(start.data.turnId, { ts: event.ts, heartbeat: start.data.heartbeat });
+        }
         continue;
       }
       if (event.type !== "turn.completed" && event.type !== "turn.failed") {
@@ -1756,17 +1763,19 @@ export class Board {
       }
       const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
       if (parsed.success) {
-        const { turnId } = parsed.data;
-        const startedAt = turnId === undefined ? undefined : starts.get(turnId);
-        if (turnId !== undefined) {
-          starts.delete(turnId);
+        const { heartbeat: ended, ...turn } = parsed.data;
+        const start = turn.turnId === undefined ? undefined : starts.get(turn.turnId);
+        if (turn.turnId !== undefined) {
+          starts.delete(turn.turnId);
         }
+        const heartbeat = ended ?? start?.heartbeat;
         entries.push({
           id: event.id,
           ts: event.ts,
           outcome: event.type === "turn.failed" ? "failed" : "completed",
-          ...parsed.data,
-          ...(startedAt === undefined ? {} : { startedAt }),
+          ...turn,
+          ...(heartbeat === undefined ? {} : { heartbeat }),
+          ...(start === undefined ? {} : { startedAt: start.ts }),
         });
       }
     }

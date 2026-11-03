@@ -130,7 +130,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A new write the interface makes needs a fake in `apps/web/e2e/board.ts`.
 - What needs the user is derived, never stored.
 - Ids and worktree paths in text read as what they name (`entityIndex`, `linkTarget`), and an uploaded image is `image:<id>`.
-- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
+- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row, under a row of its images' thumbnails while it holds any. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
 
 ### The iOS client ([ios.md](./docs/internals/ios.md))
 

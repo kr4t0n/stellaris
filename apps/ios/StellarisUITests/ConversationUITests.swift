@@ -19,7 +19,9 @@ final class ConversationUITests: ShellTestCase {
       UIColor.systemTeal.setFill()
       context.fill(CGRect(origin: .zero, size: size))
     }
-    let paste = app.buttons["paste-image"].firstMatch
+    // The system draws Paste; it may answer to its own label rather than the identifier.
+    let paste = app.buttons
+      .matching(NSPredicate(format: "identifier == 'paste-image' OR label == 'Paste'")).firstMatch
     XCTAssertTrue(paste.waitForExistence(timeout: 20), "the composer has no Paste for an image")
     paste.tap()
 

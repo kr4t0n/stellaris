@@ -295,6 +295,8 @@ export const TurnHistoryEntrySchema = z.object({
   /** The project whose channels' conversation the turn was in, for a turn in the society scope. */
   place: NameSchema.optional(),
   trigger: z.string(),
+  /** What a `heartbeat` woke for; absent on turns logged before the board kept it. */
+  heartbeat: HeartbeatCauseSchema.optional(),
   exitReason: z.string().nullable(),
   costUsd: z.number(),
   /** The tokens the turn used; absent for turns logged before turns recorded them. */

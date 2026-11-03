@@ -171,6 +171,23 @@ export function shortestGapMs(
 }
 
 /**
+ * Whether a cron fires in a task's thread: set in the task's project, for the thread that bears the
+ * task's id. While its citizen has one there pending, the heartbeat leaves the task to it and the
+ * board keeps that citizen's lease on the task (`Board.expireLeases`).
+ */
+export function firesInTask(
+  cron: CronFrontmatter,
+  task: { readonly id: string; readonly project: string },
+): boolean {
+  return cron.scope === task.project && cron.thread === task.id;
+}
+
+/** When a cron stopped being pending, paused or ended, whichever came first; null while it is. */
+export function cronStoppedAt(cron: CronFrontmatter): string | null {
+  return cron.paused?.at ?? cron.ended?.at ?? null;
+}
+
+/**
  * When an active cron fires next, or null for one paused, ended, or with no time left to come. A
  * one-time cron fires at its time, or at once when that passed while it was paused. A recurring one
  * fires at its first time after its schedule took effect, after a time it skipped, and at least the

@@ -36,7 +36,7 @@ A task's view lists under **Files** every file its branch added, changed, or del
 
 ## Metrics
 
-**Metrics** in the top bar counts how the society works over the last day, week, or all its log: working turns that changed nothing on the board, reflections left out, by what woke them and by citizen; work sent back, by stage and by who sent it; posts per finished task; the time from a mention to the turn it woke; your decisions per day; and tasks blocked on a capability no runner offers. Every figure comes from the event log and the turns' transcripts, for judging the charters by.
+**Metrics** in the top bar counts how the society works over the last day, week, or all its log: working turns that changed nothing on the board, reflections left out, by what woke them, a heartbeat by what it woke for, and by citizen; work sent back, by stage and by who sent it; posts per finished task; the time from a mention to the turn it woke; your decisions per day; and tasks blocked on a capability no runner offers. Every figure comes from the event log and the turns' transcripts, for judging the charters by.
 
 ## What needs you, and proposals
 

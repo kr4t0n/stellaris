@@ -13,7 +13,9 @@ import {
   conflictCopyOf,
   CRON_FLOOR_MS,
   CronFrontmatterSchema,
+  cronStoppedAt,
   fireTimes,
+  firesInTask,
   isOneTime,
   shortestGapMs,
   TimeZoneSchema,
@@ -1788,14 +1790,27 @@ export class Board {
     });
   }
 
-  /** Releases every claim whose lease has expired. Called by the scheduler on its tick. */
+  /**
+   * Releases every claim whose lease has expired, but for a holder's that its own cron in the
+   * task's thread keeps (`keptLease`). Called by the scheduler on its tick.
+   */
   async expireLeases(): Promise<Task[]> {
     return this.mutex.run(async () => {
       const expired: Task[] = [];
       const now = this.now();
+      let crons: readonly Cron[] | undefined;
       for (const project of await listDirs(this.paths.projects())) {
         for (const task of await this.listTasks(project)) {
-          if (task.status === "claimed" && this.leaseExpired(task, now)) {
+          if (task.status !== "claimed") {
+            continue;
+          }
+          crons ??= await this.listCrons();
+          const kept = this.keptLease(task, crons, now);
+          if (kept !== null) {
+            await this.writeTask(project, { ...task, leaseExpiresAt: kept });
+            continue;
+          }
+          if (this.leaseExpired(task, now)) {
             const released = await this.writeTask(project, {
               ...task,
               status: "open",
@@ -4264,6 +4279,7 @@ export class Board {
         ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         ...(parsed.place === undefined ? {} : { place: parsed.place }),
         trigger: parsed.trigger.kind,
+        ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
         runner: parsed.runner,
       });
@@ -4306,6 +4322,7 @@ export class Board {
         ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         ...(parsed.place === undefined ? {} : { place: parsed.place }),
         trigger: parsed.trigger.kind,
+        ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
@@ -6243,6 +6260,40 @@ export class Board {
 
   private leaseEnd(now: Date): string {
     return new Date(now.getTime() + this.leaseMs).toISOString();
+  }
+
+  /**
+   * The lease a holder's own crons in the task's thread keep its claim to, when later than the one
+   * it has, else null. While one of them is pending, the lease is renewed for a full lease once less
+   * than half is left, so it never lapses between fires that may be hours apart; once every one is
+   * paused or ended, it runs a full lease from when the last of them stopped.
+   */
+  private keptLease(task: Task, crons: readonly Cron[], now: Date): string | null {
+    if (task.leaseExpiresAt === undefined) {
+      return null;
+    }
+    const lease = Date.parse(task.leaseExpiresAt);
+    let pending = false;
+    let stopped: number | null = null;
+    for (const cron of crons) {
+      if (cron.agent !== task.claimedBy || !firesInTask(cron, task)) {
+        continue;
+      }
+      const at = cronStoppedAt(cron);
+      if (at === null) {
+        pending = true;
+      } else {
+        stopped = Math.max(stopped ?? 0, Date.parse(at));
+      }
+    }
+    const kept = pending
+      ? lease - now.getTime() < this.leaseMs / 2
+        ? now.getTime() + this.leaseMs
+        : lease
+      : stopped === null
+        ? lease
+        : stopped + this.leaseMs;
+    return kept > lease ? new Date(kept).toISOString() : null;
   }
 
   private leaseExpired(task: Task, now: Date): boolean {

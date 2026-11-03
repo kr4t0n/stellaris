@@ -215,6 +215,24 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await expect(view).toContainText("memory/core.md · core.md.conflict-0000ABCD · left 2 days ago");
 });
 
+test("a heartbeat's turn says what it woke for, unless it ran before the board kept that", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/citizen/stew?tab=turns");
+  const view = page.getByRole("region", { name: "Board content" });
+
+  const [failed, older] = [view.locator("summary").nth(0), view.locator("summary").nth(1)];
+  await expect(failed.getByText("heartbeat", { exact: true })).toBeVisible();
+  await expect(failed.getByTitle("heartbeat for a stage to take")).toHaveText(
+    "for a stage to take",
+  );
+  await expect(failed).toContainText("failed");
+  await expect(older.getByText("heartbeat", { exact: true })).toBeVisible();
+  await expect(older.getByTitle(/^heartbeat/)).toHaveCount(0);
+  await expect(older).toContainText("completed");
+});
+
 test("a finished turn opens to every tool call with what it returned", async ({ page }) => {
   await fakeBoard(page);
   await page.goto("/citizen/desk?tab=turns");

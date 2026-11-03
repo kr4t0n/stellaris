@@ -1,7 +1,13 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IMAGE_LIMIT_BYTES, MEMBER_VERBS, VERB_DESCRIPTIONS, type Ulid } from "@stellaris/shared";
+import {
+  IMAGE_LIMIT_BYTES,
+  MEMBER_VERBS,
+  VERB_DESCRIPTIONS,
+  type HeartbeatCause,
+  type Ulid,
+} from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -57,6 +63,14 @@ const turnIn = (thread: Ulid | undefined, at: string) => ({
   costUsd: 0,
   toolCalls: 0,
   model: null,
+});
+
+/** A heartbeat's trigger, naming what it woke for. */
+const heartbeat = (cause: HeartbeatCause) => ({
+  kind: "heartbeat" as const,
+  fromUser: false,
+  reason: "",
+  heartbeat: cause,
 });
 
 /** The refusal of ending a conversation under `who`'s turn there. */
@@ -612,6 +626,67 @@ describe("Board", () => {
       });
       expect(await outcome()).toBe(line);
     }
+  });
+
+  it("carries what a heartbeat woke for into the turn history, from the turn's start when its end lacks it", async () => {
+    const { board } = await society();
+    const held = await board.beginTurn({
+      ...turnIn(undefined, "2026-09-28T10:01:00.000Z"),
+      trigger: heartbeat("held"),
+    });
+    await board.finishTurn({
+      ...held,
+      endedAt: "2026-09-28T10:02:00.000Z",
+      exitReason: "completed",
+    });
+    const unread = await board.beginTurn({
+      ...turnIn(undefined, "2026-09-28T10:03:00.000Z"),
+      trigger: heartbeat("unread"),
+    });
+    await board.finishTurn({
+      ...unread,
+      endedAt: "2026-09-28T10:04:00.000Z",
+      exitReason: "error",
+      error: "the runner went away",
+    });
+    // A start that names the cause and an end that does not; a pair from before the board kept
+    // it; and a pair naming a cause a later board added, which reads as none.
+    const raw = async (type: string, payload: Record<string, unknown>) =>
+      writeFile(
+        board.paths.eventLog(),
+        `${JSON.stringify({ id: ulid(), ts: clock.toISOString(), type, actor: "eng-1", payload })}\n`,
+        { flag: "a" },
+      );
+    const [startOnly, old, later] = [ulid(), ulid(), ulid()];
+    for (const [turnId, cause] of [
+      [startOnly, "waiting"],
+      [old, undefined],
+      [later, "a cause from a later board"],
+    ] as const) {
+      const where = { turnId, project: "demo", trigger: "heartbeat" };
+      await raw("turn.started", { ...where, ...(cause === undefined ? {} : { heartbeat: cause }) });
+      await raw("turn.completed", {
+        ...where,
+        ...(cause === undefined || turnId === startOnly ? {} : { heartbeat: cause }),
+        exitReason: "completed",
+      });
+    }
+    expect(
+      (await board.listTurns("eng-1")).map((entry) => [
+        entry.turnId,
+        entry.outcome,
+        entry.heartbeat,
+      ]),
+    ).toEqual([
+      [held.id, "completed", "held"],
+      [unread.id, "failed", "unread"],
+      [startOnly, "completed", "waiting"],
+      [old, "completed", undefined],
+      [later, "completed", undefined],
+    ]);
+    expect((await board.listTurns("eng-1")).filter((entry) => "heartbeat" in entry)).toHaveLength(
+      3,
+    );
   });
 
   it("counts a closed thread's posts toward no heartbeat, while its conversation still reads them", async () => {

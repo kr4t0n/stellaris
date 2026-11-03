@@ -1,4 +1,4 @@
-import type { HeartbeatCause, Metrics, MetricsWindow } from "@stellaris/shared";
+import type { Metrics, MetricsWindow } from "@stellaris/shared";
 import { Link, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { EntityLink } from "../components/Entities.js";
@@ -6,6 +6,7 @@ import { ApiError } from "../lib/api.js";
 import { ago, span } from "../lib/format.js";
 import { useMetrics, useNow } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
+import { HEARTBEATS } from "./citizen.js";
 import { Section } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
@@ -26,13 +27,6 @@ const TRIGGERS: Readonly<Record<string, string>> = {
   ops_event: "a signal",
   onboarding: "joining",
   manual: "your wake",
-};
-
-/** What a heartbeat woke for, in words, after the trigger's. */
-const HEARTBEATS: Readonly<Record<HeartbeatCause, string>> = {
-  unread: "for unread posts",
-  held: "for a held stage",
-  waiting: "for a stage to take",
 };
 
 const DAY = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" });

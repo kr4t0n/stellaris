@@ -550,6 +550,44 @@ const DESK_TURN = {
   toolCalls: 4,
 };
 
+/**
+ * stew's two heartbeat turns, newest last: one from before the board kept what a heartbeat woke
+ * for, and one that failed waking for a stage to take, the longest of the causes in words.
+ */
+const STEW_TURNS = [
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE1",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE2",
+    ts: "2026-09-29T08:02:00.000Z",
+    outcome: "completed",
+    project: "society",
+    trigger: "heartbeat",
+    exitReason: "completed",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: "No signal needs a proposal.",
+    error: null,
+    startedAt: "2026-09-29T08:00:00.000Z",
+    toolCalls: 2,
+  },
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE3",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE4",
+    ts: "2026-09-29T09:31:00.000Z",
+    outcome: "failed",
+    project: "society",
+    trigger: "heartbeat",
+    heartbeat: "waiting",
+    exitReason: "error",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: null,
+    error: "The runner went away.",
+    startedAt: "2026-09-29T09:30:00.000Z",
+    toolCalls: 0,
+  },
+];
+
 /** The steps desk's turn kept: what it said, a command that failed, and a board verb. */
 const DESK_TRANSCRIPT = [
   {
@@ -1741,6 +1779,8 @@ export async function fakeBoard(
         return json(route, [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
         return json(route, DESK_TRANSCRIPT);
+      case "/api/agents/stew/turns":
+        return json(route, STEW_TURNS);
       case "/api/agents/desk/memory":
         return json(route, { body: "# Core memory\n\n- The user writes names plainly." });
       case "/api/agents/desk/skills":

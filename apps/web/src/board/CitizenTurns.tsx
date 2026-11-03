@@ -5,11 +5,13 @@ import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import {
   endingOf,
+  HEARTBEATS,
   historyTotals,
   scopeName,
   tokensDetail,
   tokensLabel,
   turnLength,
+  wokenBy,
 } from "./citizen.js";
 import { PaneNote } from "./Pane.js";
 import { time, TranscriptSteps } from "./Transcript.js";
@@ -62,6 +64,12 @@ function TurnRow({
               {about === null ? "" : ` · ${about}`}
             </span>
             <span className="text-fg-muted">{entry.trigger}</span>
+            {/* What a heartbeat woke for gives way before the trigger does, and reads as one phrase with it. */}
+            {entry.heartbeat === undefined ? null : (
+              <span className="-ml-1 min-w-0 truncate text-fg-muted" title={wokenBy(entry)}>
+                {HEARTBEATS[entry.heartbeat]}
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate text-fg-muted">
               {endingOf(entry)} {ago(entry.ts, now)}
             </span>

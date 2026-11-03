@@ -342,7 +342,6 @@ export function Composer({
           <Button
             aria-label="Add images"
             title="Add images"
-            className="px-1.5"
             onClick={() => picker.current?.click()}
           >
             <ImageGlyph />

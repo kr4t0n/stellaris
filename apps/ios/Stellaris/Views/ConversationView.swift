@@ -1,6 +1,7 @@
 import BoardKit
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// A channel's or a thread's messages, newest at the foot, with its draft below, on the web's
@@ -262,7 +263,8 @@ struct ReadOnlyLine: View {
 /// citizens to mention above it, as on the web, and a pick completes the name. Photos beside Send,
 /// and Paste in the menu a long press on the draft opens, put images in it as the web's composer
 /// does: each holds its place at the caret with a line saying it uploads, which the board's
-/// markdown for it replaces, and Send waits for them.
+/// markdown for it replaces, and Send waits for them. A row above the box shows each image the
+/// draft holds as a thumbnail, with a × that takes it out.
 struct DraftField: View {
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -293,6 +295,24 @@ struct DraftField: View {
           selection = TextSelection(
             insertionPoint: String.Index(utf16Offset: done.caret, in: done.text))
         }
+      }
+      let images = model.draftImages(in: conversation)
+      if !images.isEmpty {
+        ScrollView(.horizontal) {
+          HStack(spacing: 8) {
+            ForEach(images, id: \.self) { image in
+              DraftImageView(
+                image: image, preview: model.uploadPreviews[conversation.key]?[image.text]
+              ) {
+                remove(image)
+              }
+            }
+          }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Images in the draft")
+        .accessibilityIdentifier("draft-images")
       }
       // One layout or the other around the same field, which keeps its focus as the size changes.
       let row =
@@ -388,6 +408,12 @@ struct DraftField: View {
     }
   }
 
+  /// Takes an image out of the draft, and keeps the caret among the same words.
+  private func remove(_ image: DraftImage) {
+    let draft = model.memory?.draft(conversation) ?? ""
+    follow(model.removeImage(image, from: conversation, caret: caret() ?? draft.utf16.count))
+  }
+
   /// Where the draft's caret is, in UTF-16 code units, once the field has had one.
   private func caret() -> Int? {
     let text = model.memory?.draft(conversation) ?? ""
@@ -468,6 +494,70 @@ struct DraftField: View {
         failure = "The message was not sent."
       }
       sending = false
+    }
+  }
+}
+
+/// An image the draft holds, as a thumbnail above it: the board's copy once it is kept, read by its
+/// id as a message's is, or the upload's own picture, dimmed and saying so, while it is on its way;
+/// its × takes the image's markdown, or its upload's line, out of the draft.
+struct DraftImageView: View {
+  @Environment(AppModel.self) private var model
+  let image: DraftImage
+  /// The upload's own picture, a small JPEG, until the board keeps it.
+  let preview: Data?
+  let remove: () -> Void
+  @State private var kept: UIImage?
+
+  var body: some View {
+    let tile = RoundedRectangle(cornerRadius: 8)
+    ZStack(alignment: .topTrailing) {
+      ZStack {
+        MessageColor.surface2.opacity(0.5)
+        if image.id != nil {
+          if let kept {
+            Image(uiImage: kept)
+              .resizable()
+              .scaledToFill()
+              .accessibilityLabel(image.alt.isEmpty ? "Image" : image.alt)
+          }
+        } else {
+          if let preview, let picture = UIImage(data: preview) {
+            Image(uiImage: picture)
+              .resizable()
+              .scaledToFill()
+              .opacity(0.35)
+              .accessibilityHidden(true)
+          }
+          Text("Uploading…")
+            .font(MessageType.small())
+            .foregroundStyle(MessageColor.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+        }
+      }
+      .frame(width: 64, height: 64)
+      .clipShape(tile)
+      .overlay(tile.strokeBorder(Color.white.opacity(0.08)))
+      Button(action: remove) {
+        Image(systemName: "xmark")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(.white)
+          .frame(width: 20, height: 20)
+          .background(Color.black.opacity(0.6), in: Circle())
+      }
+      .buttonStyle(.plain)
+      .padding(4)
+      .accessibilityLabel(image.alt.isEmpty ? "Remove the image" : "Remove \(image.alt)")
+      .accessibilityIdentifier("remove-draft-image")
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("draft-image")
+    .task(id: image.id) {
+      guard let id = image.id else {
+        return
+      }
+      kept = try? await model.images.image(.upload(id), using: model)
     }
   }
 }

@@ -139,6 +139,105 @@ public func settleUpload(_ text: String, caret: Int, placeholder: String, markdo
     caret: caret <= start ? caret : caret >= end ? caret - held.count + length : start + length)
 }
 
+/// An image a draft holds, where it stands: one the board kept, by its id and description, or one
+/// still uploading, by the line an upload holds. `start` and `text` place it in the draft, `start`
+/// in UTF-16 code units, as the web counts them.
+public struct DraftImage: Sendable, Hashable, Decodable {
+  public enum Kind: String, Sendable, Hashable, Decodable {
+    case kept, uploading
+  }
+
+  public let kind: Kind
+  public let start: Int
+  public let text: String
+  public let id: String?
+  public let alt: String
+
+  public init(kind: Kind, start: Int, text: String, id: String?, alt: String) {
+    self.kind = kind
+    self.start = start
+    self.text = text
+    self.id = id
+    self.alt = alt
+  }
+}
+
+/// The images a draft holds, in the order they stand in it: each uploaded image's markdown,
+/// `![alt](image:<ULID>)` with no `]` or line break in its description, and each line in `held` an
+/// upload on its way still holds. A web image's markdown is none of them.
+public func draftImages(_ text: String, held: [String]) -> [DraftImage] {
+  let units = Array(text.utf16)
+  var found: [DraftImage] = []
+  var from = 0
+  let opening = Array("![".utf16)
+  let middle = Array("](image:".utf16)
+  while let start = firstUnit(of: opening, in: Array(units[from...])).map({ $0 + from }) {
+    from = start + 1
+    var close = start + opening.count
+    while close < units.count, units[close] != bracket, units[close] != newline {
+      close += 1
+    }
+    let idStart = close + middle.count
+    guard close + middle.count + 27 <= units.count,
+      units[close..<idStart].elementsEqual(middle),
+      units[idStart + 26] == parenthesis,
+      units[idStart..<idStart + 26].allSatisfy(isUlidUnit)
+    else {
+      continue
+    }
+    let end = idStart + 27
+    found.append(
+      DraftImage(
+        kind: .kept, start: start,
+        text: String(decoding: units[start..<end], as: UTF16.self),
+        id: String(decoding: units[idStart..<idStart + 26], as: UTF16.self),
+        alt: String(decoding: units[(start + opening.count)..<close], as: UTF16.self)))
+    from = end
+  }
+  for line in held {
+    if let start = firstUnit(of: Array(line.utf16), in: units) {
+      found.append(DraftImage(kind: .uploading, start: start, text: line, id: nil, alt: ""))
+    }
+  }
+  return found.enumerated().sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }
+    .map(\.element)
+}
+
+/// The draft without `image`, and the caret where it was among the text around it, or where the
+/// image stood when it was inside it; the draft as it is when the image no longer stands there.
+public func removeDraftImage(_ text: String, caret: Int, image: DraftImage) -> DraftEdit {
+  let units = Array(text.utf16)
+  let removed = Array(image.text.utf16)
+  let end = image.start + removed.count
+  guard image.start >= 0, end <= units.count, units[image.start..<end].elementsEqual(removed) else {
+    return DraftEdit(text: text, caret: caret)
+  }
+  return DraftEdit(
+    text: String(decoding: units[..<image.start], as: UTF16.self)
+      + String(decoding: units[end...], as: UTF16.self),
+    caret: caret <= image.start
+      ? caret : caret >= end ? caret - removed.count : image.start)
+}
+
+/// `text` without any line holding an image's place while it uploads, as a draft saved before the
+/// app ended holds one with no upload left to fill it.
+public func droppingUploadLines(_ text: String) -> String {
+  text.replacing(/!\[Uploading [^\]\n]*…\]\(\)/, with: "")
+}
+
+private let bracket = UInt16(UInt8(ascii: "]"))
+private let newline = UInt16(UInt8(ascii: "\n"))
+private let parenthesis = UInt16(UInt8(ascii: ")"))
+
+/// A character of a ULID: a digit or a capital in Crockford's base 32, without I, L, O, or U.
+private func isUlidUnit(_ unit: UInt16) -> Bool {
+  switch unit {
+  case 0x30...0x39: true
+  case 0x41...0x5A: ![0x49, 0x4C, 0x4F, 0x55].contains(unit)
+  default: false
+  }
+}
+
 /// Where `needle` first starts in `units`, in UTF-16 code units, as a JavaScript string's `indexOf`
 /// finds it; nil for an empty needle or none.
 private func firstUnit(of needle: [UInt16], in units: [UInt16]) -> Int? {

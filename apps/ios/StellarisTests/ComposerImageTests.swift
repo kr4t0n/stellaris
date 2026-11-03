@@ -25,6 +25,15 @@ import Testing
     return model
   }
 
+  /// Signed in with the uploads held until the test settles them.
+  private func signedIn(holding gate: HeldBoard.Gate) async throws -> AppModel {
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    return model
+  }
+
   @Test func anImageTakesThePlaceItHeldAtTheCaret() async throws {
     let model = try await signedIn()
     model.memory?.setDraft("Before  after", for: general)
@@ -111,6 +120,64 @@ import Testing
     #expect(fourth.placeholders == ["![Uploading image (2)…]()"])
     await model.upload(png, holding: third.placeholders[0], in: general)
     #expect(model.memory?.draft(general) == fourth.placeholders[0])
+  }
+
+  /// The images the draft holds, for its thumbnails: an upload's line while it is on its way, then
+  /// the board's copy by its id, which the × takes out with its markdown.
+  @Test(.timeLimit(.minutes(1))) func theDraftsImagesAreItsUploadsThenWhatTheBoardKept()
+    async throws
+  {
+    let gate = HeldBoard.Gate(paths: ["/api/images"])
+    let model = try await signedIn(holding: gate)
+    #if canImport(UIKit)
+      // A picture ImageIO can read, for the upload's own thumbnail.
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = 1
+      let bytes = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200), format: format)
+        .pngData { context in
+          UIColor.systemTeal.setFill()
+          context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
+        }
+    #else
+      let bytes = png
+    #endif
+    model.memory?.setDraft("See ", for: general)
+    let held = model.holdImages(1, in: general, start: 4, end: 4)
+    let line = held.placeholders[0]
+    let uploading = Task { await model.upload(bytes, holding: line, in: general) }
+    await gate.arrivals(1)
+    #expect(
+      model.draftImages(in: general)
+        == [DraftImage(kind: .uploading, start: 4, text: line, id: nil, alt: "")])
+    #if canImport(UIKit)
+      let preview = try #require(model.uploadPreviews[general.key]?[line])
+      let picture = try #require(UIImage(data: preview))
+      #expect(max(picture.size.width, picture.size.height) <= 192)
+    #endif
+    // As the board answered the upload that went, which the fake board kept as it arrived.
+    gate.answerAsArrived()
+    _ = await uploading.value
+    #expect(model.uploadPreviews[general.key]?[line] == nil)
+    let kept = try #require(model.draftImages(in: general).first)
+    #expect(kept.kind == .kept && kept.id != nil && kept.alt == "image.png" && kept.start == 4)
+
+    let removed = model.removeImage(kept, from: general, caret: 4 + kept.text.utf16.count)
+    #expect(removed == DraftEdit(text: "See ", caret: 4))
+    #expect(model.memory?.draft(general) == "See ")
+    #expect(model.draftImages(in: general).isEmpty)
+  }
+
+  /// A draft saved while an image uploaded, as when the app ended then, loads without the line:
+  /// no upload survives to fill it, and its thumbnail would say "Uploading…" for good.
+  @Test func aSavedDraftLoadsWithoutTheLinesNoUploadHolds() {
+    let defaults = UserDefaults(suiteName: "drafts-\(UUID().uuidString)")!
+    let board = FakeBoard.address
+    let first = ConversationMemory(board: board, defaults: defaults)
+    first.setDraft("Before ![Uploading image…]() after", for: general)
+    first.setDraft("![Uploading image…]()", for: .channel("lab/general"))
+    let next = ConversationMemory(board: board, defaults: defaults)
+    #expect(next.draft(general) == "Before  after")
+    #expect(next.draft(.channel("lab/general")) == "")
   }
 
   @Test func keepsWhatTheBoardTakesAsItIs() async throws {

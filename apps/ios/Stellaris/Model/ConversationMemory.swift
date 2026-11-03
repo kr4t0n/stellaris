@@ -1,9 +1,11 @@
+import BoardKit
 import Foundation
 import Observation
 
 /// What each conversation keeps while the user is away from it, for one board: its draft and the
 /// message its scroll is anchored at. Saved as it changes, so a view built again, or a fresh start,
-/// gets them back.
+/// gets them back, but for the lines an image's upload held: no upload outlives the sign-in it ran
+/// in, so a line saved mid-upload is dropped as the drafts load.
 @MainActor @Observable final class ConversationMemory {
   private struct Saved: Codable {
     var drafts: [String: String] = [:]
@@ -22,7 +24,7 @@ import Observation
     let saved =
       defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
       ?? Saved()
-    drafts = saved.drafts
+    drafts = saved.drafts.mapValues(droppingUploadLines).filter { !$0.value.isEmpty }
     anchors = saved.anchors
   }
 

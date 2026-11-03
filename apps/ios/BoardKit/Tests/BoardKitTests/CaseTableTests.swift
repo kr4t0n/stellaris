@@ -256,10 +256,27 @@ import Testing
       let placeholder: String
     }
 
+    struct Draft: Decodable {
+      let name: String
+      let text: String
+      let held: [String]
+      let images: [DraftImage]
+    }
+
+    struct Removal: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let image: DraftImage
+      let result: DraftEdit
+    }
+
     let placeholders: [Placeholder]
     let inserts: [Insert]
     let settles: [Settle]
     let numbered: [Numbered]
+    let drafts: [Draft]
+    let removals: [Removal]
   }
 
   @Test func uploadsHoldTheirPlaceAsOnTheWeb() throws {
@@ -272,6 +289,14 @@ import Testing
       let done = insertAt(each.text, start: each.start, end: each.end, inserted: each.inserted)
       #expect(done == each.result, "\(each.name)")
     }
+    for each in cases.drafts {
+      #expect(draftImages(each.text, held: each.held) == each.images, "\(each.name)")
+    }
+    for each in cases.removals {
+      #expect(
+        removeDraftImage(each.text, caret: each.caret, image: each.image) == each.result,
+        "\(each.name)")
+    }
     for each in cases.numbered {
       #expect(
         uploadPlaceholder(for: each.file, in: each.text, held: each.held) == each.placeholder,
@@ -282,6 +307,18 @@ import Testing
         each.text, caret: each.caret, placeholder: each.placeholder, markdown: each.markdown)
       #expect(settled == each.result, "\(each.name)")
     }
+  }
+
+  /// A draft saved with an upload's line, as when the app ended mid-upload, loads without it; the
+  /// rest of the draft, an image kept included, stays.
+  @Test func aSavedDraftDropsTheLinesNoUploadHolds() {
+    let kept = "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)"
+    #expect(
+      droppingUploadLines(
+        "See ![Uploading image…]()\n![Uploading image (2)…]() and \(kept) then")
+        == "See \n and \(kept) then")
+    #expect(droppingUploadLines("![Uploading image…](not empty) words") == "![Uploading image…](not empty) words")
+    #expect(droppingUploadLines("No images.") == "No images.")
   }
 
   struct CharterCase: Decodable {

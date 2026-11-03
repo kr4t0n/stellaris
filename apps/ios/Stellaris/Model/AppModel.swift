@@ -81,7 +81,10 @@ enum SignInFailure: Error, Equatable {
   private(set) var uploadFailures: [String: String] = [:]
   /// The lines the uploads on their way hold in each conversation's draft, by its key, each its own,
   /// which only its upload fills.
-  @ObservationIgnored private var heldLines: [String: [String]] = [:]
+  private var heldLines: [String: [String]] = [:]
+  /// A small JPEG of each upload's own picture, by its conversation's key and then its line, which
+  /// the draft shows while the upload is on its way.
+  private(set) var uploadPreviews: [String: [String: Data]] = [:]
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
 
@@ -296,6 +299,20 @@ enum SignInFailure: Error, Equatable {
     return (held.caret, placeholders)
   }
 
+  /// The images the conversation's draft holds, in the order they stand in it: those the board kept,
+  /// and those whose uploads are on their way.
+  func draftImages(in conversation: Conversation) -> [DraftImage] {
+    BoardKit.draftImages(memory?.draft(conversation) ?? "", held: heldLines[conversation.key] ?? [])
+  }
+
+  /// Takes an image's markdown, or its upload's line, out of the conversation's draft; gives where
+  /// the caret, at `caret`, goes then.
+  func removeImage(_ image: DraftImage, from conversation: Conversation, caret: Int) -> DraftEdit {
+    let removed = removeDraftImage(memory?.draft(conversation) ?? "", caret: caret, image: image)
+    memory?.setDraft(removed.text, for: conversation)
+    return removed
+  }
+
   /// Uploads an image's bytes, made into a kind and a size the board keeps, then puts the board's
   /// markdown for it where `placeholder` held its place in the conversation's draft, or takes the
   /// place away and keeps why it failed. Nil bytes, which Photos or the pasteboard couldn't give,
@@ -309,6 +326,9 @@ enum SignInFailure: Error, Equatable {
     let sent = generation
     var markdown = ""
     var failure: String?
+    if let data, let preview = await ComposerImage.preview(data), sent == generation {
+      uploadPreviews[conversation.key, default: [:]][placeholder] = preview
+    }
     do {
       guard let data, let image = await ComposerImage.prepare(data) else {
         throw ComposerImage.Unreadable()
@@ -328,6 +348,7 @@ enum SignInFailure: Error, Equatable {
     let left = (uploading[key] ?? 1) - 1
     uploading[key] = left > 0 ? left : nil
     heldLines[key]?.removeAll { $0 == placeholder }
+    uploadPreviews[key]?[placeholder] = nil
     if let failure {
       uploadFailures[key] = failure
     }
@@ -655,6 +676,7 @@ enum SignInFailure: Error, Equatable {
     uploading = [:]
     uploadFailures = [:]
     heldLines = [:]
+    uploadPreviews = [:]
   }
 
   private func leave(notice: String?) {

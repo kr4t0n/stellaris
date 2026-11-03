@@ -56,6 +56,26 @@ struct ComposerImage: Sendable, Equatable {
     return nil
   }
 
+  /// A small JPEG of the picture `data` holds, at most `side` pixels on its longest side, for the
+  /// draft to show while the image uploads; nil when it holds no picture.
+  @concurrent nonisolated static func preview(_ data: Data, side: Int = 192) async -> Data? {
+    #if canImport(ImageIO)
+      let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: side,
+      ]
+      guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+        let picture = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+      else {
+        return nil
+      }
+      return jpeg(picture)
+    #else
+      return nil
+    #endif
+  }
+
   #if canImport(ImageIO)
     /// `picture` as a JPEG of the quality a photo keeps its detail at.
     nonisolated private static func jpeg(_ picture: CGImage) -> Data? {

@@ -30,11 +30,20 @@ final class ConversationUITests: ShellTestCase {
       draft(box, matches: #"The plot: !\[Uploading image…\]\(\)"#),
       "the draft holds no place for the image while it uploads")
     XCTAssertFalse(app.buttons["send"].firstMatch.isEnabled, "Send is on while an image uploads")
+    // Its thumbnail above the draft, the picture itself, says it is uploading.
+    let tile = app.otherElements.matching(identifier: "draft-image").firstMatch
+    XCTAssertTrue(tile.waitForExistence(timeout: 20), "the draft shows no thumbnail of the image")
+    XCTAssertTrue(tile.staticTexts["Uploading…"].exists, "the thumbnail doesn't say it is uploading")
     keepScreen("image-uploading")
     XCTAssertTrue(
       draft(box, matches: #"The plot: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\)"#),
       "the image's markdown doesn't take its place in the draft")
     XCTAssertTrue(app.buttons["send"].firstMatch.isEnabled, "Send stays off once the image is in")
+    // Once kept, the board's copy, under its description.
+    let kept = tile.images.matching(NSPredicate(format: "label MATCHES %@", #"image\.(png|jpeg)"#))
+      .firstMatch
+    XCTAssertTrue(kept.waitForExistence(timeout: 20), "the thumbnail doesn't show the kept image")
+    XCTAssertFalse(tile.staticTexts["Uploading…"].exists, "the kept image still says uploading")
     keepScreen("image-pasted")
     // The caret follows the image's markdown, so what is typed next goes after it.
     box.typeText(" Done.")
@@ -47,7 +56,37 @@ final class ConversationUITests: ShellTestCase {
       .matching(NSPredicate(format: "label MATCHES %@", #"image\.(png|jpeg)"#)).firstMatch
     XCTAssertTrue(image.waitForExistence(timeout: 20), "the post doesn't show the image")
     XCTAssertLessThanOrEqual(image.frame.maxY, box.frame.minY, "the post is under the draft")
+    XCTAssertTrue(tile.waitForNonExistence(timeout: 20), "the thumbnail stays once the post went")
     keepScreen("image-posted")
+  }
+
+  /// A thumbnail's × takes its image out of the draft.
+  @MainActor func testRemovesAnImageFromTheDraft() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("Long: ")
+    let size = CGSize(width: 320, height: 200)
+    UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { context in
+      UIColor.systemPurple.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+    }
+    box.press(forDuration: 1.2)
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "the draft's menu has no Paste for an image")
+    paste.tap()
+    XCTAssertTrue(
+      draft(box, matches: #"Long: !\[image\.(png|jpeg)\]\(image:[0-9A-Z]{26}\)"#),
+      "the image pasted isn't in the draft")
+    let remove = app.buttons["remove-draft-image"].firstMatch
+    XCTAssertTrue(remove.waitForExistence(timeout: 20), "the draft's thumbnail has no ×")
+    remove.tap()
+    XCTAssertTrue(draft(box, matches: #"Long: "#), "× leaves the image's markdown in the draft")
+    XCTAssertTrue(
+      app.otherElements.matching(identifier: "draft-image").firstMatch
+        .waitForNonExistence(timeout: 20), "the thumbnail stays once its image is out")
   }
 
   /// With text copied, the draft's own Paste pastes the text, as it did before it took images.

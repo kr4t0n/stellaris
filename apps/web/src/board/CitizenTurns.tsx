@@ -5,7 +5,6 @@ import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import {
   endingOf,
-  HEARTBEATS,
   historyTotals,
   scopeName,
   tokensDetail,
@@ -48,6 +47,8 @@ function TurnRow({
         : entry.place !== undefined
           ? `${entry.place}'s channels`
           : null;
+  // What a heartbeat woke for, in the words Metrics uses; the row shows the cause's own name.
+  const heartbeat = entry.heartbeat === undefined ? undefined : wokenBy(entry);
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (
@@ -64,10 +65,11 @@ function TurnRow({
               {about === null ? "" : ` · ${about}`}
             </span>
             <span className="text-fg-muted">{entry.trigger}</span>
-            {/* What a heartbeat woke for gives way before the trigger does, and reads as one phrase with it. */}
-            {entry.heartbeat === undefined ? null : (
-              <span className="-ml-1 min-w-0 truncate text-fg-muted" title={wokenBy(entry)}>
-                {HEARTBEATS[entry.heartbeat]}
+            {/* What a heartbeat woke for keeps its width, so the scope gives way first: a held or a
+                waiting stage's heartbeat runs in its task's thread, whose title is often long. */}
+            {heartbeat === undefined ? null : (
+              <span className="-ml-1 shrink-0 text-fg-muted" title={heartbeat}>
+                · {entry.heartbeat}
               </span>
             )}
             <span className="min-w-0 flex-1 truncate text-fg-muted">

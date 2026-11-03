@@ -84,6 +84,65 @@ export function settleUpload(
   };
 }
 
+/**
+ * An image a draft holds, where it stands: one the board kept, by its id and description, or one
+ * still uploading, by the line an upload holds. `start` and `text` place it in the draft, in UTF-16
+ * code units, as the string's own indices count.
+ */
+export interface DraftImage {
+  readonly kind: "kept" | "uploading";
+  readonly start: number;
+  readonly text: string;
+  readonly id: string | null;
+  readonly alt: string;
+}
+
+/** An uploaded image in markdown: its description, then `image:` and a ULID. */
+const KEPT_IMAGE = /!\[([^\]\n]*)\]\(image:([0-9A-HJKMNP-TV-Z]{26})\)/g;
+
+/**
+ * The images a draft holds, in the order they stand in it: each uploaded image's markdown, and each
+ * line in `held` an upload on its way still holds. A web image's markdown is none of them.
+ */
+export function draftImages(text: string, held: readonly string[]): DraftImage[] {
+  const found: DraftImage[] = [];
+  for (const match of text.matchAll(KEPT_IMAGE)) {
+    found.push({
+      kind: "kept",
+      start: match.index,
+      text: match[0],
+      id: match[2] ?? null,
+      alt: match[1] ?? "",
+    });
+  }
+  for (const line of held) {
+    const start = text.indexOf(line);
+    if (start !== -1) {
+      found.push({ kind: "uploading", start, text: line, id: null, alt: "" });
+    }
+  }
+  return found.toSorted((a, b) => a.start - b.start);
+}
+
+/**
+ * The draft without `image`, and the caret where it was among the text around it, or where the
+ * image stood when it was inside it; the draft as it is when the image no longer stands there.
+ */
+export function removeDraftImage(
+  text: string,
+  caret: number,
+  image: DraftImage,
+): { text: string; caret: number } {
+  const end = image.start + image.text.length;
+  if (text.slice(image.start, end) !== image.text) {
+    return { text, caret };
+  }
+  return {
+    text: text.slice(0, image.start) + text.slice(end),
+    caret: caret <= image.start ? caret : caret >= end ? caret - image.text.length : image.start,
+  };
+}
+
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 export function listed(names: readonly string[]): string {

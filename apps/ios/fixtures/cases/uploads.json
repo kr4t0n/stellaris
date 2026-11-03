@@ -241,5 +241,229 @@
       "held": [],
       "placeholder": "![Uploading image.png…]()"
     }
+  ],
+  "drafts": [
+    {
+      "name": "none",
+      "text": "Just words.",
+      "held": [],
+      "images": []
+    },
+    {
+      "name": "one kept",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 4,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "kept and uploading, in the order they stand",
+      "text": "![Uploading image.png…]()\nThen ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": ["![Uploading image.png…]()"],
+      "images": [
+        {
+          "kind": "uploading",
+          "start": 0,
+          "text": "![Uploading image.png…]()",
+          "id": null,
+          "alt": ""
+        },
+        {
+          "kind": "kept",
+          "start": 31,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a line no upload holds is no image",
+      "text": "![Uploading image.png…]() ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 26,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a held line gone from the draft is none",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": ["![Uploading image.png (2)…]()"],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "the same image twice is two",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        },
+        {
+          "kind": "kept",
+          "start": 50,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a web image is none",
+      "text": "![a](https://example.com/a.png) ![b](image:not-an-id)",
+      "held": [],
+      "images": []
+    },
+    {
+      "name": "an empty description",
+      "text": "![](image:01BX5ZZKBKACTAV9WEVGEMMVRY)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![](image:01BX5ZZKBKACTAV9WEVGEMMVRY)",
+          "id": "01BX5ZZKBKACTAV9WEVGEMMVRY",
+          "alt": ""
+        }
+      ]
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 3,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "name": "the caret after it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 54,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 9
+      }
+    },
+    {
+      "name": "the caret before it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 1,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 1
+      }
+    },
+    {
+      "name": "the caret inside it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 10,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 4
+      }
+    },
+    {
+      "name": "the second of two alike",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "caret": 0,
+      "image": {
+        "kind": "kept",
+        "start": 50,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ",
+        "caret": 0
+      }
+    },
+    {
+      "name": "an uploading line",
+      "text": "A ![Uploading image.png…]() B",
+      "caret": 27,
+      "image": {
+        "kind": "uploading",
+        "start": 2,
+        "text": "![Uploading image.png…]()",
+        "id": null,
+        "alt": ""
+      },
+      "result": {
+        "text": "A  B",
+        "caret": 2
+      }
+    },
+    {
+      "name": "a place where it no longer stands",
+      "text": "changed",
+      "caret": 3,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "changed",
+        "caret": 3
+      }
+    }
   ]
 }

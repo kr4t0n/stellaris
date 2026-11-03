@@ -11,12 +11,15 @@ import {
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ApiError } from "../lib/api.js";
-import { useMembers, useSession } from "../lib/session.js";
+import { useMembers, useSession, useUploadedImage } from "../lib/session.js";
 import { askTitle } from "./asks.js";
 import {
   completeMention,
+  type DraftImage,
+  draftImages,
   insertAt,
   mentionAt,
+  removeDraftImage,
   settleUpload,
   uploadPlaceholder,
 } from "./compose.js";
@@ -82,6 +85,9 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null);
   /** The lines of the uploads on their way, each its own, which only its upload fills. */
   const held = useRef<string[]>([]);
+  /** Each upload's file as an object URL, by its line, its thumbnail until the board keeps it. */
+  const previewUrls = useRef(new Map<string, string>());
+  const [previews, setPreviews] = useState<ReadonlyMap<string, string>>(new Map());
   // Where the caret goes once a completed mention has rendered; set in the same frame, before
   // the next keystroke can land.
   const pendingCaret = useRef<number | null>(null);
@@ -112,6 +118,16 @@ export function Composer({
       onPosted?.(message);
     },
   });
+
+  // The previews of uploads still on their way when the composer goes.
+  useEffect(() => {
+    const urls = previewUrls.current;
+    return () => {
+      for (const url of urls.values()) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (focusOnOpen) {
@@ -172,6 +188,10 @@ export function Composer({
       placeholders.push(uploadPlaceholder(file.name, text, [...held.current, ...placeholders]));
     }
     held.current.push(...placeholders);
+    files.forEach((file, index) => {
+      previewUrls.current.set(placeholders[index] ?? "", URL.createObjectURL(file));
+    });
+    setPreviews(new Map(previewUrls.current));
     const inserted = insertAt(
       text,
       element?.selectionStart ?? text.length,
@@ -219,8 +239,22 @@ export function Composer({
       return settled.text;
     });
     held.current = held.current.filter((each) => each !== line);
+    const url = previewUrls.current.get(line);
+    if (url !== undefined) {
+      URL.revokeObjectURL(url);
+      previewUrls.current.delete(line);
+      setPreviews(new Map(previewUrls.current));
+    }
     setUploading((count) => count - 1);
   };
+  /** Takes an image's markdown, or its upload's line, out of the draft. */
+  const remove = (image: DraftImage): void => {
+    const removed = removeDraftImage(text, box.current?.selectionStart ?? caret, image);
+    pendingCaret.current = removed.caret;
+    setText(removed.text);
+    setCaret(removed.caret);
+  };
+  const images = draftImages(text, [...previews.keys()]);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (candidates.length > 0) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -259,6 +293,40 @@ export function Composer({
         submit();
       }}
     >
+      {images.length === 0 ? null : (
+        <ul aria-label="Images in the draft" className="mb-2 flex flex-wrap gap-2">
+          {images.map((image) => (
+            <li
+              key={`${image.start}:${image.text}`}
+              className="relative size-16 overflow-hidden rounded-lg bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+            >
+              {image.id === null ? (
+                <>
+                  <img
+                    src={previews.get(image.text)}
+                    alt=""
+                    className="size-full object-cover opacity-35"
+                  />
+                  <span className="absolute inset-0 grid place-items-center text-[11px] text-fg-primary">
+                    Uploading…
+                  </span>
+                </>
+              ) : (
+                <KeptThumbnail id={image.id} alt={image.alt} />
+              )}
+              <button
+                type="button"
+                aria-label={`Remove ${image.alt === "" ? "the image" : image.alt}`}
+                title="Remove"
+                onClick={() => remove(image)}
+                className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/60 text-xs text-white hover:bg-black/80"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div
         onDragOver={(event) => {
           if (filesDragged(event)) {
@@ -397,5 +465,15 @@ function ImageGlyph() {
       <circle cx={10.5} cy={6} r={1.2} />
       <path d="M2.5 12l3.8-4.2a1 1 0 0 1 1.5 0L12 12.5" />
     </svg>
+  );
+}
+
+/** An image the board kept, read through it by its id, as a post reads it. */
+function KeptThumbnail({ id, alt }: { id: string; alt: string }) {
+  const image = useUploadedImage(id);
+  return image.data === undefined ? (
+    <span title={image.error?.message} className="block size-full" />
+  ) : (
+    <img src={image.data} alt={alt} className="size-full object-cover" />
   );
 }

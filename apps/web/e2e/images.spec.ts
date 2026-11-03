@@ -678,3 +678,80 @@ test("an image the board refuses takes only its own line from another of the sam
     "image.png is not a PNG, JPEG, GIF, or WebP image by its first bytes",
   );
 });
+
+/** The thumbnails above the task thread's composer. */
+function draftRow(page: Page): Locator {
+  return page.getByRole("list", { name: "Images in the draft" });
+}
+
+test("an image in the draft shows as a thumbnail above the box, from the file while it uploads and from the board once kept, until it is sent", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const answer = Promise.withResolvers<void>();
+  const read: string[] = [];
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route) => {
+      await answer.promise;
+      await route.fallback();
+    },
+  );
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith("/api/images/")) {
+      read.push(pathname);
+    }
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const row = draftRow(page);
+  await expect(row).toHaveCount(0);
+  await box.fill("The board now: ");
+  await deliver(box, "paste", [
+    { name: "board.png", type: "image/png", bytes: [...png(320, 200)] },
+  ]);
+
+  // While it uploads, the file's own bytes, dimmed, saying so.
+  await expect(row.getByRole("listitem")).toHaveCount(1);
+  await expect(row).toContainText("Uploading…");
+  await expect(row.locator("img")).toHaveAttribute("src", /^blob:/);
+  await expect
+    .poll(() => row.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBe(320);
+
+  // Once kept, the board's copy by its id.
+  answer.resolve();
+  const kept = row.getByRole("img", { name: "board.png" });
+  await expect(kept).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(row).not.toContainText("Uploading…");
+  expect(read).toContain(`/api/images/${POSTED_IMAGES[0]}`);
+  await expect.poll(() => kept.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(320);
+
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(box).toHaveValue("");
+  await expect(row).toHaveCount(0);
+});
+
+test("a thumbnail's × takes its image out of the draft, and an image typed away takes its thumbnail", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const row = draftRow(page);
+  await box.fill("Before  after");
+  await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(7, 7));
+  await deliver(box, "paste", [{ name: "a.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(box).toHaveValue(`Before ![a.png](image:${POSTED_IMAGES[0]}) after`);
+  await expect(row.getByRole("img", { name: "a.png" })).toBeVisible();
+
+  await row.getByRole("button", { name: "Remove a.png" }).click();
+  await expect(box).toHaveValue("Before  after");
+  await expect(row).toHaveCount(0);
+
+  await deliver(box, "paste", [{ name: "b.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(row.getByRole("img", { name: "b.png" })).toBeVisible();
+  await box.fill("Words alone");
+  await expect(row).toHaveCount(0);
+});

@@ -4,9 +4,11 @@ import composeCases from "../../../ios/fixtures/cases/compose.json?raw";
 import uploadCases from "../../../ios/fixtures/cases/uploads.json?raw";
 import {
   completeMention,
+  draftImages,
   insertAt,
   listed,
   mentionAt,
+  removeDraftImage,
   settleUpload,
   uploadingImage,
   uploadPlaceholder,
@@ -58,6 +60,13 @@ describe("composing", () => {
   // The iOS app's port runs the same table (apps/ios/fixtures/cases).
   it("holds an image's place while it uploads, then puts its markdown there, as the iOS port does", () => {
     const Draft = z.object({ text: z.string(), caret: z.number() });
+    const Image = z.object({
+      kind: z.enum(["kept", "uploading"]),
+      start: z.number(),
+      text: z.string(),
+      id: z.string().nullable(),
+      alt: z.string(),
+    });
     const cases = z
       .object({
         placeholders: z
@@ -81,6 +90,23 @@ describe("composing", () => {
             placeholder: z.string(),
             markdown: z.string(),
             result: Draft.nullable(),
+          })
+          .array(),
+        drafts: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            held: z.string().array(),
+            images: Image.array(),
+          })
+          .array(),
+        removals: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            caret: z.number(),
+            image: Image,
+            result: Draft,
           })
           .array(),
         numbered: z
@@ -117,6 +143,21 @@ describe("composing", () => {
       }).toEqual({
         name: each.name,
         placeholder: each.placeholder,
+      });
+    }
+    for (const each of cases.drafts) {
+      expect({ name: each.name, images: draftImages(each.text, each.held) }).toEqual({
+        name: each.name,
+        images: each.images,
+      });
+    }
+    for (const each of cases.removals) {
+      expect({
+        name: each.name,
+        result: removeDraftImage(each.text, each.caret, each.image),
+      }).toEqual({
+        name: each.name,
+        result: each.result,
       });
     }
     for (const each of cases.settles) {

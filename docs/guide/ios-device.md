@@ -221,7 +221,10 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The plan opens beside the thread in portrait, and in a sheet in landscape and on the outer display.
 - Split View at its narrowest on the inner display shows the chat alone.
 - The composer and the keyboard in each pose, and whether the keyboard stays up and the composer keeps its place through a fold, a turn or an unfold.
-- Photos beside Send, and Paste in the draft's long-press menu. Pick several photos at once, among them one the camera took (HEIC, which goes as a JPEG), a screenshot (PNG, which goes as it is), and one from iCloud that has to download first. Paste an image copied in another app, such as Safari or Photos, then text, from the draft's menu, and check that the caret stays where the image went. CI pastes only an image the test put on the pasteboard, and picks no photo.
+- Photos beside Send, and Paste in the draft's long-press menu. Pick several photos at once, among them one the camera took (HEIC, which Photos hands over as a JPEG), a screenshot (PNG, which goes as it is), and one from iCloud that has to download first; each should land where it was put. Paste an image copied in another app, such as Safari or Photos, then text, from the draft's menu, and check that the caret stays where the image went. CI pastes only an image the test put on the pasteboard, and picks no photo.
+- A posted camera photo's metadata: open the image the board keeps (`/api/images/<id>` with the token) and read its EXIF for a location. The app sends Photos' JPEG as it is.
+- Paste from the draft's menu with text and a picture copied together, such as a selection in Notes or on a web page. The web pastes the text then; what iOS hands the draft is untested.
+- Ten large photos picked at once, such as 48-megapixel ones: the app should stay up while they upload.
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
 - The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
 

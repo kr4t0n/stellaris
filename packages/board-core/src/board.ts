@@ -6209,7 +6209,7 @@ export class Board {
     if (!PLANNING_ROLES.includes(actor.role)) {
       throw new BoardError(
         "FORBIDDEN",
-        `only the user, the steward, and the concierge may ${what}; ask one of them in the task's thread`,
+        `only the user, the steward, and the concierge may ${what}; ask one of them in the task's thread, with a mention`,
       );
     }
   }

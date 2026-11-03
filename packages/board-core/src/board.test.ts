@@ -697,6 +697,18 @@ describe("Board", () => {
     await board.postMessage(REV, { thread_id: topic.id, body: "or a fresh one" });
     expect(await unread(ENG, topic.id)).toBe(2);
     expect(await unread(ENG2, topic.id)).toBe(1);
+
+    // A blocked task's stage wakes nobody by itself, but a post in its thread still asks a turn of
+    // whoever may take it, and of nobody else.
+    const later = await board.createTask(REV, {
+      project: "demo",
+      title: "ship",
+      stages: [{ name: "ship", agent: "eng-1" }],
+    });
+    await board.updateTask(REV, { task_id: later.id, blocked_by: [task.id] });
+    await board.postMessage(ENG2, { thread_id: later.id, body: "Waiting on the check." });
+    expect(await unread(ENG, later.id)).toBe(1);
+    expect(await unread(REV, later.id)).toBe(0);
   });
 
   it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
@@ -1380,9 +1392,12 @@ describe("Board", () => {
         { id: "s3", name: "referee review", role: "researcher", gate: true },
       ],
     ];
+    // The refusal says how to ask, since a plain post in the thread wakes only whoever the
+    // current stage is for.
     for (const stages of refused) {
       await expect(board.planTask(RES, { task_id: task.id, stages })).rejects.toMatchObject({
         code: "FORBIDDEN",
+        message: expect.stringMatching(/; ask one of them in the task's thread, with a mention$/),
       });
     }
     await expect(

@@ -1846,10 +1846,12 @@ export class Scheduler {
         if (this.state.waitingSeen[key] !== undefined) {
           continue;
         }
-        // While the user's pause holds the turns of everyone who may take the stage, it waits on
-        // the pause, not on them.
+        // While the user's pause holds the turns of every citizen who may take the stage, it waits
+        // on the pause, not on them. The user takes no turns, so counts as none of them.
         members ??= await this.board.projectMembers(project.slug);
-        const takers = members.filter((member) => mayHoldStage(member, task));
+        const takers = members.filter(
+          (member) => member.cli !== null && mayHoldStage(member, task),
+        );
         if (
           takers.length > 0 &&
           takers.every((taker) => heldOn(runners, project.runner, taker.cli))
@@ -2349,7 +2351,8 @@ export class Scheduler {
       }
       const assignment = await this.runner.assign(dispatch);
       if (assignment === null) {
-        // No runner can take it now: its project's runner is away or busy. It waits as it was.
+        // No runner can take it now: the one it would run on, its project's or the citizen's pinned
+        // one, is away, busy, or paused by the user for its CLI. It waits as it was.
         this.pending.set(key, item);
         continue;
       }

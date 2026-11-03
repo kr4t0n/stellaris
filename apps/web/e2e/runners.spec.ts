@@ -148,9 +148,9 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   // checked, are not.
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   await expect(rows).toHaveText([
-    /^claude, codex\s*pod\s*no git user\.email\s*linux\s*v0\.3\.11\s*no projects\s*connected\s*Pause$/,
-    /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected\s*Pause$/,
-    /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away\s*Pause$/,
+    /^claude, codex\s*pod\s*no git user\.email\s*linux\s*v0\.3\.11\s*no projects\s*connected$/,
+    /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected$/,
+    /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away$/,
   ]);
   // Every row keeps the same eight cells, so each column holds the same thing.
   const cells = (row: number) => rows.nth(row).locator(":scope > *");
@@ -165,7 +165,7 @@ test("Runners in the top bar opens the runners view and closes it again", async 
     "gpu",
     "lab",
     "away",
-    "Pause",
+    "",
   ]);
   await expect(rows.nth(2).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(2).getByText("v0.3.10")).toHaveClass(/text-amber-300/);
@@ -184,15 +184,28 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   page,
 }) => {
   const board = await fakeBoard(page);
+  // Registered after the fake board, so it answers first: the board takes a moment to answer, as
+  // a live one may, and the control is on its way meanwhile.
+  await page.route(/\/api\/runners\/[^/]+\/(pause|resume)/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.fallback();
+  });
   await page.goto("/runners");
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   const pod = rows.nth(0);
   const state = pod.locator(":scope > *").nth(6);
   await expect(state).toHaveText("connected");
 
-  // A CLI's mark pauses that CLI on that runner alone.
-  await pod.getByRole("button", { name: "Pause claude on pod" }).click();
-  await expect(pod.getByRole("button", { name: "Resume claude on pod" })).toHaveClass(/opacity-30/);
+  // A CLI's mark pauses that CLI on that runner alone, from the keyboard. It keeps the focus while
+  // the change is on its way, takes no second press meanwhile, and the next key turns it back.
+  const claude = pod.getByRole("button", { name: /^(Pause|Resume) claude on pod$/ });
+  await claude.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await expect(claude).toHaveAccessibleName("Resume claude on pod");
+  await expect(claude).toBeFocused();
+  await expect(claude).toHaveAttribute("aria-disabled", "false");
+  await expect(claude).toHaveClass(/opacity-30/);
   await expect(pod.getByRole("button", { name: "Pause codex on pod" })).not.toHaveClass(
     /opacity-30/,
   );
@@ -202,22 +215,31 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   await expect(page.getByText("2 connected · 1 away · 1 paused ·")).toBeVisible();
   await expect(rows.nth(1).locator(":scope > *").nth(6)).toHaveText("connected");
 
-  // The runner's own pause, from the keyboard, covers every CLI and keeps the CLI's apart.
-  await pod.getByRole("button", { name: "Pause pod" }).focus();
-  await page.keyboard.press("Enter");
-  await expect(pod.getByRole("button", { name: "Resume pod" })).toHaveText("Resume");
+  // The runner's own pause covers every CLI and keeps the CLI's apart.
+  const whole = pod.getByRole("button", { name: /^(Pause|Resume) pod$/ });
+  await whole.click();
+  await expect(whole).toHaveAccessibleName("Resume pod");
+  await expect(whole).toHaveAttribute("title", "Resume pod");
   await expect(state).toHaveText("paused");
-  await pod.getByRole("button", { name: "Resume pod" }).click();
+  // A press counts once the last change is read back.
+  await expect(whole).toHaveAttribute("aria-disabled", "false");
+  await whole.click();
+  await expect(whole).toHaveAccessibleName("Pause pod");
   await expect(state).toHaveText("claude paused");
-  await pod.getByRole("button", { name: "Resume claude on pod" }).click();
+  await expect(claude).toHaveAttribute("aria-disabled", "false");
+  await claude.press("Enter");
+  await expect(claude).toHaveAccessibleName("Pause claude on pod");
+  await expect(claude).toBeFocused();
   await expect(state).toHaveText("connected");
   await expect(state).not.toHaveClass(/text-amber-300/);
 
   // An away runner can be paused too, so it takes no turns when it comes back.
   const laptop = rows.nth(2);
+  await expect(claude).toHaveAttribute("aria-disabled", "false");
   await laptop.getByRole("button", { name: "Pause laptop" }).click();
   await expect(laptop.locator(":scope > *").nth(6)).toHaveText("away · paused");
 
+  // One write a press, the press made while one was on its way none.
   expect(board.writes).toEqual([
     { path: "/api/runners/pod/pause/claude", body: {} },
     { path: "/api/runners/pod/pause", body: {} },

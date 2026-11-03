@@ -112,7 +112,7 @@ Everything else that reads a pause asks `heldOn` from `@stellaris/shared`: the r
 
 - The lease sweep renews a holder held in the task's project for a full lease once less than half is left, as for a pending cron (`pausedLease`). The claim never lapses while its holder cannot take a turn, and after the resume the holder has at least half a lease. Releasing it would only make churn: a stage named for the holder waits for it anyway, and the work is in its worktree.
 - `idle_member` counts a citizen's idle time from the last operations pass that held it in any place it works (`idleHeld`), so it is not logged during a pause, or the moment one ends.
-- `waiting_stage` skips a stage while everyone who may take it (`mayHoldStage`) is held in its project. The scheduler keeps the last pass that held it (`waitingHeld`) and counts the wait from there, so a stage that waited through a pause is not logged the moment it ends.
+- `waiting_stage` skips a stage while every citizen who may take it (`mayHoldStage`, the user aside, who takes no turns) is held in its project. A stage only the user may take still signals. The scheduler keeps the last pass that held it (`waitingHeld`) and counts the wait from there, so a stage that waited through a pause is not logged the moment it ends.
 - Both times are kept in `state/scheduler.json`, so a restart during the pause counts from them too.
 - `turn_refused` needs a turn the model service turned away, and a held wake never reaches a runner.
 

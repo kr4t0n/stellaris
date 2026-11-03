@@ -1,7 +1,7 @@
 import type { CliKind, PendingEnrollment, Runner } from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
@@ -107,6 +107,18 @@ function WaitingRunner({
   );
 }
 
+/** Two bars to pause, a triangle to resume. Decorative: its button's label says what it does. */
+function PauseMark({ paused }: { paused: boolean }) {
+  return (
+    <svg viewBox="0 0 12 12" width={12} height={12} aria-hidden="true" className="shrink-0">
+      <path
+        d={paused ? "M3 1.5v9l7.5-4.5z" : "M2.5 1.5h2.5v9h-2.5zM7 1.5h2.5v9h-2.5z"}
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 /** What a runner's row says of it: away or connected, and what of it the user paused. */
 function runnerState(runner: Runner, now: number): { label: string; detail: string; tone: string } {
   const pausedClis = runner.clis.filter((cli) => runner.pausedClis?.[cli] !== undefined);
@@ -147,11 +159,27 @@ export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
   const { api } = useSession();
   const client = useQueryClient();
+  // Pending until the runners are read again, so a control never offers the state it just left.
+  // A press meanwhile does nothing, a second one before the next render included, which is why
+  // a ref holds it; the control stays enabled, so it keeps the keyboard's focus.
+  const changing = useRef(false);
   const pause = useMutation({
     mutationFn: ({ runner, paused, cli }: { runner: string; paused: boolean; cli?: CliKind }) =>
       api.setRunnerPaused(runner, paused, cli),
-    onSettled: () => client.invalidateQueries({ queryKey: ["runners"] }),
+    onSettled: async () => {
+      try {
+        await client.invalidateQueries({ queryKey: ["runners"] });
+      } finally {
+        changing.current = false;
+      }
+    },
   });
+  const toggle = (change: { runner: string; paused: boolean; cli?: CliKind }): void => {
+    if (!changing.current) {
+      changing.current = true;
+      pause.mutate(change);
+    }
+  };
   const enrollments = useEnrollments();
   const runners = useRunners();
   const projects = useProjects();
@@ -165,7 +193,9 @@ export function RunnersView() {
   const off = registered.filter((runner) => offVersion(runner, server)).length;
   const unidentified = registered.filter((runner) => identityGap(runner) !== null).length;
   const paused = registered.filter(
-    (runner) => runner.paused !== undefined || Object.keys(runner.pausedClis ?? {}).length > 0,
+    (runner) =>
+      runner.paused !== undefined ||
+      runner.clis.some((cli) => runner.pausedClis?.[cli] !== undefined),
   ).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
@@ -240,8 +270,8 @@ export function RunnersView() {
                         type="button"
                         aria-label={label}
                         title={label}
-                        disabled={pause.isPending}
-                        onClick={() => pause.mutate({ runner: runner.name, paused: !held, cli })}
+                        aria-disabled={pause.isPending}
+                        onClick={() => toggle({ runner: runner.name, paused: !held, cli })}
                         className={`rounded p-0.5 transition-opacity hover:bg-surface-2/70 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${held ? "opacity-30 hover:opacity-60" : ""}`}
                       >
                         <CliIcon cli={cli} size={13} />
@@ -282,16 +312,18 @@ export function RunnersView() {
                 <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
                   {state.label}
                 </span>
-                <Button
-                  className="-mr-2"
+                <button
+                  type="button"
                   aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                  disabled={pause.isPending}
+                  title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                  aria-disabled={pause.isPending}
                   onClick={() =>
-                    pause.mutate({ runner: runner.name, paused: runner.paused === undefined })
+                    toggle({ runner: runner.name, paused: runner.paused === undefined })
                   }
+                  className="-mr-1 rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
                 >
-                  {runner.paused === undefined ? "Pause" : "Resume"}
-                </Button>
+                  <PauseMark paused={runner.paused !== undefined} />
+                </button>
               </li>
             );
           })}

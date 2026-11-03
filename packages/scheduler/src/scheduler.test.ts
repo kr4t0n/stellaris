@@ -803,6 +803,7 @@ describe("Scheduler", () => {
   it("signals no idle member or waiting stage the user's pause holds, and counts a stage's wait from the resume", async () => {
     const { board, runner, scheduler } = await setup({ timings: OFF_REFLECTION });
     await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
     await board.placeProject("demo", "pod");
     // eng-1 and rev-1 are on Claude; eng-2, an engineer too, is on Codex.
     await board.addAgent(USER, {
@@ -866,6 +867,32 @@ describe("Scheduler", () => {
     await restarted.tick();
     await restarted.drain();
     expect(await keys()).not.toContain("idle_member:eng-1");
+  });
+
+  it("signals no stage open to anyone while the pause holds every citizen, the user aside", async () => {
+    const { board, scheduler } = await setup();
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude"] });
+    await board.placeProject("demo", "pod");
+    // eng-1 and rev-1, the project's citizens, are both on Claude.
+    const open = await board.createTask(USER, {
+      project: "demo",
+      title: "anyone's",
+      stages: [{ name: "look" }],
+    });
+    const users = await board.createTask(USER, {
+      project: "demo",
+      title: "the user's",
+      stages: [{ name: "decide", agent: "user" }],
+    });
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const keys = (await board.listSignals()).map((record) => record.signal.key);
+    expect(keys).not.toContain(`waiting_stage:${open.id}:s1`);
+    // A stage only the user may take waits on the user, paused runner or not.
+    expect(keys).toContain(`waiting_stage:${users.id}:s1`);
   });
 
   it("wakes every member who may take a stage that names nobody, on entry and on heartbeat", async () => {

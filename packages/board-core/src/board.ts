@@ -1742,6 +1742,10 @@ export class Board {
       }
       const doc = await readMarkdown(file, RunnerSchema);
       const { paused, pausedClis, ...rest } = doc.data;
+      // A pause the runner could not show, and no turn would meet; a resume still clears one.
+      if (cli !== undefined && change.paused && !doc.data.clis.includes(cli)) {
+        throw new BoardError("INVALID_STATE", `runner ${name} has no ${cli} to pause`);
+      }
       const current = cli === undefined ? paused : pausedClis?.[cli];
       if ((current !== undefined) === change.paused) {
         return doc.data;

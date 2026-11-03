@@ -1413,6 +1413,13 @@ describe("Board", () => {
   it("pauses a runner, or one CLI on it apart from it, for the user alone, through a reconnect and a reopen", async () => {
     const { board } = await society();
     await board.addRunner(USER, "pod");
+    // With Claude alone on the runner, a pause of Codex there could show nowhere, and is refused;
+    // a resume, which clears whatever is held, is not.
+    await board.markRunner("pod", { status: "connected", clis: ["claude"] });
+    await expect(
+      board.setRunnerPaused(USER, "pod", { paused: true, cli: "codex" }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await board.setRunnerPaused(USER, "pod", { paused: false, cli: "codex" });
     const paused = await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
     expect(paused.pausedClis).toEqual({ claude: { at: clock.toISOString(), by: "user" } });
     expect(paused.paused).toBeUndefined();
@@ -1462,6 +1469,7 @@ describe("Board", () => {
     // The board's own lease, thirty minutes.
     const { board } = await society({});
     await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
     const sweep = async (minutes: number): Promise<void> => {
       for (let i = 0; i < minutes; i += 1) {
         clock = new Date(clock.getTime() + 60_000);

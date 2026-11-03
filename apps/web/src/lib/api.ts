@@ -41,8 +41,10 @@ import {
   TranscriptEntrySchema,
   TurnHistoryEntrySchema,
   UlidSchema,
+  UploadedImageSchema,
   type CliKind,
   type MetricsWindow,
+  type UploadedImage,
 } from "@stellaris/shared";
 import { z } from "zod";
 
@@ -185,14 +187,19 @@ async function fetchOk(path: string, token: string): Promise<Response> {
     throw new ApiError(0, "The board server is not reachable.");
   }
   if (!response.ok) {
-    const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
-    throw new ApiError(
-      response.status,
-      detail.success ? detail.data.message : `${path} answered ${response.status}`,
-      detail.success ? (detail.data.error ?? null) : null,
-    );
+    throw await refusal(response, path);
   }
   return response;
+}
+
+/** The board's refusal of a request, with its reason when it gave one. */
+async function refusal(response: Response, path: string): Promise<ApiError> {
+  const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
+  return new ApiError(
+    response.status,
+    detail.success ? detail.data.message : `${path} answered ${response.status}`,
+    detail.success ? (detail.data.error ?? null) : null,
+  );
 }
 
 async function get<T>(path: string, token: string, schema: z.ZodType<T>): Promise<T> {
@@ -236,14 +243,34 @@ async function write<T>(
     throw new ApiError(0, "The board server is not reachable.");
   }
   if (!response.ok) {
-    const detail = ErrorBodySchema.safeParse(await response.json().catch(() => null));
-    throw new ApiError(
-      response.status,
-      detail.success ? detail.data.message : `${path} answered ${response.status}`,
-      detail.success ? (detail.data.error ?? null) : null,
-    );
+    throw await refusal(response, path);
   }
   return schema.parse(await response.json());
+}
+
+/**
+ * An image the user posts from a composer, its bytes the whole body, with the file's name, which
+ * describes it in the markdown the board answers.
+ */
+async function postImage(token: string, file: Blob, name: string): Promise<UploadedImage> {
+  const path = `/api/images?name=${encodeURIComponent(name)}`;
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": file.type === "" ? "application/octet-stream" : file.type,
+      },
+      body: file,
+    });
+  } catch {
+    throw new ApiError(0, "The board server is not reachable.");
+  }
+  if (!response.ok) {
+    throw await refusal(response, path);
+  }
+  return UploadedImageSchema.parse(await response.json());
 }
 
 /** A verb, run as the signed-in actor through the same route agents' verbs take. */
@@ -306,6 +333,8 @@ export function createApi(token: string) {
       ),
     /** An image a citizen uploaded, as a data URL. */
     image: (id: string) => getImage(`/api/images/${encodeURIComponent(id)}`, token),
+    /** Keeps an image the user posts, answering the markdown that shows it in a post. */
+    postImage: (file: Blob, name: string) => postImage(token, file, name),
     /** What a task's branch changed since it left the default branch, file by file. */
     taskChanges: (id: string) =>
       get(`/api/tasks/${encodeURIComponent(id)}/changes`, token, BranchChangesSchema),

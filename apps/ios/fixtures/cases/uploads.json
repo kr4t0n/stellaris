@@ -1,0 +1,185 @@
+{
+  "placeholders": [
+    {
+      "name": "a plain file name",
+      "file": "shot.png",
+      "placeholder": "![Uploading shot.png…]()"
+    },
+    {
+      "name": "brackets, backslashes and line breaks left out",
+      "file": "the [board]\\before\r\n.png",
+      "placeholder": "![Uploading the boardbefore.png…]()"
+    },
+    {
+      "name": "a name beyond ASCII",
+      "file": "écran 👋.png",
+      "placeholder": "![Uploading écran 👋.png…]()"
+    }
+  ],
+  "inserts": [
+    {
+      "name": "at the caret",
+      "text": "before after",
+      "start": 7,
+      "end": 7,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "before ![Uploading shot.png…]()after",
+        "caret": 31
+      }
+    },
+    {
+      "name": "over the selection",
+      "text": "keep this out",
+      "start": 5,
+      "end": 9,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "keep ![Uploading shot.png…]() out",
+        "caret": 29
+      }
+    },
+    {
+      "name": "into an empty draft",
+      "text": "",
+      "start": 0,
+      "end": 0,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "![Uploading shot.png…]()",
+        "caret": 24
+      }
+    },
+    {
+      "name": "several, one a line",
+      "text": "see:",
+      "start": 4,
+      "end": 4,
+      "inserted": "![Uploading shot.png…]()\n![Uploading b.gif…]()",
+      "result": {
+        "text": "see:![Uploading shot.png…]()\n![Uploading b.gif…]()",
+        "caret": 50
+      }
+    },
+    {
+      "name": "past the end, at the end",
+      "text": "short",
+      "start": 9,
+      "end": 12,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "short![Uploading shot.png…]()",
+        "caret": 29
+      }
+    },
+    {
+      "name": "an end before the start, at the start",
+      "text": "short",
+      "start": 3,
+      "end": 1,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "sho![Uploading shot.png…]()rt",
+        "caret": 27
+      }
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 hi",
+      "start": 3,
+      "end": 3,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "👋 ![Uploading shot.png…]()hi",
+        "caret": 27
+      }
+    }
+  ],
+  "settles": [
+    {
+      "name": "the caret just after the placeholder",
+      "text": "look ![Uploading shot.png…]()",
+      "caret": 29,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "caret": 50
+      }
+    },
+    {
+      "name": "the caret before the placeholder",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 2,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 2
+      }
+    },
+    {
+      "name": "the caret after more text",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 35,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 56
+      }
+    },
+    {
+      "name": "the caret inside the placeholder",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 9,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 50
+      }
+    },
+    {
+      "name": "a failed upload leaves nothing",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 35,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "",
+      "result": {
+        "text": "look  there",
+        "caret": 11
+      }
+    },
+    {
+      "name": "the first of two alike",
+      "text": "![Uploading shot.png…]()\n![Uploading shot.png…]()",
+      "caret": 49,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)\n![Uploading shot.png…]()",
+        "caret": 70
+      }
+    },
+    {
+      "name": "a placeholder the user deleted",
+      "text": "look there",
+      "caret": 4,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": null
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 ![Uploading shot.png…]() x",
+      "caret": 29,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "👋 ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) x",
+        "caret": 50
+      }
+    }
+  ]
+}

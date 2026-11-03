@@ -9,6 +9,7 @@ import {
 import {
   channelRef,
   conversationPart,
+  cronFailure,
   mayHoldStage,
   parseChannelRef,
   PATH_TOKENS,
@@ -507,16 +508,20 @@ export class TurnHost {
         crons.push(cron);
       }
     }
-    // A failed turn that a cron's fire started is named with that cron, which may have ended with it.
-    const lastTurnCrons = new Map<Ulid, Cron>();
-    if (lastTurn?.exitReason === "error" || lastTurn?.exitReason === "timeout") {
-      for (const id of lastTurn.crons ?? []) {
-        const cron = await this.board.readCron(id).catch(() => null);
-        if (cron !== null) {
-          lastTurnCrons.set(id, cron);
-        }
-      }
-    }
+    // Every cron of the citizen here whose latest fire's turn failed, which may have ended with it,
+    // is named until a turn that names it completes; one this turn carries is under Crons already.
+    const failedCrons = (await this.board.listCrons()).filter(
+      (cron) =>
+        cron.agent === agent.name &&
+        cron.scope === dispatch.project &&
+        conversationPart(cron) === part &&
+        cronFailure(cron) !== null &&
+        !(dispatch.crons ?? []).includes(cron.id),
+    );
+    const cronFailures = failedCrons.flatMap((cron) => {
+      const failure = cronFailure(cron);
+      return failure === null ? [] : [{ cron: cron.id, turnId: failure.turnId }];
+    });
     const prompt = buildTurnPrompt({
       dispatch,
       clock: { now: this.now(), timeZone: society.timezone },
@@ -529,7 +534,7 @@ export class TurnHost {
       waitingStages: waiting,
       project,
       lastTurn,
-      lastTurnCrons,
+      failedCrons,
       ...(changedInstructions ? { changedInstructions: instructions } : {}),
       onboarding,
       afreshAfterReflection,
@@ -561,6 +566,7 @@ export class TurnHost {
       sessionCostUsd: costSoFarUsd,
       ...(usageSoFar === undefined ? {} : { sessionUsage: usageSoFar }),
       ...(instructionsHeld === undefined ? {} : { sessionInstructionsHash: instructionsHeld }),
+      ...(cronFailures.length === 0 ? {} : { cronFailures }),
     });
     if (record.id === undefined) {
       throw new Error("the board gave the turn no id");

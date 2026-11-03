@@ -70,10 +70,10 @@ export interface TurnPromptInput {
   readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
   /**
-   * The crons whose fire started the previous turn, as the board has them now, read only when that
-   * turn failed; one the board no longer has is missing, and named by its id alone.
+   * The citizen's crons in this conversation whose latest fire's turn failed with nothing catching
+   * it up (`cronFailure`), as the board has them now, but those this turn carries.
    */
-  readonly lastTurnCrons?: ReadonlyMap<Ulid, Cron> | undefined;
+  readonly failedCrons?: readonly Cron[] | undefined;
   /**
    * The citizen's instructions as they are now, for a resumed session that holds others: the
    * prompt carries them whole, marked as replacing what the session had. Absent otherwise.
@@ -322,8 +322,8 @@ function messageLines(
 }
 
 /**
- * A cron that woke this turn, or the failed turn before it: what it is, whether it has ended or when
- * it fires next, how its previous turn went, and its note.
+ * A cron that woke this turn, or one whose latest fire's turn failed: what it is, whether it has
+ * ended or when it fires next, how its previous turn went, and its note.
  */
 function cronLines(cron: Cron, timeZone: string): string[] {
   const previous =
@@ -535,8 +535,6 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     );
   }
   if (last !== null && (last.exitReason === "error" || last.exitReason === "timeout")) {
-    const fired = last.crons ?? [];
-    const timeZone = input.clock?.timeZone ?? DEFAULT_TIME_ZONE;
     lines.push(
       "",
       "## Your previous turn did not finish",
@@ -547,22 +545,22 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
             "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one: nothing of your earlier turns here carries over but what is on the board and in your home.",
           ]
         : []),
-      ...(fired.length === 0
-        ? []
-        : [
-            "",
-            fired.length === 1
-              ? "It carried the fire of this cron, so what its note asks may not be done:"
-              : "It carried the fire of these crons, so what their notes ask may not be done:",
-            "",
-            ...fired.flatMap((id) => {
-              const cron = input.lastTurnCrons?.get(id);
-              return cron === undefined
-                ? [`- Cron ${id}, which the board no longer has.`, ""]
-                : cronLines(cron, timeZone);
-            }),
-          ]),
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
+    );
+  }
+  // Named in each turn here until one that names it completes, so a failed or stopped turn hides none.
+  const failed = input.failedCrons ?? [];
+  if (failed.length > 0) {
+    const timeZone = input.clock?.timeZone ?? DEFAULT_TIME_ZONE;
+    lines.push(
+      "",
+      "## Cron fires that did not finish",
+      "",
+      failed.length === 1
+        ? "The turn of this cron's latest fire here failed, so what its note asks may not be done:"
+        : "The turns of these crons' latest fires here failed, so what their notes ask may not be done:",
+      "",
+      ...failed.flatMap((cron) => cronLines(cron, timeZone)),
     );
   }
   if (

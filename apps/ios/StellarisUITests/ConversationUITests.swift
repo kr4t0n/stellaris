@@ -49,6 +49,47 @@ final class ConversationUITests: ShellTestCase {
     keepScreen("image-posted")
   }
 
+  /// Probe: the field's own long-press Paste, with an image copied.
+  @MainActor func testProbeLongPressPastesAnImage() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("Long: ")
+    let size = CGSize(width: 320, height: 200)
+    UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { context in
+      UIColor.systemOrange.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+    }
+    box.press(forDuration: 1.2)
+    keepScreen("probe-image-menu")
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "PROBE: no Paste in the field's menu with an image copied")
+    paste.tap()
+    let landed = draft(box, matches: #"Long: !\[(Uploading image…|image\.(png|jpeg))\]\(.*\)"#)
+    keepScreen("probe-image-pasted")
+    XCTAssertTrue(landed, "PROBE: the image didn't land; draft is \(box.value as? String ?? "nil")")
+  }
+
+  /// Probe: the field's own long-press Paste still pastes text.
+  @MainActor func testProbeLongPressStillPastesText() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let box = draft(app)
+    box.tap()
+    box.typeText("Text: ")
+    UIPasteboard.general.string = "plain words"
+    box.press(forDuration: 1.2)
+    let paste = app.menuItems["Paste"].firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 10), "PROBE: no Paste in the field's menu with text copied")
+    paste.tap()
+    let landed = draft(box, matches: #"Text: plain words"#)
+    keepScreen("probe-text-pasted")
+    XCTAssertTrue(landed, "PROBE: the text didn't land; draft is \(box.value as? String ?? "nil")")
+  }
+
   /// Waits for the draft's text to match `pattern` whole.
   @MainActor private func draft(_ box: XCUIElement, matches pattern: String) -> Bool {
     let matching = XCTNSPredicateExpectation(

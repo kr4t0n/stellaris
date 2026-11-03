@@ -315,6 +315,9 @@ struct DraftField: View {
         .foregroundStyle(MessageColor.primary)
         .focused($focused)
         .accessibilityIdentifier("draft")
+        .pasteDestination(for: PastedImage.self) { images in
+          pasteImages(images.map(\.data))
+        }
         .padding(.leading, 12)
         .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 10)
@@ -404,6 +407,19 @@ struct DraftField: View {
     }
   }
 
+  /// Probe: images the field's own Paste hands over.
+  private func pasteImages(_ images: [Data]) {
+    guard !images.isEmpty else {
+      return
+    }
+    let held = hold(images.count)
+    for data in images {
+      Task {
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
+      }
+    }
+  }
+
   /// Where the draft's caret is, in UTF-16 code units, once the field has had one.
   private func caret() -> Int? {
     let text = model.memory?.draft(conversation) ?? ""
@@ -484,6 +500,15 @@ struct DraftField: View {
       }
       sending = false
     }
+  }
+}
+
+/// Probe: an image on the pasteboard, as its bytes.
+struct PastedImage: Transferable, Sendable {
+  let data: Data
+
+  static var transferRepresentation: some TransferRepresentation {
+    DataRepresentation(importedContentType: .image) { data in PastedImage(data: data) }
   }
 }
 

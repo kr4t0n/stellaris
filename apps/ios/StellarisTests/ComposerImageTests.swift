@@ -204,7 +204,8 @@ import Testing
           context.fill(CGRect(x: CGFloat(x), y: 0, width: 3, height: 400))
         }
       }
-      let limit = 20_000
+      // Past the limit without what UIKit writes beside the picture too, which the app leaves out.
+      let limit = try #require(withoutMetadata(large)).count / 2
       #expect(large.count > limit)
       let prepared = try #require(await ComposerImage.prepare(large, limit: limit))
       #expect(prepared.type == .jpeg && prepared.data.count <= limit)

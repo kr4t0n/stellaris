@@ -212,6 +212,36 @@ describe("recorded Codex app-server turns", () => {
     expect(result.contextTokens).toBe(30_630);
   });
 
+  /**
+   * A turn recorded from `codex app-server` 0.165.0 on 2026-11-04 against a stub of the model
+   * service and of the board, which scripted the model's calls: `read_image`, `view_image` on the
+   * file it named, `view_image` on a file that does not exist, then the status. Codex reports an
+   * image it opened as an `imageView` item only once the file was read as an image; the missing
+   * one went back to the model as an error and left no item, so it shows no step.
+   */
+  it("replays a turn that opens an image: the board's read, then Codex's view of the file", async () => {
+    const { spawn, methods } = await replay("app-server-image-recorded.jsonl");
+    const result = await new CodexBackend({ spawn }).runTurn(request({}));
+    expect(methods).toEqual(["initialize", "initialized", "thread/start", "turn/start"]);
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("viewed");
+    const file =
+      "/tmp/stellaris-images-01BX5ZZKBKACTAV9WEVGEMMVRZ-Qx7mWk/01ARZ3NDEKTSV4RRFFQ69G5FAV.png";
+    const steps = result.events.flatMap((e) =>
+      e.type === "tool_call"
+        ? [["call", e.name, e.input]]
+        : e.type === "tool_result"
+          ? [["result", e.name, e.ok, e.output]]
+          : [],
+    );
+    expect(steps).toEqual([
+      ["call", "mcp__board__read_image", { image_id: "image:01ARZ3NDEKTSV4RRFFQ69G5FAV" }],
+      ["result", "mcp__board__read_image", true, expect.stringContaining(file)],
+      ["call", "Read", { path: file }],
+      ["result", "Read", true, "[image]"],
+    ]);
+  });
+
   it("counts a request whose only item is a command still running when its update comes", async () => {
     // The same turn resumed with no totals before it, and without its opening message, so the
     // first request answers with a command alone: it starts, the request's update follows, and it

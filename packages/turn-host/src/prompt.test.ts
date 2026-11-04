@@ -814,9 +814,10 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain(
       "- laptop: away since 2026-10-01T09:00:00.000Z; darwin; CLIs claude; offers gpu, xcode; no projects",
     );
-    // Each CLI's quota in the order the runner lists its CLIs; a window reset since reads so.
+    // Each CLI's quota in the order the runner lists its CLIs; a window reset since reads so, and a
+    // limit holds its CLI's turns until its reset.
     expect(prompt).toContain(
-      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; quota claude 5h 84%, 7d reset since (near a limit) as of 2026-10-13T11:30:00.000Z; codex limited until 2026-10-20T05:11:58.000Z",
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; codex held by its limit until 2026-10-20T05:11:58.000Z; quota claude 5h 84%, 7d reset since (near a limit) as of 2026-10-13T11:30:00.000Z; codex limited until 2026-10-20T05:11:58.000Z",
     );
     // The front desk's project list says where each project lives.
     expect(prompt).toContain("on done none; on runner pod");
@@ -872,10 +873,10 @@ describe("buildTurnPrompt", () => {
       "- pod: connected, paused by the user since 2026-10-13T08:00:00.000Z; linux; CLIs claude, codex; offers nothing beyond its CLIs; projects lab\n",
     );
     expect(prompt).toContain(
-      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; claude paused by the user since 2026-10-13T08:00:00.000Z; quota claude limited until 2026-10-20T05:11:58.000Z\n",
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; claude paused by the user since 2026-10-13T08:00:00.000Z; claude held by its limit until 2026-10-20T05:11:58.000Z; quota claude limited until 2026-10-20T05:11:58.000Z\n",
     );
     expect(prompt).toContain(
-      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it",
+      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts",
     );
   });
 

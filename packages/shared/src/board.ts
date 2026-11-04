@@ -8,7 +8,7 @@ import {
   type Name,
 } from "./ids.js";
 import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
-import { CliQuotaSchema } from "./quota.js";
+import { CliQuotaSchema, limitHold, type LimitHold } from "./quota.js";
 import {
   CharterTriggerSchema,
   RoleCharterSchema,
@@ -601,20 +601,34 @@ export function runnerPause(runner: Runner, cli: CliKind): RunnerPause | undefin
 }
 
 /**
- * Whether a citizen's turns in a place would wait for the user's resume: the runner they would run
- * on, the project's for a project's turns and the citizen's home runner for its society scope's,
- * paused as a whole or for the citizen's CLI. Neither placed yet holds nothing.
+ * The limit that holds `cli`'s turns on a runner until it lifts by itself, as its quota there
+ * reads now (`limitHold`), or null when none does.
+ */
+export function runnerLimitHold(runner: Runner, cli: CliKind, now: Date): LimitHold | null {
+  const quota = runner.quotas?.[cli];
+  return quota === undefined ? null : limitHold(quota, now);
+}
+
+/**
+ * Whether a citizen's turns in a place would wait: the runner they would run on, the project's for
+ * a project's turns and the citizen's home runner for its society scope's, paused by the user as a
+ * whole or for the citizen's CLI, or holding that CLI's turns for its limit until it lifts. Neither
+ * placed yet holds nothing.
  */
 export function heldOn(
   runners: readonly Runner[],
   runner: Name | undefined,
   cli: CliKind | null,
+  now: Date,
 ): boolean {
   if (runner === undefined || cli === null) {
     return false;
   }
   const record = runners.find((each) => each.name === runner);
-  return record !== undefined && runnerPause(record, cli) !== undefined;
+  return (
+    record !== undefined &&
+    (runnerPause(record, cli) !== undefined || runnerLimitHold(record, cli, now) !== null)
+  );
 }
 
 export const ProposalKindSchema = z.enum([

@@ -8,6 +8,7 @@ import {
   parseChannelRef,
   PATH_TOKENS,
   quotaLevel,
+  runnerLimitHold,
   SOCIETY_SCOPE,
   stageIndex,
   windowCurrent,
@@ -253,7 +254,11 @@ function runnerLine(runner: Runner, projects: readonly Project[], now: Date): st
   ].join(", ");
   const pauses = runner.clis.flatMap((cli) => {
     const pause = runner.pausedClis?.[cli];
-    return pause === undefined ? [] : [`${cli} paused by the user since ${pause.at}`];
+    const hold = runnerLimitHold(runner, cli, now);
+    return [
+      ...(pause === undefined ? [] : [`${cli} paused by the user since ${pause.at}`]),
+      ...(hold === null ? [] : [`${cli} held by its limit until ${hold.until}`]),
+    ];
   });
   const quotas = runner.clis.flatMap((cli) => {
     const quota = runner.quotas?.[cli];
@@ -613,7 +618,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it: they wait, and the stages their citizens hold keep their leases.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, at the reset the CLI gave or, with none given, half an hour after the report: they wait, and the stages their citizens hold keep their leases.",
       "",
     );
     if (machines.runners.length === 0) {

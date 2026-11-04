@@ -190,6 +190,9 @@ import Testing
     #expect(await ComposerImage.prepare(png) == ComposerImage(data: png, type: .png))
     #expect(await ComposerImage.prepare(png)?.name == "image.png")
     #expect(await ComposerImage.prepare(Data("<svg/>".utf8)) == nil)
+    // A WebP's header alone, its RIFF shorter than the header itself, holds no picture.
+    let header = Data(Array("RIFF".utf8) + [3, 0, 0, 0] + Array("WEBP".utf8))
+    #expect(await ComposerImage.prepare(header) == nil)
   }
 
   #if canImport(UIKit)

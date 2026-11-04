@@ -95,8 +95,9 @@ private func number(_ bytes: ArraySlice<UInt8>, littleEndian little: Bool = fals
 
 // MARK: - JPEG
 
-/// A JPEG's segments up to the end of its first picture, without those of an application or a
-/// comment but for the JFIF header, the ICC profile, and Adobe's colour transform.
+/// A JPEG's segments that draw it, up to the end of its first picture: its frame, tables, and
+/// scans, with the JFIF header, the ICC profile, and Adobe's colour transform. A marker no JPEG has
+/// outside a scan reads as nothing.
 private func jpegWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
   guard bytes.starts(with: [0xFF, 0xD8]) else {
     return nil
@@ -116,8 +117,8 @@ private func jpegWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
       continue
     }
     switch marker {
-    case 0xD8, 0xD9:
-      // A second start, or an end before any scan.
+    case 0x00, 0x02...0xBF, 0xD8, 0xD9:
+      // No marker, a reserved one, a second start, or an end before any scan.
       return nil
     case 0x01, 0xD0...0xD7:
       kept += [0xFF, marker]
@@ -153,11 +154,13 @@ private func jpegWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
     case 0xE2 where payload.starts(with: ascii("ICC_PROFILE") + [0]),
       0xEE where payload.starts(with: ascii("Adobe")):
       kept += bytes[at..<end]
-    case 0xE0...0xEF, 0xFE:
-      // Any other application's data, XMP, IPTC, and maker data among them, or a comment.
-      break
-    default:
+    case 0xC0...0xCF where marker != 0xC8, 0xDA...0xDF, 0xF7, 0xF8:
+      // A frame, its tables, a scan, and their kin, JPEG-LS's frame and parameters among them.
       kept += bytes[at..<end]
+    default:
+      // Any other application's data, XMP, IPTC, and maker data among them, a comment, or an
+      // extension's.
+      break
     }
     at = end
     guard marker == 0xDA else {
@@ -254,7 +257,9 @@ private func gifWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
     return nil
   }
   /// The size of the colour table a packed field announces.
-  func colourTable(_ packed: UInt8) -> Int { packed & 0x80 == 0 ? 0 : 3 << (Int(packed & 0x07) + 1) }
+  func colourTable(_ packed: UInt8) -> Int {
+    packed & 0x80 == 0 ? 0 : 3 << (Int(packed & 0x07) + 1)
+  }
 
   guard bytes.count >= 13 else {
     return nil
@@ -313,7 +318,7 @@ private func webpWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
     return nil
   }
   let end = 8 + number(bytes[4..<8], littleEndian: true)
-  guard end <= bytes.count, let chunks = webpChunks(bytes[12..<end], orientation: true),
+  guard end >= 12, end <= bytes.count, let chunks = webpChunks(bytes[12..<end], orientation: true),
     !chunks.isEmpty
   else {
     return nil

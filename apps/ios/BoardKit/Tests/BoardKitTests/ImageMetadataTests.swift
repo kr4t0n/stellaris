@@ -99,6 +99,8 @@ import Testing
       // A picture a camera adds after the first, as an HDR gain map.
       + [0xFF, 0xD8] + segment(0xE1, xmp) + [0xFF, 0xD9]
     let kept = try #require(withoutMetadata(Data(photo)))
+    // Stripped again, it stays as it is.
+    #expect(withoutMetadata(kept) == kept)
     #expect(
       [UInt8](kept)
         == [0xFF, 0xD8] + segment(0xE0, jfif + [0, 0])
@@ -113,10 +115,27 @@ import Testing
     // Upright, a photo keeps no Exif at all; nor does a second Exif segment turn it.
     let exif = { (orientation: Int) in
       self.segment(
-        0xE1, Array("Exif\0\0".utf8) + self.cameraExif(orientation: orientation, littleEndian: false))
+        0xE1,
+        Array("Exif\0\0".utf8) + self.cameraExif(orientation: orientation, littleEndian: false))
     }
     let upright = [0xFF, 0xD8] + exif(1) + exif(3) + picture
     #expect(withoutMetadata(Data(upright)) == Data([0xFF, 0xD8] + picture))
+  }
+
+  @Test func keepsOnlyTheSegmentsThatDrawAJPEG() {
+    let plain = [0xFF, 0xD8] + segment(0xE0, jfif + [0, 0]) + picture
+    // An extension's segments, and the reserved JPG marker's, go like an application's.
+    let extended =
+      [0xFF, 0xD8] + segment(0xE0, jfif + [0, 0]) + segment(0xF0, Array("made up".utf8))
+      + segment(0xC8, Array("Nowhere".utf8)) + picture
+    #expect(withoutMetadata(Data(extended)) == Data(plain))
+    // A marker no JPEG has outside a scan, however long it says it is, reads as nothing.
+    for marker: UInt8 in [0x00, 0x02, 0x4D, 0xBF] {
+      let odd =
+        [0xFF, 0xD8] + segment(0xE0, jfif + [0, 0]) + [0xFF, marker, 0, 9]
+        + Array("made up".utf8) + picture
+      #expect(withoutMetadata(Data(odd)) == nil, "marker \(marker)")
+    }
   }
 
   @Test func readsNoJPEGThatEndsEarly() {
@@ -166,6 +185,8 @@ import Testing
       + frames + chunk("prVt", Array("Nowhere".utf8)) + chunk("IEND", [])
       + Array("after the end".utf8)
     let kept = try #require(withoutMetadata(Data(image)))
+    // Stripped again, it stays as it is.
+    #expect(withoutMetadata(kept) == kept)
     #expect(
       [UInt8](kept)
         == signature + header + drawn + chunk("eXIf", orientationOnly(8)) + frames
@@ -214,6 +235,8 @@ import Testing
       + application("XMP DataXMP", xmp) + timing + first + application("Example 1.0", [0, 1])
       + timing + second + text + [0x3B] + Array("after the end".utf8)
     let kept = try #require(withoutMetadata(Data(image)))
+    // Stripped again, it stays as it is.
+    #expect(withoutMetadata(kept) == kept)
     #expect([UInt8](kept) == screen + loop + timing + first + timing + second + text + [0x3B])
 
     let plain = screen + first + [0x3B]
@@ -256,9 +279,12 @@ import Testing
           + riffChunk("XMP ", xmp) + riffChunk("NOTE", Array("Nowhere".utf8)))
       + Array("after the end".utf8)
     let kept = try #require(withoutMetadata(Data(image)))
+    // Stripped again, it stays as it is.
+    #expect(withoutMetadata(kept) == kept)
     #expect(
       [UInt8](kept)
-        == webp(header(0x2A) + colours + animation + frames + riffChunk("EXIF", orientationOnly(6))))
+        == webp(
+          header(0x2A) + colours + animation + frames + riffChunk("EXIF", orientationOnly(6))))
 
     // Upright, it keeps no Exif, and its header says so.
     let upright = webp(
@@ -276,6 +302,11 @@ import Testing
     #expect(withoutMetadata(Data(long)) == nil)
     let cut = webp(Array("VP8L".utf8) + [40, 0, 0, 0, 1, 2])
     #expect(withoutMetadata(Data(cut)) == nil)
+    // A RIFF shorter than its own header, or holding nothing.
+    for size: UInt8 in 0...4 {
+      let header = Array("RIFF".utf8) + [size, 0, 0, 0] + Array("WEBP".utf8)
+      #expect(withoutMetadata(Data(header)) == nil, "RIFF size \(size)")
+    }
   }
 
   @Test func readsNothingButAnImage() {

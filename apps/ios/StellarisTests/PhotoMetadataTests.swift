@@ -362,5 +362,24 @@ import Testing
       #expect(shown.imageOrientation == .up)
       #expect(abs(shown.size.width / shown.size.height - 400.0 / 600) < 0.01, "\(shown.size)")
     }
+
+    /// A photo that doesn't read to its end, as one whose last bytes were lost, is drawn again
+    /// upright as a JPEG with none of its metadata, never sent as it is.
+    @Test func drawsAPhotoThatDoesntReadToItsEndAgain() async throws {
+      let photo = try cameraJPEG()
+      #expect(photo.suffix(2) == Data([0xFF, 0xD9]))
+      let cut = Data(photo.dropLast(2))
+      #expect(withoutMetadata(cut) == nil)
+      let prepared = try #require(await ComposerImage.prepare(cut))
+      #expect(prepared.type == .jpeg)
+      let source = try #require(CGImageSourceCreateWithData(prepared.data as CFData, nil))
+      let left = metadata(source, 0)
+      #expect(left.isEmpty, "\(left)")
+      for word in madeUp {
+        #expect(prepared.data.range(of: Data(word.utf8)) == nil, "\(word) was sent")
+      }
+      let shown = try #require(UIImage(data: prepared.data))
+      #expect(shown.imageOrientation == .up && shown.size == CGSize(width: 40, height: 60))
+    }
   #endif
 }

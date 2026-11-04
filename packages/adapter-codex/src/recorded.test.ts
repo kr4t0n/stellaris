@@ -56,6 +56,17 @@ async function replay(
   return { spawn, methods };
 }
 
+/** A turn's tool calls and results in order, as the board's steps show them. */
+function stepsOf(events: readonly AgentEvent[]): unknown[][] {
+  return events.flatMap((e) =>
+    e.type === "tool_call"
+      ? [["call", e.name, e.input]]
+      : e.type === "tool_result"
+        ? [["result", e.name, e.ok, e.output]]
+        : [],
+  );
+}
+
 function request(overrides: Partial<TurnRequest>): TurnRequest {
   return {
     spec: {
@@ -227,19 +238,108 @@ describe("recorded Codex app-server turns", () => {
     expect(result.status?.summary).toBe("viewed");
     const file =
       "/tmp/stellaris-images-01BX5ZZKBKACTAV9WEVGEMMVRZ-Qx7mWk/01ARZ3NDEKTSV4RRFFQ69G5FAV.png";
-    const steps = result.events.flatMap((e) =>
-      e.type === "tool_call"
-        ? [["call", e.name, e.input]]
-        : e.type === "tool_result"
-          ? [["result", e.name, e.ok, e.output]]
-          : [],
-    );
-    expect(steps).toEqual([
+    expect(stepsOf(result.events)).toEqual([
       ["call", "mcp__board__read_image", { image_id: "image:01ARZ3NDEKTSV4RRFFQ69G5FAV" }],
       ["result", "mcp__board__read_image", true, expect.stringContaining(file)],
       ["call", "Read", { path: file }],
       ["result", "Read", true, "[image]"],
     ]);
+  });
+
+  /**
+   * Two turns recorded from `codex app-server` 0.165.0 on 2026-11-04 against a stub of the model
+   * service, which scripted the model's sub-agent calls and gave each request its own usage: 1,000
+   * input (400 cached) and 50 output for the parent, 7,000 and 70 for the sub-agent, which ran
+   * `ls` on its first task. With `multi_agent`, Codex's default, every call comes as a
+   * `collabAgentToolCall`; with `multi_agent_v2`, which the live models' metadata names, only a
+   * wait does, and a call that starts, messages, or interrupts a sub-agent comes as a
+   * `subAgentActivity`, as does the end of the sub-agent's turn, which is no call, and
+   * `list_agents` comes as nothing.
+   */
+  it("replays a turn's multi_agent calls as one step each, none of the sub-agent's own", async () => {
+    const { spawn } = await replay("app-server-subagents-v1-recorded.jsonl");
+    const result = await new CodexBackend({ spawn }).runTurn(request({}));
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("delegated");
+    const agent = "01a1a5f7-38dc-79f1-b4b3-abdafc63627d";
+    expect(stepsOf(result.events)).toEqual([
+      ["call", "Agent", { prompt: "SUBTASK: list the files in the worktree" }],
+      ["result", "Agent", true, `${agent}: pendingInit`],
+      ["call", "wait_agent", { targets: [agent] }],
+      ["result", "wait_agent", true, `${agent}: completed\nREADME.md`],
+      ["call", "SendMessage", { to: agent, message: "FOLLOWUP: now count them" }],
+      ["result", "SendMessage", true, `${agent}: completed\nREADME.md`],
+      ["call", "wait_agent", { targets: [agent] }],
+      ["result", "wait_agent", true, `${agent}: completed\nThere is 1 file.`],
+      ["call", "TaskStop", { task_id: agent }],
+      ["result", "TaskStop", true, `${agent}: completed\nThere is 1 file.`],
+      ["call", "resume_agent", { id: agent }],
+      ["result", "resume_agent", true, `${agent}: pendingInit`],
+      ["call", "TaskStop", { task_id: agent }],
+      ["result", "TaskStop", true, `${agent}: pendingInit`],
+    ]);
+    // Eight parent requests and the sub-agent's three, as the stub answered them.
+    expect(result.usage).toEqual({
+      inputTokens: 25_800,
+      outputTokens: 610,
+      cacheReadTokens: 3_200,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  /**
+   * Recorded the same way: a spawn naming an `agent_type` Codex doesn't know, which it started and
+   * then refused without completing, a good spawn whose sub-agent the stub held past the parent's
+   * 10-second wait, so the wait timed out and its completion named no sub-agent, and a close.
+   */
+  it("replays a v1 spawn Codex started and refused as no step, and a timed-out wait with its target", async () => {
+    const { spawn } = await replay("app-server-subagents-v1-refused-recorded.jsonl");
+    const result = await new CodexBackend({ spawn }).runTurn(request({}));
+    expect(result.exitReason).toBe("completed");
+    const agent = "01a1a61b-ae6d-7363-9b69-4bd8aaf93883";
+    expect(stepsOf(result.events)).toEqual([
+      ["call", "Agent", { prompt: "SUBTASK: list the files in the worktree" }],
+      ["result", "Agent", true, `${agent}: pendingInit`],
+      ["call", "wait_agent", { targets: [agent] }],
+      ["result", "wait_agent", true, undefined],
+      ["call", "TaskStop", { task_id: agent }],
+      ["result", "TaskStop", true, `${agent}: running`],
+    ]);
+    // Five parent requests; the sub-agent's one was still held when the parent closed it.
+    expect(result.usage).toEqual({
+      inputTokens: 3_000,
+      outputTokens: 250,
+      cacheReadTokens: 2_000,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("replays a turn's multi_agent_v2 calls as one step each, none for a sub-agent's end", async () => {
+    const { spawn } = await replay("app-server-subagents-v2-recorded.jsonl");
+    const result = await new CodexBackend({ spawn }).runTurn(request({}));
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("delegated");
+    expect(stepsOf(result.events)).toEqual([
+      ["call", "Agent", { name: "/root/lister" }],
+      ["result", "Agent", true, undefined],
+      ["call", "wait_agent", { targets: [] }],
+      ["result", "wait_agent", true, undefined],
+      // `followup_task`, then `send_message`, which Codex reports alike.
+      ["call", "SendMessage", { to: "/root/lister" }],
+      ["result", "SendMessage", true, undefined],
+      ["call", "wait_agent", { targets: [] }],
+      ["result", "wait_agent", true, undefined],
+      ["call", "SendMessage", { to: "/root/lister" }],
+      ["result", "SendMessage", true, undefined],
+      ["call", "TaskStop", { task_id: "/root/lister" }],
+      ["result", "TaskStop", true, undefined],
+    ]);
+    expect(result.usage).toEqual({
+      inputTokens: 25_800,
+      outputTokens: 610,
+      cacheReadTokens: 3_200,
+      cacheWriteTokens: 0,
+    });
   });
 
   it("counts a request whose only item is a command still running when its update comes", async () => {

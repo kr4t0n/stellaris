@@ -24,6 +24,13 @@ import Testing
     return done()
   }
 
+  /// Waits for a cancel to reach the gate's request, if it does, for up to half a second.
+  private func settle(_ gate: HeldBoard.Gate) async throws {
+    for _ in 0..<20 where gate.stopped == 0 {
+      try await Task.sleep(for: .milliseconds(25))
+    }
+  }
+
   private func event(_ type: String, _ payload: [String: String]) throws -> BoardEvent {
     let object: [String: Any] = [
       "id": "00000000000000000000000Z01", "ts": "2026-01-01T00:00:00.000Z", "type": type,
@@ -181,6 +188,52 @@ import Testing
     await loading.value
     #expect(feed.state == .loaded)
     #expect(feed.stale, "an answer older than the event cleared its mark")
+  }
+
+  /// A load whose asker is cancelled, as SwiftUI cancels a view's task when the view goes, still
+  /// ends loaded once the board answers: the conversation shown is never left loading with nothing
+  /// left to load it.
+  @Test(.timeLimit(.minutes(1))) func endsLoadedWhenTheLoadsAskerIsCancelled() async throws {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let asked = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    asked.cancel()
+    try await settle(gate)
+    gate.answer()
+    await asked.value
+    #expect(try await eventually { feed.state == .loaded }, "the feed stays \(feed.state)")
+    #expect(!feed.messages.isEmpty)
+  }
+
+  /// A load that overtook an earlier one and is then cancelled leaves the conversation loaded all
+  /// the same, though the earlier answer is dropped as overtaken.
+  @Test(.timeLimit(.minutes(1))) func endsLoadedWhenTheLoadThatOvertookIsCancelled() async throws {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let first = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    let second = Task { await feed.load(using: model) }
+    await gate.arrivals(2)
+    second.cancel()
+    try await settle(gate)
+    gate.answer()
+    await first.value
+    await second.value
+    #expect(try await eventually { feed.state == .loaded }, "the feed stays \(feed.state)")
+    #expect(!feed.messages.isEmpty)
   }
 
   /// Following again with no event seen yet starts at the end of the log, so it reads what the app

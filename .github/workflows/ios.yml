@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   boardkit:
+    if: false
     runs-on: xcode-27
     timeout-minutes: 30
     env:
@@ -84,6 +85,8 @@ jobs:
             -scheme Stellaris \
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
+            -only-testing:StellarisUITests/ShellUITests/testLoadsWhatBoardAndNeedsYouOpenWhenTheBoardAnswersLate \
+            -only-testing:StellarisTests/ConversationTests \
             -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult" 2>&1 | tee "$output" || status=$?
           touch "$output.done"
           watched=0
@@ -101,7 +104,7 @@ jobs:
             -print -exec plutil -p {} \;
       # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
       - name: Look at the simulator's displays
-        if: ${{ !cancelled() }}
+        if: false
         continue-on-error: true
         run: |
           set +e

@@ -249,6 +249,27 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   ]);
 });
 
+test("a runner names the CLI its limit holds, apart from the user's pause", async ({ page }) => {
+  await fakeBoard(page, { quotas: "limited" });
+  await page.goto("/runners");
+  const pod = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(0);
+  const state = pod.locator(":scope > *").nth(6);
+  // pod's Claude is limited for 40 minutes: its turns there wait, which the row says, and its mark
+  // still offers the user's own pause.
+  await expect(state).toHaveText("claude held");
+  await expect(state).toHaveClass(/text-amber-300/);
+  await expect(state).toHaveAttribute(
+    "title",
+    /^connected; claude held by its limit for (39|40)m$/,
+  );
+  await expect(page.getByText(/ · 1 held by a limit · /)).toBeVisible();
+  await expect(pod.getByRole("button", { name: "Pause claude on pod" })).not.toHaveClass(
+    /opacity-30/,
+  );
+  await pod.getByRole("button", { name: "Pause claude on pod" }).click();
+  await expect(state).toHaveText("claude paused · claude held");
+});
+
 test("a code nobody waits with says so, and a denial sends no name", async ({ page }) => {
   const board = await fakeBoard(page, { enrolling: true });
   await page.goto("/runners?code=ZZZZ-ZZZZ");

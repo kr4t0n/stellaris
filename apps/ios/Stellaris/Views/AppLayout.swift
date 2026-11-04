@@ -118,17 +118,37 @@ private struct InnerSplit: Layout {
 
 /// Bars that run horizontal where `horizontal` is set: with the sky above the chat, the tab bar
 /// runs along the chat's foot with a word under each icon. Elsewhere iOS decides, which on the
-/// outer display is the side bar. One modifier either way, so changing it builds nothing again.
+/// outer display is the side bar, and the edge it draws it on reaches the views below as
+/// `sideBarEdge`. One modifier either way, so changing it builds nothing again.
 struct BarAxis: ViewModifier {
   let horizontal: Bool
 
   func body(content: Content) -> some View {
     if #available(iOS 27.1, *) {
-      content.toolbarVerticalBehavior(horizontal ? .disabled : .automatic)
+      content
+        .toolbarVerticalBehavior(horizontal ? .disabled : .automatic)
+        .modifier(SideBarEdge(horizontal: horizontal))
     } else {
       content
     }
   }
+}
+
+/// Hands the views below the edge iOS draws its side bar on, none where the bars run horizontal.
+@available(iOS 27.1, *)
+private struct SideBarEdge: ViewModifier {
+  let horizontal: Bool
+  @Environment(\.toolbarVerticalEdge) private var edge
+
+  func body(content: Content) -> some View {
+    content.environment(\.sideBarEdge, horizontal ? nil : edge)
+  }
+}
+
+extension EnvironmentValues {
+  /// The edge iOS draws the side bar on, which the draft meets; nil where the bars run horizontal
+  /// or iOS draws no side bar.
+  @Entry var sideBarEdge: HorizontalEdge? = nil
 }
 
 extension EdgeInsets {

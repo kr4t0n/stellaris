@@ -93,6 +93,18 @@ private final class RowGroundView: UIView {
 
   private func follow() {
     let marked = cell.map { $0.isHighlighted || $0.isSelected } ?? false
-    backgroundColor = marked ? .systemGray4 : rest
+    let ground = marked ? UIColor.systemGray4 : rest
+    guard backgroundColor != ground else {
+      return
+    }
+    // The highlight comes on at once; going back to rest, as a press ends or a row is deselected,
+    // fades, as the system's own rows do.
+    if marked || window == nil {
+      backgroundColor = ground
+    } else {
+      UIView.animate(withDuration: 0.25) {
+        self.backgroundColor = ground
+      }
+    }
   }
 }

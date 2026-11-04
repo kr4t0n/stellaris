@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Finishing a stage that waits on the user, as the web's form at that stage does: the stage, and
 /// an optional note for the task's thread. What the note says, whether the advance is on its way,
-/// and why it didn't go live in the model by task, so a sheet dismissed or built again keeps them.
+/// and why it didn't go live in the model by task, so a sheet dismissed or built again keeps them;
+/// Cancel drops the note and why it didn't go, and leaves an advance on its way to go on.
 struct AdvanceSheet: View {
   @Environment(AppModel.self) private var model
   @FocusState private var focused: Bool
@@ -78,7 +79,8 @@ struct AdvanceSheet: View {
 /// Approving or rejecting a proposal that waits on the user, as the web's decision bar does: a
 /// reason, which a rejection needs, then the decision. What the reason says lives in the model by
 /// proposal and choice until the proposal is decided or the reason cancelled, and whether the
-/// decision is on its way and why it didn't go by proposal.
+/// decision is on its way and why it didn't go by proposal; Cancel drops the reason and why it
+/// didn't go, and leaves a decision on its way to go on.
 struct DecisionSheet: View {
   @Environment(AppModel.self) private var model
   @FocusState private var focused: Bool

@@ -141,6 +141,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   });
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));
+  board.openImagesWith((actor, image) => hub.writeTurnImage(actor, image));
   const app = createApp({
     board,
     version: "test",

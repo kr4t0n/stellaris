@@ -4,7 +4,8 @@ import { UlidSchema } from "./ids.js";
 /**
  * Images a citizen uploads with `upload_image`, where the runner its turn runs on reads the file,
  * and the user posts from a composer as its bytes: the board keeps them, and a post shows one as
- * `![what it shows](image:<id>)`.
+ * `![what it shows](image:<id>)`. A citizen opens one with `read_image`, which has the runner its
+ * turn runs on write the bytes to a file of the turn's own.
  */
 
 /** The largest image the board takes. */
@@ -89,6 +90,40 @@ export function uploadedImageId(href: string): string | null {
   const id = href.slice(IMAGE_SCHEME.length);
   return UlidSchema.safeParse(id).success ? id : null;
 }
+
+/**
+ * An uploaded image as `read_image` takes it: its id, or the `image:<id>` address a post shows it
+ * by, as a citizen copies it from the markdown. A pattern rather than a transform, so the tool's
+ * schema says it; `imageIdOf` takes the id out.
+ */
+export const ImageRefSchema = z
+  .string()
+  .regex(/^(?:image:)?[0-9A-HJKMNP-TV-Z]{26}$/, "expected an image's id or image:<id>");
+
+/** The id an image reference names, with or without its `image:`. */
+export function imageIdOf(ref: string): string {
+  return ref.startsWith(IMAGE_SCHEME) ? ref.slice(IMAGE_SCHEME.length) : ref;
+}
+
+/** The extension the file `read_image` writes takes for each kind, so a reader tells it by name too. */
+export const IMAGE_EXTENSIONS: Readonly<Record<ImageType, string>> = {
+  png: "png",
+  jpeg: "jpg",
+  gif: "gif",
+  webp: "webp",
+};
+
+/**
+ * What `read_image` answers: the image's id, kind, and size, and the file holding its bytes on the
+ * machine the calling turn runs on, which the turn opens with its own file tools.
+ */
+export const ImageFileSchema = z.object({
+  id: UlidSchema,
+  type: ImageTypeSchema,
+  size: z.number().int().positive(),
+  path: ImagePathSchema,
+});
+export type ImageFile = z.infer<typeof ImageFileSchema>;
 
 /**
  * What `upload_image` and `POST /api/images` answer: the image's id and the markdown that shows it

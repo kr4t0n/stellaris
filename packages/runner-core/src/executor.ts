@@ -41,7 +41,9 @@ import {
   type StuckWork,
   type SweepResult,
   type TurnImage,
+  type TurnImageFile,
   type TurnImageRead,
+  type TurnImageWrite,
   type TurnJob,
   type TurnOutcome,
   type TurnWork,
@@ -51,7 +53,7 @@ import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
 import { describeError } from "./errors.js";
 import { ExecaGit, taskBranch, type GitAuth, type GitOps, type RemoteSync } from "./git.js";
-import { readTurnImage, type ImagePlaces } from "./images.js";
+import { readTurnImage, TurnImageFolders, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
   ResumeError,
@@ -190,6 +192,8 @@ export class TurnExecutor {
    * worktree is left to its own hand-back meanwhile.
    */
   private readonly imagePlaces = new Map<string, ImagePlaces>();
+  /** The folders the images each turn opened with `read_image` are in, removed as the turn ends. */
+  private readonly imageFolders = new TurnImageFolders();
   /** The commit each worktree's stuck work was last told at, so a hand-back tells it once. */
   private readonly stuckTold = new Map<string, string>();
 
@@ -346,6 +350,12 @@ export class TurnExecutor {
       };
     }
     this.imagePlaces.delete(job.turnId);
+    await this.imageFolders.remove(job.turnId).catch((error: unknown) => {
+      this.log.warn(
+        { turnId: job.turnId, error: describeError(error) },
+        "could not remove the images the turn opened",
+      );
+    });
     // A turn the user stopped ended because of it, however its CLI reported the end.
     if (control.stopped && result.exitReason !== "completed") {
       result = { ...result, exitReason: "stopped" };
@@ -1054,6 +1064,30 @@ export class TurnExecutor {
   async readImage(read: TurnImageRead): Promise<TurnImage | null> {
     const places = this.imagePlaces.get(read.turnId);
     return places === undefined ? null : readTurnImage(read.path, places);
+  }
+
+  /**
+   * Writes an image the board sent for `read_image` into a folder of the turn's own in the system
+   * temp folder, removed as the turn ends, and answers the file's path; null when no such turn's
+   * CLI is running here, or it ended while the image was written.
+   */
+  async writeImage(write: TurnImageWrite): Promise<TurnImageFile | null> {
+    if (!this.imagePlaces.has(write.turnId)) {
+      return null;
+    }
+    try {
+      const file = await this.imageFolders.write(write);
+      if (this.imagePlaces.has(write.turnId)) {
+        return { path: file };
+      }
+    } catch (error) {
+      if (this.imagePlaces.has(write.turnId)) {
+        throw error;
+      }
+    }
+    // The turn ended meanwhile, and its folder goes with it if its end did not take it.
+    await this.imageFolders.remove(write.turnId);
+    return null;
   }
 
   async models(cli: CliKind): Promise<ModelOption[]> {

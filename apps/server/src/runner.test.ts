@@ -27,6 +27,7 @@ import {
   CliQuotaSchema,
   cronStoppedAt,
   HOME_FILE_LIMIT_BYTES,
+  IMAGE_LIMIT_BYTES,
   MEMBER_VERBS,
   PATH_TOKENS,
   RUNNER_PROTOCOL,
@@ -3088,6 +3089,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -3218,6 +3220,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: false,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -3474,6 +3477,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -3588,6 +3592,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: true,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -4182,6 +4187,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: false,
       quotaReads: false,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -4290,6 +4296,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: false,
       quotaReads: false,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,
@@ -4394,6 +4401,7 @@ describe("turns on a runner over the runner protocol", () => {
           branchChanges: true,
           quotaReads: true,
           imageReads: false,
+          imageWrites: false,
           projectMoves: false,
           capabilities: [],
           slots: null,
@@ -4599,6 +4607,155 @@ describe("turns on a runner over the runner protocol", () => {
     });
   });
 
+  it("writes an image a turn reads into a folder of that turn's own in the temp folder, removed as the turn ends", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "image-reads" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    // The user's image is as large as the board takes, so the whole of it crosses the stream.
+    const largest = Buffer.concat([PIXEL, Buffer.alloc(IMAGE_LIMIT_BYTES - PIXEL.length, 7)]);
+    const posted = await board.postImage(USER, largest, "board.png");
+    const answers = new Map<string, { status: number; body: Record<string, unknown> }>();
+    const opened = new Map<string, Buffer>();
+    const places: string[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: async (request) => {
+        if (society === null) {
+          return completed("no society");
+        }
+        const { app, hub } = society;
+        const verb = async (name: string, input: object) => {
+          const response = await app.request(`/api/verbs/${name}`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${request.mcp.token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(input),
+          });
+          return { status: response.status, body: AnswerSchema.parse(await response.json()) };
+        };
+        const read = async (label: string, image: string) => {
+          const answer = await verb("read_image", { image_id: image });
+          answers.set(label, answer);
+          const file = answer.body["path"];
+          if (typeof file === "string") {
+            opened.set(label, await readFile(file));
+          }
+        };
+        const { cwd, configHome } = request.spec;
+        places.push(cwd, configHome);
+        // A screenshot of its own goes up and comes back, and the user's comes by its address.
+        await mkdir(path.join(cwd, "shots"), { recursive: true });
+        await writeFile(path.join(cwd, "shots", "board.png"), PIXEL);
+        const own = String((await verb("upload_image", { path: "shots/board.png" })).body["id"]);
+        await read("own", own);
+        await read("user's", `image:${posted.id}`);
+        await read("unknown", "01M4WY483E0XG4Q2ZTHAX3JBZW");
+        // A runner from before image writes is refused at once rather than left to time out.
+        const hello: RunnerHello = {
+          protocol: RUNNER_PROTOCOL,
+          version: "0.4.0",
+          os: "linux",
+          clis: ["claude"],
+          residentClis: [],
+          steerableClis: [],
+          stoppableClis: [],
+          branchReads: true,
+          branchChanges: true,
+          quotaReads: true,
+          imageReads: true,
+          imageWrites: false,
+          projectMoves: false,
+          capabilities: [],
+          slots: null,
+          turns: society.runner.turns,
+        };
+        await hub.register("pod", hello);
+        await read("old", own);
+        await hub.register("pod", { ...hello, imageWrites: true });
+        return completed("read the board's images");
+      },
+    };
+    const { run, app } = await start(board, backend);
+    // The temp folder is a place of its own, apart from the runner's data folder, as on a machine.
+    const tmpdir = process.env["TMPDIR"];
+    const temp = await mkdtemp(path.join(dir, "tmp-"));
+    process.env["TMPDIR"] = temp;
+    try {
+      const outcome = await run({
+        agent: "eng-1",
+        project: "demo",
+        trigger: { kind: "mention", fromUser: true, reason: "mentioned by user" },
+        priority: 2,
+      });
+      expect(outcome.exitReason).toBe("completed");
+    } finally {
+      if (tmpdir === undefined) {
+        delete process.env["TMPDIR"];
+      } else {
+        process.env["TMPDIR"] = tmpdir;
+      }
+    }
+
+    const own = answers.get("own");
+    expect(own).toEqual({
+      status: 200,
+      body: {
+        id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
+        type: "png",
+        size: PIXEL.length,
+        path: expect.stringMatching(/\.png$/),
+      },
+    });
+    expect(answers.get("user's")).toEqual({
+      status: 200,
+      body: { id: posted.id, type: "png", size: IMAGE_LIMIT_BYTES, path: expect.any(String) },
+    });
+    // What the turn opened at each path is the image the board keeps, byte for byte.
+    expect(opened.get("own")).toEqual(PIXEL);
+    expect(opened.get("user's")?.equals(largest)).toBe(true);
+    const files = ["own", "user's"].map((label) => String(answers.get(label)?.body["path"]));
+    const folder = path.dirname(files[0] ?? "");
+    expect(path.dirname(files[1] ?? "")).toBe(folder);
+    expect(path.dirname(folder)).toBe(temp);
+    expect(path.basename(files[1] ?? "")).toBe(`${posted.id}.png`);
+    // Never in the worktree, whose files land on a branch, nor in the home, which is shared.
+    expect(places).toHaveLength(2);
+    for (const outside of places) {
+      expect(path.relative(outside, folder).startsWith("..")).toBe(true);
+    }
+    // The turn's folder went with it.
+    await expect(stat(folder)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(answers.get("unknown")).toEqual({
+      status: 404,
+      body: { error: "NOT_FOUND", message: "image 01M4WY483E0XG4Q2ZTHAX3JBZW not found" },
+    });
+    expect(answers.get("old")).toMatchObject({
+      status: 409,
+      body: { message: "runner pod, where the turn runs, cannot open images yet; upgrade it" },
+    });
+    // Nobody but a turn has a machine to open an image on.
+    const byUser = await app.request("/api/verbs/read_image", {
+      method: "POST",
+      headers: { authorization: `Bearer ${userToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ image_id: posted.id }),
+    });
+    expect(byUser.status).toBe(409);
+  });
+
   it("speaks only to runners that hold a token, a matching protocol, and a turn for the home they ask for", async () => {
     const { board } = await Board.init(dir, { name: "auth" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -4723,6 +4880,7 @@ describe("turns on a runner over the runner protocol", () => {
       branchChanges: true,
       quotaReads: false,
       imageReads: false,
+      imageWrites: false,
       projectMoves: false,
       capabilities: [],
       slots: null,

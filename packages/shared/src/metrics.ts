@@ -15,7 +15,7 @@ export const METRICS_WINDOW_MS: Readonly<Record<MetricsWindow, number | null>> =
 };
 
 /** Verbs that only read; every other verb changes the board. */
-export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_task"];
+export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_task", "read_image"];
 
 /**
  * Whether a tool call, as a turn's transcript names it, changed the board: a board verb other than

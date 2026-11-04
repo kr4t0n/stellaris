@@ -30,6 +30,7 @@ import {
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
   imageDescription,
+  imageIdOf,
   ImageNameSchema,
   imageTypeOf,
   IsoDateTimeSchema,
@@ -94,6 +95,7 @@ import {
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
+  type ImageFile,
   type ImageType,
   type Knowledge,
   type RemovedKnowledge,
@@ -214,6 +216,15 @@ export interface TurnInFlight {
  * `BoardError` a file it may not hand over.
  */
 export type ImageSource = (actor: Actor, file: string) => Promise<Uint8Array>;
+
+/**
+ * Writes an image the board keeps to a file on the runner a citizen's turn runs on, in a folder of
+ * that turn's own, and answers its path there, refusing with a `BoardError` when it cannot.
+ */
+export type ImageSink = (
+  actor: Actor,
+  image: { id: Ulid; type: ImageType; bytes: Uint8Array },
+) => Promise<string>;
 
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
@@ -765,6 +776,7 @@ export class Board {
   /** The turns in flight, which the server hosting them supplies; none until it does. */
   private turnsInFlight: () => readonly TurnInFlight[] = () => [];
   private imageSource: ImageSource | null = null;
+  private imageSink: ImageSink | null = null;
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
@@ -826,10 +838,13 @@ export class Board {
   /**
    * Applies each one-time alignment an existing society has not had yet, and remembers it, so a
    * member that later chooses otherwise keeps its choice. A new alignment is a name and a method in
-   * this list; once every board has applied it, both are deleted. None is pending.
+   * this list; once every board has applied it, both are deleted.
    */
   private async applyAlignments(): Promise<void> {
-    const alignments: readonly { name: string; apply: () => Promise<void> }[] = [];
+    const alignments: readonly { name: string; apply: () => Promise<void> }[] = [
+      // Whoever may show an image in a post may open one a post shows.
+      { name: "image-reads-granted", apply: () => this.grantBeside("upload_image", "read_image") },
+    ];
     const file = path.join(this.paths.state(), "alignments.json");
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
@@ -842,6 +857,22 @@ export class Board {
       await apply();
     }
     await writeJson(file, { applied: [...applied, ...pending.map(({ name }) => name)] });
+  }
+
+  /**
+   * Grants `verb` once to every charter granting `beside`, the work roles' charters in practice;
+   * seed roles have it from their seed.
+   */
+  private async grantBeside(beside: VerbName, verb: VerbName): Promise<void> {
+    for (const charter of await this.listRoles()) {
+      if (charter.verbs.includes(beside) && !charter.verbs.includes(verb)) {
+        await this.writeRoleUnlocked(
+          USER_NAME,
+          { ...charter, verbs: [...charter.verbs, verb] },
+          { verbsAdded: [verb] },
+        );
+      }
+    }
   }
 
   /** Writes every missing seed charter and aligns the existing ones with their seed. */
@@ -2619,6 +2650,32 @@ export class Board {
     });
   }
 
+  /**
+   * Opens an image the board keeps for the calling turn, by its id or its `image:<id>` address:
+   * the runner the turn runs on writes the bytes to a file in a folder of the turn's own in the
+   * system temp folder, removed when the turn ends, and the board answers its path, for the
+   * citizen to open with its own file tools, since a post reaches a turn as markdown and an image
+   * in it as its address. Any image the board keeps may be opened: every post, brief, topic, and
+   * dashboard that could show one is in the projection every turn reads.
+   */
+  async openImage(actor: Actor, input: VerbInput<"read_image">): Promise<ImageFile> {
+    const args = VerbInputs.read_image.parse(input);
+    await this.authorize(actor, "read_image");
+    if (actor.scope === undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        "read_image writes the image on the machine a turn runs on, so only a turn can call it",
+      );
+    }
+    if (this.imageSink === null) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to write an image to");
+    }
+    const id = imageIdOf(args.image_id);
+    const { type, bytes } = await this.readImage(id);
+    const file = await this.imageSink(actor, { id, type, bytes });
+    return { id, type, size: bytes.byteLength, path: file };
+  }
+
   /** An uploaded image's bytes and kind, which its first bytes tell. */
   async readImage(id: Ulid): Promise<{ type: ImageType; bytes: Uint8Array }> {
     const file = this.paths.image(UlidSchema.parse(id));
@@ -3072,6 +3129,14 @@ export class Board {
    */
   readImagesWith(source: ImageSource): void {
     this.imageSource = source;
+  }
+
+  /**
+   * Where `read_image` writes an image to: the runner the calling turn runs on, through the server
+   * that hosts the runners. Without one, as in the admin CLI, nothing can be opened.
+   */
+  openImagesWith(sink: ImageSink): void {
+    this.imageSink = sink;
   }
 
   /**
@@ -4095,6 +4160,8 @@ export class Board {
         return this.removeCron(actor, VerbInputs.remove_cron.parse(input));
       case "upload_image":
         return this.uploadImage(actor, VerbInputs.upload_image.parse(input));
+      case "read_image":
+        return this.openImage(actor, VerbInputs.read_image.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }

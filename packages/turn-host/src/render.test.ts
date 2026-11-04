@@ -158,6 +158,18 @@ describe("config-home rendering", () => {
     expect(text).toContain("Never put an image or any other file into a message as base64");
   });
 
+  it("has a citizen see an image a post shows by opening the file read_image writes for its turn", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "To see an image a post, a brief, or a topic shows as `image:<id>`, call read_image with the id: it returns the path of a file of this turn's own that holds the image, removed when the turn ends, which you open with the tool that shows you an image, Read in Claude Code or view_image in Codex.",
+    );
+  });
+
   it("has a citizen keep its stage between checks of its own work, and release it only to hand it on or once its task is blocked", () => {
     const text = renderInstructions({
       agentName: "eng-1",

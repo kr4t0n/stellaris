@@ -1,10 +1,11 @@
-import { SEED_ROLES } from "@stellaris/shared";
+import { MEMBER_VERBS, RoleCharterSchema, SEED_ROLES } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { BOARD_TOOLS, toolsForRole } from "./index.js";
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
-    expect(BOARD_TOOLS).toHaveLength(32);
+    expect(BOARD_TOOLS).toHaveLength(33);
     for (const tool of BOARD_TOOLS) {
       expect(tool.description.length).toBeGreaterThan(10);
     }
@@ -24,6 +25,26 @@ describe("board tools", () => {
     expect(toolsForRole(user).map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["approve", "archive_project"]),
     );
+  });
+
+  it("shows read_image to every member, taking an image's id or its image: address", () => {
+    const engineer = RoleCharterSchema.parse({
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: MEMBER_VERBS,
+    });
+    for (const role of [...SEED_ROLES, engineer]) {
+      expect(toolsForRole(role).map((tool) => tool.name)).toContain("read_image");
+    }
+    const tool = BOARD_TOOLS.find((each) => each.name === "read_image");
+    expect(tool?.description).toContain("Open the path with your file tools to see the image.");
+    // The schema the tool list shows a CLI says both forms, since it holds no transform.
+    expect(z.toJSONSchema(tool?.inputSchema ?? z.never())).toMatchObject({
+      properties: {
+        image_id: { type: "string", pattern: "^(?:image:)?[0-9A-HJKMNP-TV-Z]{26}$" },
+      },
+      required: ["image_id"],
+    });
   });
 
   it("shows remove_skill to the steward and the user alone", () => {

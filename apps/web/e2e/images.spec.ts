@@ -4,6 +4,8 @@ import {
   fakeBoard,
   MISSING_IMAGE,
   PHONE_SIZE,
+  png,
+  POSTED_IMAGES,
   SCREENSHOT_SIZE,
   SKILL_PROPOSAL,
   STAGE_TASK,
@@ -471,4 +473,304 @@ test("an image with no description is named for what it is", async ({ page }) =>
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(enlarge).toBeFocused();
+});
+
+/** The composer of the task's thread. */
+function taskComposer(page: Page): Locator {
+  return page.getByRole("textbox", { name: "Write in the task's thread" });
+}
+
+/** Files as a page makes them: given bytes, or a size of zeros past a PNG's signature. */
+interface PageFile {
+  name: string;
+  type: string;
+  bytes?: number[];
+  size?: number;
+}
+
+/** Dispatches `kind` on the box with the files in its data, as a paste or a drop delivers them. */
+function deliver(box: Locator, kind: "paste" | "drop", files: PageFile[]): Promise<void> {
+  return box.evaluate(
+    (element, given) => {
+      const data = new DataTransfer();
+      for (const file of given.files) {
+        let bytes = new Uint8Array(file.bytes ?? []);
+        if (file.bytes === undefined) {
+          bytes = new Uint8Array(file.size ?? 0);
+          bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        }
+        data.items.add(new File([bytes], file.name, { type: file.type }));
+      }
+      const init = { bubbles: true, cancelable: true };
+      if (given.kind === "paste") {
+        element.dispatchEvent(new ClipboardEvent("paste", { ...init, clipboardData: data }));
+        return;
+      }
+      element.dispatchEvent(new DragEvent("dragover", { ...init, dataTransfer: data }));
+      element.dispatchEvent(new DragEvent("drop", { ...init, dataTransfer: data }));
+    },
+    { kind, files },
+  );
+}
+
+test("an image pasted into a composer holds its place while it uploads, then its markdown does, and it shows in the post sent", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page, { uploads: true });
+  // The board answers the upload once the test has seen it under way.
+  const answer = Promise.withResolvers<void>();
+  const uploads: Array<{
+    type: string | undefined;
+    authorization: string | undefined;
+    name: string | null;
+    bytes: Buffer | null;
+  }> = [];
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route) => {
+      const request = route.request();
+      uploads.push({
+        type: request.headers()["content-type"],
+        authorization: request.headers()["authorization"],
+        name: new URL(request.url()).searchParams.get("name"),
+        bytes: request.postDataBuffer(),
+      });
+      await answer.promise;
+      await route.fallback();
+    },
+  );
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const box = taskComposer(page);
+  const send = page.getByRole("button", { name: "Send" });
+  await box.fill("The board now:  and after.");
+  await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(15, 15));
+  const shot = png(320, 200);
+  await deliver(box, "paste", [{ name: "board.png", type: "image/png", bytes: [...shot] }]);
+  await expect(box).toHaveValue("The board now: ![Uploading board.png…]() and after.");
+  await expect(send).toBeDisabled();
+
+  answer.resolve();
+  const markdown = `![board.png](image:${POSTED_IMAGES[0]})`;
+  await expect(box).toHaveValue(`The board now: ${markdown} and after.`);
+  await expect(send).toBeEnabled();
+  // The caret stays after the image, among the same words.
+  await box.pressSequentially("!");
+  await expect(box).toHaveValue(`The board now: ${markdown}! and after.`);
+  expect(uploads).toEqual([
+    { type: "image/png", authorization: `Bearer ${TOKEN}`, name: "board.png", bytes: shot },
+  ]);
+
+  await send.click();
+  await expect(box).toHaveValue("");
+  expect(board.writes.filter((write) => write.path === "/api/verbs/post_message")).toEqual([
+    {
+      path: "/api/verbs/post_message",
+      body: { thread_id: STAGE_TASK, body: `The board now: ${markdown}! and after.` },
+    },
+  ]);
+  const image = taskThread(page).getByRole("img", { name: "board.png" });
+  await expect(image).toBeVisible();
+  await expect
+    .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
+    .toBe(320);
+});
+
+test("images dropped on a composer or picked upload too, and one the board refuses or one too large leaves its reason in place of its line", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const alert = page.getByRole("alert");
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  await box.fill("Views:\n");
+
+  await deliver(box, "drop", [
+    { name: "wide.png", type: "image/png", bytes: [...png(400, 100)] },
+    { name: "shape.svg", type: "image/svg+xml", bytes: [...svg] },
+  ]);
+  await expect(box).toHaveValue(`Views:\n![wide.png](image:${POSTED_IMAGES[0]})\n`);
+  await expect(alert).toHaveText(
+    "shape.svg is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+  );
+
+  // The picker offers the kinds the board keeps, and a new image clears the last one's failure.
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Add images" }).click();
+  const picked = await chooser;
+  expect(picked.isMultiple()).toBe(true);
+  expect(await picked.element().getAttribute("accept")).toBe(
+    "image/png,image/jpeg,image/gif,image/webp",
+  );
+  await picked.setFiles({ name: "tall.png", mimeType: "image/png", buffer: png(100, 400) });
+  await expect(box).toHaveValue(
+    `Views:\n![wide.png](image:${POSTED_IMAGES[0]})\n![tall.png](image:${POSTED_IMAGES[1]})`,
+  );
+  await expect(alert).toHaveCount(0);
+
+  // Past the board's limit, nothing is sent at all.
+  await deliver(box, "drop", [{ name: "huge.png", type: "image/png", size: 8 * 1024 * 1024 + 1 }]);
+  await expect(alert).toHaveText("huge.png is 8388609 bytes, over the 8388608 an image may be");
+  await expect(box).toHaveValue(
+    `Views:\n![wide.png](image:${POSTED_IMAGES[0]})\n![tall.png](image:${POSTED_IMAGES[1]})`,
+  );
+  // The two dropped together go side by side, in either order.
+  expect(
+    board.writes
+      .filter((write) => write.path === "/api/images")
+      .map((write) => write.body)
+      .toSorted((a, b) => String(a["name"]).localeCompare(String(b["name"]))),
+  ).toEqual([
+    { name: "shape.svg", size: svg.length },
+    { name: "tall.png", size: png(100, 400).length },
+    { name: "wide.png", size: png(400, 100).length },
+  ]);
+});
+
+/**
+ * Pastes two images both named `image.png`, as a browser names every image it pastes, the first
+ * answered only once the second has settled; gives the box.
+ */
+async function pasteTwoAlike(page: Page, second: number[]): Promise<Locator> {
+  const first = png(640, 400);
+  const answered = Promise.withResolvers<void>();
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route) => {
+      if (route.request().postDataBuffer()?.length === first.length) {
+        await answered.promise;
+      }
+      await route.fallback();
+    },
+  );
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  await box.fill("Before: ");
+  await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: [...first] }]);
+  await expect(box).toHaveValue("Before: ![Uploading image.png…]()");
+  await box.pressSequentially(" After: ");
+  await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: second }]);
+  // The first is still on its way.
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  answered.resolve();
+  return box;
+}
+
+test("two images pasted under one name each land where they were pasted, whichever answers first", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const box = await pasteTwoAlike(page, [...png(20, 20)]);
+  // The second, answered first, took the board's first id; the first took the next.
+  await expect(box).toHaveValue(
+    `Before: ![image.png](image:${POSTED_IMAGES[1]}) After: ![image.png](image:${POSTED_IMAGES[0]})`,
+  );
+});
+
+test("an image the board refuses takes only its own line from another of the same name", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const box = await pasteTwoAlike(page, [...Buffer.from("not a picture")]);
+  await expect(box).toHaveValue(`Before: ![image.png](image:${POSTED_IMAGES[0]}) After: `);
+  await expect(page.getByRole("alert")).toHaveText(
+    "image.png is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+  );
+});
+
+/** The thumbnails above the task thread's composer. */
+function draftRow(page: Page): Locator {
+  return page.getByRole("list", { name: "Images in the draft" });
+}
+
+test("an image in the draft shows as a thumbnail above the box, from the file while it uploads and from the board once kept, until it is sent", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const answer = Promise.withResolvers<void>();
+  const read: string[] = [];
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route) => {
+      await answer.promise;
+      await route.fallback();
+    },
+  );
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith("/api/images/")) {
+      read.push(pathname);
+    }
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const row = draftRow(page);
+  await expect(row).toHaveCount(0);
+  await box.fill("The board now: ");
+  await deliver(box, "paste", [
+    { name: "board.png", type: "image/png", bytes: [...png(320, 200)] },
+  ]);
+
+  // While it uploads, the file's own bytes, dimmed, saying so.
+  await expect(row.getByRole("listitem")).toHaveCount(1);
+  await expect(row).toContainText("Uploading…");
+  await expect(
+    row.getByRole("button", { name: "Remove board.png, still uploading" }),
+  ).toBeVisible();
+  await expect(row.locator("img")).toHaveAttribute("src", /^blob:/);
+  await expect
+    .poll(() => row.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBe(320);
+
+  // Once kept, the board's copy by its id.
+  answer.resolve();
+  const kept = row.getByRole("img", { name: "board.png" });
+  await expect(kept).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(row).not.toContainText("Uploading…");
+  expect(read).toContain(`/api/images/${POSTED_IMAGES[0]}`);
+  await expect.poll(() => kept.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(320);
+
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(box).toHaveValue("");
+  await expect(row).toHaveCount(0);
+});
+
+test("a thumbnail's × takes its image out of the draft, and an image typed away takes its thumbnail", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const row = draftRow(page);
+  await box.fill("Before  after");
+  await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(7, 7));
+  await deliver(box, "paste", [{ name: "a.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(box).toHaveValue(`Before ![a.png](image:${POSTED_IMAGES[0]}) after`);
+  await expect(row.getByRole("img", { name: "a.png" })).toBeVisible();
+
+  await row.getByRole("button", { name: "Remove a.png" }).click();
+  await expect(box).toHaveValue("Before  after");
+  await expect(row).toHaveCount(0);
+  // The × went with its thumbnail, so the keyboard is back in the box, where the image stood,
+  // rather than on the page, whose shortcuts would take the keys and Escape would close the view.
+  await expect(box).toBeFocused();
+  await page.keyboard.type("more");
+  await page.keyboard.press("Escape");
+  await expect(box).toHaveValue("Before more after");
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
+
+  // The same from the keyboard alone.
+  await deliver(box, "paste", [{ name: "b.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(row.getByRole("img", { name: "b.png" })).toBeVisible();
+  await row.getByRole("button", { name: "Remove b.png" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(box).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(box).toHaveValue("Before more! after");
+
+  await deliver(box, "paste", [{ name: "c.png", type: "image/png", bytes: [...png(40, 40)] }]);
+  await expect(row.getByRole("img", { name: "c.png" })).toBeVisible();
+  await box.fill("Words alone");
+  await expect(row).toHaveCount(0);
 });

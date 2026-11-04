@@ -18,13 +18,17 @@ export function asksOf(threads: readonly ThreadSummary[]): ThreadSummary[] {
     .toSorted((a, b) => b.id.localeCompare(a.id));
 }
 
-/** An ask's thread title: its first line, without a heading or quote mark, cut at a word. */
+/**
+ * An ask's thread title: its first line, without a heading or quote mark, an image as its
+ * description, cut at a word.
+ */
 export function askTitle(body: string): string {
   const line =
     body
       .trim()
       .split("\n")[0]
       ?.replace(/^(#+|>)\s*/, "")
+      .replaceAll(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
       .replaceAll(/\s+/g, " ")
       .trim() ?? "";
   if (line === "") {

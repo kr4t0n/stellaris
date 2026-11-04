@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import composeCases from "../../../ios/fixtures/cases/compose.json?raw";
-import { completeMention, listed, mentionAt } from "./compose.js";
+import uploadCases from "../../../ios/fixtures/cases/uploads.json?raw";
+import {
+  completeMention,
+  draftImages,
+  insertAt,
+  listed,
+  mentionAt,
+  removeDraftImage,
+  settleUpload,
+  uploadingImage,
+  uploadPlaceholder,
+} from "./compose.js";
 
 describe("composing", () => {
   it("finds the mention being typed and completes it", () => {
@@ -44,6 +55,117 @@ describe("composing", () => {
     ).toEqual(
       cases.map((each) => ({ name: each.name, mention: each.mention, completed: each.completed })),
     );
+  });
+
+  // The iOS app's port runs the same table (apps/ios/fixtures/cases).
+  it("holds an image's place while it uploads, then puts its markdown there, as the iOS port does", () => {
+    const Draft = z.object({ text: z.string(), caret: z.number() });
+    const Image = z.object({
+      kind: z.enum(["kept", "uploading"]),
+      start: z.number(),
+      text: z.string(),
+      id: z.string().nullable(),
+      alt: z.string(),
+    });
+    const cases = z
+      .object({
+        placeholders: z
+          .object({ name: z.string(), file: z.string(), placeholder: z.string() })
+          .array(),
+        inserts: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            start: z.number(),
+            end: z.number(),
+            inserted: z.string(),
+            result: Draft,
+          })
+          .array(),
+        settles: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            caret: z.number(),
+            placeholder: z.string(),
+            markdown: z.string(),
+            result: Draft.nullable(),
+          })
+          .array(),
+        drafts: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            held: z.string().array(),
+            images: Image.array(),
+          })
+          .array(),
+        removals: z
+          .object({
+            name: z.string(),
+            text: z.string(),
+            caret: z.number(),
+            image: Image,
+            result: Draft,
+          })
+          .array(),
+        numbered: z
+          .object({
+            name: z.string(),
+            file: z.string(),
+            text: z.string(),
+            held: z.string().array(),
+            placeholder: z.string(),
+          })
+          .array(),
+      })
+      .parse(JSON.parse(uploadCases));
+    expect(cases.settles.length).toBeGreaterThan(5);
+    for (const each of cases.placeholders) {
+      expect({ name: each.name, placeholder: uploadingImage(each.file) }).toEqual({
+        name: each.name,
+        placeholder: each.placeholder,
+      });
+    }
+    for (const each of cases.inserts) {
+      expect({
+        name: each.name,
+        result: insertAt(each.text, each.start, each.end, each.inserted),
+      }).toEqual({
+        name: each.name,
+        result: each.result,
+      });
+    }
+    for (const each of cases.numbered) {
+      expect({
+        name: each.name,
+        placeholder: uploadPlaceholder(each.file, each.text, each.held),
+      }).toEqual({
+        name: each.name,
+        placeholder: each.placeholder,
+      });
+    }
+    for (const each of cases.drafts) {
+      expect({ name: each.name, images: draftImages(each.text, each.held) }).toEqual({
+        name: each.name,
+        images: each.images,
+      });
+    }
+    for (const each of cases.removals) {
+      expect({
+        name: each.name,
+        result: removeDraftImage(each.text, each.caret, each.image),
+      }).toEqual({
+        name: each.name,
+        result: each.result,
+      });
+    }
+    for (const each of cases.settles) {
+      expect({
+        name: each.name,
+        result: settleUpload(each.text, each.caret, each.placeholder, each.markdown),
+      }).toEqual({ name: each.name, result: each.result });
+    }
   });
 
   it("lists names as a sentence", () => {

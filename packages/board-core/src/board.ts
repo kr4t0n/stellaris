@@ -29,6 +29,8 @@ import {
   githubRepository,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
+  imageDescription,
+  ImageNameSchema,
   imageTypeOf,
   IsoDateTimeSchema,
   isBoardChannel,
@@ -2558,17 +2560,45 @@ export class Board {
     }
     // Read outside the mutex: the runner may take a while, and the board waits for nobody.
     const bytes = await this.imageSource(actor, args.path);
+    return this.keepImage(actor, bytes, args.path, path.basename(args.path));
+  }
+
+  /**
+   * Keeps an image the user posts from a composer, as its bytes, under the same checks as an image
+   * a turn uploads. `name`, the file's, describes it in the markdown answered; without one the
+   * description is empty, for the user to write.
+   */
+  async postImage(actor: Actor, bytes: Uint8Array, name?: string): Promise<UploadedImage> {
+    this.assertUser(
+      actor,
+      "only the user posts an image's bytes; a turn uploads one with upload_image",
+    );
+    const given = name === undefined ? "" : ImageNameSchema.parse(name);
+    return this.keepImage(actor, bytes, given === "" ? "the image" : given, given);
+  }
+
+  /**
+   * Keeps `bytes` under a new id when they are a PNG, JPEG, GIF, or WebP of at most
+   * `IMAGE_LIMIT_BYTES`, and answers the markdown that shows them, described by `name`. `what`
+   * names the image in a refusal.
+   */
+  private async keepImage(
+    actor: Actor,
+    bytes: Uint8Array,
+    what: string,
+    name: string,
+  ): Promise<UploadedImage> {
     const type = imageTypeOf(bytes);
     if (type === null) {
       throw new BoardError(
         "VALIDATION",
-        `${args.path} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
+        `${what} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
       );
     }
     if (bytes.byteLength > IMAGE_LIMIT_BYTES) {
       throw new BoardError(
         "VALIDATION",
-        `${args.path} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+        `${what} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
       );
     }
     return this.mutex.run(async () => {
@@ -2579,12 +2609,12 @@ export class Board {
         type,
         size: bytes.byteLength,
       });
-      const name = path.basename(args.path).replaceAll(/[[\]\\\r\n]/g, "");
+      const description = imageDescription(name);
       return {
         id,
         type,
         size: bytes.byteLength,
-        markdown: `![${name}](${IMAGE_SCHEME}${id})`,
+        markdown: `![${description}](${IMAGE_SCHEME}${id})`,
       };
     });
   }

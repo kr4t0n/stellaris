@@ -15,6 +15,9 @@ struct Fixture {
   let text: String?
   /// Where a step of a sign-in sends the browser.
   let location: String?
+  /// The media type and the bytes of an image the user posts, which is the whole body.
+  let contentType: String?
+  let image: Data?
 
   /// The folder the fixtures are in, beside this package.
   static let folder = URL(fileURLWithPath: #filePath)
@@ -44,6 +47,8 @@ struct Fixture {
     body = try file["body"].map { try JSONSerialization.data(withJSONObject: $0) } ?? Data()
     text = file["text"] as? String
     location = file["location"] as? String
+    contentType = request["contentType"] as? String
+    image = (request["image"] as? String).flatMap { Data(base64Encoded: $0) }
   }
 
   /// The request's body as it was sent.

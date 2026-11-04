@@ -285,6 +285,14 @@ const HANDOVER = {
 /** An image ada uploaded to the board, and an id that names none. */
 export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
 export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
+/** The id the board gives the user's images, each one the next of these. */
+export const POSTED_IMAGES = [
+  "01M3Q2RRRRRRRRRRRRRRRRRRS1",
+  "01M3Q2RRRRRRRRRRRRRRRRRRS2",
+  "01M3Q2RRRRRRRRRRRRRRRRRRS3",
+];
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
 function pngChunk(type: string, data: Buffer): Buffer {
@@ -297,7 +305,7 @@ function pngChunk(type: string, data: Buffer): Buffer {
 }
 
 /** A PNG of the given size, a gradient under a grid, so it reads as a picture once enlarged. */
-function png(width: number, height: number): Buffer {
+export function png(width: number, height: number): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
@@ -315,7 +323,7 @@ function png(width: number, height: number): Buffer {
     }
   }
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    PNG_SIGNATURE,
     pngChunk("IHDR", header),
     pngChunk("IDAT", deflateSync(rows)),
     pngChunk("IEND", Buffer.alloc(0)),
@@ -1450,9 +1458,34 @@ export async function fakeBoard(
     );
     await page.route(BROKEN_URL, (route) => route.fulfill({ status: 404, body: "" }));
   }
+  // Images the user posted from a composer, by id; the fake keeps PNGs alone, which the tests post.
+  const userImages = new Map<string, Buffer>();
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const { pathname } = new URL(request.url());
+    const { pathname, searchParams } = new URL(request.url());
+    if (request.method() === "POST" && pathname === "/api/images") {
+      const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
+      const name = searchParams.get("name") ?? "";
+      writes.push({ path: pathname, body: { name, size: bytes.length } });
+      if (!bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+        return json(
+          route,
+          {
+            error: "VALIDATION",
+            message: `${name} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
+          },
+          400,
+        );
+      }
+      const id = POSTED_IMAGES[userImages.size] ?? "";
+      userImages.set(id, bytes);
+      return json(route, {
+        id,
+        type: "png",
+        size: bytes.length,
+        markdown: `![${name}](image:${id})`,
+      });
+    }
     if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
@@ -1761,6 +1794,10 @@ export async function fakeBoard(
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
     if (pathname.startsWith("/api/images/")) {
+      const kept = userImages.get(pathname.slice("/api/images/".length));
+      if (kept !== undefined) {
+        return route.fulfill({ contentType: "image/png", body: kept });
+      }
       return pathname === `/api/images/${UPLOADED_IMAGE}`
         ? route.fulfill({ contentType: "image/png", body: screenshot })
         : json(route, { error: "NOT_FOUND", message: "image not found" }, 404);

@@ -4,7 +4,7 @@ import Testing
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// link, `mentionAt`, `firstParagraph`, and `describeCharter` tests run.
+/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -221,6 +221,104 @@ import Testing
           done == CompletedMention(text: completed.text, caret: completed.caret), "\(each.name)")
       }
     }
+  }
+
+  struct UploadCases: Decodable {
+    struct Placeholder: Decodable {
+      let name: String
+      let file: String
+      let placeholder: String
+    }
+
+    struct Insert: Decodable {
+      let name: String
+      let text: String
+      let start: Int
+      let end: Int
+      let inserted: String
+      let result: DraftEdit
+    }
+
+    struct Settle: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let placeholder: String
+      let markdown: String
+      let result: DraftEdit?
+    }
+
+    struct Numbered: Decodable {
+      let name: String
+      let file: String
+      let text: String
+      let held: [String]
+      let placeholder: String
+    }
+
+    struct Draft: Decodable {
+      let name: String
+      let text: String
+      let held: [String]
+      let images: [DraftImage]
+    }
+
+    struct Removal: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let image: DraftImage
+      let result: DraftEdit
+    }
+
+    let placeholders: [Placeholder]
+    let inserts: [Insert]
+    let settles: [Settle]
+    let numbered: [Numbered]
+    let drafts: [Draft]
+    let removals: [Removal]
+  }
+
+  @Test func uploadsHoldTheirPlaceAsOnTheWeb() throws {
+    let cases = try Fixture.table("uploads", as: UploadCases.self)
+    #expect(cases.settles.count > 5)
+    for each in cases.placeholders {
+      #expect(uploadingImage(each.file) == each.placeholder, "\(each.name)")
+    }
+    for each in cases.inserts {
+      let done = insertAt(each.text, start: each.start, end: each.end, inserted: each.inserted)
+      #expect(done == each.result, "\(each.name)")
+    }
+    for each in cases.drafts {
+      #expect(draftImages(each.text, held: each.held) == each.images, "\(each.name)")
+    }
+    for each in cases.removals {
+      #expect(
+        removeDraftImage(each.text, caret: each.caret, image: each.image) == each.result,
+        "\(each.name)")
+    }
+    for each in cases.numbered {
+      #expect(
+        uploadPlaceholder(for: each.file, in: each.text, held: each.held) == each.placeholder,
+        "\(each.name)")
+    }
+    for each in cases.settles {
+      let settled = settleUpload(
+        each.text, caret: each.caret, placeholder: each.placeholder, markdown: each.markdown)
+      #expect(settled == each.result, "\(each.name)")
+    }
+  }
+
+  /// A draft saved with an upload's line, as when the app ended mid-upload, loads without it; the
+  /// rest of the draft, an image kept included, stays.
+  @Test func aSavedDraftDropsTheLinesNoUploadHolds() {
+    let kept = "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)"
+    #expect(
+      droppingUploadLines(
+        "See ![Uploading image…]()\n![Uploading image (2)…]() and \(kept) then")
+        == "See \n and \(kept) then")
+    #expect(droppingUploadLines("![Uploading image…](not empty) words") == "![Uploading image…](not empty) words")
+    #expect(droppingUploadLines("No images.") == "No images.")
   }
 
   struct CharterCase: Decodable {

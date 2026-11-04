@@ -1,0 +1,490 @@
+{
+  "placeholders": [
+    {
+      "name": "a plain file name",
+      "file": "shot.png",
+      "placeholder": "![Uploading shot.png…]()"
+    },
+    {
+      "name": "brackets, backslashes and line breaks left out",
+      "file": "the [board]\\before\r\n.png",
+      "placeholder": "![Uploading the boardbefore.png…]()"
+    },
+    {
+      "name": "a name beyond ASCII",
+      "file": "écran 👋.png",
+      "placeholder": "![Uploading écran 👋.png…]()"
+    },
+    {
+      "name": "a backtick left out, which would open a code span",
+      "file": "x`y.png",
+      "placeholder": "![Uploading xy.png…]()"
+    }
+  ],
+  "inserts": [
+    {
+      "name": "at the caret",
+      "text": "before after",
+      "start": 7,
+      "end": 7,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "before ![Uploading shot.png…]()after",
+        "caret": 31
+      }
+    },
+    {
+      "name": "over the selection",
+      "text": "keep this out",
+      "start": 5,
+      "end": 9,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "keep ![Uploading shot.png…]() out",
+        "caret": 29
+      }
+    },
+    {
+      "name": "into an empty draft",
+      "text": "",
+      "start": 0,
+      "end": 0,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "![Uploading shot.png…]()",
+        "caret": 24
+      }
+    },
+    {
+      "name": "several, one a line",
+      "text": "see:",
+      "start": 4,
+      "end": 4,
+      "inserted": "![Uploading shot.png…]()\n![Uploading b.gif…]()",
+      "result": {
+        "text": "see:![Uploading shot.png…]()\n![Uploading b.gif…]()",
+        "caret": 50
+      }
+    },
+    {
+      "name": "past the end, at the end",
+      "text": "short",
+      "start": 9,
+      "end": 12,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "short![Uploading shot.png…]()",
+        "caret": 29
+      }
+    },
+    {
+      "name": "an end before the start, at the start",
+      "text": "short",
+      "start": 3,
+      "end": 1,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "sho![Uploading shot.png…]()rt",
+        "caret": 27
+      }
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 hi",
+      "start": 3,
+      "end": 3,
+      "inserted": "![Uploading shot.png…]()",
+      "result": {
+        "text": "👋 ![Uploading shot.png…]()hi",
+        "caret": 27
+      }
+    }
+  ],
+  "settles": [
+    {
+      "name": "the caret just after the placeholder",
+      "text": "look ![Uploading shot.png…]()",
+      "caret": 29,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "caret": 50
+      }
+    },
+    {
+      "name": "the caret before the placeholder",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 2,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 2
+      }
+    },
+    {
+      "name": "the caret after more text",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 35,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 56
+      }
+    },
+    {
+      "name": "the caret inside the placeholder",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 9,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "look ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) there",
+        "caret": 50
+      }
+    },
+    {
+      "name": "a failed upload leaves nothing",
+      "text": "look ![Uploading shot.png…]() there",
+      "caret": 35,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "",
+      "result": {
+        "text": "look  there",
+        "caret": 11
+      }
+    },
+    {
+      "name": "the first of two alike",
+      "text": "![Uploading shot.png…]()\n![Uploading shot.png…]()",
+      "caret": 49,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)\n![Uploading shot.png…]()",
+        "caret": 70
+      }
+    },
+    {
+      "name": "a placeholder the user deleted",
+      "text": "look there",
+      "caret": 4,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": null
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 ![Uploading shot.png…]() x",
+      "caret": 29,
+      "placeholder": "![Uploading shot.png…]()",
+      "markdown": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "👋 ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) x",
+        "caret": 50
+      }
+    },
+    {
+      "name": "a numbered line settles alone",
+      "text": "![Uploading image.png…]()\n![Uploading image.png (2)…]()",
+      "caret": 0,
+      "placeholder": "![Uploading image.png (2)…]()",
+      "markdown": "![image.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "result": {
+        "text": "![Uploading image.png…]()\n![image.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "caret": 0
+      }
+    }
+  ],
+  "numbered": [
+    {
+      "name": "nothing holds it yet",
+      "file": "image.png",
+      "text": "See: ",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
+    },
+    {
+      "name": "the draft holds it",
+      "file": "image.png",
+      "text": "See: ![Uploading image.png…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png (2)…]()"
+    },
+    {
+      "name": "an upload holds it, its line deleted",
+      "file": "image.png",
+      "text": "See: ",
+      "held": ["![Uploading image.png…]()"],
+      "placeholder": "![Uploading image.png (2)…]()"
+    },
+    {
+      "name": "the first two taken, one in the draft and one held",
+      "file": "image.png",
+      "text": "![Uploading image.png…]()",
+      "held": ["![Uploading image.png (2)…]()"],
+      "placeholder": "![Uploading image.png (3)…]()"
+    },
+    {
+      "name": "another name's line takes nothing",
+      "file": "image.png",
+      "text": "![Uploading other.png…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
+    },
+    {
+      "name": "a longer number hides no shorter one",
+      "file": "image.png",
+      "text": "![Uploading image.png (12)…]()",
+      "held": [],
+      "placeholder": "![Uploading image.png…]()"
+    }
+  ],
+  "drafts": [
+    {
+      "name": "none",
+      "text": "Just words.",
+      "held": [],
+      "images": []
+    },
+    {
+      "name": "one kept",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 4,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "kept and uploading, in the order they stand",
+      "text": "![Uploading image.png…]()\nThen ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": ["![Uploading image.png…]()"],
+      "images": [
+        {
+          "kind": "uploading",
+          "start": 0,
+          "text": "![Uploading image.png…]()",
+          "id": null,
+          "alt": "image.png"
+        },
+        {
+          "kind": "kept",
+          "start": 31,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a line no upload holds is no image",
+      "text": "![Uploading image.png…]() ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 26,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a held line gone from the draft is none",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": ["![Uploading image.png (2)…]()"],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "the same image twice is two",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        },
+        {
+          "kind": "kept",
+          "start": 50,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "a web image is none",
+      "text": "![a](https://example.com/a.png) ![b](image:not-an-id)",
+      "held": [],
+      "images": []
+    },
+    {
+      "name": "an empty description",
+      "text": "![](image:01BX5ZZKBKACTAV9WEVGEMMVRY)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 0,
+          "text": "![](image:01BX5ZZKBKACTAV9WEVGEMMVRY)",
+          "id": "01BX5ZZKBKACTAV9WEVGEMMVRY",
+          "alt": ""
+        }
+      ]
+    },
+    {
+      "name": "after a character of two code units",
+      "text": "👋 ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "held": [],
+      "images": [
+        {
+          "kind": "kept",
+          "start": 3,
+          "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "alt": "shot.png"
+        }
+      ]
+    },
+    {
+      "name": "two uploads of one name, told apart",
+      "text": "![Uploading image.png…]()\n![Uploading image.png (2)…]()",
+      "held": ["![Uploading image.png (2)…]()", "![Uploading image.png…]()"],
+      "images": [
+        {
+          "kind": "uploading",
+          "start": 0,
+          "text": "![Uploading image.png…]()",
+          "id": null,
+          "alt": "image.png"
+        },
+        {
+          "kind": "uploading",
+          "start": 26,
+          "text": "![Uploading image.png (2)…]()",
+          "id": null,
+          "alt": "image.png (2)"
+        }
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "name": "the caret after it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 54,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 9
+      }
+    },
+    {
+      "name": "the caret before it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 1,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 1
+      }
+    },
+    {
+      "name": "the caret inside it",
+      "text": "See ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) here",
+      "caret": 10,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "See  here",
+        "caret": 4
+      }
+    },
+    {
+      "name": "the second of two alike",
+      "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+      "caret": 0,
+      "image": {
+        "kind": "kept",
+        "start": 50,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV) and ",
+        "caret": 0
+      }
+    },
+    {
+      "name": "an uploading line",
+      "text": "A ![Uploading image.png…]() B",
+      "caret": 27,
+      "image": {
+        "kind": "uploading",
+        "start": 2,
+        "text": "![Uploading image.png…]()",
+        "id": null,
+        "alt": "image.png"
+      },
+      "result": {
+        "text": "A  B",
+        "caret": 2
+      }
+    },
+    {
+      "name": "a place where it no longer stands",
+      "text": "changed",
+      "caret": 3,
+      "image": {
+        "kind": "kept",
+        "start": 4,
+        "text": "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)",
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "alt": "shot.png"
+      },
+      "result": {
+        "text": "changed",
+        "caret": 3
+      }
+    }
+  ]
+}

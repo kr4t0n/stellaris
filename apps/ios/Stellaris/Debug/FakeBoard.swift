@@ -10,7 +10,8 @@
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
-  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads, the
+  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads,
+  /// images the user posts, which it answers six seconds late for the token `slow-uploads`, the
   /// user's advance of a task's stage, the user's approval or rejection of a proposal, and a new
   /// dashboard for the demo project, which its reads then show to the token that wrote them alone,
   /// so tests signed in with tokens of
@@ -40,6 +41,15 @@
     private static let replayStamps = Mutex<[String: String]>([:])
     /// How many times `fading` has listed the channels.
     private static let fadingListings = Mutex(0)
+    /// Whether the session stopped the request, after which its client takes nothing more.
+    private let stopped = Mutex(false)
+
+    /// A request answered late, with the run loop of the thread the session started it on, where
+    /// its client takes the answer.
+    private struct Late: @unchecked Sendable {
+      let request: FakeBoard
+      let loop: CFRunLoop
+    }
 
     /// The app's environment when it was launched against the fake board.
     static func launched() -> AppEnvironment? {
@@ -105,6 +115,30 @@
         client?.urlProtocolDidFinishLoading(self)
         return
       }
+      if request.httpMethod == "POST", url.path(percentEncoded: true) == "/api/images",
+        request.value(forHTTPHeaderField: "Authorization") == "Bearer slow-uploads"
+      {
+        let late = Late(request: self, loop: CFRunLoopGetCurrent())
+        DispatchQueue.global().asyncAfter(deadline: .now() + 6) {
+          CFRunLoopPerformBlock(late.loop, CFRunLoopMode.defaultMode.rawValue) {
+            late.request.finish()
+          }
+          CFRunLoopWakeUp(late.loop)
+        }
+        return
+      }
+      finish()
+    }
+
+    override func stopLoading() {
+      stopped.withLock { $0 = true }
+    }
+
+    /// Answers the request as the fake board does.
+    private func finish() {
+      guard !stopped.withLock({ $0 }), let url = request.url else {
+        return
+      }
       let (status, body) = FakeBoard.answer(request)
       let response = HTTPURLResponse(
         url: url, statusCode: status, httpVersion: "HTTP/1.1",
@@ -113,8 +147,6 @@
       client?.urlProtocol(self, didLoad: body)
       client?.urlProtocolDidFinishLoading(self)
     }
-
-    override func stopLoading() {}
 
     // MARK: Answers
 
@@ -179,6 +211,9 @@
       }
       if method == "POST", path == "/api/verbs/post_message" || path == "/api/verbs/open_thread" {
         return write(path, request: request, token: token)
+      }
+      if method == "POST", path == "/api/images" {
+        return upload(request: request, token: token)
       }
       if method == "POST", path == "/api/verbs/advance_task" {
         return advance(request: request, token: token)
@@ -282,6 +317,39 @@
       var tasks: [String: Data] = [:]
       var proposals: [String: Data] = [:]
       var dashboard: Data?
+      /// The images the token posted, by id.
+      var images: [String: Data] = [:]
+    }
+
+    /// Keeps an image a token posts, as the board does, and refuses bytes of no kind it keeps.
+    private static func upload(request: URLRequest, token: String) -> (Int, Data) {
+      let bytes = bodyData(of: request) ?? Data()
+      let name =
+        request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
+        .queryItems?.first { $0.name == "name" }?.value ?? ""
+      guard let type = imageType(of: bytes) else {
+        let what = name.isEmpty ? "the image" : name
+        return (
+          400,
+          json([
+            "error": "VALIDATION",
+            "message": "\(what) is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+          ])
+        )
+      }
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        let id = String(format: "00000000000000000000PHT%03d", mine.images.count + 1)
+        mine.images[id] = bytes
+        return (
+          200,
+          json([
+            "id": id, "type": type.rawValue, "size": bytes.count,
+            "markdown": "![\(imageDescription(name))](image:\(id))",
+          ])
+        )
+      }
     }
 
     /// Takes a post or a new thread, as the user, and answers as the board does.
@@ -776,11 +844,21 @@
       ]
     }
 
-    /// A picture the fake board serves: the uploaded image the samples show, and the one on the
-    /// web; nil for any other request.
+    /// A picture the fake board serves: the uploaded image the samples show, the images a token
+    /// posted, to that token, and the one on the web; nil for any other request.
     private static func picture(_ request: URLRequest) -> Data? {
       guard let url = request.url, request.httpMethod ?? "GET" == "GET" else {
         return nil
+      }
+      let path = url.path(percentEncoded: true)
+      if path.hasPrefix("/api/images/"),
+        let token = request.value(forHTTPHeaderField: "Authorization")?
+          .replacingOccurrences(of: "Bearer ", with: ""),
+        let posted = written.withLock({
+          $0[token]?.images[String(path.dropFirst("/api/images/".count))]
+        })
+      {
+        return posted
       }
       if url.host() == webImages {
         return url.path() == "/wide.png"

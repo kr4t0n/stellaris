@@ -1,5 +1,8 @@
 import BoardKit
+import PhotosUI
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 /// A channel's or a thread's messages, newest at the foot, with its draft below, on the web's
 /// island gray; a channel's also holds each thread opened on it, where it was opened, and a task's
@@ -257,7 +260,11 @@ struct ReadOnlyLine: View {
 /// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it,
 /// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
 /// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
-/// citizens to mention above it, as on the web, and a pick completes the name.
+/// citizens to mention above it, as on the web, and a pick completes the name. Photos beside Send,
+/// and Paste in the menu a long press on the draft opens, put images in it as the web's composer
+/// does: each holds its place at the caret with a line saying it uploads, which the board's
+/// markdown for it replaces, and Send waits for them. A row above the box shows each image the
+/// draft holds as a thumbnail, with a × that takes it out.
 struct DraftField: View {
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -268,6 +275,8 @@ struct DraftField: View {
   @State private var sending = false
   /// The board's reason for not taking the last post, in its own words.
   @State private var failure: String?
+  /// The photos just picked, until their uploads start.
+  @State private var picked: [PhotosPickerItem] = []
   let conversation: Conversation
 
   var body: some View {
@@ -287,6 +296,24 @@ struct DraftField: View {
             insertionPoint: String.Index(utf16Offset: done.caret, in: done.text))
         }
       }
+      let images = model.draftImages(in: conversation)
+      if !images.isEmpty {
+        ScrollView(.horizontal) {
+          HStack(spacing: 8) {
+            ForEach(images, id: \.self) { image in
+              DraftImageView(
+                image: image, preview: model.uploadPreviews[conversation.key]?[image.text]
+              ) {
+                remove(image)
+              }
+            }
+          }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Images in the draft")
+        .accessibilityIdentifier("draft-images")
+      }
       // One layout or the other around the same field, which keeps its focus as the size changes.
       let row =
         typeSize.isAccessibilitySize
@@ -305,12 +332,27 @@ struct DraftField: View {
         .foregroundStyle(MessageColor.primary)
         .focused($focused)
         .accessibilityIdentifier("draft")
+        // The draft's own Paste, from its menu, hands over an image it can't hold as text; text
+        // still pastes as the field's own.
+        .pasteDestination(for: PastedImage.self) { images in
+          upload(images.map(\.data))
+        }
         .padding(.leading, 12)
         .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
-          send(draft.wrappedValue)
+        HStack(spacing: 2) {
+          PhotosPicker(
+            selection: $picked, maxSelectionCount: 10, matching: .images,
+            preferredItemEncoding: .compatible
+          ) {
+            ComposerGlyph(symbol: "photo")
+          }
+          .accessibilityLabel("Add photos")
+          .accessibilityIdentifier("add-photos")
+          SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
+            send(draft.wrappedValue)
+          }
         }
         .padding(.trailing, 6)
         .padding(.bottom, 6)
@@ -324,11 +366,93 @@ struct DraftField: View {
           .foregroundStyle(MessageColor.failure)
           .accessibilityIdentifier("post-failed")
       }
+      if let refused = model.uploadFailures[conversation.key] {
+        Text(refused)
+          .font(MessageType.small())
+          .foregroundStyle(MessageColor.failure)
+          .accessibilityIdentifier("upload-failed")
+      }
     }
     .padding(12)
     .overlay(alignment: .top) {
       Rectangle().fill(MessageColor.line).frame(height: 1)
     }
+    .onChange(of: picked) { _, items in
+      guard !items.isEmpty else {
+        return
+      }
+      picked = []
+      attach(items)
+    }
+  }
+
+  /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.
+  private func attach(_ items: [PhotosPickerItem]) {
+    for (item, held) in zip(items, hold(items.count)) {
+      Task {
+        let data = try? await item.loadTransferable(type: Data.self)
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
+      }
+    }
+  }
+
+  /// Uploads the images the draft's own Paste handed over.
+  private func upload(_ images: [Data]) {
+    guard !images.isEmpty else {
+      return
+    }
+    for (data, held) in zip(images, hold(images.count)) {
+      Task {
+        follow(await model.upload(data, holding: held, in: conversation) { caret() })
+      }
+    }
+  }
+
+  /// Takes an image out of the draft, and keeps the caret among the same words.
+  private func remove(_ image: DraftImage) {
+    let draft = model.memory?.draft(conversation) ?? ""
+    follow(model.removeImage(image, from: conversation, caret: caret() ?? draft.utf16.count))
+  }
+
+  /// Where the draft's caret is, in UTF-16 code units, once the field has had one.
+  private func caret() -> Int? {
+    let text = model.memory?.draft(conversation) ?? ""
+    guard let selection, case .selection(let range) = selection.indices,
+      range.lowerBound <= text.endIndex
+    else {
+      return nil
+    }
+    return text.utf16.distance(from: text.startIndex, to: range.lowerBound)
+  }
+
+  /// Moves the caret to where an image's markdown left it, among the same words: the field would
+  /// otherwise keep its offset, which the markdown, longer than its line, moved into other words.
+  private func follow(_ settled: DraftEdit?) {
+    guard let settled, selection != nil else {
+      return
+    }
+    selection = TextSelection(
+      insertionPoint: String.Index(utf16Offset: settled.caret, in: settled.text))
+  }
+
+  /// Holds the place of `count` images where the caret last was, in place of what was selected, or
+  /// at the end of a draft never typed in, and puts the caret after them; gives the lines they
+  /// hold, each its own.
+  private func hold(_ count: Int) -> [String] {
+    let text = model.memory?.draft(conversation) ?? ""
+    var range = (start: text.utf16.count, end: text.utf16.count)
+    if let selection, case .selection(let selected) = selection.indices,
+      selected.upperBound <= text.endIndex
+    {
+      range = (
+        text.utf16.distance(from: text.startIndex, to: selected.lowerBound),
+        text.utf16.distance(from: text.startIndex, to: selected.upperBound)
+      )
+    }
+    let held = model.holdImages(count, in: conversation, start: range.start, end: range.end)
+    let now = model.memory?.draft(conversation) ?? ""
+    selection = TextSelection(insertionPoint: String.Index(utf16Offset: held.caret, in: now))
+    return held.placeholders
   }
 
   /// The mention being typed before the caret, and where the caret is, in UTF-16 code units as the
@@ -344,7 +468,8 @@ struct DraftField: View {
   }
 
   private func sendable(_ text: String) -> Bool {
-    !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !sending && model.uploading[conversation.key] == nil
+      && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   /// Posts the draft, then empties it unless it was changed while the post went.
@@ -370,6 +495,102 @@ struct DraftField: View {
       }
       sending = false
     }
+  }
+}
+
+/// An image the draft holds, as a thumbnail above it: the board's copy once it is kept, read by its
+/// id as a message's is, or the upload's own picture, dimmed and saying so, while it is on its way;
+/// its × takes the image's markdown, or its upload's line, out of the draft.
+struct DraftImageView: View {
+  @Environment(AppModel.self) private var model
+  let image: DraftImage
+  /// The upload's own picture, a small JPEG, until the board keeps it.
+  let preview: Data?
+  let remove: () -> Void
+  @State private var kept: UIImage?
+
+  var body: some View {
+    let tile = RoundedRectangle(cornerRadius: 8)
+    ZStack(alignment: .topTrailing) {
+      ZStack {
+        MessageColor.surface2.opacity(0.5)
+        if image.id != nil {
+          if let kept {
+            Image(uiImage: kept)
+              .resizable()
+              .scaledToFill()
+              .accessibilityLabel(image.alt.isEmpty ? "Image" : image.alt)
+          }
+        } else {
+          if let preview, let picture = UIImage(data: preview) {
+            Image(uiImage: picture)
+              .resizable()
+              .scaledToFill()
+              .opacity(0.35)
+              .accessibilityHidden(true)
+          }
+          Text("Uploading…")
+            .font(MessageType.small())
+            .foregroundStyle(MessageColor.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+        }
+      }
+      .frame(width: 64, height: 64)
+      .clipShape(tile)
+      .overlay(tile.strokeBorder(Color.white.opacity(0.08)))
+      Button(action: remove) {
+        Image(systemName: "xmark")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(.white)
+          .frame(width: 20, height: 20)
+          .background(Color.black.opacity(0.6), in: Circle())
+      }
+      .buttonStyle(.plain)
+      .padding(4)
+      .accessibilityLabel(
+        image.id == nil
+          ? "Remove \(image.alt), still uploading"
+          : image.alt.isEmpty ? "Remove the image" : "Remove \(image.alt)")
+      .accessibilityIdentifier("remove-draft-image")
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("draft-image")
+    .task(id: image.id) {
+      guard let id = image.id else {
+        return
+      }
+      kept = try? await model.images.image(.upload(id), using: model)
+    }
+  }
+}
+
+/// An image on the pasteboard as its bytes, in whatever kind of image it is, for the draft's own
+/// Paste.
+struct PastedImage: Transferable, Sendable {
+  let data: Data
+
+  static var transferRepresentation: some TransferRepresentation {
+    DataRepresentation(importedContentType: .image) { data in PastedImage(data: data) }
+  }
+}
+
+/// An icon in the draft's box, as the web's quiet button draws one: the tertiary text colour, in a
+/// target as tall as Send.
+struct ComposerGlyph: View {
+  let symbol: String
+
+  /// Off the main actor too, since Photos draws its button's label from a `@Sendable` closure.
+  nonisolated init(symbol: String) {
+    self.symbol = symbol
+  }
+
+  var body: some View {
+    Image(systemName: symbol)
+      .font(MessageType.text())
+      .foregroundStyle(MessageColor.tertiary)
+      .frame(minWidth: 28, minHeight: 28)
+      .contentShape(Rectangle())
   }
 }
 

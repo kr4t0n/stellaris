@@ -3955,4 +3955,63 @@ describe("Board", () => {
       message: "role engineer may not upload_image",
     });
   });
+
+  it("keeps an image the user posts as its bytes, under the checks a turn's upload meets", async () => {
+    const { board } = await society();
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    // A citizen uploads from its turn's machine, never as bytes, in a turn or not.
+    const turn: Actor = { ...ENG, scope: "demo", thread: "01M4WY483E0XG4Q2ZTHAX3JBZV" };
+    for (const actor of [ENG, turn]) {
+      await expect(board.postImage(actor, png, "shot.png")).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+    }
+
+    // Brackets, backslashes, line breaks, and backticks would break the markdown, so they go.
+    const named = await board.postImage(USER, png, "the `board` [before].png");
+    expect(named).toEqual({
+      id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
+      type: "png",
+      size: png.length,
+      markdown: `![the board before.png](image:${named.id})`,
+    });
+    expect(await board.readImage(named.id)).toEqual({ type: "png", bytes: png });
+    expect(await readdir(path.join(dir, "images"))).toEqual([named.id]);
+    expect((await board.readEvents(null)).filter((each) => each.type === "image.uploaded")).toEqual(
+      [
+        expect.objectContaining({
+          actor: "user",
+          payload: { id: named.id, type: "png", size: png.length },
+        }),
+      ],
+    );
+    // With no file name, the description is the user's to write.
+    const unnamed = await board.postImage(USER, png);
+    expect(unnamed.markdown).toBe(`![](image:${unnamed.id})`);
+
+    await expect(
+      board.postImage(USER, Buffer.from("<svg><script>alert(1)</script></svg>"), "shape.svg"),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "shape.svg is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+    });
+    await expect(board.postImage(USER, new Uint8Array())).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "the image is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+    });
+    const over = Buffer.concat([png, Buffer.alloc(IMAGE_LIMIT_BYTES - png.length + 1)]);
+    await expect(board.postImage(USER, over, "big.png")).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: `big.png is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608 an image may be`,
+    });
+    await expect(board.postImage(USER, png, "x".repeat(1025))).rejects.toThrow(/1024/);
+    expect((await readdir(path.join(dir, "images"))).toSorted()).toEqual(
+      [named.id, unnamed.id].toSorted(),
+    );
+    const largest = await board.postImage(USER, over.subarray(0, IMAGE_LIMIT_BYTES), "big.png");
+    expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
+  });
 });

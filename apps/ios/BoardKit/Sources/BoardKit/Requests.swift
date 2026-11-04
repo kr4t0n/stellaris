@@ -15,11 +15,24 @@ public struct Endpoint: Sendable, Hashable {
   public let method: Method
   /// The path and query from the board's address, each part encoded: `/api/channels/demo/general`.
   public let path: String
-  /// A JSON body, for a verb.
+  /// A JSON body, for a verb, or an image's bytes.
   public let body: Data?
   /// Whether it carries the bearer token; `/auth/config` and the app's sign-in are asked without
   /// one.
   public let authenticated: Bool
+  /// What the body is: JSON, or the image's own media type.
+  public let contentType: String
+
+  init(
+    method: Method, path: String, body: Data?, authenticated: Bool,
+    contentType: String = "application/json"
+  ) {
+    self.method = method
+    self.path = path
+    self.body = body
+    self.authenticated = authenticated
+    self.contentType = contentType
+  }
 
   /// The request for a board at `board`, which may end in a path of its own, as behind a proxy.
   public func urlRequest(board: URL, token: String?) -> URLRequest {
@@ -34,7 +47,7 @@ public struct Endpoint: Sendable, Hashable {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
     if let body {
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(contentType, forHTTPHeaderField: "Content-Type")
       request.httpBody = body
     }
     return request
@@ -166,6 +179,17 @@ public enum BoardAPI {
   /// An image a citizen uploaded, as its bytes.
   public static func image(_ id: String) -> Endpoint {
     Endpoint(method: .get, path: "/api/images/\(component(id))", body: nil, authenticated: true)
+  }
+
+  /// Keeps an image the user posts, its bytes the whole body, under `name`, which describes it in
+  /// the markdown the board answers. Bytes of no kind the board keeps go as they are, for the
+  /// board to refuse in its own words.
+  public static func uploadImage(_ data: Data, name: String) -> BoardRequest<UploadedImage> {
+    BoardRequest(
+      endpoint: Endpoint(
+        method: .post, path: "/api/images?name=\(component(name))", body: data,
+        authenticated: true,
+        contentType: imageType(of: data)?.mediaType ?? "application/octet-stream"))
   }
 
   /// A post in a channel.

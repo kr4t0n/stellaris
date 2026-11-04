@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { IMAGE_LIMIT_BYTES } from "@stellaris/shared";
 
 /**
  * Asking to enroll and polling for the answer, which anyone may do without a token. The largest
@@ -21,6 +22,12 @@ export const APP_TOKEN_BODY_LIMIT_BYTES = 16 * 1024;
  * large body, is under 4 KB.
  */
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * An image the user posts from a composer, `POST /api/images`: its bytes are the whole body, with
+ * nothing around them, so the route takes exactly the largest image the board keeps.
+ */
+export const IMAGE_BODY_LIMIT_BYTES = IMAGE_LIMIT_BYTES;
 
 /**
  * A runner's hello, its reports, a turn's steps, and its outcome. Nothing bounds a batch of steps

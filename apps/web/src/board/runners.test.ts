@@ -99,7 +99,9 @@ describe("runnerState", () => {
       pausedClis: { codex: pause },
       quotas: { claude: limited("2026-11-06T04:59:59.574Z") },
     });
-    expect(heldClis(held, NOW)).toEqual([{ cli: "claude", until: "2026-11-06T04:59:59.574Z" }]);
+    expect(heldClis(held, NOW)).toEqual([
+      { cli: "claude", until: "2026-11-06T04:59:59.574Z", paused: false },
+    ]);
     expect(runnerState(held, NOW)).toEqual({
       label: "codex paused · claude held",
       detail: "connected; codex paused 1 hour ago; claude held by its limit for 1d 21h",
@@ -110,11 +112,24 @@ describe("runnerState", () => {
       label: "claude held",
       detail: "connected; claude held by its limit for 20m",
     });
-    expect(
-      runnerState(runner({ paused: pause, quotas: { claude: limited(null) } }), NOW),
-    ).toMatchObject({
-      label: "paused · claude held",
+  });
+
+  it("leaves a hold the user's pause covers out of the label, and in the detail", () => {
+    // The pause holds those turns already, so the label stays as it was before limits held any.
+    expect(runnerState(runner({ paused: pause, quotas: { claude: limited(null) } }), NOW)).toEqual({
+      label: "paused",
+      detail: "connected; paused 1 hour ago; claude held by its limit for 20m",
+      tone: "text-amber-300",
     });
+    const both = runner({
+      pausedClis: { claude: pause },
+      quotas: { claude: limited(null), codex: limited(null) },
+    });
+    expect(heldClis(both, NOW).map((hold) => [hold.cli, hold.paused])).toEqual([
+      ["claude", true],
+      ["codex", false],
+    ]);
+    expect(runnerState(both, NOW)).toMatchObject({ label: "claude paused · codex held" });
   });
 
   it("says nothing of a limit that has lifted, by its reset or by half an hour", () => {

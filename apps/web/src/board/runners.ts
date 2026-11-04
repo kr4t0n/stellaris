@@ -1,5 +1,6 @@
 import {
   runnerLimitHold,
+  runnerPause,
   type CliKind,
   type GitIdentityPart,
   type Runner,
@@ -72,20 +73,26 @@ export function suggestRunnerName(hostname: string, taken: readonly string[]): s
   }
 }
 
-/** The CLIs on a runner whose limits hold their turns now, each with when the hold lifts. */
+/**
+ * The CLIs on a runner whose limits hold their turns now, each with when the hold lifts and whether
+ * the user's pause holds it too, which leaves the limit's hold changing nothing.
+ */
 export function heldClis(
   runner: Runner,
   now: number,
-): { readonly cli: CliKind; readonly until: string }[] {
+): { readonly cli: CliKind; readonly until: string; readonly paused: boolean }[] {
   return runner.clis.flatMap((cli) => {
     const hold = runnerLimitHold(runner, cli, new Date(now));
-    return hold === null ? [] : [{ cli, until: hold.until }];
+    return hold === null
+      ? []
+      : [{ cli, until: hold.until, paused: runnerPause(runner, cli) !== undefined }];
   });
 }
 
 /**
  * What a runner's row says of it: away or connected, what of it the user paused, and which of its
- * CLIs their limits hold until they lift.
+ * CLIs their limits hold until they lift. A hold under the user's pause is named in the detail
+ * alone, since the pause holds those turns already, and the label stays as short as before.
  */
 export function runnerState(
   runner: Runner,
@@ -103,7 +110,8 @@ export function runnerState(
   const held = holds.map(
     (hold) => `${hold.cli} held by its limit for ${until(Date.parse(hold.until) - now)}`,
   );
-  const heldLabel = holds.length === 0 ? [] : [`${holds.map((hold) => hold.cli).join(", ")} held`];
+  const unpaused = holds.filter((hold) => !hold.paused).map((hold) => hold.cli);
+  const heldLabel = unpaused.length === 0 ? [] : [`${unpaused.join(", ")} held`];
   if (runner.status !== "connected") {
     const away = `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`;
     return {

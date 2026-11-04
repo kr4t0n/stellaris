@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CliQuotaSchema,
   limitHold,
+  limitLapsed,
   mergeQuota,
   quotaChanged,
   quotaLevel,
@@ -170,15 +171,23 @@ describe("limitHold", () => {
     expect(limitHold(limited, NOW)).toEqual({ until: "2026-10-13T12:30:00.000Z", known: false });
     expect(limitHold(limited, new Date("2026-10-13T12:29:59.999Z"))).not.toBeNull();
     expect(limitHold(limited, new Date("2026-10-13T12:30:00.000Z"))).toBeNull();
-    // Still read as limited all the same, as the CLI said.
-    expect(quotaLevel(limited, new Date("2026-10-13T12:30:00.000Z"))).toBe("limited");
+    // Still read as limited all the same, as the CLI said, and lapsed: one turn may try it.
+    const lapsedAt = new Date("2026-10-13T12:30:00.000Z");
+    expect(quotaLevel(limited, lapsedAt)).toBe("limited");
+    expect(limitLapsed(limited, NOW)).toBe(false);
+    expect(limitLapsed(limited, lapsedAt)).toBe(true);
+    // A limit with a reset never lapses so: at the reset it has lifted.
+    const known = quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" });
+    expect(limitLapsed(known, new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
   });
 
-  it("holds nothing short of a limit, nor a login with extra usage turned on", () => {
+  it("holds nothing short of a limit, nor a usage read's limit with extra usage turned on", () => {
     for (const status of ["allowed", "warning", "none"] as const) {
       expect(limitHold(quota({ status }), NOW)).toBeNull();
+      expect(limitLapsed(quota({ status }), new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
     }
     const extra = {
+      source: "read",
       status: "limited",
       limitedUntil: "2026-10-13T13:00:00.000Z",
       extraUsage: { enabled: true, monthlyLimit: 5_000, usedCredits: 0, currency: "USD" },
@@ -187,6 +196,11 @@ describe("limitHold", () => {
     expect(
       limitHold(quota({ ...extra, extraUsage: { ...extra.extraUsage, enabled: false } }), NOW),
     ).not.toBeNull();
+    // A turn's own limit already leaves out what extra usage covered, so it holds, extra usage on.
+    expect(limitHold(quota({ ...extra, source: "turn" }), NOW)).toEqual({
+      until: "2026-10-13T13:00:00.000Z",
+      known: true,
+    });
   });
 
   it("holds the turns of the CLI it limits on its runner, beside the user's pauses", () => {

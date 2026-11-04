@@ -15,6 +15,7 @@ import {
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
   heldOn,
+  limitLapsed,
   runnerLimitHold,
   runnerPause,
   SOCIETY_SCOPE,
@@ -174,6 +175,14 @@ export class RunnerHub implements TurnRunner {
   private moveStarts = 0;
   /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
   private readonly limitReads = new Map<string, number>();
+  /**
+   * The turn let through once a limit with no reset had held its half hour, by `runner/cli`: the
+   * report it tries, which `observedAt` names, and whether the turn has ended.
+   */
+  private readonly limitTries = new Map<
+    string,
+    { observedAt: string; dispatch: TurnDispatch; ended: boolean }
+  >();
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -529,7 +538,8 @@ export class RunnerHub implements TurnRunner {
       !seat.unconfirmed &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
-      !heldOn(runners, seat.name, cli, now);
+      !heldOn(runners, seat.name, cli, now) &&
+      !this.tryRunning(runners, seat.name, cli, now);
     let chosen: Seat | undefined;
     // The runner the turn waits for when none takes it, so a limit with no reset there is read.
     let waitsOn = agent.homeRunner;
@@ -587,7 +597,23 @@ export class RunnerHub implements TurnRunner {
     if (dispatch.project !== SOCIETY_SCOPE) {
       this.starting.set(dispatch.project, (this.starting.get(dispatch.project) ?? 0) + 1);
     }
-    return { runner: chosen.name };
+    const runner = chosen.name;
+    const lapsed = runners.find((each) => each.name === runner)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${runner}/${cli}`);
+    if (
+      lapsed !== undefined &&
+      limitLapsed(lapsed, now) &&
+      tried?.observedAt !== lapsed.observedAt
+    ) {
+      // The first turn after a limit with no reset ran out of its hold tries it for the rest; once
+      // it has ended with no newer report, the rest go.
+      this.limitTries.set(`${runner}/${cli}`, {
+        observedAt: lapsed.observedAt,
+        dispatch,
+        ended: false,
+      });
+    }
+    return { runner };
   }
 
   async runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord> {
@@ -629,6 +655,11 @@ export class RunnerHub implements TurnRunner {
       return await opened.ended;
     } finally {
       opening();
+      for (const tried of this.limitTries.values()) {
+        if (tried.dispatch === dispatch) {
+          tried.ended = true;
+        }
+      }
       if (seat !== undefined) {
         seat.inUse = Math.max(0, seat.inUse - 1);
         if (turnId !== null) {
@@ -1164,6 +1195,23 @@ export class RunnerHub implements TurnRunner {
     }
     await this.board.recordQuota(runner, cli, quota);
     return quota;
+  }
+
+  /**
+   * Whether a turn let through to try a limit with no reset, once its hold ran out, is still running
+   * on the runner, so the CLI's other turns there wait for what it reports: a refusal records a newer
+   * limit, which holds them another half hour, and a turn that ends without one lets them go.
+   */
+  private tryRunning(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): boolean {
+    const quota = runners.find((each) => each.name === name)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${name}/${cli}`);
+    return (
+      quota !== undefined &&
+      tried !== undefined &&
+      !tried.ended &&
+      tried.observedAt === quota.observedAt &&
+      limitLapsed(quota, now)
+    );
   }
 
   /**

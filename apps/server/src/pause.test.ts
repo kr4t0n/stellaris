@@ -259,21 +259,29 @@ describe("holding a CLI while its limit lasts", () => {
   });
 
   /**
-   * A society on one clock with eng-1 on Claude and rev-1 on Codex in a project living on pod, and a
-   * scheduler over its hub. Every turn says who ran it; Claude's quota reads answer as `read` says.
+   * A society on one clock with `engineers` citizens on Claude (eng-1, eng-2, …) and rev-1 on Codex
+   * in a project living on pod, and a scheduler over its hub that runs `concurrency` turns at once.
+   * Every turn says who ran it; Claude's quota reads answer as `read` says, and a Claude turn is
+   * refused for the plan's limit, reporting it with no reset, while `refusing` says so.
    */
-  async function limitedSociety(read?: () => Promise<CliQuota>) {
+  async function limitedSociety(
+    options: {
+      read?: () => Promise<CliQuota>;
+      engineers?: number;
+      concurrency?: number;
+      refusing?: () => boolean;
+    } = {},
+  ) {
+    const { read, refusing } = options;
     let clock = Date.parse("2026-11-04T08:00:00.000Z");
     const now = (): Date => new Date(clock);
     const { board, userToken } = await Board.init(dir, { name: "limits" }, { now });
     await addWorkRoles(board);
     await board.addProject(USER, { slug: "lab" });
-    await board.addAgent(USER, {
-      name: "eng-1",
-      role: "engineer",
-      cli: "claude",
-      memberships: ["lab"],
-    });
+    const engineers = Array.from({ length: options.engineers ?? 1 }, (_, i) => `eng-${i + 1}`);
+    for (const name of engineers) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["lab"] });
+    }
     await board.addAgent(USER, {
       name: "rev-1",
       role: "reviewer",
@@ -286,6 +294,22 @@ describe("holding a CLI while its limit lasts", () => {
       newSession: () => Promise.resolve(`session-${ran.length}`),
       runTurn: (request) => {
         ran.push(`${request.spec.agent}@${request.spec.runner}`);
+        if (kind === "claude" && refusing?.() === true) {
+          return Promise.resolve({
+            events: [],
+            finalText: "",
+            usage: ZERO_USAGE,
+            costUsd: 0,
+            status: null,
+            exitReason: "error",
+            error: "usage limit reached: You've hit your limit",
+            quota: CliQuotaSchema.parse({
+              observedAt: now().toISOString(),
+              source: "turn",
+              status: "limited",
+            }),
+          });
+        }
         return Promise.resolve({
           events: [],
           finalText: "done",
@@ -316,14 +340,14 @@ describe("holding a CLI while its limit lasts", () => {
       runner: society.hub,
       now,
       timings: { debounceMs: 0, userDebounceMs: 0, heartbeatMs: 24 * 3_600_000 },
-      concurrency: 4,
+      concurrency: options.concurrency ?? 4,
     });
     const settle = async (): Promise<void> => {
       await scheduler.tick();
       await scheduler.drain();
     };
     await settle();
-    expect(ran.toSorted()).toEqual(["eng-1@pod", "rev-1@pod"]);
+    expect(ran.toSorted()).toEqual([...engineers, "rev-1"].map((name) => `${name}@pod`));
     ran.length = 0;
     return {
       board,
@@ -400,15 +424,15 @@ describe("holding a CLI while its limit lasts", () => {
       },
     ];
     const reads: string[] = [];
-    const { board, scheduler, settle, ran, now, advance, wake, limit } = await limitedSociety(
-      () => {
+    const { board, scheduler, settle, ran, now, advance, wake, limit } = await limitedSociety({
+      read: () => {
         reads.push(now().toISOString());
         const answer = answers.shift();
         return answer === undefined
           ? Promise.reject(new Error("no answer"))
           : Promise.resolve().then(answer);
       },
-    );
+    });
     const started = now().getTime();
     await limit(null);
     await wake("eng-1");
@@ -490,6 +514,49 @@ describe("holding a CLI while its limit lasts", () => {
       .toBe("allowed");
     await settle();
     expect(ran).toEqual(["eng-1@pod", "eng-1@pod", "eng-1@pod"]);
+    await scheduler.stop();
+  });
+
+  it("lets one turn try a limit with no reset once its half hour is over, and the rest go by what it met", async () => {
+    // Four citizens wait on Claude, with nothing capping the turns at once, as on a server and a
+    // runner left at their defaults.
+    let refusing = false;
+    const { board, scheduler, settle, ran, advance, wake, limit } = await limitedSociety({
+      engineers: 4,
+      concurrency: Number.POSITIVE_INFINITY,
+      refusing: () => refusing,
+    });
+    refusing = true;
+    const refused = async (): Promise<number> =>
+      (await board.readEvents(null, 2000)).filter((event) => event.type === "turn.failed").length;
+    await limit(null);
+    for (const name of ["eng-1", "eng-2", "eng-3", "eng-4"]) {
+      await wake(name);
+    }
+    await settle();
+    expect(ran).toEqual([]);
+
+    // At the half hour one turn goes; the limit refuses it and holds the rest another half hour.
+    advance(30 * 60_000);
+    await settle();
+    await settle();
+    expect(ran).toHaveLength(1);
+    expect(await refused()).toBe(1);
+    advance(30 * 60_000 - 1);
+    await settle();
+    expect(ran).toHaveLength(1);
+
+    // At the next half hour one turn tries again, and once it has run the other two go together.
+    // The refused turn's wake, a manual one, went with it, as any failed turn's does.
+    refusing = false;
+    advance(1);
+    await settle();
+    expect(ran).toHaveLength(2);
+    await settle();
+    expect(ran.toSorted()).toEqual(
+      ["eng-1", "eng-2", "eng-3", "eng-4"].map((name) => `${name}@pod`),
+    );
+    expect(await refused()).toBe(1);
     await scheduler.stop();
   });
 });

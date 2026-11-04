@@ -176,7 +176,9 @@ export function RunnersView() {
       runner.paused !== undefined ||
       runner.clis.some((cli) => runner.pausedClis?.[cli] !== undefined),
   ).length;
-  const limited = registered.filter((runner) => heldClis(runner, now).length > 0).length;
+  const limited = registered.filter((runner) =>
+    heldClis(runner, now).some((hold) => !hold.paused),
+  ).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =

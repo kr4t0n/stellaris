@@ -266,8 +266,15 @@ test("a runner names the CLI its limit holds, apart from the user's pause", asyn
   await expect(pod.getByRole("button", { name: "Pause claude on pod" })).not.toHaveClass(
     /opacity-30/,
   );
+  // Paused too, the CLI's label says the pause alone, which holds its turns already; the hold stays
+  // in the title, and the header no longer counts it.
   await pod.getByRole("button", { name: "Pause claude on pod" }).click();
-  await expect(state).toHaveText("claude paused · claude held");
+  await expect(state).toHaveText("claude paused");
+  await expect(state).toHaveAttribute(
+    "title",
+    /^connected; claude paused just now; claude held by its limit for (39|40)m$/,
+  );
+  await expect(page.getByText(/held by a limit/)).toHaveCount(0);
 });
 
 test("a code nobody waits with says so, and a denial sends no name", async ({ page }) => {

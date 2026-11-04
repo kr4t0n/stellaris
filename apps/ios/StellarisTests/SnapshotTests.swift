@@ -188,6 +188,52 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
+  /// A project's list at the largest type size, which is plain, scrolled so its second section's
+  /// header pins at the top with rows going under it: the band the header takes has the island's
+  /// gray for its ground, and no black.
+  @MainActor func testAPinnedHeaderIsOnTheIslandsGray() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    model.boardPath = ["demo"]
+    var band = CGRect.null
+    let image = try await Snapshot.image(
+      of: ShellView().environment(model), size: CGSize(width: 410, height: 678),
+      type: Snapshot.typeSizes[1]
+    ) { view in
+      let list = try XCTUnwrap(
+        self.collectionViews(in: view).max { $0.numberOfSections < $1.numberOfSections },
+        "the view holds no list")
+      let row = try XCTUnwrap(
+        list.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)),
+        "the project's list has no second section")
+      // The second section's first row, its top 40 points gone under the header.
+      list.contentOffset.y = row.frame.minY + 40 - list.adjustedContentInset.top
+      list.layoutIfNeeded()
+      let header = try XCTUnwrap(self.pinnedHeader(in: list), "no header shows in the list")
+      let top = list.contentOffset.y + list.adjustedContentInset.top
+      print("pinned header: \(type(of: header)) at \(header.frame), the list's top at \(top)")
+      XCTAssertLessThanOrEqual(abs(header.frame.minY - top), 2, "the header doesn't pin at the top")
+      band = header.convert(header.bounds, to: nil)
+    }
+    try Snapshot.keep(image, named: "board-project-pinned-header-410-largest", in: self)
+    let colors = Snapshot.colors(in: image, within: band)
+    let ground = try XCTUnwrap(colors.first, "the pinned header's band is empty")
+    func share(_ test: ((red: Int, green: Int, blue: Int)) -> Bool) -> Double {
+      colors.filter { test($0.color) }.reduce(0) { $0 + $1.share }
+    }
+    let black = share { $0.red < 6 && $0.green < 6 && $0.blue < 6 }
+    let white = share { $0.red > 240 && $0.green > 240 && $0.blue > 240 }
+    let shown = colors.prefix(5).map { "\($0.color) \(Int(($0.share * 100).rounded()))%" }
+    print("pinned header's band \(band): \(shown), white \(white)")
+    let island = [ground.color.red, ground.color.green, ground.color.blue].allSatisfy {
+      abs($0 - 20) <= 2
+    }
+    XCTAssertTrue(island, "the pinned header's band isn't on the island's gray: \(shown)")
+    XCTAssertGreaterThan(ground.share, 0.4, "the pinned header's band has a ground: \(shown)")
+    XCTAssertLessThan(black, 0.01, "the pinned header's band draws black: \(shown)")
+  }
+
   /// The first two rows of the list in `view`, top first, each with a point on it, in the window,
   /// clear of its words.
   @MainActor private func firstRows(
@@ -204,15 +250,33 @@ final class SnapshotTests: XCTestCase {
   }
 
   @MainActor private func collectionView(in view: UIView) -> UICollectionView? {
+    collectionViews(in: view).first
+  }
+
+  /// The lists in `view`, outermost and first laid out first.
+  @MainActor private func collectionViews(in view: UIView) -> [UICollectionView] {
     if let list = view as? UICollectionView {
-      return list
+      return [list]
     }
-    for subview in view.subviews {
-      if let list = collectionView(in: subview) {
-        return list
-      }
+    return view.subviews.flatMap { collectionViews(in: $0) }
+  }
+
+  /// The topmost section header the list shows below its top inset, a pinned one when one pins.
+  @MainActor private func pinnedHeader(in list: UICollectionView) -> UICollectionReusableView? {
+    let top = list.contentOffset.y + list.adjustedContentInset.top
+    var headers = list.visibleSupplementaryViews(
+      ofKind: UICollectionView.elementKindSectionHeader)
+    if headers.isEmpty {
+      // Any reusable view of the list's own that isn't a row, in case the headers are of a kind
+      // of SwiftUI's own.
+      headers = list.subviews.compactMap { $0 as? UICollectionReusableView }
+        .filter { !($0 is UICollectionViewCell) }
     }
-    return nil
+    for header in headers {
+      print("a header of the list: \(type(of: header)) at \(header.frame)")
+    }
+    return headers.filter { !$0.isHidden && $0.frame.maxY > top + 1 }
+      .min { $0.frame.minY < $1.frame.minY }
   }
 
   /// A thread opened from #general, with its first message and its draft, then #general with

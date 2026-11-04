@@ -155,8 +155,57 @@ import XCTest
   static func pixels(
     in image: UIImage, near color: (red: Int, green: Int, blue: Int), within: Int = 24
   ) -> Int {
-    guard let cgImage = image.cgImage else {
+    guard let (bytes, _, _) = rgba(of: image) else {
       return 0
+    }
+    var count = 0
+    for start in stride(from: 0, to: bytes.count, by: 4) {
+      let (red, green, blue) = (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
+      if abs(red - color.red) < within, abs(green - color.green) < within,
+        abs(blue - color.blue) < within
+      {
+        count += 1
+      }
+    }
+    return count
+  }
+
+  /// The colours of the image's pixels within `rect`, in points from its top-leading corner, each
+  /// with its share of them, the most common first.
+  static func colors(
+    in image: UIImage, within rect: CGRect
+  ) -> [(color: (red: Int, green: Int, blue: Int), share: Double)] {
+    guard let (bytes, width, height) = rgba(of: image) else {
+      return []
+    }
+    let scale = image.scale
+    let (left, right) = (max(Int(rect.minX * scale), 0), min(Int(rect.maxX * scale), width))
+    let (top, bottom) = (max(Int(rect.minY * scale), 0), min(Int(rect.maxY * scale), height))
+    guard left < right, top < bottom else {
+      return []
+    }
+    var counts: [Int: Int] = [:]
+    for y in top..<bottom {
+      for x in left..<right {
+        let start = (y * width + x) * 4
+        let key = Int(bytes[start]) << 16 | Int(bytes[start + 1]) << 8 | Int(bytes[start + 2])
+        counts[key, default: 0] += 1
+      }
+    }
+    let total = Double((right - left) * (bottom - top))
+    return counts.sorted { $0.value > $1.value }.map { key, count in
+      (
+        color: (red: key >> 16 & 0xFF, green: key >> 8 & 0xFF, blue: key & 0xFF),
+        share: Double(count) / total
+      )
+    }
+  }
+
+  /// The image's pixels as bytes of red, green, blue, and alpha, a row at a time from its top, with
+  /// its width and height in pixels.
+  private static func rgba(of image: UIImage) -> (bytes: [UInt8], width: Int, height: Int)? {
+    guard let cgImage = image.cgImage else {
+      return nil
     }
     let (width, height) = (cgImage.width, cgImage.height)
     var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -172,18 +221,6 @@ import XCTest
       context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
       return true
     }
-    guard drawn else {
-      return 0
-    }
-    var count = 0
-    for start in stride(from: 0, to: bytes.count, by: 4) {
-      let (red, green, blue) = (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
-      if abs(red - color.red) < within, abs(green - color.green) < within,
-        abs(blue - color.blue) < within
-      {
-        count += 1
-      }
-    }
-    return count
+    return drawn ? (bytes, width, height) : nil
   }
 }

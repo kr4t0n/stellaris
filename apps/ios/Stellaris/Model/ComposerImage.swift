@@ -20,16 +20,21 @@ struct ComposerImage: Sendable, Equatable {
   /// The longest side, in pixels, a picture the app draws again starts at.
   static let largestSide = 4096
 
-  /// `data` as it is when the board keeps its kind and its size, as for the JPEG Photos gives in its
-  /// most compatible encoding; otherwise the picture it holds, such as a HEIC or TIFF pasted, or a
-  /// photo past the limit, as a JPEG, scaled down until it fits. Nil when it holds no picture. Off
-  /// the main actor, and decoded at the size it goes at, never whole: a 48-megapixel photo is about
-  /// 195 MB as a bitmap, and ten may come at once.
+  /// The picture `data` holds, without its metadata, such as where, when, and with what a photo
+  /// was taken, which the board would keep for anyone who opens the image. A kind the board keeps,
+  /// as the JPEG Photos gives in its most compatible encoding, goes in that kind when it fits the
+  /// limit without its metadata: its pictures byte for byte, every frame and its colour profile
+  /// included, and its orientation alone where that turns it (`withoutMetadata`). Anything else,
+  /// such as a HEIC or TIFF pasted, a photo past the limit, or an image that doesn't read to its
+  /// end, goes as a JPEG of the picture drawn again upright, scaled down until it fits, with
+  /// nothing of the original's metadata. Nil when it holds no picture. Off the main actor, and
+  /// decoded at the size it goes at, never whole: a 48-megapixel photo is about 195 MB as a
+  /// bitmap, and ten may come at once.
   @concurrent nonisolated static func prepare(_ data: Data, limit: Int = imageLimitBytes) async
     -> ComposerImage?
   {
-    if let type = imageType(of: data), data.count <= limit {
-      return ComposerImage(data: data, type: type)
+    if let type = imageType(of: data), let kept = withoutMetadata(data), kept.count <= limit {
+      return ComposerImage(data: kept, type: type)
     }
     #if canImport(ImageIO)
       guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
@@ -47,7 +52,8 @@ struct ComposerImage: Sendable, Equatable {
         else {
           return nil
         }
-        if let jpeg = jpeg(picture), jpeg.count <= limit {
+        // With what ImageIO writes beside the picture left out too.
+        if let jpeg = jpeg(picture).map({ withoutMetadata($0) ?? $0 }), jpeg.count <= limit {
           return ComposerImage(data: jpeg, type: .jpeg)
         }
         side = Int(Double(max(picture.width, picture.height)) * 0.7)

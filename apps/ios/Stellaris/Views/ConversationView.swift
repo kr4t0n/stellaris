@@ -17,6 +17,9 @@ struct ConversationView: View {
   @State private var anchor: String?
   /// How tall the messages' view is, which caps an image's height.
   @State private var height: CGFloat = .infinity
+  /// The window's safe area beyond the conversation's edges, the keyboard left out, which places
+  /// the draft against the side bar. Read here, where the draft's own padding can't move it.
+  @State private var room = EdgeInsets()
 
   var body: some View {
     // The draft is a row below the messages, not laid over them, so the foot of the messages'
@@ -86,6 +89,17 @@ struct ConversationView: View {
       foot
     }
     .background(MessageColor.island)
+    .background {
+      Color.clear
+        .ignoresSafeArea(.keyboard)
+        .onGeometryChange(for: EdgeInsets.self) { proxy in
+          let insets = proxy.safeAreaInsets
+          return EdgeInsets(
+            top: 0, leading: 0, bottom: insets.bottom.rounded(), trailing: insets.trailing.rounded())
+        } action: {
+          room = $0
+        }
+    }
     .modifier(FollowsBoardLinks())
     .onChange(of: anchor) { _, id in
       if let id {
@@ -169,11 +183,11 @@ struct ConversationView: View {
       if let readOnly = model.store.readOnly(ref) {
         ReadOnlyLine(readOnly: readOnly)
       } else {
-        DraftField(conversation: feed.conversation)
+        DraftField(conversation: feed.conversation, room: room)
       }
     case .thread:
       if feed.thread?.state != .known(.closed) {
-        DraftField(conversation: feed.conversation)
+        DraftField(conversation: feed.conversation, room: room)
       }
     }
   }
@@ -283,9 +297,10 @@ struct DraftField: View {
   @State private var failure: String?
   /// The photos just picked, until their uploads start.
   @State private var picked: [PhotosPickerItem] = []
-  /// The window's safe area beyond the draft's edges, which places it against the side bar.
-  @State private var insets = EdgeInsets()
   let conversation: Conversation
+  /// The window's safe area beyond the conversation's bottom and trailing edges, the keyboard left
+  /// out, which places the draft against the side bar; none where the draft is drawn alone.
+  var room = EdgeInsets()
 
   /// Safari's address bar is 48 points tall, as wide as iOS's side bar: the capsule's height at one
   /// line, and Send's.
@@ -356,7 +371,9 @@ struct DraftField: View {
           }
           .padding(.leading, 16)
           .padding(.trailing, typeSize.isAccessibilitySize ? 16 : 0)
-          .padding(.vertical, 10)
+          .padding(.top, 10)
+          // The text keeps 2 points above the safe area, whatever the capsule reaches into it.
+          .padding(.bottom, max(10, drop + 2))
           .frame(minHeight: Self.height)
           .frame(maxWidth: .infinity, alignment: .leading)
           PhotosPicker(
@@ -397,8 +414,7 @@ struct DraftField: View {
     }
     .padding(.horizontal, 12)
     .padding(.top, 12)
-    .padding(.bottom, foot)
-    .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
+    .padding(.bottom, drop > 0 ? -drop : 12)
     .animation(.smooth(duration: 0.2), value: focused)
     .onChange(of: picked) { _, items in
       guard !items.isEmpty else {
@@ -418,21 +434,21 @@ struct DraftField: View {
   /// bar, Send stands in the bar's column, as Safari's × does, the bar's margin in from the
   /// window's edge. Elsewhere it keeps to the draft's edge.
   private var sendReach: CGFloat {
-    guard focused, besideSideBar, insets.trailing >= Self.height + Self.sideBarMargin else {
+    guard focused, besideSideBar, room.trailing >= Self.height + Self.sideBarMargin else {
       return 0
     }
-    return Self.sideBarMargin - 12 - insets.trailing
+    return Self.sideBarMargin - 12 - room.trailing
   }
 
-  /// The room under the capsule: at rest beside the side bar, down to the bar's foot, which iOS
-  /// draws below the safe area; otherwise 12 points, as above the keyboard. A failure line under
-  /// the capsule keeps it in the safe area.
-  private var foot: CGFloat {
+  /// How far the capsule reaches below the safe area: at rest beside the side bar, down to the
+  /// bar's foot, which iOS draws below it. None while the field is focused, where the capsule sits
+  /// 12 points above the keyboard, or while a failure line shows under it.
+  private var drop: CGFloat {
     let failing = failure != nil || model.uploadFailures[conversation.key] != nil
-    guard !focused, !failing, besideSideBar, insets.bottom > Self.sideBarMargin else {
-      return 12
+    guard !focused, !failing, besideSideBar, room.bottom > Self.sideBarMargin else {
+      return 0
     }
-    return Self.sideBarMargin - insets.bottom
+    return room.bottom - Self.sideBarMargin
   }
 
   /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.

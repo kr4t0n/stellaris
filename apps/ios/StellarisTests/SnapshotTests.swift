@@ -192,7 +192,8 @@ final class SnapshotTests: XCTestCase {
   }
 
   /// The draft at its tallest, five lines and then scrolling, or two where the window is short,
-  /// as the outer display is in landscape; and the citizens a mention offers.
+  /// as the outer display is in landscape, alone and in Chat, where at rest it reaches down to the
+  /// side bar's foot; and the citizens a mention offers.
   @MainActor func testTheComposer() async throws {
     let model = try await signedIn()
     model.memory?.setDraft(
@@ -208,11 +209,15 @@ final class SnapshotTests: XCTestCase {
     .environment(model)
     try await Snapshot.record(draft, named: "composer-long", in: self)
     for type in Snapshot.typeSizes {
+      print("drawing composer-short-window-\(type.name)")
       let image = try await Snapshot.image(
         of: draft.environment(\.verticalSizeClass, .compact),
         size: CGSize(width: 678, height: 466), type: type)
       try Snapshot.keep(image, named: "composer-short-window-\(type.name)", in: self)
     }
+    await model.feed(for: .general).load(using: model)
+    try await Snapshot.record(
+      ShellView().environment(model), named: "composer-long-in-chat", in: self)
     let list = MentionList(members: model.store.mentionable("")) { _ in }
       .padding(12).background(MessageColor.island)
     try await Snapshot.recordWhole(list, named: "mention-list", in: self)

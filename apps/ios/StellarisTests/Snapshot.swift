@@ -92,6 +92,8 @@ import XCTest
   static func record(_ view: some View, named name: String, in test: XCTestCase) async throws {
     for size in sizes {
       for type in typeSizes {
+        // Named in the log before it is drawn, so a view whose layout never settles is found.
+        print("drawing \(name)-\(size.name)-\(type.name)")
         let image = try await image(of: view, size: size.size, type: type)
         try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
       }
@@ -104,6 +106,7 @@ import XCTest
   {
     for size in sizes {
       for type in typeSizes {
+        print("drawing \(name)-\(size.name)-\(type.name)")
         let image = try await image(of: view, size: size.size, type: type, fitting: true)
         try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
       }

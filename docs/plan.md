@@ -217,6 +217,7 @@ Knowledge     write_knowledge(project, topic, body, revision) # project null wri
 Skills        remove_skill(name, reason)              # steward and user; skills join by proposal; the text is set aside, not destroyed
 Dashboards    update_dashboard(project, body, revision) # the project's members and the user; refused unless revision is the current one
 Images        upload_image(path)                      # a PNG, JPEG, GIF, or WebP the caller's turn names, read on its runner; a post shows it as ![…](image:<id>)
+              read_image(image_id)                    # an image the board keeps, by id or image:<id>, written on the caller's turn's runner to a temp folder of the turn's own
 ```
 
 Rules:

@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { IMAGE_LIMIT_BYTES } from "@stellaris/shared";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readTurnImage, type ImagePlaces } from "./images.js";
+import { readTurnImage, TurnImageFolders, type ImagePlaces } from "./images.js";
 
 /** The smallest PNG there is: one transparent pixel. */
 const PIXEL = Buffer.from(
@@ -172,5 +172,59 @@ describe("readTurnImage", () => {
       why: "too_big",
       detail: "status is over the 10 bytes an image may be",
     });
+  });
+});
+
+describe("TurnImageFolders", () => {
+  const TURN = "01M4WY483E0XG4Q2ZTHAX3JBZV";
+  const OTHER = "01M4WY483E0XG4Q2ZTHAX3JBZW";
+  const IMAGE = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  let tmpdir: string | undefined;
+
+  beforeEach(() => {
+    // The system temp folder is a place of its own here, apart from the worktree and the home.
+    tmpdir = process.env["TMPDIR"];
+    process.env["TMPDIR"] = temp;
+  });
+
+  afterEach(() => {
+    if (tmpdir === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = tmpdir;
+    }
+  });
+
+  it("writes each turn's images into a folder of its own in the temp folder, and removes it", async () => {
+    const folders = new TurnImageFolders();
+    const content = PIXEL.toString("base64");
+    const first = await folders.write({ turnId: TURN, id: IMAGE, type: "png", content });
+    expect(path.basename(first)).toBe(`${IMAGE}.png`);
+    expect(path.dirname(path.dirname(first))).toBe(temp);
+    expect(await readFile(first)).toEqual(PIXEL);
+    expect((await stat(path.dirname(first))).mode & 0o777).toBe(0o700);
+    for (const outside of [worktree, home]) {
+      expect(path.relative(outside, first).startsWith("..")).toBe(true);
+    }
+    // The same turn's next image goes beside it, another turn's into a folder of that turn's.
+    const jpeg = Buffer.concat([HEADERS.jpeg, Buffer.from("rest")]);
+    const second = await folders.write({
+      turnId: TURN,
+      id: OTHER,
+      type: "jpeg",
+      content: jpeg.toString("base64"),
+    });
+    expect(second).toBe(path.join(path.dirname(first), `${OTHER}.jpg`));
+    expect(await readFile(second)).toEqual(jpeg);
+    const other = await folders.write({ turnId: OTHER, id: IMAGE, type: "png", content });
+    expect(path.dirname(other)).not.toBe(path.dirname(first));
+
+    await folders.remove(TURN);
+    expect(await readdir(temp)).toEqual([path.basename(path.dirname(other))]);
+    // A turn that opened none, or whose folder went already, leaves nothing to remove.
+    await folders.remove(TURN);
+    await folders.remove("01M4WY483E0XG4Q2ZTHAX3JBZX");
+    await folders.remove(OTHER);
+    expect(await readdir(temp)).toEqual([]);
   });
 });

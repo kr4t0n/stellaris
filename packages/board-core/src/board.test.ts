@@ -4014,4 +4014,118 @@ describe("Board", () => {
     const largest = await board.postImage(USER, over.subarray(0, IMAGE_LIMIT_BYTES), "big.png");
     expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
   });
+
+  it("hands an image it keeps to the calling turn's runner, by its id or its image: address", async () => {
+    const { board } = await society();
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const posted = await board.postImage(USER, png, "board.png");
+    const turn: Actor = { ...ENG, scope: "demo", thread: "01M4WY483E0XG4Q2ZTHAX3JBZV" };
+    const read = { image_id: `image:${posted.id}` };
+    // Nothing writes files on a board without runners.
+    await expect(board.invoke(turn, "read_image", read)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "this board has no runners to write an image to",
+    });
+    const handed: Array<{ actor: Actor; id: string; type: string; bytes: Uint8Array }> = [];
+    board.openImagesWith((actor, image) => {
+      handed.push({ actor, ...image });
+      return Promise.resolve(`/tmp/stellaris-images-1/${image.id}.png`);
+    });
+
+    // Only a turn has a machine to write the file on, whoever asks.
+    for (const actor of [ENG, USER]) {
+      await expect(board.invoke(actor, "read_image", read)).rejects.toMatchObject({
+        code: "INVALID_STATE",
+        message:
+          "read_image writes the image on the machine a turn runs on, so only a turn can call it",
+      });
+    }
+    await expect(
+      board.invoke(turn, "read_image", { image_id: "01M4WY483E0XG4Q2ZTHAX3JBZW" }),
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "image 01M4WY483E0XG4Q2ZTHAX3JBZW not found",
+    });
+    for (const image_id of ["../images/x", `img:${posted.id}`, `${posted.id}.png`, ""]) {
+      await expect(board.invoke(turn, "read_image", { image_id })).rejects.toThrow(
+        "expected an image's id or image:<id>",
+      );
+    }
+    expect(handed).toEqual([]);
+
+    for (const image_id of [`image:${posted.id}`, posted.id]) {
+      expect(await board.invoke(turn, "read_image", { image_id })).toEqual({
+        id: posted.id,
+        type: "png",
+        size: png.length,
+        path: `/tmp/stellaris-images-1/${posted.id}.png`,
+      });
+    }
+    expect(handed).toEqual([
+      { actor: turn, id: posted.id, type: "png", bytes: png },
+      { actor: turn, id: posted.id, type: "png", bytes: png },
+    ]);
+    // A runner's refusal reaches the citizen as it was given.
+    board.openImagesWith(() =>
+      Promise.reject(
+        new BoardError(
+          "INVALID_STATE",
+          "runner pod, where the turn runs, cannot open images yet; upgrade it",
+        ),
+      ),
+    );
+    await expect(board.invoke(turn, "read_image", read)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message: "runner pod, where the turn runs, cannot open images yet; upgrade it",
+    });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: ["post_message", "upload_image"],
+    });
+    await expect(board.invoke(turn, "read_image", read)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "role engineer may not read_image",
+    });
+  });
+
+  it("grants read_image once, on open, to every role that may upload_image", async () => {
+    const { board } = await Board.init(dir, { name: "older society" }, { now });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: ["post_message", "upload_image"],
+    });
+    await board.setRoleCharter(USER, { name: "watcher", purpose: "Watches.", verbs: ["search"] });
+
+    const opened = await Board.open(dir, { now });
+    expect((await opened.readRole("engineer")).verbs).toEqual([
+      "post_message",
+      "upload_image",
+      "read_image",
+    ]);
+    expect((await opened.readRole("watcher")).verbs).toEqual(["search"]);
+    expect((await opened.readRole("steward")).verbs).toContain("read_image");
+    expect(
+      (await opened.readEvents(null)).filter(
+        (each) => each.type === "role.added" && each.payload["verbsAdded"] !== undefined,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        actor: "user",
+        payload: expect.objectContaining({ name: "engineer", verbsAdded: ["read_image"] }),
+      }),
+    ]);
+    // Once: a role that later goes without it keeps its choice.
+    await opened.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: ["post_message", "upload_image"],
+    });
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.readRole("engineer")).verbs).toEqual(["post_message", "upload_image"]);
+  });
 });

@@ -1,11 +1,14 @@
 import { constants } from "node:fs";
-import { open, realpath, type FileHandle } from "node:fs/promises";
+import { mkdtemp, open, realpath, rm, writeFile, type FileHandle } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  IMAGE_EXTENSIONS,
   IMAGE_LIMIT_BYTES,
   imageTypeOf,
   type ImageRefusal,
   type TurnImage,
+  type TurnImageWrite,
 } from "@stellaris/shared";
 
 /** Where a turn may upload an image from. */
@@ -100,5 +103,37 @@ export async function readTurnImage(
     return { kind: "image", type, size, content: bytes.toString("base64") };
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * Where the images a turn opens with `read_image` go: a folder of the turn's own in the system
+ * temp folder, made at its first image and removed when the turn ends. Never the turn's worktree,
+ * whose files the runner commits to a task's branch, nor its citizen's home, which is kept in git
+ * and shared.
+ */
+export class TurnImageFolders {
+  private readonly folders = new Map<string, Promise<string>>();
+
+  /** Writes an image the board sent for a turn, as `<id>.<extension>`, and answers its path. */
+  async write(image: TurnImageWrite): Promise<string> {
+    let folder = this.folders.get(image.turnId);
+    if (folder === undefined) {
+      folder = mkdtemp(path.join(tmpdir(), `stellaris-images-${image.turnId}-`));
+      this.folders.set(image.turnId, folder);
+    }
+    const file = path.join(await folder, `${image.id}.${IMAGE_EXTENSIONS[image.type]}`);
+    await writeFile(file, Buffer.from(image.content, "base64"));
+    return file;
+  }
+
+  /** Removes a turn's folder and every image in it, if it had any. */
+  async remove(turnId: string): Promise<void> {
+    const folder = this.folders.get(turnId);
+    if (folder === undefined) {
+      return;
+    }
+    this.folders.delete(turnId);
+    await rm(await folder, { recursive: true, force: true });
   }
 }

@@ -79,6 +79,11 @@ export const RunnerHelloSchema = z.object({
   /** Whether the runner reads an image a turn running there uploads; one from before never does. */
   imageReads: z.boolean().default(false),
   /**
+   * Whether the runner writes an image the board sends for a turn running there to open, for
+   * `read_image`; one from before never does.
+   */
+  imageWrites: z.boolean().default(false),
+  /**
    * Whether the runner carries a project's repository out to another runner and in from one, and
    * removes its copy once the project has moved; one from before never does.
    */
@@ -557,6 +562,22 @@ export const TurnImageSchema = z.discriminatedUnion("kind", [
 export type TurnImage = z.infer<typeof TurnImageSchema>;
 
 /**
+ * An image the board sends for a turn running on the runner to open, for `read_image`: its id and
+ * kind, which name the file, and its bytes, base64.
+ */
+export const TurnImageWriteSchema = z.object({
+  turnId: UlidSchema,
+  id: UlidSchema,
+  type: ImageTypeSchema,
+  content: z.string(),
+});
+export type TurnImageWrite = z.infer<typeof TurnImageWriteSchema>;
+
+/** Where a runner wrote an image for a turn running there: a file in a folder of that turn's own. */
+export const TurnImageFileSchema = z.object({ path: ImagePathSchema });
+export type TurnImageFile = z.infer<typeof TurnImageFileSchema>;
+
+/**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
  * task's thread takes its id, a channel's beside general in a scope, or a project's channels' in
  * the society scope, which ends when the project is archived.
@@ -748,6 +769,15 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
    * whose hello says `imageReads`.
    */
   z.object({ type: z.literal("image"), request: z.string().min(1), read: TurnImageReadSchema }),
+  /**
+   * Answered with a `TurnImageFile`, or null when the turn is not running there. Sent only to
+   * runners whose hello says `imageWrites`.
+   */
+  z.object({
+    type: z.literal("image_write"),
+    request: z.string().min(1),
+    write: TurnImageWriteSchema,
+  }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

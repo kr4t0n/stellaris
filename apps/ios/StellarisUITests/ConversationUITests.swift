@@ -141,6 +141,12 @@ final class ConversationUITests: ShellTestCase {
     XCTAssertTrue(
       draft(box, matches: #"First line\nsecond line"#), "Return doesn't add a line to the draft")
     XCTAssertTrue(send.isEnabled, "Send is off with a draft to send")
+    // Read from the keyboard's height, which also puts Send in the column: the capsule rides on it.
+    let keyboard = app.keyboards.firstMatch
+    XCTAssertTrue(keyboard.exists, "no keyboard came up")
+    XCTAssertLessThanOrEqual(
+      app.otherElements["composer"].firstMatch.frame.maxY, keyboard.frame.minY,
+      "the capsule is under the keyboard")
     let posted = app.scrollViews["messages"].staticTexts
       .matching(NSPredicate(format: "label BEGINSWITH %@", "First line")).firstMatch
     XCTAssertFalse(posted.exists, "Return posted the draft")

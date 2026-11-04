@@ -209,12 +209,16 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The keyboard covers the side bar, its tabs included, until a scroll puts it away.
 - At rest, the composer is a capsule with no Send, and its bottom sits on the same line as the side bar's foot, as Safari's address bar does beside its own bar. The app places it 24 points above the window's foot, where iOS draws the bar on the simulator, since iOS gives no way to move the bar.
 - Tapping the composer shows a round Send in the side bar's column, where Safari shows its ×, while the keyboard covers the bar. Send is dim while the draft is empty or an image uploads, and a tap on it posts. Return adds a line. A scroll puts the keyboard away and hides Send, and the draft stays.
+- With a hardware keyboard (a Bluetooth one, or the Simulator's I/O > Keyboard > Connect Hardware Keyboard), tapping the composer shows Send at the capsule's trailing end, clear of the side bar's tabs, and the capsule stays on the bar's foot while no keyboard bar shows. CI types with the software keyboard only.
+- While the post goes, Send shows a spinner, and VoiceOver reads it as "Sending". No picture in CI catches that moment.
+- The outer display in landscape: whether the capsule's bottom meets the side bar's foot, and where Send stands with the keyboard up. No test or picture covers that pose.
+- The capsule's glass and Send's over what scrolls behind them. At the largest text size, a picture from CI shows the last message's line faintly through the capsule's top edge, which is Liquid Glass's refraction.
 - The side bar's icons are outlines, as Safari's are, with one bubble for Chat.
 - The image viewer's ✕ over the top-right corner of a full-width image.
 
 **Turning and folding**
 
-- Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles. If they do, whether the composer's capsule meets that bar's foot and Send stands in its column, as on the outer display: the app places both 24 points in from the window's edges there too.
+- Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles. If they do, whether the composer's capsule meets that bar's foot, and whether Send stands in its column with the keyboard up. Beside a trailing side bar the app puts the capsule's bottom 24 points above the window's foot, as on the outer display, whatever the safe area there (20 points in the app's own model of this pose), and moves Send into the column only while the keyboard reaches higher than 186 points.
 - Unfolding brings the sky in with a fade, beside the chat in landscape and above it in portrait; folding takes it away. The chat stays where it was through both, with its draft and its scroll.
 - A partial fold, as when the phone stands half open on a table, moves nothing.
 - On a tabletop fold, whether the card below the fold, and Advance and Approve at the bar's trailing end, are easy to reach.

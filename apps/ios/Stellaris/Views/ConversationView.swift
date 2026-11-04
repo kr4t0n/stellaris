@@ -17,9 +17,11 @@ struct ConversationView: View {
   @State private var anchor: String?
   /// How tall the messages' view is, which caps an image's height.
   @State private var height: CGFloat = .infinity
-  /// The window's safe area beyond the conversation's edges, the keyboard left out, which places
-  /// the draft against the side bar. Read here, where the draft's own padding can't move it.
-  @State private var room = EdgeInsets()
+  /// The window's safe area beyond the conversation's edges, the keyboard left out, and how far up
+  /// from the window's foot the keyboard reaches, which place the draft against the side bar. Read
+  /// here, where the draft's own padding can't move them.
+  @State private var room: EdgeInsets?
+  @State private var keyboard: CGFloat = 0
 
   var body: some View {
     // The draft is a row below the messages, not laid over them, so the foot of the messages'
@@ -98,6 +100,10 @@ struct ConversationView: View {
             top: 0, leading: 0, bottom: insets.bottom.rounded(), trailing: insets.trailing.rounded())
         } action: {
           room = $0
+        }
+      Color.clear
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom.rounded() } action: {
+          keyboard = $0
         }
     }
     .modifier(FollowsBoardLinks())
@@ -183,11 +189,11 @@ struct ConversationView: View {
       if let readOnly = model.store.readOnly(ref) {
         ReadOnlyLine(readOnly: readOnly)
       } else {
-        DraftField(conversation: feed.conversation, room: room)
+        DraftField(conversation: feed.conversation, room: room, keyboard: keyboard)
       }
     case .thread:
       if feed.thread?.state != .known(.closed) {
-        DraftField(conversation: feed.conversation, room: room)
+        DraftField(conversation: feed.conversation, room: room, keyboard: keyboard)
       }
     }
   }
@@ -299,15 +305,14 @@ struct DraftField: View {
   @State private var picked: [PhotosPickerItem] = []
   let conversation: Conversation
   /// The window's safe area beyond the conversation's bottom and trailing edges, the keyboard left
-  /// out, which places the draft against the side bar; none where the draft is drawn alone.
-  var room = EdgeInsets()
+  /// out, which places the draft against the side bar; nil where the draft is drawn alone.
+  var room: EdgeInsets?
+  /// How far up from the window's foot the keyboard reaches: the safe area's foot while it is down.
+  var keyboard: CGFloat = 0
 
   /// Safari's address bar is 48 points tall, as wide as iOS's side bar: the capsule's height at one
   /// line, and Send's.
-  static let height: CGFloat = 48
-  /// How far in from the window's trailing edge and from its foot iOS 27.1 draws the side bar on
-  /// the outer display, as the simulator's pictures measure it.
-  static let sideBarMargin: CGFloat = 24
+  nonisolated static let height: CGFloat = 48
 
   var body: some View {
     let draft = Binding(
@@ -396,7 +401,7 @@ struct DraftField: View {
           .transition(.opacity)
         }
       }
-      .padding(.trailing, sendReach)
+      .padding(.trailing, placement.sendReach)
       if let failure {
         Text(failure)
           .font(MessageType.small())
@@ -412,7 +417,7 @@ struct DraftField: View {
     }
     .padding(.horizontal, 12)
     .padding(.top, 12)
-    .padding(.bottom, drop > 0 ? -drop : 12)
+    .padding(.bottom, placement.foot)
     .animation(.smooth(duration: 0.2), value: focused)
     .onChange(of: picked) { _, items in
       guard !items.isEmpty else {
@@ -423,30 +428,10 @@ struct DraftField: View {
     }
   }
 
-  /// Where iOS draws its side bar on the trailing edge, as on the outer display.
-  private var besideSideBar: Bool {
-    sideBarEdge == .trailing
-  }
-
-  /// How far Send reaches past the draft's own trailing edge: while the keyboard covers the side
-  /// bar, Send stands in the bar's column, as Safari's × does, the bar's margin in from the
-  /// window's edge. Elsewhere it keeps to the draft's edge.
-  private var sendReach: CGFloat {
-    guard focused, besideSideBar, room.trailing >= Self.height + Self.sideBarMargin else {
-      return 0
-    }
-    return Self.sideBarMargin - 12 - room.trailing
-  }
-
-  /// How far the capsule reaches below the safe area: at rest beside the side bar, down to the
-  /// bar's foot, which iOS draws below it. None while the field is focused, where the capsule sits
-  /// 12 points above the keyboard, or while a failure line shows under it.
-  private var drop: CGFloat {
-    let failing = failure != nil || model.uploadFailures[conversation.key] != nil
-    guard !focused, !failing, besideSideBar, room.bottom > Self.sideBarMargin else {
-      return 0
-    }
-    return room.bottom - Self.sideBarMargin
+  private var placement: ComposerPlacement {
+    ComposerPlacement(
+      sideBar: sideBarEdge, room: room, keyboard: keyboard, focused: focused,
+      failing: failure != nil || model.uploadFailures[conversation.key] != nil)
   }
 
   /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.
@@ -557,6 +542,48 @@ struct DraftField: View {
         failure = "The message was not sent."
       }
       sending = false
+    }
+  }
+}
+
+/// Where the draft stands against iOS's side bar. iOS 27.1 draws the side bar 24 points in from the
+/// window's trailing edge and from its foot on the outer display, below the safe area, with its
+/// three tabs 162 points tall, and gives the app no way to move it. So the draft meets it: with the
+/// keyboard down, the capsule's bottom on the bar's foot, and while the keyboard covers the tabs,
+/// Send in the bar's column, where Safari's × stands. A hardware keyboard's bar, shorter than the
+/// tabs, leaves Send at the draft's edge.
+struct ComposerPlacement: Equatable {
+  /// How far in from the window's trailing edge and from its foot iOS draws the side bar, as the
+  /// simulator's pictures measure it.
+  static let sideBarMargin: CGFloat = 24
+  /// How tall the side bar's three tabs stand, measured the same way.
+  static let sideBarTabs: CGFloat = 162
+
+  /// The room under the capsule, below zero where it reaches into the safe area.
+  var foot: CGFloat = 12
+  /// How far Send reaches past the draft's trailing edge, below zero into the bar's column.
+  var sendReach: CGFloat = 0
+}
+
+extension ComposerPlacement {
+  /// The place beside a side bar on `sideBar`, with `room`, the window's safe area beyond the
+  /// conversation's bottom and trailing edges, the keyboard left out, or nil where the draft is
+  /// drawn alone, and `keyboard`, how far up from the window's foot the keyboard reaches.
+  init(
+    sideBar: HorizontalEdge?, room: EdgeInsets?, keyboard: CGFloat, focused: Bool, failing: Bool
+  ) {
+    guard sideBar == .trailing, let room else {
+      return
+    }
+    // The capsule's bottom on the bar's foot, below the safe area where the safe area reaches
+    // higher; a failure line under it keeps it 12 points up.
+    if keyboard <= room.bottom, !failing {
+      foot = Self.sideBarMargin - room.bottom
+    }
+    if focused, keyboard >= Self.sideBarMargin + Self.sideBarTabs,
+      room.trailing >= DraftField.height + Self.sideBarMargin
+    {
+      sendReach = Self.sideBarMargin - 12 - room.trailing
     }
   }
 }

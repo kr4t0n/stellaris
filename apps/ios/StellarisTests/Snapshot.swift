@@ -41,9 +41,12 @@ import XCTest
   /// vertical bar by the display the simulator shows, the outer one, so in a window wider than that
   /// the bars fall back to the horizontal ones, as on the inner display in portrait.
   /// With `fitting`, the window then takes the height `view` lays out at, from its top, with no
-  /// safe area, so a picture holds the whole of a view taller or shorter than `size`.
+  /// safe area, so a picture holds the whole of a view taller or shorter than `size`. `prepare`
+  /// is given the hosting view once it is laid out, before the picture, to read or set what UIKit
+  /// draws, such as a list's cells.
   static func image(
-    of view: some View, size: CGSize, type: TypeSize, fitting: Bool = false
+    of view: some View, size: CGSize, type: TypeSize, fitting: Bool = false,
+    prepare: ((UIView) throws -> Void)? = nil
   ) async throws -> UIImage {
     let scene = try XCTUnwrap(
       UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
@@ -72,6 +75,12 @@ import XCTest
       window.frame = CGRect(origin: .zero, size: CGSize(width: size.width, height: height))
       host.view.layoutIfNeeded()
       try await Task.sleep(for: .milliseconds(100))
+      host.view.layoutIfNeeded()
+    }
+    if let prepare {
+      try prepare(host.view)
+      host.view.layoutIfNeeded()
+      try await Task.sleep(for: .milliseconds(300))
       host.view.layoutIfNeeded()
     }
     return UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
@@ -108,6 +117,37 @@ import XCTest
         try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
       }
     }
+  }
+
+  /// The colour of the image's pixel at `point`, in points from its top-leading corner, each
+  /// channel from 0 to 255.
+  static func color(in image: UIImage, at point: CGPoint) -> (red: Int, green: Int, blue: Int)? {
+    guard let cgImage = image.cgImage else {
+      return nil
+    }
+    let (x, y) = (Int(point.x * image.scale), Int(point.y * image.scale))
+    guard (0..<cgImage.width).contains(x), (0..<cgImage.height).contains(y) else {
+      return nil
+    }
+    var pixel = [UInt8](repeating: 0, count: 4)
+    let drawn = pixel.withUnsafeMutableBytes { buffer -> Bool in
+      guard
+        let context = CGContext(
+          data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+          space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+      else {
+        return false
+      }
+      // Core Graphics counts up from the bottom, so the image goes where its pixel at `point`
+      // falls on the context's one.
+      context.interpolationQuality = .none
+      context.draw(
+        cgImage,
+        in: CGRect(x: -x, y: y - cgImage.height + 1, width: cgImage.width, height: cgImage.height))
+      return true
+    }
+    return drawn ? (Int(pixel[0]), Int(pixel[1]), Int(pixel[2])) : nil
   }
 
   /// How many of the image's pixels are within `within` of `red`, `green`, and `blue` in each

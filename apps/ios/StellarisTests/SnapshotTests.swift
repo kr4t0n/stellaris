@@ -126,6 +126,95 @@ final class SnapshotTests: XCTestCase {
     XCTAssertLessThan(black, pixels / 100, "the draft's row draws black")
   }
 
+  /// Board, a project under it, Needs you, and Settings sit on the conversation's island gray, as
+  /// the chat beside them does, with their rows on `surface-2` at 50% over it, which blends to 29
+  /// in each channel, and nothing black.
+  @MainActor func testTheListsAreTheChatsGray() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    try await expectIslandGray(ShellView().environment(model), named: "board")
+    model.boardPath = ["demo"]
+    try await expectIslandGray(ShellView().environment(model), named: "board-project")
+    model.tab = .needsYou
+    try await expectIslandGray(ShellView().environment(model), named: "needs-you")
+    try await expectIslandGray(SettingsView().environment(model), named: "settings")
+  }
+
+  /// Checks `view` is on the island's gray with its rows on the row's, and draws no black.
+  @MainActor private func expectIslandGray(_ view: some View, named name: String) async throws {
+    let image = try await Snapshot.image(
+      of: view, size: CGSize(width: 410, height: 678), type: Snapshot.typeSizes[0])
+    try Snapshot.keep(image, named: "proof-\(name)-gray", in: self)
+    let picture = try XCTUnwrap(image.cgImage)
+    let pixels = picture.width * picture.height
+    let gray = Snapshot.pixels(in: image, near: (red: 20, green: 20, blue: 20), within: 4)
+    let rows = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 2)
+    let black = Snapshot.pixels(in: image, near: (red: 0, green: 0, blue: 0), within: 6)
+    XCTAssertGreaterThan(gray, pixels / 4, "\(name) isn't on the island's gray")
+    XCTAssertGreaterThan(rows, pixels / 20, "\(name)'s rows aren't on the row's gray")
+    XCTAssertLessThan(black, pixels / 100, "\(name) draws black")
+  }
+
+  /// A row of Board drawn pressed, and one drawn selected, as a touch and an opened row leave their
+  /// list's cells, stand apart from the rows at rest, as the system's own rows do.
+  @MainActor func testBoardsRowsShowWhenPressedAndSelected() async throws {
+    let model = try await signedIn()
+    let size = CGSize(width: 410, height: 678)
+    var spots: [CGPoint] = []
+    let rest = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      spots = try self.firstRows(in: view).map { $0.spot }
+    }
+    let marked = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      let rows = try self.firstRows(in: view)
+      rows[0].cell.isHighlighted = true
+      rows[1].cell.isSelected = true
+    }
+    try Snapshot.keep(rest, named: "proof-rows-at-rest", in: self)
+    try Snapshot.keep(marked, named: "proof-rows-pressed-and-selected", in: self)
+    XCTAssertEqual(spots.count, 2)
+    for (spot, state) in zip(spots, ["pressed", "selected"]) {
+      let before = try XCTUnwrap(Snapshot.color(in: rest, at: spot))
+      let after = try XCTUnwrap(Snapshot.color(in: marked, at: spot))
+      let change = max(
+        abs(after.red - before.red), abs(after.green - before.green),
+        abs(after.blue - before.blue))
+      XCTAssertGreaterThanOrEqual(
+        change, 6, "a \(state) row draws as one at rest: \(before), then \(after)")
+    }
+  }
+
+  /// The first two rows of the list in `view`, top first, each with a point on it, in the window,
+  /// clear of its words.
+  @MainActor private func firstRows(
+    in view: UIView
+  ) throws -> [(cell: UICollectionViewCell, spot: CGPoint)] {
+    let list = try XCTUnwrap(collectionView(in: view), "the view holds no list")
+    let cells = list.visibleCells.sorted { $0.frame.minY < $1.frame.minY }
+    let first = try XCTUnwrap(cells.first, "the list shows no rows")
+    let second = try XCTUnwrap(cells.dropFirst().first, "the list shows one row")
+    return [first, second].map { cell in
+      let frame = cell.convert(cell.bounds, to: nil)
+      return (cell, CGPoint(x: frame.minX + frame.width * 0.8, y: frame.midY))
+    }
+  }
+
+  @MainActor private func collectionView(in view: UIView) -> UICollectionView? {
+    if let list = view as? UICollectionView {
+      return list
+    }
+    for subview in view.subviews {
+      if let list = collectionView(in: subview) {
+        return list
+      }
+    }
+    return nil
+  }
+
   /// A thread opened from #general, with its first message and its draft, then #general with
   /// the thread at its foot, where it was opened.
   @MainActor func testAThreadOpenedOnAChannel() async throws {

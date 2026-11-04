@@ -108,13 +108,24 @@ export class RunnerClient {
   ): Promise<void> {
     const reader = body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
+    // A frame as large as an image's for `read_image` comes in hundreds of pieces. They are held
+    // apart until one could end it, since joining each to the rest and searching again copies the
+    // whole frame at every piece.
+    const held: string[] = [];
+    let last = "";
     for (;;) {
       const { value, done } = await reader.read();
       if (done) {
         return;
       }
       heard();
-      buffer += value;
+      if (!`${last}${value}`.includes("\n\n")) {
+        held.push(value);
+        last = value.at(-1) ?? last;
+        continue;
+      }
+      buffer += held.join("") + value;
+      held.length = 0;
       let end = buffer.indexOf("\n\n");
       while (end !== -1) {
         const frame = buffer.slice(0, end);
@@ -139,6 +150,7 @@ export class RunnerClient {
           handlers.onMalformed?.(String(error));
         }
       }
+      last = buffer.at(-1) ?? "";
     }
   }
 

@@ -126,6 +126,8 @@ A post reaches a turn as markdown, so an image in it is only its address, `image
 
 Any image the board keeps may be opened, not only one a post the turn can read shows: every post, brief, topic, and dashboard is in the projection, which every runner mirrors whole (`boardManifest` lists every file), so such a rule would turn away an image in a topic or one the turn just uploaded and keep out nothing a turn could not already see by its id. What it leaves open is an image uploaded and shown nowhere, as one the user took out of a draft: its id is 80 random bits, unless another id was made in the same millisecond, in which case it is the one before plus one, since ids come from one monotonic source.
 
+A message that large is one frame on the job stream, so the runner's reader holds a frame's pieces apart until one could end it (see [large messages on the stream](runners.md#the-runner-reads-a-large-message-on-the-stream-in-one-pass)).
+
 ## Tokens and metrics
 
 ### A citizen's tokens are summed from the event log, and a turn without a count is unknown, never zero

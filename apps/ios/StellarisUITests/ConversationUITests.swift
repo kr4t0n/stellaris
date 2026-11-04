@@ -117,6 +117,77 @@ final class ConversationUITests: ShellTestCase {
     return XCTWaiter().wait(for: [matching], timeout: 20) == .completed
   }
 
+  /// As Safari shows its × only while its address bar has the keyboard, the draft shows no Send
+  /// until its field is focused, then a round Send beside the capsule in the side bar's column,
+  /// off while there is nothing to send. Return adds a line rather than posting. Putting the
+  /// keyboard away takes Send with it and keeps the draft, and a tap on the field brings it back.
+  @MainActor func testShowsSendOnlyWhileTheDraftIsFocused() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let send = app.buttons["send"].firstMatch
+    XCTAssertFalse(send.exists, "Send shows while the draft isn't focused")
+    let box = draft(app)
+    box.tap()
+    XCTAssertTrue(send.waitForExistence(timeout: 20), "focusing the draft shows no Send")
+    XCTAssertEqual(send.label, "Send")
+    XCTAssertFalse(send.isEnabled, "Send is on with nothing to send")
+    // Where Safari's × stands: the side bar's column, which the keyboard covers.
+    let chat = app.buttons["Chat"].firstMatch
+    XCTAssertEqual(
+      send.frame.midX, chat.frame.midX, accuracy: 2, "Send isn't in the side bar's column")
+
+    box.typeText("First line\nsecond line")
+    XCTAssertTrue(
+      draft(box, matches: #"First line\nsecond line"#), "Return doesn't add a line to the draft")
+    XCTAssertTrue(send.isEnabled, "Send is off with a draft to send")
+    let posted = app.scrollViews["messages"].staticTexts
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "First line")).firstMatch
+    XCTAssertFalse(posted.exists, "Return posted the draft")
+    keepScreen("composer-focused")
+
+    dragDown(app)
+    XCTAssertTrue(send.waitForNonExistence(timeout: 20), "Send stays once the keyboard goes")
+    XCTAssertTrue(
+      draft(box, matches: #"First line\nsecond line"#), "the draft goes with the keyboard")
+    keepScreen("composer-at-rest-with-draft")
+    box.tap()
+    XCTAssertTrue(send.waitForExistence(timeout: 20), "focusing the draft again shows no Send")
+    XCTAssertTrue(send.isEnabled, "Send is off with a draft to send")
+  }
+
+  /// At rest the capsule's bottom is on the side bar's foot, as Safari's address bar is on its
+  /// bar's, read from the two frames on the outer display.
+  @MainActor func testTheCapsuleMeetsTheSideBarsFoot() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let bar = app.tabBars.firstMatch
+    let capsule = app.otherElements["composer"].firstMatch
+    let tabs = app.buttons.matching(
+      NSPredicate(format: "label IN %@", ["Chat", "Board", "Needs you"]))
+    var frames = [
+      ("window", app.windows.firstMatch), ("tab bar", bar), ("draft", draft(app)),
+      ("capsule", capsule),
+    ]
+    frames += tabs.allElementsBoundByIndex.map { ($0.label, $0) }
+    let read = frames.map { name, element in
+      "\(name): \(element.exists ? "\(element.frame)" : "none")"
+    }
+    .joined(separator: "\n")
+    print("frames:\n\(read)")
+    let attachment = XCTAttachment(string: read)
+    attachment.name = "composer-frames"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    keepScreen("composer-at-rest")
+    XCTAssertTrue(bar.exists, "XCUITest finds no tab bar")
+    XCTAssertTrue(capsule.exists, "the draft has no capsule")
+    XCTAssertEqual(
+      capsule.frame.maxY, bar.frame.maxY, accuracy: 1,
+      "the capsule's bottom is \(bar.frame.maxY - capsule.frame.maxY) pt above the side bar's foot")
+  }
+
   /// Typing `@` offers the citizens to mention, a pick completes the name, and Send posts the draft
   /// to the foot of the conversation and empties the box.
   @MainActor func testPostsFromTheComposerWithAMention() {

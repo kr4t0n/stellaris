@@ -110,20 +110,60 @@ final class SnapshotTests: XCTestCase {
     XCTAssertGreaterThan(gray, pixels / 3, "the conversation isn't on the island's gray")
   }
 
-  /// The draft is the web's composer: a box of `surface-2` at 50% over the island's gray, which
-  /// blends to 29 in each channel, with nothing black in its row.
-  @MainActor func testTheDraftIsTheWebsComposer() async throws {
+  /// The draft at rest is Safari's capsule: 48 points tall at one line, its ends round all the way,
+  /// on the conversation's gray with no strip or hairline above it, and no Send while its field
+  /// isn't focused, though it holds text.
+  @MainActor func testTheDraftAtRestIsACapsuleWithNoSend() async throws {
     let model = try await signedIn()
+    model.memory?.setDraft("Ship it", for: .general)
     let image = try await Snapshot.image(
       of: DraftField(conversation: .general).background(MessageColor.island).environment(model),
       size: CGSize(width: 410, height: 100), type: Snapshot.typeSizes[0], fitting: true)
-    try Snapshot.keep(image, named: "proof-draft-composer", in: self)
-    let picture = try XCTUnwrap(image.cgImage)
-    let pixels = picture.width * picture.height
-    let box = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 3)
-    let black = Snapshot.pixels(in: image, near: (red: 0, green: 0, blue: 0), within: 6)
-    XCTAssertGreaterThan(box, pixels / 3, "the draft's box isn't the composer's gray")
-    XCTAssertLessThan(black, pixels / 100, "the draft's row draws black")
+    try Snapshot.keep(image, named: "proof-draft-capsule", in: self)
+    let bitmap = try XCTUnwrap(Snapshot.Bitmap(image))
+    let width = CGFloat(bitmap.width) / bitmap.scale
+    let height = CGFloat(bitmap.height) / bitmap.scale
+    // Lighter than the island's 20 in each channel; a shadow, darker, is no part of the box.
+    func drawn(_ x: CGFloat, _ y: CGFloat) -> Bool {
+      let pixel = bitmap.pixel(at: CGPoint(x: x, y: y))
+      return pixel.red + pixel.green + pixel.blue > 3 * 26
+    }
+    XCTAssertFalse(drawn(width / 2, 0.5), "a hairline runs above the draft")
+    // The longest run of drawn points down a line a third of the way across, past the text.
+    let across = width / 3
+    var run = (start: 0, length: 0)
+    var current = (start: 0, length: 0)
+    for y in 0..<Int(height) {
+      if drawn(across, CGFloat(y) + 0.5) {
+        current = (current.length == 0 ? y : current.start, current.length + 1)
+        if current.length > run.length {
+          run = current
+        }
+      } else {
+        current = (0, 0)
+      }
+    }
+    XCTAssertEqual(run.length, 48, accuracy: 2, "the draft at rest isn't Safari's 48 points tall")
+    let top = CGFloat(run.start)
+    let middle = top + CGFloat(run.length) / 2
+    let leading = try XCTUnwrap(
+      (0..<Int(across)).first { drawn(CGFloat($0) + 0.5, middle) }, "the draft draws no box")
+    // Half its height round: a point 4 in from the corner of its frame is outside a capsule, and
+    // inside a box rounded less.
+    XCTAssertFalse(
+      drawn(CGFloat(leading) + 4, top + 4), "the draft's ends aren't round all the way")
+    XCTAssertTrue(drawn(CGFloat(leading) + 4, middle), "the draft's end isn't drawn")
+    // Send would be the web's primary white, at the trailing end, with text to send.
+    let primary = (red: 245, green: 245, blue: 245)
+    var white = 0
+    for y in stride(from: top, to: top + CGFloat(run.length), by: 1 / bitmap.scale) {
+      for x in stride(from: width * 2 / 3, to: width, by: 1 / bitmap.scale) {
+        if bitmap.pixel(at: CGPoint(x: x, y: y), isNear: primary, within: 12) {
+          white += 1
+        }
+      }
+    }
+    XCTAssertLessThan(white, 2_500, "the draft at rest draws a Send")
   }
 
   /// A thread opened from #general, with its first message and its draft, then #general with

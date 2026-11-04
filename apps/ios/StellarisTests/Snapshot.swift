@@ -115,35 +115,76 @@ import XCTest
   static func pixels(
     in image: UIImage, near color: (red: Int, green: Int, blue: Int), within: Int = 24
   ) -> Int {
-    guard let cgImage = image.cgImage else {
-      return 0
-    }
-    let (width, height) = (cgImage.width, cgImage.height)
-    var bytes = [UInt8](repeating: 0, count: width * height * 4)
-    let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
-      guard
-        let context = CGContext(
-          data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-      else {
-        return false
-      }
-      context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-      return true
-    }
-    guard drawn else {
+    guard let bitmap = Bitmap(image) else {
       return 0
     }
     var count = 0
-    for start in stride(from: 0, to: bytes.count, by: 4) {
-      let (red, green, blue) = (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
-      if abs(red - color.red) < within, abs(green - color.green) < within,
-        abs(blue - color.blue) < within
-      {
-        count += 1
+    for y in 0..<bitmap.height {
+      for x in 0..<bitmap.width {
+        let pixel = bitmap.pixel(x, y)
+        if abs(pixel.red - color.red) < within, abs(pixel.green - color.green) < within,
+          abs(pixel.blue - color.blue) < within
+        {
+          count += 1
+        }
       }
     }
     return count
+  }
+
+  /// A picture's pixels, read in points or in pixels from its top-leading corner.
+  struct Bitmap {
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    private let bytes: [UInt8]
+
+    init?(_ image: UIImage) {
+      guard let cgImage = image.cgImage else {
+        return nil
+      }
+      let (width, height) = (cgImage.width, cgImage.height)
+      var bytes = [UInt8](repeating: 0, count: width * height * 4)
+      let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+        guard
+          let context = CGContext(
+            data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else {
+          return false
+        }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+      }
+      guard drawn else {
+        return nil
+      }
+      self.width = width
+      self.height = height
+      self.scale = image.scale
+      self.bytes = bytes
+    }
+
+    func pixel(_ x: Int, _ y: Int) -> (red: Int, green: Int, blue: Int) {
+      let start = (y * width + x) * 4
+      return (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
+    }
+
+    /// The pixel at `point`, in points.
+    func pixel(at point: CGPoint) -> (red: Int, green: Int, blue: Int) {
+      pixel(
+        min(max(Int(point.x * scale), 0), width - 1),
+        min(max(Int(point.y * scale), 0), height - 1))
+    }
+
+    /// Whether the pixel at `point`, in points, is within `within` of `color` in each channel.
+    func pixel(
+      at point: CGPoint, isNear color: (red: Int, green: Int, blue: Int), within: Int
+    ) -> Bool {
+      let pixel = pixel(at: point)
+      return abs(pixel.red - color.red) < within && abs(pixel.green - color.green) < within
+        && abs(pixel.blue - color.blue) < within
+    }
   }
 }

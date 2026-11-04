@@ -425,7 +425,8 @@ struct DraftField: View {
       failing: failure != nil || model.uploadFailures[conversation.key] != nil)
   }
 
-  /// Uploads the photos picked, each as Photos gives it in the most compatible encoding.
+  /// Uploads the photos picked, each as Photos gives it in the most compatible encoding, without
+  /// its metadata (`ComposerImage.prepare`).
   private func attach(_ items: [PhotosPickerItem]) {
     for (item, held) in zip(items, hold(items.count)) {
       Task {

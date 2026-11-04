@@ -20,16 +20,16 @@ struct ComposerImage: Sendable, Equatable {
   /// The longest side, in pixels, a picture the app draws again starts at.
   static let largestSide = 4096
 
-  /// The picture `data` holds, without its metadata, such as where, when, and with what a photo
-  /// was taken, which the board would keep for anyone who opens the image. A kind the board keeps,
-  /// as the JPEG Photos gives in its most compatible encoding, goes in that kind when it fits the
+  /// The picture `data` holds, without its metadata, such as where, when, and with what a photo was
+  /// taken, which the board would keep for anyone who opens the image. A kind the board keeps, as
+  /// the JPEG Photos gives in its most compatible encoding, goes in that kind when it fits the
   /// limit without its metadata: its pictures byte for byte, every frame and its colour profile
   /// included, and its orientation alone where that turns it (`withoutMetadata`). Anything else,
-  /// such as a HEIC or TIFF pasted, a photo past the limit, or an image that doesn't read to its
-  /// end, goes as a JPEG of the picture drawn again upright, scaled down until it fits, with
-  /// nothing of the original's metadata. Nil when it holds no picture. Off the main actor, and
-  /// decoded at the size it goes at, never whole: a 48-megapixel photo is about 195 MB as a
-  /// bitmap, and ten may come at once.
+  /// such as a HEIC or TIFF pasted, a photo still past the limit without its metadata, or an image
+  /// that doesn't read to its end, goes as a JPEG of the picture drawn again upright, scaled down
+  /// until it fits, with nothing of the original's metadata. Nil when it holds no picture. Off the
+  /// main actor, and decoded at the size it goes at, never whole: a 48-megapixel photo is about
+  /// 195 MB as a bitmap, and ten may come at once.
   @concurrent nonisolated static func prepare(_ data: Data, limit: Int = imageLimitBytes) async
     -> ComposerImage?
   {

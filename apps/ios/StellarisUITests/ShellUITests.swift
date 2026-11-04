@@ -190,12 +190,14 @@ final class ShellUITests: ShellTestCase {
       messages.staticTexts["message-00000000000000000000000012-1"].firstMatch
         .waitForExistence(timeout: 20),
       "the task from Board stays loading")
+    keepScreen("task-from-board-late")
     tab(app, "Needs you")
     pick(app, "stage-00000000000000000000000010")
     XCTAssertTrue(
       messages.staticTexts["message-00000000000000000000000011"].firstMatch
         .waitForExistence(timeout: 20),
       "the stage from Needs you stays loading")
+    keepScreen("stage-from-needs-you-late")
   }
 
   /// Picking in Board or Needs you opens the conversation in Chat, and Back retraces the steps.

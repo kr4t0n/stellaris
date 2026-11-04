@@ -137,6 +137,13 @@ import Testing
     try await model.decide(verdict)
     #expect(try await eventually { model.store.proposal(reallocation)?.status == .known(.rejected) })
     #expect(model.store.proposal(reallocation)?.reason == "One reviewer keeps up for now.")
+    // The decision ends each sentence once, as the board's does, though the charter's line and the
+    // reason both end in a period.
+    let decided =
+      "Rejected: reallocation of role reviewer (up to 2 per project): Two reviewers per project."
+      + " Reason: One reviewer keeps up for now."
+    let feed = model.feed(for: .thread(reallocation))
+    #expect(try await eventually { feed.messages.last?.body == decided })
     #expect(model.reasons.isEmpty)
     #expect(model.deciding == nil)
     // Decided, it no longer waits on the user, and no second decision goes.

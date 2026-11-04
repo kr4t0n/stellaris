@@ -15,7 +15,12 @@ import Testing
 /// keeps its writes under.
 @MainActor @Suite(.serialized) struct ComposerImageTests {
   private let general = Conversation.general
-  private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13])
+  /// A PNG of one pixel, whole, since the app sends no image that doesn't read to its end.
+  private let png = Data(
+    base64Encoded: [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUzZswgIiSpAAAACklEQVQI12NgAAAAAgAB",
+      "4iG8MwAAAABJRU5ErkJggg==",
+    ].joined())!
 
   private func signedIn() async throws -> AppModel {
     let (model, _) = fakeApp()
@@ -180,10 +185,10 @@ import Testing
     #expect(next.draft(.channel("lab/general")) == "")
   }
 
+  /// How an image with metadata goes is in `PhotoMetadataTests`.
   @Test func keepsWhatTheBoardTakesAsItIs() async throws {
     #expect(await ComposerImage.prepare(png) == ComposerImage(data: png, type: .png))
-    let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 16])
-    #expect(await ComposerImage.prepare(jpeg)?.name == "image.jpeg")
+    #expect(await ComposerImage.prepare(png)?.name == "image.png")
     #expect(await ComposerImage.prepare(Data("<svg/>".utf8)) == nil)
   }
 

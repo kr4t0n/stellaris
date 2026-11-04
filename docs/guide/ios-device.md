@@ -244,7 +244,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 
 **Over the network**
 
-- With the board across a real network, open a task from Board, a stage or a question from Needs you, and a channel from Board: each shows its messages with no pull. CI checks this against a fake board that answers 1.5 seconds late. Only the device shows a real network's timing.
+- With the board across a real network, folded and open, open a task from Board, a stage and a question from Needs you, and a channel from Board: each shows its messages with no pull. CI opens only a task from Board and a stage from Needs you, on the outer display, against a fake board that answers 1.5 seconds late. Only the device shows the inner display and a real network's timing.
 
 **Over time**
 

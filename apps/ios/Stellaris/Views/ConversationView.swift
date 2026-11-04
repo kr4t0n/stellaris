@@ -660,9 +660,9 @@ struct ComposerGlyph: View {
   }
 }
 
-/// Sends the draft: a round button as tall as the draft's capsule, the web's primary white with the
-/// page's dark arrow while there is something to send, Liquid Glass with a dim arrow while the draft
-/// is empty or an image still uploads, and a spinner on the white while the post goes.
+/// Sends the draft: a round button of Liquid Glass as tall as the draft's capsule, as Safari's ×
+/// is, with the web's primary white arrow while there is something to send, a dim one while the
+/// draft is empty or an image still uploads, and a spinner while the post goes.
 struct SendButton: View {
   let sending: Bool
   let enabled: Bool
@@ -670,21 +670,19 @@ struct SendButton: View {
 
   var body: some View {
     let circle = Circle()
-    let lit = enabled || sending
     Button(action: action) {
       Group {
         if sending {
           ProgressView()
-            .tint(MessageColor.surface0)
+            .tint(MessageColor.primary)
         } else {
           Image(systemName: "arrow.up")
             .font(.system(size: 19, weight: .semibold))
-            .foregroundStyle(enabled ? MessageColor.surface0 : MessageColor.tertiary)
+            .foregroundStyle(enabled ? MessageColor.primary : MessageColor.tertiary)
         }
       }
       .frame(width: DraftField.height, height: DraftField.height)
-      .background(lit ? MessageColor.primary : .clear, in: circle)
-      .glassEffect(lit ? .identity : .regular, in: circle)
+      .glassEffect(.regular, in: circle)
       .contentShape(circle)
     }
     .buttonStyle(.plain)

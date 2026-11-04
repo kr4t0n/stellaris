@@ -153,7 +153,10 @@ final class SnapshotTests: XCTestCase {
     XCTAssertFalse(
       drawn(CGFloat(leading) + 4, top + 4), "the draft's ends aren't round all the way")
     XCTAssertTrue(drawn(CGFloat(leading) + 4, middle), "the draft's end isn't drawn")
-    // Send would be the web's primary white, at the trailing end, with text to send.
+    // The round Send stands beside the capsule, which would then end 58 points short of the
+    // draft's trailing edge, 12 in.
+    XCTAssertTrue(drawn(width - 16, middle), "the capsule ends short of the draft's edge")
+    // The web's Send was a white button at the trailing end, with text to send.
     let primary = (red: 245, green: 245, blue: 245)
     var white = 0
     for y in stride(from: top, to: top + CGFloat(run.length), by: 1 / bitmap.scale) {

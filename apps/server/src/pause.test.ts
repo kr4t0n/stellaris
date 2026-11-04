@@ -469,6 +469,27 @@ describe("holding a CLI while its limit lasts", () => {
       30 * 60_000,
       30 * 60_000 + 2 * 3_600_000,
     ]);
+
+    // While the user's pause holds Claude there too, nothing is read; resumed, a waiting turn's
+    // limit is read again, the half hour since the last read being over.
+    answers.push(() =>
+      CliQuotaSchema.parse({ observedAt: now().toISOString(), source: "read", status: "allowed" }),
+    );
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "claude" });
+    advance(31 * 60_000);
+    await limit(null);
+    await wake("eng-1");
+    await settle();
+    await settle();
+    expect(reads).toHaveLength(3);
+    await board.setRunnerPaused(USER, "pod", { paused: false, cli: "claude" });
+    await settle();
+    await expect.poll(() => reads.length).toBe(4);
+    await expect
+      .poll(async () => (await board.readRunner("pod")).quotas?.claude?.status)
+      .toBe("allowed");
+    await settle();
+    expect(ran).toEqual(["eng-1@pod", "eng-1@pod", "eng-1@pod"]);
     await scheduler.stop();
   });
 });

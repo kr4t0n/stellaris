@@ -206,7 +206,9 @@ import XCTest
 
   /// The image's pixels as bytes of red, green, blue, and alpha, a row at a time from its top, with
   /// its width and height in pixels.
-  private static func rgba(of image: UIImage) -> (bytes: [UInt8], width: Int, height: Int)? {
+  nonisolated private static func rgba(
+    of image: UIImage
+  ) -> (bytes: [UInt8], width: Int, height: Int)? {
     guard let cgImage = image.cgImage else {
       return nil
     }

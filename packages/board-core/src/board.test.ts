@@ -2138,6 +2138,61 @@ describe("Board", () => {
     expect((await board.approve(STEW, { proposal_id: channel.id })).outcome).toBe("approved");
   });
 
+  it("ends each sentence of a proposal's posts once, however its charter line and reason end", async () => {
+    const { board } = await society();
+    const pitched = async (name: string, purpose: string): Promise<Ulid> =>
+      (
+        await board.propose(ENG, {
+          kind: "channel",
+          charter: { project: "demo", name, purpose },
+          rationale: "Ideas keep landing in general.",
+        })
+      ).id;
+    const posts = async (id: Ulid) => (await board.listThread(id)).map((message) => message.body);
+
+    // A charter line and a reason that end in a period keep that one, in the pitch, the decision,
+    // and the notice of the channel the approval opened.
+    const ended = await pitched("ideas", "Loose ideas.");
+    await board.approve(USER, { proposal_id: ended, reason: "One channel keeps them apart." });
+    expect(await posts(ended)).toEqual([
+      `Proposal ${ended}: channel demo/ideas: Loose ideas.\n\nIdeas keep landing in general.\n`,
+      "Approved: channel demo/ideas: Loose ideas. Reason: One channel keeps them apart. Provisioned: channel demo/ideas.\n",
+    ]);
+    expect((await board.listChannel("demo/general")).at(-1)?.body).toBe(
+      "Channel demo/ideas opened by user: Loose ideas. Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.\n",
+    );
+
+    // Neither ends in one, so the board adds each, as it always has.
+    const open = await pitched("plans", "Plans for later");
+    await board.reject(USER, { proposal_id: open, reason: "One reviewer keeps up for now" });
+    expect(await posts(open)).toEqual([
+      `Proposal ${open}: channel demo/plans: Plans for later.\n\nIdeas keep landing in general.\n`,
+      "Rejected: channel demo/plans: Plans for later. Reason: One reviewer keeps up for now.\n",
+    ]);
+
+    // A question, an exclamation, or an ellipsis ends one too, before any closing quotes, brackets,
+    // or emphasis; a period inside code does not, and the space around the text goes.
+    const reasons: [string, string][] = [
+      ["Is one reviewer enough?", "Is one reviewer enough?"],
+      ["Not now!", "Not now!"],
+      ["Later…", "Later…"],
+      ['The plan says "after the release."', 'The plan says "after the release."'],
+      ["(After the release.)", "(After the release.)"],
+      ["Wait for 0.5 (is it soon?)", "Wait for 0.5 (is it soon?)"],
+      ["**Not yet.**", "**Not yet.**"],
+      ["Run `make.`", "Run `make.`."],
+      ["  Not yet. \n", "Not yet."],
+      ["  Not yet  ", "Not yet."],
+    ];
+    for (const [reason, shown] of reasons) {
+      const id = await pitched("plans", "Plans for later");
+      await board.reject(USER, { proposal_id: id, reason });
+      expect((await posts(id)).at(-1)).toBe(
+        `Rejected: channel demo/plans: Plans for later. Reason: ${shown}\n`,
+      );
+    }
+  });
+
   it("provisions what an approval asked for: members, channels, roles, retirements", async () => {
     const { board, eng } = await society();
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
@@ -2800,12 +2855,16 @@ describe("Board", () => {
       "Steps for uv-setup.",
     );
 
-    await board.removeSkill(USER, { name: "old-plan", reason: "No longer used" });
+    // A reason that ends a sentence another way than with a period keeps its own ending too.
+    await board.removeSkill(USER, { name: "old-plan", reason: "Who still uses it?" });
     expect(await board.listSocietySkills()).toEqual([]);
+    expect((await board.listChannel("general")).at(-1)?.body).toBe(
+      "Skill old-plan removed from the society by user: Who still uses it? Every citizen's skills index stops listing it from its next turn.\n",
+    );
     const events = (await board.readEvents(null)).filter((e) => e.type === "skill.removed");
     expect(events.map((e) => [e.actor, e.payload])).toEqual([
       ["stew", { name: "uv-setup", reason: "Superseded by @eng-1's uv-project." }],
-      ["user", { name: "old-plan", reason: "No longer used" }],
+      ["user", { name: "old-plan", reason: "Who still uses it?" }],
     ]);
 
     // A steward charter from before the verb gains it with the seed's other verbs on open.

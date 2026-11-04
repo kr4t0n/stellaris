@@ -54,6 +54,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - The board stamps every message's author; no verb takes one. Ids are ULIDs from one monotonic source, and cursors and "since" comparisons rely on their sorting as strings.
 - A thread is a record off a channel (`threads/<id>.md`, its messages in `threads/<id>/`). A task's or a proposal's thread takes its subject's id. Participants are derived, never stored.
 - A mention is an `@name` outside code, found by `mentionsIn` (`@stellaris/shared/mentions`) with micromark and GFM without autolink literals and footnote calls. `postMentions` bounds the parse to 500 ms in a `vm`, past which every name counts. Never write an `@` into a post the board authors: it would wake whoever it names.
+- A board post quotes someone's text as a sentence through `asSentence`, never as `${text}.`, so text that already ends one keeps its own ending ([the rule](./docs/internals/board.md#a-post-ends-the-text-it-quotes-with-one-period)).
 - `refreshMember` rewrites a citizen's roster entry; call it in any new path that changes an agent record, a claim, a task outcome, or a turn record.
 - Memory reaches a turn only as rendered instructions (`renderInstructions`: the charter, the norms, `memory/core.md`, and a skills index); neither CLI's own discovery is relied on. What a citizen writes (profile, memory, skills, dashboards) is read with `readLooseMarkdown`, which never throws.
 - `search` never reads another citizen's home; a new search source must keep that.

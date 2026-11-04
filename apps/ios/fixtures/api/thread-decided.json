@@ -28,7 +28,7 @@
         "thread": "00000000000000000000000006",
         "ts": "2026-01-01T00:00:00.000Z",
         "mentions": [],
-        "body": "Proposal 00000000000000000000000006: channel demo/release: The 0.4.0 release..\n\nThe release needs a workstream of its own.\n"
+        "body": "Proposal 00000000000000000000000006: channel demo/release: The 0.4.0 release.\n\nThe release needs a workstream of its own.\n"
       },
       {
         "id": "00000000000000000000000018",
@@ -40,7 +40,7 @@
         },
         "ts": "2026-01-01T00:00:00.000Z",
         "mentions": [],
-        "body": "Approved: channel demo/release: The 0.4.0 release.. Provisioned: channel demo/release.\n"
+        "body": "Approved: channel demo/release: The 0.4.0 release. Provisioned: channel demo/release.\n"
       }
     ]
   }

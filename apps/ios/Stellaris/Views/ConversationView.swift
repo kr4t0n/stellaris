@@ -371,9 +371,7 @@ struct DraftField: View {
           }
           .padding(.leading, 16)
           .padding(.trailing, typeSize.isAccessibilitySize ? 16 : 0)
-          .padding(.top, 10)
-          // The text keeps 2 points above the safe area, whatever the capsule reaches into it.
-          .padding(.bottom, max(10, drop + 2))
+          .padding(.vertical, 10)
           .frame(minHeight: Self.height)
           .frame(maxWidth: .infinity, alignment: .leading)
           PhotosPicker(

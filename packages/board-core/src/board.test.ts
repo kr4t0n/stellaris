@@ -3616,11 +3616,12 @@ describe("Board", () => {
         transcript,
       );
     };
-    // A post changes the board; a read, a failed claim, and a shell command do not.
+    // A post changes the board; a read, an image opened, a failed claim, and a shell command do not.
     await finish([result("mcp__board__post_message", true)]);
     await finish([
       result("Bash", true),
       result("mcp__board__get_task", true),
+      result("mcp__board__read_image", true),
       result("mcp__board__claim_task", false),
     ]);
     // A turn that kept no transcript is counted apart.

@@ -4,7 +4,7 @@ import path from "node:path";
 import { Board } from "@stellaris/board-core";
 import { Scheduler } from "@stellaris/scheduler";
 import { ZERO_USAGE, type AgentBackend } from "@stellaris/runner-core";
-import type { CliKind } from "@stellaris/shared";
+import { CliQuotaSchema, type CliKind, type CliQuota } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
@@ -241,5 +241,234 @@ describe("pausing a runner, or one CLI on it", () => {
     expect(await post("ghost/pause", userToken)).toBe(404);
     expect((await board.readRunner("pod")).paused).toBeUndefined();
     expect((await board.readRunner("pod")).pausedClis).toBeUndefined();
+  });
+});
+
+describe("holding a CLI while its limit lasts", () => {
+  let dir: string;
+  let society: TestSociety | null = null;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-limit-test-"));
+  });
+
+  afterEach(async () => {
+    await society?.stop();
+    society = null;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A society on one clock with eng-1 on Claude and rev-1 on Codex in a project living on pod, and a
+   * scheduler over its hub. Every turn says who ran it; Claude's quota reads answer as `read` says.
+   */
+  async function limitedSociety(read?: () => Promise<CliQuota>) {
+    let clock = Date.parse("2026-11-04T08:00:00.000Z");
+    const now = (): Date => new Date(clock);
+    const { board, userToken } = await Board.init(dir, { name: "limits" }, { now });
+    await addWorkRoles(board);
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["lab"],
+    });
+    await board.addAgent(USER, {
+      name: "rev-1",
+      role: "reviewer",
+      cli: "codex",
+      memberships: ["lab"],
+    });
+    const ran: string[] = [];
+    const backend = (kind: CliKind): AgentBackend => ({
+      kind,
+      newSession: () => Promise.resolve(`session-${ran.length}`),
+      runTurn: (request) => {
+        ran.push(`${request.spec.agent}@${request.spec.runner}`);
+        return Promise.resolve({
+          events: [],
+          finalText: "done",
+          usage: ZERO_USAGE,
+          costUsd: 0,
+          status: {
+            summary: "done",
+            claimsHeld: [],
+            blockedOn: [],
+            needsUserDecision: false,
+            memoryUpdated: false,
+          },
+          exitReason: "completed",
+        });
+      },
+      ...(kind === "claude" && read !== undefined ? { readQuota: read } : {}),
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend("claude"), codex: backend("codex") }),
+      now,
+      hubNow: now,
+    });
+    await board.placeProject("lab", "pod");
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now,
+      timings: { debounceMs: 0, userDebounceMs: 0, heartbeatMs: 24 * 3_600_000 },
+      concurrency: 4,
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await settle();
+    expect(ran.toSorted()).toEqual(["eng-1@pod", "rev-1@pod"]);
+    ran.length = 0;
+    return {
+      board,
+      app: society.app,
+      userToken,
+      scheduler,
+      settle,
+      ran,
+      now,
+      advance: (ms: number): void => {
+        clock += ms;
+      },
+      wake: (agent: string): Promise<unknown> =>
+        board.requestWake(USER, { agent, project: "lab", reason: "work" }),
+      limit: (limitedUntil: string | null): Promise<unknown> =>
+        board.recordQuota(
+          "pod",
+          "claude",
+          CliQuotaSchema.parse({
+            observedAt: now().toISOString(),
+            source: "turn",
+            status: "limited",
+            limitedUntil,
+          }),
+        ),
+    };
+  }
+
+  it("starts none of a limited CLI's turns before its reset, and the kept wake at the reset with nobody acting", async () => {
+    const { board, app, userToken, scheduler, settle, ran, now, advance, wake, limit } =
+      await limitedSociety();
+    const reset = new Date(now().getTime() + 2 * 3_600_000);
+    await limit(reset.toISOString());
+    await wake("eng-1");
+    await wake("rev-1");
+    await settle();
+    // Codex on the same runner goes on; Claude's turn waits.
+    expect(ran).toEqual(["rev-1@pod"]);
+
+    // The user's pause and resume of Claude there leave the limit's hold as it was, and the limit
+    // never sets or clears the user's pause.
+    const post = async (route: string): Promise<number> =>
+      (
+        await app.request(`/api/runners/${route}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${userToken}` },
+        })
+      ).status;
+    expect(await post("pod/pause/claude")).toBe(200);
+    expect(await post("pod/resume/claude")).toBe(200);
+    expect((await board.readRunner("pod")).pausedClis).toBeUndefined();
+    advance(reset.getTime() - 1 - now().getTime());
+    await settle();
+    expect(ran).toEqual(["rev-1@pod"]);
+
+    // At the reset the next pass sends the kept wake, as the wake it was.
+    advance(1);
+    await settle();
+    expect(ran).toEqual(["rev-1@pod", "eng-1@pod"]);
+    const latest = await board.readLatestTurn("eng-1", "lab");
+    expect(latest?.trigger).toMatchObject({ kind: "manual", reason: "work" });
+    const failed = (await board.readEvents(null, 1000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(failed).toEqual([]);
+    await scheduler.stop();
+  });
+
+  it("holds a limit with no reset for half an hour, reading the quota once while a turn waits", async () => {
+    // The first read fails; the next names a reset two hours on; the last finds the limit gone.
+    const answers: Array<() => CliQuota> = [
+      () => {
+        throw new Error("the usage endpoint did not answer");
+      },
+    ];
+    const reads: string[] = [];
+    const { board, scheduler, settle, ran, now, advance, wake, limit } = await limitedSociety(
+      () => {
+        reads.push(now().toISOString());
+        const answer = answers.shift();
+        return answer === undefined
+          ? Promise.reject(new Error("no answer"))
+          : Promise.resolve().then(answer);
+      },
+    );
+    const started = now().getTime();
+    await limit(null);
+    await wake("eng-1");
+    await settle();
+    expect(ran).toEqual([]);
+    await expect.poll(() => reads.length).toBe(1);
+
+    // The failed read changes nothing, and none is asked again within the half hour.
+    advance(30 * 60_000 - 1);
+    await settle();
+    await settle();
+    expect(ran).toEqual([]);
+    expect(reads).toHaveLength(1);
+
+    // Half an hour after the report the turn goes, and its report would say what it met.
+    advance(1);
+    await settle();
+    expect(ran).toEqual(["eng-1@pod"]);
+
+    // Limited again with no reset: the read names one two hours on, which holds the turn past the
+    // half hour.
+    const reset = new Date(now().getTime() + 2 * 3_600_000).toISOString();
+    answers.push(() =>
+      CliQuotaSchema.parse({
+        observedAt: now().toISOString(),
+        source: "read",
+        status: "limited",
+        limitedUntil: reset,
+      }),
+    );
+    await limit(null);
+    await wake("eng-1");
+    await settle();
+    await expect.poll(() => reads.length).toBe(2);
+    await expect
+      .poll(async () => (await board.readRunner("pod")).quotas?.claude?.limitedUntil)
+      .toBe(reset);
+    advance(31 * 60_000);
+    await settle();
+    expect(ran).toEqual(["eng-1@pod"]);
+    expect(reads).toHaveLength(2);
+
+    // Limited once more with no reset, a read that finds the limit gone lifts the hold at once.
+    answers.push(() =>
+      CliQuotaSchema.parse({ observedAt: now().toISOString(), source: "read", status: "allowed" }),
+    );
+    advance(Date.parse(reset) - now().getTime());
+    await limit(null);
+    await settle();
+    await expect.poll(() => reads.length).toBe(3);
+    await expect
+      .poll(async () => (await board.readRunner("pod")).quotas?.claude?.status)
+      .toBe("allowed");
+    await settle();
+    expect(ran).toEqual(["eng-1@pod", "eng-1@pod"]);
+    expect(reads.map((at) => Date.parse(at) - started)).toEqual([
+      0,
+      30 * 60_000,
+      30 * 60_000 + 2 * 3_600_000,
+    ]);
+    await scheduler.stop();
   });
 });

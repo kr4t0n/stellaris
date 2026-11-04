@@ -1,4 +1,11 @@
-import type { GitIdentityPart } from "@stellaris/shared";
+import {
+  runnerLimitHold,
+  type CliKind,
+  type GitIdentityPart,
+  type Runner,
+} from "@stellaris/shared";
+import { ago } from "../lib/format.js";
+import { until } from "./quota.js";
 
 function normalized(code: string): string {
   return code.toUpperCase().replaceAll(/[^A-Z0-9]/g, "");
@@ -63,4 +70,61 @@ export function suggestRunnerName(hostname: string, taken: readonly string[]): s
       return candidate;
     }
   }
+}
+
+/** The CLIs on a runner whose limits hold their turns now, each with when the hold lifts. */
+export function heldClis(
+  runner: Runner,
+  now: number,
+): { readonly cli: CliKind; readonly until: string }[] {
+  return runner.clis.flatMap((cli) => {
+    const hold = runnerLimitHold(runner, cli, new Date(now));
+    return hold === null ? [] : [{ cli, until: hold.until }];
+  });
+}
+
+/**
+ * What a runner's row says of it: away or connected, what of it the user paused, and which of its
+ * CLIs their limits hold until they lift.
+ */
+export function runnerState(
+  runner: Runner,
+  now: number,
+): { label: string; detail: string; tone: string } {
+  const pausedClis = runner.clis.filter((cli) => runner.pausedClis?.[cli] !== undefined);
+  const paused =
+    runner.paused !== undefined
+      ? [`paused ${ago(runner.paused.at, now)}`]
+      : runner.clis.flatMap((cli) => {
+          const pause = runner.pausedClis?.[cli];
+          return pause === undefined ? [] : [`${cli} paused ${ago(pause.at, now)}`];
+        });
+  const holds = heldClis(runner, now);
+  const held = holds.map(
+    (hold) => `${hold.cli} held by its limit for ${until(Date.parse(hold.until) - now)}`,
+  );
+  const heldLabel = holds.length === 0 ? [] : [`${holds.map((hold) => hold.cli).join(", ")} held`];
+  if (runner.status !== "connected") {
+    const away = `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`;
+    return {
+      label: runner.paused === undefined ? "away" : "away · paused",
+      detail: [away, ...paused, ...held].join("; "),
+      tone: "text-amber-300",
+    };
+  }
+  if (runner.paused === undefined && pausedClis.length === 0 && holds.length === 0) {
+    return { label: "connected", detail: "connected", tone: "text-fg-muted" };
+  }
+  return {
+    label: [
+      ...(runner.paused !== undefined
+        ? ["paused"]
+        : pausedClis.length === 0
+          ? []
+          : [`${pausedClis.join(", ")} paused`]),
+      ...heldLabel,
+    ].join(" · "),
+    detail: ["connected", ...paused, ...held].join("; "),
+    tone: "text-amber-300",
+  };
 }

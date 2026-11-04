@@ -15,7 +15,14 @@ import {
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { PlanQuota } from "./Quota.js";
-import { identityGap, offVersion, sameCode, suggestRunnerName } from "./runners.js";
+import {
+  heldClis,
+  identityGap,
+  offVersion,
+  runnerState,
+  sameCode,
+  suggestRunnerName,
+} from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
 /** Connected runners first, each group by name. */
@@ -119,34 +126,6 @@ function PauseMark({ paused }: { paused: boolean }) {
   );
 }
 
-/** What a runner's row says of it: away or connected, and what of it the user paused. */
-function runnerState(runner: Runner, now: number): { label: string; detail: string; tone: string } {
-  const pausedClis = runner.clis.filter((cli) => runner.pausedClis?.[cli] !== undefined);
-  const paused =
-    runner.paused !== undefined
-      ? [`paused ${ago(runner.paused.at, now)}`]
-      : runner.clis.flatMap((cli) => {
-          const pause = runner.pausedClis?.[cli];
-          return pause === undefined ? [] : [`${cli} paused ${ago(pause.at, now)}`];
-        });
-  if (runner.status !== "connected") {
-    const away = `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`;
-    return {
-      label: runner.paused === undefined ? "away" : "away · paused",
-      detail: [away, ...paused].join("; "),
-      tone: "text-amber-300",
-    };
-  }
-  if (runner.paused === undefined && pausedClis.length === 0) {
-    return { label: "connected", detail: "connected", tone: "text-fg-muted" };
-  }
-  return {
-    label: runner.paused === undefined ? `${pausedClis.join(", ")} paused` : "paused",
-    detail: ["connected", ...paused].join("; "),
-    tone: "text-amber-300",
-  };
-}
-
 /**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
  * marked when it is not the server's, capabilities, the projects living on it, whether it is
@@ -197,6 +176,7 @@ export function RunnersView() {
       runner.paused !== undefined ||
       runner.clis.some((cli) => runner.pausedClis?.[cli] !== undefined),
   ).length;
+  const limited = registered.filter((runner) => heldClis(runner, now).length > 0).length;
   const followed =
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
@@ -214,6 +194,7 @@ export function RunnersView() {
           `${connected} connected`,
           ...(away === 0 ? [] : [`${away} away`]),
           ...(paused === 0 ? [] : [`${paused} paused`]),
+          ...(limited === 0 ? [] : [`${limited} held by a limit`]),
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
           ...(server === undefined ? [] : [`server v${server}`]),
           ...(off === 0 ? [] : [`${off} on another version`]),

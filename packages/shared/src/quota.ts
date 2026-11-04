@@ -128,6 +128,35 @@ export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
   return quota.status === "warning" || high ? "warning" : "ok";
 }
 
+/**
+ * How long a limit whose reset the CLI did not give holds its turns, from when it was reported.
+ * Then a turn goes, and its own report says whether the limit still holds.
+ */
+export const UNKNOWN_LIMIT_HOLD_MS = 30 * 60_000;
+
+/** Until when a CLI's limit holds its turns on a runner, and whether the CLI gave that time. */
+export interface LimitHold {
+  readonly until: string;
+  readonly known: boolean;
+}
+
+/**
+ * Until when a CLI's limit holds its turns on the runner that reported it, or null while they may
+ * go: the reset the CLI gave, or `UNKNOWN_LIMIT_HOLD_MS` after a limit it gave none for. A Claude
+ * login with extra usage turned on is never held, since a turn past a spent window may run on it,
+ * while its usage read calls the window a limit all the same.
+ */
+export function limitHold(quota: CliQuota, now: Date): LimitHold | null {
+  if (quota.status !== "limited" || quota.extraUsage?.enabled === true) {
+    return null;
+  }
+  const known = quota.limitedUntil !== null;
+  const until =
+    quota.limitedUntil ??
+    new Date(Date.parse(quota.observedAt) + UNKNOWN_LIMIT_HOLD_MS).toISOString();
+  return Date.parse(until) > now.getTime() ? { until, known } : null;
+}
+
 const WINDOW_NAMES: Readonly<Record<string, string>> = {
   five_hour: "5h",
   seven_day: "7d",

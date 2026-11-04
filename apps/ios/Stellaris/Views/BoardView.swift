@@ -14,6 +14,7 @@ struct BoardView: View {
         Section("Society") {
           ForEach(model.store.societyChannels, id: \.ref) { channel in
             ChannelRow(channel: channel)
+              .islandRow()
           }
         }
         ForEach(model.store.openProjects, id: \.slug) { project in
@@ -22,15 +23,19 @@ struct BoardView: View {
               Label("Dashboard and tasks", systemImage: "rectangle.grid.1x2")
             }
             .accessibilityIdentifier("project-\(project.slug)")
+            .islandRow()
             ForEach(model.store.channels(of: project.slug), id: \.ref) { channel in
               ChannelRow(channel: channel)
+                .islandRow()
             }
             ForEach(model.store.tasksInPlay(of: project.slug)) { task in
               TaskRow(task: task)
+                .islandRow()
             }
           }
         }
       }
+      .islandList()
       .overlay {
         BoardState(
           state: model.store.state,
@@ -122,9 +127,9 @@ struct TaskRow: View {
 
 /// A project as Board shows it: its dashboard, then its tasks grouped by where they stand, each
 /// group last updated first, as the web's project and tasks views list them. Picking a task opens
-/// it in Chat. At the accessibility sizes the list is plain and the dashboard's row narrowly inset,
-/// since a grouped list's margins leave a dashboard's words too little room on a narrow window and
-/// break them mid-word.
+/// it in Chat. At the accessibility sizes the list is plain, its rows on the island gray itself, and
+/// the dashboard's row narrowly inset, since a grouped list's margins leave a dashboard's words too
+/// little room on a narrow window and break them mid-word.
 struct ProjectView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -132,17 +137,18 @@ struct ProjectView: View {
 
   var body: some View {
     let groups = groupTasks(model.store.tasks(of: slug))
+    let plain = typeSize.isAccessibilitySize
     List {
       Section("Dashboard") {
         dashboard
-          .listRowInsets(
-            typeSize.isAccessibilitySize
-              ? EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8) : nil)
+          .listRowInsets(plain ? EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8) : nil)
+          .islandRow(plain: plain)
       }
       ForEach(groups) { group in
         Section("\(group.phase.label) · \(group.tasks.count)") {
           ForEach(group.tasks) { task in
             TaskRow(task: task, plan: true)
+              .islandRow(plain: plain)
           }
         }
       }
@@ -150,10 +156,12 @@ struct ProjectView: View {
         Section("Tasks") {
           Text("No tasks")
             .foregroundStyle(.secondary)
+            .islandRow(plain: plain)
         }
       }
     }
-    .modifier(ProjectListStyle(plain: typeSize.isAccessibilitySize))
+    .modifier(ProjectListStyle(plain: plain))
+    .islandList()
     .navigationTitle(model.store.projectName(slug))
     .refreshable {
       await model.store.loadDashboard(slug, using: model)

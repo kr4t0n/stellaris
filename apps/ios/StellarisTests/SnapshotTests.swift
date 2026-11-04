@@ -189,9 +189,10 @@ final class SnapshotTests: XCTestCase {
   }
 
   /// A project's list at the largest type size, which is plain, scrolled so its second section's
-  /// header pins at the top with rows going under it: the band the header takes has the island's
-  /// gray for its ground, and no black.
-  @MainActor func testAPinnedHeaderIsOnTheIslandsGray() async throws {
+  /// header pins at the top with rows going under it. iOS draws its hard scroll edge effect from
+  /// the bar to the pinned header's foot, the island blurred: the band holds no black, its
+  /// commonest colour is a neutral gray no darker than the island, and the island resumes below.
+  @MainActor func testAPinnedHeaderSitsOnTheIslandUnderTheEdgeEffect() async throws {
     let model = try await signedIn()
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
@@ -226,12 +227,18 @@ final class SnapshotTests: XCTestCase {
     let white = share { $0.red > 240 && $0.green > 240 && $0.blue > 240 }
     let shown = colors.prefix(5).map { "\($0.color) \(Int(($0.share * 100).rounded()))%" }
     print("pinned header's band \(band): \(shown), white \(white)")
-    let island = [ground.color.red, ground.color.green, ground.color.blue].allSatisfy {
-      abs($0 - 20) <= 2
-    }
-    XCTAssertTrue(island, "the pinned header's band isn't on the island's gray: \(shown)")
-    XCTAssertGreaterThan(ground.share, 0.4, "the pinned header's band has a ground: \(shown)")
+    let (red, green, blue) = ground.color
+    XCTAssertTrue(
+      abs(red - green) <= 2 && abs(green - blue) <= 2 && (20...40).contains(green),
+      "the pinned header's band has a ground of its own: \(shown)")
     XCTAssertLessThan(black, 0.01, "the pinned header's band draws black: \(shown)")
+    let below = Snapshot.colors(
+      in: image, within: CGRect(x: band.minX, y: band.maxY + 1, width: band.width, height: 10))
+    let island = below.filter {
+      [$0.color.red, $0.color.green, $0.color.blue].allSatisfy { abs($0 - 20) <= 2 }
+    }.reduce(0) { $0 + $1.share }
+    XCTAssertGreaterThan(
+      island, 0.5, "the island doesn't resume below the pinned header: \(below.prefix(5))")
   }
 
   /// The first two rows of the list in `view`, top first, each with a point on it, in the window,

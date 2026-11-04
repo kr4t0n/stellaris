@@ -169,6 +169,166 @@ final class SnapshotTests: XCTestCase {
     XCTAssertLessThan(white, 2_500, "the draft at rest draws a Send")
   }
 
+  /// Board, a project under it, Needs you, and Settings sit on the conversation's island gray, as
+  /// the chat beside them does, with their rows on `surface-2` at 50% over it, which blends to 29
+  /// in each channel, and nothing black.
+  @MainActor func testTheListsAreTheChatsGray() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    try await expectIslandGray(ShellView().environment(model), named: "board")
+    model.boardPath = ["demo"]
+    try await expectIslandGray(ShellView().environment(model), named: "board-project")
+    model.tab = .needsYou
+    try await expectIslandGray(ShellView().environment(model), named: "needs-you")
+    try await expectIslandGray(SettingsView().environment(model), named: "settings")
+  }
+
+  /// Checks `view` is on the island's gray with its rows on the row's, and draws no black.
+  @MainActor private func expectIslandGray(_ view: some View, named name: String) async throws {
+    let image = try await Snapshot.image(
+      of: view, size: CGSize(width: 410, height: 678), type: Snapshot.typeSizes[0])
+    try Snapshot.keep(image, named: "proof-\(name)-gray", in: self)
+    let picture = try XCTUnwrap(image.cgImage)
+    let pixels = picture.width * picture.height
+    let gray = Snapshot.pixels(in: image, near: (red: 20, green: 20, blue: 20), within: 4)
+    let rows = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 2)
+    let black = Snapshot.pixels(in: image, near: (red: 0, green: 0, blue: 0), within: 6)
+    XCTAssertGreaterThan(gray, pixels / 4, "\(name) isn't on the island's gray")
+    XCTAssertGreaterThan(rows, pixels / 20, "\(name)'s rows aren't on the row's gray")
+    XCTAssertLessThan(black, pixels / 100, "\(name) draws black")
+  }
+
+  /// A row of Board drawn pressed, and one drawn selected, as a touch and an opened row leave their
+  /// list's cells, stand apart from the rows at rest, as the system's own rows do.
+  @MainActor func testBoardsRowsShowWhenPressedAndSelected() async throws {
+    let model = try await signedIn()
+    let size = CGSize(width: 410, height: 678)
+    var spots: [CGPoint] = []
+    let rest = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      spots = try self.firstRows(in: view).map { $0.spot }
+    }
+    let marked = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      let rows = try self.firstRows(in: view)
+      rows[0].cell.isHighlighted = true
+      rows[1].cell.isSelected = true
+    }
+    try Snapshot.keep(rest, named: "proof-rows-at-rest", in: self)
+    try Snapshot.keep(marked, named: "proof-rows-pressed-and-selected", in: self)
+    XCTAssertEqual(spots.count, 2)
+    for (spot, state) in zip(spots, ["pressed", "selected"]) {
+      let before = try XCTUnwrap(Snapshot.color(in: rest, at: spot))
+      let after = try XCTUnwrap(Snapshot.color(in: marked, at: spot))
+      let change = max(
+        abs(after.red - before.red), abs(after.green - before.green),
+        abs(after.blue - before.blue))
+      XCTAssertGreaterThanOrEqual(
+        change, 6, "a \(state) row draws as one at rest: \(before), then \(after)")
+    }
+  }
+
+  /// A project's list at the largest type size, which is plain, scrolled so its second section's
+  /// header pins at the top with rows going under it. iOS draws its hard scroll edge effect from
+  /// the bar to the pinned header's foot, the island blurred: the band holds no black, its
+  /// commonest colour is a neutral gray no darker than the island, and the island resumes below.
+  @MainActor func testAPinnedHeaderSitsOnTheIslandUnderTheEdgeEffect() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    model.boardPath = ["demo"]
+    var band = CGRect.null
+    let image = try await Snapshot.image(
+      of: ShellView().environment(model), size: CGSize(width: 410, height: 678),
+      type: Snapshot.typeSizes[1]
+    ) { view in
+      let list = try XCTUnwrap(
+        self.collectionViews(in: view).max { $0.numberOfSections < $1.numberOfSections },
+        "the view holds no list")
+      let row = try XCTUnwrap(
+        list.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)),
+        "the project's list has no second section")
+      // The second section's first row, its top 40 points gone under the header.
+      list.contentOffset.y = row.frame.minY + 40 - list.adjustedContentInset.top
+      list.layoutIfNeeded()
+      let header = try XCTUnwrap(self.pinnedHeader(in: list), "no header shows in the list")
+      let top = list.contentOffset.y + list.adjustedContentInset.top
+      print("pinned header: \(type(of: header)) at \(header.frame), the list's top at \(top)")
+      XCTAssertLessThanOrEqual(abs(header.frame.minY - top), 2, "the header doesn't pin at the top")
+      band = header.convert(header.bounds, to: nil)
+    }
+    try Snapshot.keep(image, named: "board-project-pinned-header-410-largest", in: self)
+    let colors = Snapshot.colors(in: image, within: band)
+    let ground = try XCTUnwrap(colors.first, "the pinned header's band is empty")
+    func share(_ test: ((red: Int, green: Int, blue: Int)) -> Bool) -> Double {
+      colors.filter { test($0.color) }.reduce(0) { $0 + $1.share }
+    }
+    let black = share { $0.red < 6 && $0.green < 6 && $0.blue < 6 }
+    let white = share { $0.red > 240 && $0.green > 240 && $0.blue > 240 }
+    let shown = colors.prefix(5).map { "\($0.color) \(Int(($0.share * 100).rounded()))%" }
+    print("pinned header's band \(band): \(shown), white \(white)")
+    let (red, green, blue) = ground.color
+    XCTAssertTrue(
+      abs(red - green) <= 2 && abs(green - blue) <= 2 && (20...40).contains(green),
+      "the pinned header's band has a ground of its own: \(shown)")
+    XCTAssertLessThan(black, 0.01, "the pinned header's band draws black: \(shown)")
+    let below = Snapshot.colors(
+      in: image, within: CGRect(x: band.minX, y: band.maxY + 1, width: band.width, height: 10))
+    let island = below.filter {
+      [$0.color.red, $0.color.green, $0.color.blue].allSatisfy { abs($0 - 20) <= 2 }
+    }.reduce(0) { $0 + $1.share }
+    XCTAssertGreaterThan(
+      island, 0.5, "the island doesn't resume below the pinned header: \(below.prefix(5))")
+  }
+
+  /// The first two rows of the list in `view`, top first, each with a point on it, in the window,
+  /// clear of its words.
+  @MainActor private func firstRows(
+    in view: UIView
+  ) throws -> [(cell: UICollectionViewCell, spot: CGPoint)] {
+    let list = try XCTUnwrap(collectionView(in: view), "the view holds no list")
+    let cells = list.visibleCells.sorted { $0.frame.minY < $1.frame.minY }
+    let first = try XCTUnwrap(cells.first, "the list shows no rows")
+    let second = try XCTUnwrap(cells.dropFirst().first, "the list shows one row")
+    return [first, second].map { cell in
+      let frame = cell.convert(cell.bounds, to: nil)
+      return (cell, CGPoint(x: frame.minX + frame.width * 0.8, y: frame.midY))
+    }
+  }
+
+  @MainActor private func collectionView(in view: UIView) -> UICollectionView? {
+    collectionViews(in: view).first
+  }
+
+  /// The lists in `view`, outermost and first laid out first.
+  @MainActor private func collectionViews(in view: UIView) -> [UICollectionView] {
+    if let list = view as? UICollectionView {
+      return [list]
+    }
+    return view.subviews.flatMap { collectionViews(in: $0) }
+  }
+
+  /// The topmost section header the list shows below its top inset, a pinned one when one pins.
+  @MainActor private func pinnedHeader(in list: UICollectionView) -> UICollectionReusableView? {
+    let top = list.contentOffset.y + list.adjustedContentInset.top
+    var headers = list.visibleSupplementaryViews(
+      ofKind: UICollectionView.elementKindSectionHeader)
+    if headers.isEmpty {
+      // Any reusable view of the list's own that isn't a row, in case the headers are of a kind
+      // of SwiftUI's own.
+      headers = list.subviews.compactMap { $0 as? UICollectionReusableView }
+        .filter { !($0 is UICollectionViewCell) }
+    }
+    for header in headers {
+      print("a header of the list: \(type(of: header)) at \(header.frame)")
+    }
+    return headers.filter { !$0.isHidden && $0.frame.maxY > top + 1 }
+      .min { $0.frame.minY < $1.frame.minY }
+  }
+
   /// A thread opened from #general, with its first message and its draft, then #general with
   /// the thread at its foot, where it was opened.
   @MainActor func testAThreadOpenedOnAChannel() async throws {

@@ -16,11 +16,13 @@ struct NeedsYouView: View {
             Section("\(kind.label) · \(shown.count)") {
               ForEach(shown) { item in
                 AttentionRow(item: item)
+                  .islandRow()
               }
             }
           }
         }
       }
+      .islandList()
       .overlay {
         BoardState(state: model.store.state, rows: !items.isEmpty, empty: "Nothing needs you")
       }

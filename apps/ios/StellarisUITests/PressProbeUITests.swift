@@ -23,5 +23,6 @@ final class PressProbeUITests: ShellTestCase {
     print("probe: hold stage row at \(Date().timeIntervalSince1970)")
     stage.press(forDuration: 3)
     print("probe: done at \(Date().timeIntervalSince1970)")
+    XCTFail("probe: fails on purpose, so XCTest keeps the screen recording")
   }
 }

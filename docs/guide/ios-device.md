@@ -241,6 +241,10 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The two-finger scrub closes the plan's, the charter's, and Settings' sheets.
 - A task's or a proposal's strip at the accessibility text sizes is read in full.
 
+**Over the network**
+
+- With the board across a real network, open a task from Board, a stage or a question from Needs you, and a channel from Board: each shows its messages with no pull. CI checks this against a fake board that answers 1.5 seconds late. Only the device shows a real network's timing.
+
 **Over time**
 
 - The sky draws smoothly, and the battery holds up with it on screen.

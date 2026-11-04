@@ -190,7 +190,7 @@ A 413 closes the connection. `@hono/node-server` drops a connection whose body w
 
 ### The app's sign-in once landed on a custom scheme
 
-In 0.3.26, a sign-in started with `landing=app` landed its session at `stellaris://signin#session=<token>` on every board with GitHub sign-in. A custom URL scheme can't prove which app receives the address: several apps can claim one scheme, and which of them receives it is indeterminate (RFC 8252, section 8.1), while a claimed `https` redirect may serve as proof (section 8.6). 0.4.0 replaced it with the `https` landing, Apple's association file, and the PKCE exchange above, off unless a board names its app.
+In 0.3.26, a sign-in started with `landing=app` landed its session at `stellaris://signin#session=<token>` on every board with GitHub sign-in. A custom URL scheme can't prove which app receives the address: several apps can claim one scheme, and which of them receives it is indeterminate (RFC 8252, section 8.1), while a claimed `https` redirect may serve as proof (section 8.6). 0.3.27 replaced it with the `https` landing, Apple's association file, and the PKCE exchange above, off unless a board names its app.
 
 ### A job once carried the server's own idea of its address
 

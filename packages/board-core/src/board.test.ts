@@ -1512,6 +1512,60 @@ describe("Board", () => {
     expect(await holder(reviewed.id)).toBeUndefined();
   });
 
+  it("keeps the lease of a holder its CLI's limit holds until the reset, then lets it lapse from at least half a lease after", async () => {
+    const { board } = await society({});
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.placeProject("demo", "pod");
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    const built = await board.createTask(USER, { project: "demo", title: "build" });
+    const reviewed = await board.createTask(USER, { project: "demo", title: "review" });
+    await board.claimTask(ENG, { task_id: built.id });
+    await board.claimTask(REV, { task_id: reviewed.id });
+
+    // Claude on the project's runner is limited for two hours: eng-1's turns there wait, rev-1's on
+    // Codex do not.
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({
+        observedAt: clock.toISOString(),
+        source: "read",
+        status: "limited",
+        limitedUntil: new Date(clock.getTime() + 120 * 60_000).toISOString(),
+      }),
+    );
+    await sweep(119);
+    expect(await holder(built.id)).toBe("eng-1");
+    expect(await holder(reviewed.id)).toBeUndefined();
+    // Nothing of the user's pause was set for it.
+    expect((await board.readRunner("pod")).pausedClis).toBeUndefined();
+
+    // The limit lifts at its reset by itself, and the claim lapses from at least half a lease on.
+    await sweep(15);
+    expect(await holder(built.id)).toBe("eng-1");
+    await sweep(16);
+    expect(await holder(built.id)).toBeUndefined();
+
+    // A limit with no reset holds for half an hour from its report.
+    await board.claimTask(ENG, { task_id: built.id });
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({ observedAt: clock.toISOString(), source: "turn", status: "limited" }),
+    );
+    await sweep(29);
+    expect(await holder(built.id)).toBe("eng-1");
+    await sweep(31);
+    expect(await holder(built.id)).toBeUndefined();
+  });
+
   it("enforces role charters and the lifecycle's ends", async () => {
     const { board } = await society();
     await expect(

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CliQuotaSchema,
+  limitHold,
+  limitLapsed,
   mergeQuota,
   quotaChanged,
   quotaLevel,
@@ -10,7 +12,13 @@ import {
   type CliQuotaInput,
   type QuotaWindowInput,
 } from "./quota.js";
-import { RunnerHelloSchema, RunnerSchema, TurnOutcomeSchema } from "./index.js";
+import {
+  heldOn,
+  RunnerHelloSchema,
+  RunnerSchema,
+  TurnOutcomeSchema,
+  type Runner,
+} from "./index.js";
 
 const AT = "2026-10-13T12:00:00.000Z";
 const NOW = new Date(AT);
@@ -147,6 +155,69 @@ describe("quotaLevel", () => {
 
   it("says when a login has no plan limits", () => {
     expect(quotaLevel(quota({ status: "none" }), NOW)).toBe("none");
+  });
+});
+
+describe("limitHold", () => {
+  it("holds a CLI's turns until the reset its limit gave, and not from that instant", () => {
+    const limited = quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" });
+    expect(limitHold(limited, NOW)).toEqual({ until: "2026-10-13T13:00:00.000Z", known: true });
+    expect(limitHold(limited, new Date("2026-10-13T12:59:59.999Z"))).not.toBeNull();
+    expect(limitHold(limited, new Date("2026-10-13T13:00:00.000Z"))).toBeNull();
+  });
+
+  it("holds a limit with no reset for half an hour from its report", () => {
+    const limited = quota({ status: "limited" });
+    expect(limitHold(limited, NOW)).toEqual({ until: "2026-10-13T12:30:00.000Z", known: false });
+    expect(limitHold(limited, new Date("2026-10-13T12:29:59.999Z"))).not.toBeNull();
+    expect(limitHold(limited, new Date("2026-10-13T12:30:00.000Z"))).toBeNull();
+    // Still read as limited all the same, as the CLI said, and lapsed: one turn may try it.
+    const lapsedAt = new Date("2026-10-13T12:30:00.000Z");
+    expect(quotaLevel(limited, lapsedAt)).toBe("limited");
+    expect(limitLapsed(limited, NOW)).toBe(false);
+    expect(limitLapsed(limited, lapsedAt)).toBe(true);
+    // A limit with a reset never lapses so: at the reset it has lifted.
+    const known = quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" });
+    expect(limitLapsed(known, new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
+  });
+
+  it("holds nothing short of a limit, nor a usage read's limit with extra usage turned on", () => {
+    for (const status of ["allowed", "warning", "none"] as const) {
+      expect(limitHold(quota({ status }), NOW)).toBeNull();
+      expect(limitLapsed(quota({ status }), new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
+    }
+    const extra = {
+      source: "read",
+      status: "limited",
+      limitedUntil: "2026-10-13T13:00:00.000Z",
+      extraUsage: { enabled: true, monthlyLimit: 5_000, usedCredits: 0, currency: "USD" },
+    } as const;
+    expect(limitHold(quota(extra), NOW)).toBeNull();
+    expect(
+      limitHold(quota({ ...extra, extraUsage: { ...extra.extraUsage, enabled: false } }), NOW),
+    ).not.toBeNull();
+    // A turn's own limit already leaves out what extra usage covered, so it holds, extra usage on.
+    expect(limitHold(quota({ ...extra, source: "turn" }), NOW)).toEqual({
+      until: "2026-10-13T13:00:00.000Z",
+      known: true,
+    });
+  });
+
+  it("holds the turns of the CLI it limits on its runner, beside the user's pauses", () => {
+    const pod: Runner = RunnerSchema.parse({
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "codex"],
+      capabilities: [],
+      status: "connected",
+      quotas: { claude: quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" }) },
+    });
+    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
+    expect(heldOn([pod], "pod", "codex", NOW)).toBe(false);
+    expect(heldOn([pod], "pod", "claude", new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
+    expect(heldOn([pod], undefined, "claude", NOW)).toBe(false);
+    const paused = { ...pod, pausedClis: { codex: { at: AT, by: "user" } } };
+    expect(heldOn([paused], "pod", "codex", NOW)).toBe(true);
   });
 });
 

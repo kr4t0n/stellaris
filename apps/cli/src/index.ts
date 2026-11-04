@@ -16,6 +16,7 @@ import {
   PlanEditSchema,
   PlanSchema,
   ProposalKindSchema,
+  runnerLimitHold,
   stageIndex,
   VerbNameSchema,
   type Cron,
@@ -211,6 +212,7 @@ runner
   .action(async () => {
     const board = await open();
     const runners = await board.listRunners();
+    const now = new Date();
     print(runners, () =>
       runners.length === 0
         ? "No runners yet; add one with `runner add <name>`."
@@ -223,6 +225,11 @@ runner
                   each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
                 }${Object.keys(each.pausedClis ?? {})
                   .map((cli) => `  ${cli} paused`)
+                  .join("")}${each.clis
+                  .map((cli) => {
+                    const hold = runnerLimitHold(each, cli, now);
+                    return hold === null ? "" : `  ${cli} held until ${hold.until}`;
+                  })
                   .join("")}`,
             )
             .join("\n"),

@@ -121,6 +121,10 @@ The Codex app-server bindings are generated on demand, with `codex app-server ge
 
 Its `item.started` carries an empty `query`, and a search opened by URL or run from code keeps it empty, with what it did in `action` (a search with `queries`, `open_page` with a `url`, `find_in_page` with a `pattern`). The adapter reports the call when the item completes and describes it from the query or the action; reported at start, every search in the live transcript was blank.
 
+### A Codex item shows under the name Claude gives the same tool
+
+The app server reports each tool call as an item, and `toolNameOf` names it as Claude Code names the same tool, so both CLIs' steps read alike: `commandExecution` is `Bash`, `fileChange` is `Edit`, `webSearch` is `WebSearch`, `imageView` is `Read`, and `mcpToolCall` is `mcp__<server>__<tool>`. An item of any other type shows no step. Codex 0.165.0 sends `imageView`, its `view_image` tool, only once it has read the file and decoded it as an image, with the path and no status, so the step is a `Read` of the path whose result is `[image]`, as both adapters show an image in a tool's result. A `view_image` that fails, on a missing file or bytes that are not an image, hands its error to the model and sends the client nothing, so it shows no step at all.
+
 ## Usage, cost, and models
 
 ### Token counts are a turn's own, and both CLIs report them as something else

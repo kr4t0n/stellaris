@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { Board, SYSTEM_ACTOR, type Actor } from "@stellaris/board-core";
 import {
+  CliQuotaSchema,
   MEMBER_VERBS,
   conversationPart,
   sessionKey,
@@ -866,6 +867,71 @@ describe("Scheduler", () => {
     advance(10 * 60_000);
     await restarted.tick();
     await restarted.drain();
+    expect(await keys()).not.toContain("idle_member:eng-1");
+  });
+
+  it("signals no idle member or waiting stage its CLI's limit holds, and counts a stage's wait from the reset", async () => {
+    const { board, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.placeProject("demo", "pod");
+    // eng-1 and rev-1 are on Claude; eng-2, an engineer too, is on Codex.
+    await board.addAgent(USER, {
+      name: "eng-2",
+      role: "engineer",
+      cli: "codex",
+      memberships: ["demo"],
+    });
+    await scheduler.tick();
+    await scheduler.drain();
+    const held = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-1's alone",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const shared = await board.createTask(USER, {
+      project: "demo",
+      title: "any engineer's",
+      stages: [{ name: "build", role: "engineer" }],
+    });
+    const keys = async (): Promise<string[]> =>
+      (await board.listSignals()).map((record) => record.signal.key);
+
+    // Claude on pod is limited until a reset three days and ten minutes away.
+    const reset = now().getTime() + 3 * DAY + 10 * 60_000;
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({
+        observedAt: now().toISOString(),
+        source: "read",
+        status: "limited",
+        limitedUntil: new Date(reset).toISOString(),
+      }),
+    );
+    advance(3 * DAY + 5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    // eng-2 could take the shared stage, and is idle, since its CLI is not limited.
+    expect(await keys()).toEqual(
+      expect.arrayContaining([`waiting_stage:${shared.id}:s1`, "idle_member:eng-2"]),
+    );
+    expect(await keys()).not.toContain(`waiting_stage:${held.id}:s1`);
+    expect(await keys()).not.toContain("idle_member:eng-1");
+    expect(await keys()).not.toContain("idle_member:rev-1");
+
+    // Held to the last pass before the reset, the stage has waited only from there once it lifts.
+    advance(reset - 1 - now().getTime());
+    await scheduler.tick();
+    await scheduler.drain();
+    advance(1_001);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await keys()).not.toContain(`waiting_stage:${held.id}:s1`);
+    advance(5_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(await keys()).toContain(`waiting_stage:${held.id}:s1`);
     expect(await keys()).not.toContain("idle_member:eng-1");
   });
 

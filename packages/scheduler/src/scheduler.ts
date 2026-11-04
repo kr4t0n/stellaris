@@ -1846,15 +1846,15 @@ export class Scheduler {
         if (this.state.waitingSeen[key] !== undefined) {
           continue;
         }
-        // While the user's pause holds the turns of every citizen who may take the stage, it waits
-        // on the pause, not on them. The user takes no turns, so counts as none of them.
+        // While the user's pause, or their CLI's limit, holds the turns of every citizen who may take
+        // the stage, it waits on that, not on them. The user takes no turns, so counts as none of them.
         members ??= await this.board.projectMembers(project.slug);
         const takers = members.filter(
           (member) => member.cli !== null && mayHoldStage(member, task),
         );
         if (
           takers.length > 0 &&
-          takers.every((taker) => heldOn(runners, project.runner, taker.cli))
+          takers.every((taker) => heldOn(runners, project.runner, taker.cli, new Date(now)))
         ) {
           this.state.waitingHeld[key] = iso(now);
           continue;
@@ -2096,13 +2096,15 @@ export class Scheduler {
           last = Math.max(last, Date.parse(ended));
         }
       }
-      // A citizen the user's pause holds anywhere it works may be idle for that alone, so it is
-      // idle only from the last pass that held it.
+      // A citizen the user's pause, or its CLI's limit, holds anywhere it works may be idle for that
+      // alone, so it is idle only from the last pass that held it.
+      const at = new Date(now);
       const held =
-        heldOn(runners, agent.homeRunner, agent.cli) ||
+        heldOn(runners, agent.homeRunner, agent.cli, at) ||
         projects.some(
           (project) =>
-            agent.memberships.includes(project.slug) && heldOn(runners, project.runner, agent.cli),
+            agent.memberships.includes(project.slug) &&
+            heldOn(runners, project.runner, agent.cli, at),
         );
       if (held) {
         this.state.idleHeld[agent.name] = iso(now);

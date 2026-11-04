@@ -15,7 +15,11 @@ import {
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
   heldOn,
+  limitLapsed,
+  runnerLimitHold,
+  runnerPause,
   SOCIETY_SCOPE,
+  UNKNOWN_LIMIT_HOLD_MS,
   SweepResultSchema,
   TurnImageFileSchema,
   TurnImageSchema,
@@ -32,6 +36,7 @@ import {
   type ProjectRepo,
   type RunnerAnswer,
   type RunnerHello,
+  type Runner,
   type RunnerMessage,
   type RunnerWelcome,
   type RunningTurn,
@@ -168,6 +173,16 @@ export class RunnerHub implements TurnRunner {
   private readonly starting = new Map<Name, number>();
   /** Moves started since the hub did, so a placement that a move overtook gives its turn back. */
   private moveStarts = 0;
+  /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
+  private readonly limitReads = new Map<string, number>();
+  /**
+   * The turn let through once a limit with no reset had held its half hour, by `runner/cli`: the
+   * report it tries, which `observedAt` names, and whether the turn has ended.
+   */
+  private readonly limitTries = new Map<
+    string,
+    { observedAt: string; dispatch: TurnDispatch; ended: boolean }
+  >();
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -513,16 +528,21 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
-    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed. It is
-    // still there and still has the CLI, so a project living on it and a citizen pinned to it wait.
+    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed, and
+    // one whose CLI is limited none of that CLI's until the limit lifts. It is still there and still
+    // has the CLI, so a project living on it and a citizen pinned to it wait.
     const runners = await this.board.listRunners();
+    const now = this.now();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
       !seat.unconfirmed &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
-      !heldOn(runners, seat.name, cli);
+      !heldOn(runners, seat.name, cli, now) &&
+      !this.tryRunning(runners, seat.name, cli, now);
     let chosen: Seat | undefined;
+    // The runner the turn waits for when none takes it, so a limit with no reset there is read.
+    let waitsOn = agent.homeRunner;
     if (dispatch.project === SOCIETY_SCOPE) {
       chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);
     } else {
@@ -557,8 +577,12 @@ export class RunnerHub implements TurnRunner {
       }
       const seat = this.seats.get(home);
       chosen = seat !== undefined && free(seat) ? seat : undefined;
+      waitsOn = home;
     }
     if (chosen === undefined) {
+      if (waitsOn !== undefined) {
+        this.readAfterLimit(runners, waitsOn, cli, now);
+      }
       return null;
     }
     // A move that started while this placement read the board may have the project held, or moved
@@ -573,7 +597,23 @@ export class RunnerHub implements TurnRunner {
     if (dispatch.project !== SOCIETY_SCOPE) {
       this.starting.set(dispatch.project, (this.starting.get(dispatch.project) ?? 0) + 1);
     }
-    return { runner: chosen.name };
+    const runner = chosen.name;
+    const lapsed = runners.find((each) => each.name === runner)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${runner}/${cli}`);
+    if (
+      lapsed !== undefined &&
+      limitLapsed(lapsed, now) &&
+      tried?.observedAt !== lapsed.observedAt
+    ) {
+      // The first turn after a limit with no reset ran out of its hold tries it for the rest; once
+      // it has ended with no newer report, the rest go.
+      this.limitTries.set(`${runner}/${cli}`, {
+        observedAt: lapsed.observedAt,
+        dispatch,
+        ended: false,
+      });
+    }
+    return { runner };
   }
 
   async runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord> {
@@ -615,6 +655,11 @@ export class RunnerHub implements TurnRunner {
       return await opened.ended;
     } finally {
       opening();
+      for (const tried of this.limitTries.values()) {
+        if (tried.dispatch === dispatch) {
+          tried.ended = true;
+        }
+      }
       if (seat !== undefined) {
         seat.inUse = Math.max(0, seat.inUse - 1);
         if (turnId !== null) {
@@ -1150,6 +1195,56 @@ export class RunnerHub implements TurnRunner {
     }
     await this.board.recordQuota(runner, cli, quota);
     return quota;
+  }
+
+  /**
+   * Whether a turn let through to try a limit with no reset, once its hold ran out, is still running
+   * on the runner, so the CLI's other turns there wait for what it reports: a refusal records a newer
+   * limit, which holds them another half hour, and a turn that ends without one lets them go.
+   */
+  private tryRunning(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): boolean {
+    const quota = runners.find((each) => each.name === name)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${name}/${cli}`);
+    return (
+      quota !== undefined &&
+      tried !== undefined &&
+      !tried.ended &&
+      tried.observedAt === quota.observedAt &&
+      limitLapsed(quota, now)
+    );
+  }
+
+  /**
+   * Asks a runner to read a CLI's quota again while a limit it gave no reset for holds a turn
+   * waiting for it there, at most once per `UNKNOWN_LIMIT_HOLD_MS` for each runner and CLI, so a
+   * reset the read names becomes the hold and a clear read lifts it. Not while the user's pause
+   * holds the CLI there too, nor on a runner from before quota reads; a read that fails changes
+   * nothing, and the hold runs out as it would have.
+   */
+  private readAfterLimit(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): void {
+    const record = runners.find((each) => each.name === name);
+    const seat = this.seats.get(name);
+    if (
+      record === undefined ||
+      seat === undefined ||
+      seat.send === null ||
+      !seat.hello.quotaReads ||
+      !seat.hello.clis.includes(cli) ||
+      runnerPause(record, cli) !== undefined ||
+      runnerLimitHold(record, cli, now)?.known !== false
+    ) {
+      return;
+    }
+    const key = `${name}/${cli}`;
+    const last = this.limitReads.get(key);
+    if (last !== undefined && now.getTime() - last < UNKNOWN_LIMIT_HOLD_MS) {
+      return;
+    }
+    this.limitReads.set(key, now.getTime());
+    this.log.info({ runner: name, cli }, "reading a quota limited until an unknown time");
+    this.quota(name, cli).catch((error: unknown) => {
+      this.log.warn({ runner: name, cli, error: String(error) }, "could not read a limited quota");
+    });
   }
 
   /** Calls `listener` whenever a runner registers, connects, or goes away. */

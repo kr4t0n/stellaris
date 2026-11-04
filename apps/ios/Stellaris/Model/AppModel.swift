@@ -431,6 +431,15 @@ enum SignInFailure: Error, Equatable {
     }
   }
 
+  /// Drops what the task's Advance sheet says and closes it, as its Cancel does. An advance on its
+  /// way goes on.
+  func cancelAdvance(_ id: String) {
+    advanceNotes[id] = nil
+    if advancing == id {
+      advancing = nil
+    }
+  }
+
   /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
   /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
   /// which the decision closes, again. Only a proposal that waits on the user is decided here, and
@@ -473,6 +482,15 @@ enum SignInFailure: Error, Equatable {
     Task {
       await feed.load(using: self)
       await store.reload(["proposals", "threads", "members", "channels"], using: self)
+    }
+  }
+
+  /// Drops what the decision's sheet says and closes it, as its Cancel does. A decision on its way
+  /// goes on.
+  func cancelDecision(_ verdict: Verdict) {
+    reasons[verdict] = nil
+    if deciding == verdict {
+      deciding = nil
     }
   }
 

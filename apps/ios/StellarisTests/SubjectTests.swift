@@ -6,7 +6,8 @@ import Testing
 
 /// A task's advance and a proposal's decision over the fake board: a stage that waits on the user
 /// finished with its note, none sent for a stage another citizen holds, a proposal approved, and a
-/// rejection sent only with its reason; what each sheet says, kept until it is sent or cancelled;
+/// rejection sent only with its reason; what each sheet says and why it didn't go, kept until it
+/// is sent or cancelled;
 /// and a proposal named as the web names it. Each test signs in with a token of its own, which the
 /// fake board keeps its writes under.
 @MainActor @Suite(.serialized) struct SubjectTests {
@@ -208,9 +209,9 @@ import Testing
     #expect(groups.map(\.phase) == [.waiting, .working])
   }
 
-  /// An advance on its way is the only one: the sheet swiped away mid-send, then Advance again
-  /// from the bar, sends nothing more, since an advance names no stage and a second would finish
-  /// the next.
+  /// An advance on its way is the only one: the sheet swiped away or cancelled mid-send, then
+  /// Advance again from the bar, sends nothing more, since an advance names no stage and a second
+  /// would finish the next.
   @Test(.timeLimit(.minutes(1))) func sendsOneAdvanceWhileOneIsUnderWay() async throws {
     let gate = HeldBoard.Gate(paths: ["/api/verbs/advance_task"])
     let model = try await signedIn(holding: gate)
@@ -219,6 +220,10 @@ import Testing
     await gate.arrivals(1)
     #expect(model.underWay.contains(exportView))
     model.advancing = nil
+    model.advancing = exportView
+    await #expect(throws: SubjectRefusal.underWay) { try await model.advance(exportView) }
+    model.cancelAdvance(exportView)
+    #expect(model.underWay.contains(exportView))
     model.advancing = exportView
     await #expect(throws: SubjectRefusal.underWay) { try await model.advance(exportView) }
     // As the board answered the one that went, which the fake board carried out as it arrived.
@@ -230,12 +235,17 @@ import Testing
     #expect(gate.arrived == 1, "a second advance went")
   }
 
-  /// A decision on its way is the only one, Approve and Reject alike.
+  /// A decision on its way is the only one, Approve and Reject alike, and Cancel leaves it on its
+  /// way.
   @Test(.timeLimit(.minutes(1))) func sendsOneDecisionWhileOneIsUnderWay() async throws {
     let gate = HeldBoard.Gate(paths: ["/api/verbs/approve", "/api/verbs/reject"])
     let model = try await signedIn(holding: gate)
-    let first = Task { try await model.decide(Verdict(proposal: reallocation, choice: .approve)) }
+    let approve = Verdict(proposal: reallocation, choice: .approve)
+    model.deciding = approve
+    let first = Task { try await model.decide(approve) }
     await gate.arrivals(1)
+    #expect(model.underWay.contains(reallocation))
+    model.cancelDecision(approve)
     #expect(model.underWay.contains(reallocation))
     let reject = Verdict(proposal: reallocation, choice: .reject)
     model.reasons[reject] = "Too late."
@@ -258,6 +268,51 @@ import Testing
     await #expect(throws: BoardError.self) { try await model.advance(exportView) }
     #expect(model.refusals[exportView]?.contains("not in play") == true)
     #expect(!model.underWay.contains(exportView))
+  }
+
+  /// Cancel drops a refused advance's refusal with its note, where a dismiss keeps both, and
+  /// leaves another task's.
+  @Test func cancellingAnAdvanceDropsItsRefusal() async throws {
+    let model = try await signedIn()
+    // Finished elsewhere, while the app's copy still has the stage waiting on the user.
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    _ = try await model.send(BoardAPI.advanceTask(exportView, note: nil))
+    model.advancing = exportView
+    model.advanceNotes[exportView] = "The design is approved."
+    await #expect(throws: BoardError.self) { try await model.advance(exportView) }
+    await #expect(throws: SubjectRefusal.notYours) { try await model.advance(emptyState) }
+    // Dismissed, as a swipe down or a fold that builds the sheet again does, then shown again.
+    model.advancing = nil
+    model.advancing = exportView
+    #expect(model.refusals[exportView]?.contains("not in play") == true)
+    #expect(model.advanceNotes[exportView] == "The design is approved.")
+
+    model.cancelAdvance(exportView)
+    #expect(model.refusals[exportView] == nil, "Cancel left the refusal for the sheet")
+    #expect(model.advanceNotes[exportView] == nil)
+    #expect(model.advancing == nil)
+    #expect(model.refusals[emptyState] == "This stage no longer waits on you.")
+  }
+
+  /// Cancel drops a refused decision's refusal with its reason, where a dismiss keeps both.
+  @Test func cancellingADecisionDropsItsRefusal() async throws {
+    let model = try await signedIn()
+    // Decided elsewhere, while the app's copy still has the proposal waiting on the user.
+    _ = try await model.send(BoardAPI.approve(member, reason: nil))
+    #expect(model.store.proposal(member).map(waitingOnYou) == true)
+    let reject = Verdict(proposal: member, choice: .reject)
+    model.deciding = reject
+    model.reasons[reject] = "Not this one."
+    await #expect(throws: BoardError.self) { try await model.decide(reject) }
+    model.deciding = nil
+    model.deciding = reject
+    #expect(model.refusals[member]?.contains("already provisioned") == true)
+    #expect(model.reasons[reject] == "Not this one.")
+
+    model.cancelDecision(reject)
+    #expect(model.refusals[member] == nil, "Cancel left the refusal for the sheet")
+    #expect(model.reasons[reject] == nil)
+    #expect(model.deciding == nil)
   }
 
   /// An event that lands while a dashboard is on its first read reads it again, and the later

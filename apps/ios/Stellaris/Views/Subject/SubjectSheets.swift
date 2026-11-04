@@ -41,8 +41,7 @@ struct AdvanceSheet: View {
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button {
-            model.advanceNotes[taskId] = nil
-            model.advancing = nil
+            model.cancelAdvance(taskId)
           } label: {
             Label("Cancel", systemImage: "xmark")
           }
@@ -120,8 +119,7 @@ struct DecisionSheet: View {
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button {
-            model.reasons[verdict] = nil
-            model.deciding = nil
+            model.cancelDecision(verdict)
           } label: {
             Label("Cancel", systemImage: "xmark")
           }

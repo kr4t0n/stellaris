@@ -71,7 +71,8 @@ enum SignInFailure: Error, Equatable {
   /// again until the board answers: an advance names no stage, so a second would finish the next.
   private(set) var underWay: Set<String> = []
   /// Why a task's advance or a proposal's decision didn't go, in words for its sheet, by the task's
-  /// or the proposal's id, kept until the next try, so a sheet built again shows it still.
+  /// or the proposal's id, kept until the next try or its sheet's Cancel, so a sheet dismissed or
+  /// built again shows it still.
   private(set) var refusals: [String: String] = [:]
   /// How many images are on their way into each conversation's draft, by the conversation's key.
   /// Its Send waits for them, so a line holding an image's place never goes out.
@@ -431,6 +432,16 @@ enum SignInFailure: Error, Equatable {
     }
   }
 
+  /// Drops what the task's Advance sheet says and why its last advance didn't go, and closes it,
+  /// as its Cancel does. An advance on its way goes on.
+  func cancelAdvance(_ id: String) {
+    advanceNotes[id] = nil
+    refusals[id] = nil
+    if advancing == id {
+      advancing = nil
+    }
+  }
+
   /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
   /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
   /// which the decision closes, again. Only a proposal that waits on the user is decided here, and
@@ -473,6 +484,16 @@ enum SignInFailure: Error, Equatable {
     Task {
       await feed.load(using: self)
       await store.reload(["proposals", "threads", "members", "channels"], using: self)
+    }
+  }
+
+  /// Drops what the decision's sheet says and why the proposal's last decision didn't go, and
+  /// closes it, as its Cancel does. A decision on its way goes on.
+  func cancelDecision(_ verdict: Verdict) {
+    reasons[verdict] = nil
+    refusals[verdict.proposal] = nil
+    if deciding == verdict {
+      deciding = nil
     }
   }
 

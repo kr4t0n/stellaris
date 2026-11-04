@@ -496,8 +496,8 @@
       let line =
         (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
         .map { describeCharter($0.kind, $0.charter) } ?? id
-      let post =
-        "\(approved ? "Approved" : "Rejected"): \(line).\(reason.map { " Reason: \($0)." } ?? "")"
+      let why = reason.map { " Reason: \(asSentence($0))" } ?? ""
+      let post = "\(approved ? "Approved" : "Rejected"): \(asSentence(line))\(why)"
       let outcome = approved ? "approved" : "rejected"
       return written.withLock { written in
         var mine = written[token] ?? Written()
@@ -516,6 +516,16 @@
         answer["reason"] = reason
         return (200, json(answer))
       }
+    }
+
+    /// Free text a post quotes as a sentence, as the board's `asSentence` writes it: trimmed, with a
+    /// period unless it ends one already, with `.`, `…`, `?` or `!` before any closing quotes,
+    /// brackets, or emphasis.
+    private static func asSentence(_ text: String) -> String {
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      let closers: Set<Character> = ["\"", "'", "”", "’", "»", ")", "]", "}", "*", "_"]
+      let last = trimmed.reversed().first { !closers.contains($0) }
+      return last.map { ".…?!".contains($0) } == true ? trimmed : trimmed + "."
     }
 
     /// Writes the demo project's dashboard, as a citizen does with `update_dashboard`, so a test can

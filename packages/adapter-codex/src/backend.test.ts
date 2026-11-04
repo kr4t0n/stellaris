@@ -1269,6 +1269,42 @@ describe("CodexBackend cold turns", () => {
     );
   });
 
+  it("reports a sub-agent call as it completes, with what it started with, and none Codex left", async () => {
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        // Codex 0.165.0 starts a v1 spawn and, refusing its agent type, never completes it.
+        const refused = collabCall("c1", "spawnAgent", {
+          status: "inProgress",
+          prompt: "First.",
+          receiverThreadIds: [],
+        });
+        turn.item("item/started", refused);
+        const spawn = collabCall("c2", "spawnAgent", { prompt: "Second.", receiverThreadIds: [] });
+        turn.item("item/started", { ...spawn, status: "inProgress" });
+        turn.item("item/completed", {
+          ...spawn,
+          receiverThreadIds: ["thread-8"],
+          agentsStates: { "thread-8": { status: "pendingInit", message: null } },
+        });
+        // A wait that timed out names, as it completes, none of the sub-agents it waited on.
+        const wait = collabCall("c3", "wait");
+        turn.item("item/started", { ...wait, status: "inProgress" });
+        turn.item("item/completed", { ...wait, receiverThreadIds: [] });
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("waited") });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.events.filter((e) => e.type === "tool_call" || e.type === "tool_result")).toEqual(
+      [
+        { type: "tool_call", name: "Agent", input: { prompt: "Second." } },
+        { type: "tool_result", name: "Agent", ok: true, output: "thread-8: pendingInit" },
+        { type: "tool_call", name: "wait_agent", input: { targets: ["thread-8"] } },
+        { type: "tool_result", name: "wait_agent", ok: true },
+      ],
+    );
+  });
+
   it("marks failed commands and board calls as failed results", async () => {
     const fake = fakeAppServer({
       turn: (turn) => {

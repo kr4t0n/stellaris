@@ -343,6 +343,14 @@ const SUB_AGENT_ACTIVITIES = new Map([
   ["interrupted", "TaskStop"],
 ]);
 
+/**
+ * Items whose call is reported when they complete. A web search learns what it looked for as it
+ * runs. Codex can start a sub-agent call and return without completing it, as a v1 spawn it refuses
+ * once started or a v1 wait whose sub-agent's status fails, and a call left with no result would
+ * take the next result of the same tool.
+ */
+const REPORTED_ON_COMPLETION = new Set(["webSearch", "collabAgentToolCall", "subAgentActivity"]);
+
 /** App-server items use camelCase types; the vocabulary maps onto the same tool names as everywhere else. */
 function toolNameOf(item: Dict): string | null {
   switch (item["type"]) {
@@ -658,6 +666,8 @@ interface TurnCollector {
   status: string | null;
   error: string | undefined;
   readonly started: Set<string>;
+  /** What a call reported on completion said as it started, by its item's id. */
+  readonly startInputs: Map<string, unknown>;
   readonly emit: (event: AgentEvent) => void;
   readonly settle: () => void;
   /** Steers the app server accepted and has not yet delivered as a user message. */
@@ -1045,11 +1055,19 @@ export class CodexAppServerSession implements ResidentSession {
         if (name === null) {
           return;
         }
-        // A web search learns what it looked for as it runs, so its call is reported on completion.
-        const early = item["type"] === "webSearch" && method !== "item/completed";
-        if (!turn.started.has(id) && !early) {
+        if (method !== "item/completed" && REPORTED_ON_COMPLETION.has(String(item["type"]))) {
+          // A sub-agent call names its sub-agents fullest as it starts, since a wait's completion
+          // names only those that ended; a web search's start is blank.
+          if (item["type"] !== "webSearch" && !turn.startInputs.has(id)) {
+            turn.startInputs.set(id, toolInputOf(item, name));
+          }
+          return;
+        }
+        if (!turn.started.has(id)) {
           turn.started.add(id);
-          turn.emit({ type: "tool_call", name, input: toolInputOf(item, name) });
+          const input = turn.startInputs.get(id) ?? toolInputOf(item, name);
+          turn.startInputs.delete(id);
+          turn.emit({ type: "tool_call", name, input });
         }
         if (method === "item/completed") {
           const output = toolOutputOf(item);
@@ -1128,6 +1146,7 @@ export class CodexAppServerSession implements ResidentSession {
       status: null,
       error: undefined,
       started: new Set(),
+      startInputs: new Map(),
       emit,
       settle,
       outstanding: new Set(),

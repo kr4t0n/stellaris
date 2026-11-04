@@ -287,6 +287,33 @@ describe("recorded Codex app-server turns", () => {
     });
   });
 
+  /**
+   * Recorded the same way: a spawn naming an `agent_type` Codex doesn't know, which it started and
+   * then refused without completing, a good spawn whose sub-agent the stub held past the parent's
+   * 10-second wait, so the wait timed out and its completion named no sub-agent, and a close.
+   */
+  it("replays a v1 spawn Codex started and refused as no step, and a timed-out wait with its target", async () => {
+    const { spawn } = await replay("app-server-subagents-v1-refused-recorded.jsonl");
+    const result = await new CodexBackend({ spawn }).runTurn(request({}));
+    expect(result.exitReason).toBe("completed");
+    const agent = "01a1a61b-ae6d-7363-9b69-4bd8aaf93883";
+    expect(stepsOf(result.events)).toEqual([
+      ["call", "Agent", { prompt: "SUBTASK: list the files in the worktree" }],
+      ["result", "Agent", true, `${agent}: pendingInit`],
+      ["call", "wait_agent", { targets: [agent] }],
+      ["result", "wait_agent", true, undefined],
+      ["call", "TaskStop", { task_id: agent }],
+      ["result", "TaskStop", true, `${agent}: running`],
+    ]);
+    // Five parent requests; the sub-agent's one was still held when the parent closed it.
+    expect(result.usage).toEqual({
+      inputTokens: 3_000,
+      outputTokens: 250,
+      cacheReadTokens: 2_000,
+      cacheWriteTokens: 0,
+    });
+  });
+
   it("replays a turn's multi_agent_v2 calls as one step each, none for a sub-agent's end", async () => {
     const { spawn } = await replay("app-server-subagents-v2-recorded.jsonl");
     const result = await new CodexBackend({ spawn }).runTurn(request({}));

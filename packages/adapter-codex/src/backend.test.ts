@@ -1176,6 +1176,25 @@ describe("CodexBackend cold turns", () => {
     ]);
   });
 
+  it("reports an image Codex opened as a Read of its path, once, with the image as its result", async () => {
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        const view = { type: "imageView", id: "call-1", path: "/tmp/images/plot.png" };
+        turn.item("item/started", view);
+        turn.item("item/completed", view);
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("looked") });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.events.filter((e) => e.type === "tool_call" || e.type === "tool_result")).toEqual(
+      [
+        { type: "tool_call", name: "Read", input: { path: "/tmp/images/plot.png" } },
+        { type: "tool_result", name: "Read", ok: true, output: "[image]" },
+      ],
+    );
+  });
+
   it("marks failed commands and board calls as failed results", async () => {
     const fake = fakeAppServer({
       turn: (turn) => {

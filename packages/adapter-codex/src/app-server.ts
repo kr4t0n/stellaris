@@ -322,6 +322,8 @@ function toolNameOf(item: Dict): string | null {
       return "Edit";
     case "webSearch":
       return "WebSearch";
+    case "imageView":
+      return "Read";
     case "mcpToolCall": {
       const server = str(item["server"]) ?? "mcp";
       const tool = str(item["tool"]) ?? "tool";
@@ -340,6 +342,8 @@ function toolInputOf(item: Dict): unknown {
       return { changes: item["changes"] };
     case "webSearch":
       return searchInput(item);
+    case "imageView":
+      return { path: item["path"] };
     case "mcpToolCall":
       return item["arguments"];
     default:
@@ -385,6 +389,10 @@ function toolOutputOf(item: Dict): string {
         )
         .join("\n");
     }
+    // Codex reports an image only once it has read and decoded the file, and the model was given
+    // the image itself, which both adapters show as they show an image block in a result.
+    case "imageView":
+      return "[image]";
     default:
       return "";
   }

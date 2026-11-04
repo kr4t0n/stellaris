@@ -30,6 +30,14 @@ export const TriggerKindSchema = z.enum([
 ]);
 export type TriggerKind = z.infer<typeof TriggerKindSchema>;
 
+/**
+ * What a heartbeat woke a conversation for, the first that applies: `unread`, posts it has not
+ * read; `held`, a stage it holds; `waiting`, a stage it may take. News comes first, since a held or
+ * waiting stage alone would wake it on every heartbeat.
+ */
+export const HeartbeatCauseSchema = z.enum(["unread", "held", "waiting"]);
+export type HeartbeatCause = z.infer<typeof HeartbeatCauseSchema>;
+
 export const TriggerSchema = z.object({
   kind: TriggerKindSchema,
   from: NameSchema.optional(),
@@ -41,6 +49,8 @@ export const TriggerSchema = z.object({
   channel: ChannelRefSchema.optional(),
   /** The cron that came due, for a `cron` wake. */
   cronId: UlidSchema.optional(),
+  /** What a `heartbeat` woke for; absent on records from before the board kept it. */
+  heartbeat: HeartbeatCauseSchema.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 export type TriggerInput = z.input<typeof TriggerSchema>;
@@ -181,6 +191,12 @@ export const TurnRecordSchema = z.object({
    */
   sessionUsage: UsageSchema.optional(),
   /**
+   * The SHA-256 of the instructions the session holds after this turn, the first turn's section
+   * left out (`instructionsHash` in `turn-host`): those it began with, or the latest a prompt
+   * carried. Absent when the board does not know them, as for records from before it kept them.
+   */
+  sessionInstructionsHash: z.string().optional(),
+  /**
    * The whole input of the turn's latest model call in the session's own thread, as the runner
    * reported it: how large the session had grown. Absent for a turn that made no call.
    */
@@ -205,6 +221,12 @@ export const TurnRecordSchema = z.object({
   sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */
   crons: z.array(UlidSchema).optional(),
+  /**
+   * The failed fires its prompt named: each of its citizen's crons in its conversation whose latest
+   * fire's turn failed with nothing catching it up (`cronFailure`), but those it carries, with that
+   * turn. Completing it catches each up.
+   */
+  cronFailures: z.array(z.object({ cron: UlidSchema, turnId: UlidSchema })).optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecordSchema>;
 
@@ -273,6 +295,8 @@ export const TurnHistoryEntrySchema = z.object({
   /** The project whose channels' conversation the turn was in, for a turn in the society scope. */
   place: NameSchema.optional(),
   trigger: z.string(),
+  /** What a `heartbeat` woke for; absent on turns logged before the board kept it. */
+  heartbeat: HeartbeatCauseSchema.optional(),
   exitReason: z.string().nullable(),
   costUsd: z.number(),
   /** The tokens the turn used; absent for turns logged before turns recorded them. */

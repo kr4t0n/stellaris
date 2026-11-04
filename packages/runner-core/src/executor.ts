@@ -9,6 +9,7 @@ import {
   HeldWorkspaceSchema,
   HOME_SCRATCH,
   MOVE_PACK_LIMIT_BYTES,
+  moveTransferMs,
   PATH_TOKENS,
   SERVER_TOKEN,
   SOCIETY_SCOPE,
@@ -40,7 +41,9 @@ import {
   type StuckWork,
   type SweepResult,
   type TurnImage,
+  type TurnImageFile,
   type TurnImageRead,
+  type TurnImageWrite,
   type TurnJob,
   type TurnOutcome,
   type TurnWork,
@@ -50,7 +53,7 @@ import { renderClaudeMcpConfig, renderCodexMcpConfig } from "./config-home.js";
 import { TurnControl } from "./control.js";
 import { describeError } from "./errors.js";
 import { ExecaGit, taskBranch, type GitAuth, type GitOps, type RemoteSync } from "./git.js";
-import { readTurnImage, type ImagePlaces } from "./images.js";
+import { readTurnImage, TurnImageFolders, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
   ResumeError,
@@ -149,6 +152,11 @@ interface Resident {
   readonly model: string | undefined;
   /** The effort the session started with, which it keeps for good, as it does its model. */
   readonly effort: string | undefined;
+  /**
+   * The instructions the process started with, by the job's `instructionsHash` or else their text:
+   * a compaction puts these back, so a process given others starts afresh.
+   */
+  readonly instructions: string;
   timer: ReturnType<typeof setTimeout> | null;
   /** Set when another turn of the citizen changed its memory, which this session read at its start. */
   stale: boolean;
@@ -184,6 +192,8 @@ export class TurnExecutor {
    * worktree is left to its own hand-back meanwhile.
    */
   private readonly imagePlaces = new Map<string, ImagePlaces>();
+  /** The folders the images each turn opened with `read_image` are in, removed as the turn ends. */
+  private readonly imageFolders = new TurnImageFolders();
   /** The commit each worktree's stuck work was last told at, so a hand-back tells it once. */
   private readonly stuckTold = new Map<string, string>();
 
@@ -340,13 +350,20 @@ export class TurnExecutor {
       };
     }
     this.imagePlaces.delete(job.turnId);
+    await this.imageFolders.remove(job.turnId).catch((error: unknown) => {
+      this.log.warn(
+        { turnId: job.turnId, error: describeError(error) },
+        "could not remove the images the turn opened",
+      );
+    });
     // A turn the user stopped ended because of it, however its CLI reported the end.
     if (control.stopped && result.exitReason !== "completed") {
       result = { ...result, exitReason: "stopped" };
     }
     if (result.status?.memoryUpdated === true) {
-      // The citizen's warm sessions started with the memory this turn changed; each restarts at
-      // its next turn, not mid-turn.
+      // The citizen's warm processes started with the memory this turn changed; each restarts at
+      // its next turn, not mid-turn, on the instructions that job carries. The session itself keeps
+      // the instructions it began with, so the server's prompt carries a change (`TurnHost.openTurn`).
       for (const [key, warm] of this.residents) {
         if (key.startsWith(`${job.agent}/`)) {
           warm.stale = true;
@@ -485,7 +502,12 @@ export class TurnExecutor {
         return { ok: false, held, bytes };
       }
       const refs = await this.git.refs(repoDir);
-      await this.git.pushEverything(repoDir, remote.url(move), moveAuth(remote, move));
+      await this.git.pushEverything(
+        repoDir,
+        remote.url(move),
+        moveAuth(remote, move),
+        moveTransferMs(bytes),
+      );
       this.log.info(
         { project: repo.slug, move, refs: Object.keys(refs).length, bytes },
         "sent a project's repository to the board for a move",
@@ -512,7 +534,13 @@ export class TurnExecutor {
       }
       const staging = this.layout.incoming(repo.slug);
       try {
-        await this.git.cloneEverything(remote.url(move), moveAuth(remote, move), staging, repo);
+        await this.git.cloneEverything(
+          remote.url(move),
+          moveAuth(remote, move),
+          staging,
+          repo,
+          moveTransferMs(request.bytes ?? MOVE_PACK_LIMIT_BYTES),
+        );
         if (
           request.pullRequests &&
           this.pulls.signedIn !== undefined &&
@@ -1038,6 +1066,30 @@ export class TurnExecutor {
     return places === undefined ? null : readTurnImage(read.path, places);
   }
 
+  /**
+   * Writes an image the board sent for `read_image` into a folder of the turn's own in the system
+   * temp folder, removed as the turn ends, and answers the file's path; null when no such turn's
+   * CLI is running here, or it ended while the image was written.
+   */
+  async writeImage(write: TurnImageWrite): Promise<TurnImageFile | null> {
+    if (!this.imagePlaces.has(write.turnId)) {
+      return null;
+    }
+    try {
+      const file = await this.imageFolders.write(write);
+      if (this.imagePlaces.has(write.turnId)) {
+        return { path: file };
+      }
+    } catch (error) {
+      if (this.imagePlaces.has(write.turnId)) {
+        throw error;
+      }
+    }
+    // The turn ended meanwhile, and its folder goes with it if its end did not take it.
+    await this.imageFolders.remove(write.turnId);
+    return null;
+  }
+
   async models(cli: CliKind): Promise<ModelOption[]> {
     const backend = this.backends[cli];
     return backend?.listModels === undefined ? [] : backend.listModels();
@@ -1255,9 +1307,10 @@ export class TurnExecutor {
 
   /**
    * One turn on a warm session: start it on first use, run the prompt, then either keep it warm
-   * until the idle timeout or recycle it when its instructions went stale. A session given another
-   * token or model than it started with starts afresh, since the CLI read both at its start, and so
-   * does one whose job names no session, since the server dropped the one it was warm on.
+   * until the idle timeout or recycle it when its citizen's memory changed or the turn failed. A session given another
+   * token, model, or instructions than it started with starts afresh, since the CLI read them at its
+   * start and a compaction puts its instructions back, and so does one whose job names no session,
+   * since the server dropped the one it was warm on.
    */
   private async runResident(
     backend: AgentBackend,
@@ -1278,16 +1331,21 @@ export class TurnExecutor {
     if (backend.startResident === undefined || resident === undefined) {
       throw new Error("backend cannot host resident sessions");
     }
+    const instructions = job.instructionsHash ?? input.instructions;
     const warm = this.residents.get(resident.key);
     if (
       warm !== undefined &&
       (warm.model !== spec.model ||
         warm.effort !== spec.effort ||
         warm.token !== job.mcp.token ||
+        warm.instructions !== instructions ||
         warm.stale ||
         input.newSession)
     ) {
-      await this.closeResident(resident.key, "model, effort, token, memory, or session changed");
+      await this.closeResident(
+        resident.key,
+        "model, effort, token, instructions, memory, or session changed",
+      );
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
@@ -1306,6 +1364,7 @@ export class TurnExecutor {
         token: job.mcp.token,
         model: spec.model,
         effort: spec.effort,
+        instructions,
         timer: null,
         stale: false,
       };
@@ -1328,7 +1387,7 @@ export class TurnExecutor {
     }
     const stale = result.status?.memoryUpdated === true || result.exitReason !== "completed";
     if (stale) {
-      // The instructions carry the memory core; a changed memory or a broken turn means a fresh start next time.
+      // A changed memory or a broken turn means a new process next time, on the same session.
       await this.closeResident(resident.key, "instructions changed or turn failed");
     } else {
       const active = current;

@@ -285,6 +285,14 @@ const HANDOVER = {
 /** An image ada uploaded to the board, and an id that names none. */
 export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
 export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
+/** The id the board gives the user's images, each one the next of these. */
+export const POSTED_IMAGES = [
+  "01M3Q2RRRRRRRRRRRRRRRRRRS1",
+  "01M3Q2RRRRRRRRRRRRRRRRRRS2",
+  "01M3Q2RRRRRRRRRRRRRRRRRRS3",
+];
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
 function pngChunk(type: string, data: Buffer): Buffer {
@@ -297,7 +305,7 @@ function pngChunk(type: string, data: Buffer): Buffer {
 }
 
 /** A PNG of the given size, a gradient under a grid, so it reads as a picture once enlarged. */
-function png(width: number, height: number): Buffer {
+export function png(width: number, height: number): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
@@ -315,7 +323,7 @@ function png(width: number, height: number): Buffer {
     }
   }
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    PNG_SIGNATURE,
     pngChunk("IHDR", header),
     pngChunk("IDAT", deflateSync(rows)),
     pngChunk("IEND", Buffer.alloc(0)),
@@ -549,6 +557,72 @@ const DESK_TURN = {
   startedAt: "2026-09-29T09:00:00.000Z",
   toolCalls: 4,
 };
+
+/**
+ * The task ren's heartbeats woke it for, a thread whose title is as long as three in four of a
+ * real board's task titles.
+ */
+const BENCH_TASK = "01M3Q2AAAAAAAAAAAAAAAAAAT1";
+const BENCH_THREAD = {
+  id: BENCH_TASK,
+  channel: "lab/general",
+  title: "Benchmark the shortest-path solvers on three city road graphs again",
+  subject: { kind: "task", id: BENCH_TASK },
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
+  body: "",
+};
+
+/**
+ * ren's heartbeat turns, newest last: one from before the board kept what a heartbeat woke for,
+ * then one for the stage it held in the task's thread and one, failed, for a stage there it could
+ * take, where the scheduler runs both.
+ */
+const REN_TURNS = [
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE1",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE2",
+    ts: "2026-09-29T08:02:00.000Z",
+    outcome: "completed",
+    project: "lab",
+    trigger: "heartbeat",
+    exitReason: "completed",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: "Nothing new in lab.",
+    error: null,
+    startedAt: "2026-09-29T08:00:00.000Z",
+    toolCalls: 2,
+  },
+  {
+    ...DESK_TURN,
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE3",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE4",
+    ts: "2026-09-29T09:03:00.000Z",
+    thread: BENCH_TASK,
+    trigger: "heartbeat",
+    heartbeat: "held",
+    summary: "The benchmark is still running; nothing to do yet.",
+  },
+  {
+    id: "01M3Q2DDDDDDDDDDDDDDDDDDE5",
+    turnId: "01M3Q2DDDDDDDDDDDDDDDDDDE6",
+    ts: "2026-09-29T09:31:00.000Z",
+    outcome: "failed",
+    project: "lab",
+    thread: BENCH_TASK,
+    trigger: "heartbeat",
+    heartbeat: "waiting",
+    exitReason: "error",
+    costUsd: 0,
+    model: "claude-opus-5-5",
+    summary: null,
+    error: "The runner went away.",
+    startedAt: "2026-09-29T09:30:00.000Z",
+    toolCalls: 0,
+  },
+];
 
 /** The steps desk's turn kept: what it said, a command that failed, and a board verb. */
 const DESK_TRANSCRIPT = [
@@ -919,8 +993,9 @@ function metrics(window: string) {
       idle: 3,
       unknown: 1,
       byTrigger: [
-        { trigger: "heartbeat", turns: 4, idle: 3 },
+        { trigger: "heartbeat", heartbeat: "held", turns: 3, idle: 3 },
         { trigger: "stage", turns: 8, idle: 0 },
+        { trigger: "heartbeat", turns: 1, idle: 0 },
       ],
       byAgent: [
         { agent: "stew", role: "steward", turns: 4, idle: 3 },
@@ -1166,6 +1241,8 @@ export async function fakeBoard(
     earlyApproval?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
+    /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
+    heartbeats?: boolean;
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
@@ -1194,6 +1271,54 @@ export async function fakeBoard(
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
   // laptop's, taken with pod's, so their resets match to the minute whenever the view asks.
   const laptopQuotas = { claude: claudeQuota(120, 35) };
+  // The user's pauses, by runner: the whole runner's, and each CLI's on it.
+  const runnerPauses = new Map<
+    string,
+    { paused?: { at: string; by: string }; pausedClis: Record<string, { at: string; by: string }> }
+  >();
+  const pausesOf = (runner: string): Record<string, unknown> => {
+    const pauses = runnerPauses.get(runner);
+    return {
+      ...(pauses?.paused === undefined ? {} : { paused: pauses.paused }),
+      ...(pauses === undefined || Object.keys(pauses.pausedClis).length === 0
+        ? {}
+        : { pausedClis: pauses.pausedClis }),
+    };
+  };
+  const runnerRecords = (): Array<Record<string, unknown>> => [
+    {
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "codex"],
+      capabilities: [],
+      version: "0.3.11",
+      gitIdentityMissing: ["email"],
+      status: "connected",
+      quotas: podQuotas,
+      ...pausesOf("pod"),
+    },
+    {
+      name: "studio",
+      os: "darwin",
+      clis: ["claude"],
+      capabilities: [],
+      version: "0.3.11",
+      gitIdentityMissing: [],
+      status: "connected",
+      quotas: studioQuotas,
+      ...pausesOf("studio"),
+    },
+    {
+      name: "laptop",
+      os: "darwin",
+      clis: ["claude"],
+      capabilities: ["gpu"],
+      version: "0.3.10",
+      status: "disconnected",
+      quotas: laptopQuotas,
+      ...pausesOf("laptop"),
+    },
+  ];
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1333,12 +1458,57 @@ export async function fakeBoard(
     );
     await page.route(BROKEN_URL, (route) => route.fulfill({ status: 404, body: "" }));
   }
+  // Images the user posted from a composer, by id; the fake keeps PNGs alone, which the tests post.
+  const userImages = new Map<string, Buffer>();
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const { pathname } = new URL(request.url());
+    const { pathname, searchParams } = new URL(request.url());
+    if (request.method() === "POST" && pathname === "/api/images") {
+      const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
+      const name = searchParams.get("name") ?? "";
+      writes.push({ path: pathname, body: { name, size: bytes.length } });
+      if (!bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+        return json(
+          route,
+          {
+            error: "VALIDATION",
+            message: `${name} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
+          },
+          400,
+        );
+      }
+      const id = POSTED_IMAGES[userImages.size] ?? "";
+      userImages.set(id, bytes);
+      return json(route, {
+        id,
+        type: "png",
+        size: bytes.length,
+        markdown: `![${name}](image:${id})`,
+      });
+    }
     if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
+      const pause = /^\/api\/runners\/([^/]+)\/(pause|resume)(?:\/([^/]+))?$/.exec(pathname);
+      if (pause !== null) {
+        const [, runner = "", verb, cli] = pause;
+        const pauses = runnerPauses.get(runner) ?? { pausedClis: {} };
+        const now = { at: new Date().toISOString(), by: "user" };
+        if (cli === undefined && verb === "pause") {
+          pauses.paused ??= now;
+        } else if (cli === undefined) {
+          delete pauses.paused;
+        } else if (verb === "pause") {
+          pauses.pausedClis[cli] ??= now;
+        } else {
+          delete pauses.pausedClis[cli];
+        }
+        runnerPauses.set(runner, pauses);
+        return json(
+          route,
+          runnerRecords().find((each) => each["name"] === runner),
+        );
+      }
       switch (pathname) {
         case "/api/runners/pod/quota/claude":
           podQuotas["claude"] = { ...claudeQuota(0, 41), source: "read" };
@@ -1624,6 +1794,10 @@ export async function fakeBoard(
       return json(route, metrics(new URL(request.url()).searchParams.get("window") ?? "7d"));
     }
     if (pathname.startsWith("/api/images/")) {
+      const kept = userImages.get(pathname.slice("/api/images/".length));
+      if (kept !== undefined) {
+        return route.fulfill({ contentType: "image/png", body: kept });
+      }
       return pathname === `/api/images/${UPLOADED_IMAGE}`
         ? route.fulfill({ contentType: "image/png", body: screenshot })
         : json(route, { error: "NOT_FOUND", message: "image not found" }, 404);
@@ -1699,47 +1873,20 @@ export async function fakeBoard(
           ...(options.retired === true
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),
+          ...(options.heartbeats === true ? [member("ren", "researcher", ["lab"])] : []),
         ]);
       case "/api/version":
         return json(route, { version: "0.3.11" });
       case "/api/runners":
-        return json(route, [
-          {
-            name: "pod",
-            os: "linux",
-            clis: ["claude", "codex"],
-            capabilities: [],
-            version: "0.3.11",
-            gitIdentityMissing: ["email"],
-            status: "connected",
-            quotas: podQuotas,
-          },
-          {
-            name: "studio",
-            os: "darwin",
-            clis: ["claude"],
-            capabilities: [],
-            version: "0.3.11",
-            gitIdentityMissing: [],
-            status: "connected",
-            quotas: studioQuotas,
-          },
-          {
-            name: "laptop",
-            os: "darwin",
-            clis: ["claude"],
-            capabilities: ["gpu"],
-            version: "0.3.10",
-            status: "disconnected",
-            quotas: laptopQuotas,
-          },
-        ]);
+        return json(route, runnerRecords());
       case "/api/agents/desk/models":
         return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
       case "/api/agents/desk/turns":
         return json(route, [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
         return json(route, DESK_TRANSCRIPT);
+      case "/api/agents/ren/turns":
+        return json(route, options.heartbeats === true ? REN_TURNS : []);
       case "/api/agents/desk/memory":
         return json(route, { body: "# Core memory\n\n- The user writes names plainly." });
       case "/api/agents/desk/skills":
@@ -1812,6 +1959,9 @@ export async function fakeBoard(
             messages: threadMessages.length,
             lastMessageId: threadMessages.at(-1)?.["id"] ?? null,
           },
+          ...(options.heartbeats === true
+            ? [{ ...BENCH_THREAD, messages: 0, lastMessageId: null }]
+            : []),
           {
             ...proposalThread(),
             messages: proposalMessages.length,

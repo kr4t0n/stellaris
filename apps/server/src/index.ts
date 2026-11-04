@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { serve } from "@hono/node-server";
 import { Board } from "@stellaris/board-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
 import { SERVER_TOKEN, STELLARIS_VERSION, loadServerConfig } from "@stellaris/shared";
@@ -11,6 +10,7 @@ import { createApp } from "./app.js";
 import { EnrollmentDesk } from "./enrollment.js";
 import { ModelCatalog } from "./models.js";
 import { QuotaReads } from "./quotas.js";
+import { serveBoard } from "./serve.js";
 import { TurnHub } from "./turn-hub.js";
 
 const VERSION = STELLARIS_VERSION;
@@ -55,6 +55,7 @@ const runners = new RunnerHub({ board, host, version: VERSION, log });
 board.watchTurns(() => host.inFlight());
 // An image a citizen uploads is read on the runner its turn runs on.
 board.readImagesWith((actor, file) => runners.readTurnImage(actor, file));
+board.openImagesWith((actor, image) => runners.writeTurnImage(actor, image));
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
@@ -98,22 +99,25 @@ const app = createApp({
   trustedProxies: config.trustedProxies,
   log,
 });
-const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
-  log.info(
-    {
-      host: info.address,
-      port: info.port,
-      dataDir: config.dataDir,
-      mcpUrl,
-      webDir,
-      webBuilt,
-      signIn: config.github === null ? "token" : `github (${config.github.users.join(", ")})`,
-      appleAppId: config.github?.appleAppId ?? null,
-      trustedProxies: config.trustedProxies,
-    },
-    "board server listening",
-  );
-});
+const server = serveBoard(
+  { fetch: app.fetch, port: config.port, hostname: config.host },
+  (info) => {
+    log.info(
+      {
+        host: info.address,
+        port: info.port,
+        dataDir: config.dataDir,
+        mcpUrl,
+        webDir,
+        webBuilt,
+        signIn: config.github === null ? "token" : `github (${config.github.users.join(", ")})`,
+        appleAppId: config.github?.appleAppId ?? null,
+        trustedProxies: config.trustedProxies,
+      },
+      "board server listening",
+    );
+  },
+);
 
 await scheduler.start();
 log.info(

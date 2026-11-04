@@ -10,6 +10,7 @@ import {
   tokensDetail,
   tokensLabel,
   turnLength,
+  wokenBy,
 } from "./citizen.js";
 import { PaneNote } from "./Pane.js";
 import { time, TranscriptSteps } from "./Transcript.js";
@@ -46,6 +47,8 @@ function TurnRow({
         : entry.place !== undefined
           ? `${entry.place}'s channels`
           : null;
+  // What a heartbeat woke for, in the words Metrics uses; the row shows the cause's own name.
+  const heartbeat = entry.heartbeat === undefined ? undefined : wokenBy(entry);
   const text = entry.error ?? entry.summary ?? "";
   const tone = entry.error === null ? "text-fg-secondary" : "text-red-300";
   return (
@@ -62,6 +65,13 @@ function TurnRow({
               {about === null ? "" : ` · ${about}`}
             </span>
             <span className="text-fg-muted">{entry.trigger}</span>
+            {/* What a heartbeat woke for keeps its width, so the scope gives way first: a held or a
+                waiting stage's heartbeat runs in its task's thread, whose title is often long. */}
+            {heartbeat === undefined ? null : (
+              <span className="-ml-1 shrink-0 text-fg-muted" title={heartbeat}>
+                · {entry.heartbeat}
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate text-fg-muted">
               {endingOf(entry)} {ago(entry.ts, now)}
             </span>

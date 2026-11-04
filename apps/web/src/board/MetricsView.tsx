@@ -6,6 +6,7 @@ import { ApiError } from "../lib/api.js";
 import { ago, span } from "../lib/format.js";
 import { useMetrics, useNow } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
+import { HEARTBEATS } from "./citizen.js";
 import { Section } from "./Overview.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
@@ -200,7 +201,7 @@ export function MetricsView() {
             label="By what woke them"
             columns={["Woken by", "Turns", "Did nothing"]}
             rows={idle.byTrigger.map((row) => [
-              TRIGGERS[row.trigger] ?? row.trigger,
+              `${TRIGGERS[row.trigger] ?? row.trigger}${row.heartbeat === undefined ? "" : `, ${HEARTBEATS[row.heartbeat]}`}`,
               row.turns,
               <Part key="idle" part={row.idle} whole={row.turns} />,
             ])}

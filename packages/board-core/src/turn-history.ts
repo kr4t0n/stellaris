@@ -1,5 +1,6 @@
 import {
   addUsage,
+  HeartbeatCauseSchema,
   METRICS_WINDOW_MS,
   NameSchema,
   UlidSchema,
@@ -21,6 +22,8 @@ export const TurnHistoryPayloadSchema = z.object({
   channel: NameSchema.optional(),
   place: NameSchema.optional(),
   trigger: z.string().default("manual"),
+  // One a later board added reads as none, so the turn stays in the history.
+  heartbeat: HeartbeatCauseSchema.optional().catch(undefined),
   exitReason: z.string().nullable().default(null),
   costUsd: z.number().default(0),
   usage: UsageSchema.optional(),

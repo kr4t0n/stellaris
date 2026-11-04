@@ -89,6 +89,23 @@ final class InnerLayoutSnapshotTests: XCTestCase {
     }
   }
 
+  /// A task's plan, open over its thread in each pose: beside the thread below the sky in
+  /// portrait, where the chat has the window's width, and in a sheet in landscape, where it has
+  /// half, as on the outer display and in Split View.
+  @MainActor func testThePlanInEachPose() async throws {
+    let model = try await signedIn()
+    let task = "00000000000000000000000010"
+    model.open(.thread(task))
+    await model.feed(for: .thread(task)).load(using: model)
+    model.inspecting = task
+    for pose in poses where pose.name != "portrait-typing" {
+      let image = try await Snapshot.image(
+        of: AppLayout(pose: pose.pose).environment(model), size: pose.size,
+        type: Snapshot.typeSizes[0])
+      try Snapshot.keep(image, named: "inner-\(pose.name)-plan", in: self)
+    }
+  }
+
   /// The sky's viewport, which runs out to the window's edges, spans the window one way and ends
   /// at the far edge of the fold's band the other, in the window as in the pose, with room for the
   /// band.

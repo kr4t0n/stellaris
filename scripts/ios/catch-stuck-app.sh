@@ -85,11 +85,19 @@ record() {
 }
 
 # Records a copy's console every 10 s while it runs, keeping the last record that found its devices,
-# since a copy still starting up hasn't yet pointed its console where the app sends it.
+# from when XCTest's output first shows the app idle after the copy appeared: a copy still starting
+# up hasn't yet pointed its console where the app sends it, and a first launch on a busy runner has
+# taken 15 s, longer than the records once kept of it while it ran.
 console() {
-  local pid=$1 file="$folder/console/$1.txt"
+  local pid=$1 file="$folder/console/$1.txt" from
   mkdir -p "$folder/console"
-  sleep 5
+  from=$(wc -l <"$output" 2>/dev/null || echo 0)
+  until tail -n +"$((from + 1))" "$output" 2>/dev/null | grep -q "Wait for ${bundle//./\\.} to idle"; do
+    if ! ps -p "$pid" >/dev/null 2>&1 || [ -e "$output.done" ]; then
+      return 0
+    fi
+    sleep 1
+  done
   while ps -p "$pid" >/dev/null 2>&1 && [ ! -e "$output.done" ]; do
     record "$pid" >"$file.new" 2>&1
     if grep -q '^Stellaris ' "$file.new"; then

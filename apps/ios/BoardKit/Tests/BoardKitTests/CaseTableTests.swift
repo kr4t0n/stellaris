@@ -1,9 +1,10 @@
+import Foundation
 import Testing
 
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// and link tests run.
+/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -190,6 +191,176 @@ import Testing
           }
         }
       #expect(items == each.expected, "\(each.name)")
+    }
+  }
+
+  struct ComposeCase: Decodable {
+    struct Completed: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+    }
+
+    let name: String
+    let text: String
+    let caret: Int
+    let mention: MentionFragment?
+    let completed: Completed?
+  }
+
+  @Test func mentionsAgreeWithTheWeb() throws {
+    let cases = try Fixture.table("compose", as: [ComposeCase].self)
+    #expect(cases.count > 10)
+    for each in cases {
+      let mention = mentionAt(each.text, caret: each.caret)
+      #expect(mention == each.mention, "\(each.name)")
+      if let completed = each.completed, let mention {
+        let done = completeMention(
+          each.text, caret: each.caret, start: mention.start, name: completed.name)
+        #expect(
+          done == CompletedMention(text: completed.text, caret: completed.caret), "\(each.name)")
+      }
+    }
+  }
+
+  struct UploadCases: Decodable {
+    struct Placeholder: Decodable {
+      let name: String
+      let file: String
+      let placeholder: String
+    }
+
+    struct Insert: Decodable {
+      let name: String
+      let text: String
+      let start: Int
+      let end: Int
+      let inserted: String
+      let result: DraftEdit
+    }
+
+    struct Settle: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let placeholder: String
+      let markdown: String
+      let result: DraftEdit?
+    }
+
+    struct Numbered: Decodable {
+      let name: String
+      let file: String
+      let text: String
+      let held: [String]
+      let placeholder: String
+    }
+
+    struct Draft: Decodable {
+      let name: String
+      let text: String
+      let held: [String]
+      let images: [DraftImage]
+    }
+
+    struct Removal: Decodable {
+      let name: String
+      let text: String
+      let caret: Int
+      let image: DraftImage
+      let result: DraftEdit
+    }
+
+    let placeholders: [Placeholder]
+    let inserts: [Insert]
+    let settles: [Settle]
+    let numbered: [Numbered]
+    let drafts: [Draft]
+    let removals: [Removal]
+  }
+
+  @Test func uploadsHoldTheirPlaceAsOnTheWeb() throws {
+    let cases = try Fixture.table("uploads", as: UploadCases.self)
+    #expect(cases.settles.count > 5)
+    for each in cases.placeholders {
+      #expect(uploadingImage(each.file) == each.placeholder, "\(each.name)")
+    }
+    for each in cases.inserts {
+      let done = insertAt(each.text, start: each.start, end: each.end, inserted: each.inserted)
+      #expect(done == each.result, "\(each.name)")
+    }
+    for each in cases.drafts {
+      #expect(draftImages(each.text, held: each.held) == each.images, "\(each.name)")
+    }
+    for each in cases.removals {
+      #expect(
+        removeDraftImage(each.text, caret: each.caret, image: each.image) == each.result,
+        "\(each.name)")
+    }
+    for each in cases.numbered {
+      #expect(
+        uploadPlaceholder(for: each.file, in: each.text, held: each.held) == each.placeholder,
+        "\(each.name)")
+    }
+    for each in cases.settles {
+      let settled = settleUpload(
+        each.text, caret: each.caret, placeholder: each.placeholder, markdown: each.markdown)
+      #expect(settled == each.result, "\(each.name)")
+    }
+  }
+
+  /// A draft saved with an upload's line, as when the app ended mid-upload, loads without it; the
+  /// rest of the draft, an image kept included, stays.
+  @Test func aSavedDraftDropsTheLinesNoUploadHolds() {
+    let kept = "![shot.png](image:01ARZ3NDEKTSV4RRFFQ69G5FAV)"
+    #expect(
+      droppingUploadLines(
+        "See ![Uploading image…]()\n![Uploading image (2)…]() and \(kept) then")
+        == "See \n and \(kept) then")
+    #expect(droppingUploadLines("![Uploading image…](not empty) words") == "![Uploading image…](not empty) words")
+    #expect(droppingUploadLines("No images.") == "No images.")
+  }
+
+  struct CharterCase: Decodable {
+    let name: String
+    let kind: OrUnknown<Proposal.Kind>
+    let charter: [String: JSONValue]
+    let line: String
+    let title: String
+  }
+
+  struct ParagraphCase: Decodable {
+    let name: String
+    let markdown: String
+    let limit: Int?
+    let paragraph: String
+  }
+
+  @Test func firstParagraphAgreesWithTheWeb() throws {
+    let cases = try Fixture.table("first-paragraph", as: [ParagraphCase].self)
+    #expect(cases.count > 10)
+    for each in cases {
+      let paragraph =
+        each.limit.map { firstParagraph(each.markdown, limit: $0) } ?? firstParagraph(each.markdown)
+      #expect(paragraph == each.paragraph, "\(each.name)")
+    }
+  }
+
+  @Test func describeCharterAgreesWithTheWeb() throws {
+    let cases = try Fixture.table("describe-charter", as: [CharterCase].self)
+    #expect(cases.count > 40)
+    for each in cases {
+      let proposal = try JSONDecoder().decode(
+        Proposal.self,
+        from: JSONEncoder().encode(
+          [
+            "id": .string("01M5A0000000000000000000PA"), "kind": .string(each.kind.rawValue),
+            "proposedBy": .string("concierge-1"), "status": .string("proposed"),
+            "createdAt": .string("2026-10-26T10:00:00.000Z"), "charter": .object(each.charter),
+            "body": .string(""),
+          ] as [String: JSONValue]))
+      #expect(describeCharter(each.kind, each.charter) == each.line, "\(each.name)")
+      #expect(proposalTitle(proposal) == each.title, "\(each.name)")
     }
   }
 }

@@ -29,6 +29,9 @@ final class HeldBoard: URLProtocol {
       HeldBoard.gates.withLock { $0[token] = self }
     }
 
+    /// How many requests in all have come to the gate.
+    var arrived: Int { state.withLock { $0.arrived } }
+
     /// Returns once `count` requests in all have come to the gate.
     func arrivals(_ count: Int) async {
       await withCheckedContinuation { continuation in
@@ -48,6 +51,12 @@ final class HeldBoard: URLProtocol {
     /// Answers the requests held so far as the fake board would.
     func answer() {
       settle { $0.answer(refusing: false) }
+    }
+
+    /// Answers the requests held so far with what the fake board would have said as each arrived,
+    /// as a board does that answered before a later write.
+    func answerAsArrived() {
+      settleHeld { held in held.request.answer(held.arrived) }
     }
 
     /// Answers the requests held so far as the fake board answers a token it doesn't take.
@@ -75,6 +84,10 @@ final class HeldBoard: URLProtocol {
     }
 
     private func settle(_ outcome: @escaping @Sendable (HeldBoard) -> Void) {
+      settleHeld { outcome($0.request) }
+    }
+
+    private func settleHeld(_ outcome: @escaping @Sendable (Held) -> Void) {
       let held = state.withLock { state in
         defer { state.held = [] }
         return state.held
@@ -86,15 +99,16 @@ final class HeldBoard: URLProtocol {
   }
 
   /// A held request, with the run loop of the thread the session started it on, where its client
-  /// takes the outcome.
+  /// takes the outcome, and the fake board's answer as it arrived.
   fileprivate struct Held: @unchecked Sendable {
     let request: HeldBoard
     let loop: CFRunLoop
+    let arrived: (status: Int, body: Data)
 
-    func settle(_ outcome: @escaping @Sendable (HeldBoard) -> Void) {
+    func settle(_ outcome: @escaping @Sendable (Held) -> Void) {
       let held = self
       CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue) {
-        outcome(held.request)
+        outcome(held)
       }
       CFRunLoopWakeUp(loop)
     }
@@ -124,7 +138,8 @@ final class HeldBoard: URLProtocol {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
-    HeldBoard.gate(for: request)?.hold(Held(request: self, loop: CFRunLoopGetCurrent()))
+    HeldBoard.gate(for: request)?.hold(
+      Held(request: self, loop: CFRunLoopGetCurrent(), arrived: FakeBoard.answer(request)))
   }
 
   override func stopLoading() {
@@ -132,14 +147,18 @@ final class HeldBoard: URLProtocol {
   }
 
   private func answer(refusing: Bool) {
-    guard !stopped.withLock({ $0 }), let url = request.url else {
-      return
-    }
     var asked = request
     if refusing {
       asked.setValue("Bearer refused", forHTTPHeaderField: "Authorization")
     }
-    let (status, body) = FakeBoard.answer(asked)
+    answer(FakeBoard.answer(asked))
+  }
+
+  fileprivate func answer(_ answer: (status: Int, body: Data)) {
+    guard !stopped.withLock({ $0 }), let url = request.url else {
+      return
+    }
+    let (status, body) = answer
     let response = HTTPURLResponse(
       url: url, statusCode: status, httpVersion: "HTTP/1.1",
       headerFields: ["Content-Type": "application/json"])!

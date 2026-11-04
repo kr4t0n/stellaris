@@ -34,6 +34,20 @@ public enum AppSignIn {
     return nil
   }
 
+  /// What iOS said when it ended a sign-in's web authentication session as cancelled, or nil when
+  /// the person cancelled. iOS ends a session it refuses to start with the same `canceledLogin`,
+  /// before showing anything, as for a callback host the app isn't associated with under
+  /// `webcredentials`, and gives its reason in the error, which a person's cancel lacks.
+  public static func refusal(ofCanceled error: NSError) -> String? {
+    for key in [NSLocalizedFailureReasonErrorKey, NSLocalizedDescriptionKey] {
+      let text = (error.userInfo[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+      if let text, !text.isEmpty {
+        return text
+      }
+    }
+    return nil
+  }
+
   /// A new verifier: 32 random bytes as base64url, 43 characters, as RFC 7636 asks.
   public static func makeVerifier() -> String {
     var generator = SystemRandomNumberGenerator()

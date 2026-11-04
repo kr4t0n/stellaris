@@ -10,13 +10,19 @@
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
-  /// web at `images.example.com`, on a runner alone, and gone. Any token signs in, except
+  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads,
+  /// images the user posts, which it answers six seconds late for the token `slow-uploads`, the
+  /// user's advance of a task's stage, the user's approval or rejection of a proposal, and a new
+  /// dashboard for the demo project, which its reads then show to the token that wrote them alone,
+  /// so tests signed in with tokens of
+  /// their own see only their own writes. Any token signs in, except
   /// `refused`, which the board doesn't take, and
   /// `revoked`, which it takes for sign-in and refuses on every request after. With `fading`, every
   /// list of the channels after the first fails, as when the network goes once the board loaded,
   /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
   /// nothing, and its turn stream sends the captured one, stamped now, as live; both stay open,
-  /// as the board's do.
+  /// as the board's do. A token starting `replay-` gets its first turn stream's stamps again on every
+  /// later connection, as the board replays its buffer.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     /// The thread of samples, which general's newest message links to.
@@ -29,8 +35,21 @@
     /// Where the samples' image on the web is.
     static let webImages = "images.example.com"
     private static let folder = Mutex<URL?>(nil)
+    /// What each token posted and opened.
+    private static let written = Mutex<[String: Written]>([:])
+    /// The stamp each `replay-` token's turn stream was first given.
+    private static let replayStamps = Mutex<[String: String]>([:])
     /// How many times `fading` has listed the channels.
     private static let fadingListings = Mutex(0)
+    /// Whether the session stopped the request, after which its client takes nothing more.
+    private let stopped = Mutex(false)
+
+    /// A request answered late, with the run loop of the thread the session started it on, where
+    /// its client takes the answer.
+    private struct Late: @unchecked Sendable {
+      let request: FakeBoard
+      let loop: CFRunLoop
+    }
 
     /// The app's environment when it was launched against the fake board.
     static func launched() -> AppEnvironment? {
@@ -96,6 +115,30 @@
         client?.urlProtocolDidFinishLoading(self)
         return
       }
+      if request.httpMethod == "POST", url.path(percentEncoded: true) == "/api/images",
+        request.value(forHTTPHeaderField: "Authorization") == "Bearer slow-uploads"
+      {
+        let late = Late(request: self, loop: CFRunLoopGetCurrent())
+        DispatchQueue.global().asyncAfter(deadline: .now() + 6) {
+          CFRunLoopPerformBlock(late.loop, CFRunLoopMode.defaultMode.rawValue) {
+            late.request.finish()
+          }
+          CFRunLoopWakeUp(late.loop)
+        }
+        return
+      }
+      finish()
+    }
+
+    override func stopLoading() {
+      stopped.withLock { $0 = true }
+    }
+
+    /// Answers the request as the fake board does.
+    private func finish() {
+      guard !stopped.withLock({ $0 }), let url = request.url else {
+        return
+      }
       let (status, body) = FakeBoard.answer(request)
       let response = HTTPURLResponse(
         url: url, statusCode: status, httpVersion: "HTTP/1.1",
@@ -104,8 +147,6 @@
       client?.urlProtocol(self, didLoad: body)
       client?.urlProtocolDidFinishLoading(self)
     }
-
-    override func stopLoading() {}
 
     // MARK: Answers
 
@@ -143,7 +184,14 @@
         guard let text = read("turn-stream")?["text"] as? String else {
           return nil
         }
-        let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        var now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+        if let token, token.hasPrefix("Bearer replay-") {
+          now = replayStamps.withLock { stamps in
+            let stamp = stamps[token] ?? now
+            stamps[token] = stamp
+            return stamp
+          }
+        }
         return Data(text.replacingOccurrences(of: "2026-01-01T00:00:00.000Z", with: now).utf8)
       default:
         return nil
@@ -161,6 +209,21 @@
       guard let token, token != "refused", token != "revoked" || path == "/api/me" else {
         return fixture("error-unauthorized")
       }
+      if method == "POST", path == "/api/verbs/post_message" || path == "/api/verbs/open_thread" {
+        return write(path, request: request, token: token)
+      }
+      if method == "POST", path == "/api/images" {
+        return upload(request: request, token: token)
+      }
+      if method == "POST", path == "/api/verbs/advance_task" {
+        return advance(request: request, token: token)
+      }
+      if method == "POST", path == "/api/verbs/approve" || path == "/api/verbs/reject" {
+        return decide(path, request: request, token: token)
+      }
+      if method == "POST", path == "/api/verbs/update_dashboard" {
+        return updateDashboard(request: request, token: token)
+      }
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
@@ -168,18 +231,41 @@
       case ("GET", "/api/scheduler"): return fixture("scheduler")
       case ("GET", "/api/projects"): return fixture("projects")
       case ("GET", "/api/channels"): return fixture("channels")
-      case ("GET", "/api/channels/general"): return (200, json(general))
-      case ("GET", "/api/channels/demo/general"): return fixture("channel")
+      case ("GET", "/api/channels/general"):
+        return (200, json(general + posted(in: "general", by: token)))
+      case ("GET", "/api/channels/demo/general"):
+        let captured = body("channel") as? [Any] ?? []
+        return (200, json(captured + posted(in: "demo/general", by: token)))
       case ("GET", "/api/requests"): return fixture("requests")
-      case ("GET", "/api/proposals"): return fixture("proposals")
-      case ("GET", "/api/projects/demo/tasks"): return fixture("tasks")
-      case ("GET", "/api/threads"): return (200, json(threads))
+      case ("GET", "/api/proposals"): return (200, json(proposals(for: token)))
+      case ("GET", "/api/projects/demo/tasks"): return (200, json(tasks(for: token)))
+      case ("GET", "/api/projects/demo/dashboard"):
+        guard let written = written.withLock({ $0[token]?.dashboard }) else {
+          return fixture("dashboard")
+        }
+        return (200, written)
+      case ("GET", "/api/threads"): return (200, json(threads + opened(by: token)))
       case ("GET", "/api/messages"): return (200, json(lookUp(request)))
       case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
       case ("DELETE", "/api/sign-in"): return fixture("sign-out")
-      case ("GET", _) where path.hasPrefix("/api/channels/"): return (200, json([Any]()))
+      case ("GET", _) where path.hasPrefix("/api/channels/"):
+        let ref = String(path.dropFirst("/api/channels/".count)).removingPercentEncoding ?? ""
+        return (200, json(posted(in: ref, by: token)))
       case ("GET", _) where path.hasPrefix("/api/threads/"):
-        return thread(String(path.dropFirst("/api/threads/".count)))
+        return thread(String(path.dropFirst("/api/threads/".count)), token: token)
+      case ("GET", _) where path.hasPrefix("/api/tasks/"):
+        let id = String(path.dropFirst("/api/tasks/".count))
+        guard let task = tasks(for: token).first(where: { $0["id"] as? String == id }) else {
+          return fixture("error-not-found")
+        }
+        return (200, json(task))
+      case ("GET", _) where path.hasPrefix("/api/proposals/"):
+        let id = String(path.dropFirst("/api/proposals/".count))
+        guard let proposal = proposals(for: token).first(where: { $0["id"] as? String == id })
+        else {
+          return fixture("error-not-found")
+        }
+        return (200, json(proposal))
       default: return fixture("error-not-found")
       }
     }
@@ -203,6 +289,351 @@
 
     private static func body(_ name: String) -> Any? { read(name)?["body"] }
 
+    // MARK: Writes
+
+    /// A post or a thread a token wrote, as the board would keep it.
+    private struct Post: Sendable {
+      let id: String
+      let channel: String
+      let thread: String?
+      let ts: String
+      let body: String
+      /// What a verb recorded on the post, as JSON.
+      var step: Data? = nil
+    }
+
+    private struct Opened: Sendable {
+      let id: String
+      let channel: String
+      let title: String
+      let openedAt: String
+    }
+
+    private struct Written: Sendable {
+      var posts: [Post] = []
+      var threads: [Opened] = []
+      /// Tasks the token advanced and proposals it decided, as JSON, by id, and the demo
+      /// project's dashboard as the token last wrote it.
+      var tasks: [String: Data] = [:]
+      var proposals: [String: Data] = [:]
+      var dashboard: Data?
+      /// The images the token posted, by id.
+      var images: [String: Data] = [:]
+    }
+
+    /// Keeps an image a token posts, as the board does, and refuses bytes of no kind it keeps.
+    private static func upload(request: URLRequest, token: String) -> (Int, Data) {
+      let bytes = bodyData(of: request) ?? Data()
+      let name =
+        request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
+        .queryItems?.first { $0.name == "name" }?.value ?? ""
+      guard let type = imageType(of: bytes) else {
+        let what = name.isEmpty ? "the image" : name
+        return (
+          400,
+          json([
+            "error": "VALIDATION",
+            "message": "\(what) is not a PNG, JPEG, GIF, or WebP image by its first bytes",
+          ])
+        )
+      }
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        let id = String(format: "00000000000000000000PHT%03d", mine.images.count + 1)
+        mine.images[id] = bytes
+        return (
+          200,
+          json([
+            "id": id, "type": type.rawValue, "size": bytes.count,
+            "markdown": "![\(imageDescription(name))](image:\(id))",
+          ])
+        )
+      }
+    }
+
+    /// Takes a post or a new thread, as the user, and answers as the board does.
+    private static func write(_ path: String, request: URLRequest, token: String) -> (Int, Data) {
+      let input =
+        bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        as? [String: Any] ?? [:]
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        if path == "/api/verbs/open_thread" {
+          let thread = Opened(
+            id: String(format: "00000000000000000000THR%03d", mine.threads.count + 1),
+            channel: input["channel"] as? String ?? "general",
+            title: input["title"] as? String ?? "", openedAt: now)
+          mine.threads.append(thread)
+          return (200, json(threadRecord(thread)))
+        }
+        let thread = input["thread_id"] as? String
+        let channel =
+          thread.map { id in
+            mine.threads.first { $0.id == id }?.channel
+              ?? (id == samples ? "general" : capturedChannel(of: id))
+          } ?? input["channel"] as? String ?? "general"
+        let post = Post(
+          id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+          channel: channel, thread: thread, ts: now, body: input["body"] as? String ?? "")
+        mine.posts.append(post)
+        return (200, json(record(post)))
+      }
+    }
+
+    // MARK: Tasks and proposals
+
+    /// The captured tasks, as `token` advanced them.
+    private static func tasks(for token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token]?.tasks ?? [:] }
+      return (body("tasks") as? [[String: Any]] ?? []).map { task in
+        (task["id"] as? String).flatMap { mine[$0] }.flatMap(object) ?? task
+      }
+    }
+
+    /// The captured proposals, as `token` decided them.
+    private static func proposals(for token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token]?.proposals ?? [:] }
+      return (body("proposals") as? [[String: Any]] ?? []).map { proposal in
+        (proposal["id"] as? String).flatMap { mine[$0] }.flatMap(object) ?? proposal
+      }
+    }
+
+    private static func object(_ data: Data) -> [String: Any]? {
+      (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// The board's refusal, as it words the state that refused it.
+    private static func refusal(_ message: String) -> (Int, Data) {
+      (409, json(["error": "INVALID_STATE", "message": message]))
+    }
+
+    /// Finishes the task's current stage as the user, as the board does: the stage done by the
+    /// user, the task at the next stage, open, or done after its last; the note posted in its
+    /// thread with the step.
+    private static func advance(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      let id = input["task_id"] as? String ?? ""
+      guard var task = tasks(for: token).first(where: { $0["id"] as? String == id }) else {
+        return fixture("error-not-found")
+      }
+      guard ["open", "claimed"].contains(task["status"] as? String ?? ""),
+        task["completing"] as? Bool != true
+      else {
+        return refusal("task \(id) is \(task["status"] as? String ?? "") and not in play")
+      }
+      var stages = task["stages"] as? [[String: Any]] ?? []
+      guard let index = stages.firstIndex(where: { $0["id"] as? String == task["stage"] as? String })
+      else {
+        return refusal("task \(id) has no stage \(task["stage"] as? String ?? "")")
+      }
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      let next = stages.indices.contains(index + 1) ? stages[index + 1] : nil
+      if next == nil, task["onDone"] as? String == "ghpr", task["pullRequest"] == nil {
+        return refusal("task \(id) lands through its pull request")
+      }
+      var holders = stages[index]["holders"] as? [String] ?? []
+      if !holders.contains("user") {
+        holders.append("user")
+      }
+      stages[index]["holders"] = holders
+      stages[index]["completedBy"] = "user"
+      stages[index]["completedAt"] = now
+      let stageId = stages[index]["id"] as? String ?? ""
+      task["stages"] = stages
+      task["claimedBy"] = nil
+      task["leaseExpiresAt"] = nil
+      task["updatedAt"] = now
+      if let next, let nextId = next["id"] as? String {
+        task["status"] = "open"
+        task["stage"] = nextId
+        task["stageSince"] = now
+      } else {
+        task["status"] = "done"
+      }
+      let step: [String: Any] = [
+        "action": "advanced", "stage": stageId, "to": next?["id"] as? String ?? NSNull(),
+      ]
+      let note = input["note"] as? String
+      written.withLock { written in
+        var mine = written[token] ?? Written()
+        mine.tasks[id] = json(task)
+        if let note {
+          mine.posts.append(
+            Post(
+              id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+              channel: task["channel"] as? String == "general"
+                ? "\(task["project"] as? String ?? "demo")/general"
+                : task["channel"] as? String ?? "general",
+              thread: id, ts: now, body: note, step: json(step)))
+        }
+        written[token] = mine
+      }
+      return (200, json(task))
+    }
+
+    /// Approves or rejects the proposal as the user, as the board does: the proposal decided, with
+    /// the reason; the decision posted in its thread with the step, which closes the thread.
+    private static func decide(_ path: String, request: URLRequest, token: String) -> (Int, Data)
+    {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      let id = input["proposal_id"] as? String ?? ""
+      guard var proposal = proposals(for: token).first(where: { $0["id"] as? String == id }) else {
+        return fixture("error-not-found")
+      }
+      guard proposal["status"] as? String == "proposed" else {
+        return refusal("proposal \(id) is already \(proposal["status"] as? String ?? "")")
+      }
+      let approved = path.hasSuffix("/approve")
+      let reason = input["reason"] as? String
+      let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
+      proposal["status"] = approved ? "provisioned" : "rejected"
+      proposal["decidedBy"] = "user"
+      proposal["decidedAt"] = now
+      proposal["reason"] = reason
+      let line =
+        (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
+        .map { describeCharter($0.kind, $0.charter) } ?? id
+      let post =
+        "\(approved ? "Approved" : "Rejected"): \(line).\(reason.map { " Reason: \($0)." } ?? "")"
+      let outcome = approved ? "approved" : "rejected"
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        mine.proposals[id] = json(proposal)
+        mine.posts.append(
+          Post(
+            id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
+            channel: "governance", thread: id, ts: now, body: post,
+            step: json(["action": outcome])))
+        let decision: [String: Any] = [
+          "id": String(format: "00000000000000000000DEC%03d", mine.proposals.count),
+          "proposalId": id, "decidedBy": "user", "outcome": outcome, "ts": now,
+        ]
+        var answer = decision
+        answer["reason"] = reason
+        return (200, json(answer))
+      }
+    }
+
+    /// Writes the demo project's dashboard, as a citizen does with `update_dashboard`, so a test can
+    /// change it while the app reads it; the app itself writes no dashboard.
+    private static func updateDashboard(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      return written.withLock { written in
+        var mine = written[token] ?? Written()
+        defer { written[token] = mine }
+        let before = mine.dashboard.flatMap(object) ?? body("dashboard") as? [String: Any] ?? [:]
+        let dashboard: [String: Any] = [
+          "project": input["project"] as? String ?? "demo",
+          "revision": (before["revision"] as? Int ?? 0) + 1,
+          "updatedBy": "user",
+          "updatedAt": Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now),
+          "body": input["body"] as? String ?? "",
+        ]
+        mine.dashboard = json(dashboard)
+        return (200, json(dashboard))
+      }
+    }
+
+    /// A request's body, which `URLSession` hands a protocol as a stream.
+    private static func bodyData(of request: URLRequest) -> Data? {
+      if let data = request.httpBody {
+        return data
+      }
+      guard let stream = request.httpBodyStream else {
+        return nil
+      }
+      stream.open()
+      defer { stream.close() }
+      var data = Data()
+      var buffer = [UInt8](repeating: 0, count: 4096)
+      while stream.hasBytesAvailable {
+        let read = stream.read(&buffer, maxLength: buffer.count)
+        guard read > 0 else {
+          break
+        }
+        data.append(buffer, count: read)
+      }
+      return data
+    }
+
+    /// The channel of the captured thread `id`, or general.
+    private static func capturedChannel(of id: String) -> String {
+      guard let detail = body("thread") as? [String: Any],
+        let thread = detail["thread"] as? [String: Any], thread["id"] as? String == id
+      else {
+        return "general"
+      }
+      return thread["channel"] as? String ?? "general"
+    }
+
+    /// What `token` posted in the channel `ref` itself, oldest first.
+    private static func posted(in ref: String, by token: String) -> [[String: Any]] {
+      let posts = written.withLock { $0[token]?.posts ?? [] }
+      return posts.filter { $0.channel == ref && $0.thread == nil }.map(record)
+    }
+
+    /// The threads `token` opened, as the board lists them.
+    private static func opened(by token: String) -> [[String: Any]] {
+      let mine = written.withLock { $0[token] ?? Written() }
+      return mine.threads.map { thread in
+        var summary = threadRecord(thread)
+        let posts = mine.posts.filter { $0.thread == thread.id }
+        summary["messages"] = posts.count
+        summary["lastMessageId"] = posts.last?.id ?? NSNull()
+        summary["lastAuthor"] = posts.isEmpty ? NSNull() : "user"
+        return summary
+      }
+    }
+
+    private static func record(_ post: Post) -> [String: Any] {
+      var message: [String: Any] = [
+        "id": post.id, "author": "user", "channel": post.channel, "ts": post.ts,
+        "mentions": [String](), "body": post.body,
+      ]
+      message["thread"] = post.thread
+      message["step"] = post.step.flatMap(object)
+      return message
+    }
+
+    private static func threadRecord(_ thread: Opened) -> [String: Any] {
+      [
+        "id": thread.id, "channel": thread.channel, "title": thread.title, "state": "open",
+        "openedBy": "user", "openedAt": thread.openedAt, "body": "",
+      ]
+    }
+
+    // MARK: Threads
+
+    /// A thread by its id: one `token` opened, the captured task thread, the samples, or one made
+    /// up for a proposal's or a question's, titled as the board would; with what `token` posted in
+    /// it after its own messages.
+    private static func thread(_ id: String, token: String) -> (Int, Data) {
+      let mine = written.withLock { $0[token] ?? Written() }
+      let posts = mine.posts.filter { $0.thread == id }.map(record)
+      if let opened = mine.threads.first(where: { $0.id == id }) {
+        return (200, json(["thread": threadRecord(opened), "messages": posts]))
+      }
+      let (status, data) = thread(id)
+      guard status == 200, !posts.isEmpty,
+        var detail = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+      else {
+        return (status, data)
+      }
+      detail["messages"] = (detail["messages"] as? [Any] ?? []) + posts
+      // A decision closes its proposal's thread.
+      if let decided = mine.proposals[id].flatMap(object), var thread = detail["thread"] as? [String: Any] {
+        thread["state"] = "closed"
+        thread["closedBy"] = decided["decidedBy"]
+        thread["closedAt"] = decided["decidedAt"]
+        detail["thread"] = thread
+      }
+      return (200, json(detail))
+    }
+
     /// A thread by its id: the captured task thread, the samples, or one made up for a proposal's
     /// or a question's, titled as the board would.
     private static func thread(_ id: String) -> (Int, Data) {
@@ -220,11 +651,25 @@
       }
       var title = "A thread"
       var channel = "general"
+      var subject: [String: Any]?
       if let proposals = body("proposals") as? [[String: Any]],
         let proposal = proposals.first(where: { $0["id"] as? String == id })
       {
-        title = "\((proposal["kind"] as? String ?? "").capitalized) proposal"
+        // As the board titles a proposal's thread: its kind, then its charter in one line.
+        let line =
+          (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
+          .map { describeCharter($0.kind, $0.charter) } ?? ""
+        title = "\(proposal["kind"] as? String ?? "") proposal: \(line)"
         channel = "governance"
+        subject = ["kind": "proposal", "id": id]
+      }
+      // As the board titles a task's thread: the task's title, on its project's channel.
+      if let tasks = body("tasks") as? [[String: Any]],
+        let task = tasks.first(where: { $0["id"] as? String == id })
+      {
+        title = task["title"] as? String ?? title
+        channel = "\(task["project"] as? String ?? "demo")/\(task["channel"] as? String ?? "general")"
+        subject = ["kind": "task", "id": id]
       }
       if let requests = body("requests") as? [[String: Any]],
         let asked = requests.compactMap({ $0["thread"] as? [String: Any] })
@@ -233,14 +678,21 @@
         title = asked["title"] as? String ?? title
         channel = asked["channel"] as? String ?? channel
       }
-      let thread: [String: Any] = [
+      var thread: [String: Any] = [
         "id": id, "channel": channel, "title": title, "state": "open",
         "openedBy": "concierge-1", "openedAt": time(0), "body": "",
       ]
+      thread["subject"] = subject
       let message = message(
         id: "\(id)-1", author: "concierge-1", channel: channel, thread: id, minute: 0,
         body: "Opened for the decision.")
       return (200, json(["thread": thread, "messages": [message]]))
+    }
+
+    /// The id of general's message numbered `number`, shaped as the board's ids are, so a link can
+    /// name it.
+    static func generalId(_ number: Int) -> String {
+      String(format: "000000000000000000000GEN%02d", number)
     }
 
     /// Sixty messages in the society's general channel, of varied lengths.
@@ -258,8 +710,8 @@
           ? "The [rendering samples](/thread/\(samples)) are in their thread."
           : notes[number % notes.count]
         return message(
-          id: String(format: "general-%02d", number), author: authors[number % authors.count],
-          channel: "general", thread: nil, minute: number, body: "Note \(number). \(note)")
+          id: generalId(number), author: authors[number % authors.count], channel: "general",
+          thread: nil, minute: number, body: "Note \(number). \(note)")
       }
     }
 
@@ -341,7 +793,7 @@
         ),
         (
           "user",
-          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ."
+          "Thanks. Merging \(task) once the review is in; @eng-1, the [spec](https://example.com/specs/export) wins where the notes differ, as [note 30](/c/general?message=\(generalId(30))) says."
         ),
       ]
       return bodies.enumerated().map { index, entry in
@@ -392,11 +844,21 @@
       ]
     }
 
-    /// A picture the fake board serves: the uploaded image the samples show, and the one on the
-    /// web; nil for any other request.
+    /// A picture the fake board serves: the uploaded image the samples show, the images a token
+    /// posted, to that token, and the one on the web; nil for any other request.
     private static func picture(_ request: URLRequest) -> Data? {
       guard let url = request.url, request.httpMethod ?? "GET" == "GET" else {
         return nil
+      }
+      let path = url.path(percentEncoded: true)
+      if path.hasPrefix("/api/images/"),
+        let token = request.value(forHTTPHeaderField: "Authorization")?
+          .replacingOccurrences(of: "Bearer ", with: ""),
+        let posted = written.withLock({
+          $0[token]?.images[String(path.dropFirst("/api/images/".count))]
+        })
+      {
+        return posted
       }
       if url.host() == webImages {
         return url.path() == "/wide.png"

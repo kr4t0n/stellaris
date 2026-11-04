@@ -11,6 +11,7 @@ import {
   turnLength,
   wakeScopes,
   withoutTitle,
+  wokenBy,
 } from "./citizen.js";
 
 function entry(overrides: Partial<TurnHistoryEntry> = {}): TurnHistoryEntry {
@@ -54,6 +55,21 @@ describe("citizen", () => {
     expect(endingOf(entry({ exitReason: "timeout" }))).toBe("timed out");
     expect(endingOf(entry({ exitReason: null, outcome: "failed" }))).toBe("failed");
     expect(endingOf(entry({ exitReason: "stopped" }))).toBe("stopped by you");
+  });
+
+  it("names what a heartbeat woke for beside its trigger, as Metrics words it", () => {
+    expect(wokenBy(entry({ trigger: "heartbeat", heartbeat: "held" }))).toBe(
+      "heartbeat for a held stage",
+    );
+    expect(wokenBy(entry({ trigger: "heartbeat", heartbeat: "waiting" }))).toBe(
+      "heartbeat for a stage to take",
+    );
+    expect(wokenBy(entry({ trigger: "heartbeat", heartbeat: "unread" }))).toBe(
+      "heartbeat for unread posts",
+    );
+    // A heartbeat logged before the board kept what it woke for, and any other trigger, as it is.
+    expect(wokenBy(entry({ trigger: "heartbeat" }))).toBe("heartbeat");
+    expect(wokenBy(entry({ trigger: "stage" }))).toBe("stage");
   });
 
   it("totals a history, with the tokens of the turns that recorded them", () => {

@@ -71,7 +71,7 @@ pnpm build && pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # captur
 pnpm build && pnpm vitest run apps/web/src/sky -u                       # write the sky's tables again after a change to its model, camera, or scene
 ```
 
-The app's tests run against a fake board that answers from the fixtures, and keep their screenshots with the results. To build the app for a device, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` beside it, which git ignores, and set your team, the app's bundle ID, and your board's host; the board then sets `STELLARIS_APPLE_APP_ID` to `<team>.<bundle ID>`. [docs/internals/ios.md](./docs/internals/ios.md) covers the app, its tests, and the fixtures and tables that keep the client in step with the server and the web.
+The app's tests run against a fake board that answers from the fixtures, and keep their screenshots with the results. To build the app for a device, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` beside it, which git ignores, and set your team, the app's bundle ID, and your board's host; the board then sets `STELLARIS_APPLE_APP_ID` to `<team>.<bundle ID>`. [docs/guide/ios-device.md](./docs/guide/ios-device.md) takes you from a Mac without the project to the app signed in on your iPhone, step by step. [docs/internals/ios.md](./docs/internals/ios.md) covers the app, its tests, and the fixtures and tables that keep the client in step with the server and the web.
 
 ## Quick start
 

@@ -1,6 +1,6 @@
 import { TriggerSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { decideWake } from "./wake.js";
+import { decideWake, heartbeatCause } from "./wake.js";
 
 const trigger = (kind: string, extra: Record<string, unknown> = {}) =>
   TriggerSchema.parse({ kind, ...extra });
@@ -35,6 +35,14 @@ describe("decideWake", () => {
     expect(decideWake({ ...base, ...idle, claimsHeld: 1 }).wake).toBe(true);
     expect(decideWake({ ...base, ...idle, digestSize: 3 }).wake).toBe(true);
     expect(decideWake({ ...base, ...idle, waitingStages: 1 }).wake).toBe(true);
+  });
+
+  it("names what a heartbeat wakes for, unread posts before a held or a waiting stage", () => {
+    const idle = { digestSize: 0, claimsHeld: 0, waitingStages: 0 };
+    expect(heartbeatCause(idle)).toBeNull();
+    expect(heartbeatCause({ ...idle, waitingStages: 1 })).toBe("waiting");
+    expect(heartbeatCause({ ...idle, claimsHeld: 1, waitingStages: 1 })).toBe("held");
+    expect(heartbeatCause({ digestSize: 2, claimsHeld: 1, waitingStages: 1 })).toBe("unread");
   });
 
   it("always runs reflection and onboarding turns", () => {

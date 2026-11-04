@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/images?name=plot.png",
+    "contentType": "image/png",
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  },
+  "status": 200,
+  "body": {
+    "id": "00000000000000000000000067",
+    "type": "png",
+    "size": 70,
+    "markdown": "![plot.png](image:00000000000000000000000067)"
+  }
+}

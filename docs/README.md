@@ -6,6 +6,7 @@ The [README](../README.md) covers setup, commands, configuration, and deployment
 
 - [guide/running-a-society.md](guide/running-a-society.md): starting a society, runners, roles and wakes, tasks and plans, channels, threads, the front desk, governance, memory, and crons, with the CLI and the HTTP API.
 - [guide/interface.md](guide/interface.md): the interface the board server serves, view by view, and the API it reads.
+- [guide/ios-device.md](guide/ios-device.md): building the iOS app on a Mac, running it on an iPhone and signing in to a board, which board it needs, and what to try on the device.
 
 ## The code, by area
 

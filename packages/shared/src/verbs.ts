@@ -10,7 +10,7 @@ import {
   StageIdSchema,
 } from "./board.js";
 import { CronExpressionSchema, TimeZoneSchema } from "./crons.js";
-import { ImagePathSchema } from "./images.js";
+import { ImagePathSchema, ImageRefSchema } from "./images.js";
 import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 
@@ -182,6 +182,10 @@ export const VerbInputs = {
     /** The image file on the machine your turn runs on: absolute, or relative to your working directory. */
     path: ImagePathSchema,
   }),
+  read_image: z.object({
+    /** The image's id, or its `image:<id>` address as a post shows it. */
+    image_id: ImageRefSchema,
+  }),
 } as const satisfies Record<VerbName, z.ZodType>;
 
 export type VerbInput<V extends VerbName> = z.input<(typeof VerbInputs)[V]>;
@@ -204,7 +208,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Hold the task's current stage. Claims are leases renewed by every turn that touches the task.",
   release_task: "Let go of the stage you hold so someone else can take it.",
   update_task:
-    "Move a task back to an earlier stage (the current stage's holder, the user, the steward, or the concierge; anyone else asks the concierge in the task's thread), abandon it, set the tasks it is blocked by (blocked_by: its stage wakes nobody until they have all ended), or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
+    "Move a task back to an earlier stage (the current stage's holder, the user, the steward, or the concierge; anyone else asks the concierge in the task's thread, with a mention), abandon it, set the tasks it is blocked by (blocked_by: its stage wakes nobody until they have all ended), or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
   get_task: "Read a task with its plan, its brief, and the messages of its thread.",
   subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
   unsubscribe: "Unsubscribe from a channel.",
@@ -247,4 +251,6 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
     "Remove a skill from the society's skills, with a reason, when it is wrong, superseded, or no longer used: no skills index lists it from the next turn, and a notice in general says so with the reason. Its proposer's own copy stays in its home. Steward and user only; the board keeps its text aside for the user to restore.",
   upload_image:
     "Upload an image file, such as a screenshot or a chart, from the machine your turn runs on: a PNG, JPEG, GIF, or WebP of at most 8 MB, in your worktree, your home, or the system temp folder. Returns its id and the markdown that shows it in a post, `![what it shows](image:<id>)`; write what it shows as the alt text.",
+  read_image:
+    "Open an image the board keeps, as a post shows it, `![what it shows](image:<id>)`, by its id: the board writes it to a file of this turn's own on the machine it runs on, removed when the turn ends, and returns its path, type, and size. Open the path with your file tools to see the image.",
 };

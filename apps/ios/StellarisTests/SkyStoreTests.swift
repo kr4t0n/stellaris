@@ -243,4 +243,31 @@ final class ChangingScheduler: URLProtocol {
     #expect(model.sky.lastSaid == ["eng-1": "The export view is in"])
     #expect(model.sky.state == .loaded)
   }
+
+  /// Shown again, as when the keyboard that covered it goes, the sky connects to the turn stream
+  /// again, which replays the server's buffer with the stamps it had; what it played plays no more.
+  @Test(.timeLimit(.minutes(1))) func aSkyShownAgainPlaysNoCueTwice() async throws {
+    let (model, _) = fakeApp()
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: "replay-\(UUID().uuidString)")
+    try await waitUntilLoaded(model)
+    let clock = ContinuousClock()
+    let first = Task { await model.sky.run(using: model) }
+    var deadline = clock.now + .seconds(20)
+    while model.sky.heard < 5, clock.now < deadline {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    first.cancel()
+    await first.value
+    // The captured stream's three calls by citizens the sky shows.
+    #expect(model.sky.played == 3)
+    let second = Task { await model.sky.run(using: model) }
+    defer { second.cancel() }
+    deadline = clock.now + .seconds(20)
+    while model.sky.heard < 10, clock.now < deadline {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(model.sky.heard == 10, "the second connection replayed nothing")
+    #expect(model.sky.played == 3)
+  }
 }

@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/images?name=notes.txt",
+    "contentType": "application/octet-stream",
+    "image": "bm90ZXMsIG5vdCBhIHBpY3R1cmUK"
+  },
+  "status": 400,
+  "body": {
+    "error": "VALIDATION",
+    "message": "notes.txt is not a PNG, JPEG, GIF, or WebP image by its first bytes"
+  }
+}

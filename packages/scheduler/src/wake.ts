@@ -1,4 +1,4 @@
-import type { Trigger } from "@stellaris/shared";
+import type { HeartbeatCause, Trigger } from "@stellaris/shared";
 
 export interface WakeInput {
   readonly trigger: Trigger;
@@ -16,6 +16,19 @@ export interface WakeDecision {
   readonly reason: string;
   /** 2 jumps the queue, 1 is normal, 0 is background. */
   readonly priority: 0 | 1 | 2;
+}
+
+/** What a heartbeat would wake a conversation for, the first that applies, or null for nothing. */
+export function heartbeatCause(
+  input: Pick<WakeInput, "digestSize" | "claimsHeld" | "waitingStages">,
+): HeartbeatCause | null {
+  if (input.digestSize > 0) {
+    return "unread";
+  }
+  if (input.claimsHeld > 0) {
+    return "held";
+  }
+  return input.waitingStages > 0 ? "waiting" : null;
 }
 
 /**
@@ -56,7 +69,7 @@ export function decideWake(input: WakeInput): WakeDecision {
     case "heartbeat":
       break;
   }
-  if (input.digestSize === 0 && input.claimsHeld === 0 && input.waitingStages === 0) {
+  if (heartbeatCause(input) === null) {
     return { wake: false, reason: "nothing to read, hold, or take", priority: 0 };
   }
   return {

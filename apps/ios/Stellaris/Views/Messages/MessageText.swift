@@ -34,6 +34,12 @@ enum MessageType {
     .custom(face(weight, italic: italic), size: MessageTheme.metaSize, relativeTo: .caption)
   }
 
+  /// A chip's words, a task's phase or a step, at the web's 11 pixels, scaling as the smallest
+  /// caption does.
+  static func chip(_ weight: Weight = .regular) -> Font {
+    .custom(face(weight, italic: false), size: 11, relativeTo: .caption2)
+  }
+
   static let code = Font.system(.caption, design: .monospaced)
 
   /// The space between a message's lines for the web's `leading-relaxed`, at the default size:
@@ -54,6 +60,11 @@ enum MessageColor {
   static let muted = Color(sky: MessageTheme.fgMuted)
   static let mention = Color(sky: MessageTheme.mention)
   static let mentionTint = Color(sky: MessageTheme.mentionTint, opacity: 0.1)
+  static let surface1 = Color(sky: MessageTheme.surface1)
+  static let markTint = Color(sky: MessageTheme.markTint, opacity: 0.06)
+  static let markBar = Color(sky: MessageTheme.markBar, opacity: 0.5)
+  static let threadOpen = Color(sky: MessageTheme.threadOpen)
+  static let failure = Color(sky: MessageTheme.failure)
 }
 
 /// A block's text as one `AttributedString`, set as the web sets it: each run's face and colour,

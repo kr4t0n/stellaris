@@ -1,0 +1,577 @@
+[
+  {
+    "name": "a member for one project",
+    "kind": "member",
+    "charter": {
+      "name": "eng-2",
+      "role": "engineer",
+      "cli": "claude",
+      "memberships": ["demo"],
+      "subscriptions": []
+    },
+    "line": "member eng-2 as engineer on claude for demo",
+    "title": "Member eng-2 as engineer on claude for demo"
+  },
+  {
+    "name": "a member for two projects, with every field",
+    "kind": "member",
+    "charter": {
+      "name": "eng-3",
+      "role": "engineer",
+      "cli": "codex",
+      "model": "gpt-5",
+      "homeRunner": "runner-1",
+      "memberships": ["demo", "lab"],
+      "subscriptions": ["general", "demo/release"],
+      "seedInstructions": "Start with the tests."
+    },
+    "line": "member eng-3 as engineer on codex for demo, lab",
+    "title": "Member eng-3 as engineer on codex for demo, lab"
+  },
+  {
+    "name": "a member in no project",
+    "kind": "member",
+    "charter": {
+      "name": "concierge-2",
+      "role": "concierge",
+      "cli": "claude"
+    },
+    "line": "member concierge-2 as concierge on claude",
+    "title": "Member concierge-2 as concierge on claude"
+  },
+  {
+    "name": "a member whose name isn't a board name",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "name": "Eng 2",
+      "role": "engineer"
+    },
+    "line": "member {\"cli\":\"claude\",\"name\":\"Eng 2\",\"role\":\"engineer\"}",
+    "title": "Member {\"cli\":\"claude\",\"name\":\"Eng 2\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a member named past 32 characters",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "role": "engineer"
+    },
+    "line": "member {\"cli\":\"claude\",\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role\":\"engineer\"}",
+    "title": "Member {\"cli\":\"claude\",\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a member named with a hyphen first",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "name": "-eng",
+      "role": "engineer"
+    },
+    "line": "member {\"cli\":\"claude\",\"name\":\"-eng\",\"role\":\"engineer\"}",
+    "title": "Member {\"cli\":\"claude\",\"name\":\"-eng\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a member with a null model, which no optional field takes",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "model": null,
+      "name": "eng-2",
+      "role": "engineer"
+    },
+    "line": "member {\"cli\":\"claude\",\"model\":null,\"name\":\"eng-2\",\"role\":\"engineer\"}",
+    "title": "Member {\"cli\":\"claude\",\"model\":null,\"name\":\"eng-2\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a member with null memberships, which no default takes",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "memberships": null,
+      "name": "eng-2",
+      "role": "engineer"
+    },
+    "line": "member {\"cli\":\"claude\",\"memberships\":null,\"name\":\"eng-2\",\"role\":\"engineer\"}",
+    "title": "Member {\"cli\":\"claude\",\"memberships\":null,\"name\":\"eng-2\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a member following a ref with an empty channel",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "name": "eng-2",
+      "role": "engineer",
+      "subscriptions": ["demo/"]
+    },
+    "line": "member {\"cli\":\"claude\",\"name\":\"eng-2\",\"role\":\"engineer\",\"subscriptions\":[\"demo/\"]}",
+    "title": "Member {\"cli\":\"claude\",\"name\":\"eng-2\",\"role\":\"engineer\",\"subscriptions\":[\"demo/\"]}"
+  },
+  {
+    "name": "a member following a ref of three parts",
+    "kind": "member",
+    "charter": {
+      "cli": "claude",
+      "name": "eng-2",
+      "role": "engineer",
+      "subscriptions": ["a/b/c"]
+    },
+    "line": "member {\"cli\":\"claude\",\"name\":\"eng-2\",\"role\":\"engineer\",\"subscriptions\":[\"a/b/c\"]}",
+    "title": "Member {\"cli\":\"claude\",\"name\":\"eng-2\",\"role\":\"engineer\",\"subscriptions\":[\"a/b/c\"]}"
+  },
+  {
+    "name": "a member with no CLI",
+    "kind": "member",
+    "charter": {
+      "name": "eng-2",
+      "role": "engineer"
+    },
+    "line": "member {\"name\":\"eng-2\",\"role\":\"engineer\"}",
+    "title": "Member {\"name\":\"eng-2\",\"role\":\"engineer\"}"
+  },
+  {
+    "name": "a role with its defaults",
+    "kind": "role",
+    "charter": {
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role researcher (3 verbs, up to 1 per project)",
+    "title": "Role researcher (3 verbs, up to 1 per project)"
+  },
+  {
+    "name": "a role of up to three per project",
+    "kind": "role",
+    "charter": {
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "verbs": ["post_message", "claim_task", "write_knowledge"],
+      "maxReplicas": 3,
+      "backlogThreshold": 2.5,
+      "wakeTriggers": [],
+      "resident": true,
+      "societyScope": false,
+      "reflects": false,
+      "reviewDate": "2026-12-01"
+    },
+    "line": "role researcher (3 verbs, up to 3 per project)",
+    "title": "Role researcher (3 verbs, up to 3 per project)"
+  },
+  {
+    "name": "a role with no verbs",
+    "kind": "role",
+    "charter": {
+      "name": "watcher",
+      "purpose": "Watches.",
+      "verbs": []
+    },
+    "line": "role watcher (0 verbs, up to 1 per project)",
+    "title": "Role watcher (0 verbs, up to 1 per project)"
+  },
+  {
+    "name": "a role of a fractional number per project",
+    "kind": "role",
+    "charter": {
+      "maxReplicas": 1.5,
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role {\"maxReplicas\":1.5,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}",
+    "title": "Role {\"maxReplicas\":1.5,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}"
+  },
+  {
+    "name": "a role of none per project",
+    "kind": "role",
+    "charter": {
+      "maxReplicas": 0,
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role {\"maxReplicas\":0,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}",
+    "title": "Role {\"maxReplicas\":0,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}"
+  },
+  {
+    "name": "a role with an empty purpose",
+    "kind": "role",
+    "charter": {
+      "name": "researcher",
+      "purpose": "",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role {\"name\":\"researcher\",\"purpose\":\"\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}",
+    "title": "Role {\"name\":\"researcher\",\"purpose\":\"\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}"
+  },
+  {
+    "name": "a role with no verbs listed",
+    "kind": "role",
+    "charter": {
+      "name": "researcher",
+      "purpose": "Runs experiments."
+    },
+    "line": "role {\"name\":\"researcher\",\"purpose\":\"Runs experiments.\"}",
+    "title": "Role {\"name\":\"researcher\",\"purpose\":\"Runs experiments.\"}"
+  },
+  {
+    "name": "a role with a backlog of zero",
+    "kind": "role",
+    "charter": {
+      "backlogThreshold": 0,
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role {\"backlogThreshold\":0,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}",
+    "title": "Role {\"backlogThreshold\":0,\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}"
+  },
+  {
+    "name": "a role whose warm session isn't a flag",
+    "kind": "role",
+    "charter": {
+      "name": "researcher",
+      "purpose": "Runs experiments.",
+      "resident": "yes",
+      "verbs": ["post_message", "claim_task", "write_knowledge"]
+    },
+    "line": "role {\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"resident\":\"yes\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}",
+    "title": "Role {\"name\":\"researcher\",\"purpose\":\"Runs experiments.\",\"resident\":\"yes\",\"verbs\":[\"post_message\",\"claim_task\",\"write_knowledge\"]}"
+  },
+  {
+    "name": "a project's channel",
+    "kind": "channel",
+    "charter": {
+      "project": "demo",
+      "name": "release",
+      "purpose": "The 0.4.0 release."
+    },
+    "line": "channel demo/release: The 0.4.0 release.",
+    "title": "Channel demo/release: The 0.4.0 release."
+  },
+  {
+    "name": "a society channel",
+    "kind": "channel",
+    "charter": {
+      "project": null,
+      "name": "announcements",
+      "purpose": "News for everyone."
+    },
+    "line": "channel announcements: News for everyone.",
+    "title": "Channel announcements: News for everyone."
+  },
+  {
+    "name": "a channel with no project given",
+    "kind": "channel",
+    "charter": {
+      "name": "announcements",
+      "purpose": "News for everyone."
+    },
+    "line": "channel announcements: News for everyone.",
+    "title": "Channel announcements: News for everyone."
+  },
+  {
+    "name": "a channel with an empty purpose",
+    "kind": "channel",
+    "charter": {
+      "name": "release",
+      "project": "demo",
+      "purpose": ""
+    },
+    "line": "channel {\"name\":\"release\",\"project\":\"demo\",\"purpose\":\"\"}",
+    "title": "Channel {\"name\":\"release\",\"project\":\"demo\",\"purpose\":\"\"}"
+  },
+  {
+    "name": "a retirement",
+    "kind": "retirement",
+    "charter": {
+      "agent": "eng-1",
+      "reason": "The project is done."
+    },
+    "line": "retirement of eng-1: The project is done.",
+    "title": "Retirement of eng-1: The project is done."
+  },
+  {
+    "name": "a retirement with no reason",
+    "kind": "retirement",
+    "charter": {
+      "agent": "eng-1"
+    },
+    "line": "retirement {\"agent\":\"eng-1\"}",
+    "title": "Retirement {\"agent\":\"eng-1\"}"
+  },
+  {
+    "name": "a reallocation of replicas",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "maxReplicas": 2
+      },
+      "description": "Two reviewers per project."
+    },
+    "line": "reallocation of role reviewer (up to 2 per project): Two reviewers per project.",
+    "title": "Reallocation of role reviewer (up to 2 per project): Two reviewers per project."
+  },
+  {
+    "name": "a reallocation of every field, in the line's order",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "verbs": ["post_message", "claim_task", "write_knowledge"],
+        "wakeTriggers": ["heartbeat", "ops_event"],
+        "backlogThreshold": 2.5,
+        "maxReplicas": 4
+      },
+      "description": "More of everything."
+    },
+    "line": "reallocation of role reviewer (up to 4 per project, backlog threshold 2.5, wakes on heartbeat, ops_event, 3 verbs): More of everything.",
+    "title": "Reallocation of role reviewer (up to 4 per project, backlog threshold 2.5, wakes on heartbeat, ops_event, 3 verbs): More of everything."
+  },
+  {
+    "name": "a reallocation to no ambient wakes",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "wakeTriggers": []
+      },
+      "description": "Quiet."
+    },
+    "line": "reallocation of role reviewer (no ambient wakes): Quiet.",
+    "title": "Reallocation of role reviewer (no ambient wakes): Quiet."
+  },
+  {
+    "name": "a backlog of a ten-millionth, with an exponent",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "backlogThreshold": 1e-7
+      },
+      "description": "d"
+    },
+    "line": "reallocation of role reviewer (backlog threshold 1e-7): d",
+    "title": "Reallocation of role reviewer (backlog threshold 1e-7): d"
+  },
+  {
+    "name": "a backlog of a millionth, written out",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "backlogThreshold": 0.000001
+      },
+      "description": "d"
+    },
+    "line": "reallocation of role reviewer (backlog threshold 0.000001): d",
+    "title": "Reallocation of role reviewer (backlog threshold 0.000001): d"
+  },
+  {
+    "name": "a backlog of 10^21, with an exponent",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "backlogThreshold": 1e21
+      },
+      "description": "d"
+    },
+    "line": "reallocation of role reviewer (backlog threshold 1e+21): d",
+    "title": "Reallocation of role reviewer (backlog threshold 1e+21): d"
+  },
+  {
+    "name": "a backlog just under 10^21, written out",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "backlogThreshold": 123456789012345680000
+      },
+      "description": "d"
+    },
+    "line": "reallocation of role reviewer (backlog threshold 123456789012345680000): d",
+    "title": "Reallocation of role reviewer (backlog threshold 123456789012345680000): d"
+  },
+  {
+    "name": "the largest safe number of replicas",
+    "kind": "reallocation",
+    "charter": {
+      "role": "reviewer",
+      "changes": {
+        "maxReplicas": 9007199254740991
+      },
+      "description": "d"
+    },
+    "line": "reallocation of role reviewer (up to 9007199254740991 per project): d",
+    "title": "Reallocation of role reviewer (up to 9007199254740991 per project): d"
+  },
+  {
+    "name": "a number of replicas past the safe integers",
+    "kind": "reallocation",
+    "charter": {
+      "changes": {
+        "maxReplicas": 9007199254740992
+      },
+      "description": "d",
+      "role": "reviewer"
+    },
+    "line": "reallocation {\"changes\":{\"maxReplicas\":9007199254740992},\"description\":\"d\",\"role\":\"reviewer\"}",
+    "title": "Reallocation {\"changes\":{\"maxReplicas\":9007199254740992},\"description\":\"d\",\"role\":\"reviewer\"}"
+  },
+  {
+    "name": "a reallocation that changes nothing",
+    "kind": "reallocation",
+    "charter": {
+      "changes": {},
+      "description": "d",
+      "role": "reviewer"
+    },
+    "line": "reallocation {\"changes\":{},\"description\":\"d\",\"role\":\"reviewer\"}",
+    "title": "Reallocation {\"changes\":{},\"description\":\"d\",\"role\":\"reviewer\"}"
+  },
+  {
+    "name": "a reallocation with a field of no role",
+    "kind": "reallocation",
+    "charter": {
+      "changes": {
+        "maxReplicas": 2,
+        "other": 1
+      },
+      "description": "d",
+      "role": "reviewer"
+    },
+    "line": "reallocation {\"changes\":{\"maxReplicas\":2,\"other\":1},\"description\":\"d\",\"role\":\"reviewer\"}",
+    "title": "Reallocation {\"changes\":{\"maxReplicas\":2,\"other\":1},\"description\":\"d\",\"role\":\"reviewer\"}"
+  },
+  {
+    "name": "a reallocation with no changes",
+    "kind": "reallocation",
+    "charter": {
+      "description": "d",
+      "role": "reviewer"
+    },
+    "line": "reallocation {\"description\":\"d\",\"role\":\"reviewer\"}",
+    "title": "Reallocation {\"description\":\"d\",\"role\":\"reviewer\"}"
+  },
+  {
+    "name": "a negative backlog",
+    "kind": "reallocation",
+    "charter": {
+      "changes": {
+        "backlogThreshold": -1
+      },
+      "description": "d",
+      "role": "reviewer"
+    },
+    "line": "reallocation {\"changes\":{\"backlogThreshold\":-1},\"description\":\"d\",\"role\":\"reviewer\"}",
+    "title": "Reallocation {\"changes\":{\"backlogThreshold\":-1},\"description\":\"d\",\"role\":\"reviewer\"}"
+  },
+  {
+    "name": "a skill whose summary ends in dots and spaces",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": "  Sort the inbox...  "
+    },
+    "line": "skill triage: Sort the inbox",
+    "title": "Skill triage: Sort the inbox"
+  },
+  {
+    "name": "a skill whose summary ends in JavaScript's white space",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": " Sort the inbox. ﻿"
+    },
+    "line": "skill triage: Sort the inbox",
+    "title": "Skill triage: Sort the inbox"
+  },
+  {
+    "name": "a skill whose summary is dots alone",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": "..."
+    },
+    "line": "skill triage: ",
+    "title": "Skill triage: "
+  },
+  {
+    "name": "a summary of 200 code points, 201 UTF-16 code units",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙"
+    },
+    "line": "skill triage: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙",
+    "title": "Skill triage: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙"
+  },
+  {
+    "name": "a summary of 201 code points",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙"
+    },
+    "line": "skill {\"name\":\"triage\",\"summary\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙\"}",
+    "title": "Skill {\"name\":\"triage\",\"summary\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🌙\"}"
+  },
+  {
+    "name": "a summary of one combining mark",
+    "kind": "skill",
+    "charter": {
+      "name": "triage",
+      "summary": "́"
+    },
+    "line": "skill triage: ́",
+    "title": "Skill triage: ́"
+  },
+  {
+    "name": "an archive",
+    "kind": "archive",
+    "charter": {
+      "project": "demo",
+      "reason": "The work moved to lab."
+    },
+    "line": "archive of project demo: The work moved to lab.",
+    "title": "Archive of project demo: The work moved to lab."
+  },
+  {
+    "name": "an archive of a project that isn't a board name",
+    "kind": "archive",
+    "charter": {
+      "project": "Demo",
+      "reason": "Moved."
+    },
+    "line": "archive {\"project\":\"Demo\",\"reason\":\"Moved.\"}",
+    "title": "Archive {\"project\":\"Demo\",\"reason\":\"Moved.\"}"
+  },
+  {
+    "name": "a charter's strings, escaped as JSON",
+    "kind": "member",
+    "charter": {
+      "name": "x\u0001\"\\\n\t\b\f\r\u001f é"
+    },
+    "line": "member {\"name\":\"x\\u0001\\\"\\\\\\n\\t\\b\\f\\r\\u001f é\"}",
+    "title": "Member {\"name\":\"x\\u0001\\\"\\\\\\n\\t\\b\\f\\r\\u001f é\"}"
+  },
+  {
+    "name": "a charter's numbers, flags, nulls, and lists",
+    "kind": "member",
+    "charter": {
+      "a": 1,
+      "b": 1.5,
+      "c": [true, false, null],
+      "d": {
+        "e": -0.25,
+        "f": 1e-7,
+        "g": 1e21
+      }
+    },
+    "line": "member {\"a\":1,\"b\":1.5,\"c\":[true,false,null],\"d\":{\"e\":-0.25,\"f\":1e-7,\"g\":1e+21}}",
+    "title": "Member {\"a\":1,\"b\":1.5,\"c\":[true,false,null],\"d\":{\"e\":-0.25,\"f\":1e-7,\"g\":1e+21}}"
+  }
+]

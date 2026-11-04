@@ -9,6 +9,7 @@ import {
 import {
   channelRef,
   conversationPart,
+  cronFailure,
   mayHoldStage,
   parseChannelRef,
   PATH_TOKENS,
@@ -49,7 +50,12 @@ import {
   type RunnersView,
   type SocietyView,
 } from "./prompt.js";
-import { renderInstructions, type OnboardingContext } from "./render.js";
+import {
+  instructionsHash,
+  renderInstructions,
+  type OnboardingContext,
+  type RenderInstructionsInput,
+} from "./render.js";
 
 export interface HostLog {
   info(context: object, message: string): void;
@@ -129,6 +135,8 @@ interface OpenTurn {
   stopRequestedBy: Name | null;
   readonly held: readonly Ulid[];
   readonly costSoFarUsd: number;
+  /** The hash of the job's instructions (`instructionsHash`), which its session holds once it took them. */
+  readonly instructionsNow: string;
   /** How many turns in a row before this one could not resume the job's session for a `retry`. */
   readonly resumeRetries: number;
   readonly configuredModel: string | null;
@@ -402,7 +410,7 @@ export class TurnHost {
               .filter((ref) => !agent.subscriptions.includes(ref)),
           }
         : null;
-    const instructions = renderInstructions({
+    const rendered: RenderInstructionsInput = {
       agentName: agent.name,
       roleCharter: await this.board.readAgentRoleBody(agent.name),
       memoryCore: await this.board.readMemoryCore(agent.name),
@@ -420,7 +428,15 @@ export class TurnHost {
         })),
       ],
       ...(onboarding === null ? {} : { onboarding }),
-    });
+    };
+    const instructions = renderInstructions(rendered);
+    // Both CLIs keep the instructions a session began with when they resume it, whatever they are
+    // given then, so a resumed session whose instructions changed since it last received them gets
+    // them in the prompt, as does one the board knows nothing of, as from before it kept them.
+    const instructionsNow = instructionsHash(rendered);
+    const instructionsHeld =
+      !newSession && lastTurn?.session === recorded ? lastTurn.sessionInstructionsHash : undefined;
+    const changedInstructions = !newSession && instructionsHeld !== instructionsNow;
     // Roles that route for the user get the roster and the projects still taking work in every digest.
     const societyView: SocietyView | null = charter.wakeTriggers.includes(USER_POST_TRIGGER)
       ? {
@@ -492,6 +508,20 @@ export class TurnHost {
         crons.push(cron);
       }
     }
+    // Every cron of the citizen here whose latest fire's turn failed, which may have ended with it,
+    // is named until a turn that names it completes; one this turn carries is under Crons already.
+    const failedCrons = (await this.board.listCrons()).filter(
+      (cron) =>
+        cron.agent === agent.name &&
+        cron.scope === dispatch.project &&
+        conversationPart(cron) === part &&
+        cronFailure(cron) !== null &&
+        !(dispatch.crons ?? []).includes(cron.id),
+    );
+    const cronFailures = failedCrons.flatMap((cron) => {
+      const failure = cronFailure(cron);
+      return failure === null ? [] : [{ cron: cron.id, turnId: failure.turnId }];
+    });
     const prompt = buildTurnPrompt({
       dispatch,
       clock: { now: this.now(), timeZone: society.timezone },
@@ -504,6 +534,8 @@ export class TurnHost {
       waitingStages: waiting,
       project,
       lastTurn,
+      failedCrons,
+      ...(changedInstructions ? { changedInstructions: instructions } : {}),
       onboarding,
       afreshAfterReflection,
       societyView,
@@ -533,6 +565,8 @@ export class TurnHost {
       session: recorded ?? null,
       sessionCostUsd: costSoFarUsd,
       ...(usageSoFar === undefined ? {} : { sessionUsage: usageSoFar }),
+      ...(instructionsHeld === undefined ? {} : { sessionInstructionsHash: instructionsHeld }),
+      ...(cronFailures.length === 0 ? {} : { cronFailures }),
     });
     if (record.id === undefined) {
       throw new Error("the board gave the turn no id");
@@ -552,6 +586,7 @@ export class TurnHost {
       costSoFarUsd,
       ...(usageSoFar === undefined ? {} : { usageSoFar }),
       instructions,
+      instructionsHash: instructionsNow,
       prompt,
       mcp: { url: this.mcpUrl, token },
       limits: { timeoutMs: this.turnTimeoutMs, maxTurns: this.maxTurns },
@@ -586,6 +621,7 @@ export class TurnHost {
       stopRequestedBy: null,
       held: held.map((each) => each.id),
       costSoFarUsd,
+      instructionsNow,
       resumeRetries,
       configuredModel: agent.model ?? null,
       transcript: [],
@@ -795,7 +831,26 @@ export class TurnHost {
       turn.record.trigger.kind === "reflection" &&
       outcome.exitReason === "completed";
     // The running usage is the runner's to report: it keeps the job's for a turn that saw none.
-    const { sessionUsage: _started, ...begun } = turn.record;
+    const { sessionUsage: _started, sessionInstructionsHash: heldBefore, ...begun } = turn.record;
+    // The digest counts as delivered at a turn's end as below, a stop included, since a stop is the
+    // user's decision on the work.
+    const promptDelivered =
+      outcome.exitReason === "completed" ||
+      outcome.exitReason === "blocked" ||
+      outcome.exitReason === "stopped";
+    // A new session began with the job's instructions. A resumed one has them once its prompt, which
+    // carried any change, was delivered, and for a stop, which can come before the CLI took the
+    // prompt, once a model call answered (`contextTokens`); else the next turn carries them again.
+    const instructionsTaken =
+      outcome.exitReason === "stopped" ? outcome.contextTokens !== undefined : promptDelivered;
+    const instructionsHeld =
+      job.session === null
+        ? outcome.session === null
+          ? undefined
+          : turn.instructionsNow
+        : instructionsTaken
+          ? turn.instructionsNow
+          : heldBefore;
     const finished: TurnRecord = {
       ...begun,
       session: outcome.session,
@@ -807,6 +862,7 @@ export class TurnHost {
       costUsd: outcome.costUsd,
       sessionCostUsd: outcome.sessionCostUsd ?? turn.costSoFarUsd,
       ...(outcome.sessionUsage === undefined ? {} : { sessionUsage: outcome.sessionUsage }),
+      ...(instructionsHeld === undefined ? {} : { sessionInstructionsHash: instructionsHeld }),
       ...(outcome.contextTokens === undefined ? {} : { contextTokens: outcome.contextTokens }),
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
       model: outcome.model ?? turn.configuredModel,
@@ -859,11 +915,7 @@ export class TurnHost {
       }
       // A stop is the user's decision on work it watched, not a failure: what the turn was shown
       // counts as read, so nothing restarts the work, and its stages stay held.
-      if (
-        outcome.exitReason === "completed" ||
-        outcome.exitReason === "blocked" ||
-        outcome.exitReason === "stopped"
-      ) {
+      if (promptDelivered) {
         // The digest was delivered, at the start and by the steers the turn took; only now does the
         // cursor move past it.
         await this.board.setDigestCursor(job.agent, job.scope, turn.delivered, part);

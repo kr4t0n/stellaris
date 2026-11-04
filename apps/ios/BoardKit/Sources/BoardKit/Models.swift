@@ -142,6 +142,8 @@ public struct Member: Sendable, Hashable, Codable {
   /// The projects the citizen belongs to.
   public let memberships: [String]
   public let lastTurnAt: String?
+  /// How many stages the citizen holds now; the sky's tables leave it out.
+  public let claimsHeld: Int?
 }
 
 /// The scheduler's sessions, each an `agent/scope` key with the conversation's part after it, as

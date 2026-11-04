@@ -35,6 +35,7 @@ export const VERB_NAMES = [
   "remove_cron",
   "remove_skill",
   "upload_image",
+  "read_image",
 ] as const;
 export const VerbNameSchema = z.enum(VERB_NAMES);
 export type VerbName = z.infer<typeof VerbNameSchema>;
@@ -81,6 +82,7 @@ export const USER_NAME = "user";
 export const MEMBER_VERBS: readonly VerbName[] = [
   "post_message",
   "upload_image",
+  "read_image",
   "read_inbox",
   "search",
   "open_thread",

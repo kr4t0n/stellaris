@@ -36,6 +36,8 @@ enum SignInFailure: Error, Equatable {
   /// Why the app is back at sign-in, when the board ended the sign-in.
   private(set) var notice: String?
   var tab: AppTab = .chat
+  /// The projects Board has opened, the last one shown, kept here so a fold keeps Board's place.
+  var boardPath: [String] = []
   var showsSettings = false
   private(set) var history = ChatHistory()
   private(set) var memory: ConversationMemory?
@@ -45,6 +47,46 @@ enum SignInFailure: Error, Equatable {
   private(set) var images = BoardImages()
   /// The image open in the viewer, which the tabs present.
   var viewing: ViewedImage?
+  /// The channel whose New thread sheet is open, which the tabs present.
+  var startingThread: String?
+  /// What each channel's new thread says so far, kept until it opens, so a sheet dismissed or built
+  /// again comes back with its text.
+  var newThreads: [String: NewThreadDraft] = [:]
+  /// The message a link named in each conversation, marked and scrolled to once, as the web marks
+  /// the message its address names.
+  private(set) var marks: [Conversation: MessageMark] = [:]
+  /// The task whose Advance sheet is open, which Chat presents.
+  var advancing: String?
+  /// What each task's Advance note says so far, kept until the stage is finished or the note is
+  /// cancelled, so a sheet dismissed or built again comes back with its text.
+  var advanceNotes: [String: String] = [:]
+  /// The proposal whose decision sheet is open, and which way it decides, which Chat presents.
+  var deciding: Verdict?
+  /// What each decision's reason says so far, kept as the notes are.
+  var reasons: [Verdict: String] = [:]
+  /// The task or the proposal whose plan or charter is open beside its thread, or in a sheet where
+  /// there is no room beside it.
+  var inspecting: String?
+  /// The tasks and the proposals whose advance or decision is on its way to the board. Neither goes
+  /// again until the board answers: an advance names no stage, so a second would finish the next.
+  private(set) var underWay: Set<String> = []
+  /// Why a task's advance or a proposal's decision didn't go, in words for its sheet, by the task's
+  /// or the proposal's id, kept until the next try, so a sheet built again shows it still.
+  private(set) var refusals: [String: String] = [:]
+  /// How many images are on their way into each conversation's draft, by the conversation's key.
+  /// Its Send waits for them, so a line holding an image's place never goes out.
+  private(set) var uploading: [String: Int] = [:]
+  /// Why the last image that failed in each conversation didn't go, in the board's words when it
+  /// gave them, kept until the next image or post there, so a view built again shows it still.
+  private(set) var uploadFailures: [String: String] = [:]
+  /// The lines the uploads on their way hold in each conversation's draft, by its key, each its own,
+  /// which only its upload fills.
+  private var heldLines: [String: [String]] = [:]
+  /// A small JPEG of each upload's own picture, by its conversation's key and then its line, which
+  /// the draft shows while the upload is on its way.
+  private(set) var uploadPreviews: [String: [String: Data]] = [:]
+  /// Follows the board's events while the app is in front, and reads again what they touch.
+  let live = LiveUpdates()
 
   @ObservationIgnored let environment: AppEnvironment
   @ObservationIgnored private var client: BoardClient?
@@ -153,10 +195,12 @@ enum SignInFailure: Error, Equatable {
     }
   }
 
-  /// The board's events after `since`, from one connection, as the signed-in user; nil when
-  /// signed out.
-  func events(since: String) -> AsyncThrowingStream<BoardEvent, any Error>? {
-    client?.events(since: since)
+  /// Follows the board's events as the signed-in user, across drops; nil when signed out.
+  func eventFollower() -> EventFollower<ContinuousClock>? {
+    guard let client else {
+      return nil
+    }
+    return EventFollower(connect: { client.eventConnection(since: $0) })
   }
 
   /// The live turn stream from the start of the server's buffer; nil when signed out.
@@ -198,10 +242,290 @@ enum SignInFailure: Error, Equatable {
 
   // MARK: Chat
 
-  /// Shows `conversation` in Chat, which Back then leaves for the one shown before.
-  func open(_ conversation: Conversation) {
+  /// Shows `conversation` in Chat, which Back then leaves for the one shown before, marked and
+  /// scrolled to the message `at` names, if any.
+  func open(_ conversation: Conversation, at message: String? = nil) {
+    marks[conversation] = message.map { MessageMark(id: $0) }
     history.open(conversation)
     tab = .chat
+  }
+
+  /// Notes that the conversation has scrolled to its marked message, which a view built again then
+  /// leaves where the user scrolled.
+  func reachedMark(in conversation: Conversation) {
+    marks[conversation]?.reached = true
+  }
+
+  /// Posts `body` to `conversation` as the user, then, without waiting, reads the conversation
+  /// again, and what waits on the user, which a post answers where it was asked, as the web's
+  /// composer does.
+  func post(_ body: String, to conversation: Conversation) async throws -> Message {
+    let request =
+      switch conversation {
+      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body)
+      case .thread(let id): BoardAPI.postMessage(thread: id, body: body)
+      }
+    let message = try await send(request)
+    uploadFailures[conversation.key] = nil
+    let feed = feed(for: conversation)
+    Task {
+      await feed.load(using: self)
+      await store.reload(["requests"], using: self)
+    }
+    return message
+  }
+
+  /// Holds the place of `count` images in the conversation's draft, one a line, in place of what is
+  /// selected from `start` to `end` in UTF-16 code units, as the web's composer does: gives the
+  /// caret after them, and the lines they hold, each its own and numbered past those the draft and
+  /// the uploads on their way hold, one for each `upload` to fill.
+  func holdImages(_ count: Int, in conversation: Conversation, start: Int, end: Int)
+    -> (caret: Int, placeholders: [String])
+  {
+    let key = conversation.key
+    let draft = memory?.draft(conversation) ?? ""
+    var placeholders: [String] = []
+    for _ in 0..<count {
+      placeholders.append(
+        uploadPlaceholder(
+          for: "image", in: draft, held: (heldLines[key] ?? []) + placeholders))
+    }
+    let held = insertAt(
+      draft, start: start, end: end, inserted: placeholders.joined(separator: "\n"))
+    memory?.setDraft(held.text, for: conversation)
+    heldLines[key, default: []] += placeholders
+    uploading[key, default: 0] += count
+    uploadFailures[key] = nil
+    return (held.caret, placeholders)
+  }
+
+  /// The images the conversation's draft holds, in the order they stand in it: those the board kept,
+  /// and those whose uploads are on their way.
+  func draftImages(in conversation: Conversation) -> [DraftImage] {
+    BoardKit.draftImages(memory?.draft(conversation) ?? "", held: heldLines[conversation.key] ?? [])
+  }
+
+  /// Takes an image's markdown, or its upload's line, out of the conversation's draft; gives where
+  /// the caret, at `caret`, goes then.
+  func removeImage(_ image: DraftImage, from conversation: Conversation, caret: Int) -> DraftEdit {
+    let removed = removeDraftImage(memory?.draft(conversation) ?? "", caret: caret, image: image)
+    memory?.setDraft(removed.text, for: conversation)
+    return removed
+  }
+
+  /// Uploads an image's bytes, made into a kind and a size the board keeps, then puts the board's
+  /// markdown for it where `placeholder` held its place in the conversation's draft, or takes the
+  /// place away and keeps why it failed. Nil bytes, which Photos or the pasteboard couldn't give,
+  /// fail too. The markdown is lost when the user deleted the line, as on the web. `caret` says
+  /// where the draft's caret is as the line is replaced, in UTF-16 code units; the draft that
+  /// gives back says where it goes then, among the same words, for the field to move it there.
+  @discardableResult func upload(
+    _ data: Data?, holding placeholder: String, in conversation: Conversation,
+    caret: () -> Int? = { nil }
+  ) async -> DraftEdit? {
+    let sent = generation
+    var markdown = ""
+    var failure: String?
+    if let data, let preview = await ComposerImage.preview(data), sent == generation {
+      uploadPreviews[conversation.key, default: [:]][placeholder] = preview
+    }
+    do {
+      guard let data, let image = await ComposerImage.prepare(data) else {
+        throw ComposerImage.Unreadable()
+      }
+      markdown = try await send(BoardAPI.uploadImage(image.data, name: image.name)).markdown
+    } catch let refusal as BoardError where refusal.status != 0 {
+      failure = refusal.message
+    } catch is ComposerImage.Unreadable {
+      failure = "The image could not be read."
+    } catch {
+      failure = "The image was not uploaded."
+    }
+    guard sent == generation else {
+      return nil
+    }
+    let key = conversation.key
+    let left = (uploading[key] ?? 1) - 1
+    uploading[key] = left > 0 ? left : nil
+    heldLines[key]?.removeAll { $0 == placeholder }
+    uploadPreviews[key]?[placeholder] = nil
+    if let failure {
+      uploadFailures[key] = failure
+    }
+    let draft = memory?.draft(conversation) ?? ""
+    guard
+      let settled = settleUpload(
+        draft, caret: caret() ?? draft.utf16.count, placeholder: placeholder, markdown: markdown)
+    else {
+      return nil
+    }
+    memory?.setDraft(settled.text, for: conversation)
+    return settled
+  }
+
+  /// Opens the thread `channel`'s draft describes, with its first message if it has one, then shows
+  /// it in Chat and forgets the draft, as the web's New thread does.
+  func openThread(in channel: String) async throws {
+    let draft = newThreads[channel] ?? NewThreadDraft()
+    let thread = try await send(
+      BoardAPI.openThread(
+        channel: channel, title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let first = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !first.isEmpty {
+      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first))
+    }
+    newThreads[channel] = nil
+    if startingThread == channel {
+      startingThread = nil
+    }
+    open(.thread(thread.id))
+    await store.reload(["threads"], using: self)
+  }
+
+  // MARK: Tasks and proposals
+
+  /// What the thread `conversation` is about: a task or a proposal, as the board last gave it.
+  func subject(of conversation: Conversation) -> Subject? {
+    guard case .thread(let id) = conversation else {
+      return nil
+    }
+    if let task = store.task(id) {
+      return .task(task)
+    }
+    return store.proposal(id).map(Subject.proposal)
+  }
+
+  /// Finishes the task's current stage as the user, with the note its sheet holds for the task's
+  /// thread, as the web's form at a stage that names the user does; then shows the task as the
+  /// board answered, and reads its thread and the board's tasks and questions again. Only a stage
+  /// that waits on the user is finished here, though the board takes the user's advance of any,
+  /// and only one advance of a task is on its way at a time.
+  func advance(_ id: String) async throws {
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
+    guard let task = store.task(id), stageForYou(task) != nil else {
+      refusals[id] = "This stage no longer waits on you."
+      throw SubjectRefusal.notYours
+    }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
+    let note = (advanceNotes[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let advanced: BoardTask
+    do {
+      advanced = try await send(BoardAPI.advanceTask(id, note: note.isEmpty ? nil : note))
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
+    }
+    store.replace(advanced)
+    advanceNotes[id] = nil
+    if advancing == id {
+      advancing = nil
+    }
+    let feed = feed(for: .thread(id))
+    Task {
+      await feed.load(using: self)
+      await store.reload(["tasks", "requests"], using: self)
+    }
+  }
+
+  /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
+  /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
+  /// which the decision closes, again. Only a proposal that waits on the user is decided here, and
+  /// only one decision of it is on its way at a time.
+  func decide(_ verdict: Verdict) async throws {
+    let id = verdict.proposal
+    guard !underWay.contains(id) else {
+      throw SubjectRefusal.underWay
+    }
+    guard let proposal = store.proposal(id), waitingOnYou(proposal) else {
+      refusals[id] = "This proposal no longer waits on you."
+      throw SubjectRefusal.notYours
+    }
+    let reason = (reasons[verdict] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if verdict.choice == .reject, reason.isEmpty {
+      refusals[id] = "A rejection needs its reason."
+      throw SubjectRefusal.noReason
+    }
+    underWay.insert(id)
+    defer { underWay.remove(id) }
+    refusals[id] = nil
+    do {
+      switch verdict.choice {
+      case .approve:
+        _ = try await send(BoardAPI.approve(id, reason: reason.isEmpty ? nil : reason))
+      case .reject:
+        _ = try await send(BoardAPI.reject(id, reason: reason))
+      }
+    } catch {
+      refusals[id] = AppModel.words(for: error)
+      throw error
+    }
+    for choice in Verdict.Choice.allCases {
+      reasons[Verdict(proposal: id, choice: choice)] = nil
+    }
+    if deciding?.proposal == id {
+      deciding = nil
+    }
+    let feed = feed(for: .thread(id))
+    Task {
+      await feed.load(using: self)
+      await store.reload(["proposals", "threads", "members", "channels"], using: self)
+    }
+  }
+
+  /// A failed send in words: the board's refusal in its own, or that it didn't take it.
+  private static func words(for error: any Error) -> String {
+    if let refusal = error as? BoardError, refusal.status != 0 {
+      return refusal.message
+    }
+    return "The board did not take it."
+  }
+
+  /// Reads again what `keys` name of what the app has loaded, as the web's `refreshFor` makes each
+  /// key's queries stale: the conversation Chat shows, the board's lists, and the sky's while it is
+  /// shown; with `everything`, all of it, as after a drop. Another conversation already read is
+  /// read again when it is next shown, as the web refetches a stale query once it is used.
+  func reread(_ keys: Set<ReadKey>, everything: Bool = false) async {
+    func touched(_ name: String, _ id: String? = nil) -> Bool {
+      everything
+        || keys.contains { key in
+          key.first == name && (key.count < 2 || key[1] == nil || id == nil || key[1] == id)
+        }
+    }
+    // A conversation never read yet is read when it is shown. One still on its first load counts as
+    // read: an answer the board gave before the event would leave it without what the event says.
+    for (conversation, feed) in feeds where feed.state != .idle {
+      let stale =
+        switch conversation {
+        case .channel(let ref): touched("channel", ref)
+        case .thread(let id): touched("thread", id)
+        }
+      guard stale else {
+        continue
+      }
+      feed.markStale()
+      if conversation == history.current {
+        await feed.load(using: self)
+      }
+    }
+    let lists = BoardStore.lists.filter { touched($0) }
+    if everything {
+      await store.refresh(using: self)
+    } else if !lists.isEmpty {
+      await store.reload(lists, using: self)
+    }
+    // Every task read alone and every dashboard read, on its first read or failed too: an answer
+    // the board gave before the event would leave out what the event says.
+    for id in store.taskReads.keys where touched("task", id) {
+      await store.lookUpTask(id, using: self)
+    }
+    for project in store.dashboardReads.keys where touched("dashboard", project) {
+      await store.loadDashboard(project, using: self)
+    }
+    sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
   }
 
   /// Where Back in Chat goes, if anywhere.
@@ -257,7 +581,9 @@ enum SignInFailure: Error, Equatable {
         open(.thread(entity.id))
         return .opened
       case .message:
-        open(entity.thread.map(Conversation.thread) ?? .channel(entity.channel ?? "general"))
+        open(
+          entity.thread.map(Conversation.thread) ?? .channel(entity.channel ?? "general"),
+          at: entity.id)
         return .opened
       case .cron:
         break
@@ -273,12 +599,18 @@ enum SignInFailure: Error, Equatable {
 
   /// A message's markdown, read once for its text and the ids the board names.
   func document(for message: Message) -> MessageDocument {
+    document(id: message.id, markdown: message.body)
+  }
+
+  /// Markdown the board keeps under `id`, a message's, a task's brief, or a dashboard, read as a
+  /// message is, once for its text and the ids the board names.
+  func document(id: String, markdown: String) -> MessageDocument {
     let entities = store.entities
-    if let kept = documents[message.id], kept.body == message.body, kept.entities == entities {
+    if let kept = documents[id], kept.body == markdown, kept.entities == entities {
       return kept.document
     }
-    let document = MessageDocument(markdown: message.body, entities: entities)
-    documents[message.id] = (message.body, entities, document)
+    let document = MessageDocument(markdown: markdown, entities: entities)
+    documents[id] = (markdown, entities, document)
     return document
   }
 
@@ -294,10 +626,14 @@ enum SignInFailure: Error, Equatable {
     case .channel(let ref):
       return "#" + (ref.split(separator: "/").last.map(String.init) ?? ref)
     case .thread(let id):
+      // A proposal's thread is titled as the board announced it, which the web titles the proposal.
+      if let proposal = store.proposal(id) {
+        return proposal.title
+      }
       if let thread = feeds[conversation]?.thread {
         return thread.title
       }
-      return store.tasks.first { $0.id == id }?.title ?? "the thread"
+      return store.task(id)?.title ?? "the thread"
     }
   }
 
@@ -312,6 +648,11 @@ enum SignInFailure: Error, Equatable {
     self.actor = actor
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
+    boardPath = []
+    marks = [:]
+    newThreads = [:]
+    forgetSubjects()
+    live.clear()
     feeds = [:]
     documents = [:]
     images = BoardImages()
@@ -320,6 +661,22 @@ enum SignInFailure: Error, Equatable {
     notice = nil
     phase = .signedIn
     Task { await store.refresh(using: self) }
+  }
+
+  /// Closes the sheets and the inspector of tasks and proposals, and drops what they said, and
+  /// what the drafts' images on their way and their failures were.
+  private func forgetSubjects() {
+    advancing = nil
+    advanceNotes = [:]
+    deciding = nil
+    reasons = [:]
+    inspecting = nil
+    underWay = []
+    refusals = [:]
+    uploading = [:]
+    uploadFailures = [:]
+    heldLines = [:]
+    uploadPreviews = [:]
   }
 
   private func leave(notice: String?) {
@@ -331,9 +688,15 @@ enum SignInFailure: Error, Equatable {
     documents = [:]
     images = BoardImages()
     viewing = nil
+    startingThread = nil
+    newThreads = [:]
+    forgetSubjects()
+    marks = [:]
+    live.clear()
     store.clear()
     sky.clear()
     history = ChatHistory()
+    boardPath = []
     showsSettings = false
     self.notice = notice
     phase = .signedOut

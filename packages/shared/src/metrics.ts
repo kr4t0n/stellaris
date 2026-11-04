@@ -2,6 +2,7 @@ import { z } from "zod";
 import { UsageSchema } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
+import { HeartbeatCauseSchema } from "./turns.js";
 
 /** How far back the metrics look: a day, a week, or the whole log. */
 export const MetricsWindowSchema = z.enum(["24h", "7d", "all"]);
@@ -14,7 +15,7 @@ export const METRICS_WINDOW_MS: Readonly<Record<MetricsWindow, number | null>> =
 };
 
 /** Verbs that only read; every other verb changes the board. */
-export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_task"];
+export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_task", "read_image"];
 
 /**
  * Whether a tool call, as a turn's transcript names it, changed the board: a board verb other than
@@ -39,12 +40,21 @@ export const MetricsSchema = z.object({
   /**
    * Finished turns that changed nothing on the board. Reflections are left out, since they write
    * memory, not the board; turns without a transcript are counted apart, their actions unknown.
+   * Heartbeats are split by what each woke for, and those recorded before the board kept it are a
+   * row without one.
    */
   idle: z.object({
     turns: CountSchema,
     idle: CountSchema,
     unknown: CountSchema,
-    byTrigger: z.array(z.object({ trigger: z.string(), turns: CountSchema, idle: CountSchema })),
+    byTrigger: z.array(
+      z.object({
+        trigger: z.string(),
+        heartbeat: HeartbeatCauseSchema.optional(),
+        turns: CountSchema,
+        idle: CountSchema,
+      }),
+    ),
     byAgent: z.array(
       z.object({
         agent: NameSchema,

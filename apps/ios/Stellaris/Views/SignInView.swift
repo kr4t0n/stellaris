@@ -216,7 +216,11 @@ struct SignInView: View {
         problem = "GitHub's sign-in ended somewhere the app doesn't know."
       }
     } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-      return
+      // A session iOS refused to start ends as a cancel too, with iOS's reason; the person's own
+      // cancel has none, and says nothing.
+      if let reason = AppSignIn.refusal(ofCanceled: error as NSError) {
+        problem = "iOS ended the sign-in: \(reason)"
+      }
     } catch {
       problem = describe(error)
     }

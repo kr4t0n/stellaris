@@ -1,13 +1,22 @@
+import { once } from "node:events";
+import type { Writable } from "node:stream";
 import { MOVE_PACK_LIMIT_BYTES } from "@stellaris/shared";
 import { execa } from "execa";
+import { liftDeadline } from "./serve.js";
 
 /** The smart HTTP protocol's three requests; nothing else of a repository is served. */
 const SMART_PATHS = new Set(["/info/refs", "/git-upload-pack", "/git-receive-pack"]);
 /**
  * A home is markdown, and a move carries a project's packs, which the old runner measures against
- * the same limit before it pushes; a pack past this is refused rather than buffered.
+ * the same limit before it pushes; a request past this is refused as soon as it passes it.
  */
 const MAX_BYTES = MOVE_PACK_LIMIT_BYTES;
+/**
+ * How long a request may send nothing before the board gives up on it: a runner's git gives up on
+ * a transfer under 1,000 bytes a second for as long, and a dead peer would otherwise hold its
+ * `http-backend`, and a home's later pushes behind it, for good.
+ */
+const IDLE_MS = 5 * 60_000;
 
 export interface HomeGitRequest {
   /**
@@ -22,6 +31,94 @@ export interface HomeGitRequest {
   readonly request: Request;
   /** Who is pushing or fetching, for git's own records. */
   readonly runner: string;
+  /** How long the request may send nothing; five minutes unless a test shortens it. */
+  readonly idleMs?: number | undefined;
+  /** The most the request may carry; `MOVE_PACK_LIMIT_BYTES` unless a test lowers it. */
+  readonly limitBytes?: number | undefined;
+}
+
+/** How feeding a request's body to `http-backend` ended. */
+type Fed = "done" | "too large" | "idle" | "cut" | "stopped";
+
+/**
+ * Writes a request's body into `http-backend` as it arrives, at the pace git reads it: so git
+ * indexes a pack while the rest is on its way, and the board holds no more of it than a pipe does.
+ * It stops at the first byte past `limit`, after `idleMs` with nothing new, when the client goes
+ * (`cut`), or when `http-backend` stops reading (`stopped`), whose answer then says why. A body
+ * stopped or past the limit is left unread, so the answer still reaches the client.
+ *
+ * Nothing here races a read against a promise that outlives it: each race would hang a reaction
+ * holding that read's chunk on the longer promise, and a 128 MiB push kept 136 MiB of them.
+ */
+async function feed(
+  body: ReadableStream<Uint8Array> | null,
+  stdin: Writable,
+  limit: number,
+  idleMs: number,
+): Promise<Fed> {
+  if (body === null) {
+    stdin.end();
+    return "done";
+  }
+  const reader = body.getReader();
+  const waits = new AbortController();
+  let ended: Exclude<Fed, "done"> | null = null;
+  const endedAs = (): Exclude<Fed, "done"> | null => ended;
+  // A client gone or silent loses its connection; any other end leaves the rest unread. Either
+  // settles a read in flight, and `waits` a wait for the pipe to drain.
+  const end = (why: Exclude<Fed, "done">): Exclude<Fed, "done"> => {
+    if (ended === null) {
+      ended = why;
+      waits.abort();
+      if (why === "idle" || why === "cut") {
+        reader.cancel().catch(() => undefined);
+      } else {
+        reader.releaseLock();
+      }
+    }
+    return ended;
+  };
+  const timer = setTimeout(() => end("idle"), idleMs);
+  const stopped = (): void => {
+    end("stopped");
+  };
+  // `http-backend` that exits before reading everything fails the next write with EPIPE.
+  stdin.on("error", stopped);
+  stdin.once("close", stopped);
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read().catch(() => null);
+      const early = endedAs();
+      if (early !== null) {
+        return early;
+      }
+      if (next === null) {
+        return end("cut");
+      }
+      if (next.done) {
+        stdin.end();
+        return "done";
+      }
+      timer.refresh();
+      total += next.value.byteLength;
+      if (total > limit) {
+        return end("too large");
+      }
+      if (!stdin.write(next.value)) {
+        const drained = await once(stdin, "drain", { signal: waits.signal }).then(
+          () => true,
+          () => false,
+        );
+        if (!drained) {
+          return end("stopped");
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    stdin.off("close", stopped);
+  }
 }
 
 /** Splits a CGI answer into its status, headers, and body. */
@@ -61,6 +158,8 @@ export class HomeGit {
   private readonly pushes = new Map<string, Promise<unknown>>();
 
   serve(input: HomeGitRequest): Promise<Response> {
+    // Authorized by now, and a push may wait here behind another to the same home.
+    liftDeadline(input.request);
     if (input.rest !== "/git-receive-pack") {
       return serveHomeGit(input);
     }
@@ -81,17 +180,22 @@ export class HomeGit {
  * Serves one smart-HTTP request against a repository on the board, an agent's home or a move's,
  * through `git http-backend`, which ships with git: clones and fetches through `git-upload-pack`,
  * pushes through `git-receive-pack`, where a home's own hook and `updateInstead` take over.
- * Authentication and the check of who may reach the repository happen before this is called.
+ * Authentication and the check of who may reach the repository happen before this is called, so
+ * the request's deadline gives way to the idle limit: a pack takes as long as it keeps arriving.
  */
 export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
   if (!SMART_PATHS.has(input.rest)) {
     return new Response("not a smart HTTP path", { status: 404 });
   }
   const { request } = input;
-  const body = Buffer.from(await request.arrayBuffer());
-  if (body.length > MAX_BYTES) {
+  const limit = input.limitBytes ?? MAX_BYTES;
+  const length = request.headers.get("content-length");
+  // git posts a pack past `http.postBuffer` in chunks, with no length, and the rest with one.
+  const declared = length !== null && /^\d+$/.test(length) ? length : null;
+  if (declared !== null && Number(declared) > limit) {
     return new Response("pack too large for the board to take", { status: 413 });
   }
+  liftDeadline(request);
   const url = new URL(request.url);
   const env: Record<string, string> = {
     PATH: process.env["PATH"] ?? "/usr/bin:/bin",
@@ -102,10 +206,13 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
     PATH_INFO: `/${input.repository}${input.rest}`,
     QUERY_STRING: url.search.replace(/^\?/, ""),
     CONTENT_TYPE: request.headers.get("content-type") ?? "",
-    CONTENT_LENGTH: String(body.length),
     REMOTE_USER: input.runner,
     REMOTE_ADDR: "127.0.0.1",
   };
+  // With no length, `http-backend` reads the body to its end.
+  if (declared !== null) {
+    env["CONTENT_LENGTH"] = declared;
+  }
   const encoding = request.headers.get("content-encoding");
   if (encoding !== null) {
     env["HTTP_CONTENT_ENCODING"] = encoding;
@@ -114,10 +221,9 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
   if (protocol !== null) {
     env["HTTP_GIT_PROTOCOL"] = protocol;
   }
-  const result = await execa("git", ["http-backend"], {
+  const backend = execa("git", ["http-backend"], {
     env,
     extendEnv: false,
-    input: body,
     encoding: "buffer",
     // The blank line that ends the headers ends the whole answer when the body is empty, as for
     // the 4-byte probe git sends before a pack too large for one post; stripped, it reads as none.
@@ -125,6 +231,17 @@ export async function serveHomeGit(input: HomeGitRequest): Promise<Response> {
     reject: false,
     maxBuffer: MAX_BYTES,
   });
+  const fed = await feed(request.body, backend.stdin, limit, input.idleMs ?? IDLE_MS);
+  if (fed !== "done" && fed !== "stopped") {
+    backend.kill();
+    await backend;
+    return fed === "too large"
+      ? new Response("pack too large for the board to take", { status: 413 })
+      : new Response(fed === "idle" ? "the request stopped arriving" : "the request was cut", {
+          status: fed === "idle" ? 408 : 400,
+        });
+  }
+  const result = await backend;
   if (result.exitCode !== 0 && result.stdout.length === 0) {
     return new Response(`git http-backend failed: ${Buffer.from(result.stderr).toString("utf8")}`, {
       status: 500,

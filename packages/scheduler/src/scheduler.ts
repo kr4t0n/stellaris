@@ -5,6 +5,9 @@ import {
   placeConversation,
   CRON_FAILING_RUNS,
   currentStage,
+  firesInTask,
+  heldOn,
+  cronStoppedAt,
   nextFire,
   parseSessionKey,
   mayHoldStage,
@@ -39,7 +42,7 @@ import {
   type WorkspaceConversation,
 } from "@stellaris/shared";
 import { z } from "zod";
-import { decideWake } from "./wake.js";
+import { decideWake, heartbeatCause } from "./wake.js";
 
 /**
  * A conversation beside a scope's home: a thread's, a channel's other than general, or, in the
@@ -255,6 +258,18 @@ const StateSchema = z.object({
   lastHeartbeat: z.record(z.string(), z.string()),
   /** Waiting stages already signalled, as `task:stage`, so each is logged once while it waits. */
   waitingSeen: z.record(z.string(), z.string()).default({}),
+  /**
+   * The last pass at which each waiting stage was held by the user's pause of its runner, as
+   * `task:stage`; its wait counts from there, so a stage that waited through a pause is not
+   * signalled the moment the pause ends.
+   */
+  waitingHeld: z.record(z.string(), z.string()).default({}),
+  /**
+   * The last operations pass at which each citizen was held by the user's pause of a runner it
+   * works on; its idle time counts from there, so a citizen held through a pause is not signalled
+   * idle the moment the pause ends.
+   */
+  idleHeld: z.record(z.string(), z.string()).default({}),
   /** Queued dispatches survive a restart; the cursor has already moved past the events that made them. */
   pending: z.record(z.string(), PendingSchema).default({}),
   opsReported: z.record(z.string(), z.string()).default({}),
@@ -1460,10 +1475,14 @@ export class Scheduler {
    * A heartbeat per member and scope on the cadence, which then looks at every conversation of the
    * scope: the unread messages of its home, of each other channel, and of each thread, a stage the
    * member holds, and a stage of an unblocked task waiting that it may take, each in its task's
-   * thread. Each conversation with something wakes on its own, so a heartbeat never brings one
-   * task's business into another's turn.
+   * thread. A stage counts for neither while the member has a cron pending in its task's thread
+   * (`cronStoppedAt`: neither paused nor ended, and its latest fire's turn did not fail or was
+   * caught up since), whose fires are its checks there. Each conversation with something wakes on
+   * its own, so a heartbeat never brings one task's business into another's turn, and its trigger
+   * says what it woke for (`heartbeatCause`).
    */
   private async checkHeartbeats(now: number): Promise<void> {
+    let pendingCrons: readonly Cron[] | undefined;
     for (const agent of await this.board.listAgents()) {
       if (agent.status !== "active" || agent.cli === null) {
         continue;
@@ -1490,6 +1509,12 @@ export class Scheduler {
         this.state.lastHeartbeat[cadence] = iso(now);
         unread ??= await this.board.unreadByConversation(actor);
         held ??= await this.board.heldClaims(agent.name);
+        pendingCrons ??= (await this.board.listCrons()).filter(
+          (cron) => cronStoppedAt(cron) === null,
+        );
+        const crons = pendingCrons;
+        const leftToCron = (task: Task): boolean =>
+          crons.some((cron) => cron.agent === agent.name && firesInTask(cron, task));
         const reasons = new Map<
           string,
           {
@@ -1523,7 +1548,7 @@ export class Scheduler {
           }
         }
         for (const task of held) {
-          if (task.project === project) {
+          if (task.project === project && !leftToCron(task)) {
             reasonsIn({ thread: { id: task.id, task: true } }).claimsHeld += 1;
           }
         }
@@ -1531,6 +1556,7 @@ export class Scheduler {
           for (const task of await this.board.openTasks(project)) {
             if (
               mayHoldStage(agent, task) &&
+              !leftToCron(task) &&
               (await this.blockersInPlay(task.blockedBy)).length === 0
             ) {
               reasonsIn({ thread: { id: task.id, task: true } }).waiting += 1;
@@ -1541,7 +1567,16 @@ export class Scheduler {
           if (this.pending.has(key) || this.running.has(key)) {
             continue;
           }
-          const trigger = TriggerSchema.parse({ kind: "heartbeat", reason: "heartbeat" });
+          const cause = heartbeatCause({
+            digestSize: reason.digestSize,
+            claimsHeld: reason.claimsHeld,
+            waitingStages: reason.waiting,
+          });
+          const trigger = TriggerSchema.parse({
+            kind: "heartbeat",
+            reason: "heartbeat",
+            ...(cause === null ? {} : { heartbeat: cause }),
+          });
           const decision = decideWake({
             trigger,
             digestSize: reason.digestSize,
@@ -1798,7 +1833,9 @@ export class Scheduler {
    */
   private async checkWaitingStages(now: number): Promise<void> {
     const stillWaiting = new Set<string>();
+    const runners = await this.board.listRunners();
     for (const project of await this.board.listProjects()) {
+      let members: readonly Agent[] | undefined;
       for (const task of await this.board.openTasks(project.slug)) {
         const stage = currentStage(task);
         if (stage === undefined) {
@@ -1809,7 +1846,22 @@ export class Scheduler {
         if (this.state.waitingSeen[key] !== undefined) {
           continue;
         }
-        const age = now - Date.parse(task.stageSince);
+        // While the user's pause holds the turns of every citizen who may take the stage, it waits
+        // on the pause, not on them. The user takes no turns, so counts as none of them.
+        members ??= await this.board.projectMembers(project.slug);
+        const takers = members.filter(
+          (member) => member.cli !== null && mayHoldStage(member, task),
+        );
+        if (
+          takers.length > 0 &&
+          takers.every((taker) => heldOn(runners, project.runner, taker.cli))
+        ) {
+          this.state.waitingHeld[key] = iso(now);
+          continue;
+        }
+        const held = this.state.waitingHeld[key];
+        const age =
+          now - Math.max(Date.parse(task.stageSince), held === undefined ? 0 : Date.parse(held));
         if (age < this.timings.waitingStageMs) {
           continue;
         }
@@ -1831,6 +1883,11 @@ export class Scheduler {
           ...(stage.role === undefined ? {} : { role: stage.role }),
           ...(stage.agent === undefined ? {} : { agent: stage.agent }),
         });
+      }
+    }
+    for (const key of Object.keys(this.state.waitingHeld)) {
+      if (!stillWaiting.has(key)) {
+        delete this.state.waitingHeld[key];
       }
     }
     for (const key of Object.keys(this.state.waitingSeen)) {
@@ -1915,7 +1972,8 @@ export class Scheduler {
         .flatMap((runner) => runner.capabilities),
     );
 
-    for (const project of await this.board.listProjects()) {
+    const projects = await this.board.listProjects();
+    for (const project of projects) {
       const slug = project.slug;
       const tasks = await this.board.listTasks(slug);
       // A placed project's turns run on its own runner, so only that runner's capabilities count.
@@ -2020,7 +2078,13 @@ export class Scheduler {
     }
 
     const crons = (await this.board.listCrons()).filter((cron) => cron.ended === undefined);
-    for (const agent of await this.board.listAgents()) {
+    const agents = await this.board.listAgents();
+    for (const name of Object.keys(this.state.idleHeld)) {
+      if (!agents.some((agent) => agent.name === name && agent.status === "active")) {
+        delete this.state.idleHeld[name];
+      }
+    }
+    for (const agent of agents) {
       if (agent.status !== "active" || agent.cli === null) {
         continue;
       }
@@ -2032,7 +2096,19 @@ export class Scheduler {
           last = Math.max(last, Date.parse(ended));
         }
       }
-      const idle = now - last;
+      // A citizen the user's pause holds anywhere it works may be idle for that alone, so it is
+      // idle only from the last pass that held it.
+      const held =
+        heldOn(runners, agent.homeRunner, agent.cli) ||
+        projects.some(
+          (project) =>
+            agent.memberships.includes(project.slug) && heldOn(runners, project.runner, agent.cli),
+        );
+      if (held) {
+        this.state.idleHeld[agent.name] = iso(now);
+      }
+      const heldAt = this.state.idleHeld[agent.name];
+      const idle = now - Math.max(last, heldAt === undefined ? 0 : Date.parse(heldAt));
       if (idle >= this.timings.idleMemberMs) {
         signals.push({
           kind: "idle_member",
@@ -2275,7 +2351,8 @@ export class Scheduler {
       }
       const assignment = await this.runner.assign(dispatch);
       if (assignment === null) {
-        // No runner can take it now: its project's runner is away or busy. It waits as it was.
+        // No runner can take it now: the one it would run on, its project's or the citizen's pinned
+        // one, is away, busy, or paused by the user for its CLI. It waits as it was.
         this.pending.set(key, item);
         continue;
       }

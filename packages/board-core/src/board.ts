@@ -9,11 +9,16 @@ import {
   currentStage,
   channelRef,
   ChannelProposalSchema,
+  CliKindSchema,
   CommitIdSchema,
   conflictCopyOf,
   CRON_FLOOR_MS,
+  cronFailure,
   CronFrontmatterSchema,
+  cronStoppedAt,
   fireTimes,
+  firesInTask,
+  heldOn,
   isOneTime,
   shortestGapMs,
   TimeZoneSchema,
@@ -24,6 +29,9 @@ import {
   githubRepository,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
+  imageDescription,
+  imageIdOf,
+  ImageNameSchema,
   imageTypeOf,
   IsoDateTimeSchema,
   isBoardChannel,
@@ -83,9 +91,11 @@ import {
   type Dashboard,
   type Decision,
   type GitIdentityPart,
+  type HeartbeatCause,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
+  type ImageFile,
   type ImageType,
   type Knowledge,
   type RemovedKnowledge,
@@ -207,6 +217,15 @@ export interface TurnInFlight {
  */
 export type ImageSource = (actor: Actor, file: string) => Promise<Uint8Array>;
 
+/**
+ * Writes an image the board keeps to a file on the runner a citizen's turn runs on, in a folder of
+ * that turn's own, and answers its path there, refusing with a `BoardError` when it cannot.
+ */
+export type ImageSink = (
+  actor: Actor,
+  image: { id: Ulid; type: ImageType; bytes: Uint8Array },
+) => Promise<string>;
+
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
 
@@ -321,7 +340,10 @@ const SignInsSchema = z.object({
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
 
-const TurnStartPayloadSchema = z.object({ turnId: UlidSchema });
+const TurnStartPayloadSchema = z.object({
+  turnId: UlidSchema,
+  heartbeat: TurnHistoryPayloadSchema.shape.heartbeat,
+});
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -412,14 +434,22 @@ export interface UnreadConversation {
 /**
  * A message of a digest, with the conversation it is filed in: its scope and, but for the home,
  * its part, a thread's id, `#channel`, or `~project` as `conversationPart` gives. News is read by
- * any general conversation.
+ * any general conversation. `asked` marks a post that mentions the reader, or the user's post for
+ * the front desk.
  */
 interface DigestEntry {
   scope: Name;
   part: string | null;
   message: Message;
   news?: true;
+  asked?: true;
 }
+
+/**
+ * Which of a thread's posts ask a reader for a turn: none once it has closed, every one, only
+ * those that ask the reader, or those and the ones that mention the user, for a task's creator.
+ */
+type ThreadCount = "none" | "every" | "asked" | "asks-user";
 
 /** Where a conversation's cursor is kept. */
 function conversationKey(scope: string, part: string | null): string {
@@ -539,6 +569,11 @@ function proposedFrom(origin: ProposalOrigin | undefined, where: ProposalOrigin)
     origin.channel === where.channel &&
     origin.place === where.place
   );
+}
+
+/** The later of two leases given as ISO times, either of which may be null. */
+function latestLease(a: string | null, b: string | null): string | null {
+  return a === null ? b : b === null || a >= b ? a : b;
 }
 
 function megabytes(bytes: number): string {
@@ -741,6 +776,7 @@ export class Board {
   /** The turns in flight, which the server hosting them supplies; none until it does. */
   private turnsInFlight: () => readonly TurnInFlight[] = () => [];
   private imageSource: ImageSource | null = null;
+  private imageSink: ImageSink | null = null;
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
@@ -802,10 +838,13 @@ export class Board {
   /**
    * Applies each one-time alignment an existing society has not had yet, and remembers it, so a
    * member that later chooses otherwise keeps its choice. A new alignment is a name and a method in
-   * this list; once every board has applied it, both are deleted. None is pending.
+   * this list; once every board has applied it, both are deleted.
    */
   private async applyAlignments(): Promise<void> {
-    const alignments: readonly { name: string; apply: () => Promise<void> }[] = [];
+    const alignments: readonly { name: string; apply: () => Promise<void> }[] = [
+      // Whoever may show an image in a post may open one a post shows.
+      { name: "image-reads-granted", apply: () => this.grantBeside("upload_image", "read_image") },
+    ];
     const file = path.join(this.paths.state(), "alignments.json");
     const { applied } = (await exists(file))
       ? await readJson(file, AlignmentsSchema)
@@ -818,6 +857,22 @@ export class Board {
       await apply();
     }
     await writeJson(file, { applied: [...applied, ...pending.map(({ name }) => name)] });
+  }
+
+  /**
+   * Grants `verb` once to every charter granting `beside`, the work roles' charters in practice;
+   * seed roles have it from their seed.
+   */
+  private async grantBeside(beside: VerbName, verb: VerbName): Promise<void> {
+    for (const charter of await this.listRoles()) {
+      if (charter.verbs.includes(beside) && !charter.verbs.includes(verb)) {
+        await this.writeRoleUnlocked(
+          USER_NAME,
+          { ...charter, verbs: [...charter.verbs, verb] },
+          { verbsAdded: [verb] },
+        );
+      }
+    }
   }
 
   /** Writes every missing seed charter and aligns the existing ones with their seed. */
@@ -1701,6 +1756,52 @@ export class Board {
   }
 
   /**
+   * Pauses or resumes a runner, the user's alone: the whole runner, or with `cli` that CLI on it
+   * alone, each apart from the other. While either holds, no turn it covers starts there; their
+   * wakes wait in the scheduler's queue, and a turn under way finishes. Pausing what is paused, or
+   * resuming what is not, changes nothing and logs nothing.
+   */
+  async setRunnerPaused(
+    actor: Actor,
+    name: Name,
+    change: { paused: boolean; cli?: CliKind | undefined },
+  ): Promise<Runner> {
+    this.assertUser(actor, "only the user may pause or resume a runner");
+    const cli = change.cli === undefined ? undefined : CliKindSchema.parse(change.cli);
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const { paused, pausedClis, ...rest } = doc.data;
+      // A pause the runner could not show, and no turn would meet; a resume still clears one.
+      if (cli !== undefined && change.paused && !doc.data.clis.includes(cli)) {
+        throw new BoardError("INVALID_STATE", `runner ${name} has no ${cli} to pause`);
+      }
+      const current = cli === undefined ? paused : pausedClis?.[cli];
+      if ((current !== undefined) === change.paused) {
+        return doc.data;
+      }
+      const pause = change.paused ? { at: this.now().toISOString(), by: actor.name } : undefined;
+      const clis = cli === undefined ? { ...pausedClis } : { ...pausedClis, [cli]: pause };
+      const kept = Object.entries(clis).filter(([, each]) => each !== undefined);
+      const whole = cli === undefined ? pause : paused;
+      const next: Runner = RunnerSchema.parse({
+        ...rest,
+        ...(whole === undefined ? {} : { paused: whole }),
+        ...(kept.length === 0 ? {} : { pausedClis: Object.fromEntries(kept) }),
+      });
+      await writeMarkdown(file, next, doc.body);
+      await this.events.append(change.paused ? "runner.paused" : "runner.resumed", actor.name, {
+        name,
+        ...(cli === undefined ? {} : { cli }),
+      });
+      return next;
+    });
+  }
+
+  /**
    * Logs an operations signal as an `ops.signal` event. No channel carries it: the scheduler wakes
    * its readers from the event, the runner lists it in their prompts, and the interface's log shows
    * it to the user.
@@ -1729,15 +1830,18 @@ export class Board {
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     const entries: TurnHistoryEntry[] = [];
-    // A turn's start pairs with its end by the turn's id.
-    const starts = new Map<string, string>();
+    // A turn's start pairs with its end by the turn's id, and gives what a heartbeat woke for to
+    // an end that lacks it.
+    const starts = new Map<string, { ts: string; heartbeat: HeartbeatCause | undefined }>();
     for (const event of events) {
       if (event.actor !== agent) {
         continue;
       }
       if (event.type === "turn.started") {
         const start = TurnStartPayloadSchema.safeParse(event.payload);
-        if (start.success) starts.set(start.data.turnId, event.ts);
+        if (start.success) {
+          starts.set(start.data.turnId, { ts: event.ts, heartbeat: start.data.heartbeat });
+        }
         continue;
       }
       if (event.type !== "turn.completed" && event.type !== "turn.failed") {
@@ -1745,17 +1849,19 @@ export class Board {
       }
       const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
       if (parsed.success) {
-        const { turnId } = parsed.data;
-        const startedAt = turnId === undefined ? undefined : starts.get(turnId);
-        if (turnId !== undefined) {
-          starts.delete(turnId);
+        const { heartbeat: ended, ...turn } = parsed.data;
+        const start = turn.turnId === undefined ? undefined : starts.get(turn.turnId);
+        if (turn.turnId !== undefined) {
+          starts.delete(turn.turnId);
         }
+        const heartbeat = ended ?? start?.heartbeat;
         entries.push({
           id: event.id,
           ts: event.ts,
           outcome: event.type === "turn.failed" ? "failed" : "completed",
-          ...parsed.data,
-          ...(startedAt === undefined ? {} : { startedAt }),
+          ...turn,
+          ...(heartbeat === undefined ? {} : { heartbeat }),
+          ...(start === undefined ? {} : { startedAt: start.ts }),
         });
       }
     }
@@ -1788,14 +1894,34 @@ export class Board {
     });
   }
 
-  /** Releases every claim whose lease has expired. Called by the scheduler on its tick. */
+  /**
+   * Releases every claim whose lease has expired, but for a holder's that its own cron in the
+   * task's thread keeps (`keptLease`). Called by the scheduler on its tick.
+   */
   async expireLeases(): Promise<Task[]> {
     return this.mutex.run(async () => {
       const expired: Task[] = [];
       const now = this.now();
+      let crons: readonly Cron[] | undefined;
+      let runners: readonly Runner[] | undefined;
       for (const project of await listDirs(this.paths.projects())) {
+        let place: Project | undefined;
         for (const task of await this.listTasks(project)) {
-          if (task.status === "claimed" && this.leaseExpired(task, now)) {
+          if (task.status !== "claimed") {
+            continue;
+          }
+          crons ??= await this.listCrons();
+          runners ??= await this.listRunners();
+          place ??= await this.readProject(project);
+          const kept = latestLease(
+            this.keptLease(task, crons, now),
+            await this.pausedLease(task, runners, place.runner, now),
+          );
+          if (kept !== null) {
+            await this.writeTask(project, { ...task, leaseExpiresAt: kept });
+            continue;
+          }
+          if (this.leaseExpired(task, now)) {
             const released = await this.writeTask(project, {
               ...task,
               status: "open",
@@ -1876,21 +2002,34 @@ export class Board {
    * general channel, one of its other channels, one of its threads, or, in the society scope, a
    * project's channels. The heartbeat asks, so that it wakes a member where its unread
    * messages are and nowhere else. Society channels count only for a member woken in the society
-   * scope; a project member reads them at its next turn. Two kinds of post are in the digest but not
+   * scope; a project member reads them at its next turn. Some posts are in the digest but not
    * counted, and are read when the member wakes for something else: a task step's, which wakes
-   * whoever it hands work to, and the board's own, operations signals and landing announcements,
-   * whose signals that call for action wake their readers directly. A closed thread counts for
-   * nothing: its conversation has ended, and a turn there could only read its posts and be refused
-   * a reply, while a wake queued before it closed, as for a mention, still runs there.
+   * whoever it hands work to; the board's own, operations signals and landing announcements, whose
+   * signals that call for action wake their readers directly; and a knowledge topic's notice, which
+   * asks nothing of anyone. In a task's thread a post counts only for whoever the current stage is
+   * for, its holder or, while nobody holds it, a member who may take it, and for the task's creator
+   * when it mentions the user, so the creator can put a wait on the user in; a post that asks the
+   * reader counts wherever it is. A closed thread counts for nothing: its conversation has ended,
+   * and a turn there could only read its posts and be refused a reply, while a wake queued before
+   * it closed, as for a mention, still runs there.
    */
   async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
     const counts = new Map<string, UnreadConversation>();
-    const closed = new Map<Ulid, boolean>();
+    const threadCounts = new Map<Ulid, ThreadCount>();
     const unscoped = { name: actor.name, role: actor.role };
-    for (const { scope, part, message, news } of await this.digestSince(unscoped, cursors, upto)) {
+    for (const { scope, part, message, news, asked } of await this.digestSince(
+      unscoped,
+      cursors,
+      upto,
+    )) {
       // News waits for the citizen's next turn; it is never a reason for one.
-      if (news === true || message.step !== undefined || message.author === SYSTEM_ACTOR.name) {
+      if (
+        news === true ||
+        message.step !== undefined ||
+        message.author === SYSTEM_ACTOR.name ||
+        message.notice?.kind === "knowledge"
+      ) {
         continue;
       }
       const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
@@ -1899,12 +2038,16 @@ export class Board {
       }
       const thread = threadOfPart(part);
       if (thread !== undefined) {
-        let ended = closed.get(thread);
-        if (ended === undefined) {
-          ended = (await this.tryFindThread(thread))?.thread.state === "closed";
-          closed.set(thread, ended);
+        let counted = threadCounts.get(thread);
+        if (counted === undefined) {
+          counted = await this.threadCount(actor, thread);
+          threadCounts.set(thread, counted);
         }
-        if (ended) {
+        const forReader =
+          counted === "every" ||
+          (counted !== "none" && asked === true) ||
+          (counted === "asks-user" && message.mentions.includes(USER_NAME));
+        if (!forReader) {
           continue;
         }
       }
@@ -2101,7 +2244,7 @@ export class Board {
         include = participates;
       }
       if (include && message.author !== actor.name) {
-        collected.push({ scope: filedIn, part, message });
+        collected.push({ scope: filedIn, part, message, ...(asked ? { asked: true } : {}) });
       }
     }
     return collected.toSorted(byId);
@@ -2448,17 +2591,45 @@ export class Board {
     }
     // Read outside the mutex: the runner may take a while, and the board waits for nobody.
     const bytes = await this.imageSource(actor, args.path);
+    return this.keepImage(actor, bytes, args.path, path.basename(args.path));
+  }
+
+  /**
+   * Keeps an image the user posts from a composer, as its bytes, under the same checks as an image
+   * a turn uploads. `name`, the file's, describes it in the markdown answered; without one the
+   * description is empty, for the user to write.
+   */
+  async postImage(actor: Actor, bytes: Uint8Array, name?: string): Promise<UploadedImage> {
+    this.assertUser(
+      actor,
+      "only the user posts an image's bytes; a turn uploads one with upload_image",
+    );
+    const given = name === undefined ? "" : ImageNameSchema.parse(name);
+    return this.keepImage(actor, bytes, given === "" ? "the image" : given, given);
+  }
+
+  /**
+   * Keeps `bytes` under a new id when they are a PNG, JPEG, GIF, or WebP of at most
+   * `IMAGE_LIMIT_BYTES`, and answers the markdown that shows them, described by `name`. `what`
+   * names the image in a refusal.
+   */
+  private async keepImage(
+    actor: Actor,
+    bytes: Uint8Array,
+    what: string,
+    name: string,
+  ): Promise<UploadedImage> {
     const type = imageTypeOf(bytes);
     if (type === null) {
       throw new BoardError(
         "VALIDATION",
-        `${args.path} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
+        `${what} is not a PNG, JPEG, GIF, or WebP image by its first bytes`,
       );
     }
     if (bytes.byteLength > IMAGE_LIMIT_BYTES) {
       throw new BoardError(
         "VALIDATION",
-        `${args.path} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+        `${what} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
       );
     }
     return this.mutex.run(async () => {
@@ -2469,14 +2640,40 @@ export class Board {
         type,
         size: bytes.byteLength,
       });
-      const name = path.basename(args.path).replaceAll(/[[\]\\\r\n]/g, "");
+      const description = imageDescription(name);
       return {
         id,
         type,
         size: bytes.byteLength,
-        markdown: `![${name}](${IMAGE_SCHEME}${id})`,
+        markdown: `![${description}](${IMAGE_SCHEME}${id})`,
       };
     });
+  }
+
+  /**
+   * Opens an image the board keeps for the calling turn, by its id or its `image:<id>` address:
+   * the runner the turn runs on writes the bytes to a file in a folder of the turn's own in the
+   * system temp folder, removed when the turn ends, and the board answers its path, for the
+   * citizen to open with its own file tools, since a post reaches a turn as markdown and an image
+   * in it as its address. Any image the board keeps may be opened: every post, brief, topic, and
+   * dashboard that could show one is in the projection every turn reads.
+   */
+  async openImage(actor: Actor, input: VerbInput<"read_image">): Promise<ImageFile> {
+    const args = VerbInputs.read_image.parse(input);
+    await this.authorize(actor, "read_image");
+    if (actor.scope === undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        "read_image writes the image on the machine a turn runs on, so only a turn can call it",
+      );
+    }
+    if (this.imageSink === null) {
+      throw new BoardError("NOT_FOUND", "this board has no runners to write an image to");
+    }
+    const id = imageIdOf(args.image_id);
+    const { type, bytes } = await this.readImage(id);
+    const file = await this.imageSink(actor, { id, type, bytes });
+    return { id, type, size: bytes.byteLength, path: file };
   }
 
   /** An uploaded image's bytes and kind, which its first bytes tell. */
@@ -2932,6 +3129,14 @@ export class Board {
    */
   readImagesWith(source: ImageSource): void {
     this.imageSource = source;
+  }
+
+  /**
+   * Where `read_image` writes an image to: the runner the calling turn runs on, through the server
+   * that hosts the runners. Without one, as in the admin CLI, nothing can be opened.
+   */
+  openImagesWith(sink: ImageSink): void {
+    this.imageSink = sink;
   }
 
   /**
@@ -3955,6 +4160,8 @@ export class Board {
         return this.removeCron(actor, VerbInputs.remove_cron.parse(input));
       case "upload_image":
         return this.uploadImage(actor, VerbInputs.upload_image.parse(input));
+      case "read_image":
+        return this.openImage(actor, VerbInputs.read_image.parse(input));
       default:
         throw new BoardError("VALIDATION", `unknown verb ${String(verb)}`);
     }
@@ -4264,6 +4471,7 @@ export class Board {
         ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         ...(parsed.place === undefined ? {} : { place: parsed.place }),
         trigger: parsed.trigger.kind,
+        ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
         runner: parsed.runner,
       });
@@ -4289,6 +4497,13 @@ export class Board {
       for (const id of parsed.crons ?? []) {
         await this.recordCronRun(id, parsed, failed);
       }
+      // A turn shown a cron's failed fire sees it through by completing, as a turn whose prompt
+      // was delivered and that the user did not stop.
+      if (parsed.exitReason === "completed" || parsed.exitReason === "blocked") {
+        for (const shown of parsed.cronFailures ?? []) {
+          await this.catchUpCron(shown, parsed);
+        }
+      }
       if (parsed.exitReason === "stopped") {
         await this.events.append("turn.stopped", parsed.stoppedBy ?? USER_NAME, {
           ...(parsed.id === undefined ? {} : { turnId: parsed.id }),
@@ -4306,6 +4521,7 @@ export class Board {
         ...(parsed.channel === undefined ? {} : { channel: parsed.channel }),
         ...(parsed.place === undefined ? {} : { place: parsed.place }),
         trigger: parsed.trigger.kind,
+        ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
@@ -4460,6 +4676,31 @@ export class Board {
       lastRun: { turnId: record.id, at: record.endedAt ?? this.now().toISOString(), outcome },
       failures:
         outcome === "failed" ? cron.failures + 1 : outcome === "completed" ? 0 : cron.failures,
+    });
+  }
+
+  /**
+   * Marks a cron's failed fire caught up by a completed turn whose prompt named it, while that
+   * failure is still its latest run. Its schedule and its run of failures stay as they are.
+   */
+  private async catchUpCron(
+    shown: { cron: Ulid; turnId: Ulid },
+    record: TurnRecord,
+  ): Promise<void> {
+    if (record.id === undefined || !(await exists(this.paths.cron(shown.cron)))) {
+      return;
+    }
+    const cron = await this.readCron(shown.cron);
+    const failure = cronFailure(cron);
+    if (failure === null || failure.turnId !== shown.turnId) {
+      return;
+    }
+    await this.writeCron({
+      ...cron,
+      lastRun: {
+        ...failure,
+        caughtUp: { turnId: record.id, at: record.endedAt ?? this.now().toISOString() },
+      },
     });
   }
 
@@ -6184,7 +6425,7 @@ export class Board {
     if (!PLANNING_ROLES.includes(actor.role)) {
       throw new BoardError(
         "FORBIDDEN",
-        `only the user, the steward, and the concierge may ${what}; ask one of them in the task's thread`,
+        `only the user, the steward, and the concierge may ${what}; ask one of them in the task's thread, with a mention`,
       );
     }
   }
@@ -6243,6 +6484,64 @@ export class Board {
 
   private leaseEnd(now: Date): string {
     return new Date(now.getTime() + this.leaseMs).toISOString();
+  }
+
+  /**
+   * The lease a holder's own crons in the task's thread keep its claim to, when later than the one
+   * it has, else null. While one of them is pending, the lease is renewed for a full lease once less
+   * than half is left, so it never lapses between fires that may be hours apart; once every one is
+   * paused, ended, or failed at its latest fire with nothing catching it up (`cronStoppedAt`), it
+   * runs a full lease from when the last of them stopped.
+   */
+  private keptLease(task: Task, crons: readonly Cron[], now: Date): string | null {
+    if (task.leaseExpiresAt === undefined) {
+      return null;
+    }
+    const lease = Date.parse(task.leaseExpiresAt);
+    let pending = false;
+    let stopped: number | null = null;
+    for (const cron of crons) {
+      if (cron.agent !== task.claimedBy || !firesInTask(cron, task)) {
+        continue;
+      }
+      const at = cronStoppedAt(cron);
+      if (at === null) {
+        pending = true;
+      } else {
+        stopped = Math.max(stopped ?? 0, Date.parse(at));
+      }
+    }
+    const kept = pending
+      ? lease - now.getTime() < this.leaseMs / 2
+        ? now.getTime() + this.leaseMs
+        : lease
+      : stopped === null
+        ? lease
+        : stopped + this.leaseMs;
+    return kept > lease ? new Date(kept).toISOString() : null;
+  }
+
+  /**
+   * The lease a holder keeps while the user's pause holds its turns in the task's project
+   * (`heldOn`), when later than the one it has, else null. It is renewed for a full lease once less
+   * than half is left, as for a pending cron, so it never lapses while the holder cannot take a
+   * turn there, and after the resume the holder has at least half a lease to come back to it.
+   */
+  private async pausedLease(
+    task: Task,
+    runners: readonly Runner[],
+    runner: Name | undefined,
+    now: Date,
+  ): Promise<string | null> {
+    if (task.claimedBy === undefined || task.leaseExpiresAt === undefined) {
+      return null;
+    }
+    const holder = await this.readAgent(task.claimedBy).catch(() => null);
+    if (holder === null || !heldOn(runners, runner, holder.cli)) {
+      return null;
+    }
+    const lease = Date.parse(task.leaseExpiresAt);
+    return lease - now.getTime() < this.leaseMs / 2 ? this.leaseEnd(now) : null;
   }
 
   private leaseExpired(task: Task, now: Date): boolean {
@@ -6417,11 +6716,7 @@ export class Board {
         ) {
           return true;
         }
-        if (task.status !== "open" || task.completing) {
-          return false;
-        }
-        const agent = await this.readAgent(actor.name);
-        return agent.memberships.includes(task.project) && mayHoldStage(actor, task);
+        return await this.mayTakeStage(actor, task);
       }
       if (subject?.kind === "proposal") {
         const proposal = await this.readProposal(subject.id);
@@ -6439,6 +6734,45 @@ export class Board {
       return false;
     }
     return false;
+  }
+
+  /** Whether a task's current stage waits for a holder and the member may take it. */
+  private async mayTakeStage(actor: Actor, task: Task): Promise<boolean> {
+    if (task.status !== "open" || task.completing) {
+      return false;
+    }
+    const agent = await this.readAgent(actor.name);
+    return agent.memberships.includes(task.project) && mayHoldStage(actor, task);
+  }
+
+  /**
+   * Which of a thread's posts count toward a reader's heartbeat (see `unreadByConversation`). A
+   * thread, or a task, the board cannot find counts as an open topic's would.
+   */
+  private async threadCount(actor: Actor, id: Ulid): Promise<ThreadCount> {
+    const found = await this.tryFindThread(id);
+    if (found?.thread.state === "closed") {
+      return "none";
+    }
+    const subject = found?.thread.subject;
+    const task =
+      subject?.kind === "task"
+        ? await this.findTask(subject.id).then(
+            (location) => location.task,
+            () => null,
+          )
+        : null;
+    if (task === null) {
+      return "every";
+    }
+    const stageIsTheirs =
+      task.status === "claimed"
+        ? task.claimedBy === actor.name
+        : await this.mayTakeStage(actor, task);
+    if (stageIsTheirs) {
+      return "every";
+    }
+    return task.createdBy === actor.name ? "asks-user" : "asked";
   }
 
   private async threadScopes(): Promise<string[]> {

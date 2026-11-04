@@ -79,6 +79,11 @@ export const RunnerHelloSchema = z.object({
   /** Whether the runner reads an image a turn running there uploads; one from before never does. */
   imageReads: z.boolean().default(false),
   /**
+   * Whether the runner writes an image the board sends for a turn running there to open, for
+   * `read_image`; one from before never does.
+   */
+  imageWrites: z.boolean().default(false),
+  /**
    * Whether the runner carries a project's repository out to another runner and in from one, and
    * removes its copy once the project has moved; one from before never does.
    */
@@ -245,6 +250,12 @@ export const TurnJobSchema = z.object({
   usageSoFar: UsageSchema.optional(),
   /** The rendered charter, norms, memory core, and skills index, with `PATH_TOKENS` for places. */
   instructions: z.string(),
+  /**
+   * The hash of `instructions` without the first turn's section (`instructionsHash` in
+   * `turn-host`): a warm process started on other instructions starts afresh, so a compaction in
+   * it puts back the current ones. Absent from a server from before, when the text is compared.
+   */
+  instructionsHash: z.string().optional(),
   prompt: z.string(),
   mcp: z.object({ url: z.string().min(1), token: z.string().min(1) }),
   limits: z.object({
@@ -551,6 +562,22 @@ export const TurnImageSchema = z.discriminatedUnion("kind", [
 export type TurnImage = z.infer<typeof TurnImageSchema>;
 
 /**
+ * An image the board sends for a turn running on the runner to open, for `read_image`: its id and
+ * kind, which name the file, and its bytes, base64.
+ */
+export const TurnImageWriteSchema = z.object({
+  turnId: UlidSchema,
+  id: UlidSchema,
+  type: ImageTypeSchema,
+  content: z.string(),
+});
+export type TurnImageWrite = z.infer<typeof TurnImageWriteSchema>;
+
+/** Where a runner wrote an image for a turn running there: a file in a folder of that turn's own. */
+export const TurnImageFileSchema = z.object({ path: ImagePathSchema });
+export type TurnImageFile = z.infer<typeof TurnImageFileSchema>;
+
+/**
  * A conversation with a workspace of its own on a runner: a thread's, a task's included, since a
  * task's thread takes its id, a channel's beside general in a scope, or a project's channels' in
  * the society scope, which ends when the project is archived.
@@ -605,9 +632,24 @@ export type SweepResult = z.infer<typeof SweepResultSchema>;
 
 /**
  * The most a move carries: the repository's packs as the old runner measures them before it
- * pushes, and what the server's git route for a move reads of one request, held in memory.
+ * pushes, and what the server's git route for a move takes of one request as it streams it to git.
  */
 export const MOVE_PACK_LIMIT_BYTES = 256 * 1024 * 1024;
+
+/**
+ * The slowest a move's transfer may run on average and still finish: half the 34 KB/s that the
+ * slowest measured push between two runners' sites ran at.
+ */
+export const MOVE_FLOOR_BYTES_PER_SECOND = 16 * 1024;
+
+/**
+ * How long a move's push or clone of `bytes` may take before its clock cuts it: the ten minutes any
+ * transfer had before, plus the bytes at the floor rate, so a pack at the cap gets about four hours
+ * and forty minutes. A transfer that stops moving ends far sooner, at git's low-speed limit.
+ */
+export function moveTransferMs(bytes: number): number {
+  return 10 * 60_000 + Math.ceil(bytes / MOVE_FLOOR_BYTES_PER_SECOND) * 1000;
+}
 
 /** A repository's branches and tags by full name (`refs/heads/…`, `refs/tags/…`), each at its object. */
 export const RepoRefsSchema = z.record(
@@ -664,6 +706,8 @@ export const ProjectImportSchema = z.object({
   move: UlidSchema,
   repo: ProjectRepoSchema,
   pullRequests: z.boolean(),
+  /** The packs' size the old runner measured, which the clone's clock is sized from; the cap if unsaid. */
+  bytes: z.number().int().nonnegative().optional(),
 });
 export type ProjectImport = z.infer<typeof ProjectImportSchema>;
 
@@ -725,6 +769,15 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
    * whose hello says `imageReads`.
    */
   z.object({ type: z.literal("image"), request: z.string().min(1), read: TurnImageReadSchema }),
+  /**
+   * Answered with a `TurnImageFile`, or null when the turn is not running there. Sent only to
+   * runners whose hello says `imageWrites`.
+   */
+  z.object({
+    type: z.literal("image_write"),
+    request: z.string().min(1),
+    write: TurnImageWriteSchema,
+  }),
   /** Answered with whether the CLI accepted it; that it took it comes as a `steered` event. */
   z.object({
     type: z.literal("steer"),

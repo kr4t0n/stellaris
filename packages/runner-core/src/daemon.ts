@@ -274,6 +274,7 @@ export class RunnerDaemon {
           branchChanges: true,
           quotaReads: true,
           imageReads: true,
+          imageWrites: true,
           projectMoves: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
@@ -367,6 +368,9 @@ export class RunnerDaemon {
         return;
       case "image":
         answer(this.executor.readImage(message.read));
+        return;
+      case "image_write":
+        answer(this.executor.writeImage(message.write));
         return;
       case "export":
         answer(this.executor.exportProject(message.export, this.client.moveRemote()));

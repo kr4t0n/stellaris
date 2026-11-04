@@ -70,7 +70,7 @@ public func toolLabel(_ name: String) -> String {
 private let summaryLimit = 400
 
 /// What JavaScript's `\s` and `trim` take for white space.
-private func isJavaScriptSpace(_ scalar: Unicode.Scalar) -> Bool {
+func isJavaScriptSpace(_ scalar: Unicode.Scalar) -> Bool {
   switch scalar.value {
   case 0x09...0x0D, 0x20, 0xA0, 0x1680, 0x2000...0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
     0xFEFF:
@@ -80,7 +80,7 @@ private func isJavaScriptSpace(_ scalar: Unicode.Scalar) -> Bool {
   }
 }
 
-private func trimmedAsJavaScript(_ scalars: Substring.UnicodeScalarView)
+func trimmedAsJavaScript(_ scalars: Substring.UnicodeScalarView)
   -> Substring.UnicodeScalarView
 {
   guard let first = scalars.firstIndex(where: { !isJavaScriptSpace($0) }),
@@ -134,11 +134,16 @@ public struct SkyCue: Sendable, Hashable {
 
 /// The motion `item` sets off in `model` at `now`: a tool's call flickers its citizen's star, and
 /// a post's first line rises from it. Nil for any other step, for an event older than
-/// `recentTurnEvents`, whose stamp can't be read, and for a citizen the sky doesn't show.
-public func skyCue(for item: LiveTurnEvent, in model: SkyModel, now: Date) -> SkyCue? {
+/// `recentTurnEvents`, whose stamp can't be read, and for a citizen the sky doesn't show; and, once
+/// the sky has played cues up to `playedThrough`, for an event stamped then or before, which a
+/// connection made again replays from the server's buffer.
+public func skyCue(
+  for item: LiveTurnEvent, in model: SkyModel, now: Date, playedThrough: Date? = nil
+) -> SkyCue? {
   guard case .toolCall(let name, let input) = item.event,
     let stamped = parseBoardTime(item.ts),
     now.timeIntervalSince(stamped) <= recentTurnEvents,
+    playedThrough.map({ stamped > $0 }) ?? true,
     let star = starOf(model, agent: item.agent, scope: item.project)
   else {
     return nil

@@ -35,6 +35,47 @@ public enum MessageTheme {
   public static let mention = SkyColor(red: 116, green: 212, blue: 255)
   public static let mentionTint = SkyColor(red: 0, green: 188, blue: 255)
 
+  /// The message a link named, as `.message-target` marks it: a tint of Tailwind's `amber-300`,
+  /// `oklch(87.9% 0.169 91.605)`, the nearest colour in sRGB, at 6%, and a bar of `rgb(252 211
+  /// 77)` at 50% down its leading edge, 2 points wide.
+  public static let markTint = SkyColor(red: 255, green: 210, blue: 48)
+  public static let markBar = SkyColor(red: 252, green: 211, blue: 77)
+  /// An open thread's mark in its channel's stream: Tailwind's `emerald-400`, `oklch(76.5% 0.177
+  /// 163.223)`, the nearest colour in sRGB; a closed one's is `fg-muted`.
+  public static let threadOpen = SkyColor(red: 0, green: 212, blue: 146)
+  /// A post the board didn't take: Tailwind's `red-400`, `oklch(70.4% 0.191 22.216)`, the nearest
+  /// colour in sRGB.
+  public static let failure = SkyColor(red: 255, green: 100, blue: 103)
+
+  // The colours of a task's phase and a proposal's status, of a plan's segments and stages, and
+  // of a gate, as `PHASE_STYLE` and `PlanStrip` in the web's task views and `STATUS_STYLE` in its
+  // proposals view give them: Tailwind's palette, each the nearest colour in sRGB.
+
+  /// `amber-300`, `oklch(87.9% 0.169 91.605)`: a stage waiting for a holder, and its chip's text.
+  public static let amber300 = SkyColor(red: 255, green: 210, blue: 48)
+  /// `amber-500`, `oklch(76.9% 0.188 70.08)`: a waiting chip's ground.
+  public static let amber500 = SkyColor(red: 254, green: 154, blue: 0)
+  /// `emerald-300`, `oklch(84.5% 0.143 164.978)`: a chip's text for work going on or approved.
+  public static let emerald300 = SkyColor(red: 94, green: 233, blue: 181)
+  /// `emerald-400`, `oklch(76.5% 0.177 163.223)`: a stage done.
+  public static let emerald400 = SkyColor(red: 0, green: 212, blue: 146)
+  /// `emerald-500`, `oklch(69.6% 0.17 162.48)`: the ground of a chip for work going on.
+  public static let emerald500 = SkyColor(red: 0, green: 188, blue: 125)
+  /// `sky-300`, `oklch(82.8% 0.111 230.318)`: a gate, and a landing chip's text.
+  public static let sky300 = SkyColor(red: 116, green: 212, blue: 255)
+  /// `sky-400`, `oklch(74.6% 0.16 232.661)`: a gate's ground.
+  public static let sky400 = SkyColor(red: 0, green: 188, blue: 255)
+  /// `sky-500`, `oklch(68.5% 0.169 237.323)`: a landing chip's ground.
+  public static let sky500 = SkyColor(red: 0, green: 166, blue: 244)
+  /// `orange-300`, `oklch(83.7% 0.128 66.29)`: a sent-back chip's text.
+  public static let orange300 = SkyColor(red: 255, green: 184, blue: 106)
+  /// `orange-500`, `oklch(70.5% 0.213 47.604)`: a sent-back chip's ground.
+  public static let orange500 = SkyColor(red: 255, green: 105, blue: 0)
+  /// `red-300`, `oklch(80.8% 0.114 19.571)`: a rejected or failed chip's text.
+  public static let red300 = SkyColor(red: 255, green: 162, blue: 162)
+  /// `red-500`, `oklch(63.7% 0.237 25.331)`: a rejected or failed chip's ground.
+  public static let red500 = SkyColor(red: 251, green: 44, blue: 54)
+
   /// `text-sm`, a message's text and a name: 0.875rem.
   public static let textSize = 14.0
   /// `leading-relaxed`, a message's lines: 1.625 times the text.

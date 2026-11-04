@@ -69,6 +69,16 @@ export interface TurnPromptInput {
   /** The turn's project, or null in the society scope. */
   readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
+  /**
+   * The citizen's crons in this conversation whose latest fire's turn failed with nothing catching
+   * it up (`cronFailure`), as the board has them now, but those this turn carries.
+   */
+  readonly failedCrons?: readonly Cron[] | undefined;
+  /**
+   * The citizen's instructions as they are now, for a resumed session that holds others: the
+   * prompt carries them whole, marked as replacing what the session had. Absent otherwise.
+   */
+  readonly changedInstructions?: string | null | undefined;
   readonly onboarding: OnboardingContext | null;
   /** Whether a reflection that completes in this conversation ends its session: a society role's home. */
   readonly afreshAfterReflection?: boolean | undefined;
@@ -140,6 +150,8 @@ const SAVE_WHAT_IS_OPEN =
 const REFLECTION_REPORT =
   "- Report memoryUpdated: true in the status object when core.md or a skill changed.";
 
+const INSTRUCTIONS_CHANGED =
+  "Your instructions changed since this conversation last received them. Between the tags below are the whole of them now: they replace the instructions this conversation began with and any earlier text like this, so where the two differ, follow these, and a rule missing from them no longer applies.";
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
 
@@ -233,10 +245,16 @@ function runnerLine(runner: Runner, projects: readonly Project[], now: Date): st
   const living = projects
     .filter((project) => project.runner === runner.name)
     .map((project) => project.slug);
-  const state =
+  const state = [
     runner.status === "connected"
       ? "connected"
-      : `away${runner.lastSeen === undefined ? "" : ` since ${runner.lastSeen}`}`;
+      : `away${runner.lastSeen === undefined ? "" : ` since ${runner.lastSeen}`}`,
+    ...(runner.paused === undefined ? [] : [`paused by the user since ${runner.paused.at}`]),
+  ].join(", ");
+  const pauses = runner.clis.flatMap((cli) => {
+    const pause = runner.pausedClis?.[cli];
+    return pause === undefined ? [] : [`${cli} paused by the user since ${pause.at}`];
+  });
   const quotas = runner.clis.flatMap((cli) => {
     const quota = runner.quotas?.[cli];
     return quota === undefined ? [] : [quotaPhrase(cli, quota, now)];
@@ -245,7 +263,7 @@ function runnerLine(runner: Runner, projects: readonly Project[], now: Date): st
     runner.clis.length === 0 ? "none" : runner.clis.join(", ")
   }; offers ${runner.capabilities.length === 0 ? "nothing beyond its CLIs" : runner.capabilities.join(", ")}; ${
     living.length === 0 ? "no projects" : `projects ${living.join(", ")}`
-  }${quotas.length === 0 ? "" : `; quota ${quotas.join("; ")}`}`;
+  }${pauses.map((pause) => `; ${pause}`).join("")}${quotas.length === 0 ? "" : `; quota ${quotas.join("; ")}`}`;
 }
 
 /** The first line of a profile that is not a heading, clipped. */
@@ -303,7 +321,10 @@ function messageLines(
   return lines;
 }
 
-/** A cron that woke the turn: what it is, when it fires, how its previous turn went, and its note. */
+/**
+ * A cron that woke this turn, or one whose latest fire's turn failed: what it is, whether it has
+ * ended or when it fires next, how its previous turn went, and its note.
+ */
 function cronLines(cron: Cron, timeZone: string): string[] {
   const previous =
     cron.lastRun === undefined
@@ -314,9 +335,11 @@ function cronLines(cron: Cron, timeZone: string): string[] {
     ? " It fired once, as set, and has ended."
     : cron.ended !== undefined
       ? ` ${cron.ended.by} has ended it since it fired (${cron.ended.reason}), so do what it asks only if it still matters.`
-      : next === null
-        ? ""
-        : ` Next it fires at ${next.toISOString()}.`;
+      : cron.paused !== undefined
+        ? ` ${cron.paused.by} has paused it since it fired, so it fires no more until resumed.`
+        : next === null
+          ? ""
+          : ` Next it fires at ${next.toISOString()}.`;
   return [
     `- "${cron.title}" (cron ${cron.id}), set by ${cron.createdBy} at ${cron.createdAt}, fires ${describeSchedule(cron.schedule, timeZone)}.${previous}${state}`,
     "",
@@ -394,6 +417,22 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
       "The user posted. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. Stay silent when the user already addressed a citizen and nothing else is needed.",
+    );
+  }
+
+  // A resumed session keeps the instructions it began with whatever its CLI is given, so a change
+  // reaches its model only here.
+  const changed = input.changedInstructions ?? null;
+  if (changed !== null) {
+    lines.push(
+      "",
+      "## Your instructions changed",
+      "",
+      INSTRUCTIONS_CHANGED,
+      "",
+      "<instructions>",
+      changed.trimEnd(),
+      "</instructions>",
     );
   }
 
@@ -509,6 +548,21 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "The worktree may hold uncommitted changes. Run git status before doing anything else.",
     );
   }
+  // Named in each turn here until one that names it completes, so a failed or stopped turn hides none.
+  const failed = input.failedCrons ?? [];
+  if (failed.length > 0) {
+    const timeZone = input.clock?.timeZone ?? DEFAULT_TIME_ZONE;
+    lines.push(
+      "",
+      "## Cron fires that did not finish",
+      "",
+      failed.length === 1
+        ? "The turn of this cron's latest fire here failed, so what its note asks may not be done:"
+        : "The turns of these crons' latest fires here failed, so what their notes ask may not be done:",
+      "",
+      ...failed.flatMap((cron) => cronLines(cron, timeZone)),
+    );
+  }
   if (
     last?.trigger.kind === "reflection" &&
     last.exitReason === "completed" &&
@@ -559,7 +613,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window; a CLI limited until a time fails its turns there until then. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it: they wait, and the stages their citizens hold keep their leases.",
       "",
     );
     if (machines.runners.length === 0) {

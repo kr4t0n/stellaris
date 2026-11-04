@@ -398,6 +398,8 @@ describe("the answers the iOS client reads", () => {
       proposal_id: proposals.find((each) => each.kind === "reallocation")?.id,
       reason: "One reviewer keeps up for now.",
     });
+    // A decided proposal's thread: its decision's post carries the step, and the decision closed it.
+    await call("thread-decided", "GET", `/api/threads/${channel?.id}`);
     await call("sign-out", "DELETE", "/api/sign-in");
     // The same two under a GitHub sign-in, the app's own way in, which names the account.
     const signedIn = await board.signIn("fixture-login", 60 * 60 * 1000);
@@ -514,8 +516,36 @@ describe("the answers the iOS client reads", () => {
     const named = posts.find((post) => post.author === "eng-1")?.id;
     await call("messages", "GET", `/api/messages?ids=${named},01HZZZZZZZZZZZZZZZZZZZZZZZ`);
 
+    // An image the user posts from a composer, as its bytes with the kind BoardKit reads from
+    // them, and a file that is no image, which BoardKit sends as bytes of no kind.
+    const upload = async (name: string, fileName: string, bytes: Buffer, type: string) => {
+      const imageRoute = `/api/images?name=${encodeURIComponent(fileName)}`;
+      const answer = await fetch(`${url}${imageRoute}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${userToken}`, "content-type": type },
+        body: bytes,
+      });
+      captures.set(name, {
+        request: normaliser.json({
+          method: "POST",
+          path: imageRoute,
+          contentType: type,
+          image: bytes.toString("base64"),
+        }),
+        status: answer.status,
+        body: normaliser.json(await answer.json()),
+      });
+    };
+    await upload("upload-image", "plot.png", PLOT, "image/png");
+    await upload(
+      "error-upload-image",
+      "notes.txt",
+      Buffer.from("notes, not a picture\n"),
+      "application/octet-stream",
+    );
+
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(38);
+    expect(captures.size).toBe(41);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

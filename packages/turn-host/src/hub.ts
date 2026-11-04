@@ -9,12 +9,15 @@ import {
   MergeOutcomeSchema,
   ModelListSchema,
   MOVE_PACK_LIMIT_BYTES,
+  moveTransferMs,
   ProjectExportedSchema,
   ProjectImportedSchema,
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
+  heldOn,
   SOCIETY_SCOPE,
   SweepResultSchema,
+  TurnImageFileSchema,
   TurnImageSchema,
   type BranchChanges,
   type BranchFile,
@@ -39,6 +42,7 @@ import {
   type TurnRecord,
   type TurnJob,
   type ImageRefusal,
+  type ImageType,
   type Ulid,
   type HeldWork,
   type HeldWorkspace,
@@ -118,7 +122,10 @@ const DEFAULT_GRACE_MS = 2 * 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10 * 60_000;
 /** A steer or a stop is answered at once by a runner that has the turn; waiting longer is pointless. */
 const CONTROL_TIMEOUT_MS = 15_000;
-/** A file read is a few git calls and up to 8 MB on the way back, which someone is waiting for. */
+/**
+ * A file read is a few git calls and up to 8 MB on the way back, and an image's write for a turn
+ * up to 8 MB on the way out, which someone is waiting for.
+ */
 const FILE_TIMEOUT_MS = 60_000;
 /** What a refusal of `upload_image` reads as: a file not there, one out of reach, one no image. */
 const IMAGE_REFUSALS: Record<ImageRefusal, "NOT_FOUND" | "FORBIDDEN" | "VALIDATION"> = {
@@ -506,11 +513,15 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
+    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed. It is
+    // still there and still has the CLI, so a project living on it and a citizen pinned to it wait.
+    const runners = await this.board.listRunners();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
       !seat.unconfirmed &&
       seat.hello.clis.includes(cli) &&
-      (seat.hello.slots === null || seat.inUse < seat.hello.slots);
+      (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
+      !heldOn(runners, seat.name, cli);
     let chosen: Seat | undefined;
     if (dispatch.project === SOCIETY_SCOPE) {
       chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);
@@ -814,12 +825,15 @@ export class RunnerHub implements TurnRunner {
       move.id = await this.board.openMoveRepo();
       const id = move.id;
       move.phase = "export";
+      // A push and a clone are timed on their runners by the pack's size, at a floor rate a slow
+      // link between sites still beats, and end early when they stall; the hub waits them out,
+      // and a runner that leaves fails its request at once.
       const exported = ProjectExportedSchema.parse(
-        await this.request(source, (request) => ({
-          type: "export",
-          request,
-          export: { move: id, repo },
-        })).catch((error: unknown) => {
+        await this.request(
+          source,
+          (request) => ({ type: "export", request, export: { move: id, repo } }),
+          moveTransferMs(MOVE_PACK_LIMIT_BYTES) + this.requestTimeoutMs,
+        ).catch((error: unknown) => {
           throw new BoardError(
             "INVALID_STATE",
             `${from} could not send ${slug}: ${describe(error)}`,
@@ -836,11 +850,20 @@ export class RunnerHub implements TurnRunner {
       }
       move.phase = "import";
       const imported = ProjectImportedSchema.parse(
-        await this.request(target, (request) => ({
-          type: "import",
-          request,
-          import: { move: id, repo, pullRequests: project.onDone === "ghpr" },
-        })).catch((error: unknown) => {
+        await this.request(
+          target,
+          (request) => ({
+            type: "import",
+            request,
+            import: {
+              move: id,
+              repo,
+              pullRequests: project.onDone === "ghpr",
+              bytes: exported.bytes,
+            },
+          }),
+          moveTransferMs(exported.bytes) + this.requestTimeoutMs,
+        ).catch((error: unknown) => {
           throw new BoardError("INVALID_STATE", `${to} could not take ${slug}: ${describe(error)}`);
         }),
       );
@@ -1029,36 +1052,11 @@ export class RunnerHub implements TurnRunner {
    * back as a `BoardError` in the runner's words.
    */
   async readTurnImage(actor: Actor, file: string): Promise<Uint8Array> {
-    const turn = this.host
-      .runningTurns()
-      .find(
-        (each) =>
-          each.agent === actor.name &&
-          each.scope === actor.scope &&
-          each.thread === actor.thread &&
-          each.channel === actor.channel &&
-          each.place === actor.place,
-      );
-    if (turn === undefined) {
-      throw new BoardError(
-        "INVALID_STATE",
-        `${actor.name} has no turn running in this conversation to read ${file} from`,
-      );
-    }
-    const seat = this.seats.get(turn.runner);
-    if (seat === undefined || seat.send === null) {
-      throw new RunnerAwayError(`runner ${turn.runner}, where the turn runs, is not connected`);
-    }
-    if (!seat.hello.imageReads) {
-      throw new BoardError(
-        "INVALID_STATE",
-        `runner ${seat.name}, where the turn runs, cannot read images yet; upgrade it`,
-      );
-    }
+    const { turnId, seat } = this.turnSeat(actor, "imageReads", `read ${file} from`, "read images");
     const image = TurnImageSchema.nullable().parse(
       await this.request(
         seat,
-        (request) => ({ type: "image", request, read: { turnId: turn.turnId, path: file } }),
+        (request) => ({ type: "image", request, read: { turnId, path: file } }),
         FILE_TIMEOUT_MS,
       ),
     );
@@ -1069,6 +1067,38 @@ export class RunnerHub implements TurnRunner {
       throw new BoardError(IMAGE_REFUSALS[image.why], image.detail);
     }
     return Buffer.from(image.content, "base64");
+  }
+
+  /**
+   * Hands an image the board keeps to the runner a citizen's turn runs on, for `read_image`, which
+   * writes it to a folder of that turn's own in the system temp folder, removed when the turn
+   * ends, and answers the file's path there, with the same refusals as `readTurnImage`.
+   */
+  async writeTurnImage(
+    actor: Actor,
+    image: { id: Ulid; type: ImageType; bytes: Uint8Array },
+  ): Promise<string> {
+    const { turnId, seat } = this.turnSeat(actor, "imageWrites", "open an image in", "open images");
+    const file = TurnImageFileSchema.nullable().parse(
+      await this.request(
+        seat,
+        (request) => ({
+          type: "image_write",
+          request,
+          write: {
+            turnId,
+            id: image.id,
+            type: image.type,
+            content: Buffer.from(image.bytes).toString("base64"),
+          },
+        }),
+        FILE_TIMEOUT_MS,
+      ),
+    );
+    if (file === null) {
+      throw new BoardError("INVALID_STATE", `the turn is no longer running on runner ${seat.name}`);
+    }
+    return file.path;
   }
 
   /** The models a CLI offers, asked of a connected runner that has it; none when no runner has it. */
@@ -1302,6 +1332,46 @@ export class RunnerHub implements TurnRunner {
       seat,
       repo: projectRepo(record),
     };
+  }
+
+  /**
+   * The caller's turn in flight, found by its conversation, and the connected runner it runs on,
+   * which must say `able` in its hello: an image's way to and from the machine a turn runs on.
+   * `where` and `what` say what the caller asked for in a refusal.
+   */
+  private turnSeat(
+    actor: Actor,
+    able: "imageReads" | "imageWrites",
+    where: string,
+    what: string,
+  ): { turnId: Ulid; seat: Seat } {
+    const turn = this.host
+      .runningTurns()
+      .find(
+        (each) =>
+          each.agent === actor.name &&
+          each.scope === actor.scope &&
+          each.thread === actor.thread &&
+          each.channel === actor.channel &&
+          each.place === actor.place,
+      );
+    if (turn === undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `${actor.name} has no turn running in this conversation to ${where}`,
+      );
+    }
+    const seat = this.seats.get(turn.runner);
+    if (seat === undefined || seat.send === null) {
+      throw new RunnerAwayError(`runner ${turn.runner}, where the turn runs, is not connected`);
+    }
+    if (!seat.hello[able]) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${seat.name}, where the turn runs, cannot ${what} yet; upgrade it`,
+      );
+    }
+    return { turnId: turn.turnId, seat };
   }
 
   private assertOwns(runner: Name, turnId: Ulid): void {

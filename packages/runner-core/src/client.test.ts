@@ -1,3 +1,4 @@
+import { IMAGE_LIMIT_BYTES, type RunnerMessage } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { RunnerClient } from "./client.js";
 import { describeError } from "./errors.js";
@@ -56,6 +57,55 @@ describe("RunnerClient", () => {
     stop.abort();
     // Stopped by the runner itself, the stream says so rather than that it went silent.
     await expect(held).rejects.not.toThrow("silent");
+  });
+
+  it("takes every message whole however the stream cuts it, an image's of 8 MiB in 16 KiB pieces too", async () => {
+    const messages: RunnerMessage[] = [
+      { type: "stop", request: "first", turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+      {
+        type: "image_write",
+        request: "second",
+        write: {
+          turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          id: "01M4WY483E0XG4Q2ZTHAX3JBZW",
+          type: "png",
+          content: Buffer.alloc(IMAGE_LIMIT_BYTES, 7).toString("base64"),
+        },
+      },
+      { type: "stop", request: "third", turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+    ];
+    const text = `: attached\n\n${messages.map((each) => `data: ${JSON.stringify(each)}\n\n`).join("")}`;
+    const firstEnd = text.indexOf("\n\n", text.indexOf("data:")) + 1;
+    const cuts: Record<string, string[]> = {
+      whole: [text],
+      "16 KiB": Array.from({ length: Math.ceil(text.length / 16_384) }, (_, index) =>
+        text.slice(index * 16_384, (index + 1) * 16_384),
+      ),
+      // A frame's blank line cut between its two line breaks: the first's, before more frames, and
+      // the last's, with nothing after it to flush it, after the piece that ends the frame before
+      // it or with each line break a piece of its own.
+      "between the first's line breaks": [text.slice(0, firstEnd), text.slice(firstEnd)],
+      "between the last's line breaks": [text.slice(0, -1), "\n"],
+      "each of the last's line breaks alone": [text.slice(0, -2), "\n", "\n"],
+    };
+    for (const [cut, pieces] of Object.entries(cuts)) {
+      const taken: RunnerMessage[] = [];
+      const stop = new AbortController();
+      const client = new RunnerClient("http://server", "token", streamingFetch(pieces, 0), 5_000);
+      const held = client.stream(stop.signal, {
+        onMessage: (message) => {
+          taken.push(message);
+          if (taken.length === messages.length) {
+            stop.abort();
+          }
+        },
+        onMalformed: (problem) => {
+          throw new Error(`${cut}: ${problem}`);
+        },
+      });
+      await expect(held).rejects.toThrow("aborted");
+      expect({ cut, taken }).toEqual({ cut, taken: messages });
+    }
   });
 
   it("describes an error with the causes fetch keeps beneath it", () => {

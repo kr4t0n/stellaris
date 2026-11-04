@@ -34,6 +34,18 @@ const cronlessDispatch = {
   onboarding: false,
 };
 
+/** A heartbeat's prompt, given the instructions it carries as changed, if any. */
+function promptWith(changedInstructions?: string | null): string {
+  return buildTurnPrompt({
+    dispatch: cronlessDispatch,
+    messages: [],
+    heldClaims: [],
+    lastTurn: null,
+    onboarding: null,
+    ...(changedInstructions === undefined ? {} : { changedInstructions }),
+  });
+}
+
 describe("buildTurnPrompt", () => {
   it("tells the time in the society's zone, and quotes each cron that woke the turn", () => {
     const cron = {
@@ -104,6 +116,115 @@ describe("buildTurnPrompt", () => {
         onboarding: null,
       }),
     ).not.toContain("## Crons");
+  });
+
+  it("names each cron whose latest fire's turn failed, with its note, in a section of its own after the previous turn's notice", () => {
+    const once = {
+      ...CronFrontmatterSchema.parse({
+        id: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        title: "Look again",
+        agent: "eng-1",
+        scope: "demo",
+        schedule: { at: "2026-10-10T10:00:00.000Z" },
+        createdBy: "eng-1",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        since: "2026-10-10T08:00:00.000Z",
+        lastFiredAt: "2026-10-10T10:00:00.000Z",
+        lastRun: {
+          turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          at: "2026-10-10T10:03:00.000Z",
+          outcome: "failed",
+        },
+        failures: 1,
+        ended: { at: "2026-10-10T10:00:00.000Z", by: "board", reason: "fired once, as set" },
+      }),
+      note: "Is the fix live?",
+    };
+    const failed: TurnRecord = {
+      agent: "eng-1",
+      project: "demo",
+      runner: "server",
+      cli: "claude",
+      session: "s",
+      trigger: TriggerSchema.parse({ kind: "cron", reason: 'cron "Look again" came due' }),
+      startedAt: "2026-10-10T10:00:00.000Z",
+      endedAt: "2026-10-10T10:03:00.000Z",
+      exitReason: "error",
+      status: null,
+      error: "the CLI ended",
+      usage: null,
+      costUsd: 0,
+      toolCalls: 2,
+      model: null,
+      crons: [once.id],
+    };
+    const next = (lastTurn: TurnRecord | null, failedCrons: readonly (typeof once)[]) =>
+      buildTurnPrompt({
+        dispatch: cronlessDispatch,
+        clock: { now: new Date("2026-10-10T10:20:00.000Z"), timeZone: "UTC" },
+        messages: [],
+        heldClaims: [],
+        lastTurn,
+        failedCrons,
+        onboarding: null,
+      });
+    const worktree =
+      "The worktree may hold uncommitted changes. Run git status before doing anything else.";
+    const section = [
+      "## Cron fires that did not finish",
+      "",
+      "The turn of this cron's latest fire here failed, so what its note asks may not be done:",
+      "",
+      `- "Look again" (cron ${once.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires once at 2026-10-10T10:00:00.000Z. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. It fired once, as set, and has ended.`,
+      "",
+      "  Is the fix live?",
+    ].join("\n");
+    // The fire's own turn was the previous one: its notice as for any failed turn, then the cron.
+    expect(next(failed, [once])).toContain(
+      [
+        "## Your previous turn did not finish",
+        "",
+        "It ended with error: the CLI ended.",
+        worktree,
+        "",
+        section,
+      ].join("\n"),
+    );
+    // A turn between that the user stopped, or none known, leaves the section as it is.
+    expect(next({ ...failed, exitReason: "stopped", error: null }, [once])).toContain(section);
+    expect(next(null, [once])).toContain(section);
+
+    // Several: a recurring one with when it fires next, and one paused.
+    const hourly = {
+      ...once,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+      title: "Check the deploy",
+      schedule: { cron: "0 * * * *" },
+      ended: undefined,
+      note: "Read the deploy log.",
+    };
+    const paused = {
+      ...hourly,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      title: "Check the queue",
+      paused: { at: "2026-10-10T10:10:00.000Z", by: "user" },
+    };
+    const several = next({ ...failed, crons: [] }, [hourly, paused]);
+    expect(several).toContain(
+      "The turns of these crons' latest fires here failed, so what their notes ask may not be done:",
+    );
+    expect(several).toContain(
+      `- "Check the deploy" (cron ${hourly.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires \`0 * * * *\` in the society's time zone, UTC. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. Next it fires at 2026-10-10T11:00:00.000Z.\n\n  Read the deploy log.`,
+    );
+    expect(several).toContain(
+      `(cron ${paused.id}), set by eng-1 at 2026-10-10T08:00:00.000Z, fires \`0 * * * *\` in the society's time zone, UTC. The turn of its previous fire failed at 2026-10-10T10:03:00.000Z. user has paused it since it fired, so it fires no more until resumed.`,
+    );
+
+    // With none, a failed turn's notice is as it was, and there is no section.
+    expect(next(failed, [])).toContain(
+      `## Your previous turn did not finish\n\nIt ended with error: the CLI ended.\n${worktree}`,
+    );
+    expect(next(failed, [])).not.toContain("## Cron fires that did not finish");
   });
 
   it("carries the trigger, held claims, unread messages with thread titles, and a failed-turn note", () => {
@@ -222,6 +343,24 @@ describe("buildTurnPrompt", () => {
     });
     expect(prompt).toContain("This is your first turn as eng-1");
     expect(prompt).toContain("Nothing new.");
+  });
+
+  it("carries changed instructions whole, once, marked as replacing the earlier ones, and nothing otherwise", () => {
+    const instructions = "# eng-1\n\n## Role\n\n# engineer\n\n## Core memory\n\n- A new lesson.\n";
+    const changed = promptWith(instructions);
+    expect(changed.split("## Your instructions changed").length - 1).toBe(1);
+    expect(changed).toContain(
+      "Between the tags below are the whole of them now: they replace the instructions this conversation began with and any earlier text like this, so where the two differ, follow these, and a rule missing from them no longer applies.",
+    );
+    expect(changed).toContain(`<instructions>\n${instructions.trimEnd()}\n</instructions>\n`);
+    // Before the conversation, so the turn reads its rules before its work.
+    expect(changed.indexOf("</instructions>")).toBeLessThan(
+      changed.indexOf("## This conversation"),
+    );
+    for (const unchanged of [promptWith(), promptWith(null)]) {
+      expect(unchanged).not.toContain("## Your instructions changed");
+      expect(unchanged).not.toContain("<instructions>");
+    }
   });
 
   it("says a dropped session's turn starts anew, and why, and says nothing of it otherwise", () => {
@@ -682,6 +821,62 @@ describe("buildTurnPrompt", () => {
     // The front desk's project list says where each project lives.
     expect(prompt).toContain("on done none; on runner pod");
     expect(prompt).toContain("on done none; not placed on a runner yet");
+  });
+
+  it("says which runners, and which CLIs on one, the user paused, beside the quota", () => {
+    const pause = { at: "2026-10-13T08:00:00.000Z", by: "user" };
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "eng-1",
+        project: "society",
+        trigger: TriggerSchema.parse({ kind: "user_post", fromUser: true }),
+        priority: 2,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      runners: {
+        runners: [
+          {
+            name: "pod",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+            paused: pause,
+          },
+          {
+            name: "merlin",
+            os: "linux",
+            clis: ["claude", "codex"],
+            capabilities: [],
+            status: "connected",
+            pausedClis: { claude: pause },
+            quotas: {
+              claude: CliQuotaSchema.parse({
+                observedAt: "2026-10-13T11:00:00.000Z",
+                source: "turn",
+                status: "limited",
+                limitedUntil: "2026-10-20T05:11:58.000Z",
+              }),
+            },
+          },
+        ],
+        projects: [listedProject("lab", "pod")],
+      },
+      clock: { now: new Date("2026-10-13T12:00:00.000Z"), timeZone: "UTC" },
+    });
+    expect(prompt).toContain(
+      "- pod: connected, paused by the user since 2026-10-13T08:00:00.000Z; linux; CLIs claude, codex; offers nothing beyond its CLIs; projects lab\n",
+    );
+    expect(prompt).toContain(
+      "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; claude paused by the user since 2026-10-13T08:00:00.000Z; quota claude limited until 2026-10-20T05:11:58.000Z\n",
+    );
+    expect(prompt).toContain(
+      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it",
+    );
   });
 
   it("tells a turn outside projects when it was asked from a project the citizen is not in", () => {

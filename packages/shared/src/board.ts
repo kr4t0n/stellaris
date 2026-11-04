@@ -266,7 +266,10 @@ export function isTaskStep(step: MessageStep): step is TaskStep {
   return "stage" in step;
 }
 
-/** A knowledge topic written, written again, or removed, of a project or, with null, of the society. */
+/**
+ * A knowledge topic written, written again, or removed, of a project or, with null, of the society.
+ * Its post asks nothing of anyone, so it counts toward no heartbeat and is read at the next turn.
+ */
 export const KnowledgeNoticeSchema = z.object({
   kind: z.literal("knowledge"),
   action: z.enum(["written", "updated", "removed"]),
@@ -277,7 +280,8 @@ export type KnowledgeNotice = z.infer<typeof KnowledgeNoticeSchema>;
 
 /**
  * What a verb recorded on the post it made about its work outside any thread, which the interface
- * draws as a notice rather than as talk. Unlike a step, it changes no wake. One member per kind.
+ * draws as a notice rather than as talk. Each kind says whether its post counts toward a
+ * heartbeat. One member per kind.
  */
 export const MessageNoticeSchema = z.discriminatedUnion("kind", [KnowledgeNoticeSchema]);
 export type MessageNotice = z.infer<typeof MessageNoticeSchema>;
@@ -555,6 +559,10 @@ export const RunnerOsSchema = z.enum(["linux", "windows", "darwin"]);
 export const GitIdentityPartSchema = z.enum(["name", "email"]);
 export type GitIdentityPart = z.infer<typeof GitIdentityPartSchema>;
 
+/** When the user paused a runner, or one CLI on it, and who that was. */
+export const RunnerPauseSchema = z.object({ at: IsoDateTimeSchema, by: NameSchema });
+export type RunnerPause = z.infer<typeof RunnerPauseSchema>;
+
 export const RunnerSchema = z.object({
   name: NameSchema,
   os: RunnerOsSchema,
@@ -574,8 +582,40 @@ export const RunnerSchema = z.object({
    * read; absent until one has.
    */
   quotas: z.partialRecord(CliKindSchema, CliQuotaSchema).optional(),
+  /** The user's pause of the whole runner: no turn starts on it until the user resumes it. */
+  paused: RunnerPauseSchema.optional(),
+  /**
+   * The user's pauses of single CLIs on the runner, each apart from the runner's own: no turn of
+   * that CLI starts on it until the user resumes it.
+   */
+  pausedClis: z.partialRecord(CliKindSchema, RunnerPauseSchema).optional(),
 });
 export type Runner = z.infer<typeof RunnerSchema>;
+
+/**
+ * The user's pause that holds `cli`'s turns on a runner, the whole runner's first, or undefined
+ * when they may start there.
+ */
+export function runnerPause(runner: Runner, cli: CliKind): RunnerPause | undefined {
+  return runner.paused ?? runner.pausedClis?.[cli];
+}
+
+/**
+ * Whether a citizen's turns in a place would wait for the user's resume: the runner they would run
+ * on, the project's for a project's turns and the citizen's home runner for its society scope's,
+ * paused as a whole or for the citizen's CLI. Neither placed yet holds nothing.
+ */
+export function heldOn(
+  runners: readonly Runner[],
+  runner: Name | undefined,
+  cli: CliKind | null,
+): boolean {
+  if (runner === undefined || cli === null) {
+    return false;
+  }
+  const record = runners.find((each) => each.name === runner);
+  return record !== undefined && runnerPause(record, cli) !== undefined;
+}
 
 export const ProposalKindSchema = z.enum([
   "role",

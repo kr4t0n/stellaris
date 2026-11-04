@@ -1,6 +1,8 @@
 import { access, chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  MOVE_PACK_LIMIT_BYTES,
+  moveTransferMs,
   patchHunks,
   type BranchChanges,
   type BranchCommit,
@@ -126,18 +128,28 @@ export interface GitOps {
   refs(repoDir: string): Promise<RepoRefs>;
   /** What a repository's objects take, packed and loose, in bytes: at most what a push of them carries. */
   objectBytes(repoDir: string): Promise<number>;
-  /** Pushes every branch and tag to `url`, the move's repository on the server, skipping the clone's hooks. */
-  pushEverything(repoDir: string, url: string, auth: GitAuth | null): Promise<void>;
+  /**
+   * Pushes every branch and tag to `url`, the move's repository on the server, skipping the clone's
+   * hooks, within `timeoutMs`, a pack at the cap's `moveTransferMs` if unsaid.
+   */
+  pushEverything(
+    repoDir: string,
+    url: string,
+    auth: GitAuth | null,
+    timeoutMs?: number,
+  ): Promise<void>;
   /**
    * Makes `dir` a repository of every branch and tag at `url`, each a local branch or tag, with the
    * project's remote as `origin`, which must answer a fetch, and the default branch checked out:
-   * the clone `ensureRepo` makes, with the branches the old runner had.
+   * the clone `ensureRepo` makes, with the branches the old runner had. The clone takes at most
+   * `timeoutMs`, as the push does.
    */
   cloneEverything(
     url: string,
     auth: GitAuth | null,
     dir: string,
     project: ProjectRepo,
+    timeoutMs?: number,
   ): Promise<void>;
   /**
    * When the worktree is on a task branch: commits whatever was left uncommitted as `author`,
@@ -267,8 +279,16 @@ export interface GitAuth {
   readonly header: string;
 }
 
-/** A carried repository is a few MiB on the pods measured; past a 256 MiB pack on a slow line, minutes. */
-const MOVE_TIMEOUT_MS = 10 * 60_000;
+/** The longest a move's push or clone may take: a pack at the cap, at the floor rate. */
+const MOVE_TIMEOUT_MS = moveTransferMs(MOVE_PACK_LIMIT_BYTES);
+
+/**
+ * A move's transfer that moves under 1,000 bytes a second for five minutes has stopped: curl ends
+ * it then, rather than at the clock sized for a whole pack at the floor rate. Five minutes outlasts
+ * what the server does between the last byte of a push and its answer, and before the first byte
+ * of a fetch's.
+ */
+const MOVE_LOW_SPEED = { GIT_HTTP_LOW_SPEED_LIMIT: "1000", GIT_HTTP_LOW_SPEED_TIME: "300" };
 
 /** `http.<url>.extraHeader` for one address, added to whatever configuration the environment gives git. */
 function authEnv(auth: GitAuth | null): Record<string, string> {
@@ -488,7 +508,12 @@ export class ExecaGit implements GitOps {
     return kib * 1024;
   }
 
-  async pushEverything(repoDir: string, url: string, auth: GitAuth | null): Promise<void> {
+  async pushEverything(
+    repoDir: string,
+    url: string,
+    auth: GitAuth | null,
+    timeoutMs = MOVE_TIMEOUT_MS,
+  ): Promise<void> {
     const pushed = await git(
       [
         "push",
@@ -499,8 +524,8 @@ export class ExecaGit implements GitOps {
         "+refs/tags/*:refs/tags/*",
       ],
       repoDir,
-      MOVE_TIMEOUT_MS,
-      authEnv(auth),
+      timeoutMs,
+      { ...MOVE_LOW_SPEED, ...authEnv(auth) },
     );
     if (pushed.exitCode !== 0) {
       throw new Error(
@@ -514,6 +539,7 @@ export class ExecaGit implements GitOps {
     auth: GitAuth | null,
     requestedDir: string,
     project: ProjectRepo,
+    timeoutMs = MOVE_TIMEOUT_MS,
   ): Promise<void> {
     const dir = path.resolve(requestedDir);
     await rm(dir, { recursive: true, force: true });
@@ -533,8 +559,8 @@ export class ExecaGit implements GitOps {
         "+refs/tags/*:refs/tags/*",
       ],
       dir,
-      MOVE_TIMEOUT_MS,
-      authEnv(auth),
+      timeoutMs,
+      { ...MOVE_LOW_SPEED, ...authEnv(auth) },
     );
     if (fetched.exitCode !== 0) {
       throw new Error(

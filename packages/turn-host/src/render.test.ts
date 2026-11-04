@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderInstructions } from "./render.js";
+import { instructionsHash, renderInstructions } from "./render.js";
 
 const places = { homeDir: "/data/agents/eng-1", boardDir: "/data/board" };
 
@@ -129,7 +129,19 @@ describe("config-home rendering", () => {
       ...places,
     });
     expect(text).toContain(
-      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread.",
+      "the holder of the current stage sends the task back to an earlier stage with update_task, and so may the user, the steward, and the concierge; anyone else asks the concierge in the task's thread, with a mention.",
+    );
+  });
+
+  it("says whom a post in a task's thread wakes, as the heartbeat counts it", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change.",
     );
   });
 
@@ -146,6 +158,18 @@ describe("config-home rendering", () => {
     expect(text).toContain("Never put an image or any other file into a message as base64");
   });
 
+  it("has a citizen see an image a post shows by opening the file read_image writes for its turn", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "To see an image a post, a brief, or a topic shows as `image:<id>`, call read_image with the id: it returns the path of a file of this turn's own that holds the image, removed when the turn ends, which you open with the tool that shows you an image, Read in Claude Code or view_image in Codex.",
+    );
+  });
+
   it("has a citizen keep its stage between checks of its own work, and release it only to hand it on or once its task is blocked", () => {
     const text = renderInstructions({
       agentName: "eng-1",
@@ -157,7 +181,10 @@ describe("config-home rendering", () => {
       "Never wait by sleeping or leaving a process running: a turn's board token ends with the turn",
     );
     expect(text).toContain(
-      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and your turns in the task's thread renew its lease.",
+      "While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and while it is pending in the task's thread, neither ended nor paused, with its latest fire's turn not failed or a turn of yours there completed since, the board keeps your lease and the heartbeat leaves the stage to it, waking you there only for a post you have not read.",
+    );
+    expect(text).toContain(
+      "Holding a stage is a lease; every turn that touches the task renews it, and so does the board while a cron of yours in the task's thread is pending.",
     );
     expect(text).toContain(
       "Release a stage only to hand it on, or once its task's blocked_by names the tasks it waits on: the stage then wakes nobody until the last of them ends.",
@@ -170,5 +197,34 @@ describe("config-home rendering", () => {
     );
     expect(text).not.toContain("Never wait by holding a stage");
     expect(text).not.toContain("Release a stage only to hand it on.");
+  });
+
+  it("hashes what a session keeps of its instructions: a change counts, the first turn's section does not", () => {
+    const input = { agentName: "eng-1", roleCharter: "# engineer", memoryCore: "- one", ...places };
+    const onboarding = {
+      agentName: "eng-1",
+      roleSummary: "Builds things.",
+      project: "demo",
+      worktree: "/tmp/wt",
+    };
+    const later = instructionsHash(input);
+    expect(later).toMatch(/^[0-9a-f]{64}$/);
+    expect(renderInstructions({ ...input, onboarding })).not.toBe(renderInstructions(input));
+    expect(instructionsHash({ ...input, onboarding })).toBe(later);
+    expect(instructionsHash({ ...input, memoryCore: "- one\n- two" })).not.toBe(later);
+    expect(instructionsHash({ ...input, norms: "Be kind." })).not.toBe(later);
+  });
+
+  it("tells a citizen when a change to its instructions reaches its conversations, and nothing of a warm session", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill. A change to your instructions reaches each of your conversations at its next turn, whose prompt then carries them whole, replacing what that conversation had; a turn already running keeps what it started with.",
+    );
+    expect(text).not.toContain("so a warm session restarts with the new instructions");
   });
 });

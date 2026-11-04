@@ -15,7 +15,12 @@ import Testing
 /// keeps its writes under.
 @MainActor @Suite(.serialized) struct ComposerImageTests {
   private let general = Conversation.general
-  private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13])
+  /// A PNG of one pixel, whole, since the app sends no image that doesn't read to its end.
+  private let png = Data(
+    base64Encoded: [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUzZswgIiSpAAAACklEQVQI12NgAAAAAgAB",
+      "4iG8MwAAAABJRU5ErkJggg==",
+    ].joined())!
 
   private func signedIn() async throws -> AppModel {
     let (model, _) = fakeApp()
@@ -180,11 +185,14 @@ import Testing
     #expect(next.draft(.channel("lab/general")) == "")
   }
 
+  /// How an image with metadata goes is in `PhotoMetadataTests`.
   @Test func keepsWhatTheBoardTakesAsItIs() async throws {
     #expect(await ComposerImage.prepare(png) == ComposerImage(data: png, type: .png))
-    let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 16])
-    #expect(await ComposerImage.prepare(jpeg)?.name == "image.jpeg")
+    #expect(await ComposerImage.prepare(png)?.name == "image.png")
     #expect(await ComposerImage.prepare(Data("<svg/>".utf8)) == nil)
+    // A WebP's header alone, its RIFF shorter than the header itself, holds no picture.
+    let header = Data(Array("RIFF".utf8) + [3, 0, 0, 0] + Array("WEBP".utf8))
+    #expect(await ComposerImage.prepare(header) == nil)
   }
 
   #if canImport(UIKit)
@@ -199,7 +207,8 @@ import Testing
           context.fill(CGRect(x: CGFloat(x), y: 0, width: 3, height: 400))
         }
       }
-      let limit = 20_000
+      // Past the limit without what UIKit writes beside the picture too, which the app leaves out.
+      let limit = try #require(withoutMetadata(large)).count / 2
       #expect(large.count > limit)
       let prepared = try #require(await ComposerImage.prepare(large, limit: limit))
       #expect(prepared.type == .jpeg && prepared.data.count <= limit)

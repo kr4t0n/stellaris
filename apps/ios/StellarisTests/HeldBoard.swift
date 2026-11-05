@@ -17,6 +17,7 @@ final class HeldBoard: URLProtocol {
 
     private struct State {
       var arrived = 0
+      var stopped = 0
       var held: [Held] = []
       var waiting: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     }
@@ -31,6 +32,9 @@ final class HeldBoard: URLProtocol {
 
     /// How many requests in all have come to the gate.
     var arrived: Int { state.withLock { $0.arrived } }
+
+    /// How many of them the session stopped, as when their asker was cancelled.
+    var stopped: Int { state.withLock { $0.stopped } }
 
     /// Returns once `count` requests in all have come to the gate.
     func arrivals(_ count: Int) async {
@@ -67,6 +71,10 @@ final class HeldBoard: URLProtocol {
     /// Fails the requests held so far, as when nothing answers.
     func fail() {
       settle { $0.fail() }
+    }
+
+    fileprivate func stop() {
+      state.withLock { $0.stopped += 1 }
     }
 
     fileprivate func hold(_ request: Held) {
@@ -144,6 +152,7 @@ final class HeldBoard: URLProtocol {
 
   override func stopLoading() {
     stopped.withLock { $0 = true }
+    HeldBoard.gate(for: request)?.stop()
   }
 
   private func answer(refusing: Bool) {

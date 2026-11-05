@@ -3537,6 +3537,251 @@ describe("turns on a runner over the runner protocol", () => {
     });
   });
 
+  it("places turns again on a runner whose job receipt was lost while its stream lived, once its turn reports", async () => {
+    const { board } = await Board.init(dir, { name: "receipt-lost" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    // The runner's new connections to the server fail while the stream it opened before keeps
+    // delivering, as when connecting timed out for a while and the stream lived through it.
+    let down = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({
+        claude: {
+          kind: "claude",
+          newSession: () => Promise.resolve("s"),
+          runTurn: () => Promise.resolve(completed("done")),
+        },
+      }),
+      ackTimeoutMs: 200,
+      drop: (request) => down && new URL(request.url).pathname !== "/runner/stream",
+    });
+    const { run, hub, runner } = society;
+    const dispatch = {
+      agent: "eng-1",
+      project: "demo",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 2,
+    };
+    await run(dispatch);
+    await vi.waitFor(() => expect(runner.turns).toEqual([]));
+
+    // The job arrives; its receipt and the board's copy do not, so the turn fails before its CLI
+    // starts and its outcome waits for the network. Past the hub's 200 ms the runner gets no more
+    // turns; 600 ms also outlasts the 400 ms (retryMs 50 × 2³) after which a runner up to 0.4.0
+    // gave up on its receipt.
+    down = true;
+    const failed = run(dispatch);
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    const [turnId] = runner.turns;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(hub.unacknowledged("pod")).toEqual([turnId]);
+    expect(await hub.assign({ ...dispatch, onboarding: false })).toBeNull();
+
+    // Once the network is back, the outcome or the receipt gets through at its next try, and the
+    // runner takes turns again, its stream never having dropped.
+    down = false;
+    const back = Date.now();
+    const placed = await vi.waitFor(
+      async () => {
+        const assignment = await hub.assign({ ...dispatch, onboarding: false });
+        if (assignment === null) {
+          throw new Error("the runner takes no turn yet");
+        }
+        return assignment;
+      },
+      { timeout: 10_000, interval: 20 },
+    );
+    const waited = Date.now() - back;
+    expect(await failed).toMatchObject({
+      exitReason: "error",
+      error: expect.stringMatching(/^the runner could not run the turn/),
+    });
+    expect(await hub.runTurn(TurnDispatchSchema.parse(dispatch), placed)).toMatchObject({
+      exitReason: "completed",
+      runner: "pod",
+    });
+    // The next try comes at most as long after the network returned as the runner had been trying,
+    // plus retryMs, and never more than 15 s after: under a second here.
+    expect(waited).toBeLessThan(2_000);
+  });
+
+  it("places turns again on a runner whose job receipt was lost while its stream lived and its turn runs on silently", async () => {
+    const { board } = await Board.init(dir, { name: "receipt-late" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    // The first turn holds, posting no step, until released; the others end at once.
+    const gate = Promise.withResolvers<void>();
+    let started = 0;
+    let down = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({
+        claude: {
+          kind: "claude",
+          newSession: () => Promise.resolve("s"),
+          runTurn: async () => {
+            if ((started += 1) === 1) {
+              await gate.promise;
+            }
+            return completed("done");
+          },
+        },
+      }),
+      ackTimeoutMs: 200,
+      drop: (request) =>
+        down && /^\/runner\/turns\/[^/]+\/received$/.test(new URL(request.url).pathname),
+    });
+    const { run, hub, runner } = society;
+
+    // Only the receipt fails, past the hub's 200 ms and the 400 ms after which a runner up to
+    // 0.4.0 gave up on it.
+    down = true;
+    const long = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    const [turnId] = runner.turns;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
+
+    // The receipt gets through at its next try, while the turn still runs and has posted nothing.
+    down = false;
+    const back = Date.now();
+    const placed = await vi.waitFor(
+      async () => {
+        const assignment = await hub.assign({ ...manual("eng-2", "demo"), onboarding: false });
+        if (assignment === null) {
+          throw new Error("the runner takes no turn yet");
+        }
+        return assignment;
+      },
+      { timeout: 10_000, interval: 20 },
+    );
+    const waited = Date.now() - back;
+    expect(hub.unacknowledged("pod")).toEqual([]);
+    expect(runner.turns).toEqual([turnId]);
+    expect(
+      await hub.runTurn(TurnDispatchSchema.parse(manual("eng-2", "demo")), placed),
+    ).toMatchObject({
+      exitReason: "completed",
+      runner: "pod",
+    });
+    // As above: under a second here.
+    expect(waited).toBeLessThan(2_000);
+    gate.resolve();
+    expect(await long).toMatchObject({ exitReason: "completed" });
+    expect(started).toBe(2);
+  });
+
+  it("counts a turn's steps or outcome as its job's receipt, for a runner that never posts one", async () => {
+    const { board } = await Board.init(dir, { name: "receipt-never" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    society = await startTestSociety({
+      board,
+      backends: () => ({
+        claude: {
+          kind: "claude",
+          newSession: () => Promise.resolve("s"),
+          runTurn: () => Promise.resolve(completed("never runs here")),
+        },
+      }),
+      ackTimeoutMs: 50,
+    });
+    const { run, hub } = society;
+    // A runner whose stream delivers, and whose receipts never get through, as one that gave up on
+    // them while new connections failed.
+    await board.addRunner(USER, "quiet");
+    await hub.register("quiet", {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: true,
+      imageReads: false,
+      imageWrites: false,
+      projectMoves: false,
+      capabilities: [],
+      slots: null,
+      turns: [],
+    });
+    const delivered: string[] = [];
+    await hub.attach("quiet", (message) => {
+      if (message.type === "turn") {
+        delivered.push(message.job.turnId);
+      }
+      return true;
+    });
+    await board.placeProject("demo", "quiet");
+    const outcome = {
+      exitReason: "completed" as const,
+      status: null,
+      error: null,
+      usage: ZERO_USAGE,
+      costUsd: 0,
+      session: "s",
+      model: null,
+      work: null,
+      leftovers: false,
+    };
+
+    // A step of the turn shows its job arrived, so the next turn goes there while it runs.
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(delivered).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
+    await hub.turnEvents("quiet", delivered[0] ?? "", [
+      { ts: new Date().toISOString(), event: { type: "text", delta: "working" } },
+    ]);
+    expect(hub.unacknowledged("quiet")).toEqual([]);
+    const second = run(manual("eng-2", "demo"));
+    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await hub.turnOutcome("quiet", delivered[0] ?? "", outcome);
+    expect(await first).toMatchObject({ exitReason: "completed" });
+
+    // So does its outcome alone, as a turn that fails before its CLI starts posts.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await hub.assign({ ...manual("eng-1", "demo"), onboarding: false })).toBeNull();
+    await hub.turnOutcome("quiet", delivered[1] ?? "", outcome);
+    expect(await second).toMatchObject({ exitReason: "completed" });
+    expect(hub.unacknowledged("quiet")).toEqual([]);
+    const third = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(delivered).toHaveLength(3));
+    await hub.turnOutcome("quiet", delivered[2] ?? "", outcome);
+    expect(await third).toMatchObject({ exitReason: "completed" });
+  });
+
   it("keeps a turn queued while its project's runner is away, and fails turns a restarted runner dropped", async () => {
     const { board } = await Board.init(dir, { name: "away" });
     await board.addProject(USER, { slug: "demo" });

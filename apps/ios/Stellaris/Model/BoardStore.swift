@@ -435,12 +435,21 @@ extension Proposal {
   /// Counts loads, so an answer that a later load's overtook changes nothing.
   @ObservationIgnored private var loads = 0
 
+  /// Reads the conversation again, and returns once the read has ended. The read is a task of its
+  /// own, which cancelling the caller leaves going: SwiftUI cancels the view's task as Chat's tab
+  /// comes forward with another conversation, yet goes on showing the view and never starts its
+  /// task again, and it can cancel a pull's task too. Cancelled with them, the read would leave the
+  /// conversation loading with nothing left to load it.
   func load(using model: AppModel) async {
     loads += 1
     let load = loads
     if state != .loaded {
       state = .loading
     }
+    await Task { await read(load, using: model) }.value
+  }
+
+  private func read(_ load: Int, using model: AppModel) async {
     do {
       switch conversation {
       case .channel(let ref):

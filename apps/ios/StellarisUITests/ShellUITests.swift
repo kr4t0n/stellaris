@@ -176,6 +176,30 @@ final class ShellUITests: ShellTestCase {
     XCTAssertEqual(draft(app).value as? String, "Half a thought")
   }
 
+  /// A task picked in Board, and a stage in Needs you, show their threads with no pull while the
+  /// board answers a conversation's read a second and a half late, as one across a network does:
+  /// bringing Chat forward with another conversation cancels its view's first task.
+  @MainActor func testLoadsWhatBoardAndNeedsYouOpenWhenTheBoardAnswersLate() {
+    let app = launch()
+    signIn(app, token: "slow-1500-\(UUID().uuidString)")
+    expectGeneral(app)
+    let messages = app.scrollViews["messages"].firstMatch
+    tab(app, "Board")
+    pick(app, "task-00000000000000000000000012")
+    XCTAssertTrue(
+      messages.staticTexts["message-00000000000000000000000012-1"].firstMatch
+        .waitForExistence(timeout: 20),
+      "the task from Board stays loading")
+    keepScreen("task-from-board-late")
+    tab(app, "Needs you")
+    pick(app, "stage-00000000000000000000000010")
+    XCTAssertTrue(
+      messages.staticTexts["message-00000000000000000000000011"].firstMatch
+        .waitForExistence(timeout: 20),
+      "the stage from Needs you stays loading")
+    keepScreen("stage-from-needs-you-late")
+  }
+
   /// Picking in Board or Needs you opens the conversation in Chat, and Back retraces the steps.
   @MainActor func testBackGoesToWhereChatCameFrom() {
     let app = launch()

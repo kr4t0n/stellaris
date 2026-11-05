@@ -163,12 +163,20 @@ final class SubjectUITests: ShellTestCase {
     let list = app.collectionViews.firstMatch
     XCTAssertTrue(list.waitForExistence(timeout: 20), "Needs you shows no list")
     let row = app.buttons["stage-\(exportView)"].firstMatch
-    for _ in 0..<12 where !(row.exists && row.isHittable) {
-      let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.7))
-      let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.3))
-      start.press(forDuration: 0.1, thenDragTo: end)
+    // Until the row's middle is on screen: one scrolled in only as far as a sliver at the window's
+    // foot counts as hittable, and a tap there reaches nothing. Each drag is held at its end, so
+    // the list moves by the drag alone, a fifth of the window, and can't fling the row past.
+    let window = app.windows.firstMatch.frame
+    func shown() -> Bool {
+      row.exists && row.isHittable
+        && window.insetBy(dx: 0, dy: 40).contains(CGPoint(x: row.frame.midX, y: row.frame.midY))
     }
-    XCTAssertTrue(row.exists && row.isHittable, "the stage isn't in Needs you")
+    for _ in 0..<20 where !shown() {
+      let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.6))
+      let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
+      start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+    XCTAssertTrue(shown(), "the stage isn't on screen in Needs you")
     row.tap()
     pick(app, "plan")
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch

@@ -48,8 +48,6 @@ const SILENT: RunnerLog = { info() {}, warn() {}, error() {} };
 const MAX_RETRY_MS = 15_000;
 /** Long enough to outlast a server restart or a node's network coming back. */
 const POST_FOR_MS = 15 * 60_000;
-/** A job's receipt matters only until the stream is known to work again, as a reconnect says. */
-const RECEIPT_ATTEMPTS = 3;
 /** Steps of a turn travel in small batches, so the live picture lags by at most this much. */
 const EVENT_BATCH_MS = 100;
 
@@ -420,13 +418,18 @@ export class RunnerDaemon {
   }
 
   /**
-   * Tells the server a job arrived. A receipt that never gets through costs nothing: the turn is
-   * among those the next hello lists, which the server takes as received too.
+   * Tells the server a job arrived, trying again for as long as the turn's steps would be, until
+   * the turn ends. Until it hears, the server places no more turns here, and a stream that keeps
+   * working never reconnects to tell it otherwise; the turn's steps and outcome count as a receipt.
    */
   private async acknowledge(turnId: string): Promise<void> {
     await persist(
-      () => this.client.received(turnId),
-      { retryMs: this.retryMs, forMs: this.retryMs * 2 ** RECEIPT_ATTEMPTS },
+      async () => {
+        if (this.running.has(turnId)) {
+          await this.client.received(turnId);
+        }
+      },
+      { retryMs: this.retryMs, forMs: this.postForMs },
       (error) =>
         this.log.warn({ turnId, error: describeError(error) }, "could not acknowledge a job"),
     );

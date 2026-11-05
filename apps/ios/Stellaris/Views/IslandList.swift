@@ -18,7 +18,7 @@ extension View {
   }
 
   /// A row of a list on the island gray: on `surface-2` at 50% over it, the web's row under the
-  /// pointer and the composer's box, so a grouped list's sections read apart from the gray around
+  /// pointer and its composer's box, so a grouped list's sections read apart from the gray around
   /// them; or, in a plain list, on the island itself, as the web's rows are. Pressed or selected,
   /// it takes the system's highlight (`RowGround`).
   func islandRow(plain: Bool = false) -> some View {

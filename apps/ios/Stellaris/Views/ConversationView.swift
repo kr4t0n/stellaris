@@ -17,6 +17,10 @@ struct ConversationView: View {
   @State private var anchor: String?
   /// How tall the messages' view is, which caps an image's height.
   @State private var height: CGFloat = .infinity
+  /// The window's safe area beyond the conversation's bottom and trailing edges, the keyboard's
+  /// height at the foot while it is up, which places the draft against the side bar. Read here,
+  /// where the draft's own padding can't move it.
+  @State private var room: EdgeInsets?
 
   var body: some View {
     // The draft is a row below the messages, not laid over them, so the foot of the messages'
@@ -86,6 +90,13 @@ struct ConversationView: View {
       foot
     }
     .background(MessageColor.island)
+    .onGeometryChange(for: EdgeInsets.self) { proxy in
+      let insets = proxy.safeAreaInsets
+      return EdgeInsets(
+        top: 0, leading: 0, bottom: insets.bottom.rounded(), trailing: insets.trailing.rounded())
+    } action: {
+      room = $0
+    }
     .modifier(FollowsBoardLinks())
     .onChange(of: anchor) { _, id in
       if let id {
@@ -169,11 +180,11 @@ struct ConversationView: View {
       if let readOnly = model.store.readOnly(ref) {
         ReadOnlyLine(readOnly: readOnly)
       } else {
-        DraftField(conversation: feed.conversation)
+        DraftField(conversation: feed.conversation, room: room)
       }
     case .thread:
       if feed.thread?.state != .known(.closed) {
-        DraftField(conversation: feed.conversation)
+        DraftField(conversation: feed.conversation, room: room)
       }
     }
   }
@@ -256,19 +267,26 @@ struct ReadOnlyLine: View {
   }
 }
 
-/// The draft of the conversation's next message, kept by conversation as it is typed, in a box
-/// drawn as the web's `Composer` draws one, on the island's gray below a hairline, with Send in it,
-/// beside the text, or under it at the accessibility sizes, where the text takes the box's width.
-/// It grows to five lines, two where the window is short, then scrolls. Typing `@` offers the
-/// citizens to mention above it, as on the web, and a pick completes the name. Photos beside Send,
-/// and Paste in the menu a long press on the draft opens, put images in it as the web's composer
-/// does: each holds its place at the caret with a line saying it uploads, which the board's
-/// markdown for it replaces, and Send waits for them. A row above the box shows each image the
-/// draft holds as a thumbnail, with a × that takes it out.
+/// The draft of the conversation's next message, kept by conversation as it is typed, in a capsule
+/// drawn as Safari's address bar is: Liquid Glass, 48 points tall at one line with its ends round
+/// all the way, floating on the conversation's gray. It grows to five lines, two where the window
+/// is short, then scrolls, keeping the same ends. At rest its bottom meets the foot of iOS's side
+/// bar, as Safari's address bar meets its own. Photos sits inside its trailing end, where Safari
+/// has the mic, or under the text at the accessibility sizes, where the text takes the capsule's
+/// width.
+/// Send shows only while the field is focused, as Safari shows its × only while its bar has the
+/// keyboard: a round button as tall as the capsule beside it, in the side bar's column while the
+/// software keyboard covers the bar's tabs (`ComposerPlacement`). Return breaks the line, and only
+/// Send posts. Typing `@` offers the citizens to mention above it, as on the web, and a pick
+/// completes the name. Photos, and Paste in the menu a long press on the draft opens, put images in
+/// it as the web's composer does: each holds its place at the caret with a line saying it uploads,
+/// which the board's markdown for it replaces, and Send waits for them. A row above the capsule
+/// shows each image the draft holds as a thumbnail, with a × that takes it out.
 struct DraftField: View {
   @Environment(AppModel.self) private var model
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.sideBarEdge) private var sideBarEdge
   @FocusState private var focused: Bool
   /// Where the caret is, which the mention being typed is read before.
   @State private var selection: TextSelection?
@@ -278,6 +296,14 @@ struct DraftField: View {
   /// The photos just picked, until their uploads start.
   @State private var picked: [PhotosPickerItem] = []
   let conversation: Conversation
+  /// The window's safe area beyond the conversation's bottom and trailing edges, the keyboard's
+  /// height at the foot while it is up, which places the draft against the side bar; nil where the
+  /// draft is drawn alone.
+  var room: EdgeInsets?
+
+  /// Safari's address bar is 48 points tall, as wide as iOS's side bar: the capsule's height at one
+  /// line, and Send's.
+  nonisolated static let height: CGFloat = 48
 
   var body: some View {
     let draft = Binding(
@@ -285,7 +311,7 @@ struct DraftField: View {
       set: { model.memory?.setDraft($0, for: conversation) })
     let typing = mention(in: draft.wrappedValue)
     let candidates = typing.map { model.store.mentionable($0.fragment.prefix) } ?? []
-    let box = RoundedRectangle(cornerRadius: 12)
+    let capsule = RoundedRectangle(cornerRadius: Self.height / 2, style: .continuous)
     VStack(alignment: .leading, spacing: 8) {
       if let typing, !candidates.isEmpty {
         MentionList(members: candidates) { name in
@@ -314,34 +340,36 @@ struct DraftField: View {
         .accessibilityLabel("Images in the draft")
         .accessibilityIdentifier("draft-images")
       }
-      // One layout or the other around the same field, which keeps its focus as the size changes.
-      let row =
-        typeSize.isAccessibilitySize
-        ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0))
-        : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
-      row {
-        TextField(
-          text: draft, selection: $selection,
-          prompt: Text("Message").foregroundStyle(MessageColor.muted), axis: .vertical
-        ) {
-          Text("Message")
-        }
-        .lineLimit(verticalSizeClass == .compact ? 1...2 : 1...5)
-        .textFieldStyle(.plain)
-        .font(MessageType.text())
-        .foregroundStyle(MessageColor.primary)
-        .focused($focused)
-        .accessibilityIdentifier("draft")
-        // The draft's own Paste, from its menu, hands over an image it can't hold as text; text
-        // still pastes as the field's own.
-        .pasteDestination(for: PastedImage.self) { images in
-          upload(images.map(\.data))
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        HStack(spacing: 2) {
+      HStack(alignment: .bottom, spacing: 10) {
+        // One layout or the other around the same field, which keeps its focus as the size
+        // changes.
+        let field =
+          typeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 0))
+          : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+        field {
+          TextField(
+            text: draft, selection: $selection,
+            prompt: Text("Message").foregroundStyle(MessageColor.muted), axis: .vertical
+          ) {
+            Text("Message")
+          }
+          .lineLimit(verticalSizeClass == .compact ? 1...2 : 1...5)
+          .textFieldStyle(.plain)
+          .font(MessageType.text())
+          .foregroundStyle(MessageColor.primary)
+          .focused($focused)
+          .accessibilityIdentifier("draft")
+          // The draft's own Paste, from its menu, hands over an image it can't hold as text; text
+          // still pastes as the field's own.
+          .pasteDestination(for: PastedImage.self) { images in
+            upload(images.map(\.data))
+          }
+          .padding(.leading, 16)
+          .padding(.trailing, typeSize.isAccessibilitySize ? 16 : 0)
+          .padding(.vertical, 10)
+          .frame(minHeight: Self.height)
+          .frame(maxWidth: .infinity, alignment: .leading)
           PhotosPicker(
             selection: $picked, maxSelectionCount: 10, matching: .images,
             preferredItemEncoding: .compatible
@@ -350,16 +378,21 @@ struct DraftField: View {
           }
           .accessibilityLabel("Add photos")
           .accessibilityIdentifier("add-photos")
+          .padding(.trailing, 12)
+          // Centred on a line of text, the first or the last.
+          .padding(.bottom, (Self.height - ComposerGlyph.target) / 2)
+        }
+        .glassEffect(.regular, in: capsule)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("composer")
+        if focused {
           SendButton(sending: sending, enabled: sendable(draft.wrappedValue)) {
             send(draft.wrappedValue)
           }
+          .transition(.opacity)
         }
-        .padding(.trailing, 6)
-        .padding(.bottom, 6)
       }
-      .background(MessageColor.surface2.opacity(0.5), in: box)
-      // The web's inset edge, brighter while the box has the focus.
-      .overlay(box.strokeBorder(Color.white.opacity(focused ? 0.16 : 0.06)))
+      .padding(.trailing, placement.sendReach)
       if let failure {
         Text(failure)
           .font(MessageType.small())
@@ -373,10 +406,10 @@ struct DraftField: View {
           .accessibilityIdentifier("upload-failed")
       }
     }
-    .padding(12)
-    .overlay(alignment: .top) {
-      Rectangle().fill(MessageColor.line).frame(height: 1)
-    }
+    .padding(.horizontal, 12)
+    .padding(.top, 12)
+    .padding(.bottom, placement.foot)
+    .animation(.smooth(duration: 0.2), value: focused)
     .onChange(of: picked) { _, items in
       guard !items.isEmpty else {
         return
@@ -384,6 +417,12 @@ struct DraftField: View {
       picked = []
       attach(items)
     }
+  }
+
+  private var placement: ComposerPlacement {
+    ComposerPlacement(
+      sideBar: sideBarEdge, room: room, focused: focused,
+      failing: failure != nil || model.uploadFailures[conversation.key] != nil)
   }
 
   /// Uploads the photos picked, each as Photos gives it in the most compatible encoding, without
@@ -499,6 +538,46 @@ struct DraftField: View {
   }
 }
 
+/// Where the draft stands against iOS's side bar. iOS 27.1 draws the side bar 24 points in from the
+/// window's trailing edge and from its foot on the outer display, below the safe area, with its
+/// three tabs 162 points tall, and gives the app no way to move it. So the draft meets it: at rest,
+/// the capsule's bottom on the bar's foot, and while the software keyboard covers the tabs, Send in
+/// the bar's column, where Safari's × stands. A hardware keyboard's bar, shorter than the tabs,
+/// leaves Send at the draft's edge.
+struct ComposerPlacement: Equatable {
+  /// How far in from the window's trailing edge and from its foot iOS draws the side bar, as the
+  /// simulator's pictures measure it.
+  static let sideBarMargin: CGFloat = 24
+  /// How tall the side bar's three tabs stand, measured the same way.
+  static let sideBarTabs: CGFloat = 162
+
+  /// The room under the capsule, below zero where it reaches into the safe area.
+  var foot: CGFloat = 12
+  /// How far Send reaches past the draft's trailing edge, below zero into the bar's column.
+  var sendReach: CGFloat = 0
+}
+
+extension ComposerPlacement {
+  /// The place beside a side bar on `sideBar`, with `room`, the window's safe area beyond the
+  /// conversation's bottom and trailing edges, or nil where the draft is drawn alone. The safe area
+  /// at the foot is the keyboard's height while one is up: a background that ignores the keyboard
+  /// reads the same, so the field's focus says whether the keyboard is down.
+  init(sideBar: HorizontalEdge?, room: EdgeInsets?, focused: Bool, failing: Bool) {
+    guard sideBar == .trailing, let room else {
+      return
+    }
+    let tabs = Self.sideBarMargin + Self.sideBarTabs
+    // At rest, the capsule's bottom on the bar's foot, below the safe area where the safe area
+    // reaches higher; a failure line under it keeps it 12 points up, as does a keyboard going.
+    if !focused, !failing, room.bottom < tabs {
+      foot = Self.sideBarMargin - room.bottom
+    }
+    if focused, room.bottom >= tabs, room.trailing >= DraftField.height + Self.sideBarMargin {
+      sendReach = Self.sideBarMargin - 12 - room.trailing
+    }
+  }
+}
+
 /// An image the draft holds, as a thumbnail above it: the board's copy once it is kept, read by its
 /// id as a message's is, or the upload's own picture, dimmed and saying so, while it is on its way;
 /// its × takes the image's markdown, or its upload's line, out of the draft.
@@ -576,10 +655,13 @@ struct PastedImage: Transferable, Sendable {
   }
 }
 
-/// An icon in the draft's box, as the web's quiet button draws one: the tertiary text colour, in a
-/// target as tall as Send.
+/// An icon in the draft's capsule, as the web's quiet button draws one: the tertiary text colour,
+/// in a target 28 points square.
 struct ComposerGlyph: View {
   let symbol: String
+
+  /// How tall and wide a glyph's target is.
+  nonisolated static let target: CGFloat = 28
 
   /// Off the main actor too, since Photos draws its button's label from a `@Sendable` closure.
   nonisolated init(symbol: String) {
@@ -590,32 +672,39 @@ struct ComposerGlyph: View {
     Image(systemName: symbol)
       .font(MessageType.text())
       .foregroundStyle(MessageColor.tertiary)
-      .frame(minWidth: 28, minHeight: 28)
+      .frame(minWidth: Self.target, minHeight: Self.target)
       .contentShape(Rectangle())
   }
 }
 
-/// The web's primary button, which sends a draft: `fg-primary` with the page's dark text on it.
+/// Sends the draft: a round button of Liquid Glass as tall as the draft's capsule, as Safari's ×
+/// is, with the web's primary white arrow while there is something to send, a dim one while the
+/// draft is empty or an image still uploads, and a spinner while the post goes.
 struct SendButton: View {
   let sending: Bool
   let enabled: Bool
   let action: () -> Void
 
   var body: some View {
+    let circle = Circle()
     Button(action: action) {
-      Text(sending ? "Sending…" : "Send")
-        .font(MessageType.small(.medium))
-        .lineLimit(1)
-        .fixedSize()
-        .foregroundStyle(MessageColor.surface0)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(minHeight: 28)
-        .background(MessageColor.primary, in: RoundedRectangle(cornerRadius: 6))
+      Group {
+        if sending {
+          ProgressView()
+            .tint(MessageColor.primary)
+        } else {
+          Image(systemName: "arrow.up")
+            .font(.system(size: 19, weight: .semibold))
+            .foregroundStyle(enabled ? MessageColor.primary : MessageColor.tertiary)
+        }
+      }
+      .frame(width: DraftField.height, height: DraftField.height)
+      .glassEffect(.regular, in: circle)
+      .contentShape(circle)
     }
     .buttonStyle(.plain)
     .disabled(!enabled)
-    .opacity(enabled ? 1 : 0.4)
+    .accessibilityLabel(sending ? "Sending" : "Send")
     .accessibilityIdentifier("send")
   }
 }

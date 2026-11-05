@@ -117,6 +117,113 @@ final class ConversationUITests: ShellTestCase {
     return XCTWaiter().wait(for: [matching], timeout: 20) == .completed
   }
 
+  /// As Safari shows its × only while its address bar has the keyboard, the draft shows no Send
+  /// until its field is focused, then a round Send beside the capsule in the side bar's column,
+  /// off while there is nothing to send. Return adds a line rather than posting. Putting the
+  /// keyboard away takes Send with it and keeps the draft, and a tap on the field brings it back.
+  @MainActor func testShowsSendOnlyWhileTheDraftIsFocused() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let send = app.buttons["send"].firstMatch
+    XCTAssertFalse(send.exists, "Send shows while the draft isn't focused")
+    let box = draft(app)
+    box.tap()
+    XCTAssertTrue(send.waitForExistence(timeout: 20), "focusing the draft shows no Send")
+    XCTAssertEqual(send.label, "Send")
+    XCTAssertFalse(send.isEnabled, "Send is on with nothing to send")
+    // Where Safari's × stands: the side bar's column, which the keyboard covers.
+    let chat = app.buttons["Chat"].firstMatch
+    XCTAssertEqual(
+      send.frame.midX, chat.frame.midX, accuracy: 2, "Send isn't in the side bar's column")
+
+    box.typeText("First line\nsecond line")
+    XCTAssertTrue(
+      draft(box, matches: #"First line\nsecond line"#), "Return doesn't add a line to the draft")
+    XCTAssertTrue(send.isEnabled, "Send is off with a draft to send")
+    // Read from the keyboard's height, which also puts Send in the column: the capsule rides on it.
+    let keyboard = app.keyboards.firstMatch
+    XCTAssertTrue(keyboard.exists, "no keyboard came up")
+    XCTAssertLessThanOrEqual(
+      app.otherElements["composer"].firstMatch.frame.maxY, keyboard.frame.minY,
+      "the capsule is under the keyboard")
+    let posted = app.scrollViews["messages"].staticTexts
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "First line")).firstMatch
+    XCTAssertFalse(posted.exists, "Return posted the draft")
+    keepScreen("composer-focused")
+
+    dragDown(app)
+    XCTAssertTrue(send.waitForNonExistence(timeout: 20), "Send stays once the keyboard goes")
+    XCTAssertTrue(
+      draft(box, matches: #"First line\nsecond line"#), "the draft goes with the keyboard")
+    keepScreen("composer-at-rest-with-draft")
+    box.tap()
+    XCTAssertTrue(send.waitForExistence(timeout: 20), "focusing the draft again shows no Send")
+    XCTAssertTrue(send.isEnabled, "Send is off with a draft to send")
+  }
+
+  /// At rest the capsule's bottom is on the side bar's foot, as Safari's address bar is on its
+  /// bar's. XCUITest lists the tabs but no tab bar, so the foot is read from a picture of the
+  /// screen: down the column from the lowest tab's middle to the first point of the conversation's
+  /// gray below the bar's glass.
+  @MainActor func testTheCapsuleMeetsTheSideBarsFoot() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let capsule = app.otherElements["composer"].firstMatch
+    let lowest = app.buttons["Needs you"].firstMatch
+    XCTAssertTrue(lowest.exists, "the side bar has no Needs you")
+    let screen = XCUIScreen.main.screenshot()
+    let attachment = XCTAttachment(screenshot: screen)
+    attachment.name = "composer-at-rest.png"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    let foot = try? XCTUnwrap(
+      firstGray(in: screen.image, down: lowest.frame.midX, from: lowest.frame.midY),
+      "no gray below the side bar")
+    print("capsule: \(capsule.exists ? "\(capsule.frame)" : "none"); bar's foot: \(foot ?? -1)")
+    XCTAssertTrue(capsule.exists, "the draft has no capsule")
+    guard let foot else {
+      return
+    }
+    XCTAssertEqual(
+      capsule.frame.maxY, foot, accuracy: 1,
+      "the capsule's bottom is \(foot - capsule.frame.maxY) pt above the side bar's foot")
+  }
+
+  /// The first point, going down from `y` at `x`, where `image` is as dark as the conversation's
+  /// gray, in points.
+  @MainActor private func firstGray(in image: UIImage, down x: CGFloat, from y: CGFloat) -> CGFloat? {
+    guard let picture = image.cgImage else {
+      return nil
+    }
+    let (width, height) = (picture.width, picture.height)
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+      guard
+        let context = CGContext(
+          data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+      else {
+        return false
+      }
+      context.draw(picture, in: CGRect(x: 0, y: 0, width: width, height: height))
+      return true
+    }
+    let column = Int(x * image.scale)
+    guard drawn, column >= 0, column < width else {
+      return nil
+    }
+    for row in max(Int(y * image.scale), 0)..<height {
+      let start = (row * width + column) * 4
+      if Int(bytes[start]) + Int(bytes[start + 1]) + Int(bytes[start + 2]) < 3 * 30 {
+        return CGFloat(row) / image.scale
+      }
+    }
+    return nil
+  }
+
   /// Typing `@` offers the citizens to mention, a pick completes the name, and Send posts the draft
   /// to the foot of the conversation and empties the box.
   @MainActor func testPostsFromTheComposerWithAMention() {

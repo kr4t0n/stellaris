@@ -43,7 +43,8 @@ struct RootView: View {
 
 /// Chat, Board, and Needs you, each with its own navigation stack. On a compact width iOS draws the
 /// tab bar in the side bar, where a tab shows its icon alone; `AppLayout` places it beside or below
-/// the sky on the inner display.
+/// the sky on the inner display. The icons are outlines, as Safari's side bar draws its own, where
+/// a tab bar's are filled, and Chat's is one bubble, as wide as the others.
 struct ShellView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
@@ -51,14 +52,20 @@ struct ShellView: View {
   var body: some View {
     @Bindable var model = model
     TabView(selection: $model.tab) {
-      Tab("Chat", systemImage: "bubble.left.and.bubble.right", value: AppTab.chat) {
+      Tab(value: AppTab.chat) {
         ChatView()
+      } label: {
+        TabLabel(title: "Chat", symbol: "bubble.left")
       }
-      Tab("Board", systemImage: "square.grid.2x2", value: AppTab.board) {
+      Tab(value: AppTab.board) {
         BoardView()
+      } label: {
+        TabLabel(title: "Board", symbol: "square.grid.2x2")
       }
-      Tab("Needs you", systemImage: "bell", value: AppTab.needsYou) {
+      Tab(value: AppTab.needsYou) {
         NeedsYouView()
+      } label: {
+        TabLabel(title: "Needs you", symbol: "bell")
       }
       .badge(model.store.attention.count)
     }
@@ -73,6 +80,17 @@ struct ShellView: View {
         Task { await model.refresh() }
       }
     }
+  }
+}
+
+/// A tab's title and its symbol as an outline, which a tab bar would otherwise fill.
+private struct TabLabel: View {
+  let title: String
+  let symbol: String
+
+  var body: some View {
+    Label(title, systemImage: symbol)
+      .environment(\.symbolVariants, .none)
   }
 }
 

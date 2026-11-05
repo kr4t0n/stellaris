@@ -101,6 +101,8 @@ import XCTest
   static func record(_ view: some View, named name: String, in test: XCTestCase) async throws {
     for size in sizes {
       for type in typeSizes {
+        // Named in the log before it is drawn, so a view whose layout never settles is found.
+        print("drawing \(name)-\(size.name)-\(type.name)")
         let image = try await image(of: view, size: size.size, type: type)
         try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
       }
@@ -113,6 +115,7 @@ import XCTest
   {
     for size in sizes {
       for type in typeSizes {
+        print("drawing \(name)-\(size.name)-\(type.name)")
         let image = try await image(of: view, size: size.size, type: type, fitting: true)
         try keep(image, named: "\(name)-\(size.name)-\(type.name)", in: test)
       }
@@ -203,7 +206,9 @@ import XCTest
 
   /// The image's pixels as bytes of red, green, blue, and alpha, a row at a time from its top, with
   /// its width and height in pixels.
-  private static func rgba(of image: UIImage) -> (bytes: [UInt8], width: Int, height: Int)? {
+  nonisolated private static func rgba(
+    of image: UIImage
+  ) -> (bytes: [UInt8], width: Int, height: Int)? {
     guard let cgImage = image.cgImage else {
       return nil
     }
@@ -222,5 +227,44 @@ import XCTest
       return true
     }
     return drawn ? (bytes, width, height) : nil
+  }
+
+  /// A picture's pixels, read in points or in pixels from its top-leading corner.
+  struct Bitmap {
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    private let bytes: [UInt8]
+
+    init?(_ image: UIImage) {
+      guard let (bytes, width, height) = Snapshot.rgba(of: image) else {
+        return nil
+      }
+      self.width = width
+      self.height = height
+      self.scale = image.scale
+      self.bytes = bytes
+    }
+
+    func pixel(_ x: Int, _ y: Int) -> (red: Int, green: Int, blue: Int) {
+      let start = (y * width + x) * 4
+      return (Int(bytes[start]), Int(bytes[start + 1]), Int(bytes[start + 2]))
+    }
+
+    /// The pixel at `point`, in points.
+    func pixel(at point: CGPoint) -> (red: Int, green: Int, blue: Int) {
+      pixel(
+        min(max(Int(point.x * scale), 0), width - 1),
+        min(max(Int(point.y * scale), 0), height - 1))
+    }
+
+    /// Whether the pixel at `point`, in points, is within `within` of `color` in each channel.
+    func pixel(
+      at point: CGPoint, isNear color: (red: Int, green: Int, blue: Int), within: Int
+    ) -> Bool {
+      let pixel = pixel(at: point)
+      return abs(pixel.red - color.red) < within && abs(pixel.green - color.green) < within
+        && abs(pixel.blue - color.blue) < within
+    }
   }
 }

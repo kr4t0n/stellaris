@@ -9,6 +9,7 @@ import XCTest
 /// Answers the scheduler as idle in front of the fake board, counting each time it is asked.
 final class CountedScheduler: URLProtocol {
   static let asked = Mutex(0)
+  static let times = Mutex<[ContinuousClock.Instant]>([])
 
   override class func canInit(with request: URLRequest) -> Bool {
     request.url?.host() == FakeBoard.address.host()
@@ -19,6 +20,7 @@ final class CountedScheduler: URLProtocol {
 
   override func startLoading() {
     CountedScheduler.asked.withLock { $0 += 1 }
+    CountedScheduler.times.withLock { $0.append(.now) }
     guard let url = request.url,
       let response = HTTPURLResponse(
         url: url, statusCode: 200, httpVersion: "HTTP/1.1",
@@ -49,7 +51,7 @@ final class FoldTests: XCTestCase {
   private let anchored = FakeBoard.generalId(30)
 
   @MainActor func testTheChatKeepsItsPlaceAsThePhoneOpensTurnsAndFolds() async throws {
-    continueAfterFailure = false
+    continueAfterFailure = true
     let model = try await signedIn()
     let memory = try XCTUnwrap(model.memory)
     // The draft and the message the scroll is anchored at, as the user left them.
@@ -97,11 +99,34 @@ final class FoldTests: XCTestCase {
     XCTAssertTrue(below, "the chat isn't below the sky: \(window.frame(of: messages))")
 
     // Folded: the chat alone, and the sky neither draws nor asks.
+    let foldedAt = ContinuousClock.now
+    let trace = FoldTrace()
+    let sampling = Task { @MainActor in
+      var last = -1
+      while !Task.isCancelled {
+        if model.sky.running != last {
+          last = model.sky.running
+          trace.lines.append("running \(last) at \(ContinuousClock.now - foldedAt)")
+        }
+        try? await Task.sleep(for: .milliseconds(5))
+      }
+    }
     window.resize(to: outer)
     try await window.settle()
     model.sky.lastFrame = nil
     let folded = CountedScheduler.asked.withLock { $0 }
+    let readAt = ContinuousClock.now
+    let runningAtRead = model.sky.running
     try await Task.sleep(for: .seconds(2))
+    sampling.cancel()
+    let after = CountedScheduler.asked.withLock { $0 }
+    let asks = CountedScheduler.times.withLock { $0 }.filter { $0 > foldedAt - .seconds(1) }
+      .map { "\($0 - foldedAt)" }
+    let line =
+      "FOLDPROBE extra \(after - folded); read at \(readAt - foldedAt) with running \(runningAtRead);"
+      + " asks at \(asks.joined(separator: ", ")); \(trace.lines.joined(separator: ", "))"
+    print(line)
+    NSLog("%@", line as NSString)
     XCTAssertNil(model.sky.lastFrame, "the sky draws while the phone is folded")
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")
@@ -248,6 +273,11 @@ final class FoldTests: XCTestCase {
     model.sky.schedulerPoll = .milliseconds(200)
     return model
   }
+}
+
+/// What the probe saw of the sky's run after the fold.
+@MainActor final class FoldTrace {
+  var lines: [String] = []
 }
 
 /// A window of the test host's scene that a test resizes, with the size classes of the display

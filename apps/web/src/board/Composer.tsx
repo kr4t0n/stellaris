@@ -1,4 +1,4 @@
-import { ASK_CHANNEL, IMAGE_LIMIT_BYTES, IMAGE_MEDIA_TYPES, type Message } from "@stellaris/shared";
+import { ASK_CHANNEL, IMAGE_MEDIA_TYPES, type Message } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useEffect,
@@ -23,6 +23,9 @@ import {
   settleUpload,
   uploadPlaceholder,
 } from "./compose.js";
+// Loaded with the page, never with the first image: a page open across a deploy finds a chunk it
+// hadn't loaded gone, and would post no image at all.
+import { imageToPost } from "./post-image.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -208,14 +211,7 @@ export function Composer({
     setUploading((count) => count + 1);
     let markdown = "";
     try {
-      // The board refuses a larger one too, but only once all of it has been sent.
-      if (file.size > IMAGE_LIMIT_BYTES) {
-        throw new ApiError(
-          413,
-          `${file.name} is ${file.size} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
-        );
-      }
-      markdown = (await api.postImage(file, file.name)).markdown;
+      markdown = (await api.postImage(await imageToPost(file, file.name), file.name)).markdown;
     } catch (error) {
       setUploadFailure(
         error instanceof ApiError && error.status !== 0

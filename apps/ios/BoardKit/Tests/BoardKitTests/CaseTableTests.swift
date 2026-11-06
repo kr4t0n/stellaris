@@ -5,7 +5,7 @@ import Testing
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
 /// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run, and
-/// the one the board's `withoutMetadata` runs.
+/// the one `withoutMetadata` in `shared` runs.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent

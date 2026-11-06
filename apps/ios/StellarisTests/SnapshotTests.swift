@@ -110,20 +110,223 @@ final class SnapshotTests: XCTestCase {
     XCTAssertGreaterThan(gray, pixels / 3, "the conversation isn't on the island's gray")
   }
 
-  /// The draft is the web's composer: a box of `surface-2` at 50% over the island's gray, which
-  /// blends to 29 in each channel, with nothing black in its row.
-  @MainActor func testTheDraftIsTheWebsComposer() async throws {
+  /// The draft at rest is Safari's capsule: 48 points tall at one line, its ends round all the way,
+  /// on the conversation's gray with no strip or hairline above it, and no Send while its field
+  /// isn't focused, though it holds text.
+  @MainActor func testTheDraftAtRestIsACapsuleWithNoSend() async throws {
     let model = try await signedIn()
+    model.memory?.setDraft("Ship it", for: .general)
     let image = try await Snapshot.image(
       of: DraftField(conversation: .general).background(MessageColor.island).environment(model),
       size: CGSize(width: 410, height: 100), type: Snapshot.typeSizes[0], fitting: true)
-    try Snapshot.keep(image, named: "proof-draft-composer", in: self)
+    try Snapshot.keep(image, named: "proof-draft-capsule", in: self)
+    let bitmap = try XCTUnwrap(Snapshot.Bitmap(image))
+    let width = CGFloat(bitmap.width) / bitmap.scale
+    let height = CGFloat(bitmap.height) / bitmap.scale
+    // Lighter than the island's 20 in each channel; a shadow, darker, is no part of the box.
+    func drawn(_ x: CGFloat, _ y: CGFloat) -> Bool {
+      let pixel = bitmap.pixel(at: CGPoint(x: x, y: y))
+      return pixel.red + pixel.green + pixel.blue > 3 * 26
+    }
+    XCTAssertFalse(drawn(width / 2, 0.5), "a hairline runs above the draft")
+    // The longest run of drawn points down a line a third of the way across, past the text.
+    let across = width / 3
+    var run = (start: 0, length: 0)
+    var current = (start: 0, length: 0)
+    for y in 0..<Int(height) {
+      if drawn(across, CGFloat(y) + 0.5) {
+        current = (current.length == 0 ? y : current.start, current.length + 1)
+        if current.length > run.length {
+          run = current
+        }
+      } else {
+        current = (0, 0)
+      }
+    }
+    XCTAssertEqual(run.length, 48, accuracy: 2, "the draft at rest isn't Safari's 48 points tall")
+    let top = CGFloat(run.start)
+    let middle = top + CGFloat(run.length) / 2
+    let leading = try XCTUnwrap(
+      (0..<Int(across)).first { drawn(CGFloat($0) + 0.5, middle) }, "the draft draws no box")
+    // Half its height round: a point 4 in from the corner of its frame is outside a capsule, and
+    // inside a box rounded less.
+    XCTAssertFalse(
+      drawn(CGFloat(leading) + 4, top + 4), "the draft's ends aren't round all the way")
+    XCTAssertTrue(drawn(CGFloat(leading) + 4, middle), "the draft's end isn't drawn")
+    // The round Send stands beside the capsule, which would then end 58 points short of the
+    // draft's trailing edge, 12 in.
+    XCTAssertTrue(drawn(width - 16, middle), "the capsule ends short of the draft's edge")
+    // The web's Send was a white button at the trailing end, with text to send.
+    let primary = (red: 245, green: 245, blue: 245)
+    var white = 0
+    for y in stride(from: top, to: top + CGFloat(run.length), by: 1 / bitmap.scale) {
+      for x in stride(from: width * 2 / 3, to: width, by: 1 / bitmap.scale) {
+        if bitmap.pixel(at: CGPoint(x: x, y: y), isNear: primary, within: 12) {
+          white += 1
+        }
+      }
+    }
+    XCTAssertLessThan(white, 2_500, "the draft at rest draws a Send")
+  }
+
+  /// Board, a project under it, Needs you, and Settings sit on the conversation's island gray, as
+  /// the chat beside them does, with their rows on `surface-2` at 50% over it, which blends to 29
+  /// in each channel, and nothing black.
+  @MainActor func testTheListsAreTheChatsGray() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    try await expectIslandGray(ShellView().environment(model), named: "board")
+    model.boardPath = ["demo"]
+    try await expectIslandGray(ShellView().environment(model), named: "board-project")
+    model.tab = .needsYou
+    try await expectIslandGray(ShellView().environment(model), named: "needs-you")
+    try await expectIslandGray(SettingsView().environment(model), named: "settings")
+  }
+
+  /// Checks `view` is on the island's gray with its rows on the row's, and draws no black.
+  @MainActor private func expectIslandGray(_ view: some View, named name: String) async throws {
+    let image = try await Snapshot.image(
+      of: view, size: CGSize(width: 410, height: 678), type: Snapshot.typeSizes[0])
+    try Snapshot.keep(image, named: "proof-\(name)-gray", in: self)
     let picture = try XCTUnwrap(image.cgImage)
     let pixels = picture.width * picture.height
-    let box = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 3)
+    let gray = Snapshot.pixels(in: image, near: (red: 20, green: 20, blue: 20), within: 4)
+    let rows = Snapshot.pixels(in: image, near: (red: 29, green: 29, blue: 29), within: 2)
     let black = Snapshot.pixels(in: image, near: (red: 0, green: 0, blue: 0), within: 6)
-    XCTAssertGreaterThan(box, pixels / 3, "the draft's box isn't the composer's gray")
-    XCTAssertLessThan(black, pixels / 100, "the draft's row draws black")
+    XCTAssertGreaterThan(gray, pixels / 4, "\(name) isn't on the island's gray")
+    XCTAssertGreaterThan(rows, pixels / 20, "\(name)'s rows aren't on the row's gray")
+    XCTAssertLessThan(black, pixels / 100, "\(name) draws black")
+  }
+
+  /// A row of Board drawn pressed, and one drawn selected, as a touch and an opened row leave their
+  /// list's cells, stand apart from the rows at rest, as the system's own rows do.
+  @MainActor func testBoardsRowsShowWhenPressedAndSelected() async throws {
+    let model = try await signedIn()
+    let size = CGSize(width: 410, height: 678)
+    var spots: [CGPoint] = []
+    let rest = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      spots = try self.firstRows(in: view).map { $0.spot }
+    }
+    let marked = try await Snapshot.image(
+      of: BoardView().environment(model), size: size, type: Snapshot.typeSizes[0]
+    ) { view in
+      let rows = try self.firstRows(in: view)
+      rows[0].cell.isHighlighted = true
+      rows[1].cell.isSelected = true
+    }
+    try Snapshot.keep(rest, named: "proof-rows-at-rest", in: self)
+    try Snapshot.keep(marked, named: "proof-rows-pressed-and-selected", in: self)
+    XCTAssertEqual(spots.count, 2)
+    for (spot, state) in zip(spots, ["pressed", "selected"]) {
+      let before = try XCTUnwrap(Snapshot.color(in: rest, at: spot))
+      let after = try XCTUnwrap(Snapshot.color(in: marked, at: spot))
+      let change = max(
+        abs(after.red - before.red), abs(after.green - before.green),
+        abs(after.blue - before.blue))
+      XCTAssertGreaterThanOrEqual(
+        change, 6, "a \(state) row draws as one at rest: \(before), then \(after)")
+    }
+  }
+
+  /// A project's list at the largest type size, which is plain, scrolled so its second section's
+  /// header pins at the top with rows going under it. iOS draws its hard scroll edge effect from
+  /// the bar to the pinned header's foot, the island blurred: the band holds no black, its
+  /// commonest colour is a neutral gray no darker than the island, and the island resumes below.
+  @MainActor func testAPinnedHeaderSitsOnTheIslandUnderTheEdgeEffect() async throws {
+    let model = try await signedIn()
+    await model.store.loadDashboard("demo", using: model)
+    model.tab = .board
+    model.boardPath = ["demo"]
+    var band = CGRect.null
+    let image = try await Snapshot.image(
+      of: ShellView().environment(model), size: CGSize(width: 410, height: 678),
+      type: Snapshot.typeSizes[1]
+    ) { view in
+      let list = try XCTUnwrap(
+        self.collectionViews(in: view).max { $0.numberOfSections < $1.numberOfSections },
+        "the view holds no list")
+      let row = try XCTUnwrap(
+        list.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)),
+        "the project's list has no second section")
+      // The second section's first row, its top 40 points gone under the header.
+      list.contentOffset.y = row.frame.minY + 40 - list.adjustedContentInset.top
+      list.layoutIfNeeded()
+      let header = try XCTUnwrap(self.pinnedHeader(in: list), "no header shows in the list")
+      let top = list.contentOffset.y + list.adjustedContentInset.top
+      print("pinned header: \(type(of: header)) at \(header.frame), the list's top at \(top)")
+      XCTAssertLessThanOrEqual(abs(header.frame.minY - top), 2, "the header doesn't pin at the top")
+      band = header.convert(header.bounds, to: nil)
+    }
+    try Snapshot.keep(image, named: "board-project-pinned-header-410-largest", in: self)
+    let colors = Snapshot.colors(in: image, within: band)
+    let ground = try XCTUnwrap(colors.first, "the pinned header's band is empty")
+    func share(_ test: ((red: Int, green: Int, blue: Int)) -> Bool) -> Double {
+      colors.filter { test($0.color) }.reduce(0) { $0 + $1.share }
+    }
+    let black = share { $0.red < 6 && $0.green < 6 && $0.blue < 6 }
+    let white = share { $0.red > 240 && $0.green > 240 && $0.blue > 240 }
+    let shown = colors.prefix(5).map { "\($0.color) \(Int(($0.share * 100).rounded()))%" }
+    print("pinned header's band \(band): \(shown), white \(white)")
+    let (red, green, blue) = ground.color
+    XCTAssertTrue(
+      abs(red - green) <= 2 && abs(green - blue) <= 2 && (20...40).contains(green),
+      "the pinned header's band has a ground of its own: \(shown)")
+    XCTAssertLessThan(black, 0.01, "the pinned header's band draws black: \(shown)")
+    let below = Snapshot.colors(
+      in: image, within: CGRect(x: band.minX, y: band.maxY + 1, width: band.width, height: 10))
+    let island = below.filter {
+      [$0.color.red, $0.color.green, $0.color.blue].allSatisfy { abs($0 - 20) <= 2 }
+    }.reduce(0) { $0 + $1.share }
+    XCTAssertGreaterThan(
+      island, 0.5, "the island doesn't resume below the pinned header: \(below.prefix(5))")
+  }
+
+  /// The first two rows of the list in `view`, top first, each with a point on it, in the window,
+  /// clear of its words.
+  @MainActor private func firstRows(
+    in view: UIView
+  ) throws -> [(cell: UICollectionViewCell, spot: CGPoint)] {
+    let list = try XCTUnwrap(collectionView(in: view), "the view holds no list")
+    let cells = list.visibleCells.sorted { $0.frame.minY < $1.frame.minY }
+    let first = try XCTUnwrap(cells.first, "the list shows no rows")
+    let second = try XCTUnwrap(cells.dropFirst().first, "the list shows one row")
+    return [first, second].map { cell in
+      let frame = cell.convert(cell.bounds, to: nil)
+      return (cell, CGPoint(x: frame.minX + frame.width * 0.8, y: frame.midY))
+    }
+  }
+
+  @MainActor private func collectionView(in view: UIView) -> UICollectionView? {
+    collectionViews(in: view).first
+  }
+
+  /// The lists in `view`, outermost and first laid out first.
+  @MainActor private func collectionViews(in view: UIView) -> [UICollectionView] {
+    if let list = view as? UICollectionView {
+      return [list]
+    }
+    return view.subviews.flatMap { collectionViews(in: $0) }
+  }
+
+  /// The topmost section header the list shows below its top inset, a pinned one when one pins.
+  @MainActor private func pinnedHeader(in list: UICollectionView) -> UICollectionReusableView? {
+    let top = list.contentOffset.y + list.adjustedContentInset.top
+    var headers = list.visibleSupplementaryViews(
+      ofKind: UICollectionView.elementKindSectionHeader)
+    if headers.isEmpty {
+      // Any reusable view of the list's own that isn't a row, in case the headers are of a kind
+      // of SwiftUI's own.
+      headers = list.subviews.compactMap { $0 as? UICollectionReusableView }
+        .filter { !($0 is UICollectionViewCell) }
+    }
+    for header in headers {
+      print("a header of the list: \(type(of: header)) at \(header.frame)")
+    }
+    return headers.filter { !$0.isHidden && $0.frame.maxY > top + 1 }
+      .min { $0.frame.minY < $1.frame.minY }
   }
 
   /// A thread opened from #general, with its first message and its draft, then #general with
@@ -152,7 +355,8 @@ final class SnapshotTests: XCTestCase {
   }
 
   /// The draft at its tallest, five lines and then scrolling, or two where the window is short,
-  /// as the outer display is in landscape; and the citizens a mention offers.
+  /// as the outer display is in landscape, alone and in Chat, where at rest it reaches down to the
+  /// side bar's foot; and the citizens a mention offers.
   @MainActor func testTheComposer() async throws {
     let model = try await signedIn()
     model.memory?.setDraft(
@@ -168,11 +372,15 @@ final class SnapshotTests: XCTestCase {
     .environment(model)
     try await Snapshot.record(draft, named: "composer-long", in: self)
     for type in Snapshot.typeSizes {
+      print("drawing composer-short-window-\(type.name)")
       let image = try await Snapshot.image(
         of: draft.environment(\.verticalSizeClass, .compact),
         size: CGSize(width: 678, height: 466), type: type)
       try Snapshot.keep(image, named: "composer-short-window-\(type.name)", in: self)
     }
+    await model.feed(for: .general).load(using: model)
+    try await Snapshot.record(
+      ShellView().environment(model), named: "composer-long-in-chat", in: self)
     let list = MentionList(members: model.store.mentionable("")) { _ in }
       .padding(12).background(MessageColor.island)
     try await Snapshot.recordWhole(list, named: "mention-list", in: self)

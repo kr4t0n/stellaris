@@ -12,6 +12,7 @@ struct SettingsView: View {
           Text(model.board?.absoluteString ?? "")
             .textSelection(.enabled)
             .accessibilityIdentifier("settings-board")
+            .islandRow()
         }
         Section("Signed in as") {
           if let actor = model.actor {
@@ -19,9 +20,11 @@ struct SettingsView: View {
               Text(actor.signIn == nil ? "Token" : "GitHub")
             }
             .accessibilityIdentifier("settings-actor")
+            .islandRow()
           } else {
             Text(Loading.unreachable)
               .foregroundStyle(.secondary)
+              .islandRow()
           }
         }
         Section {
@@ -29,8 +32,10 @@ struct SettingsView: View {
             Task { await model.signOut() }
           }
           .accessibilityIdentifier("sign-out")
+          .islandRow()
         }
       }
+      .islandList()
       .navigationTitle("Settings")
     }
     // No button: nothing here is saved, so a drag down closes it, which the grabber shows.

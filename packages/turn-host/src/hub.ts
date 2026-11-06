@@ -15,7 +15,11 @@ import {
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
   heldOn,
+  limitLapsed,
+  runnerLimitHold,
+  runnerPause,
   SOCIETY_SCOPE,
+  UNKNOWN_LIMIT_HOLD_MS,
   SweepResultSchema,
   TurnImageFileSchema,
   TurnImageSchema,
@@ -32,6 +36,7 @@ import {
   type ProjectRepo,
   type RunnerAnswer,
   type RunnerHello,
+  type Runner,
   type RunnerMessage,
   type RunnerWelcome,
   type RunningTurn,
@@ -79,16 +84,21 @@ interface Seat {
   grace: ReturnType<typeof setTimeout> | null;
   /** Jobs sent down its stream that it has not acknowledged, sent again when it reconnects. */
   readonly unacked: Map<Ulid, Unacked>;
-  /**
-   * A job went unacknowledged for too long, so its stream may be delivering nothing although it
-   * looks open; no turn goes there until the runner acknowledges a job or connects again.
-   */
-  unconfirmed: boolean;
 }
 
 interface Unacked {
   readonly job: TurnJob;
-  timer: ReturnType<typeof setTimeout>;
+  readonly timer: ReturnType<typeof setTimeout>;
+  /**
+   * Unacknowledged for too long, so the stream may be delivering nothing although it looks open:
+   * no turn goes to the runner while one of its jobs is overdue.
+   */
+  overdue: boolean;
+}
+
+/** Whether a job sent to a runner is overdue for its receipt, so it gets no more turns for now. */
+function receiptOverdue(seat: Seat): boolean {
+  return [...seat.unacked.values()].some((each) => each.overdue);
 }
 
 interface Pending {
@@ -168,6 +178,16 @@ export class RunnerHub implements TurnRunner {
   private readonly starting = new Map<Name, number>();
   /** Moves started since the hub did, so a placement that a move overtook gives its turn back. */
   private moveStarts = 0;
+  /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
+  private readonly limitReads = new Map<string, number>();
+  /**
+   * The turn let through once a limit with no reset had held its half hour, by `runner/cli`: the
+   * report it tries, which `observedAt` names, and whether the turn has ended.
+   */
+  private readonly limitTries = new Map<
+    string,
+    { observedAt: string; dispatch: TurnDispatch; ended: boolean }
+  >();
 
   constructor(options: RunnerHubOptions) {
     this.board = options.board;
@@ -218,9 +238,9 @@ export class RunnerHub implements TurnRunner {
         `runner protocol ${hello.protocol} is not ${RUNNER_PROTOCOL}; upgrade the runner or the server`,
       );
     }
-    const seat = this.seats.get(name);
+    let seat = this.seats.get(name);
     if (seat === undefined) {
-      this.seats.set(name, {
+      seat = {
         name,
         hello,
         send: null,
@@ -229,18 +249,17 @@ export class RunnerHub implements TurnRunner {
         disconnectedAt: null,
         grace: null,
         unacked: new Map(),
-        unconfirmed: false,
-      });
+      };
+      this.seats.set(name, seat);
     } else {
       seat.hello = hello;
       seat.warm = new Set();
     }
     const still = new Set(hello.turns);
-    const unacked = this.seats.get(name)?.unacked ?? new Map<Ulid, Unacked>();
     for (const turnId of this.host.turnsOn(name)) {
       if (still.has(turnId)) {
-        this.settle(unacked, turnId);
-      } else if (!unacked.has(turnId)) {
+        this.settle(seat, turnId);
+      } else if (!seat.unacked.has(turnId)) {
         await this.host.abortTurn(turnId, `runner ${name} restarted during the turn`);
       }
     }
@@ -267,7 +286,6 @@ export class RunnerHub implements TurnRunner {
     }
     seat.send = send;
     seat.disconnectedAt = null;
-    seat.unconfirmed = false;
     if (seat.grace !== null) {
       clearTimeout(seat.grace);
       seat.grace = null;
@@ -313,26 +331,25 @@ export class RunnerHub implements TurnRunner {
     await Promise.allSettled(this.detaching);
   }
 
+  /** A turn's steps, which show its job arrived as its receipt would. */
   async turnEvents(runner: Name, turnId: Ulid, entries: readonly TranscriptEntry[]): Promise<void> {
     this.assertOwns(runner, turnId);
+    this.received(runner, turnId);
     await this.host.addEvents(turnId, entries);
   }
 
   /** A runner's word that a turn's job arrived, which also shows its stream delivers again. */
   received(runner: Name, turnId: Ulid): void {
     const seat = this.seats.get(runner);
-    if (seat === undefined || !seat.unacked.has(turnId)) {
-      return;
-    }
-    this.settle(seat.unacked, turnId);
-    if (seat.unconfirmed) {
-      seat.unconfirmed = false;
-      this.log.info({ runner }, "runner is taking jobs again");
+    if (seat !== undefined) {
+      this.settle(seat, turnId);
     }
   }
 
+  /** A turn's outcome, which shows its job arrived as its receipt would. */
   async turnOutcome(runner: Name, turnId: Ulid, outcome: TurnOutcome): Promise<TurnAck> {
     this.assertOwns(runner, turnId);
+    this.received(runner, turnId);
     const ack = await this.host.closeTurn(turnId, outcome);
     return ack ?? { dropWorkspace: false };
   }
@@ -513,16 +530,21 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
-    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed. It is
-    // still there and still has the CLI, so a project living on it and a citizen pinned to it wait.
+    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed, and
+    // one whose CLI is limited none of that CLI's until the limit lifts. It is still there and still
+    // has the CLI, so a project living on it and a citizen pinned to it wait.
     const runners = await this.board.listRunners();
+    const now = this.now();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
-      !seat.unconfirmed &&
+      !receiptOverdue(seat) &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
-      !heldOn(runners, seat.name, cli);
+      !heldOn(runners, seat.name, cli, now) &&
+      !this.tryRunning(runners, seat.name, cli, now);
     let chosen: Seat | undefined;
+    // The runner the turn waits for when none takes it, so a limit with no reset there is read.
+    let waitsOn = agent.homeRunner;
     if (dispatch.project === SOCIETY_SCOPE) {
       chosen = await this.pinnedSeat(agent.name, agent.homeRunner, cli, free);
     } else {
@@ -557,8 +579,12 @@ export class RunnerHub implements TurnRunner {
       }
       const seat = this.seats.get(home);
       chosen = seat !== undefined && free(seat) ? seat : undefined;
+      waitsOn = home;
     }
     if (chosen === undefined) {
+      if (waitsOn !== undefined) {
+        this.readAfterLimit(runners, waitsOn, cli, now);
+      }
       return null;
     }
     // A move that started while this placement read the board may have the project held, or moved
@@ -573,7 +599,23 @@ export class RunnerHub implements TurnRunner {
     if (dispatch.project !== SOCIETY_SCOPE) {
       this.starting.set(dispatch.project, (this.starting.get(dispatch.project) ?? 0) + 1);
     }
-    return { runner: chosen.name };
+    const runner = chosen.name;
+    const lapsed = runners.find((each) => each.name === runner)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${runner}/${cli}`);
+    if (
+      lapsed !== undefined &&
+      limitLapsed(lapsed, now) &&
+      tried?.observedAt !== lapsed.observedAt
+    ) {
+      // The first turn after a limit with no reset ran out of its hold tries it for the rest; once
+      // it has ended with no newer report, the rest go.
+      this.limitTries.set(`${runner}/${cli}`, {
+        observedAt: lapsed.observedAt,
+        dispatch,
+        ended: false,
+      });
+    }
+    return { runner };
   }
 
   async runTurn(dispatch: TurnDispatch, assignment: TurnAssignment): Promise<TurnRecord> {
@@ -615,10 +657,15 @@ export class RunnerHub implements TurnRunner {
       return await opened.ended;
     } finally {
       opening();
+      for (const tried of this.limitTries.values()) {
+        if (tried.dispatch === dispatch) {
+          tried.ended = true;
+        }
+      }
       if (seat !== undefined) {
         seat.inUse = Math.max(0, seat.inUse - 1);
         if (turnId !== null) {
-          this.settle(seat.unacked, turnId);
+          this.settle(seat, turnId);
         }
       }
     }
@@ -1152,6 +1199,56 @@ export class RunnerHub implements TurnRunner {
     return quota;
   }
 
+  /**
+   * Whether a turn let through to try a limit with no reset, once its hold ran out, is still running
+   * on the runner, so the CLI's other turns there wait for what it reports: a refusal records a newer
+   * limit, which holds them another half hour, and a turn that ends without one lets them go.
+   */
+  private tryRunning(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): boolean {
+    const quota = runners.find((each) => each.name === name)?.quotas?.[cli];
+    const tried = this.limitTries.get(`${name}/${cli}`);
+    return (
+      quota !== undefined &&
+      tried !== undefined &&
+      !tried.ended &&
+      tried.observedAt === quota.observedAt &&
+      limitLapsed(quota, now)
+    );
+  }
+
+  /**
+   * Asks a runner to read a CLI's quota again while a limit it gave no reset for holds a turn
+   * waiting for it there, at most once per `UNKNOWN_LIMIT_HOLD_MS` for each runner and CLI, so a
+   * reset the read names becomes the hold and a clear read lifts it. Not while the user's pause
+   * holds the CLI there too, nor on a runner from before quota reads; a read that fails changes
+   * nothing, and the hold runs out as it would have.
+   */
+  private readAfterLimit(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): void {
+    const record = runners.find((each) => each.name === name);
+    const seat = this.seats.get(name);
+    if (
+      record === undefined ||
+      seat === undefined ||
+      seat.send === null ||
+      !seat.hello.quotaReads ||
+      !seat.hello.clis.includes(cli) ||
+      runnerPause(record, cli) !== undefined ||
+      runnerLimitHold(record, cli, now)?.known !== false
+    ) {
+      return;
+    }
+    const key = `${name}/${cli}`;
+    const last = this.limitReads.get(key);
+    if (last !== undefined && now.getTime() - last < UNKNOWN_LIMIT_HOLD_MS) {
+      return;
+    }
+    this.limitReads.set(key, now.getTime());
+    this.log.info({ runner: name, cli }, "reading a quota limited until an unknown time");
+    this.quota(name, cli).catch((error: unknown) => {
+      this.log.warn({ runner: name, cli, error: String(error) }, "could not read a limited quota");
+    });
+  }
+
   /** Calls `listener` whenever a runner registers, connects, or goes away. */
   onRunnerChange(listener: (runner: Name) => void): void {
     this.runnerListeners.add(listener);
@@ -1168,33 +1265,45 @@ export class RunnerHub implements TurnRunner {
   /**
    * Waits for a runner to acknowledge a job. One that does not in time may be behind a stream that
    * looks open but delivers nothing, as when its machine's network stops passing traffic, so no
-   * more turns go to it until it acknowledges or connects again; the turns it has carry on, since
-   * they report by posts.
+   * more turns go to it until the job is acknowledged, its turn ends, or the runner connects again;
+   * the turns it has carry on, since they report by posts.
    */
   private expectAck(seat: Seat, job: TurnJob): void {
     const previous = seat.unacked.get(job.turnId);
     if (previous !== undefined) {
       clearTimeout(previous.timer);
     }
-    const timer = setTimeout(() => {
-      if (!seat.unacked.has(job.turnId) || seat.unconfirmed || seat.send === null) {
-        return;
-      }
-      seat.unconfirmed = true;
-      this.log.warn(
-        { runner: seat.name, turnId: job.turnId, waitedMs: this.ackTimeoutMs },
-        "runner has not acknowledged a job; no more turns go to it until it does or reconnects",
-      );
-    }, this.ackTimeoutMs);
-    timer.unref?.();
-    seat.unacked.set(job.turnId, { job, timer });
+    const entry: Unacked = {
+      job,
+      timer: setTimeout(() => {
+        if (seat.unacked.get(job.turnId) !== entry || seat.send === null) {
+          return;
+        }
+        const wasHeld = receiptOverdue(seat);
+        entry.overdue = true;
+        if (!wasHeld) {
+          this.log.warn(
+            { runner: seat.name, turnId: job.turnId, waitedMs: this.ackTimeoutMs },
+            "runner has not acknowledged a job; no more turns go to it until it does, the turn ends, or it reconnects",
+          );
+        }
+      }, this.ackTimeoutMs),
+      overdue: false,
+    };
+    entry.timer.unref?.();
+    seat.unacked.set(job.turnId, entry);
   }
 
-  private settle(unacked: Map<Ulid, Unacked>, turnId: Ulid): void {
-    const entry = unacked.get(turnId);
-    if (entry !== undefined) {
-      clearTimeout(entry.timer);
-      unacked.delete(turnId);
+  /** A job acknowledged, or its turn over: the hold it put on its runner, if any, goes with it. */
+  private settle(seat: Seat, turnId: Ulid): void {
+    const entry = seat.unacked.get(turnId);
+    if (entry === undefined) {
+      return;
+    }
+    clearTimeout(entry.timer);
+    seat.unacked.delete(turnId);
+    if (entry.overdue && !receiptOverdue(seat)) {
+      this.log.info({ runner: seat.name }, "runner is taking jobs again");
     }
   }
 

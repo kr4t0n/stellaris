@@ -22,7 +22,8 @@
   /// and a host under `.invalid`, which never resolves, can't be reached. Its event stream sends
   /// nothing, and its turn stream sends the captured one, stamped now, as live; both stay open,
   /// as the board's do. A token starting `replay-` gets its first turn stream's stamps again on every
-  /// later connection, as the board replays its buffer.
+  /// later connection, as the board replays its buffer. A token `slow-<ms>-…` gets each channel's
+  /// and thread's messages that many milliseconds late, as a board across a network answers them.
   final class FakeBoard: URLProtocol {
     static let address = URL(string: "https://board.example.com")!
     /// The thread of samples, which general's newest message links to.
@@ -127,7 +128,33 @@
         }
         return
       }
+      if let lateness = FakeBoard.lateness(of: request) {
+        let late = Late(request: self, loop: CFRunLoopGetCurrent())
+        DispatchQueue.global().asyncAfter(deadline: .now() + lateness) {
+          CFRunLoopPerformBlock(late.loop, CFRunLoopMode.defaultMode.rawValue) {
+            late.request.finish()
+          }
+          CFRunLoopWakeUp(late.loop)
+        }
+        return
+      }
       finish()
+    }
+
+    /// How many seconds late a conversation's read is answered for a token `slow-<ms>-…`, as a
+    /// board across a network answers; nil for any other request.
+    private static func lateness(of request: URLRequest) -> Double? {
+      let path = request.url?.path(percentEncoded: true) ?? ""
+      guard request.httpMethod ?? "GET" == "GET",
+        path.hasPrefix("/api/threads/") || path.hasPrefix("/api/channels/"),
+        let token = request.value(forHTTPHeaderField: "Authorization"),
+        token.hasPrefix("Bearer slow-"),
+        let milliseconds = token.dropFirst("Bearer slow-".count).split(separator: "-").first
+          .flatMap({ Double($0) })
+      else {
+        return nil
+      }
+      return milliseconds / 1000
     }
 
     override func stopLoading() {
@@ -496,8 +523,8 @@
       let line =
         (try? JSONDecoder().decode(Proposal.self, from: json(proposal)))
         .map { describeCharter($0.kind, $0.charter) } ?? id
-      let post =
-        "\(approved ? "Approved" : "Rejected"): \(line).\(reason.map { " Reason: \($0)." } ?? "")"
+      let why = reason.map { " Reason: \(asSentence($0))" } ?? ""
+      let post = "\(approved ? "Approved" : "Rejected"): \(asSentence(line))\(why)"
       let outcome = approved ? "approved" : "rejected"
       return written.withLock { written in
         var mine = written[token] ?? Written()
@@ -516,6 +543,16 @@
         answer["reason"] = reason
         return (200, json(answer))
       }
+    }
+
+    /// Free text a post quotes as a sentence, as the board's `asSentence` writes it: trimmed, with a
+    /// period unless it ends one already, with `.`, `…`, `?` or `!` before any closing quotes,
+    /// brackets, or emphasis.
+    private static func asSentence(_ text: String) -> String {
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      let closers: Set<Character> = ["\"", "'", "”", "’", "»", ")", "]", "}", "*", "_"]
+      let last = trimmed.reversed().first { !closers.contains($0) }
+      return last.map { ".…?!".contains($0) } == true ? trimmed : trimmed + "."
     }
 
     /// Writes the demo project's dashboard, as a citizen does with `update_dashboard`, so a test can

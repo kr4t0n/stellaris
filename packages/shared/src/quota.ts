@@ -128,6 +128,53 @@ export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
   return quota.status === "warning" || high ? "warning" : "ok";
 }
 
+/**
+ * How long a limit whose reset the CLI did not give holds its turns, from when it was reported.
+ * Then one turn goes (`limitLapsed`), and its own report says whether the limit still holds.
+ */
+export const UNKNOWN_LIMIT_HOLD_MS = 30 * 60_000;
+
+/** Until when a CLI's limit holds its turns on a runner, and whether the CLI gave that time. */
+export interface LimitHold {
+  readonly until: string;
+  readonly known: boolean;
+}
+
+/**
+ * Whether a quota's limit stops its CLI's turns. A Claude login's usage read with extra usage
+ * turned on does not: the read calls a spent window a limit whether extra usage covers it or not,
+ * while a turn's own report leaves a refusal extra usage covered out of its limit already.
+ */
+function stopsTurns(quota: CliQuota): boolean {
+  return (
+    quota.status === "limited" && !(quota.source === "read" && quota.extraUsage?.enabled === true)
+  );
+}
+
+/**
+ * Until when a CLI's limit holds its turns on the runner that reported it, or null while they may
+ * go: the reset the CLI gave, or `UNKNOWN_LIMIT_HOLD_MS` after a limit it gave none for.
+ */
+export function limitHold(quota: CliQuota, now: Date): LimitHold | null {
+  if (!stopsTurns(quota)) {
+    return null;
+  }
+  const known = quota.limitedUntil !== null;
+  const until =
+    quota.limitedUntil ??
+    new Date(Date.parse(quota.observedAt) + UNKNOWN_LIMIT_HOLD_MS).toISOString();
+  return Date.parse(until) > now.getTime() ? { until, known } : null;
+}
+
+/**
+ * Whether a limit the CLI gave no reset for has held its turns for `UNKNOWN_LIMIT_HOLD_MS` and
+ * stands with no newer report: one turn may go to find out whether it still holds, and the rest
+ * wait for what that turn reports.
+ */
+export function limitLapsed(quota: CliQuota, now: Date): boolean {
+  return stopsTurns(quota) && quota.limitedUntil === null && limitHold(quota, now) === null;
+}
+
 const WINDOW_NAMES: Readonly<Record<string, string>> = {
   five_hour: "5h",
   seven_day: "7d",

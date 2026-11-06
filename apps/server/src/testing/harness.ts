@@ -75,6 +75,8 @@ export interface TestSocietyOptions {
   readonly signIn?: AppDependencies["signIn"];
   /** The turn host's clock, for a test whose board and scheduler keep one of their own. */
   readonly now?: (() => Date) | undefined;
+  /** The runner hub's clock, which decides when a CLI's limit stops holding its turns. */
+  readonly hubNow?: (() => Date) | undefined;
 }
 
 export interface TestSociety {
@@ -138,6 +140,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     graceMs: options.graceMs ?? 5_000,
     ackTimeoutMs: options.ackTimeoutMs,
     requestTimeoutMs: options.hubRequestTimeoutMs,
+    ...(options.hubNow === undefined ? {} : { now: options.hubNow }),
   });
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));

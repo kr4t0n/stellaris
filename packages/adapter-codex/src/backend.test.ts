@@ -516,6 +516,23 @@ function paramsOf(received: Received[], method: string): Record<string, unknown>
   return received.find((m) => m.method === method)?.params;
 }
 
+/** A `multi_agent` call of a tool on thread-8, completed, with what the case changes. */
+function collabCall(id: string, tool: string, more: Record<string, unknown> = {}) {
+  return {
+    type: "collabAgentToolCall",
+    id,
+    tool,
+    status: "completed",
+    senderThreadId: "thread-1",
+    receiverThreadIds: ["thread-8"],
+    prompt: null,
+    model: null,
+    reasoningEffort: null,
+    agentsStates: {},
+    ...more,
+  };
+}
+
 describe("CodexBackend cold turns", () => {
   it("starts a server, opens a thread, runs one turn, and stops the server", async () => {
     const fake = fakeAppServer();
@@ -1174,6 +1191,118 @@ describe("CodexBackend cold turns", () => {
       { type: "tool_call", name: "WebSearch", input: { url: "https://arxiv.org/abs/1" } },
       { type: "tool_call", name: "WebSearch", input: { query: "sssp · apsp" } },
     ]);
+  });
+
+  it("reports an image Codex opened as a Read of its path, once, with the image as its result", async () => {
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        const view = { type: "imageView", id: "call-1", path: "/tmp/images/plot.png" };
+        turn.item("item/started", view);
+        turn.item("item/completed", view);
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("looked") });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.events.filter((e) => e.type === "tool_call" || e.type === "tool_result")).toEqual(
+      [
+        { type: "tool_call", name: "Read", input: { path: "/tmp/images/plot.png" } },
+        { type: "tool_result", name: "Read", ok: true, output: "[image]" },
+      ],
+    );
+  });
+
+  it("reports each sub-agent call once, under the name Claude Code gives the same tool", async () => {
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        // A spawn Codex could not make names no thread and fails.
+        const spawn = collabCall("c1", "spawnAgent", {
+          prompt: "Look into it.",
+          receiverThreadIds: [],
+        });
+        turn.item("item/started", { ...spawn, status: "inProgress" });
+        turn.item("item/completed", { ...spawn, status: "failed" });
+        turn.item(
+          "item/completed",
+          // Codex fails a wait on any sub-agent that errored.
+          collabCall("c2", "wait", {
+            status: "failed",
+            receiverThreadIds: ["thread-8", "thread-9"],
+            agentsStates: {
+              "thread-8": { status: "completed", message: "Found it." },
+              "thread-9": { status: "errored", message: null },
+            },
+          }),
+        );
+        // Tools Codex 0.165.0 declares but reports only to its analytics, and one it may add.
+        turn.item("item/completed", collabCall("c3", "followupTask", { prompt: "And the rest." }));
+        turn.item("item/completed", collabCall("c4", "interruptAgent"));
+        turn.item("item/completed", collabCall("c5", "listAgents", { receiverThreadIds: [] }));
+        turn.item("item/completed", collabCall("c6", "forkAgent"));
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("asked") });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.events.filter((e) => e.type === "tool_call" || e.type === "tool_result")).toEqual(
+      [
+        { type: "tool_call", name: "Agent", input: { prompt: "Look into it." } },
+        { type: "tool_result", name: "Agent", ok: false },
+        { type: "tool_call", name: "wait_agent", input: { targets: ["thread-8", "thread-9"] } },
+        {
+          type: "tool_result",
+          name: "wait_agent",
+          ok: false,
+          output: "thread-8: completed\nFound it.\nthread-9: errored",
+        },
+        {
+          type: "tool_call",
+          name: "SendMessage",
+          input: { to: "thread-8", message: "And the rest." },
+        },
+        { type: "tool_result", name: "SendMessage", ok: true },
+        { type: "tool_call", name: "TaskStop", input: { task_id: "thread-8" } },
+        { type: "tool_result", name: "TaskStop", ok: true },
+        { type: "tool_call", name: "ListAgents", input: {} },
+        { type: "tool_result", name: "ListAgents", ok: true },
+      ],
+    );
+  });
+
+  it("reports a sub-agent call as it completes, with what it started with, and none Codex left", async () => {
+    const fake = fakeAppServer({
+      turn: (turn) => {
+        // Codex 0.165.0 starts a v1 spawn and, refusing its agent type, never completes it.
+        const refused = collabCall("c1", "spawnAgent", {
+          status: "inProgress",
+          prompt: "First.",
+          receiverThreadIds: [],
+        });
+        turn.item("item/started", refused);
+        const spawn = collabCall("c2", "spawnAgent", { prompt: "Second.", receiverThreadIds: [] });
+        turn.item("item/started", { ...spawn, status: "inProgress" });
+        turn.item("item/completed", {
+          ...spawn,
+          receiverThreadIds: ["thread-8"],
+          agentsStates: { "thread-8": { status: "pendingInit", message: null } },
+        });
+        // A wait that timed out names, as it completes, none of the sub-agents it waited on.
+        const wait = collabCall("c3", "wait");
+        turn.item("item/started", { ...wait, status: "inProgress" });
+        turn.item("item/completed", { ...wait, receiverThreadIds: [] });
+        turn.item("item/completed", { type: "agentMessage", id: "a1", text: STATUS("waited") });
+        turn.complete("completed");
+      },
+    });
+    const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.events.filter((e) => e.type === "tool_call" || e.type === "tool_result")).toEqual(
+      [
+        { type: "tool_call", name: "Agent", input: { prompt: "Second." } },
+        { type: "tool_result", name: "Agent", ok: true, output: "thread-8: pendingInit" },
+        { type: "tool_call", name: "wait_agent", input: { targets: ["thread-8"] } },
+        { type: "tool_result", name: "wait_agent", ok: true },
+      ],
+    );
   });
 
   it("marks failed commands and board calls as failed results", async () => {

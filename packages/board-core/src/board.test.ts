@@ -1512,6 +1512,60 @@ describe("Board", () => {
     expect(await holder(reviewed.id)).toBeUndefined();
   });
 
+  it("keeps the lease of a holder its CLI's limit holds until the reset, then lets it lapse from at least half a lease after", async () => {
+    const { board } = await society({});
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.placeProject("demo", "pod");
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    const built = await board.createTask(USER, { project: "demo", title: "build" });
+    const reviewed = await board.createTask(USER, { project: "demo", title: "review" });
+    await board.claimTask(ENG, { task_id: built.id });
+    await board.claimTask(REV, { task_id: reviewed.id });
+
+    // Claude on the project's runner is limited for two hours: eng-1's turns there wait, rev-1's on
+    // Codex do not.
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({
+        observedAt: clock.toISOString(),
+        source: "read",
+        status: "limited",
+        limitedUntil: new Date(clock.getTime() + 120 * 60_000).toISOString(),
+      }),
+    );
+    await sweep(119);
+    expect(await holder(built.id)).toBe("eng-1");
+    expect(await holder(reviewed.id)).toBeUndefined();
+    // Nothing of the user's pause was set for it.
+    expect((await board.readRunner("pod")).pausedClis).toBeUndefined();
+
+    // The limit lifts at its reset by itself, and the claim lapses from at least half a lease on.
+    await sweep(15);
+    expect(await holder(built.id)).toBe("eng-1");
+    await sweep(16);
+    expect(await holder(built.id)).toBeUndefined();
+
+    // A limit with no reset holds for half an hour from its report.
+    await board.claimTask(ENG, { task_id: built.id });
+    await board.recordQuota(
+      "pod",
+      "claude",
+      CliQuotaSchema.parse({ observedAt: clock.toISOString(), source: "turn", status: "limited" }),
+    );
+    await sweep(29);
+    expect(await holder(built.id)).toBe("eng-1");
+    await sweep(31);
+    expect(await holder(built.id)).toBeUndefined();
+  });
+
   it("enforces role charters and the lifecycle's ends", async () => {
     const { board } = await society();
     await expect(
@@ -2082,6 +2136,61 @@ describe("Board", () => {
       charter: { project: "demo", name: "design", purpose: "Design discussion" },
     });
     expect((await board.approve(STEW, { proposal_id: channel.id })).outcome).toBe("approved");
+  });
+
+  it("ends each sentence of a proposal's posts once, however its charter line and reason end", async () => {
+    const { board } = await society();
+    const pitched = async (name: string, purpose: string): Promise<Ulid> =>
+      (
+        await board.propose(ENG, {
+          kind: "channel",
+          charter: { project: "demo", name, purpose },
+          rationale: "Ideas keep landing in general.",
+        })
+      ).id;
+    const posts = async (id: Ulid) => (await board.listThread(id)).map((message) => message.body);
+
+    // A charter line and a reason that end in a period keep that one, in the pitch, the decision,
+    // and the notice of the channel the approval opened.
+    const ended = await pitched("ideas", "Loose ideas.");
+    await board.approve(USER, { proposal_id: ended, reason: "One channel keeps them apart." });
+    expect(await posts(ended)).toEqual([
+      `Proposal ${ended}: channel demo/ideas: Loose ideas.\n\nIdeas keep landing in general.\n`,
+      "Approved: channel demo/ideas: Loose ideas. Reason: One channel keeps them apart. Provisioned: channel demo/ideas.\n",
+    ]);
+    expect((await board.listChannel("demo/general")).at(-1)?.body).toBe(
+      "Channel demo/ideas opened by user: Loose ideas. Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.\n",
+    );
+
+    // Neither ends in one, so the board adds each, as it always has.
+    const open = await pitched("plans", "Plans for later");
+    await board.reject(USER, { proposal_id: open, reason: "One reviewer keeps up for now" });
+    expect(await posts(open)).toEqual([
+      `Proposal ${open}: channel demo/plans: Plans for later.\n\nIdeas keep landing in general.\n`,
+      "Rejected: channel demo/plans: Plans for later. Reason: One reviewer keeps up for now.\n",
+    ]);
+
+    // A question, an exclamation, or an ellipsis ends one too, before any closing quotes, brackets,
+    // or emphasis; a period inside code does not, and the space around the text goes.
+    const reasons: [string, string][] = [
+      ["Is one reviewer enough?", "Is one reviewer enough?"],
+      ["Not now!", "Not now!"],
+      ["Later…", "Later…"],
+      ['The plan says "after the release."', 'The plan says "after the release."'],
+      ["(After the release.)", "(After the release.)"],
+      ["Wait for 0.5 (is it soon?)", "Wait for 0.5 (is it soon?)"],
+      ["**Not yet.**", "**Not yet.**"],
+      ["Run `make.`", "Run `make.`."],
+      ["  Not yet. \n", "Not yet."],
+      ["  Not yet  ", "Not yet."],
+    ];
+    for (const [reason, shown] of reasons) {
+      const id = await pitched("plans", "Plans for later");
+      await board.reject(USER, { proposal_id: id, reason });
+      expect((await posts(id)).at(-1)).toBe(
+        `Rejected: channel demo/plans: Plans for later. Reason: ${shown}\n`,
+      );
+    }
   });
 
   it("provisions what an approval asked for: members, channels, roles, retirements", async () => {
@@ -2746,12 +2855,16 @@ describe("Board", () => {
       "Steps for uv-setup.",
     );
 
-    await board.removeSkill(USER, { name: "old-plan", reason: "No longer used" });
+    // A reason that ends a sentence another way than with a period keeps its own ending too.
+    await board.removeSkill(USER, { name: "old-plan", reason: "Who still uses it?" });
     expect(await board.listSocietySkills()).toEqual([]);
+    expect((await board.listChannel("general")).at(-1)?.body).toBe(
+      "Skill old-plan removed from the society by user: Who still uses it? Every citizen's skills index stops listing it from its next turn.\n",
+    );
     const events = (await board.readEvents(null)).filter((e) => e.type === "skill.removed");
     expect(events.map((e) => [e.actor, e.payload])).toEqual([
       ["stew", { name: "uv-setup", reason: "Superseded by @eng-1's uv-project." }],
-      ["user", { name: "old-plan", reason: "No longer used" }],
+      ["user", { name: "old-plan", reason: "Who still uses it?" }],
     ]);
 
     // A steward charter from before the verb gains it with the seed's other verbs on open.

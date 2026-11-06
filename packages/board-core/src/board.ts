@@ -622,9 +622,13 @@ function plain(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** A summary without its trailing period, for sentences that add their own. */
-function sentence(summary: string): string {
-  return summary.trim().replace(/\.+$/, "");
+/** Text that ends a sentence: a period, an ellipsis, `?` or `!`, then any closing quotes, brackets, or emphasis. */
+const SENTENCE_END = /[.…?!]["'”’»)\]}*_]*$/u;
+
+/** Free text a post quotes as a sentence, trimmed, with a period unless it ends one already. */
+function asSentence(text: string): string {
+  const trimmed = text.trim();
+  return SENTENCE_END.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /** A skill's one-line summary: its `description`, else the body's first plain line. */
@@ -2523,7 +2527,7 @@ export class Board {
       await this.appendMessage(
         SYSTEM_ACTOR.name,
         "general",
-        `Skill ${args.name} removed from the society by ${actor.name}: ${sentence(withoutMentions(args.reason))}. Every citizen's skills index stops listing it from its next turn.`,
+        `Skill ${args.name} removed from the society by ${actor.name}: ${asSentence(withoutMentions(args.reason))} Every citizen's skills index stops listing it from its next turn.`,
       );
       return removed;
     });
@@ -3892,7 +3896,7 @@ export class Board {
       await this.appendThreadMessage(
         actor.name,
         thread.id,
-        `Proposal ${proposal.id}: ${describeCharter(proposal.kind, proposal.charter)}.${
+        `Proposal ${proposal.id}: ${asSentence(describeCharter(proposal.kind, proposal.charter))}${
           rationale.length === 0 ? "" : `\n\n${rationale}`
         }`,
       );
@@ -4751,8 +4755,8 @@ export class Board {
           actor.name,
           current,
           input.ok
-            ? `${sentence(input.detail)}.`
-            : `Landing failed: ${sentence(input.detail)}. The task waits at its last stage for its participants to reshape the plan.`,
+            ? asSentence(input.detail)
+            : `Landing failed: ${asSentence(input.detail)} The task waits at its last stage for its participants to reshape the plan.`,
           input.ok
             ? { action: "landed", stage: current.stage, to: null }
             : { action: "reopened", stage: current.stage, to: current.stage },
@@ -4779,7 +4783,7 @@ export class Board {
           await this.appendMessage(
             actor.name,
             channelRef(location.project, task.channel),
-            `Task ${task.id} "${task.title}" is done: ${sentence(input.detail)}.`,
+            `Task ${task.id} "${task.title}" is done: ${asSentence(input.detail)}`,
           );
         }
         return task;
@@ -5635,7 +5639,7 @@ export class Board {
     await this.appendMessage(
       SYSTEM_ACTOR.name,
       "general",
-      `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${sentence(skill.summary)}. Every citizen's skills index now lists it.`,
+      `Skill ${skill.name} ${replaced ? "updated in" : "promoted to"} the society: ${asSentence(skill.summary)} Every citizen's skills index now lists it.`,
     );
     return replaced;
   }
@@ -5940,7 +5944,7 @@ export class Board {
     await this.appendMessage(
       SYSTEM_ACTOR.name,
       channelRef(input.project, "general"),
-      `Channel ${ref} opened by ${by}: ${purpose}. Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.`,
+      `Channel ${ref} opened by ${by}: ${asSentence(purpose)} Subscribe to it to follow its posts; its tasks and mentions reach whoever they concern either way.`,
     );
     return ref;
   }
@@ -6522,10 +6526,11 @@ export class Board {
   }
 
   /**
-   * The lease a holder keeps while the user's pause holds its turns in the task's project
-   * (`heldOn`), when later than the one it has, else null. It is renewed for a full lease once less
-   * than half is left, as for a pending cron, so it never lapses while the holder cannot take a
-   * turn there, and after the resume the holder has at least half a lease to come back to it.
+   * The lease a holder keeps while the user's pause, or its CLI's limit, holds its turns in the
+   * task's project (`heldOn`), when later than the one it has, else null. It is renewed for a full
+   * lease once less than half is left, as for a pending cron, so it never lapses while the holder
+   * cannot take a turn there, and after the resume or the reset the holder has at least half a
+   * lease to come back to it.
    */
   private async pausedLease(
     task: Task,
@@ -6537,7 +6542,7 @@ export class Board {
       return null;
     }
     const holder = await this.readAgent(task.claimedBy).catch(() => null);
-    if (holder === null || !heldOn(runners, runner, holder.cli)) {
+    if (holder === null || !heldOn(runners, runner, holder.cli, now)) {
       return null;
     }
     const lease = Date.parse(task.leaseExpiresAt);
@@ -6664,7 +6669,7 @@ export class Board {
       });
     }
     const verdict = outcome === "approved" ? "Approved" : "Rejected";
-    const why = reason === undefined ? "" : ` Reason: ${reason}.`;
+    const why = reason === undefined ? "" : ` Reason: ${asSentence(reason)}`;
     const result =
       provision === undefined
         ? ""
@@ -6673,7 +6678,7 @@ export class Board {
             .join(", ")}.`;
     // The decision is the proposal's last post, a step that wakes no front desk, and it ends
     // the thread; the scheduler wakes the proposer from the event.
-    const post = `${verdict}: ${describeCharter(proposal.kind, proposal.charter)}.${why}${result}`;
+    const post = `${verdict}: ${asSentence(describeCharter(proposal.kind, proposal.charter))}${why}${result}`;
     // The board's own decision quotes the proposer's words, whose mentions would wake as the board's.
     await this.appendThreadMessage(
       actor.name,

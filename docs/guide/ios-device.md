@@ -207,11 +207,18 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - A link or an image in the top-leading part of Chat opens. On the simulator, a tap inside the status bar's frame there, 223 by 317 points from the window's corner, reaches no message and scrolls the conversation to its top instead.
 - At the largest text size (Settings > Accessibility > Display & Text Size > Larger Text), the plan's half-height sheet closes with a drag down on its bar, at its middle or its foot. In CI, only a drag on its content closed it.
 - The keyboard covers the side bar, its tabs included, until a scroll puts it away.
+- At rest, the composer is a capsule with no Send, and its bottom sits on the same line as the side bar's foot, as Safari's address bar does beside its own bar. The app places it 24 points above the window's foot, where iOS draws the bar on the simulator, since iOS gives no way to move the bar.
+- Tapping the composer shows a round Send in the side bar's column, where Safari shows its ×, while the keyboard covers the bar. Send is dim while the draft is empty or an image uploads, and a tap on it posts. Return adds a line. A scroll puts the keyboard away and hides Send, and the draft stays.
+- With a hardware keyboard (a Bluetooth one, or the Simulator's I/O > Keyboard > Connect Hardware Keyboard), tapping the composer shows Send at the capsule's trailing end, clear of the side bar's tabs, and the capsule rises 12 points above the safe area while the field has the focus. CI types with the software keyboard only.
+- While the post goes, Send shows a spinner, and VoiceOver reads it as "Sending". No picture in CI catches that moment.
+- The outer display in landscape: whether the capsule's bottom meets the side bar's foot, and where Send stands with the keyboard up. No test or picture covers that pose.
+- The capsule's glass and Send's over what scrolls behind them. At the largest text size, a picture from CI shows the last message's line faintly through the capsule's top edge, which is Liquid Glass's refraction.
+- The side bar's icons are outlines, as Safari's are, with one bubble for Chat.
 - The image viewer's ✕ over the top-right corner of a full-width image.
 
 **Turning and folding**
 
-- Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles.
+- Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles. If they do, whether the composer's capsule meets that bar's foot, and whether Send stands in its column with the keyboard up. Beside a trailing side bar the app puts the capsule's bottom 24 points above the window's foot, as on the outer display, whatever the safe area there (20 points in the app's own model of this pose), and moves Send into the column only while the keyboard reaches higher than 186 points.
 - Unfolding brings the sky in with a fade, beside the chat in landscape and above it in portrait; folding takes it away. The chat stays where it was through both, with its draft and its scroll.
 - A partial fold, as when the phone stands half open on a table, moves nothing.
 - On a tabletop fold, whether the card below the fold, and Advance and Approve at the bar's trailing end, are easy to reach.
@@ -221,8 +228,9 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The plan opens beside the thread in portrait, and in a sheet in landscape and on the outer display.
 - Split View at its narrowest on the inner display shows the chat alone.
 - The composer and the keyboard in each pose, and whether the keyboard stays up and the composer keeps its place through a fold, a turn or an unfold.
-- Photos beside Send, and Paste in the draft's long-press menu. Pick several photos at once, among them one the camera took (HEIC, which Photos hands over as a JPEG), a screenshot (PNG, which goes as it is), and one from iCloud that has to download first; each should land where it was put. Paste an image copied in another app, such as Safari or Photos, then text, from the draft's menu, and check that the caret stays where the image went, that each image shows as a thumbnail above the draft, from the photo while it uploads and from the board once kept, and that its × takes it out. CI pastes only an image the test put on the pasteboard, and picks no photo.
-- A posted camera photo's metadata: open the image the board keeps (`/api/images/<id>` with the token) and read its EXIF for a location. The app sends Photos' JPEG as it is.
+- Photos inside the composer's capsule, and Paste in the draft's long-press menu. Pick several photos at once, among them one the camera took (HEIC, which Photos hands over as a JPEG), a screenshot (PNG, which stays a PNG), and one from iCloud that has to download first; each should land where it was put. Paste an image copied in another app, such as Safari or Photos, then text, from the draft's menu, and check that the caret stays where the image went, that each image shows as a thumbnail above the draft, from the photo while it uploads and from the board once kept, and that its × takes it out. CI pastes only an image the test put on the pasteboard, and picks no photo.
+- A posted camera photo's metadata: take a photo with Location Services on for Camera, check that Photos shows where it was taken, and post it from the app. Open the image the board keeps (`/api/images/<id>` with the token) and read its EXIF: it should hold no location, camera, or date, only the orientation, and the photo should show upright and in the same colours as in Photos.
+- Whether an HDR photo posted from the app shows as bright as in Photos: the app leaves out anything after a JPEG's first picture, so a gain map kept there goes.
 - Paste from the draft's menu with text and a picture copied together, such as a selection in Notes or on a web page. The web pastes the text then; what iOS hands the draft is untested.
 - Ten large photos picked at once, such as 48-megapixel ones: the app should stay up while they upload.
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
@@ -240,6 +248,10 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Links, images, and task lists in messages. An image is read by its alt text.
 - The two-finger scrub closes the plan's, the charter's, and Settings' sheets.
 - A task's or a proposal's strip at the accessibility text sizes is read in full.
+
+**Over the network**
+
+- With the board across a real network, folded and open, open a task from Board, a stage and a question from Needs you, and a channel from Board: each shows its messages with no pull. CI opens only a task from Board and a stage from Needs you, on the outer display, against a fake board that answers 1.5 seconds late. Only the device shows the inner display and a real network's timing.
 
 **Over time**
 

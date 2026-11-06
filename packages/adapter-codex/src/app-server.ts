@@ -313,6 +313,44 @@ class JsonRpcClient {
   }
 }
 
+/**
+ * A sub-agent call, by a `collabAgentToolCall`'s `tool`, under the name of the Claude Code tool that
+ * does the same: `Agent` starts a sub-agent, `SendMessage` gives one a message, `TaskStop` stops one,
+ * and `ListAgents` lists them. Claude Code has no call that waits on a sub-agent, whose end it
+ * reports by itself, or that reopens a closed one, which a message resumes, so those two keep the
+ * names Codex gives the model.
+ */
+const SUB_AGENT_CALLS = new Map([
+  ["spawnAgent", "Agent"],
+  ["sendInput", "SendMessage"],
+  ["sendMessage", "SendMessage"],
+  ["followupTask", "SendMessage"],
+  ["closeAgent", "TaskStop"],
+  ["interruptAgent", "TaskStop"],
+  ["listAgents", "ListAgents"],
+  ["wait", "wait_agent"],
+  ["resumeAgent", "resume_agent"],
+]);
+
+/**
+ * A `multi_agent_v2` call that starts, messages, or interrupts a sub-agent reports it as a
+ * `subAgentActivity` of a kind, and no `collabAgentToolCall`. `completed` is a sub-agent's turn
+ * ending, which is no call.
+ */
+const SUB_AGENT_ACTIVITIES = new Map([
+  ["started", "Agent"],
+  ["interacted", "SendMessage"],
+  ["interrupted", "TaskStop"],
+]);
+
+/**
+ * Items whose call is reported when they complete. A web search learns what it looked for as it
+ * runs. Codex can start a sub-agent call and return without completing it, as a v1 spawn it refuses
+ * once started or a v1 wait whose sub-agent's status fails, and a call left with no result would
+ * take the next result of the same tool.
+ */
+const REPORTED_ON_COMPLETION = new Set(["webSearch", "collabAgentToolCall", "subAgentActivity"]);
+
 /** App-server items use camelCase types; the vocabulary maps onto the same tool names as everywhere else. */
 function toolNameOf(item: Dict): string | null {
   switch (item["type"]) {
@@ -322,17 +360,23 @@ function toolNameOf(item: Dict): string | null {
       return "Edit";
     case "webSearch":
       return "WebSearch";
+    case "imageView":
+      return "Read";
     case "mcpToolCall": {
       const server = str(item["server"]) ?? "mcp";
       const tool = str(item["tool"]) ?? "tool";
       return `mcp__${server}__${tool}`;
     }
+    case "collabAgentToolCall":
+      return SUB_AGENT_CALLS.get(str(item["tool"]) ?? "") ?? null;
+    case "subAgentActivity":
+      return SUB_AGENT_ACTIVITIES.get(str(item["kind"]) ?? "") ?? null;
     default:
       return null;
   }
 }
 
-function toolInputOf(item: Dict): unknown {
+function toolInputOf(item: Dict, name: string): unknown {
   switch (item["type"]) {
     case "commandExecution":
       return { command: item["command"] };
@@ -340,11 +384,56 @@ function toolInputOf(item: Dict): unknown {
       return { changes: item["changes"] };
     case "webSearch":
       return searchInput(item);
+    case "imageView":
+      return { path: item["path"] };
     case "mcpToolCall":
       return item["arguments"];
+    case "collabAgentToolCall":
+    case "subAgentActivity":
+      return subAgentInput(item, name);
     default:
       return undefined;
   }
+}
+
+/**
+ * A sub-agent call's input in the fields of the tool it is named for. It names its sub-agents as
+ * the model did: `multi_agent` by thread, `multi_agent_v2` by path. What a v2 call said to one is
+ * not reported.
+ */
+function subAgentInput(item: Dict, name: string): Dict {
+  const v2 = item["type"] === "subAgentActivity";
+  const agents = v2 ? [str(item["agentPath"]) ?? ""] : subAgentsNamedBy(item);
+  const agent = agents.join(", ");
+  const prompt = str(item["prompt"]) ?? "";
+  switch (name) {
+    case "Agent":
+      return v2 ? { name: agent } : { prompt };
+    case "SendMessage":
+      return v2 ? { to: agent } : { to: agent, message: prompt };
+    case "TaskStop":
+      return { task_id: agent };
+    case "resume_agent":
+      return { id: agent };
+    case "wait_agent":
+      return { targets: agents };
+    default:
+      return {};
+  }
+}
+
+/** Where each sub-agent a call named stood when it ended, with its last message if it had one. */
+function agentStatesOf(raw: unknown): string {
+  return Object.entries(isDict(raw) ? raw : {})
+    .flatMap(([thread, state]) => {
+      if (!isDict(state)) {
+        return [];
+      }
+      const status = `${thread}: ${str(state["status"]) ?? "unknown"}`;
+      const message = str(state["message"]);
+      return [message === undefined ? status : `${status}\n${message}`];
+    })
+    .join("\n");
 }
 
 function toolOk(item: Dict): boolean {
@@ -385,6 +474,12 @@ function toolOutputOf(item: Dict): string {
         )
         .join("\n");
     }
+    // Codex reports an image only once it has read and decoded the file, and the model was given
+    // the image itself, which both adapters show as they show an image block in a result.
+    case "imageView":
+      return "[image]";
+    case "collabAgentToolCall":
+      return agentStatesOf(item["agentsStates"]);
     default:
       return "";
   }
@@ -571,6 +666,8 @@ interface TurnCollector {
   status: string | null;
   error: string | undefined;
   readonly started: Set<string>;
+  /** What a call reported on completion said as it started, by its item's id. */
+  readonly startInputs: Map<string, unknown>;
   readonly emit: (event: AgentEvent) => void;
   readonly settle: () => void;
   /** Steers the app server accepted and has not yet delivered as a user message. */
@@ -958,11 +1055,19 @@ export class CodexAppServerSession implements ResidentSession {
         if (name === null) {
           return;
         }
-        // A web search learns what it looked for as it runs, so its call is reported on completion.
-        const early = item["type"] === "webSearch" && method !== "item/completed";
-        if (!turn.started.has(id) && !early) {
+        if (method !== "item/completed" && REPORTED_ON_COMPLETION.has(String(item["type"]))) {
+          // A sub-agent call names its sub-agents fullest as it starts, since a wait's completion
+          // names only those that ended; a web search's start is blank.
+          if (item["type"] !== "webSearch" && !turn.startInputs.has(id)) {
+            turn.startInputs.set(id, toolInputOf(item, name));
+          }
+          return;
+        }
+        if (!turn.started.has(id)) {
           turn.started.add(id);
-          turn.emit({ type: "tool_call", name, input: toolInputOf(item) });
+          const input = turn.startInputs.get(id) ?? toolInputOf(item, name);
+          turn.startInputs.delete(id);
+          turn.emit({ type: "tool_call", name, input });
         }
         if (method === "item/completed") {
           const output = toolOutputOf(item);
@@ -1041,6 +1146,7 @@ export class CodexAppServerSession implements ResidentSession {
       status: null,
       error: undefined,
       started: new Set(),
+      startInputs: new Map(),
       emit,
       settle,
       outstanding: new Set(),

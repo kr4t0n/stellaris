@@ -1,10 +1,17 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { IMAGE_LIMIT_BYTES } from "@stellaris/shared";
+import { exifOrientation } from "@stellaris/shared/image-metadata";
+import { z } from "zod";
 import {
   BADGE_TARGET,
   fakeBoard,
   MISSING_IMAGE,
   PHONE_SIZE,
   png,
+  PNG_SIGNATURE,
+  pngChunk,
   POSTED_IMAGES,
   SCREENSHOT_SIZE,
   SKILL_PROPOSAL,
@@ -480,11 +487,11 @@ function taskComposer(page: Page): Locator {
   return page.getByRole("textbox", { name: "Write in the task's thread" });
 }
 
-/** Files as a page makes them: given bytes, or a size of zeros past a PNG's signature. */
+/** Files as a page makes them: given bytes, followed by zeros up to a size when given one. */
 interface PageFile {
   name: string;
   type: string;
-  bytes?: number[];
+  bytes: number[];
   size?: number;
 }
 
@@ -494,11 +501,8 @@ function deliver(box: Locator, kind: "paste" | "drop", files: PageFile[]): Promi
     (element, given) => {
       const data = new DataTransfer();
       for (const file of given.files) {
-        let bytes = new Uint8Array(file.bytes ?? []);
-        if (file.bytes === undefined) {
-          bytes = new Uint8Array(file.size ?? 0);
-          bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-        }
+        const bytes = new Uint8Array(Math.max(file.bytes.length, file.size ?? 0));
+        bytes.set(file.bytes);
         data.items.add(new File([bytes], file.name, { type: file.type }));
       }
       const init = { bubbles: true, cancelable: true };
@@ -609,9 +613,23 @@ test("images dropped on a composer or picked upload too, and one the board refus
   );
   await expect(alert).toHaveCount(0);
 
-  // Past the board's limit, nothing is sent at all.
-  await deliver(box, "drop", [{ name: "huge.png", type: "image/png", size: 8 * 1024 * 1024 + 1 }]);
-  await expect(alert).toHaveText("huge.png is 8388609 bytes, over the 8388608 an image may be");
+  // Past the board's limit, a file of a kind it doesn't keep is not sent at all, and neither is
+  // an image that doesn't read to its end and that the browser can't draw.
+  await deliver(box, "drop", [
+    { name: "huge.bmp", type: "image/bmp", bytes: [0x42, 0x4d], size: IMAGE_LIMIT_BYTES + 1 },
+  ]);
+  await expect(alert).toHaveText("huge.bmp is 8388609 bytes, over the 8388608 an image may be");
+  await deliver(box, "drop", [
+    {
+      name: "blank.png",
+      type: "image/png",
+      bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+      size: 1000,
+    },
+  ]);
+  await expect(alert).toHaveText(
+    "blank.png does not read as a PNG; save it again and send that copy",
+  );
   await expect(box).toHaveValue(
     `Views:\n![wide.png](image:${POSTED_IMAGES[0]})\n![tall.png](image:${POSTED_IMAGES[1]})`,
   );
@@ -634,11 +652,13 @@ test("images dropped on a composer or picked upload too, and one the board refus
  */
 async function pasteTwoAlike(page: Page, second: number[]): Promise<Locator> {
   const first = png(640, 400);
+  const held = Promise.withResolvers<void>();
   const answered = Promise.withResolvers<void>();
   await page.route(
     (url) => url.pathname === "/api/images",
     async (route) => {
       if (route.request().postDataBuffer()?.length === first.length) {
+        held.resolve();
         await answered.promise;
       }
       await route.fallback();
@@ -650,7 +670,14 @@ async function pasteTwoAlike(page: Page, second: number[]): Promise<Locator> {
   await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: [...first] }]);
   await expect(box).toHaveValue("Before: ![Uploading image.png…]()");
   await box.pressSequentially(" After: ");
+  // The first is held, so the first answer is the second's. Each is posted once it is read, a
+  // moment after its paste.
+  const secondAnswered = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/images",
+  );
   await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: second }]);
+  await held.promise;
+  await secondAnswered;
   // The first is still on its way.
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
   answered.resolve();
@@ -773,4 +800,289 @@ test("a thumbnail's × takes its image out of the draft, and an image typed away
   await expect(row.getByRole("img", { name: "c.png" })).toBeVisible();
   await box.fill("Words alone");
   await expect(row).toHaveCount(0);
+});
+
+/** The images both strippers run, with what is kept of each: each kind with a made-up camera. */
+const IMAGE_CASES = z
+  .object({ name: z.string(), image: z.base64(), kept: z.base64().nullable() })
+  .array()
+  .parse(
+    JSON.parse(
+      readFileSync(
+        new URL("../../ios/fixtures/cases/image-metadata.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  )
+  .map((each) => ({
+    name: each.name,
+    image: Buffer.from(each.image, "base64"),
+    kept: each.kept === null ? null : Buffer.from(each.kept, "base64"),
+  }));
+
+/** The case of that name, and what is kept of it. */
+function imageCase(name: string): { image: Buffer; kept: Buffer } {
+  const found = IMAGE_CASES.find((each) => each.name === name);
+  if (found?.kept == null) {
+    throw new Error(`no image case named ${name} that is kept`);
+  }
+  return { image: found.image, kept: found.kept };
+}
+
+/** A camera's photo: a JPEG with its make, a place, and an orientation that turns it. */
+const CAMERA_PHOTO = imageCase("a camera's JPEG");
+
+/** The camera's Exif segment, marker and length included, as a JPEG holds it. */
+function cameraExifSegment(): Buffer {
+  const exif = CAMERA_PHOTO.image.indexOf("Exif\0\0", 0, "latin1");
+  return CAMERA_PHOTO.image.subarray(
+    exif - 4,
+    exif - 2 + CAMERA_PHOTO.image.readUInt16BE(exif - 2),
+  );
+}
+
+/** The orientation a JPEG's Exif gives, 1 when it has none. */
+function jpegOrientation(bytes: Buffer): number {
+  const exif = bytes.indexOf("Exif\0\0", 0, "latin1");
+  return exif === -1 ? 1 : exifOrientation(bytes.subarray(exif));
+}
+
+/** A JPEG's width and height, from its frame's header. */
+function jpegSize(bytes: Buffer): { width: number; height: number } {
+  let at = 2;
+  while (at + 9 < bytes.length) {
+    const marker = bytes[at + 1] ?? 0;
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return { width: bytes.readUInt16BE(at + 7), height: bytes.readUInt16BE(at + 5) };
+    }
+    at += 2 + bytes.readUInt16BE(at + 2);
+  }
+  throw new Error("no frame header");
+}
+
+/** What the composer posted to `/api/images`, each answered with the next id the board gives. */
+async function recordUploads(
+  page: Page,
+): Promise<Map<string, { type: string | undefined; bytes: Buffer }>> {
+  const posted = new Map<string, { type: string | undefined; bytes: Buffer }>();
+  await page.route(
+    (url) => url.pathname === "/api/images",
+    async (route: Route) => {
+      const request = route.request();
+      const name = new URL(request.url()).searchParams.get("name") ?? "";
+      const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
+      const id = POSTED_IMAGES[posted.size] ?? "";
+      posted.set(name, { type: request.headers()["content-type"], bytes });
+      await route.fulfill({
+        json: { id, type: "jpeg", size: bytes.length, markdown: `![${name}](image:${id})` },
+      });
+    },
+  );
+  return posted;
+}
+
+test("an image posted from a composer goes without its metadata, as the board keeps it: a camera's photo without its camera and its place, turned as it was", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  const kinds = [
+    ["photo.jpg", "image/jpeg", CAMERA_PHOTO],
+    ["moving.png", "image/png", imageCase("a camera's APNG")],
+    ["moving.gif", "image/gif", imageCase("an animated GIF")],
+  ] as const;
+  await deliver(
+    box,
+    "paste",
+    kinds.map(([name, type, { image }]) => ({ name, type, bytes: [...image] })),
+  );
+  await expect(box).toHaveValue(/^(?:!\[[a-z.]+\]\(image:\w+\)\n?){3}$/);
+
+  for (const [name, type, { kept }] of kinds) {
+    expect(posted.get(name), name).toEqual({ type, bytes: kept });
+  }
+  const photo = posted.get("photo.jpg")?.bytes ?? Buffer.alloc(0);
+  // The made-up camera's make, and its GPS directory's latitude reference, a southern one.
+  const south = Buffer.from([0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x53]);
+  expect(CAMERA_PHOTO.image.includes("Example\0")).toBe(true);
+  expect(CAMERA_PHOTO.image.includes(south)).toBe(true);
+  expect(photo.includes("Example")).toBe(false);
+  expect(photo.includes(south)).toBe(false);
+  expect(jpegOrientation(CAMERA_PHOTO.image)).toBe(6);
+  expect(jpegOrientation(photo)).toBe(6);
+});
+
+test("a page left open across a deploy still posts an image without its metadata, with no chunk it hadn't loaded", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  await expect(box).toBeVisible();
+  // A deploy renames every chunk, so the server answers one the page asks for only now with a 404.
+  await page.route("**/assets/**", (route) => route.fulfill({ status: 404, body: "" }));
+  await deliver(box, "paste", [
+    { name: "photo.jpg", type: "image/jpeg", bytes: [...CAMERA_PHOTO.image] },
+  ]);
+  await expect(box).toHaveValue(`![photo.jpg](image:${POSTED_IMAGES[0]})`);
+  expect(posted.get("photo.jpg")).toEqual({ type: "image/jpeg", bytes: CAMERA_PHOTO.kept });
+});
+
+test("a photo over the limit only for what follows its picture goes without it, neither refused nor drawn again", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  // As an HDR gain map or a motion photo's video follows a camera's picture.
+  await deliver(box, "drop", [
+    {
+      name: "motion.jpg",
+      type: "image/jpeg",
+      bytes: [...CAMERA_PHOTO.image],
+      size: CAMERA_PHOTO.image.length + IMAGE_LIMIT_BYTES,
+    },
+  ]);
+  await expect(box).toHaveValue(`![motion.jpg](image:${POSTED_IMAGES[0]})`);
+  expect(posted.get("motion.jpg")).toEqual({ type: "image/jpeg", bytes: CAMERA_PHOTO.kept });
+});
+
+test("a photo cut short goes as a JPEG of its picture drawn again upright, with none of its metadata", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  // A 400 by 300 picture, blue at its top left and red elsewhere, as the browser encodes it.
+  const picture = Buffer.from(
+    await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 400;
+      canvas.height = 300;
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        return [];
+      }
+      context.fillStyle = "#ff0000";
+      context.fillRect(0, 0, 400, 300);
+      context.fillStyle = "#0000ff";
+      context.fillRect(0, 0, 100, 100);
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", 0.95);
+      });
+      return [...new Uint8Array((await blob?.arrayBuffer()) ?? new ArrayBuffer(0))];
+    }),
+  );
+  // The camera's Exif after the start of the image, then all of it but its last 100 bytes.
+  const photo = Buffer.concat([picture.subarray(0, 2), cameraExifSegment(), picture.subarray(2)]);
+  const cut = photo.subarray(0, -100);
+  expect(jpegOrientation(cut)).toBe(6);
+  expect(cut.includes("Example\0")).toBe(true);
+  const box = taskComposer(page);
+  await deliver(box, "paste", [{ name: "cut.jpg", type: "image/jpeg", bytes: [...cut] }]);
+  await expect(box).toHaveValue(`![cut.jpg](image:${POSTED_IMAGES[0]})`);
+
+  const sent = posted.get("cut.jpg");
+  expect(sent?.type).toBe("image/jpeg");
+  const bytes = sent?.bytes ?? Buffer.alloc(0);
+  expect(bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+  expect(bytes.includes("Exif")).toBe(false);
+  expect(bytes.includes("Example")).toBe(false);
+  // Turned upright: 300 wide and 400 tall, with the blue that was at the top left at the top right.
+  expect(jpegSize(bytes)).toEqual({ width: 300, height: 400 });
+  const corners = await page.evaluate(
+    async (given) => {
+      const image = await createImageBitmap(new Blob([new Uint8Array(given)]));
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context?.drawImage(image, 0, 0);
+      const blue = (x: number, y: number): boolean => {
+        const [red = 0, , bluePart = 0] = context?.getImageData(x, y, 1, 1).data ?? [];
+        return bluePart > 128 && red < 128;
+      };
+      return { topLeft: blue(10, 10), topRight: blue(image.width - 10, 10) };
+    },
+    [...bytes],
+  );
+  expect(corners).toEqual({ topLeft: false, topRight: true });
+});
+
+/**
+ * A PNG of a gradient `width` by `height` pixels with alpha, at `depth` bits a channel, its image
+ * data stored without compression when `stored`, so that its size is its pixels'.
+ */
+function gradientPng(width: number, height: number, depth: 8 | 16, stored: boolean): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([depth, 6, 0, 0, 0], 8);
+  const channel = depth / 8;
+  const row = 1 + width * 4 * channel;
+  const rows = Buffer.alloc(row * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = y * row + 1 + x * 4 * channel;
+      const pixel = [(x * 255) / width, (y * 255) / height, 128, 255];
+      pixel.forEach((value, index) => {
+        rows.fill(Math.round(value), at + index * channel, at + (index + 1) * channel);
+      });
+    }
+  }
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(rows, { level: stored ? 0 : 6 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/**
+ * Pastes `bytes` into the box as a PNG named `name`, which the page reads from a route rather
+ * than from the test's arguments, too large to pass.
+ */
+async function pasteServed(page: Page, box: Locator, name: string, bytes: Buffer): Promise<void> {
+  await page.route(`**/e2e-files/${name}`, (route) =>
+    route.fulfill({ contentType: "application/octet-stream", body: bytes }),
+  );
+  await box.evaluate(async (element, fileName) => {
+    const blob = await (await fetch(`/e2e-files/${fileName}`)).blob();
+    const data = new DataTransfer();
+    data.items.add(new File([blob], fileName, { type: "image/png" }));
+    element.dispatchEvent(
+      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }),
+    );
+  }, name);
+}
+
+test("an image still past the limit without its metadata, or one cut short, goes as a JPEG drawn again, at most 4,096 pixels on its longest side", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+
+  // Its pictures alone are past the limit, at 16 bits a channel stored as they are.
+  const deep = gradientPng(1100, 1000, 16, true);
+  expect(deep.length).toBeGreaterThan(IMAGE_LIMIT_BYTES);
+  await pasteServed(page, box, "deep.png", deep);
+  await expect(box).toHaveValue(`![deep.png](image:${POSTED_IMAGES[0]})`, { timeout: 15_000 });
+  const first = posted.get("deep.png")?.bytes ?? Buffer.alloc(0);
+  expect(posted.get("deep.png")?.type).toBe("image/jpeg");
+  expect(jpegSize(first)).toEqual({ width: 1100, height: 1000 });
+
+  // Wider than 4,096 pixels, and cut short before its end.
+  await box.fill("");
+  const wide = gradientPng(4400, 40, 8, false);
+  await pasteServed(page, box, "wide.png", wide.subarray(0, -12));
+  await expect(box).toHaveValue(`![wide.png](image:${POSTED_IMAGES[1]})`, { timeout: 15_000 });
+  const second = posted.get("wide.png")?.bytes ?? Buffer.alloc(0);
+  expect(posted.get("wide.png")?.type).toBe("image/jpeg");
+  expect(jpegSize(second)).toEqual({ width: 4096, height: 37 });
 });

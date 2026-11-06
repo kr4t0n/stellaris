@@ -292,10 +292,10 @@ export const POSTED_IMAGES = [
   "01M3Q2RRRRRRRRRRRRRRRRRRS3",
 ];
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+export const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
-function pngChunk(type: string, data: Buffer): Buffer {
+export function pngChunk(type: string, data: Buffer): Buffer {
   const head = Buffer.alloc(8);
   head.writeUInt32BE(data.length, 0);
   head.write(type, 4, "latin1");

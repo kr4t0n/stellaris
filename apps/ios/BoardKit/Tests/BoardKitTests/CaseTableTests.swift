@@ -4,7 +4,8 @@ import Testing
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run.
+/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run, and
+/// the one `withoutMetadata` in `shared` runs.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -361,6 +362,23 @@ import Testing
           ] as [String: JSONValue]))
       #expect(describeCharter(each.kind, each.charter) == each.line, "\(each.name)")
       #expect(proposalTitle(proposal) == each.title, "\(each.name)")
+    }
+  }
+
+  /// An image and what the board keeps of it, both in base64, or nil when it keeps none.
+  struct ImageMetadataCase: Decodable {
+    let name: String
+    let image: String
+    let kept: String?
+  }
+
+  @Test func withoutMetadataAgreesWithTheBoard() throws {
+    let cases = try Fixture.table("image-metadata", as: [ImageMetadataCase].self)
+    #expect(cases.count > 40)
+    for each in cases {
+      let image = try #require(Data(base64Encoded: each.image), "\(each.name)")
+      let kept = try each.kept.map { try #require(Data(base64Encoded: $0), "\(each.name)") }
+      #expect(withoutMetadata(image) == kept, "\(each.name)")
     }
   }
 }

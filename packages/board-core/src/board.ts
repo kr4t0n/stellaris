@@ -27,6 +27,7 @@ import {
   describeCharter,
   EffortSchema,
   githubRepository,
+  IMAGE_KIND_NAMES,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
   imageDescription,
@@ -163,6 +164,7 @@ import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
+import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
@@ -2577,9 +2579,9 @@ export class Board {
   /**
    * Keeps an image a citizen's turn names by its path, read on the runner the turn runs on, which
    * refuses a file outside the turn's worktree, the citizen's home, and the system temp folder.
-   * Only the bytes of a PNG, JPEG, GIF, or WebP of at most `IMAGE_LIMIT_BYTES` are kept, checked
-   * here again whatever the runner said, under a new id outside the projection, so no runner
-   * mirrors them and no prompt carries them: a post shows the image by its `image:` address.
+   * Only a PNG, JPEG, GIF, or WebP of at most `IMAGE_LIMIT_BYTES` is kept, checked here again
+   * whatever the runner said, without its metadata, under a new id outside the projection, so no
+   * runner mirrors it and no prompt carries it: a post shows the image by its `image:` address.
    */
   async uploadImage(actor: Actor, input: VerbInput<"upload_image">): Promise<UploadedImage> {
     const args = VerbInputs.upload_image.parse(input);
@@ -2614,8 +2616,13 @@ export class Board {
 
   /**
    * Keeps `bytes` under a new id when they are a PNG, JPEG, GIF, or WebP of at most
-   * `IMAGE_LIMIT_BYTES`, and answers the markdown that shows them, described by `name`. `what`
-   * names the image in a refusal.
+   * `IMAGE_LIMIT_BYTES` that reads to its end, without its metadata (`withoutMetadata`), and
+   * answers the markdown that shows it, described by `name`. `what` names the image in a refusal.
+   * The limit is for the bytes as they came, as the route's body cap measures them, and bounds
+   * what is read; what is kept is checked against it too, since an orientation written smaller
+   * than the board writes it grows by a few bytes. The runner, the web's composer, and the app
+   * strip an image before they send it, and stripping it again changes nothing, but an older
+   * runner, page, or app sends one as it was.
    */
   private async keepImage(
     actor: Actor,
@@ -2636,19 +2643,34 @@ export class Board {
         `${what} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
       );
     }
+    // Read before the mutex, which every other write waits on: an image of 8 MiB built to take the
+    // most steps takes a few hundred milliseconds.
+    const kept = withoutMetadata(bytes);
+    if (kept === null) {
+      throw new BoardError(
+        "VALIDATION",
+        `${what} does not read to its end as a ${IMAGE_KIND_NAMES[type]}, so its metadata cannot be told from its picture; save it again and send that copy`,
+      );
+    }
+    if (kept.byteLength > IMAGE_LIMIT_BYTES) {
+      throw new BoardError(
+        "VALIDATION",
+        `${what} is ${kept.byteLength} bytes without its metadata, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+      );
+    }
     return this.mutex.run(async () => {
       const id = this.newId();
-      await writeFileAtomic(this.paths.image(id), bytes);
+      await writeFileAtomic(this.paths.image(id), kept);
       await this.events.append("image.uploaded", actor.name, {
         id,
         type,
-        size: bytes.byteLength,
+        size: kept.byteLength,
       });
       const description = imageDescription(name);
       return {
         id,
         type,
-        size: bytes.byteLength,
+        size: kept.byteLength,
         markdown: `![${description}](${IMAGE_SCHEME}${id})`,
       };
     });

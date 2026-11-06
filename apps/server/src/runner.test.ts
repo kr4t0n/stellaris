@@ -43,6 +43,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
 
@@ -385,12 +386,6 @@ async function commitEmpty(cwd: string, agent: string, message: string): Promise
 
 /** A verb's answer or refusal, as a JSON object. */
 const AnswerSchema = z.record(z.string(), z.unknown());
-
-/** The smallest PNG there is: one transparent pixel. */
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-  "base64",
-);
 
 const deskPost = {
   agent: "desk",
@@ -4868,7 +4863,7 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo"],
     });
     // The user's image is as large as the board takes, so the whole of it crosses the stream.
-    const largest = Buffer.concat([PIXEL, Buffer.alloc(IMAGE_LIMIT_BYTES - PIXEL.length, 7)]);
+    const largest = pngOfSize(IMAGE_LIMIT_BYTES);
     const posted = await board.postImage(USER, largest, "board.png");
     const answers = new Map<string, { status: number; body: Record<string, unknown> }>();
     const opened = new Map<string, Buffer>();

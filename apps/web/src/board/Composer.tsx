@@ -23,6 +23,9 @@ import {
   settleUpload,
   uploadPlaceholder,
 } from "./compose.js";
+// Loaded with the page, never with the first image: a page open across a deploy finds a chunk it
+// hadn't loaded gone, and would post no image at all.
+import { imageToPost } from "./post-image.js";
 
 /**
  * Where a post goes: a channel, a thread, or a new ask, which opens a thread on the society's
@@ -208,8 +211,6 @@ export function Composer({
     setUploading((count) => count + 1);
     let markdown = "";
     try {
-      // Loaded with the first image posted, so the first page goes without the stripper.
-      const { imageToPost } = await import("./post-image.js");
       markdown = (await api.postImage(await imageToPost(file, file.name), file.name)).markdown;
     } catch (error) {
       setUploadFailure(

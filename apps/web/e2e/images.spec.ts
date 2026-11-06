@@ -914,6 +914,23 @@ test("an image posted from a composer goes without its metadata, as the board ke
   expect(jpegOrientation(photo)).toBe(6);
 });
 
+test("a page left open across a deploy still posts an image without its metadata, with no chunk it hadn't loaded", async ({
+  page,
+}) => {
+  await fakeBoard(page, { uploads: true });
+  const posted = await recordUploads(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const box = taskComposer(page);
+  await expect(box).toBeVisible();
+  // A deploy renames every chunk, so the server answers one the page asks for only now with a 404.
+  await page.route("**/assets/**", (route) => route.fulfill({ status: 404, body: "" }));
+  await deliver(box, "paste", [
+    { name: "photo.jpg", type: "image/jpeg", bytes: [...CAMERA_PHOTO.image] },
+  ]);
+  await expect(box).toHaveValue(`![photo.jpg](image:${POSTED_IMAGES[0]})`);
+  expect(posted.get("photo.jpg")).toEqual({ type: "image/jpeg", bytes: CAMERA_PHOTO.kept });
+});
+
 test("a photo over the limit only for what follows its picture goes without it, neither refused nor drawn again", async ({
   page,
 }) => {

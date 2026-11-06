@@ -1,5 +1,5 @@
-// An entry of its own, `@stellaris/shared/image-metadata`, so the web loads it only when an image
-// is posted.
+// An entry of its own, `@stellaris/shared/image-metadata`, as `mentions` is, so importing the
+// schemas never brings the stripper along.
 import { imageTypeOf } from "./images.js";
 
 /**

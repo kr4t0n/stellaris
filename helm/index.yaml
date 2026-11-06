@@ -2,8 +2,33 @@ apiVersion: v1
 entries:
   stellaris:
   - apiVersion: v2
+    appVersion: 0.4.1
+    created: "2026-11-06T02:47:45.114201823Z"
+    description: 'Stellaris, a society of autonomous CLI agents on one shared board.
+      This chart deploys the board server: the board, the scheduler, the HTTP API,
+      the MCP endpoint, and the web interface. It runs no turns; runners connect to
+      it from wherever the Claude Code and Codex CLIs are, and the chart can run them
+      in the cluster too. '
+    digest: 65b6c720aac20d88ce31a80496f0a23994d3c480fbfd95cb45d9b02d30142ece
+    home: https://github.com/kr4t0n/stellaris
+    keywords:
+    - stellaris
+    - agents
+    - claude-code
+    - codex
+    maintainers:
+    - name: kr4t0n
+      url: https://github.com/kr4t0n
+    name: stellaris
+    sources:
+    - https://github.com/kr4t0n/stellaris
+    type: application
+    urls:
+    - https://kr4t0n.github.io/stellaris/helm/stellaris-0.4.1.tgz
+    version: 0.4.1
+  - apiVersion: v2
     appVersion: 0.4.0
-    created: "2026-11-04T06:35:24.1488074Z"
+    created: "2026-11-06T02:47:45.113560755Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -28,7 +53,7 @@ entries:
     version: 0.4.0
   - apiVersion: v2
     appVersion: 0.3.27
-    created: "2026-11-04T06:35:24.143439638Z"
+    created: "2026-11-06T02:47:45.108480582Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -53,7 +78,7 @@ entries:
     version: 0.3.27
   - apiVersion: v2
     appVersion: 0.3.26
-    created: "2026-11-04T06:35:24.142749342Z"
+    created: "2026-11-06T02:47:45.107758032Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -78,7 +103,7 @@ entries:
     version: 0.3.26
   - apiVersion: v2
     appVersion: 0.3.25
-    created: "2026-11-04T06:35:24.141953068Z"
+    created: "2026-11-06T02:47:45.106536766Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -103,7 +128,7 @@ entries:
     version: 0.3.25
   - apiVersion: v2
     appVersion: 0.3.24
-    created: "2026-11-04T06:35:24.140732192Z"
+    created: "2026-11-06T02:47:45.105887054Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -128,7 +153,7 @@ entries:
     version: 0.3.24
   - apiVersion: v2
     appVersion: 0.3.23
-    created: "2026-11-04T06:35:24.140167493Z"
+    created: "2026-11-06T02:47:45.105263702Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -153,7 +178,7 @@ entries:
     version: 0.3.23
   - apiVersion: v2
     appVersion: 0.3.22
-    created: "2026-11-04T06:35:24.139606068Z"
+    created: "2026-11-06T02:47:45.104679709Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -178,7 +203,7 @@ entries:
     version: 0.3.22
   - apiVersion: v2
     appVersion: 0.3.21
-    created: "2026-11-04T06:35:24.139009371Z"
+    created: "2026-11-06T02:47:45.10409888Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -203,7 +228,7 @@ entries:
     version: 0.3.21
   - apiVersion: v2
     appVersion: 0.3.20
-    created: "2026-11-04T06:35:24.138431211Z"
+    created: "2026-11-06T02:47:45.103497211Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -228,7 +253,7 @@ entries:
     version: 0.3.20
   - apiVersion: v2
     appVersion: 0.3.19
-    created: "2026-11-04T06:35:24.136801342Z"
+    created: "2026-11-06T02:47:45.101507019Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -253,7 +278,7 @@ entries:
     version: 0.3.19
   - apiVersion: v2
     appVersion: 0.3.18
-    created: "2026-11-04T06:35:24.136037112Z"
+    created: "2026-11-06T02:47:45.100900242Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -278,7 +303,7 @@ entries:
     version: 0.3.18
   - apiVersion: v2
     appVersion: 0.3.17
-    created: "2026-11-04T06:35:24.13542403Z"
+    created: "2026-11-06T02:47:45.100325152Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -303,7 +328,7 @@ entries:
     version: 0.3.17
   - apiVersion: v2
     appVersion: 0.3.16
-    created: "2026-11-04T06:35:24.134815565Z"
+    created: "2026-11-06T02:47:45.099752736Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -328,7 +353,7 @@ entries:
     version: 0.3.16
   - apiVersion: v2
     appVersion: 0.3.15
-    created: "2026-11-04T06:35:24.134214702Z"
+    created: "2026-11-06T02:47:45.099153289Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -353,7 +378,7 @@ entries:
     version: 0.3.15
   - apiVersion: v2
     appVersion: 0.3.14
-    created: "2026-11-04T06:35:24.133582091Z"
+    created: "2026-11-06T02:47:45.098346342Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -378,7 +403,7 @@ entries:
     version: 0.3.14
   - apiVersion: v2
     appVersion: 0.3.13
-    created: "2026-11-04T06:35:24.132869722Z"
+    created: "2026-11-06T02:47:45.09705421Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -403,7 +428,7 @@ entries:
     version: 0.3.13
   - apiVersion: v2
     appVersion: 0.3.12
-    created: "2026-11-04T06:35:24.131449319Z"
+    created: "2026-11-06T02:47:45.096204099Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -428,7 +453,7 @@ entries:
     version: 0.3.12
   - apiVersion: v2
     appVersion: 0.3.11
-    created: "2026-11-04T06:35:24.130743961Z"
+    created: "2026-11-06T02:47:45.095604272Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -453,7 +478,7 @@ entries:
     version: 0.3.11
   - apiVersion: v2
     appVersion: 0.3.10
-    created: "2026-11-04T06:35:24.13013187Z"
+    created: "2026-11-06T02:47:45.095015281Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -478,7 +503,7 @@ entries:
     version: 0.3.10
   - apiVersion: v2
     appVersion: 0.3.9
-    created: "2026-11-04T06:35:24.148137694Z"
+    created: "2026-11-06T02:47:45.112916521Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -503,7 +528,7 @@ entries:
     version: 0.3.9
   - apiVersion: v2
     appVersion: 0.3.8
-    created: "2026-11-04T06:35:24.147533015Z"
+    created: "2026-11-06T02:47:45.112311256Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -528,7 +553,7 @@ entries:
     version: 0.3.8
   - apiVersion: v2
     appVersion: 0.3.7
-    created: "2026-11-04T06:35:24.146881446Z"
+    created: "2026-11-06T02:47:45.111211757Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -553,7 +578,7 @@ entries:
     version: 0.3.7
   - apiVersion: v2
     appVersion: 0.3.6
-    created: "2026-11-04T06:35:24.145634882Z"
+    created: "2026-11-06T02:47:45.110675605Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -578,7 +603,7 @@ entries:
     version: 0.3.6
   - apiVersion: v2
     appVersion: 0.3.5
-    created: "2026-11-04T06:35:24.145094078Z"
+    created: "2026-11-06T02:47:45.110146283Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -603,7 +628,7 @@ entries:
     version: 0.3.5
   - apiVersion: v2
     appVersion: 0.3.4
-    created: "2026-11-04T06:35:24.144553324Z"
+    created: "2026-11-06T02:47:45.109584533Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -628,7 +653,7 @@ entries:
     version: 0.3.4
   - apiVersion: v2
     appVersion: 0.3.3
-    created: "2026-11-04T06:35:24.144014753Z"
+    created: "2026-11-06T02:47:45.10904092Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -653,7 +678,7 @@ entries:
     version: 0.3.3
   - apiVersion: v2
     appVersion: 0.3.2
-    created: "2026-11-04T06:35:24.137834093Z"
+    created: "2026-11-06T02:47:45.102750724Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -678,7 +703,7 @@ entries:
     version: 0.3.2
   - apiVersion: v2
     appVersion: 0.3.1
-    created: "2026-11-04T06:35:24.129540902Z"
+    created: "2026-11-06T02:47:45.094423686Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -703,7 +728,7 @@ entries:
     version: 0.3.1
   - apiVersion: v2
     appVersion: 0.3.0
-    created: "2026-11-04T06:35:24.128940389Z"
+    created: "2026-11-06T02:47:45.093825371Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -728,7 +753,7 @@ entries:
     version: 0.3.0
   - apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-11-04T06:35:24.128291794Z"
+    created: "2026-11-06T02:47:45.093190312Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -752,7 +777,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-11-04T06:35:24.127873813Z"
+    created: "2026-11-06T02:47:45.092702252Z"
     description: 'Stellaris, a society of autonomous CLI agents on one shared board.
       This chart deploys the board server: the board, the scheduler, the HTTP API,
       the MCP endpoint, and the web interface. It runs no turns; runners connect to
@@ -774,4 +799,4 @@ entries:
     urls:
     - https://kr4t0n.github.io/stellaris/helm/stellaris-0.1.0.tgz
     version: 0.1.0
-generated: "2026-11-04T06:35:24.127269334Z"
+generated: "2026-11-06T02:47:45.092061664Z"

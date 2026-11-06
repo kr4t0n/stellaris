@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { IMAGE_LIMIT_BYTES } from "@stellaris/shared";
 import { exifOrientation } from "@stellaris/shared/image-metadata";
@@ -9,6 +10,8 @@ import {
   MISSING_IMAGE,
   PHONE_SIZE,
   png,
+  PNG_SIGNATURE,
+  pngChunk,
   POSTED_IMAGES,
   SCREENSHOT_SIZE,
   SKILL_PROPOSAL,
@@ -994,61 +997,53 @@ test("a photo cut short goes as a JPEG of its picture drawn again upright, with 
 });
 
 /**
- * Pastes a PNG of noise `side` pixels square, made in the page: random bytes, which a PNG can't
- * make smaller, or a repeating pattern, which it can and a JPEG can't, and less its last `cut`
- * bytes.
+ * A PNG of a gradient `width` by `height` pixels with alpha, at `depth` bits a channel, its image
+ * data stored without compression when `stored`, so that its size is its pixels'.
  */
-function pasteNoise(
-  box: Locator,
-  name: string,
-  noise: { side: number; random: boolean; cut: number },
-): Promise<number> {
-  return box.evaluate(
-    async (element, { fileName, side, random, cut }) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = side;
-      canvas.height = side;
-      const context = canvas.getContext("2d");
-      if (context === null) {
-        return 0;
-      }
-      const pixels = context.createImageData(side, side);
-      if (random) {
-        for (let at = 0; at < pixels.data.length; at += 65536) {
-          crypto.getRandomValues(pixels.data.subarray(at, at + 65536));
-        }
-      } else {
-        let seed = 1;
-        for (let at = 0; at < pixels.data.length; at += 4) {
-          seed = (seed * 1103515245 + 12345) >>> 0;
-          pixels.data.set([seed & 255, (seed >>> 8) & 255, (seed >>> 16) & 255], at);
-        }
-      }
-      for (let at = 3; at < pixels.data.length; at += 4) {
-        pixels.data[at] = 255;
-      }
-      context.putImageData(pixels, 0, 0);
-      const encoded = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, "image/png");
+function gradientPng(width: number, height: number, depth: 8 | 16, stored: boolean): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([depth, 6, 0, 0, 0], 8);
+  const channel = depth / 8;
+  const row = 1 + width * 4 * channel;
+  const rows = Buffer.alloc(row * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = y * row + 1 + x * 4 * channel;
+      const pixel = [(x * 255) / width, (y * 255) / height, 128, 255];
+      pixel.forEach((value, index) => {
+        rows.fill(Math.round(value), at + index * channel, at + (index + 1) * channel);
       });
-      if (encoded === null) {
-        return 0;
-      }
-      const file = new File([encoded.slice(0, encoded.size - cut)], fileName, {
-        type: "image/png",
-      });
-      const data = new DataTransfer();
-      data.items.add(file);
-      element.dispatchEvent(
-        new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }),
-      );
-      return file.size;
-    },
-    { fileName: name, ...noise },
-  );
+    }
+  }
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(rows, { level: stored ? 0 : 6 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
-test("an image past the limit without its metadata, or one cut short, is drawn again from 4,096 pixels, 0.7 times smaller each time until it fits", async ({
+/**
+ * Pastes `bytes` into the box as a PNG named `name`, which the page reads from a route rather
+ * than from the test's arguments, too large to pass.
+ */
+async function pasteServed(page: Page, box: Locator, name: string, bytes: Buffer): Promise<void> {
+  await page.route(`**/e2e-files/${name}`, (route) =>
+    route.fulfill({ contentType: "application/octet-stream", body: bytes }),
+  );
+  await box.evaluate(async (element, fileName) => {
+    const blob = await (await fetch(`/e2e-files/${fileName}`)).blob();
+    const data = new DataTransfer();
+    data.items.add(new File([blob], fileName, { type: "image/png" }));
+    element.dispatchEvent(
+      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }),
+    );
+  }, name);
+}
+
+test("an image still past the limit without its metadata, or one cut short, goes as a JPEG drawn again, at most 4,096 pixels on its longest side", async ({
   page,
 }) => {
   await fakeBoard(page, { uploads: true });
@@ -1056,22 +1051,21 @@ test("an image past the limit without its metadata, or one cut short, is drawn a
   await page.goto(`/task/${STAGE_TASK}`);
   const box = taskComposer(page);
 
-  // A PNG past the limit with nothing to leave out fits as a JPEG at its own size.
-  const random = await pasteNoise(box, "random.png", { side: 1800, random: true, cut: 0 });
-  expect(random).toBeGreaterThan(IMAGE_LIMIT_BYTES);
-  await expect(box).toHaveValue(`![random.png](image:${POSTED_IMAGES[0]})`);
-  const first = posted.get("random.png")?.bytes ?? Buffer.alloc(0);
-  expect(posted.get("random.png")?.type).toBe("image/jpeg");
-  expect(jpegSize(first)).toEqual({ width: 1800, height: 1800 });
-  expect(first.length).toBeLessThanOrEqual(IMAGE_LIMIT_BYTES);
+  // Its pictures alone are past the limit, at 16 bits a channel stored as they are.
+  const deep = gradientPng(1100, 1000, 16, true);
+  expect(deep.length).toBeGreaterThan(IMAGE_LIMIT_BYTES);
+  await pasteServed(page, box, "deep.png", deep);
+  await expect(box).toHaveValue(`![deep.png](image:${POSTED_IMAGES[0]})`, { timeout: 15_000 });
+  const first = posted.get("deep.png")?.bytes ?? Buffer.alloc(0);
+  expect(posted.get("deep.png")?.type).toBe("image/jpeg");
+  expect(jpegSize(first)).toEqual({ width: 1100, height: 1000 });
 
-  // One wider than 4,096 pixels, cut short, is past the limit as a JPEG of 4,096, so goes at
-  // 0.7 times that.
+  // Wider than 4,096 pixels, and cut short before its end.
   await box.fill("");
-  await pasteNoise(box, "pattern.png", { side: 4400, random: false, cut: 12 });
-  await expect(box).toHaveValue(`![pattern.png](image:${POSTED_IMAGES[1]})`, { timeout: 20_000 });
-  const second = posted.get("pattern.png")?.bytes ?? Buffer.alloc(0);
-  expect(posted.get("pattern.png")?.type).toBe("image/jpeg");
-  expect(jpegSize(second)).toEqual({ width: 2867, height: 2867 });
-  expect(second.length).toBeLessThanOrEqual(IMAGE_LIMIT_BYTES);
+  const wide = gradientPng(4400, 40, 8, false);
+  await pasteServed(page, box, "wide.png", wide.subarray(0, -12));
+  await expect(box).toHaveValue(`![wide.png](image:${POSTED_IMAGES[1]})`, { timeout: 15_000 });
+  const second = posted.get("wide.png")?.bytes ?? Buffer.alloc(0);
+  expect(posted.get("wide.png")?.type).toBe("image/jpeg");
+  expect(jpegSize(second)).toEqual({ width: 4096, height: 37 });
 });

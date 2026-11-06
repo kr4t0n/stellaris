@@ -10,6 +10,7 @@ import { RunnerHub, TurnHost } from "@stellaris/turn-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { EnrollmentDesk } from "./enrollment.js";
+import { pngOfSize } from "./testing/images.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 // The limits are restated here rather than imported, so changing one means changing its test too.
@@ -162,8 +163,7 @@ describe("request body limits", () => {
     (await board.readEvents(null, 1_000)).filter((event) => event.type === "image.uploaded").length;
 
   it("takes an image the user posts up to 8 MiB, past the cap on other writes, and refuses one over it with a 413", async () => {
-    const png = Buffer.from("89504e470d0a1a0a", "hex");
-    const image = (size: number) => Buffer.concat([png, Buffer.alloc(size - png.length)]);
+    const image = pngOfSize;
 
     const over = await send(image(8 * MiB + 1));
     expect(over.status).toBe(413);

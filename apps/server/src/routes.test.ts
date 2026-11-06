@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -17,6 +17,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { ONE_PIXEL } from "./testing/images.js";
 import { addWorkRoles } from "./testing/scripted-backend.js";
 import { TurnHub } from "./turn-hub.js";
 
@@ -525,18 +526,10 @@ describe("board server routes", () => {
       });
     // Each kind by its first bytes, whatever the request's content type says.
     const images: Array<{ type: string; bytes: Buffer; sent: string }> = [
-      {
-        type: "png",
-        bytes: Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"),
-        sent: "image/png",
-      },
-      { type: "jpeg", bytes: Buffer.from("ffd8ffe000104a464946", "hex"), sent: "image/jpeg" },
-      { type: "gif", bytes: Buffer.from("GIF89a\x01\x00\x01\x00", "latin1"), sent: "" },
-      {
-        type: "webp",
-        bytes: Buffer.from("RIFF\x24\x00\x00\x00WEBPVP8 ", "latin1"),
-        sent: "application/octet-stream",
-      },
+      { type: "png", bytes: ONE_PIXEL.png, sent: "image/png" },
+      { type: "jpeg", bytes: ONE_PIXEL.jpeg, sent: "image/jpeg" },
+      { type: "gif", bytes: ONE_PIXEL.gif, sent: "" },
+      { type: "webp", bytes: ONE_PIXEL.webp, sent: "application/octet-stream" },
     ];
     const png = images[0]?.bytes ?? Buffer.alloc(0);
     for (const image of images) {
@@ -555,13 +548,41 @@ describe("board server routes", () => {
       expect(Buffer.from(await served.arrayBuffer())).toEqual(image.bytes);
     }
     expect(await kept()).toBe(4);
+    // A camera's photo comes back without its camera, place, or notes, and turned as it was; one
+    // cut short is refused, since its metadata can't be told from its picture.
+    const table = z
+      .object({ name: z.string(), image: z.base64(), kept: z.base64().nullable() })
+      .array()
+      .parse(
+        JSON.parse(
+          await readFile(
+            new URL("../../ios/fixtures/cases/image-metadata.json", import.meta.url),
+            "utf8",
+          ),
+        ),
+      );
+    const photo = table.find((each) => each.name === "a camera's JPEG");
+    const answer = await post(Buffer.from(photo?.image ?? "", "base64"), "?name=photo.jpg");
+    expect(answer.status).toBe(200);
+    const photoId = UploadedImageSchema.parse(await answer.json()).id;
+    const served = await app.request(`/api/images/${photoId}`, { headers });
+    expect(Buffer.from(await served.arrayBuffer()).toString("base64")).toBe(photo?.kept);
+    const cut = table.find((each) => each.name === "a JPEG cut at byte 169 of 170");
+    const refused = await post(Buffer.from(cut?.image ?? "", "base64"), "?name=photo.jpg");
+    expect(refused.status).toBe(400);
+    expect(Answer.parse(await refused.json())).toEqual({
+      error: "VALIDATION",
+      message:
+        "photo.jpg does not read to its end as a JPEG, so its metadata cannot be told from its picture; save it again and send that copy",
+    });
+    expect(await kept()).toBe(5);
     const named = UploadedImageSchema.parse(
       await (await post(png, `?name=${encodeURIComponent("a [b]\\c\nd`e`.png")}`)).json(),
     );
     expect(named.markdown).toBe(`![a bcde.png](image:${named.id})`);
     const unnamed = UploadedImageSchema.parse(await (await post(png)).json());
     expect(unnamed.markdown).toBe(`![](image:${unnamed.id})`);
-    expect(await kept()).toBe(6);
+    expect(await kept()).toBe(7);
 
     // No document posing as an image, nor nothing at all.
     const svg = await post(
@@ -592,7 +613,7 @@ describe("board server routes", () => {
       error: "FORBIDDEN",
       message: "only the user posts an image's bytes",
     });
-    expect(await kept()).toBe(6);
+    expect(await kept()).toBe(7);
   });
 
   it("serves knowledge per project and for the society, the society's skills, and reflection wakes", async () => {

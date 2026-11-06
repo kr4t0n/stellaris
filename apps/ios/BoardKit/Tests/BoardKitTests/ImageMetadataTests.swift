@@ -309,6 +309,22 @@ import Testing
     }
   }
 
+  @Test func readsAnAnimationsFramesHoweverDeepTheyNest() {
+    let place = [UInt8](repeating: 0, count: 16)
+    let lossless = riffChunk("VP8L", [0x2F, 1, 2, 3, 4])
+    // A frame holding a frame, and so on, 100,000 deep, which it keeps as it is. Each frame's
+    // header is written in turn, since wrapping the frames one by one copies them all.
+    let depth = 100_000
+    let size = { (value: Int) in (0..<4).map { UInt8(truncatingIfNeeded: value >> ($0 * 8)) } }
+    var nested = Array("RIFF".utf8) + size(4 + 24 * depth + lossless.count) + Array("WEBP".utf8)
+    nested.reserveCapacity(12 + 24 * depth + lossless.count)
+    for level in 0..<depth {
+      nested += Array("ANMF".utf8) + size(16 + 24 * (depth - level - 1) + lossless.count) + place
+    }
+    nested += lossless
+    #expect(withoutMetadata(Data(nested)) == Data(nested))
+  }
+
   @Test func readsNothingButAnImage() {
     #expect(withoutMetadata(Data("<svg/>".utf8)) == nil)
     #expect(withoutMetadata(Data()) == nil)

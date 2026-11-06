@@ -318,14 +318,17 @@ private func webpWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
     return nil
   }
   let end = 8 + number(bytes[4..<8], littleEndian: true)
-  guard end >= 12, end <= bytes.count, let chunks = webpChunks(bytes[12..<end], orientation: true),
+  guard end >= 12, end <= bytes.count, let chunks = webpChunks(bytes[12..<end]),
     !chunks.isEmpty
   else {
     return nil
   }
   var kept = ascii("RIFF") + littleEndian(chunks.count + 4, size: 4) + ascii("WEBP") + chunks
-  // VP8X, when it comes, comes first and says whether Exif and XMP follow.
-  if kept.count > 20, kept[12..<16].elementsEqual(ascii("VP8X")) {
+  // VP8X, when it comes, comes first and says in its first byte whether Exif and XMP follow. One
+  // of no bytes has none, and the byte after its header is the next chunk's.
+  if kept.count > 20, kept[12..<16].elementsEqual(ascii("VP8X")),
+    number(kept[16..<20], littleEndian: true) > 0
+  {
     let exif = webpChunkTypes(kept[12...]).contains(ascii("EXIF"))
     kept[20] = kept[20] & ~0x0C | (exif ? 0x08 : 0)
   }
@@ -333,33 +336,53 @@ private func webpWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
 }
 
 /// The chunks in `chunks` that draw the image, an animation's frames with their own chunks left
-/// out in the same way, and an Exif block of the orientation alone when `orientation` is true and
-/// the image is turned. Nil when the chunks don't read to their end.
-private func webpChunks(_ chunks: ArraySlice<UInt8>, orientation: Bool) -> [UInt8]? {
+/// out in the same way, and an Exif block of the orientation alone when the image is turned. A
+/// frame's chunks are read in turn with the file's, the frames it is inside kept on a stack, never
+/// by a call of their own, since a file may nest frames inside frames however deep it likes, and a
+/// decoder draws each. Nil when the chunks don't read to their end.
+private func webpChunks(_ chunks: ArraySlice<UInt8>) -> [UInt8]? {
   var kept: [UInt8] = []
+  // The frames being read, the innermost last: where its chunks end, where the reading of the
+  // chunks around it goes on, and where its size goes in what is kept.
+  var frames: [(end: Int, resume: Int, size: Int)] = []
+  var end = chunks.endIndex
   var at = chunks.startIndex
   var orientationKept = false
-  while at < chunks.endIndex {
-    guard chunks.endIndex - at >= 8 else {
+  while true {
+    if at >= end {
+      guard let frame = frames.popLast() else {
+        return kept
+      }
+      kept.replaceSubrange(
+        frame.size..<frame.size + 4, with: littleEndian(kept.count - frame.size - 4, size: 4))
+      at = frame.resume
+      end = frames.last?.end ?? chunks.endIndex
+      continue
+    }
+    guard end - at >= 8 else {
       return nil
     }
     let type = Array(chunks[at..<at + 4])
     let size = number(chunks[at + 4..<at + 8], littleEndian: true)
-    guard size <= chunks.endIndex - at - 8 else {
+    guard size <= end - at - 8 else {
       return nil
     }
     let data = chunks[at + 8..<at + 8 + size]
     // A chunk of odd size is padded to an even one, a pad the last may lack.
-    at = min(at + 8 + size + size % 2, chunks.endIndex)
+    at = min(at + 8 + size + size % 2, end)
     if type == ascii("ANMF") {
       // A frame's 16 bytes of placement and timing, then its own chunks.
-      guard data.count >= 16, let frame = webpChunks(data.dropFirst(16), orientation: false) else {
+      guard data.count >= 16 else {
         return nil
       }
-      kept += type + littleEndian(16 + frame.count, size: 4) + data.prefix(16) + frame
+      kept += type
+      frames.append((end: data.endIndex, resume: at, size: kept.count))
+      kept += [0, 0, 0, 0] + data.prefix(16)
+      at = data.startIndex + 16
+      end = data.endIndex
     } else if webpDrawingChunks.contains(type) {
       kept += type + littleEndian(size, size: 4) + data + (size % 2 == 1 ? [0] : [])
-    } else if type == ascii("EXIF"), orientation, !orientationKept {
+    } else if type == ascii("EXIF"), frames.isEmpty, !orientationKept {
       orientationKept = true
       let turned = exifOrientation(data)
       if turned != 1 {
@@ -368,7 +391,6 @@ private func webpChunks(_ chunks: ArraySlice<UInt8>, orientation: Bool) -> [UInt
       }
     }
   }
-  return kept
 }
 
 /// The types of the chunks in `chunks`, which read to their end.

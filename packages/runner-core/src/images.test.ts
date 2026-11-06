@@ -160,31 +160,32 @@ describe("readTurnImage", () => {
   });
 
   it("answers every image of the strippers' table as it is kept, and refuses one that doesn't read to its end, saying to save it again", async () => {
+    const file = path.join(temp, "case.img");
+    const kinds = { png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" };
+    const answered: Array<{ name: string; read: unknown }> = [];
+    const expected: Array<{ name: string; read: unknown }> = [];
     let refusals = 0;
     for (const { name, image, kept } of IMAGE_CASES) {
       const type = imageTypeOf(image);
       if (type === null) {
         continue;
       }
-      const file = path.join(temp, "case.img");
       await writeFile(file, image);
-      const read = await readTurnImage(file, places);
-      if (kept === null) {
-        refusals += 1;
-        expect(read, name).toEqual({
-          kind: "refused",
-          why: "not_image",
-          detail: `${file} does not read to its end as a ${{ png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" }[type]}, so its metadata cannot be told from its picture; save it again and upload that copy`,
-        });
-      } else {
-        expect(read, name).toEqual({
-          kind: "image",
-          type,
-          size: kept.length,
-          content: kept.toString("base64"),
-        });
-      }
+      answered.push({ name, read: await readTurnImage(file, places) });
+      refusals += kept === null ? 1 : 0;
+      expected.push({
+        name,
+        read:
+          kept === null
+            ? {
+                kind: "refused",
+                why: "not_image",
+                detail: `${file} does not read to its end as a ${kinds[type]}, so its metadata cannot be told from its picture; save it again and upload that copy`,
+              }
+            : { kind: "image", type, size: kept.length, content: kept.toString("base64") },
+      });
     }
+    expect(answered).toEqual(expected);
     expect(refusals).toBeGreaterThan(20);
   });
 

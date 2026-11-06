@@ -486,8 +486,9 @@ function webpWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
   kept.add(ascii("WEBP"));
   kept.add(chunks);
   const image = kept.bytes;
-  // VP8X, when it comes, comes first and says whether Exif and XMP follow.
-  if (image.length > 20 && typeAt(image, 12) === "VP8X") {
+  // VP8X, when it comes, comes first and says in its first byte whether Exif and XMP follow. One
+  // of no bytes has none, and the byte after its header is the next chunk's.
+  if (image.length > 20 && typeAt(image, 12) === "VP8X" && numberAt(image, 16, 4, true) > 0) {
     const exif = webpChunkTypes(image.subarray(12)).includes("EXIF");
     image[20] = ((image[20] ?? 0) & ~0x0c) | (exif ? 0x08 : 0);
   }

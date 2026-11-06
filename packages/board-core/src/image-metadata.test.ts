@@ -444,6 +444,16 @@ const CASES: Case[] = [
   },
   { name: "a WebP that holds no metadata", image: simpleWebp, kept: simpleWebp },
   {
+    name: "a WebP whose VP8X holds no bytes, before a chunk it keeps",
+    image: webp([...riffChunk("VP8X", []), ...lossless]),
+    kept: webp([...riffChunk("VP8X", []), ...lossless]),
+  },
+  {
+    name: "a turned WebP whose VP8X holds no bytes",
+    image: webp([...riffChunk("VP8X", []), ...lossless, ...riffChunk("EXIF", cameraExif(6, true))]),
+    kept: webp([...riffChunk("VP8X", []), ...lossless, ...riffChunk("EXIF", only(6))]),
+  },
+  {
     name: "a WebP whose RIFF is longer than the file",
     image: simpleWebp.map((byte, index) => (index === 4 ? byte + 2 : byte)),
     kept: null,

@@ -324,8 +324,11 @@ private func webpWithoutMetadata(_ bytes: [UInt8]) -> [UInt8]? {
     return nil
   }
   var kept = ascii("RIFF") + littleEndian(chunks.count + 4, size: 4) + ascii("WEBP") + chunks
-  // VP8X, when it comes, comes first and says whether Exif and XMP follow.
-  if kept.count > 20, kept[12..<16].elementsEqual(ascii("VP8X")) {
+  // VP8X, when it comes, comes first and says in its first byte whether Exif and XMP follow. One
+  // of no bytes has none, and the byte after its header is the next chunk's.
+  if kept.count > 20, kept[12..<16].elementsEqual(ascii("VP8X")),
+    number(kept[16..<20], littleEndian: true) > 0
+  {
     let exif = webpChunkTypes(kept[12...]).contains(ascii("EXIF"))
     kept[20] = kept[20] & ~0x0C | (exif ? 0x08 : 0)
   }

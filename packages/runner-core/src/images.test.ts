@@ -1,9 +1,22 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IMAGE_LIMIT_BYTES } from "@stellaris/shared";
+import { crc32 } from "node:zlib";
+import { IMAGE_LIMIT_BYTES, imageTypeOf } from "@stellaris/shared";
+import { exifOrientation } from "@stellaris/shared/image-metadata";
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { readTurnImage, TurnImageFolders, type ImagePlaces } from "./images.js";
 
 /** The smallest PNG there is: one transparent pixel. */
@@ -11,11 +24,64 @@ const PIXEL = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
-const HEADERS = {
-  jpeg: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
-  gif: Buffer.from("GIF89a\x01\x00\x01\x00", "latin1"),
-  webp: Buffer.from("RIFF\x24\x00\x00\x00WEBPVP8 ", "latin1"),
-};
+
+/**
+ * The images the strippers run, with what is kept of each, from base64: each kind of image with
+ * a made-up camera and place, as it is kept, and as no stripper can read it.
+ */
+const IMAGE_CASES = z
+  .object({ name: z.string(), image: z.base64(), kept: z.base64().nullable() })
+  .array()
+  .parse(
+    JSON.parse(
+      await readFile(
+        new URL("../../../apps/ios/fixtures/cases/image-metadata.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  )
+  .map((each) => ({
+    name: each.name,
+    image: Buffer.from(each.image, "base64"),
+    kept: each.kept === null ? null : Buffer.from(each.kept, "base64"),
+  }));
+
+/** The case of that name. */
+function imageCase(name: string): { image: Buffer; kept: Buffer | null } {
+  const found = IMAGE_CASES.find((each) => each.name === name);
+  if (found === undefined) {
+    throw new Error(`no image case named ${name}`);
+  }
+  return found;
+}
+
+/** A PNG chunk of `type` holding `data`, with its CRC. */
+function pngChunk(type: string, data: Uint8Array): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const check = Buffer.alloc(4);
+  check.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, check]);
+}
+
+/**
+ * The pixel as a PNG of `size` bytes, a second chunk of image data filling it out: every byte of
+ * it is a chunk that draws the picture, so all of it is kept.
+ */
+function pngOfSize(size: number): Buffer {
+  return Buffer.concat([
+    PIXEL.subarray(0, -12),
+    pngChunk("IDAT", Buffer.alloc(size - PIXEL.length - 12)),
+    PIXEL.subarray(-12),
+  ]);
+}
+
+/** The orientation a JPEG's Exif gives, 1 when it has none. */
+function jpegOrientation(bytes: Buffer): number {
+  const exif = bytes.indexOf("Exif\0\0", 0, "latin1");
+  return exif === -1 ? 1 : exifOrientation(bytes.subarray(exif));
+}
 
 let dir: string;
 let places: ImagePlaces;
@@ -63,11 +129,77 @@ describe("readTurnImage", () => {
   });
 
   it("tells a JPEG, a GIF, and a WebP by their first bytes, whatever their names say", async () => {
-    for (const [type, bytes] of Object.entries(HEADERS)) {
+    for (const [type, name] of [
+      ["jpeg", "a JPEG that holds no metadata"],
+      ["gif", "a GIF that holds no metadata"],
+      ["webp", "a WebP that holds no metadata"],
+    ] as const) {
       const file = path.join(temp, `${type}.png`);
-      await writeFile(file, bytes);
+      await writeFile(file, imageCase(name).image);
       expect(await readTurnImage(file, places)).toMatchObject({ kind: "image", type });
     }
+  });
+
+  it("answers a camera's photo without its camera and its place, keeping its orientation, and leaves the file as it was", async () => {
+    const { image, kept } = imageCase("a camera's JPEG");
+    const file = path.join(worktree, "photo.jpg");
+    await writeFile(file, image);
+    const read = await readTurnImage(file, places);
+    const content = Buffer.from(read.kind === "image" ? read.content : "", "base64");
+    expect(read).toMatchObject({ kind: "image", type: "jpeg", size: kept?.length });
+    expect(content).toEqual(kept);
+    // The made-up camera's make, and the GPS directory's latitude reference, a southern one.
+    expect(image.includes("Example\0")).toBe(true);
+    expect(content.includes("Example")).toBe(false);
+    expect(image.includes(Buffer.from([0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x53]))).toBe(
+      true,
+    );
+    expect(content.includes(Buffer.from([0x53, 0x00]))).toBe(false);
+    expect(jpegOrientation(image)).not.toBe(1);
+    expect(jpegOrientation(content)).toBe(jpegOrientation(image));
+    expect(await readFile(file)).toEqual(image);
+  });
+
+  it("answers every image of the strippers' table as it is kept, and refuses one that doesn't read to its end, saying to save it again", async () => {
+    let refusals = 0;
+    for (const { name, image, kept } of IMAGE_CASES) {
+      const type = imageTypeOf(image);
+      if (type === null) {
+        continue;
+      }
+      const file = path.join(temp, "case.img");
+      await writeFile(file, image);
+      const read = await readTurnImage(file, places);
+      if (kept === null) {
+        refusals += 1;
+        expect(read, name).toEqual({
+          kind: "refused",
+          why: "not_image",
+          detail: `${file} does not read to its end as a ${{ png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" }[type]}, so its metadata cannot be told from its picture; save it again and upload that copy`,
+        });
+      } else {
+        expect(read, name).toEqual({
+          kind: "image",
+          type,
+          size: kept.length,
+          content: kept.toString("base64"),
+        });
+      }
+    }
+    expect(refusals).toBeGreaterThan(20);
+  });
+
+  it("answers a photo over the limit only for what follows its picture, without it", async () => {
+    const { image, kept } = imageCase("a camera's JPEG");
+    const file = path.join(temp, "motion.jpg");
+    // As an HDR gain map or a motion photo's video follows a camera's picture.
+    await writeFile(file, Buffer.concat([image, Buffer.alloc(IMAGE_LIMIT_BYTES)]));
+    expect(await readTurnImage(file, places)).toEqual({
+      kind: "image",
+      type: "jpeg",
+      size: kept?.length,
+      content: kept?.toString("base64"),
+    });
   });
 
   it("refuses a file outside those places, and a link that leads out of them", async () => {
@@ -145,32 +277,47 @@ describe("readTurnImage", () => {
     expect(await readTurnImage(pipe, places)).toMatchObject({ why: "not_image" });
   });
 
-  it("takes an image of exactly the limit and refuses one a byte over it", async () => {
+  it("takes an image of exactly the limit without its metadata and refuses one a byte over it", async () => {
     const file = path.join(temp, "big.png");
-    await writeFile(file, Buffer.concat([PIXEL, Buffer.alloc(IMAGE_LIMIT_BYTES - PIXEL.length)]));
+    await writeFile(file, pngOfSize(IMAGE_LIMIT_BYTES));
     expect(await readTurnImage(file, places)).toMatchObject({
       kind: "image",
       size: IMAGE_LIMIT_BYTES,
     });
-    await writeFile(
-      file,
-      Buffer.concat([PIXEL, Buffer.alloc(IMAGE_LIMIT_BYTES + 1 - PIXEL.length)]),
-    );
+    await writeFile(file, pngOfSize(IMAGE_LIMIT_BYTES + 1));
     expect(await readTurnImage(file, places)).toEqual({
       kind: "refused",
       why: "too_big",
-      detail: `${file} is ${IMAGE_LIMIT_BYTES + 1} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+      detail: `${file} is ${IMAGE_LIMIT_BYTES + 1} bytes without its metadata, over the ${IMAGE_LIMIT_BYTES} an image may be`,
     });
     // A smaller limit is the same rule.
     expect(await readTurnImage(file, places, PIXEL.length - 1)).toMatchObject({ why: "too_big" });
   });
 
+  it("reads a file of at most four times the limit, and refuses a larger one by its size before reading it", async () => {
+    const file = path.join(temp, "long.png");
+    await writeFile(file, Buffer.concat([PIXEL, Buffer.alloc(4 * 1000 - PIXEL.length)]));
+    expect(await readTurnImage(file, places, 1000)).toEqual({
+      kind: "image",
+      type: "png",
+      size: PIXEL.length,
+      content: PIXEL.toString("base64"),
+    });
+    // A hole of zeros the file system never wrote, so nothing but its size is there.
+    await truncate(file, 4 * IMAGE_LIMIT_BYTES + 1);
+    expect(await readTurnImage(file, places)).toEqual({
+      kind: "refused",
+      why: "too_big",
+      detail: `${file} is ${4 * IMAGE_LIMIT_BYTES + 1} bytes, over the ${4 * IMAGE_LIMIT_BYTES} read for an image of at most ${IMAGE_LIMIT_BYTES} without its metadata`,
+    });
+  });
+
   it("stops reading at the limit a file its size does not tell runs past", async () => {
-    // A file under /proc says it holds nothing, and holds more than ten bytes.
+    // A file under /proc says it holds nothing, and holds more than forty bytes.
     expect(await readTurnImage("status", { cwd: "/proc/self", roots: ["/proc"] }, 10)).toEqual({
       kind: "refused",
       why: "too_big",
-      detail: "status is over the 10 bytes an image may be",
+      detail: "status is over the 40 bytes read for an image of at most 10 without its metadata",
     });
   });
 });
@@ -207,7 +354,7 @@ describe("TurnImageFolders", () => {
       expect(path.relative(outside, first).startsWith("..")).toBe(true);
     }
     // The same turn's next image goes beside it, another turn's into a folder of that turn's.
-    const jpeg = Buffer.concat([HEADERS.jpeg, Buffer.from("rest")]);
+    const jpeg = imageCase("a JPEG that holds no metadata").image;
     const second = await folders.write({
       turnId: TURN,
       id: OTHER,

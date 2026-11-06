@@ -41,8 +41,8 @@ import Observation
   /// Reads an event made stale, gathered while a reload waits.
   @ObservationIgnored private var stale: Set<String> = []
   @ObservationIgnored private var reloading: Task<Void, Never>?
-  /// How many of the sky's views are shown and following the board.
-  @ObservationIgnored private var running = 0
+  /// How many of the sky's views are shown and following the board, which the tests read.
+  @ObservationIgnored private(set) var running = 0
   /// The stamp of the newest cue the sky has played, kept across runs: each connection to the turn
   /// stream replays the server's buffer, which the sky has played up to here already.
   @ObservationIgnored private(set) var playedThrough: Date?

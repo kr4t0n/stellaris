@@ -96,9 +96,12 @@ final class FoldTests: XCTestCase {
     }
     XCTAssertTrue(below, "the chat isn't below the sky: \(window.frame(of: messages))")
 
-    // Folded: the chat alone, and the sky neither draws nor asks.
+    // Folded: the chat alone, and the sky neither draws nor asks, counted from when its run has
+    // ended, so an ask it made before it stopped isn't counted as one made while folded.
     window.resize(to: outer)
     try await window.settle()
+    let stopped = try await window.until { model.sky.running == 0 }
+    XCTAssertTrue(stopped, "the sky still runs while the phone is folded")
     model.sky.lastFrame = nil
     let folded = CountedScheduler.asked.withLock { $0 }
     try await Task.sleep(for: .seconds(2))

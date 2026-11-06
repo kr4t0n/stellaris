@@ -47,7 +47,10 @@ jobs:
 
   app:
     runs-on: xcode-27
-    timeout-minutes: 45
+    # What ends a test that hangs, since the stuck-app watcher leaves the step running. Up to 0.4.1
+    # the tests ran up to 48 minutes, counting a run the limit cut with two tests left, and the
+    # steps after them, the runner's own cleanup included, up to 8 more: 70 is a quarter over both.
+    timeout-minutes: 70
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       # XcodeGen from its release, checked against the digest GitHub lists for the asset.

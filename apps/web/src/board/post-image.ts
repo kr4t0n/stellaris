@@ -58,11 +58,34 @@ export async function imageToPost(
 }
 
 /**
- * The picture `file` holds, drawn again upright as a JPEG at most `LARGEST_SIDE` pixels on its
- * longest side, then 0.7 times that each time it is still past `limit`, with what the browser
- * wrote beside the picture left out too; null when the browser can't draw it, or it fits at no
- * size. Decoded by an image element, which draws what a file cut short holds, where
- * `createImageBitmap` refuses it.
+ * The sizes a picture `width` by `height` pixels is drawn again at, in turn, until one fits: at
+ * most `LARGEST_SIDE` pixels on its longest side and never larger than it is, then 0.7 times the
+ * last one's longest side, down to `SMALLEST_SIDE`, as the app's `prepare` steps.
+ */
+export function drawnSizes(
+  width: number,
+  height: number,
+): Array<{ width: number; height: number }> {
+  const sizes: Array<{ width: number; height: number }> = [];
+  const longest = Math.max(width, height);
+  let side = LARGEST_SIDE;
+  while (side >= SMALLEST_SIDE) {
+    const scale = Math.min(1, side / longest);
+    const size = {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    };
+    sizes.push(size);
+    side = Math.trunc(Math.max(size.width, size.height) * 0.7);
+  }
+  return sizes;
+}
+
+/**
+ * The picture `file` holds, drawn again upright as a JPEG at each of its `drawnSizes` until one
+ * fits `limit`, with what the browser wrote beside the picture left out too; null when the
+ * browser can't draw it, or it fits at no size. Decoded by an image element, which draws what a
+ * file cut short holds, where `createImageBitmap` refuses it.
  */
 async function drawnAgain(file: Blob, limit: number): Promise<Blob | null> {
   const url = URL.createObjectURL(file);
@@ -79,15 +102,12 @@ async function drawnAgain(file: Blob, limit: number): Promise<Blob | null> {
     if (context === null) {
       return null;
     }
-    const longest = Math.max(picture.naturalWidth, picture.naturalHeight);
-    let side = LARGEST_SIDE;
-    while (side >= SMALLEST_SIDE) {
-      const scale = Math.min(1, side / longest);
-      canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale));
+    for (const size of drawnSizes(picture.naturalWidth, picture.naturalHeight)) {
+      canvas.width = size.width;
+      canvas.height = size.height;
       // Sizing a canvas resets its context.
       context.imageSmoothingQuality = "high";
-      context.drawImage(picture, 0, 0, canvas.width, canvas.height);
+      context.drawImage(picture, 0, 0, size.width, size.height);
       const jpeg = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY);
       });
@@ -99,7 +119,6 @@ async function drawnAgain(file: Blob, limit: number): Promise<Blob | null> {
       if (kept.byteLength <= limit) {
         return new Blob([kept], { type: IMAGE_MEDIA_TYPES.jpeg });
       }
-      side = Math.trunc(Math.max(canvas.width, canvas.height) * 0.7);
     }
     return null;
   } finally {

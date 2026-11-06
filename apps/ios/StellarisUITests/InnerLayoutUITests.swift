@@ -5,9 +5,10 @@ import XCTest
 /// window taller than wide puts the sky above the chat, as the inner display in portrait does.
 final class InnerLayoutUITests: ShellTestCase {
   /// The sky sits above the chat, and a tap opens a card inside the sky's part. While the keyboard
-  /// is up the chat grows over the sky, whose stars take no touch, and once the keyboard goes the
-  /// chat drops back below it with the draft kept. XCUITest lists the covered sky's elements all
-  /// the same, so whether VoiceOver skips them is checked on the device.
+  /// is up the chat grows over the sky, whose stars take no touch, with the island's gray behind
+  /// the keyboard, and once the keyboard goes the chat drops back below it with the draft kept.
+  /// XCUITest lists the covered sky's elements all the same, so whether VoiceOver skips them is
+  /// checked on the device.
   @MainActor func testTheChatGrowsOverTheSkyWhileTheKeyboardIsUp() {
     let app = launch(arguments: ["-StellarisInnerLayout"])
     signIn(app)
@@ -39,7 +40,7 @@ final class InnerLayoutUITests: ShellTestCase {
     waitUntil("the chat doesn't grow over the sky") {
       messages.frame.minY < skyFrame.midY && messages.frame.width >= skyFrame.width - 1
     }
-    keepScreen("inner-stacked-typing")
+    expectTheGroundBehindTheKeyboard(app, beside: draft(app), "inner-stacked-typing")
     waitUntil("the covered sky's stars take a touch") { !star.isHittable }
 
     // A drag of the conversation puts the keyboard away.

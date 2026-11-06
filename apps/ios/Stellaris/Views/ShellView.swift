@@ -125,6 +125,10 @@ struct ChatView: View {
             .frame(width: 320)
         }
       }
+      // What shows where no view draws, as behind the keyboard's rounded corners, below the foot
+      // the conversation's own ground ends at while the keyboard is up: the island, not the
+      // stack's black.
+      .containerBackground(MessageColor.island, for: .navigation)
       .toolbar {
         if let back = model.back {
           ToolbarItem(placement: .cancellationAction) {

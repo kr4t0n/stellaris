@@ -149,12 +149,11 @@ describe("readTurnImage", () => {
     expect(read).toMatchObject({ kind: "image", type: "jpeg", size: kept?.length });
     expect(content).toEqual(kept);
     // The made-up camera's make, and the GPS directory's latitude reference, a southern one.
+    const south = Buffer.from([0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x53]);
     expect(image.includes("Example\0")).toBe(true);
+    expect(image.includes(south)).toBe(true);
     expect(content.includes("Example")).toBe(false);
-    expect(image.includes(Buffer.from([0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x53]))).toBe(
-      true,
-    );
-    expect(content.includes(Buffer.from([0x53, 0x00]))).toBe(false);
+    expect(content.includes(south)).toBe(false);
     expect(jpegOrientation(image)).not.toBe(1);
     expect(jpegOrientation(content)).toBe(jpegOrientation(image));
     expect(await readFile(file)).toEqual(image);

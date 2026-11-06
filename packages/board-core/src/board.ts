@@ -2618,9 +2618,11 @@ export class Board {
    * Keeps `bytes` under a new id when they are a PNG, JPEG, GIF, or WebP of at most
    * `IMAGE_LIMIT_BYTES` that reads to its end, without its metadata (`withoutMetadata`), and
    * answers the markdown that shows it, described by `name`. `what` names the image in a refusal.
-   * The limit is for the bytes as they came, as the route's body cap, the runner's read, and the
-   * web's composer measure them, and bounds what is read; what is kept is checked against it too,
-   * since an orientation written smaller than the board writes it grows by a few bytes.
+   * The limit is for the bytes as they came, as the route's body cap measures them, and bounds
+   * what is read; what is kept is checked against it too, since an orientation written smaller
+   * than the board writes it grows by a few bytes. The runner, the web's composer, and the app
+   * strip an image before they send it, and stripping it again changes nothing, but an older
+   * runner, page, or app sends one as it was.
    */
   private async keepImage(
     actor: Actor,

@@ -1,15 +1,16 @@
-// An entry of its own, `@stellaris/shared/image-metadata`, so importing the schemas never brings
-// the stripper along.
+// An entry of its own, `@stellaris/shared/image-metadata`, so the web loads it only when an image
+// is posted.
 import { imageTypeOf } from "./images.js";
 
 /**
- * What the board leaves out of an image it keeps: everything an image carries beside its picture,
+ * What an image leaves out on its way to the board: everything it carries beside its picture,
  * such as where a photo was taken (GPS), when and with what (Exif, TIFF, a maker's notes), and
  * what was written about it (IPTC, XMP, a PNG's text, a GIF's comments). What is kept is copied
- * byte for byte, never encoded again: the picture, its colour profile, and every frame. A port of
- * `withoutMetadata` in BoardKit (`apps/ios/BoardKit/Sources/BoardKit/ImageMetadata.swift`), which
- * the app runs before it posts, so an image it stripped comes out the same; the two run the table
- * in `apps/ios/fixtures/cases/image-metadata.json`.
+ * byte for byte, never encoded again: the picture, its colour profile, and every frame. The web's
+ * composer and the runner run it before they send an image, and the board on every image it keeps,
+ * so an image stripped already comes out the same. A port of `withoutMetadata` in BoardKit
+ * (`apps/ios/BoardKit/Sources/BoardKit/ImageMetadata.swift`), which the app runs before it posts;
+ * the two run the table in `apps/ios/fixtures/cases/image-metadata.json`.
  */
 
 /**

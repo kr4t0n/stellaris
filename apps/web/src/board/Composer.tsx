@@ -1,4 +1,4 @@
-import { ASK_CHANNEL, IMAGE_LIMIT_BYTES, IMAGE_MEDIA_TYPES, type Message } from "@stellaris/shared";
+import { ASK_CHANNEL, IMAGE_MEDIA_TYPES, type Message } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useEffect,
@@ -208,14 +208,9 @@ export function Composer({
     setUploading((count) => count + 1);
     let markdown = "";
     try {
-      // The board refuses a larger one too, but only once all of it has been sent.
-      if (file.size > IMAGE_LIMIT_BYTES) {
-        throw new ApiError(
-          413,
-          `${file.name} is ${file.size} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
-        );
-      }
-      markdown = (await api.postImage(file, file.name)).markdown;
+      // Loaded with the first image posted, so the first page goes without the stripper.
+      const { imageToPost } = await import("./post-image.js");
+      markdown = (await api.postImage(await imageToPost(file, file.name), file.name)).markdown;
     } catch (error) {
       setUploadFailure(
         error instanceof ApiError && error.status !== 0

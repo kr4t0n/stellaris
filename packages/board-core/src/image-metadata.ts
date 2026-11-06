@@ -370,11 +370,11 @@ function pngWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
 // GIF
 
 /** The application extensions that play a GIF: its loop count, under either name, and its ICC profile. */
-const GIF_PLAYING_APPLICATIONS: ReadonlySet<string> = new Set([
+const GIF_PLAYING_APPLICATIONS: readonly Uint8Array[] = [
   "NETSCAPE2.0",
   "ANIMEXTS1.0",
   "ICCRGBG1012",
-]);
+].map(ascii);
 
 /** The size of the colour table a GIF's packed field announces. */
 function gifColourTable(packed: number): number {
@@ -429,16 +429,15 @@ function gifWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
           return null;
         }
         const label = bytes[at + 1];
-        const application =
-          bytes[at + 2] === 11
-            ? String.fromCharCode(...bytes.subarray(at + 3, Math.min(at + 14, end)))
-            : "";
+        // An application's name and code are its first sub-block, of 11 bytes, compared in place,
+        // since a GIF can hold half a million extensions.
+        const plays =
+          label === 0xff &&
+          bytes[at + 2] === 11 &&
+          end >= at + 14 &&
+          GIF_PLAYING_APPLICATIONS.some((name) => startsWith(bytes, name, at + 3));
         // A frame's timing, text drawn as a frame, or an application extension that plays it.
-        if (
-          label === 0xf9 ||
-          label === 0x01 ||
-          (label === 0xff && GIF_PLAYING_APPLICATIONS.has(application))
-        ) {
+        if (label === 0xf9 || label === 0x01 || plays) {
           kept.add(bytes.subarray(at, end));
         }
         at = end;

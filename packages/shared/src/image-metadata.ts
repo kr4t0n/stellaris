@@ -1,4 +1,6 @@
-import { imageTypeOf } from "@stellaris/shared";
+// An entry of its own, `@stellaris/shared/image-metadata`, so importing the schemas never brings
+// the stripper along.
+import { imageTypeOf } from "./images.js";
 
 /**
  * What the board leaves out of an image it keeps: everything an image carries beside its picture,
@@ -24,7 +26,7 @@ import { imageTypeOf } from "@stellaris/shared";
  * The orientation an image's Exif gives stays, alone in an Exif block of its own, where it turns
  * the picture, so that it shows upright as it did.
  */
-export function withoutMetadata(bytes: Uint8Array): Uint8Array | null {
+export function withoutMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   switch (imageTypeOf(bytes)) {
     case "jpeg":
       return jpegWithoutMetadata(bytes);
@@ -172,7 +174,7 @@ function littleEndian(value: number, size: number): number[] {
  * pieces, since an image can hold millions of two-byte markers.
  */
 class Kept {
-  private buffer: Uint8Array;
+  private buffer: Uint8Array<ArrayBuffer>;
   length = 0;
 
   constructor(capacity: number) {
@@ -194,7 +196,7 @@ class Kept {
     this.buffer.set(piece, at);
   }
 
-  get bytes(): Uint8Array {
+  get bytes(): Uint8Array<ArrayBuffer> {
     return this.buffer.subarray(0, this.length);
   }
 }
@@ -206,7 +208,7 @@ class Kept {
  * scans, with the JFIF header, the ICC profile, and Adobe's colour transform. A marker no JPEG has
  * outside a scan reads as nothing.
  */
-function jpegWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
+function jpegWithoutMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
     return null;
   }
@@ -335,7 +337,7 @@ const PNG_DRAWING_CHUNKS: ReadonlySet<string> = new Set([
 ]);
 
 /** A PNG's chunks up to its end, of the kinds that draw it. */
-function pngWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
+function pngWithoutMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   const kept = new Kept(bytes.length);
   kept.add(bytes.subarray(0, 8));
   let at = 8;
@@ -385,7 +387,7 @@ function gifColourTable(packed: number): number {
  * A GIF's header, colour table, frames, and the extensions that play them, up to its trailer;
  * comments and any other application's data, XMP among them, are left out.
  */
-function gifWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
+function gifWithoutMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   /** Past the data sub-blocks that start at `start`, and their terminator. */
   const subBlocksEnd = (start: number): number | null => {
     let at = start;
@@ -470,7 +472,7 @@ const WEBP_DRAWING_CHUNKS: ReadonlySet<string> = new Set([
  * A WebP's chunks that draw it, each frame's too, with its header's sizes and flags made to fit
  * what is kept.
  */
-function webpWithoutMetadata(bytes: Uint8Array): Uint8Array | null {
+function webpWithoutMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   if (bytes.length < 12) {
     return null;
   }

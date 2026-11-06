@@ -27,6 +27,7 @@ import {
   describeCharter,
   EffortSchema,
   githubRepository,
+  IMAGE_KIND_NAMES,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
   imageDescription,
@@ -163,7 +164,7 @@ import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
-import { withoutMetadata } from "./image-metadata.js";
+import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
@@ -601,14 +602,6 @@ const FRONT_DESK_CHANNELS: readonly ChannelRef[] = [ASK_CHANNEL];
 
 /** The one-time alignments a society has had, by name, kept in `state/alignments.json`. */
 const AlignmentsSchema = z.object({ applied: z.array(z.string()).default([]) });
-
-/** Each kind of image as a refusal names it. */
-const IMAGE_KIND_NAMES: Readonly<Record<ImageType, string>> = {
-  png: "PNG",
-  jpeg: "JPEG",
-  gif: "GIF",
-  webp: "WebP",
-};
 
 /** The line a project's dashboard begins with. */
 const DASHBOARD_LINE = "The project's members keep this page current with update_dashboard.";

@@ -145,6 +145,62 @@ class ShellTestCase: XCTestCase {
     attachment.lifetime = .keepAlways
     add(attachment)
   }
+
+  /// Keeps a picture of the screen as `name` once the keyboard is up, and checks that the ground
+  /// beside the focused `field` at each edge of the window runs on behind the keyboard: down each
+  /// edge from the field, past the keyboard's rounded corners at its top and at the window's foot,
+  /// there is no black a point long, and the foot is that ground. Where the ground ended at the
+  /// keyboard's top, the edges showed black for 2 to 55 points; the dark rim the keyboard draws
+  /// between the ground and its glass is never black.
+  @MainActor func expectTheGroundBehindTheKeyboard(
+    _ app: XCUIApplication, beside field: XCUIElement, _ name: String
+  ) {
+    let keyboard = app.keyboards.firstMatch
+    XCTAssertTrue(keyboard.waitForExistence(timeout: 20), "no keyboard came up")
+    // Once it has finished rising.
+    var top = keyboard.frame.minY
+    let deadline = Date.now.addingTimeInterval(5)
+    while Date.now < deadline {
+      RunLoop.current.run(until: .now.addingTimeInterval(0.25))
+      let now = keyboard.frame.minY
+      if now == top {
+        break
+      }
+      top = now
+    }
+    let window = app.windows.firstMatch.frame
+    let from = field.frame.midY
+    let screen = XCUIScreen.main.screenshot()
+    let attachment = XCTAttachment(screenshot: screen)
+    attachment.name = "\(name).png"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    guard let pixels = ScreenPixels(screen.image) else {
+      return XCTFail("the picture of the screen can't be read")
+    }
+    let black = { (colour: ScreenPixels.Colour) in
+      max(colour.red, colour.green, colour.blue) <= 1
+    }
+    var wrong: [String] = []
+    for (side, x) in [("leading", window.minX + 1), ("trailing", window.maxX - 1)] {
+      guard let ground = pixels.colour(x: x, y: from), !black(ground) else {
+        wrong.append("\(side): no ground beside the field to compare with")
+        continue
+      }
+      if let start = pixels.first(down: x, from: from, for: 1, where: black) {
+        wrong.append("\(side): black from \(start) pt where the ground is \(ground)")
+      }
+      let foot = pixels.colour(x: x, y: window.maxY - 1)
+      if let foot, foot.isNear(ground) {
+        continue
+      }
+      let seen = foot.map(String.init(describing:)) ?? "none"
+      wrong.append("\(side): the foot is \(seen), not \(ground)")
+    }
+    XCTAssertTrue(
+      wrong.isEmpty,
+      "behind the keyboard isn't the ground beside the field: " + wrong.joined(separator: "; "))
+  }
 }
 
 final class ShellUITests: ShellTestCase {

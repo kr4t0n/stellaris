@@ -119,8 +119,9 @@ final class ConversationUITests: ShellTestCase {
 
   /// As Safari shows its × only while its address bar has the keyboard, the draft shows no Send
   /// until its field is focused, then a round Send beside the capsule in the side bar's column,
-  /// off while there is nothing to send. Return adds a line rather than posting. Putting the
-  /// keyboard away takes Send with it and keeps the draft, and a tap on the field brings it back.
+  /// off while there is nothing to send, and the island's gray runs on behind the keyboard. Return
+  /// adds a line rather than posting. Putting the keyboard away takes Send with it and keeps the
+  /// draft, and a tap on the field brings it back.
   @MainActor func testShowsSendOnlyWhileTheDraftIsFocused() {
     let app = launch()
     signIn(app)
@@ -150,7 +151,7 @@ final class ConversationUITests: ShellTestCase {
     let posted = app.scrollViews["messages"].staticTexts
       .matching(NSPredicate(format: "label BEGINSWITH %@", "First line")).firstMatch
     XCTAssertFalse(posted.exists, "Return posted the draft")
-    keepScreen("composer-focused")
+    expectTheGroundBehindTheKeyboard(app, beside: box, "composer-focused")
 
     dragDown(app)
     XCTAssertTrue(send.waitForNonExistence(timeout: 20), "Send stays once the keyboard goes")
@@ -194,34 +195,7 @@ final class ConversationUITests: ShellTestCase {
   /// The first point, going down from `y` at `x`, where `image` is as dark as the conversation's
   /// gray, in points.
   @MainActor private func firstGray(in image: UIImage, down x: CGFloat, from y: CGFloat) -> CGFloat? {
-    guard let picture = image.cgImage else {
-      return nil
-    }
-    let (width, height) = (picture.width, picture.height)
-    var bytes = [UInt8](repeating: 0, count: width * height * 4)
-    let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
-      guard
-        let context = CGContext(
-          data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-      else {
-        return false
-      }
-      context.draw(picture, in: CGRect(x: 0, y: 0, width: width, height: height))
-      return true
-    }
-    let column = Int(x * image.scale)
-    guard drawn, column >= 0, column < width else {
-      return nil
-    }
-    for row in max(Int(y * image.scale), 0)..<height {
-      let start = (row * width + column) * 4
-      if Int(bytes[start]) + Int(bytes[start + 1]) + Int(bytes[start + 2]) < 3 * 30 {
-        return CGFloat(row) / image.scale
-      }
-    }
-    return nil
+    ScreenPixels(image)?.first(down: x, from: y) { $0.red + $0.green + $0.blue < 3 * 30 }
   }
 
   /// Typing `@` offers the citizens to mention, a pick completes the name, and Send posts the draft
@@ -253,8 +227,9 @@ final class ConversationUITests: ShellTestCase {
     keepScreen("posted")
   }
 
-  /// New thread in the bar opens a sheet for its title and first message; opening it shows the
-  /// thread in Chat, and Back shows it in its channel's stream.
+  /// New thread in the bar opens a sheet for its title and first message, with the chat's ground
+  /// behind the keyboard; opening it shows the thread in Chat, and Back shows it in its channel's
+  /// stream.
   @MainActor func testOpensAThreadFromItsChannel() {
     let app = launch()
     signIn(app)
@@ -267,7 +242,7 @@ final class ConversationUITests: ShellTestCase {
     let first = app.textFields["thread-first-message"].firstMatch
     first.tap()
     first.typeText("Docs first.")
-    keepScreen("new-thread")
+    expectTheGroundBehindTheKeyboard(app, beside: first, "new-thread")
     expectInTheSideColumn(app, app.buttons["open-thread"].firstMatch)
     pick(app, "open-thread")
 

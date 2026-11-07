@@ -130,6 +130,17 @@ jobs:
               "$RUNNER_TEMP/screens/displays/display-$display.png"
           done
           exit 0
+      # The app's icon as Icon Composer draws it in each of iOS's appearances, for review.
+      - name: Draw the app's icon
+        if: ${{ !cancelled() }}
+        run: |
+          ictool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          mkdir -p "$RUNNER_TEMP/screens/icon"
+          for rendition in Default Dark ClearLight ClearDark TintedLight TintedDark; do
+            "$ictool" apps/ios/Icon/AppIcon.icon --export-image \
+              --output-file "$RUNNER_TEMP/screens/icon/$rendition.png" --platform iOS \
+              --rendition "$rendition" --width 1024 --height 1024 --scale 1
+          done
       - name: Collect the screenshots
         if: ${{ !cancelled() }}
         run: |

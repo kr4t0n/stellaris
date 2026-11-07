@@ -101,42 +101,18 @@
       "blur-material" : 0,
       "layers" : [
         {
-          "fill-specializations" : [
-            {
-              "appearance" : "tinted",
-              "value" : {
-                "solid" : "extended-gray:1.00000,1.00000"
-              }
-            }
-          ],
           "glass" : false,
           "image-name" : "03-meteor-right.svg",
           "name" : "03-meteor-right",
           "opacity" : 0.65
         },
         {
-          "fill-specializations" : [
-            {
-              "appearance" : "tinted",
-              "value" : {
-                "solid" : "extended-gray:1.00000,1.00000"
-              }
-            }
-          ],
           "glass" : false,
           "image-name" : "02-meteor-lower.svg",
           "name" : "02-meteor-lower",
           "opacity" : 0.75
         },
         {
-          "fill-specializations" : [
-            {
-              "appearance" : "tinted",
-              "value" : {
-                "solid" : "extended-gray:1.00000,1.00000"
-              }
-            }
-          ],
           "glass" : false,
           "image-name" : "01-meteor-upper.svg",
           "name" : "01-meteor-upper",

@@ -202,6 +202,11 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The launch screen, which no test or picture covers.
 - Whether iOS's GitHub sign-in sheet is dark: iOS draws it, not the app, so it may not follow the app's setting.
 
+**The app's icon**
+
+- The icon on the Home Screen in each appearance (touch and hold the Home Screen, then Edit > Customize): Default, Dark, Clear and Tinted, each with the light and the dark wallpaper. The three stars stay apart, the upper meteor passes clear of the large star, and its tail fades out before the icon's top edge. CI draws the six only with Icon Composer's tool, not with a device's glass over a real wallpaper.
+- The icon at its smallest, in Spotlight, Settings' list, and the App Library: the three stars stay apart, and the meteors' faint tails in Clear and Tinted.
+
 **Touch and the keyboard on the outer display**
 
 - A link or an image in the top-leading part of Chat opens. On the simulator, a tap inside the status bar's frame there, 223 by 317 points from the window's corner, reaches no message and scrolls the conversation to its top instead.

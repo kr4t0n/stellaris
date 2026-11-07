@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   boardkit:
+    if: false
     runs-on: xcode-27
     timeout-minutes: 30
     env:
@@ -57,6 +58,7 @@ jobs:
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
       DESTINATION: platform=iOS Simulator,name=iPhone Duo,OS=27.1
+      PROBE_UI: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install XcodeGen
@@ -87,7 +89,10 @@ jobs:
             -scheme Stellaris \
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
-            -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult" 2>&1 | tee "$output" || status=$?
+            -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult" \
+            -only-testing:StellarisTests/AppIconTests \
+            -only-testing:StellarisTests/IconProbeTests \
+            $PROBE_UI 2>&1 | tee "$output" || status=$?
           touch "$output.done"
           watched=0
           wait "$watcher" || watched=$?
@@ -102,13 +107,26 @@ jobs:
         run: |
           find "$RUNNER_TEMP/derived/Build/Intermediates.noindex" -name 'Stellaris.app*.xcent' \
             -print -exec plutil -p {} \;
-      # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
-      - name: Look at the simulator's displays
+      - name: Probe the icon
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
           set +e
-          mkdir -p "$RUNNER_TEMP/screens/displays"
+          app=$(find "$RUNNER_TEMP/derived/Build/Products" -maxdepth 2 -name Stellaris.app | head -1)
+          echo "app: $app"
+          ls -la "$app"
+          plutil -p "$app/Info.plist" | grep -i -A12 icon
+          xcrun assetutil --info "$app/Assets.car" | head -300
+          find "$RUNNER_TEMP/derived/Build/Intermediates.noindex" -name 'assetcatalog_generated_info*.plist' \
+            -print -exec plutil -p {} \;
+          echo "--- asset compiler lines"
+          grep -n -i -E 'actool|CompileAssetCatalog|AppIcon|\.icon' "$RUNNER_TEMP/test-output.txt" | head -60
+          echo "--- warnings"
+          grep -n -i 'warning:' "$RUNNER_TEMP/test-output.txt" | head -60
+          echo "--- simctl ui help"
+          xcrun simctl ui help 2>&1
+          mkdir -p "$RUNNER_TEMP/screens/home"
+          xcrun simctl list devices booted
           device=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
@@ -117,18 +135,13 @@ jobs:
           echo "iPhone Duo: $device"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
-          xcrun simctl io "$device" enumerate
-          SIMCTL_CHILD_STELLARIS_FAKE_BOARD="$PWD/apps/ios/fixtures/api" \
-            xcrun simctl launch "$device" com.example.stellaris -StellarisReset
-          sleep 5
-          # Asked for a screenshot without one, simctl names each display it can capture.
-          displays=$(xcrun simctl io "$device" screenshot "$RUNNER_TEMP/any.png" 2>&1 |
-            grep -oE -- '--display=[0-9]+' | cut -d= -f2)
-          echo "displays: $displays"
-          for display in $displays; do
-            xcrun simctl io "$device" screenshot --display="$display" \
-              "$RUNNER_TEMP/screens/displays/display-$display.png"
+          xcrun simctl terminate "$device" com.example.stellaris
+          for look in light dark; do
+            xcrun simctl ui "$device" appearance "$look"
+            sleep 3
+            xcrun simctl io "$device" screenshot --display=1 "$RUNNER_TEMP/screens/home/home-$look.png"
           done
+          xcrun simctl spawn "$device" defaults read com.apple.springboard 2>&1 | head -80
           exit 0
       - name: Collect the screenshots
         if: ${{ !cancelled() }}

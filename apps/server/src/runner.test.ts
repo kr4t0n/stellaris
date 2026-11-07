@@ -17,6 +17,7 @@ import {
   type AgentBackend,
   type PullRequestOps,
   type ResidentSession,
+  type TurnControl,
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
@@ -463,6 +464,88 @@ async function idleRepeats(board: Board, count: number): Promise<void> {
       wakes: false,
     });
   }
+}
+
+/**
+ * A CLI whose turns run until the test ends them, logging as each starts, is asked to stop, and
+ * ends, so a test can tell whether two ever ran at once. A stop ends nothing by itself: the test
+ * ends the turn, as a real CLI winds down some time after its interrupt.
+ */
+class LoggedBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  readonly stops = true;
+  readonly log: string[] = [];
+  private readonly ends: Array<PromiseWithResolvers<void>> = [];
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  async runTurn(
+    _request: object,
+    _onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
+    const ended = Promise.withResolvers<void>();
+    this.ends.push(ended);
+    const turn = this.ends.length;
+    let stopped = false;
+    this.log.push(`start ${turn}`);
+    const detach = control?.attach({
+      stop: () => {
+        stopped = true;
+        this.log.push(`stop ${turn}`);
+      },
+    });
+    await ended.promise;
+    detach?.();
+    this.log.push(`end ${turn}`);
+    return stopped
+      ? { ...completed("stopped"), status: null, exitReason: "interrupted" }
+      : completed("done");
+  }
+
+  /** Ends the nth turn, counted from 1. */
+  end(turn: number): void {
+    this.ends[turn - 1]?.resolve();
+  }
+}
+
+/**
+ * A runner's way to the server that the test can take down as a network fails: the event stream it
+ * holds is cut, and every call fails at once until the network is back.
+ */
+function failingNetwork(): { fetch: typeof fetch; down: () => void; up: () => void } {
+  let down = false;
+  const streams = new Set<AbortController>();
+  return {
+    fetch: (input, init) => {
+      if (down) {
+        return Promise.reject(new TypeError("fetch failed"));
+      }
+      const url = input instanceof Request ? input.url : input.toString();
+      if (!url.endsWith("/runner/stream")) {
+        return fetch(input, init);
+      }
+      const cut = new AbortController();
+      streams.add(cut);
+      const signal = init?.signal ?? null;
+      return fetch(input, {
+        ...init,
+        signal: signal === null ? cut.signal : AbortSignal.any([signal, cut.signal]),
+      });
+    },
+    down: () => {
+      down = true;
+      for (const stream of streams) {
+        stream.abort();
+      }
+      streams.clear();
+    },
+    up: () => {
+      down = false;
+    },
+  };
 }
 
 /** When each spend report was logged, oldest first. */
@@ -3684,6 +3767,104 @@ describe("turns on a runner over the runner protocol", () => {
     gate.resolve();
     expect(await long).toMatchObject({ exitReason: "completed" });
     expect(started).toBe(2);
+  });
+
+  it("stops the CLI of a turn the board ended while its runner was away, once the runner is back", async () => {
+    const { board } = await Board.init(dir, { name: "ended-away" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    const network = failingNetwork();
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      fetch: network.fetch,
+      graceMs: 300,
+    });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
+
+    // The runner's network fails for longer than the grace period: the board ends the turn and
+    // frees its conversation, while the CLI, cut off from the board, works on.
+    network.down();
+    expect(await first).toMatchObject({
+      exitReason: "error",
+      error: "runner pod went away during the turn",
+    });
+    expect(runner.turns).toHaveLength(1);
+
+    // Back, the runner lists the turn in its hello, and the server has it stop the CLI.
+    network.up();
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), {
+      timeout: 10_000,
+    });
+
+    // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
+    // workspace only once that CLI has ended.
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(backend.log).toEqual(["start 1", "stop 1"]);
+    backend.end(1);
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]));
+    backend.end(2);
+    expect(await next).toMatchObject({ exitReason: "completed" });
+    await vi.waitFor(() => expect(runner.turns).toEqual([]));
+  });
+
+  it("runs one turn of a conversation at a time on a runner, stopping the earlier for the next", async () => {
+    const { board } = await Board.init(dir, { name: "one-at-a-time" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const backend = new LoggedBackend();
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    const { run, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+
+    // The server sends a conversation's next turn only once it has ended the last, so a second job
+    // of the conversation means the board no longer holds the first, by whatever path it ended:
+    // the runner stops it, and starts the second in the workspace only once its CLI has ended.
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(backend.log).toEqual(["start 1", "stop 1"]);
+
+    // Another citizen's turn, in a conversation of its own, does not wait.
+    const other = run(manual("eng-2", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]));
+    backend.end(2);
+    expect(await other).toMatchObject({ exitReason: "completed" });
+
+    backend.end(1);
+    await vi.waitFor(() =>
+      expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+    );
+    backend.end(3);
+    expect(await first).toMatchObject({ exitReason: "stopped" });
+    expect(await next).toMatchObject({ exitReason: "completed" });
   });
 
   it("counts a turn's steps or outcome as its job's receipt, for a runner that never posts one", async () => {

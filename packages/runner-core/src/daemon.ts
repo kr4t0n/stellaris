@@ -1,7 +1,9 @@
 import { setTimeout as wait } from "node:timers/promises";
 import {
+  conversationPart,
   RUNNER_PROTOCOL,
   sameConversation,
+  sessionKey,
   workspaceConversationOf,
   type AgentEvent,
   type CliKind,
@@ -168,6 +170,11 @@ export class RunnerDaemon {
   private readonly jobs = new Map<string, TurnJob>();
   /** Each turn in flight's handle, for the steers and stops the server sends it. */
   private readonly controls = new Map<string, TurnControl>();
+  /**
+   * Each conversation's latest turn here, by session key, and when its workspace is free: once its
+   * CLI has ended and its work been handed back.
+   */
+  private readonly conversations = new Map<string, { turnId: string; free: Promise<void> }>();
   private readonly homes: HomeSync;
   private readonly board: TreeCopy;
   private abort: AbortController | null = null;
@@ -316,19 +323,39 @@ export class RunnerDaemon {
 
   private handle(message: RunnerMessage): void {
     if (message.type === "turn") {
-      if (this.stopped || this.running.has(message.job.turnId)) {
+      const { job } = message;
+      if (this.stopped || this.running.has(job.turnId)) {
         return;
       }
+      // The server sends a conversation's next turn only once it has ended the last, so a turn of
+      // the conversation still here is one the board no longer holds, whatever ended it: it stops,
+      // and this one starts in the workspace only once that turn's CLI has ended.
+      const key = sessionKey(job.agent, job.scope, conversationPart(job));
+      const earlier = this.conversations.get(key);
+      if (earlier !== undefined) {
+        this.controls.get(earlier.turnId)?.stop();
+        this.log.warn(
+          { agent: job.agent, scope: job.scope, turnId: earlier.turnId, next: job.turnId },
+          "stopping a turn the board has ended, for its conversation's next",
+        );
+      }
+      const { promise: free, resolve: freed } = Promise.withResolvers<void>();
+      this.conversations.set(key, { turnId: job.turnId, free });
       const control = new TurnControl();
-      this.controls.set(message.job.turnId, control);
-      this.jobs.set(message.job.turnId, message.job);
-      const run = this.runJob(message.job, control).finally(() => {
-        this.running.delete(message.job.turnId);
-        this.controls.delete(message.job.turnId);
-        this.jobs.delete(message.job.turnId);
+      this.controls.set(job.turnId, control);
+      this.jobs.set(job.turnId, job);
+      const run = this.runJob(job, control, earlier?.free, () => {
+        freed();
+        if (this.conversations.get(key)?.turnId === job.turnId) {
+          this.conversations.delete(key);
+        }
+      }).finally(() => {
+        this.running.delete(job.turnId);
+        this.controls.delete(job.turnId);
+        this.jobs.delete(job.turnId);
       });
-      this.running.set(message.job.turnId, run);
-      void this.acknowledge(message.job.turnId);
+      this.running.set(job.turnId, run);
+      void this.acknowledge(job.turnId);
       return;
     }
     const answer = (work: Promise<unknown>): void => {
@@ -435,13 +462,23 @@ export class RunnerDaemon {
     );
   }
 
-  private async runJob(job: TurnJob, control: TurnControl): Promise<void> {
+  /**
+   * Runs a turn once its conversation's earlier one here, if any, has left the workspace, then
+   * reports it; `freed` is called once this one has left it, before its home and outcome go back.
+   */
+  private async runJob(
+    job: TurnJob,
+    control: TurnControl,
+    earlier: Promise<void> | undefined,
+    freed: () => void,
+  ): Promise<void> {
     const sender = new EventSender((entries) => this.client.events(job.turnId, entries), this.log, {
       retryMs: this.retryMs,
       forMs: this.postForMs,
     });
     let outcome: TurnOutcome;
     try {
+      await earlier;
       await this.board.pull(this.client.boardTree());
       await this.homes.prepare(job.agent);
       outcome = await this.executor.run(job, (event) => sender.push(event), control);
@@ -457,6 +494,8 @@ export class RunnerDaemon {
         work: null,
         leftovers: false,
       };
+    } finally {
+      freed();
     }
     // A turn that reports no running usage, as one that saw no result or never reached its CLI,
     // leaves the session's as the job gave it.

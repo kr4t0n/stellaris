@@ -204,8 +204,8 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 
 **The app's icon**
 
-- The icon on the Home Screen in each appearance (touch and hold the Home Screen, then Edit > Customize): Default, Dark, Clear and Tinted, each with the light and the dark wallpaper. The three stars stay apart, the upper meteor passes clear of the large star, and its tail fades out before the icon's top edge. CI draws the six with Icon Composer's tool and shows a simulator's Home Screen, not a device's glass over a real wallpaper.
-- The icon at its smallest, in Spotlight, Settings' list, and a notification: the three stars stay apart, and the meteors' faint tails in Clear and Tinted.
+- The icon on the Home Screen in each appearance (touch and hold the Home Screen, then Edit > Customize): Default, Dark, Clear and Tinted, each with the light and the dark wallpaper. The three stars stay apart, the upper meteor passes clear of the large star, and its tail fades out before the icon's top edge. CI draws the six only with Icon Composer's tool, not with a device's glass over a real wallpaper.
+- The icon at its smallest, in Spotlight, Settings' list, and the App Library: the three stars stay apart, and the meteors' faint tails in Clear and Tinted.
 
 **Touch and the keyboard on the outer display**
 

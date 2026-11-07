@@ -97,7 +97,11 @@ export const RunnerHelloSchema = z.object({
   gitIdentityMissing: z.array(GitIdentityPartSchema).optional(),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
-  /** Turns the runner is still running, when it registers again; the server fails the rest of its turns. */
+  /**
+   * Turns the runner is still running, when it registers again: the server fails the rest of its
+   * turns, and has any of these it has ended stopped once the stream opens, when the runner lists
+   * a CLI it can stop.
+   */
   turns: z.array(UlidSchema).default([]),
 });
 export type RunnerHello = z.infer<typeof RunnerHelloSchema>;

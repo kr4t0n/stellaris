@@ -46,6 +46,8 @@ export interface TestSocietyOptions {
    * may; asked before the app sees the request.
    */
   readonly drop?: ((request: Request) => boolean) | undefined;
+  /** The first runner's way to the server, for a test whose network fails; Node's own if left out. */
+  readonly fetch?: typeof fetch | undefined;
   /** How long a runner may be away before the hub moves or fails its work. */
   readonly graceMs?: number | undefined;
   /** How long a runner may take to acknowledge a job before the hub sends it no more turns. */
@@ -69,6 +71,7 @@ export interface TestSocietyOptions {
         readonly name: string;
         readonly backends: (app: TestApp) => Partial<Record<CliKind, AgentBackend>>;
         readonly capabilities?: readonly string[] | undefined;
+        readonly fetch?: typeof fetch | undefined;
       }>
     | undefined;
   /** Signing in with GitHub, with GitHub itself faked through its `fetch`. */
@@ -167,6 +170,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       name: options.runnerName ?? "pod",
       backends: options.backends,
       capabilities: options.capabilities,
+      fetch: options.fetch,
     },
     ...(options.extraRunners ?? []),
   ]) {
@@ -181,6 +185,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
       version: "test",
       slots: options.slots ?? null,
       capabilities: each.capabilities,
+      fetch: each.fetch,
       retryMs: 50,
       // Tests move a project's remote between turns a moment apart.
       fetchIntervalMs: 0,

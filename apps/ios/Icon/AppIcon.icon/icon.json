@@ -1,170 +1,162 @@
 {
-  "fill": {
-    "linear-gradient": [
-      "srgb:0.14117647,0.15686275,0.18823529,1.00000000",
-      "srgb:0.06666667,0.07843137,0.10196078,1.00000000"
-    ],
-    "orientation": {
-      "start": {
-        "x": 0.5,
-        "y": 0
-      },
-      "stop": {
-        "x": 0.5,
-        "y": 1
-      }
-    }
-  },
-  "fill-specializations": [
+  "fill-specializations" : [
     {
-      "appearance": "dark",
-      "value": {
-        "linear-gradient": [
-          "srgb:0.05490196,0.06274510,0.08235294,1.00000000",
-          "srgb:0.02352941,0.02745098,0.04313725,1.00000000"
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.14117647,0.15686275,0.18823529,1.00000000",
+          "srgb:0.06666667,0.07843137,0.10196078,1.00000000"
         ],
-        "orientation": {
-          "start": {
-            "x": 0.5,
-            "y": 0
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0
           },
-          "stop": {
-            "x": 0.5,
-            "y": 1
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1
           }
         }
       }
     },
     {
-      "appearance": "tinted",
-      "value": "automatic"
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.05490196,0.06274510,0.08235294,1.00000000",
+          "srgb:0.02352941,0.02745098,0.04313725,1.00000000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1
+          }
+        }
+      }
     }
   ],
-  "groups": [
+  "groups" : [
     {
-      "name": "02 Stars",
-      "layers": [
+      "blur-material" : 0,
+      "layers" : [
         {
-          "image-name": "06-star-lower.svg",
-          "name": "06-star-lower",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 1
+          "glass" : false,
+          "image-name" : "06-star-lower.svg",
+          "name" : "06-star-lower",
+          "opacity" : 1
         },
         {
-          "image-name": "05-star-upper.svg",
-          "name": "05-star-upper",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 1
+          "glass" : false,
+          "image-name" : "05-star-upper.svg",
+          "name" : "05-star-upper",
+          "opacity" : 1
         },
         {
-          "image-name": "04-star-large.svg",
-          "name": "04-star-large",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 1
+          "glass" : false,
+          "image-name" : "04-star-large.svg",
+          "name" : "04-star-large",
+          "opacity" : 1
         }
       ],
-      "lighting": "individual",
-      "blur-material": 0,
-      "shadow": {
-        "kind": "none",
-        "opacity": 0
+      "lighting" : "individual",
+      "name" : "02 Stars",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
       },
-      "specular": false,
-      "translucency": {
-        "enabled": false,
-        "value": 0
+      "specular" : false,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
       }
     },
     {
-      "name": "01 Meteors",
-      "layers": [
+      "blur-material" : 0,
+      "layers" : [
         {
-          "image-name": "03-meteor-right.svg",
-          "name": "03-meteor-right",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 0.65
+          "glass" : false,
+          "image-name" : "03-meteor-right.svg",
+          "name" : "03-meteor-right",
+          "opacity" : 0.65
         },
         {
-          "image-name": "02-meteor-lower.svg",
-          "name": "02-meteor-lower",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 0.75
+          "glass" : false,
+          "image-name" : "02-meteor-lower.svg",
+          "name" : "02-meteor-lower",
+          "opacity" : 0.75
         },
         {
-          "image-name": "01-meteor-upper.svg",
-          "name": "01-meteor-upper",
-          "glass": false,
-          "fill": "automatic",
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "appearance": "tinted",
-              "value": {
-                "solid": "extended-gray:1.00000,1.00000"
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
               }
             }
           ],
-          "opacity": 1
+          "glass" : false,
+          "image-name" : "01-meteor-upper.svg",
+          "name" : "01-meteor-upper",
+          "opacity" : 1
         }
       ],
-      "lighting": "individual",
-      "blur-material": 0,
-      "shadow": {
-        "kind": "none",
-        "opacity": 0
+      "lighting" : "individual",
+      "name" : "01 Meteors",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
       },
-      "specular": false,
-      "translucency": {
-        "enabled": false,
-        "value": 0
+      "specular" : false,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
       }
     }
   ],
-  "supported-platforms": {
-    "squares": "shared"
+  "supported-platforms" : {
+    "squares" : "shared"
   }
 }

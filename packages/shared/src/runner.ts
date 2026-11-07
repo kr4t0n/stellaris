@@ -99,7 +99,8 @@ export const RunnerHelloSchema = z.object({
   slots: z.number().int().positive().nullable(),
   /**
    * Turns the runner is still running, when it registers again: the server fails the rest of its
-   * turns, and has any of these it has ended stopped once the stream opens.
+   * turns, and has any of these it has ended stopped once the stream opens, when the runner lists
+   * a CLI it can stop.
    */
   turns: z.array(UlidSchema).default([]),
 });

@@ -3867,6 +3867,136 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await next).toMatchObject({ exitReason: "completed" });
   });
 
+  it("keeps a turn running, unstopped, on a runner back within the grace period", async () => {
+    const { board } = await Board.init(dir, { name: "back-in-grace" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    const network = failingNetwork();
+    let hellos = 0;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      fetch: network.fetch,
+      graceMs: 3_000,
+      drop: (request) => {
+        if (new URL(request.url).pathname === "/runner/hello") {
+          hellos += 1;
+        }
+        return false;
+      },
+    });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
+    const said = hellos;
+
+    // The network fails for less than the grace period. The runner says hello again, listing the
+    // turn, which the board still holds, so nothing stops it, neither then nor once the grace
+    // period would have run out.
+    network.down();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    network.up();
+    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), { timeout: 5_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]));
+    expect(runner.turns).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(backend.log).toEqual(["start 1"]);
+    backend.end(1);
+    expect(await first).toMatchObject({ exitReason: "completed" });
+  });
+
+  it("ends a turn the user stops while it waits for its conversation's earlier one, its CLI never started", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-waiting" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
+    const waiting = runner.turns[1] ?? "";
+
+    // The user stops the turn that waits. It ends once the earlier turn's CLI has ended, without
+    // starting its own.
+    expect(await hub.stop(waiting, "user")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(runner.turns).toHaveLength(2);
+    backend.end(1);
+    expect(await next).toMatchObject({ exitReason: "stopped" });
+    expect(await first).toMatchObject({ exitReason: "stopped" });
+    expect(backend.log).toEqual(["start 1", "stop 1", "end 1"]);
+  });
+
+  it("sends the stop for a turn the board has ended only to a runner that lists a CLI it can stop", async () => {
+    const { board } = await Board.init(dir, { name: "ended-older-runner" });
+    society = await startTestSociety({ board, backends: () => ({ claude: new LoggedBackend() }) });
+    const { hub } = society;
+    // A turn the runner still runs and the host no longer holds, as after the grace period.
+    const ended = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const hello: RunnerHello = {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: true,
+      imageReads: false,
+      imageWrites: false,
+      projectMoves: false,
+      capabilities: [],
+      slots: null,
+      turns: [ended],
+    };
+
+    // A runner from before stops lists none it can stop, and would skip the message.
+    await board.addRunner(USER, "older");
+    await hub.register("older", hello);
+    const toOlder: RunnerMessage[] = [];
+    await hub.attach("older", (message) => toOlder.push(message) > 0);
+    expect(toOlder).toEqual([]);
+
+    await board.addRunner(USER, "newer");
+    await hub.register("newer", { ...hello, stoppableClis: ["claude"] });
+    const toNewer: RunnerMessage[] = [];
+    await hub.attach("newer", (message) => toNewer.push(message) > 0);
+    expect(toNewer).toEqual([{ type: "stop", request: expect.any(String), turnId: ended }]);
+    const [stop] = toNewer;
+    if (stop?.type === "stop") {
+      hub.answer("newer", stop.request, { ok: true, value: true });
+    }
+  });
+
   it("counts a turn's steps or outcome as its job's receipt, for a runner that never posts one", async () => {
     const { board } = await Board.init(dir, { name: "receipt-never" });
     await board.addProject(USER, { slug: "demo" });

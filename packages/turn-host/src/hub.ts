@@ -281,7 +281,8 @@ export class RunnerHub implements TurnRunner {
   /**
    * A registered runner's stream opened. Returns what to call when it closes. A turn its hello
    * listed that the board has ended, as one whose runner came back after the grace period, is told
-   * to stop before anything else goes down the stream, since its CLI still works there.
+   * to stop before anything else goes down the stream, since its CLI still works there; a runner
+   * that lists no CLI it can stop, as one from before stops, is sent none.
    */
   async attach(name: Name, send: RunnerSend): Promise<() => Promise<void>> {
     const seat = this.seats.get(name);
@@ -294,9 +295,11 @@ export class RunnerHub implements TurnRunner {
       clearTimeout(seat.grace);
       seat.grace = null;
     }
-    for (const turnId of seat.hello.turns) {
-      if (this.host.runnerOf(turnId) !== name) {
-        void this.stopEnded(seat, turnId);
+    if (seat.hello.stoppableClis.length > 0) {
+      for (const turnId of seat.hello.turns) {
+        if (this.host.runnerOf(turnId) !== name) {
+          void this.stopEnded(seat, turnId);
+        }
       }
     }
     for (const { job } of seat.unacked.values()) {
@@ -1324,10 +1327,17 @@ export class RunnerHub implements TurnRunner {
         (request) => ({ type: "stop", request, turnId }),
         CONTROL_TIMEOUT_MS,
       );
-      this.log.warn(
-        { runner: seat.name, turnId, stopped },
-        "stopped a turn the board had ended, which its runner still ran",
-      );
+      if (stopped === true) {
+        this.log.warn(
+          { runner: seat.name, turnId },
+          "stopped a turn the board had ended, which its runner still ran",
+        );
+      } else {
+        this.log.info(
+          { runner: seat.name, turnId },
+          "a turn the board had ended was no longer running on its runner",
+        );
+      }
     } catch (error) {
       this.log.warn(
         { runner: seat.name, turnId, error: String(error) },

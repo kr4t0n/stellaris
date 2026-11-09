@@ -171,8 +171,8 @@ export interface SchedulerTimings {
    */
   readonly sessionCapTokens: number;
   /**
-   * After a turn the model service turned away for now, the same wake goes again after each of
-   * these delays in turn, one per refusal in a row; once they are spent, the heartbeat takes over.
+   * After a turn that failed for now, the same wake goes again after each of these delays in turn,
+   * one per such failure in a row; once they are spent, the heartbeat takes over.
    */
   readonly transientRetryMs: readonly number[];
 }
@@ -435,7 +435,7 @@ export class Scheduler {
   private readonly sweeping = new Set<Promise<void>>();
   /** Crons whose fire's turn is running; a cron's next time passes while one is. */
   private readonly cronsInFlight = new Set<Ulid>();
-  /** Turns in a row the model service turned away, by session key, which `retryRefused` counts. */
+  /** Turns in a row that failed for now, by session key, which `retryRefused` counts. */
   private readonly refused = new Map<string, number>();
   private state: State = StateSchema.parse({
     cursor: null,
@@ -2414,11 +2414,13 @@ export class Scheduler {
   }
 
   /**
-   * A turn the model service turned away for now, overloaded or failing on its side, is sent again:
-   * the same wake in the same conversation, after the next delay of `transientRetryMs`, with every
-   * check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a new
-   * post's, runs the conversation instead. Once the delays are spent the heartbeat takes over, and
-   * a `turn_refused` signal, which wakes nobody, says so. A turn that ends any other way ends the run.
+   * A turn that failed for now is sent again: the model service turned it away or cut it off, the
+   * runner could not reach the board before its CLI started, or its job never reached the runner.
+   * The same wake goes in the same conversation, after the next delay of `transientRetryMs`, with
+   * every check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a
+   * new post's, runs the conversation instead. Once the delays are spent the heartbeat takes over,
+   * and a `turn_refused` signal, which wakes nobody, says so. A turn that ends any other way ends
+   * the run.
    */
   private async retryRefused(key: string, item: PendingTurn, record: TurnRecord): Promise<void> {
     if (record.transient !== true || record.exitReason !== "error") {
@@ -2438,7 +2440,7 @@ export class Scheduler {
       this.pending.set(key, { ...retry, readyAt: this.now().getTime() + delay });
       this.log.info(
         { agent: dispatch.agent, project: dispatch.project, refused, delayMs: delay },
-        "the model service turned the turn away, sending its wake again",
+        "the turn failed for now, sending its wake again",
       );
       return;
     }
@@ -2457,7 +2459,7 @@ export class Scheduler {
     await this.board.publishSignal({
       kind: "turn_refused",
       key: `turn_refused:${key}`,
-      summary: `${dispatch.agent}'s turns in ${where} were turned away by the model service ${refused} times in a row${record.model === null ? "" : ` on ${record.model}`}, the last with "${record.error ?? "no error"}"; its heartbeat takes over`,
+      summary: `${dispatch.agent}'s turns in ${where} failed for now ${refused} times in a row${record.model === null ? "" : ` on ${record.model}`}, the last with "${record.error ?? "no error"}"; its heartbeat takes over`,
       value: refused,
       threshold: refused,
       agent: dispatch.agent,

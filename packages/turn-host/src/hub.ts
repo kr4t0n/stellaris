@@ -661,6 +661,7 @@ export class RunnerHub implements TurnRunner {
         await this.host.abortTurn(
           opened.job.turnId,
           `runner ${seat.name} went away before the turn`,
+          { transient: true },
         );
       } else {
         this.expectAck(seat, opened.job);
@@ -1368,11 +1369,15 @@ export class RunnerHub implements TurnRunner {
         return;
       }
       for (const turnId of this.host.turnsOn(seat.name)) {
+        // A job the runner never acknowledged, nor sent a step of, most likely never arrived, so
+        // its wake may go again; a turn under way may have done work a resend would do twice.
+        const unsent = seat.unacked.has(turnId);
         void this.host.abortTurn(
           turnId,
-          seat.unacked.has(turnId)
+          unsent
             ? `the turn never reached runner ${seat.name}, which went away`
             : `runner ${seat.name} went away during the turn`,
+          { transient: unsent },
         );
       }
     }, this.graceMs);

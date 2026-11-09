@@ -15,7 +15,7 @@ import {
   type TurnJob,
   type TurnOutcome,
 } from "@stellaris/shared";
-import { RunnerClient, RunnerHttpError } from "./client.js";
+import { RunnerClient, RunnerHttpError, unreachable } from "./client.js";
 import { TurnControl } from "./control.js";
 import { runnerOs } from "./enroll.js";
 import { describeError } from "./errors.js";
@@ -477,9 +477,13 @@ export class RunnerDaemon {
       forMs: this.postForMs,
     });
     let outcome: TurnOutcome;
+    // Whether the board's copy is being pulled, which no CLI waits for yet.
+    let pulling = false;
     try {
       await earlier;
+      pulling = true;
       await this.board.pull(this.client.boardTree());
+      pulling = false;
       await this.homes.prepare(job.agent);
       outcome = await this.executor.run(job, (event) => sender.push(event), control);
     } catch (error) {
@@ -493,6 +497,8 @@ export class RunnerDaemon {
         model: null,
         work: null,
         leftovers: false,
+        // The server out of reach for now: the same wake may pass in a minute, and nothing ran.
+        ...(pulling && unreachable(error) ? { transient: true } : {}),
       };
     } finally {
       freed();

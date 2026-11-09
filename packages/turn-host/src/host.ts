@@ -998,8 +998,15 @@ export class TurnHost {
     return { dropWorkspace: ended && (closing ? decided : !outcome.leftovers) };
   }
 
-  /** Ends a turn whose outcome will never come, as when its runner went away, as failed. */
-  async abortTurn(turnId: Ulid, reason: string): Promise<void> {
+  /**
+   * Ends a turn whose outcome will never come, as when its runner went away, as failed; `transient`
+   * when its job never reached the runner, so the same wake may pass in a minute.
+   */
+  async abortTurn(
+    turnId: Ulid,
+    reason: string,
+    options: { readonly transient?: boolean | undefined } = {},
+  ): Promise<void> {
     const turn = this.open.get(turnId);
     if (turn === undefined) {
       return;
@@ -1015,6 +1022,7 @@ export class TurnHost {
       exitReason: "error",
       error: reason,
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
+      ...(options.transient === true ? { transient: true } : {}),
     };
     if (await this.recorded(turn, () => this.board.finishTurn(finished, turn.transcript))) {
       this.log.warn({ agent: turn.job.agent, project: turn.job.scope, reason }, "turn aborted");

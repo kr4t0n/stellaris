@@ -70,8 +70,9 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
 }
 
 /**
- * The end of a row that shows a count or a new-messages dot: a slot as wide as a two-digit count
- * whose middle is the same line in every row, so counts of any width and dots are centred on it.
+ * The end of a row that shows a count or a new-messages dot: a slot 28 px wide, about a three-digit
+ * count's width, whose middle is the same line in every row, so counts and dots are centred on it;
+ * a wider count grows both ways from it.
  */
 function RowEnd({ children }: { children: ReactNode }) {
   return <span className="flex w-7 shrink-0 justify-center">{children}</span>;

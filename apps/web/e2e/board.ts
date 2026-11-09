@@ -125,6 +125,16 @@ function labPost(minute: number, author: string, body: string, notice?: unknown)
   };
 }
 
+/** The society's general's one post, listed only with `unread`. */
+const SOCIETY_POST = {
+  id: "01M3Q2NNNNNNNNNNNNNNNNNNN1",
+  author: "desk",
+  channel: "general",
+  ts: CREATED,
+  mentions: [],
+  body: "The runners restart at noon.",
+};
+
 const EXPERIMENTS = { kind: "knowledge", topic: "experiments", project: "lab" };
 
 /** lab's general: talk, and the notes knowledge verbs posted. */
@@ -1250,10 +1260,17 @@ export async function fakeBoard(
      * Citizens list run out of room.
      */
     crowded?: boolean;
+    /**
+     * Lists lab's general with its posts and the society's general with one, so a browser that
+     * listed the board before them shows each channel's dot: lab's beside its open thread's count,
+     * the society's with no count.
+     */
+    unread?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
   const archived = options.archived === true;
+  const unread = options.unread === true;
   const asks = options.asks === true ? askFixtures() : new Map<string, AskFixture>();
   let answering: string | null = null;
   const writes: Write[] = [];
@@ -1987,6 +2004,7 @@ export async function fakeBoard(
           ? json(route, SOCIETY_SKILL_FILES)
           : json(route, { error: "NOT_FOUND", message: "the society has no skill uv-setup" }, 404);
       case "/api/channels/general":
+        return json(route, unread ? [SOCIETY_POST] : []);
       case "/api/channels/governance":
       case "/api/channels/asks":
         return json(route, []);
@@ -2021,10 +2039,19 @@ export async function fakeBoard(
         return json(route, enrolling ? [enrollment] : []);
       case "/api/channels":
         return json(route, [
-          channel("general"),
+          unread
+            ? { ...channel("general"), messages: 1, lastMessageId: SOCIETY_POST.id }
+            : channel("general"),
           channel("governance"),
           channel("asks"),
-          { ...channel("general"), ref: "lab/general", project: "lab" },
+          {
+            ...channel("general"),
+            ref: "lab/general",
+            project: "lab",
+            ...(unread
+              ? { messages: LAB_GENERAL.length, lastMessageId: LAB_GENERAL.at(-1)?.id ?? null }
+              : {}),
+          },
           ...labChannels.map((each) => ({
             ...channel(each.name),
             ref: `lab/${each.name}`,

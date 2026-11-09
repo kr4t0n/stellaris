@@ -59,6 +59,26 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
   );
 }
 
+/**
+ * A channel's dot for posts this browser hasn't seen. Beside the count it sits on a line set at the
+ * count's size, which shares the count's baseline, raised so its middle is half a capital's height
+ * above it, the digits' middle. Centred on the count's box, it showed a pixel below them, since
+ * the digits sit high in their line (docs/internals/interface.md).
+ */
+function NewDot({ besideCount }: { besideCount: boolean }) {
+  const dot = "size-1.5 rounded-full bg-emerald-400";
+  return besideCount ? (
+    <span className="text-[11px]">
+      <span
+        aria-label="new messages"
+        className={`inline-block align-[calc(0.5cap-0.1875rem)] ${dot}`}
+      />
+    </span>
+  ) : (
+    <span aria-label="new messages" className={dot} />
+  );
+}
+
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
     <span title={title} className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300">
@@ -237,12 +257,7 @@ export function Navigator({
                           {threadCount}
                         </span>
                       ) : null}
-                      {fresh ? (
-                        <span
-                          aria-label="new messages"
-                          className="size-1.5 rounded-full bg-emerald-400"
-                        />
-                      ) : null}
+                      {fresh ? <NewDot besideCount={threadCount > 0} /> : null}
                     </Link>
                   </li>
                 );

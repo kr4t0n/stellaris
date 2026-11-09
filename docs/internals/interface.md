@@ -184,6 +184,12 @@ Concurrency is per conversation, so a citizen once ran turns in two projects sid
 
 Following argus, line breaks become spaces and the row cuts the text at its own width; there is no line count. The first build showed a command's first line, and a 74-line command whose first line wrote a README hid the citation check that took six minutes.
 
+### A row's `items-center` centres boxes, not the digits in them
+
+A count's digits sit high in their line. Instrument Sans's ascent and descent are 970 and 250 per 1000, and its digits 735 tall. In the 11-pixel count's 15.7-pixel line, Chromium puts the baseline 11 px below the top, its half-leading of 0.85 px floored to nothing, so the digits' middle is 0.9 px above the box's. Centred on the count's box by the row, the navigator's new-messages dot showed a pixel below the number until 2026-11-09.
+
+`NewDot` in `Navigator.tsx` puts the dot on a line of the count's size, which shares the count's baseline wherever an engine puts it, and raises it with `vertical-align: calc(0.5cap - 0.1875rem)` so its middle is half a capital's height above that baseline, the digits' middle. `e2e/layout.spec.ts` compares the two as drawn. Line up any mark beside text with its glyphs the same way. A nudge in pixels holds only for one engine's rounding of the half-leading: as the row's line height went from 14 to 22 px, the old dot was a pixel off at every odd height and on at every even one.
+
 ### The seen store starts caught up
 
 `initSeen` records every channel's newest message the first time a browser lists them, under a `*` marker, so a first visit shows no dots; before the marker, opening a channel wrote its id first and every other channel then looked unseen.

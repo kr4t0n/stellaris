@@ -190,3 +190,91 @@ for (const size of [
     expect(await place()).toEqual(idle);
   });
 }
+
+test("a channel's dot for unseen posts sits level with the middle of its count's digits, and in the middle of a row with no count", async ({
+  page,
+}) => {
+  await fakeBoard(page, { unread: true });
+  // This browser listed the board before those posts.
+  await page.addInitScript(() => {
+    localStorage.setItem("stellaris.seen", JSON.stringify({ "*": "1" }));
+  });
+  await page.goto("/needs-you");
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  const lab = navigator.locator('a[href="/c/lab/general"]');
+  const count = lab.getByTitle("1 open threads");
+  const dot = lab.getByLabel("new messages");
+  await expect(dot).toBeVisible();
+  await expect(count).toBeVisible();
+  await page.evaluate(() => document.fonts.load("11px 'Instrument Sans Variable'"));
+
+  // Where each is drawn, read from the row's pixels at this window's scale of 1: the rows holding
+  // at least half the strongest grey over the ground among the count's digits, and half the
+  // strongest green within the dot's box.
+  const [row, digits, mark] = await Promise.all([
+    lab.boundingBox(),
+    count.boundingBox(),
+    dot.boundingBox(),
+  ]);
+  if (row === null || digits === null || mark === null) {
+    throw new Error("the row is not on the page");
+  }
+  const columns = (box: { x: number; width: number }, inset: number) => ({
+    from: Math.round(box.x - row.x + inset),
+    to: Math.round(box.x - row.x + box.width - inset),
+  });
+  const middles = await page.evaluate(
+    async ({ bytes, ink, green }) => {
+      const image = await createImageBitmap(new Blob([new Uint8Array(bytes)]));
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context?.drawImage(image, 0, 0);
+      const data = context?.getImageData(0, 0, image.width, image.height).data ?? [];
+      const middle = (
+        span: { from: number; to: number },
+        strength: (red: number, greenPart: number) => number,
+      ) => {
+        const rows: number[] = [];
+        for (let y = 0; y < image.height; y += 1) {
+          let strongest = -Infinity;
+          for (let x = span.from; x < span.to; x += 1) {
+            const at = (y * image.width + x) * 4;
+            strongest = Math.max(strongest, strength(data[at] ?? 0, data[at + 1] ?? 0));
+          }
+          rows.push(strongest);
+        }
+        const ground = Math.min(...rows);
+        const peak = Math.max(...rows) - ground;
+        const drawn = rows.flatMap((value, y) => (value - ground >= peak / 2 ? [y] : []));
+        return ((drawn[0] ?? 0) + (drawn.at(-1) ?? 0) + 1) / 2;
+      };
+      return {
+        digits: middle(ink, (red) => red),
+        dot: middle(green, (red, greenPart) => greenPart - red),
+      };
+    },
+    {
+      bytes: [...(await lab.screenshot())],
+      // Inside the count's padding, and the dot's box with a pixel either side.
+      ink: columns(digits, 6),
+      green: columns(mark, -1),
+    },
+  );
+  // On dev the dot was centred on the count's box, below the digits, which sit high in it: drawn a
+  // whole pixel lower, the smallest step it can be off by at this scale. Half a pixel is left for a
+  // shape of odd height, whose middle falls between rows.
+  expect(Math.abs(middles.dot - middles.digits), JSON.stringify(middles)).toBeLessThanOrEqual(0.5);
+
+  // With no count, the dot stays in the middle of its row.
+  const society = navigator.locator('a[href="/c/general"]');
+  const [alone, lone] = await Promise.all([
+    society.boundingBox(),
+    society.getByLabel("new messages").boundingBox(),
+  ]);
+  if (alone === null || lone === null) {
+    throw new Error("the society's general shows no dot");
+  }
+  expect(lone.y + lone.height / 2).toBeCloseTo(alone.y + alone.height / 2, 2);
+});

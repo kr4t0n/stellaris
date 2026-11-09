@@ -125,6 +125,19 @@ function labPost(minute: number, author: string, body: string, notice?: unknown)
   };
 }
 
+/** Twelve topics open in the society's governance, listed only with `unread`. */
+const GOVERNANCE_TOPICS = Array.from({ length: 12 }, (_, at) => ({
+  id: `01M3Q2PPPPPPPPPPPPPPPPPP${String(at + 1).padStart(2, "0")}`,
+  channel: "governance",
+  title: `Topic ${at + 1}`,
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
+  body: "",
+  messages: 0,
+  lastMessageId: null,
+}));
+
 /** The society's general's one post, listed only with `unread`. */
 const SOCIETY_POST = {
   id: "01M3Q2NNNNNNNNNNNNNNNNNNN1",
@@ -1263,7 +1276,7 @@ export async function fakeBoard(
     /**
      * Lists lab's general with its posts and the society's general with one, so a browser that
      * listed the board before them shows each channel's dot: lab's beside its open thread's count,
-     * the society's with no count.
+     * the society's with no count. Opens twelve topics in governance too, a count of two digits.
      */
     unread?: boolean;
   } = {},
@@ -1968,6 +1981,7 @@ export async function fakeBoard(
         return json(route, { thread: ARCHIVE_THREAD, messages: [ARCHIVE_PITCH] });
       case "/api/threads":
         return json(route, [
+          ...(unread ? GOVERNANCE_TOPICS : []),
           ...(archived
             ? [{ ...ARCHIVE_THREAD, messages: 1, lastMessageId: ARCHIVE_PITCH.id }]
             : []),

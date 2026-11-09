@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
@@ -55,31 +55,34 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
         </span>
         <span className="min-w-0 flex-1 truncate">tasks</span>
         {count > 0 ? (
-          <>
+          <RowEnd>
             <span
               title={`${count} tasks in play`}
               className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
             >
               {count}
             </span>
-            <DotRoom />
-          </>
+          </RowEnd>
         ) : null}
       </Link>
     </li>
   );
 }
 
-/** The new-messages dot's room beside a count that shows none, so every count ends on one line. */
-function DotRoom() {
-  return <span aria-hidden="true" className="w-1.5 shrink-0" />;
+/**
+ * The end of a row that shows a count or a new-messages dot: a slot as wide as a two-digit count
+ * whose middle is the same line in every row, so counts of any width and dots are centred on it.
+ */
+function RowEnd({ children }: { children: ReactNode }) {
+  return <span className="flex w-7 shrink-0 justify-center">{children}</span>;
 }
 
 /**
- * A channel's dot for posts this browser hasn't seen, in the column at the row's end. Beside a
- * count it sits on a line of the count's type, so on the digits' baseline wherever a device scale
- * puts it, and is raised half a capital's height to the digits' middle: centred on the row, it is
- * drawn a device pixel below them at a scale of 2 (docs/internals/interface.md).
+ * A channel's dot for posts this browser hasn't seen, in the row's end. Beside a count, which then
+ * sits just before it, the dot sits on a line of the count's type, so on the digits' baseline
+ * wherever a device scale puts it, and is raised half a capital's height to the digits' middle:
+ * centred on the row, it is drawn a device pixel below them at a scale of 2
+ * (docs/internals/interface.md).
  */
 function NewDot({ besideCount }: { besideCount: boolean }) {
   const dot = "size-1.5 rounded-full bg-emerald-400";
@@ -97,15 +100,14 @@ function NewDot({ besideCount }: { besideCount: boolean }) {
 
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
-    <>
+    <RowEnd>
       <span
         title={title}
         className={`rounded-md bg-amber-500/15 px-1.5 ${COUNT_TYPE} text-amber-300`}
       >
         {value}
       </span>
-      <DotRoom />
-    </>
+    </RowEnd>
   );
 }
 
@@ -260,6 +262,15 @@ export function Navigator({
                 const active = channel.ref === activeChannel;
                 const threadCount = openThreads.get(channel.ref) ?? 0;
                 const fresh = !active && isUnseen(seen, channel.ref, channel.lastMessageId);
+                const count =
+                  threadCount > 0 ? (
+                    <span
+                      title={`${threadCount} open threads`}
+                      className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+                    >
+                      {threadCount}
+                    </span>
+                  ) : null;
                 return (
                   <li key={channel.ref}>
                     <Link
@@ -271,18 +282,9 @@ export function Navigator({
                       <span className={`min-w-0 flex-1 truncate ${fresh ? "font-semibold" : ""}`}>
                         {channel.name}
                       </span>
-                      {threadCount > 0 ? (
-                        <span
-                          title={`${threadCount} open threads`}
-                          className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
-                        >
-                          {threadCount}
-                        </span>
-                      ) : null}
-                      {fresh ? (
-                        <NewDot besideCount={threadCount > 0} />
-                      ) : threadCount > 0 ? (
-                        <DotRoom />
+                      {fresh ? count : null}
+                      {fresh || count !== null ? (
+                        <RowEnd>{fresh ? <NewDot besideCount={count !== null} /> : count}</RowEnd>
                       ) : null}
                     </Link>
                   </li>

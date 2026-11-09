@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { fakeBoard } from "./board.js";
 import { COUNTED, drawnCount, navigatorWithDots } from "./counts.js";
 
@@ -225,24 +225,42 @@ test("every count in the navigator draws its digits in the middle of its pill, a
   expect(lone.y + lone.height / 2).toBeCloseTo(alone.y + alone.height / 2, 2);
 });
 
-test("every count in the navigator ends on one line, with or without a dot beside it, and every dot for unseen posts sits in one column after them", async ({
+/** A box that must be on the page. */
+async function boxOf(locator: Locator) {
+  const found = await locator.boundingBox();
+  if (found === null) {
+    throw new Error("not on the page");
+  }
+  return found;
+}
+
+/** Where a box's middle is across the page. */
+async function middle(locator: Locator) {
+  const found = await boxOf(locator);
+  return found.x + found.width / 2;
+}
+
+test("every count and every dot for unseen posts in the navigator is centred on one vertical line, whatever the count's width, and a count beside a dot sits just before it", async ({
   page,
 }) => {
   const navigator = await navigatorWithDots(page);
-  const ends = await Promise.all(
-    COUNTED.map(async (href) => {
-      const pill = await navigator.locator(`a[href="${href}"] [title]`).boundingBox();
-      return pill === null ? null : pill.x + pill.width;
-    }),
+  // needs you's 2, governance's 13 and the 1s are pills of three widths.
+  const counts = await Promise.all(
+    COUNTED.filter((href) => href !== "/c/lab/general").map((href) =>
+      middle(navigator.locator(`a[href="${href}"] [title]`)),
+    ),
   );
-  expect(new Set(ends), `count ends ${JSON.stringify(ends)}`).toEqual(new Set([ends[0]]));
+  const lab = navigator.locator('a[href="/c/lab/general"]');
+  const dots = await Promise.all([
+    middle(navigator.locator('a[href="/c/general"]').getByLabel("new messages")),
+    middle(lab.getByLabel("new messages")),
+  ]);
+  const middles = [...counts, ...dots];
+  expect(new Set(middles), `middles ${JSON.stringify(middles)}`).toEqual(new Set([middles[0]]));
 
-  const dots = await Promise.all(
-    ['a[href="/c/general"]', 'a[href="/c/lab/general"]'].map(async (row) => {
-      const dot = await navigator.locator(row).getByLabel("new messages").boundingBox();
-      return dot === null ? null : dot.x + dot.width / 2;
-    }),
-  );
-  expect(dots[0], `dot centres ${JSON.stringify(dots)}`).toBe(dots[1]);
-  expect(dots[0]).toBeGreaterThan(ends[0] ?? Infinity);
+  const [count, dot] = await Promise.all([
+    boxOf(lab.locator("[title]")),
+    boxOf(lab.getByLabel("new messages")),
+  ]);
+  expect(count.x + count.width).toBeLessThan(dot.x);
 });

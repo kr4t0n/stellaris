@@ -1745,6 +1745,9 @@ export class Scheduler {
     if (reflecting) {
       return;
     }
+    // A new request goes behind every other, so `checkReflections` serves homes in the order they
+    // asked: an object keeps a key it already has in its first place.
+    delete this.state.earlyReflection[home];
     this.state.earlyReflection[home] = { session, due: true };
     this.log.info(
       { agent: agent.name, project, contextTokens: tokens, cap: this.timings.sessionCapTokens },

@@ -1880,11 +1880,24 @@ describe("Scheduler", () => {
       ["eng-1", "lab", "reflection"],
     ]);
     runner.dispatches.length = 0;
+    // In the order they asked this time, though demo asked first before.
+    runner.outcomes.push({ session: "s-8", contextTokens: 5_000 });
+    runner.outcomes.push({ session: "s-9", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await settle(4);
+    expect(turns()).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "lab", "reflection"],
+      ["eng-1", "demo", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
 
     // A reflection in one home answers no request of another's: lab passes the cap while the user's
     // reflection waits for demo, and gets its own after it.
     runner.hold = true;
-    runner.outcomes.push({ session: "s-8", contextTokens: 5_000 });
+    runner.outcomes.push({ session: "s-10", contextTokens: 5_000 });
     await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
     await scheduler.tick();
     await board.requestWake(USER, {
@@ -1941,6 +1954,49 @@ describe("Scheduler", () => {
       { earlyReflection: {} },
     );
     expect(state.earlyReflection).toEqual({ "steward-1/society": { session: "s-1", due: false } });
+  });
+
+  it("queues no early reflection in a project the member left while its request waited", async () => {
+    const timings = { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 };
+    const { board, runner, scheduler } = await setup({ record: true, timings });
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    runner.dispatches.length = 0;
+
+    // lab's home passes the cap while a wake in demo waits for a runner, so its request waits too.
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.away = true;
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await scheduler.tick();
+    const early = async (): Promise<unknown> =>
+      (
+        await board.readState(
+          "scheduler",
+          z.object({ earlyReflection: z.record(z.string(), z.unknown()) }),
+          { earlyReflection: {} },
+        )
+      ).earlyReflection;
+    expect(await early()).toEqual({ "eng-1/lab": { session: "s-1", due: true } });
+
+    // The member leaves lab before the request is served: demo's wake runs, and lab gets nothing.
+    await board.leaveProject(USER, { project: "lab", agent: "eng-1" });
+    runner.away = false;
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "manual"],
+    ]);
+    expect(await early()).toEqual({ "eng-1/lab": { session: "s-1", due: false } });
   });
 
   it("lets a pass under way finish and save its cursor before it stops", async () => {

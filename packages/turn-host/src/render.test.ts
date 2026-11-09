@@ -145,6 +145,18 @@ describe("config-home rendering", () => {
     );
   });
 
+  it("says whom a post at the top of a project's channel wakes, as the heartbeat counts it", () => {
+    const text = renderInstructions({
+      agentName: "eng-1",
+      roleCharter: "# engineer",
+      memoryCore: "",
+      ...places,
+    });
+    expect(text).toContain(
+      "- A post at the top of a project's channel, general or another, wakes only whoever it mentions; everyone else reads it at their next turn there, at the latest about a day later. So mention whoever must act on it or know it soon.",
+    );
+  });
+
   it("has a citizen show an image by uploading it and linking its id, never by pasting its bytes", () => {
     const text = renderInstructions({
       agentName: "eng-1",

@@ -465,14 +465,14 @@ describe("Board", () => {
   it("scans a digest without holding up a post, and counts nothing written during the scan", async () => {
     const { board } = await society();
     for (let n = 0; n < 500; n += 1) {
-      await board.postMessage(REV, { channel: "demo/general", body: `note ${n}` });
+      await board.postMessage(REV, { channel: "demo/general", body: `@eng-1 note ${n}` });
     }
     let scanned = false;
     const scan = board.unreadByConversation(ENG).then((counts) => {
       scanned = true;
       return counts;
     });
-    await board.postMessage(REV, { channel: "demo/general", body: "meanwhile" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 meanwhile" });
     // The post did not wait for the heartbeat's scan of five hundred messages.
     expect(scanned).toBe(false);
     // The scan took its mark before the post, so it counts the five hundred alone; the next sees it.
@@ -870,12 +870,77 @@ describe("Board", () => {
     expect(await unread(REV, later.id)).toBe(0);
   });
 
+  it("counts a top-level post in a project's channel for whoever it asks, and for everyone else once a day old", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const FRONT: Actor = { name: "concierge-1", role: "concierge" };
+    await board.addAgent(USER, { ...FRONT, cli: "claude" });
+    const STEWARD: Actor = { name: "steward-1", role: "steward" };
+    await board.addAgent(USER, { ...STEWARD, cli: "claude" });
+    await board.subscribe(ENG, { channel: "demo/dev" });
+    const unread = async (actor: Actor) =>
+      (await board.unreadByConversation(actor)).map(({ scope, thread, channel, place, count }) => [
+        scope,
+        thread ?? channel ?? place,
+        count,
+      ]);
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "which cache?" });
+
+    // Fresh, in general and in a workstream's channel alike, a post asks a turn of whoever it
+    // mentions and of nobody else; the user's asks the front desk's, outside the project.
+    await board.postMessage(REV, { channel: "demo/general", body: "the build is green" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "the release plan" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-2 the date?" });
+    await board.postMessage(USER, { channel: "demo/general", body: "what is next?" });
+    // A thread's post and the society's general count as before.
+    await board.postMessage(REV, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { channel: "general", body: "the society's build is green" });
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 1]]);
+    expect(await unread(FRONT)).toEqual([
+      ["society", "demo", 1],
+      ["society", null, 1],
+    ]);
+    expect(await unread(STEWARD)).toEqual([["society", null, 1]]);
+    // Each is in the digest all the same, read at the next turn there.
+    const home = { ...ENG, scope: "demo" };
+    expect((await board.readDigest(home, { advance: false })).messages.map((m) => m.body)).toEqual([
+      "the build is green\n",
+      "@eng-2 the date?\n",
+      "what is next?\n",
+      "the society's build is green\n",
+    ]);
+
+    // A day after, every post still unread asks a turn of every reader it reaches.
+    clock = new Date(clock.getTime() + 24 * 3_600_000 - 1);
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    clock = new Date(clock.getTime() + 1);
+    expect(await unread(ENG)).toEqual([
+      ["demo", null, 3],
+      ["demo", "dev", 1],
+      ["demo", topic.id, 1],
+    ]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
+    expect(await unread(FRONT)).toEqual([
+      ["society", "demo", 1],
+      ["society", null, 1],
+    ]);
+
+    // A turn there reads them, and they ask nothing more of anyone it read them for.
+    await board.readDigest(home, { advance: true });
+    await board.readDigest({ ...home, channel: "dev" }, { advance: true });
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
+  });
+
   it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
     const { board } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
     await board.addAgent(USER, { ...STEW, cli: "claude" });
+    // A project's posts count at once, so only the notice's own rule keeps it out.
     const home = async (actor: Actor, scope: string): Promise<number> =>
-      (await board.unreadByConversation(actor)).find(
+      (await board.unreadByConversation(actor, { channelPostWaitMs: 0 })).find(
         (entry) =>
           entry.scope === scope &&
           entry.thread === null &&
@@ -940,9 +1005,10 @@ describe("Board", () => {
     const news = await board.postMessage(REV, { channel: "general", body: "the build is green" });
     expect(await ids("dev")).toEqual([inDev.id, asked.id]);
     expect(await ids()).toEqual([inGeneral.id, news.id]);
+    // Each counts toward the heartbeat where it is filed, but the post that asks nothing of eng-1.
     expect(await board.unreadByConversation(ENG)).toEqual([
       { scope: "demo", thread: null, channel: null, place: null, count: 1 },
-      { scope: "demo", thread: null, channel: "dev", place: null, count: 2 },
+      { scope: "demo", thread: null, channel: "dev", place: null, count: 1 },
     ]);
 
     // A channel token reads its channel, and its turn moves that conversation's cursor alone.

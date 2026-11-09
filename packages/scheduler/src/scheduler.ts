@@ -1,4 +1,9 @@
-import { SYSTEM_ACTOR, type Board, type UnreadConversation } from "@stellaris/board-core";
+import {
+  CHANNEL_POST_WAIT_MS,
+  SYSTEM_ACTOR,
+  type Board,
+  type UnreadConversation,
+} from "@stellaris/board-core";
 import {
   channelConversation,
   conversationPart,
@@ -141,6 +146,11 @@ export interface SchedulerTimings {
   readonly debounceMs: number;
   readonly userDebounceMs: number;
   readonly heartbeatMs: number;
+  /**
+   * A top-level post in a project's channel that asks a member nothing counts toward the member's
+   * heartbeat once it is this old; until then the member reads it at its next turn there.
+   */
+  readonly channelPostWaitMs: number;
   /** A current stage without a holder for this long is signalled as waiting. */
   readonly waitingStageMs: number;
   readonly leaseSweepMs: number;
@@ -182,6 +192,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   debounceMs: 30_000,
   userDebounceMs: 5_000,
   heartbeatMs: 15 * 60_000,
+  channelPostWaitMs: CHANNEL_POST_WAIT_MS,
   waitingStageMs: 10 * 60_000,
   leaseSweepMs: 60_000,
   opsIntervalMs: 5 * 60_000,
@@ -204,6 +215,7 @@ export const SchedulerTimingsSchema = z
     debounceMs: z.number().nonnegative(),
     userDebounceMs: z.number().nonnegative(),
     heartbeatMs: z.number().positive(),
+    channelPostWaitMs: z.number().nonnegative(),
     waitingStageMs: z.number().positive(),
     leaseSweepMs: z.number().positive(),
     opsIntervalMs: z.number().positive(),
@@ -1507,7 +1519,9 @@ export class Scheduler {
           continue;
         }
         this.state.lastHeartbeat[cadence] = iso(now);
-        unread ??= await this.board.unreadByConversation(actor);
+        unread ??= await this.board.unreadByConversation(actor, {
+          channelPostWaitMs: this.timings.channelPostWaitMs,
+        });
         held ??= await this.board.heldClaims(agent.name);
         pendingCrons ??= (await this.board.listCrons()).filter(
           (cron) => cronStoppedAt(cron) === null,

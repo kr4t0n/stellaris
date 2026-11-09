@@ -262,9 +262,9 @@ test("a channel's dot for unseen posts sits level with the middle of its count's
       green: columns(mark, -1),
     },
   );
-  // On dev the dot was centred on the count's box, below the digits, which sit high in it: drawn a
-  // whole pixel lower, the smallest step it can be off by at this scale. Half a pixel is left for a
-  // shape of odd height, whose middle falls between rows.
+  // A dot centred on the count's box is drawn a whole pixel below the digits, which sit high in it:
+  // the smallest step it can be off by at this scale. Half a pixel is left for a shape of odd
+  // height, whose middle falls between rows.
   expect(Math.abs(middles.dot - middles.digits), JSON.stringify(middles)).toBeLessThanOrEqual(0.5);
 
   // With no count, the dot stays in the middle of its row.

@@ -1121,7 +1121,8 @@ describe("board server routes", () => {
     expect(icon.headers.get("content-type")).toBe("image/svg+xml");
     expect(icon.headers.get("cache-control")).toBe("no-cache");
 
-    for (const route of ["/", "/task/01M3Q2AAAAAAAAAAAAAAAAAAA1", "/c/lab/general"]) {
+    // `/metrics` is the interface's metrics view here; Prometheus's counters have a port of their own.
+    for (const route of ["/", "/task/01M3Q2AAAAAAAAAAAAAAAAAAA1", "/c/lab/general", "/metrics"]) {
       const page = await app.request(route);
       expect(page.status).toBe(200);
       expect(await page.text()).toBe("<html>sky</html>");

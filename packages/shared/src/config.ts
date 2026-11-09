@@ -34,6 +34,11 @@ export const ServerConfigSchema = z.object({
   host: z.string().min(1),
   port: z.number().int().positive().max(65535),
   /**
+   * A second port, on the same host, that serves Prometheus's counters at `/metrics` and nothing
+   * else, or null for none: the main port's `/metrics` is the interface's page.
+   */
+  metricsPort: z.number().int().positive().max(65535).nullable(),
+  /**
    * An address every runner's agents reach this server at, for example https://board.example, or
    * null for each runner to use the address it reaches the server at itself.
    */
@@ -107,10 +112,13 @@ function githubSignIn(env: Readonly<Record<string, string | undefined>>): Github
 
 /** Builds the server configuration from an environment map. Callers pass `process.env`. */
 export function loadServerConfig(env: Readonly<Record<string, string | undefined>>): ServerConfig {
-  return ServerConfigSchema.parse({
+  const config = ServerConfigSchema.parse({
     dataDir: env["STELLARIS_DATA_DIR"] ?? "./data",
     host: env["STELLARIS_HOST"] ?? "127.0.0.1",
     port: Number(env["STELLARIS_PORT"] ?? "4700"),
+    metricsPort: env["STELLARIS_METRICS_PORT"]?.trim()
+      ? Number(env["STELLARIS_METRICS_PORT"])
+      : null,
     publicUrl: env["STELLARIS_PUBLIC_URL"]?.replace(/\/+$/, "") ?? null,
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     concurrency: limit(env["STELLARIS_CONCURRENCY"], null),
@@ -120,6 +128,10 @@ export function loadServerConfig(env: Readonly<Record<string, string | undefined
     github: githubSignIn(env),
     trustedProxies: Number(env["STELLARIS_TRUSTED_PROXIES"] ?? "0"),
   });
+  if (config.metricsPort === config.port) {
+    throw new Error("STELLARIS_METRICS_PORT must differ from STELLARIS_PORT");
+  }
+  return config;
 }
 
 export const RunnerConfigSchema = z.object({

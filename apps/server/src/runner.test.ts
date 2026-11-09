@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -38,10 +40,11 @@ import {
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
+  type TurnRecord,
   type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
@@ -2089,6 +2092,190 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
   });
 
+  it("marks a turn transient whose runner could not reach the board before its CLI started, and no other failure there", async () => {
+    const { board } = await Board.init(dir, { name: "unreachable" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    let ran = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => {
+        ran += 1;
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    // A server that sends the manifest's headers and part of its body, then closes the connection,
+    // as when a read times out: fetch says `terminated`.
+    const cutting = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-length": "1000" });
+      response.write('{"files":{', () => response.socket?.destroy());
+    });
+    cutting.listen(0, "127.0.0.1");
+    await once(cutting, "listening");
+    onTestFinished(() => new Promise<void>((resolve) => cutting.close(() => resolve())));
+    const cutAt = cutting.address();
+    const cutUrl = `http://127.0.0.1:${typeof cutAt === "object" && cutAt !== null ? cutAt.port : 0}`;
+    // How the next pull of the board's copy goes: its connection closed unanswered, as a proxy
+    // may close it, or cut in its answer's body, or answered with this status or with what is
+    // not JSON.
+    let manifest: "dropped" | "cut" | "garbled" | number | null = null;
+    let homes = false;
+    const live = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => {
+        const { pathname } = new URL(request.url);
+        return (
+          (manifest === "dropped" && pathname === "/runner/board/manifest") ||
+          (homes && pathname.startsWith("/runner/homes/"))
+        );
+      },
+      fetch: (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (!url.endsWith("/runner/board/manifest")) {
+          return fetch(input, init);
+        }
+        if (manifest === "cut") {
+          return fetch(`${cutUrl}/runner/board/manifest`, init);
+        }
+        if (manifest === "garbled") {
+          return Promise.resolve(new Response("<html>gateway</html>", { status: 200 }));
+        }
+        if (typeof manifest === "number") {
+          return Promise.resolve(new Response("refused", { status: manifest }));
+        }
+        return fetch(input, init);
+      },
+    });
+    society = live;
+    const post = { ...deskPost, agent: "concierge-1" };
+    const pulling = async (how: NonNullable<typeof manifest>): Promise<TurnRecord> => {
+      manifest = how;
+      try {
+        return await live.run(post);
+      } finally {
+        manifest = null;
+      }
+    };
+    await live.run(post);
+
+    // The server out of reach, or failing on its side: nothing ran, so the wake may go again.
+    const dropped = await pulling("dropped");
+    expect(dropped.error).toMatch(/^the runner could not run the turn: .*other side closed/);
+    expect(dropped.transient).toBe(true);
+    const cut = await pulling("cut");
+    expect(cut.error).toMatch(/^the runner could not run the turn: TypeError: terminated/);
+    expect(cut.transient).toBe(true);
+    for (const status of [503, 429]) {
+      expect(await pulling(status)).toMatchObject({
+        error: expect.stringContaining(`answered ${status}`),
+        transient: true,
+      });
+    }
+
+    // A refusal, or an answer the runner cannot read, would come again in a minute.
+    for (const how of [403, "garbled"] as const) {
+      const refused = await pulling(how);
+      expect(refused.error).toMatch(/^the runner could not run the turn/);
+      expect(refused.transient).toBeUndefined();
+    }
+
+    // So does a git failure, as of the agent's home, which comes after the pull.
+    homes = true;
+    const unfetched = await live.run(post);
+    homes = false;
+    expect(unfetched.error).toMatch(/^the runner could not run the turn: Error: git fetch failed/);
+    expect(unfetched.transient).toBeUndefined();
+    expect(ran).toBe(1);
+  });
+
+  it("sends a turn its runner could not start for want of the board again, and a cut-off one in its session", async () => {
+    let clock = Date.parse("2026-11-09T10:00:00.000Z");
+    const now = () => new Date(clock);
+    const { board } = await Board.init(dir, { name: "resend" }, { now });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const outcomes: TurnResult[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        return Promise.resolve(outcomes.shift() ?? completed("ran"));
+      },
+    };
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      now,
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now,
+      timings: {
+        debounceMs: 0,
+        userDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        transientRetryMs: [60_000],
+      },
+    });
+    const pass = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    /** How the concierge's latest turn ended. */
+    const lastEnd = async (): Promise<unknown> =>
+      (await board.readEvents(null, 1_000))
+        .filter(
+          (event) =>
+            event.actor === "concierge-1" && ["turn.completed", "turn.failed"].includes(event.type),
+        )
+        .map((event) => [event.type, event.payload["transient"] ?? null])
+        .at(-1);
+    // Onboarding runs first.
+    for (let i = 0; i < 3; i += 1) {
+      await pass();
+    }
+    const before = handed.length;
+
+    // The board's copy never arrives, so the turn fails before its CLI starts.
+    dropping = true;
+    await board.postMessage(USER, { channel: "general", body: "Is the build green?" });
+    await pass();
+    dropping = false;
+    expect(await lastEnd()).toEqual(["turn.failed", true]);
+    expect(handed).toHaveLength(before);
+
+    // A minute later the same wake goes again, and reaches the CLI; the heartbeat is an hour away.
+    clock += 59_000;
+    await pass();
+    expect(handed).toHaveLength(before);
+    clock += 1_000;
+    await pass();
+    expect(handed).toHaveLength(before + 1);
+    expect(await lastEnd()).toEqual(["turn.completed", null]);
+
+    // A turn the API cut off after its CLI had worked goes again in the session holding that work.
+    outcomes.push({
+      ...completed(""),
+      status: null,
+      exitReason: "error",
+      error: "API Error: 499 Client Closed Request",
+      transient: true,
+    });
+    await board.postMessage(USER, { channel: "general", body: "And the deploy?" });
+    await pass();
+    clock += 60_000;
+    await pass();
+    const [cut, resent] = handed.slice(before + 1);
+    expect(cut).toEqual({ session: "session-1", newSession: false });
+    expect(resent).toEqual(cut);
+    expect(handed).toHaveLength(before + 3);
+  });
+
   it("keeps a session its CLI may resume next time, and drops it after three such turns in a row", async () => {
     const { board } = await Board.init(dir, { name: "retry" });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
@@ -3605,13 +3792,24 @@ describe("turns on a runner over the runner protocol", () => {
     });
     expect(await first).toMatchObject({ exitReason: "completed" });
 
-    // A job that never arrived on a runner that then stays away is said to have never reached it.
+    // A job that never arrived on a runner that then stays away is said to have never reached it,
+    // and since nothing ran, the same wake may go again.
     const second = run(dispatch);
     await vi.waitFor(() => expect(delivered).toHaveLength(2));
     await detach();
     expect(await second).toMatchObject({
       exitReason: "error",
       error: expect.stringContaining("never reached runner ghost"),
+      transient: true,
+    });
+
+    // Nor did one the hub could not even send, its runner's stream gone.
+    await hub.register("ghost", hello);
+    await hub.attach("ghost", () => false);
+    expect(await run(dispatch)).toMatchObject({
+      exitReason: "error",
+      error: "runner ghost went away before the turn",
+      transient: true,
     });
   });
 
@@ -3800,10 +3998,13 @@ describe("turns on a runner over the runner protocol", () => {
     // The runner's network fails for longer than the grace period: the board ends the turn and
     // frees its conversation, while the CLI, cut off from the board, works on.
     network.down();
-    expect(await first).toMatchObject({
+    const ended = await first;
+    expect(ended).toMatchObject({
       exitReason: "error",
       error: "runner pod went away during the turn",
     });
+    // Its CLI may have done work a resend would do twice, so its wake waits for the heartbeat.
+    expect(ended.transient).toBeUndefined();
     expect(runner.turns).toHaveLength(1);
 
     // Back, the runner lists the turn in its hello, and the server has it stop the CLI.

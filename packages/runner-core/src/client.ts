@@ -29,6 +29,22 @@ export class RunnerHttpError extends Error {
 }
 
 /**
+ * Whether a call to the server failed on the way there or on the server's side, so the same call
+ * may pass in a minute: the server answered 5xx or 429, or fetch failed for the network, which it
+ * says with a `TypeError`, "fetch failed" before an answer and "terminated" while reading one, the
+ * cause naming the socket's error. A refusal, or an answer the runner could not read, comes again.
+ */
+export function unreachable(error: unknown): boolean {
+  if (error instanceof RunnerHttpError) {
+    return error.status >= 500 || error.status === 429;
+  }
+  return (
+    error instanceof TypeError &&
+    (error.message === "fetch failed" || error.message === "terminated")
+  );
+}
+
+/**
  * How long the event stream may stay silent before the runner takes it for dead: the server writes
  * a comment every 15 seconds, so this is three missed. Node's fetch alone waits five minutes.
  */

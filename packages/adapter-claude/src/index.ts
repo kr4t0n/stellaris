@@ -177,9 +177,12 @@ interface TurnState {
   limitText: string | undefined;
   /** Whether the latest result ended its run on an API error: a success marked `is_error`. */
   apiError: boolean;
-  /** Whether the CLI's own message about an API error said the service was overloaded or failing. */
+  /**
+   * Whether the CLI's own message about an API error said the service was overloaded or failing, or
+   * the connection to it failed.
+   */
   serverError: boolean;
-  /** Whether that API error was the service's to fix, a 5xx or a 529, so a minute may cure it. */
+  /** Whether that API error may pass in a minute: the service's to fix, or a request cut off. */
   transient: boolean;
 }
 
@@ -390,7 +393,8 @@ function handleMessage(
         state.limitText = said.length > 0 ? said : "the plan's usage limit";
         state.quota = limitedQuota(state.quota, context.now());
       }
-      // After its own retries, Claude Code says `server_error` for a 5xx or a 529.
+      // After its own retries, Claude Code says `server_error` for a 5xx or a 529, and for a
+      // connection that failed or timed out, which has no status.
       if (message.error === "server_error" || message.error === "overloaded") {
         state.serverError = true;
       }
@@ -469,7 +473,7 @@ function handleMessage(
           state.exitReason = "error";
           state.error = message.result || "the turn ended on an API error";
           const status = message.api_error_status;
-          state.transient = typeof status === "number" ? status >= 500 : serverError;
+          state.transient = typeof status === "number" ? passesLater(status) : serverError;
         } else {
           // The latest run decides how the turn ended, so an earlier run's error goes with it.
           state.exitReason = "completed";
@@ -500,6 +504,16 @@ function handleMessage(
     default:
       return;
   }
+}
+
+/**
+ * Whether the API's status says a minute may cure the refusal: the service failed or was overloaded
+ * (5xx, 529), or the request was cut off on its way (499, "Client Closed Request", which Claude Code
+ * does not retry). Claude Code puts the refusal's own status on a failed compaction, a 400 for a
+ * prompt too long, whatever failed the compaction request, so that stays a refusal.
+ */
+function passesLater(status: number): boolean {
+  return status >= 500 || status === 499;
 }
 
 /** Turns a finished turn's state into the result every backend returns, emitting the closing events. */

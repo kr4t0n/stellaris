@@ -2020,9 +2020,9 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).toContain(note);
   });
 
-  it("keeps the session after a reflection outside a society role's home", async () => {
-    const { board } = await Board.init(dir, { name: "kept" });
-    await board.addProject(USER, { slug: "demo" });
+  it("starts a project member's home afresh once a reflection there completes, and keeps its threads' and channels' sessions", async () => {
+    const { board } = await Board.init(dir, { name: "afresh-project" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
     await board.setRoleCharter(USER, {
       name: "engineer",
       purpose: "Builds.",
@@ -2032,6 +2032,122 @@ describe("turns on a runner over the runner protocol", () => {
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const topic = await board.openThread(USER, { channel: "demo/general", title: "a question" });
+    const handed: Array<[string, boolean]> = [];
+    const prompts: string[] = [];
+    const outcomes: TurnResult[] = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(outcomes.shift() ?? completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const home = manual("eng-1", "demo");
+    const inThread = { ...home, thread: { id: topic.id, task: false } };
+    const inChannel = { ...home, channel: "release" };
+    const save = "This conversation's session ends with this turn";
+    const note = "## Your session started afresh";
+
+    // The home, a thread, and a channel each start a session of their own.
+    await run(home);
+    await run(inThread);
+    await run(inChannel);
+    expect(handed).toEqual([
+      ["s-1", true],
+      ["s-2", true],
+      ["s-3", true],
+    ]);
+    const reflected = await run(reflection("eng-1", "demo"));
+    expect(reflected).toMatchObject({
+      exitReason: "completed",
+      session: "s-1",
+      sessionDropped: true,
+    });
+    expect(prompts.at(-1)).toContain(save);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "pod" });
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.completed" && event.payload["trigger"] === "reflection",
+    );
+    expect(ended.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ project: "demo", session: "s-1", sessionDropped: true }),
+    ]);
+
+    // The next home turn starts a session, told why rather than given the first-turn notes, and
+    // the one after resumes it, told nothing.
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-4", true]);
+    expect(prompts.at(-1)).toContain(note);
+    expect(prompts.at(-1)).not.toContain("## First turn");
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-4", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // The thread and the channel resume theirs, told nothing.
+    await run(inThread);
+    expect(handed.at(-1)).toEqual(["s-2", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+    await run(inChannel);
+    expect(handed.at(-1)).toEqual(["s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+    expect(await board.readSessions("eng-1", "demo", topic.id)).toEqual({
+      claude: "s-2",
+      runner: "pod",
+    });
+    expect(await board.readSessions("eng-1", "demo", "#release")).toEqual({
+      claude: "s-3",
+      runner: "pod",
+    });
+
+    // A reflection that fails, times out, or is stopped keeps the home's session.
+    const unfinished: TurnResult[] = [
+      { ...completed(""), status: null, exitReason: "error", error: "the CLI ended" },
+      { ...completed(""), status: null, exitReason: "timeout", error: "turn timed out" },
+      { ...completed(""), status: null, exitReason: "stopped" },
+    ];
+    for (const outcome of unfinished) {
+      outcomes.push(outcome);
+      const kept = await run(reflection("eng-1", "demo"));
+      expect(kept.exitReason).toBe(outcome.exitReason);
+      expect(kept.sessionDropped).toBeUndefined();
+      await run(home);
+      expect(handed.at(-1)).toEqual(["s-4", false]);
+      expect(prompts.at(-1)).not.toContain(note);
+    }
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-4", runner: "pod" });
+  });
+
+  it("keeps the session after a reflection in a work role's home outside projects, and in a project home of a role that does not reflect", async () => {
+    const { board } = await Board.init(dir, { name: "kept" });
+    await board.addProject(USER, { slug: "demo" });
+    for (const [name, reflects] of [
+      ["engineer", true],
+      ["scribe", false],
+    ] as const) {
+      await board.setRoleCharter(USER, {
+        name,
+        purpose: "Builds.",
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+        reflects,
+      });
+    }
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await board.addAgent(USER, {
+      name: "scribe-1",
+      role: "scribe",
       cli: "claude",
       memberships: ["demo"],
     });
@@ -2048,18 +2164,22 @@ describe("turns on a runner over the runner protocol", () => {
       },
     };
     const { run } = await start(board, backend);
-    // A work role's home in its project, and its home outside projects, where it was asked.
-    for (const project of ["demo", "society"]) {
-      await run(manual("eng-1", project));
-      const reflected = await run(reflection("eng-1", project));
+    // A work role's home outside projects, where it was asked, and the project home of a role
+    // that does not reflect, where the user asked for one anyway.
+    for (const [agent, project] of [
+      ["eng-1", "society"],
+      ["scribe-1", "demo"],
+    ] as const) {
+      await run(manual(agent, project));
+      const reflected = await run(reflection(agent, project));
       expect(reflected.sessionDropped).toBeUndefined();
       expect(prompts.at(-1)).toContain("## Reflection");
       expect(prompts.at(-1)).not.toContain("This conversation's session ends with this turn");
-      await run(manual("eng-1", project));
+      await run(manual(agent, project));
       expect(handed.at(-1)).toEqual([handed.at(-2)?.[0], false]);
     }
-    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-1", runner: "pod" });
-    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-2", runner: "pod" });
+    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-1", runner: "pod" });
+    expect(await board.readSessions("scribe-1", "demo")).toEqual({ claude: "s-2", runner: "pod" });
   });
 
   it("records a turn the model service turned away as transient, and only a failed one", async () => {

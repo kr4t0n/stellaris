@@ -1,5 +1,90 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
-  <circle cx="16" cy="16" r="9" fill="#f5f5f5" opacity="0.08"/>
-  <path d="M16 6 L18 14 L26 16 L18 18 L16 26 L14 18 L6 16 L14 14 Z" fill="#f5f5f5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="ground" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0" stop-color="#242830"/>
+      <stop offset="1" stop-color="#11141a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#ground)"/>
+  <g id="03-meteor-right" opacity="0.65">
+    <defs>
+      <linearGradient id="color-03-meteor-right" gradientUnits="userSpaceOnUse" x1="890" y1="442" x2="640" y2="590">
+        <stop offset="0" stop-color="#bcb1f4" stop-opacity="0"/>
+        <stop offset="0.35" stop-color="#bcb1f4" stop-opacity="0.14"/>
+        <stop offset="0.7" stop-color="#b8d5f3" stop-opacity="0.55"/>
+        <stop offset="1" stop-color="#dffff8" stop-opacity="0.95"/>
+      </linearGradient>
+    </defs>
+    <path d="M890 442 L634.498211 580.706437 Q634.836909 593.05655 645.501789 599.293563 Z" fill="url(#color-03-meteor-right)" opacity="0.2"/>
+    <path d="M890 442 L638.013243 586.643991 Q634.836909 593.05655 641.986757 593.356009 Z" fill="url(#color-03-meteor-right)"/>
+    <circle cx="640" cy="590" r="6" fill="#c9eee9" opacity="0.5"/>
+    <circle cx="640" cy="590" r="2.7" fill="#f4fffc"/>
+  </g>
+  <g id="02-meteor-lower" opacity="0.75">
+    <defs>
+      <linearGradient id="color-02-meteor-lower" gradientUnits="userSpaceOnUse" x1="425" y1="650" x2="130" y2="865">
+        <stop offset="0" stop-color="#bcb1f4" stop-opacity="0"/>
+        <stop offset="0.35" stop-color="#bcb1f4" stop-opacity="0.14"/>
+        <stop offset="0.7" stop-color="#b8d5f3" stop-opacity="0.55"/>
+        <stop offset="1" stop-color="#dffff8" stop-opacity="0.95"/>
+      </linearGradient>
+    </defs>
+    <path d="M425 650 L122.578778 854.817394 Q124.342997 869.122901 137.421222 875.182606 Z" fill="url(#color-02-meteor-lower)" opacity="0.2"/>
+    <path d="M425 650 L127.320114 861.322948 Q124.342997 869.122901 132.679886 868.677052 Z" fill="url(#color-02-meteor-lower)"/>
+    <circle cx="130" cy="865" r="7" fill="#c9eee9" opacity="0.5"/>
+    <circle cx="130" cy="865" r="3.15" fill="#f4fffc"/>
+  </g>
+  <g id="01-meteor-upper" opacity="1">
+    <defs>
+      <linearGradient id="color-01-meteor-upper" gradientUnits="userSpaceOnUse" x1="580" y1="10" x2="200" y2="235">
+        <stop offset="0" stop-color="#bcb1f4" stop-opacity="0"/>
+        <stop offset="0.35" stop-color="#bcb1f4" stop-opacity="0.14"/>
+        <stop offset="0.7" stop-color="#b8d5f3" stop-opacity="0.55"/>
+        <stop offset="1" stop-color="#dffff8" stop-opacity="0.95"/>
+      </linearGradient>
+    </defs>
+    <path d="M580 10 L191.746229 221.060299 Q192.255721 239.585428 208.253771 248.939701 Z" fill="url(#color-01-meteor-upper)" opacity="0.2"/>
+    <path d="M580 10 L197.019472 229.966219 Q192.255721 239.585428 202.980528 240.033781 Z" fill="url(#color-01-meteor-upper)"/>
+    <circle cx="200" cy="235" r="9" fill="#c9eee9" opacity="0.5"/>
+    <circle cx="200" cy="235" r="4.05" fill="#f4fffc"/>
+  </g>
+  <g id="06-star-lower" opacity="1">
+    <defs>
+      <linearGradient id="color-06-star-lower" x1="10%" y1="0%" x2="90%" y2="100%">
+        <stop offset="0" stop-color="#e4fcff"/>
+        <stop offset="0.24" stop-color="#d0c5ff"/>
+        <stop offset="0.42" stop-color="#fff9ff"/>
+        <stop offset="0.58" stop-color="#f7c8e9"/>
+        <stop offset="0.8" stop-color="#c0efeb"/>
+        <stop offset="1" stop-color="#fff1c3"/>
+      </linearGradient>
+    </defs>
+    <path d="M0 -1 C.12 -.33 .2 -.17 1 0 C.2 .17 .12 .33 0 1 C-.12 .33 -.2 .17 -1 0 C-.2 -.17 -.12 -.33 0 -1Z" transform="translate(720 760) rotate(-20) scale(130 150)" fill="url(#color-06-star-lower)"/>
+  </g>
+  <g id="05-star-upper" opacity="1">
+    <defs>
+      <linearGradient id="color-05-star-upper" x1="10%" y1="0%" x2="90%" y2="100%">
+        <stop offset="0" stop-color="#e4fcff"/>
+        <stop offset="0.24" stop-color="#d0c5ff"/>
+        <stop offset="0.42" stop-color="#fff9ff"/>
+        <stop offset="0.58" stop-color="#f7c8e9"/>
+        <stop offset="0.8" stop-color="#c0efeb"/>
+        <stop offset="1" stop-color="#fff1c3"/>
+      </linearGradient>
+    </defs>
+    <path d="M0 -1 C.12 -.33 .2 -.17 1 0 C.2 .17 .12 .33 0 1 C-.12 .33 -.2 .17 -1 0 C-.2 -.17 -.12 -.33 0 -1Z" transform="translate(725 265) rotate(19) scale(153 177)" fill="url(#color-05-star-upper)"/>
+  </g>
+  <g id="04-star-large" opacity="1">
+    <defs>
+      <linearGradient id="color-04-star-large" x1="10%" y1="0%" x2="90%" y2="100%">
+        <stop offset="0" stop-color="#e4fcff"/>
+        <stop offset="0.24" stop-color="#d0c5ff"/>
+        <stop offset="0.42" stop-color="#fff9ff"/>
+        <stop offset="0.58" stop-color="#f7c8e9"/>
+        <stop offset="0.8" stop-color="#c0efeb"/>
+        <stop offset="1" stop-color="#fff1c3"/>
+      </linearGradient>
+    </defs>
+    <path d="M0 -1 C.12 -.33 .2 -.17 1 0 C.2 .17 .12 .33 0 1 C-.12 .33 -.2 .17 -1 0 C-.2 -.17 -.12 -.33 0 -1Z" transform="translate(355 500) rotate(-14) scale(240 275)" fill="url(#color-04-star-large)"/>
+  </g>
 </svg>

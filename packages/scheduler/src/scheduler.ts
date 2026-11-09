@@ -2435,7 +2435,8 @@ export class Scheduler {
       if (this.pending.has(key)) {
         return;
       }
-      // What was steered into the refused turn was never read there, so it may be steered again.
+      // What was steered into the failed turn may not have been read there, so it may be
+      // steered again.
       const { steeredThrough: _steered, ...retry } = item;
       this.pending.set(key, { ...retry, readyAt: this.now().getTime() + delay });
       this.log.info(

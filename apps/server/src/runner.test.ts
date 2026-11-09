@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -42,7 +44,7 @@ import {
   type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
@@ -2102,9 +2104,21 @@ describe("turns on a runner over the runner protocol", () => {
         return Promise.resolve(completed("ran"));
       },
     };
+    // A server that sends the manifest's headers and part of its body, then closes the connection,
+    // as when a read times out: fetch says `terminated`.
+    const cutting = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-length": "1000" });
+      response.write('{"files":{', () => response.socket?.destroy());
+    });
+    cutting.listen(0, "127.0.0.1");
+    await once(cutting, "listening");
+    onTestFinished(() => new Promise<void>((resolve) => cutting.close(() => resolve())));
+    const cutAt = cutting.address();
+    const cutUrl = `http://127.0.0.1:${typeof cutAt === "object" && cutAt !== null ? cutAt.port : 0}`;
     // How the next pull of the board's copy goes: its connection closed unanswered, as a proxy
-    // may close it, or answered with this status or with what is not JSON.
-    let manifest: "dropped" | "garbled" | number | null = null;
+    // may close it, or cut in its answer's body, or answered with this status or with what is
+    // not JSON.
+    let manifest: "dropped" | "cut" | "garbled" | number | null = null;
     let homes = false;
     const live = await startTestSociety({
       board,
@@ -2118,12 +2132,17 @@ describe("turns on a runner over the runner protocol", () => {
       },
       fetch: (input, init) => {
         const url = input instanceof Request ? input.url : input.toString();
-        if (manifest !== null && manifest !== "dropped" && url.endsWith("/runner/board/manifest")) {
-          return Promise.resolve(
-            manifest === "garbled"
-              ? new Response("<html>gateway</html>", { status: 200 })
-              : new Response("refused", { status: manifest }),
-          );
+        if (!url.endsWith("/runner/board/manifest")) {
+          return fetch(input, init);
+        }
+        if (manifest === "cut") {
+          return fetch(`${cutUrl}/runner/board/manifest`, init);
+        }
+        if (manifest === "garbled") {
+          return Promise.resolve(new Response("<html>gateway</html>", { status: 200 }));
+        }
+        if (typeof manifest === "number") {
+          return Promise.resolve(new Response("refused", { status: manifest }));
         }
         return fetch(input, init);
       },
@@ -2144,6 +2163,9 @@ describe("turns on a runner over the runner protocol", () => {
     const dropped = await pulling("dropped");
     expect(dropped.error).toMatch(/^the runner could not run the turn: .*other side closed/);
     expect(dropped.transient).toBe(true);
+    const cut = await pulling("cut");
+    expect(cut.error).toMatch(/^the runner could not run the turn: TypeError: terminated/);
+    expect(cut.transient).toBe(true);
     for (const status of [503, 429]) {
       expect(await pulling(status)).toMatchObject({
         error: expect.stringContaining(`answered ${status}`),

@@ -459,7 +459,7 @@ describe("ClaudeAgentBackend replay", () => {
     expect(refusedLast.error).toBe("API Error: 400 stub refuses");
   });
 
-  it("says a turn the API turned away with a 5xx or a 529 may pass, and no other", async () => {
+  it("says a turn the API turned away with a 5xx or a 529 may pass, and a 400 or the plan's limit never", async () => {
     const overloaded = refusedTurn(
       "API Error: Repeated 529 Overloaded errors. The API is at capacity — this is usually temporary.",
       529,

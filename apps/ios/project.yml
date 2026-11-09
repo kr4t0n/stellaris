@@ -28,13 +28,16 @@ targets:
   Stellaris:
     type: application
     platform: iOS
-    sources: [Stellaris]
+    sources:
+      - Stellaris
+      # The app's icon, Icon Composer's layered bundle, which the asset compiler builds into the app.
+      - Icon/AppIcon.icon
     dependencies:
       - package: BoardKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(STELLARIS_BUNDLE_ID)
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Generated/Info.plist
       properties:

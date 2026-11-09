@@ -102,9 +102,18 @@ spec:
             - name: http
               containerPort: {{ .Values.server.containerPort }}
               protocol: TCP
+            {{- if .Values.server.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.server.metrics.port }}
+              protocol: TCP
+            {{- end }}
           env:
             - name: STELLARIS_PORT
               value: {{ .Values.server.containerPort | quote }}
+            {{- if .Values.server.metrics.enabled }}
+            - name: STELLARIS_METRICS_PORT
+              value: {{ .Values.server.metrics.port | quote }}
+            {{- end }}
             {{- with $config.logLevel }}
             - name: STELLARIS_LOG_LEVEL
               value: {{ . | quote }}

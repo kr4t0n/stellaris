@@ -160,6 +160,7 @@ describe("server config", () => {
       dataDir: "./data",
       host: "127.0.0.1",
       port: 4700,
+      metricsPort: null,
       publicUrl: null,
       logLevel: "info",
       concurrency: null,
@@ -193,6 +194,19 @@ describe("server config", () => {
     expect(loadServerConfig({ STELLARIS_TRUSTED_PROXIES: "1" }).trustedProxies).toBe(1);
     expect(() => loadServerConfig({ STELLARIS_TRUSTED_PROXIES: "-1" })).toThrow(/0/);
     expect(() => loadServerConfig({ STELLARIS_TURN_TIMEOUT_MS: "forever" })).toThrow(/number/i);
+  });
+
+  it("serves Prometheus's counters on a port of their own only when one is set", () => {
+    expect(loadServerConfig({ STELLARIS_METRICS_PORT: "" }).metricsPort).toBeNull();
+    expect(loadServerConfig({ STELLARIS_METRICS_PORT: " 9464 " }).metricsPort).toBe(9464);
+    expect(() => loadServerConfig({ STELLARIS_METRICS_PORT: "4700" })).toThrow(
+      /STELLARIS_METRICS_PORT must differ from STELLARIS_PORT/,
+    );
+    expect(() =>
+      loadServerConfig({ STELLARIS_PORT: "5000", STELLARIS_METRICS_PORT: "5000" }),
+    ).toThrow(/differ/);
+    expect(() => loadServerConfig({ STELLARIS_METRICS_PORT: "metrics" })).toThrow(/number/i);
+    expect(() => loadServerConfig({ STELLARIS_METRICS_PORT: "70000" })).toThrow(/65535/);
   });
 
   it("reads GitHub sign-in whole or not at all", () => {

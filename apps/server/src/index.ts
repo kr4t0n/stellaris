@@ -9,6 +9,7 @@ import pino from "pino";
 import { createApp } from "./app.js";
 import { EnrollmentDesk } from "./enrollment.js";
 import { ModelCatalog } from "./models.js";
+import { createMetricsApp } from "./prometheus.js";
 import { QuotaReads } from "./quotas.js";
 import { serveBoard } from "./serve.js";
 import { TurnHub } from "./turn-hub.js";
@@ -119,6 +120,22 @@ const server = serveBoard(
   },
 );
 
+// Prometheus's counters, only when asked for, on a port of their own: the main port's `/metrics` is
+// the interface's page. They are seeded from the event log once, here, and never read it again.
+const metrics =
+  config.metricsPort === null
+    ? null
+    : serveBoard(
+        {
+          fetch: createMetricsApp(await board.countTurns()).fetch,
+          port: config.metricsPort,
+          hostname: config.host,
+        },
+        (info) => {
+          log.info({ host: info.address, port: info.port }, "metrics listening");
+        },
+      );
+
 await scheduler.start();
 log.info(
   {
@@ -135,6 +152,7 @@ const shutdown = async (signal: string): Promise<void> => {
   // The runners keep posting while the scheduler drains, so the server answers until then.
   await scheduler.stop();
   await runners.close();
+  metrics?.close();
   server.close();
   process.exit(0);
 };

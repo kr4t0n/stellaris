@@ -169,6 +169,7 @@ import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
 import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
+import { TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
   exists,
@@ -4297,6 +4298,41 @@ export class Board {
     return tokenUse(events, window, this.now());
   }
 
+  /**
+   * Every finished turn counted for Prometheus: seeded once from the whole event log, then moved
+   * by each turn's end this process appends, so reading the counts never reads the log. The server
+   * logs every turn's end itself; one another process appended would count from the next seed.
+   */
+  async countTurns(): Promise<TurnCounters> {
+    const clis = new Map<string, CliKind | null>();
+    const counters = new TurnCounters((agent) => clis.get(agent) ?? null);
+    // Ends appended while the log is read wait, and count once unless the read held them.
+    let waiting: BoardEvent[] | null = [];
+    this.events.onAppend((event) => {
+      if (waiting === null) {
+        counters.add(event);
+      } else {
+        waiting.push(event);
+      }
+    });
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    for (const agent of await this.listAgents()) {
+      clis.set(agent.name, agent.cli);
+    }
+    const seen = new Set<string>();
+    for (const event of events) {
+      seen.add(event.id);
+      counters.add(event);
+    }
+    for (const event of waiting) {
+      if (!seen.has(event.id)) {
+        counters.add(event);
+      }
+    }
+    waiting = null;
+    return counters;
+  }
+
   /** The board actions a finished turn took, from its transcript; null when it kept none. */
   private async turnActions(agent: Name, turnId: string): Promise<number | null> {
     // A transcript is written before its turn's end is logged and never changes after.
@@ -4549,6 +4585,7 @@ export class Board {
         trigger: parsed.trigger.kind,
         ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
+        cli: parsed.cli,
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),

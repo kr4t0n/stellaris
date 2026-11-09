@@ -323,9 +323,9 @@ export const TurnOutcomeSchema = z.object({
    */
   resumeFailed: ResumeFailureSchema.optional(),
   /**
-   * Set when the model service turned the turn away for now, as when it was overloaded or failed
-   * on its side, which the scheduler answers by sending the same wake again within minutes. A
-   * runner from before never sends it.
+   * Set when the turn failed for now: the model service turned it away or cut it off, or the runner
+   * could not reach the board before the CLI started. The scheduler answers it by sending the same
+   * wake again within minutes. A runner from before never sends it.
    */
   transient: z.boolean().optional(),
   /** The model the CLI reported, when it reported one. */

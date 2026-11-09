@@ -210,7 +210,11 @@ export const TurnRecordSchema = z.object({
   stoppedBy: NameSchema.optional(),
   /** Why the CLI could not resume the turn's session, for a turn that failed so. */
   resumeFailed: ResumeFailureSchema.optional(),
-  /** Whether the model service turned the turn away for now: overloaded, or failing on its side. */
+  /**
+   * Whether the turn failed for now, which the same wake may get past in a minute: the model service
+   * turned it away or cut it off, the runner could not reach the board before the CLI started, or
+   * the job never reached the runner.
+   */
   transient: z.boolean().optional(),
   /** How many turns in a row, this one included, could not resume the session for a `retry`. */
   resumeRetries: z.number().int().positive().optional(),

@@ -9,9 +9,9 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 # Each case is a name, the --set flags of one deployment, and any lines its rendering must hold,
-# each after a further |.
+# each after a further |; a line starting with ! is text the rendering must hold nowhere.
 cases=(
-  "defaults|"
+  "defaults||!STELLARIS_METRICS_PORT|!name: metrics|!kind: ServiceMonitor"
   "everything on|--set ingress.enabled=true --set ingress.className=nginx --set ingress.tls.enabled=true \
 --set ingress.tls.secretName=stellaris-tls --set auth.github.enabled=true --set auth.github.clientId=client-1 \
 --set auth.github.clientSecret=secret-1 --set auth.github.users={octocat,12345} --set server.config.trustedProxies=2 \
@@ -21,6 +21,15 @@ cases=(
 --set runner.extraInitContainers[0].name=install-ssh-key --set runner.extraInitContainers[0].image=busybox:1.37 \
 --set auth.github.appleAppId=ABCDE12345.com.example.app\
 |            - name: STELLARIS_APPLE_APP_ID|              value: \"ABCDE12345.com.example.app\""
+  "metrics without a ServiceMonitor|--set server.metrics.enabled=true\
+|            - name: metrics|              containerPort: 4701|            - name: STELLARIS_METRICS_PORT\
+|              value: \"4701\"|    - name: metrics|      port: 4701|      targetPort: metrics|!kind: ServiceMonitor"
+  "metrics with a ServiceMonitor|--set server.metrics.enabled=true --set server.metrics.port=9100 \
+--set server.metrics.serviceMonitor.enabled=true --set server.metrics.serviceMonitor.labels.release=prometheus \
+--set server.metrics.serviceMonitor.interval=30s --set ingress.enabled=true\
+|            - name: metrics|              containerPort: 9100|              value: \"9100\"|      port: 9100\
+|kind: ServiceMonitor|    release: prometheus|    - port: metrics|      path: /metrics|      interval: \"30s\"\
+|                  name: http|!scrapeTimeout"
   "runners only|--set server.enabled=false --set runner.enabled=true --set runner.serverUrl=https://stellaris.example.com \
 --set runner.existingSecret=runner-token --set persistence.enabled=false\
 |      serviceAccountName: default|      automountServiceAccountToken: false"
@@ -37,6 +46,9 @@ cases=(
 )
 # Each refusal is the message the chart must fail with, and the --set flags that ask for it.
 refusals=(
+  "server.metrics.serviceMonitor needs server.metrics.enabled|--set server.metrics.serviceMonitor.enabled=true"
+  "server.metrics.port must differ from server.containerPort|--set server.metrics.enabled=true \
+--set server.metrics.port=4700"
   "runner.extraVolumes: home is the runner's claim|--set runner.enabled=true --set runner.extraVolumes[0].name=home \
 --set runner.extraVolumes[0].emptyDir.medium=Memory"
   "auth.github.clientId is required|--set auth.github.enabled=true"
@@ -65,6 +77,14 @@ for entry in "${cases[@]}"; do
     { echo "render failed: $name"; exit 1; }
   echo "$name: $(grep -c '^kind: ' "$out/rendered") objects ($(grep '^kind: ' "$out/rendered" | sort | uniq -c | awk '{printf "%s%s %s", sep, $1, $3; sep=", "}'))"
   for line in "${parts[@]:2}"; do
+    if [[ $line == '!'* ]]; then
+      if grep -qF -- "${line#!}" "$out/rendered"; then
+        echo "$name: the rendering holds \"${line#!}\""
+        exit 1
+      fi
+      echo "  lacks \"${line#!}\""
+      continue
+    fi
     grep -qxF -- "$line" "$out/rendered" || { echo "$name: the rendering lacks \"$line\""; exit 1; }
     echo "  holds \"${line#"${line%%[! ]*}"}\""
   done

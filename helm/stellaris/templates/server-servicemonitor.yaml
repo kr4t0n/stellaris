@@ -1,0 +1,31 @@
+{{- $metrics := .Values.server.metrics -}}
+{{- if and .Values.server.enabled $metrics.enabled $metrics.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "stellaris.server.fullname" . }}
+  labels:
+    {{- include "stellaris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+    {{- with $metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  # The server's Service, whose metrics port this scrapes; the runners have none.
+  selector:
+    matchLabels:
+      {{- include "stellaris.server.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      {{- with $metrics.serviceMonitor.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+      {{- with $metrics.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . | quote }}
+      {{- end }}
+{{- end }}

@@ -88,6 +88,22 @@ server:
     port: 4700
     annotations: {}
 
+  # Prometheus's counters of finished turns and the tokens they used, at /metrics on a port of their
+  # own (STELLARIS_METRICS_PORT), which the container and the Service expose and the Ingress never
+  # routes, since the main port's /metrics is the interface's page. The port asks for no token and
+  # serves counts by citizen, CLI, model, outcome, and trigger, nothing else.
+  metrics:
+    enabled: false
+    port: 4701
+    # A ServiceMonitor for the Prometheus Operator, whose CRDs must be in the cluster. Add the labels
+    # your Prometheus's serviceMonitorSelector matches, such as `release: <its release>`.
+    serviceMonitor:
+      enabled: false
+      labels: {}
+      # Empty keeps the Prometheus's own scrape interval and timeout, for example 30s and 10s.
+      interval: ""
+      scrapeTimeout: ""
+
   # On SIGTERM the server waits for running turns to report before it exits, so give it as long as
   # the turn timeout. Pause the society before an upgrade (see the chart's README).
   terminationGracePeriodSeconds: 1200

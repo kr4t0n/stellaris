@@ -70,33 +70,11 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
 }
 
 /**
- * The end of a row that shows a count or a new-messages dot: a slot 28 px wide, about a three-digit
- * count's width, whose middle is the same line in every row, so counts and dots are centred on it;
- * a wider count grows both ways from it.
+ * The end of a row that shows a count: a slot 28 px wide, about a three-digit count's width, whose
+ * middle is the same line in every row, so counts are centred on it; a wider one grows both ways.
  */
 function RowEnd({ children }: { children: ReactNode }) {
   return <span className="flex w-7 shrink-0 justify-center">{children}</span>;
-}
-
-/**
- * A channel's dot for posts this browser hasn't seen, in the row's end. Beside a count, which then
- * sits just before it, the dot sits on a line of the count's type, so on the digits' baseline
- * wherever a device scale puts it, and is raised half a capital's height to the digits' middle:
- * centred on the row, it is drawn a device pixel below them at a scale of 2
- * (docs/internals/interface.md).
- */
-function NewDot({ besideCount }: { besideCount: boolean }) {
-  const dot = "size-1.5 rounded-full bg-emerald-400";
-  return besideCount ? (
-    <span className={COUNT_TYPE}>
-      <span
-        aria-label="new messages"
-        className={`inline-block align-[calc(0.5cap-0.1875rem)] ${dot}`}
-      />
-    </span>
-  ) : (
-    <span aria-label="new messages" className={dot} />
-  );
 }
 
 function Count({ value, title }: { value: number; title: string }) {
@@ -154,8 +132,8 @@ function Governance({ active }: { active: GovernanceView | null }) {
 
 /**
  * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
- * order the sky places them, each with its open threads and a dot when something is new since
- * this browser looked, and last the archived projects, each opening its overview.
+ * order the sky places them, each with its open threads and its name in bold when something is new
+ * since this browser looked, and last the archived projects, each opening its overview.
  */
 export function Navigator({
   activeChannel,
@@ -263,15 +241,6 @@ export function Navigator({
                 const active = channel.ref === activeChannel;
                 const threadCount = openThreads.get(channel.ref) ?? 0;
                 const fresh = !active && isUnseen(seen, channel.ref, channel.lastMessageId);
-                const count =
-                  threadCount > 0 ? (
-                    <span
-                      title={`${threadCount} open threads`}
-                      className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
-                    >
-                      {threadCount}
-                    </span>
-                  ) : null;
                 return (
                   <li key={channel.ref}>
                     <Link
@@ -283,9 +252,16 @@ export function Navigator({
                       <span className={`min-w-0 flex-1 truncate ${fresh ? "font-semibold" : ""}`}>
                         {channel.name}
                       </span>
-                      {fresh ? count : null}
-                      {fresh || count !== null ? (
-                        <RowEnd>{fresh ? <NewDot besideCount={count !== null} /> : count}</RowEnd>
+                      {fresh ? <span className="sr-only">new messages</span> : null}
+                      {threadCount > 0 ? (
+                        <RowEnd>
+                          <span
+                            title={`${threadCount} open threads`}
+                            className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+                          >
+                            {threadCount}
+                          </span>
+                        </RowEnd>
                       ) : null}
                     </Link>
                   </li>

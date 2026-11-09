@@ -80,8 +80,8 @@ export function askState(
 }
 
 /**
- * Whether an open ask ends in a reply this browser has not shown. Unlike a channel's dot, it does
- * not wait for the board to be listed once: an answer nobody has read is news on any first visit.
+ * Whether an open ask ends in a reply this browser has not shown. Unlike a channel's bold name, it
+ * does not wait for the board to be listed once: an answer nobody has read is news on any first visit.
  */
 export function hasUnseenReply(
   ask: ThreadSummary,

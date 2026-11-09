@@ -2,13 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PREVIEW_PORT = 4174;
 const SOCIETY = /society\.spec\.ts/;
-const SCALE = /scale\.spec\.ts/;
 
 // Two kinds of browser session. Most specs run the built interface against a fake board: every
 // /api request is answered by the test, and the preview's proxy points at a closed port so nothing
-// can reach a live society; one of them, in its own project, at a real device scale. The exit test
-// starts a whole board server of its own on a fresh society of scripted citizens, which serves the
-// interface itself; build the server before it.
+// can reach a live society. The exit test starts a whole board server of its own on a fresh
+// society of scripted citizens, which serves the interface itself; build the server before it.
 export default defineConfig({
   testDir: "e2e",
   forbidOnly: process.env["CI"] !== undefined,
@@ -20,20 +18,8 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: [SOCIETY, SCALE],
+      testIgnore: SOCIETY,
       use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${PREVIEW_PORT}` },
-    },
-    // Chromium at a real device scale of 2, which lays text out in device pixels. Playwright's
-    // deviceScaleFactor keeps CSS pixels, and a device descriptor's refuses the null viewport the
-    // window's own scale needs.
-    {
-      name: "scale",
-      testMatch: SCALE,
-      use: {
-        baseURL: `http://127.0.0.1:${PREVIEW_PORT}`,
-        viewport: null,
-        launchOptions: { args: ["--force-device-scale-factor=2", "--window-size=1600,1000"] },
-      },
     },
     { name: "society", testMatch: SOCIETY, use: { ...devices["Desktop Chrome"] } },
   ],

@@ -1275,8 +1275,8 @@ export async function fakeBoard(
     crowded?: boolean;
     /**
      * Lists lab's general with its posts and the society's general with one, so a browser that
-     * listed the board before them shows each channel's dot: lab's beside its open thread's count,
-     * the society's with no count. Opens twelve topics in governance too, a count of two digits.
+     * listed the board before them shows both as unread: lab's with its open thread's count, the
+     * society's with none. Opens twelve topics in governance too, a count of two digits.
      */
     unread?: boolean;
   } = {},

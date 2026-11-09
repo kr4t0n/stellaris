@@ -45,15 +45,21 @@ function replaying(messages: readonly SDKMessage[]): { queryFn: QueryFn; calls: 
  * A turn the API refused, as Claude Code 2.1.283 streamed it against a local server answering 400:
  * the init message that says it opened the session, a synthetic assistant message with the API's
  * words, then a `success` result marked `is_error`. Against 529 and 500 it streamed the same
- * frames once its own retries ran out, with `error: "server_error"` and the status.
+ * frames once its own retries ran out, with `error: "server_error"` and the status. Claude Code
+ * 2.1.312 streamed the same for a 499, a connection that failed or timed out, a prompt too long, and
+ * a compaction that failed, each with the fields the cases below give; `steps` come before the
+ * refusal, as a tool call the run made before its next request was refused.
  */
 function refusedTurn(
   text = "API Error: 400 stub refuses",
   status: number | null = 400,
   error = "unknown",
+  terminalReason = "api_error",
+  steps: readonly unknown[] = [],
 ): SDKMessage[] {
   const frames: unknown[] = [
     { type: "system", subtype: "init", session_id: "recorded", model: "claude-opus-5-5" },
+    ...steps,
     {
       type: "assistant",
       message: {
@@ -66,6 +72,7 @@ function refusedTurn(
       parent_tool_use_id: null,
       error,
       is_api_error_message: true,
+      ...(status === null ? {} : { api_error_status: status }),
       session_id: "recorded",
     },
     {
@@ -73,7 +80,7 @@ function refusedTurn(
       subtype: "success",
       is_error: true,
       api_error_status: status,
-      terminal_reason: "api_error",
+      terminal_reason: terminalReason,
       result: text,
       total_cost_usd: 0,
       usage: { input_tokens: 0, output_tokens: 0 },
@@ -471,7 +478,6 @@ describe("ClaudeAgentBackend replay", () => {
     }
     for (const frames of [
       refusedTurn(),
-      refusedTurn("API Error: Connection error.", null),
       // The plan's limit, which the CLI's `rate_limit` says, waits for its reset instead.
       refusedTurn("You've hit your limit · resets 3pm", 429, "rate_limit"),
     ]) {
@@ -490,6 +496,70 @@ describe("ClaudeAgentBackend replay", () => {
     const then = await coldTurn(replaying([...overloaded, ...(maxTurns as SDKMessage[])]).queryFn);
     expect(then.exitReason).toBe("error");
     expect(then.transient).toBeUndefined();
+  });
+
+  it("says a request cut off or a connection lost may pass, and a prompt too long or a sign-in never", async () => {
+    // The run called a tool, and the request after it was cut off: the 499 came mid-turn.
+    const steps = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "claude-opus-5-5",
+          content: [
+            { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "echo one" } },
+          ],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        parent_tool_use_id: null,
+        session_id: "recorded",
+      },
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "one" }],
+        },
+        parent_tool_use_id: null,
+        session_id: "recorded",
+      },
+    ];
+    for (const frames of [
+      refusedTurn("API Error: 499 Client Closed Request", 499, "unknown", "api_error", steps),
+      // A connection that failed or timed out has no status, and Claude Code says `server_error`.
+      refusedTurn(
+        "API Error: Connection dropped (ECONNRESET). Check the gateway set in ANTHROPIC_BASE_URL, then try again.",
+        null,
+        "server_error",
+      ),
+      refusedTurn("Request timed out", null, "server_error"),
+    ]) {
+      const result = await coldTurn(replaying(frames).queryFn);
+      expect(result).toMatchObject({ exitReason: "error", transient: true });
+    }
+    for (const frames of [
+      // A compaction that failed carries the refusal's 400, whatever cut its own request off.
+      refusedTurn(
+        "Prompt is too long · automatic compaction failed: API Error: 499 Client Closed Request",
+        400,
+        "invalid_request",
+        "prompt_too_long",
+      ),
+      refusedTurn("Prompt is too long", 400, "invalid_request", "prompt_too_long"),
+      refusedTurn("Invalid API key · Fix external API key", 401, "authentication_failed"),
+      // An OAuth session that could not be refreshed is no answer of the API's, so it has no
+      // status: built from Claude Code's own code, since a stub has no OAuth session to expire.
+      refusedTurn(
+        "Failed to authenticate: OAuth session expired and could not be refreshed",
+        null,
+        "authentication_failed",
+      ),
+      refusedTurn("You've hit your limit · resets 3pm", 429, "rate_limit"),
+    ]) {
+      const result = await coldTurn(replaying(frames).queryFn);
+      expect(result.exitReason).toBe("error");
+      expect(result.transient).toBeUndefined();
+    }
   });
 
   it("treats a stream without a result message as an error", async () => {

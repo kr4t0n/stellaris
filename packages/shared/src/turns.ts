@@ -220,7 +220,8 @@ export const TurnRecordSchema = z.object({
   resumeRetries: z.number().int().positive().optional(),
   /**
    * Whether the server dropped the conversation's session after this turn, which the next starts
-   * anew: one its CLI could not resume, or a society role's home after a reflection completed.
+   * anew: one its CLI could not resume, or a society role's or a project member's home after a
+   * reflection completed.
    */
   sessionDropped: z.boolean().optional(),
   /** The crons whose fire started the turn, which record how it ended. */

@@ -81,7 +81,10 @@ export interface TurnPromptInput {
    */
   readonly changedInstructions?: string | null | undefined;
   readonly onboarding: OnboardingContext | null;
-  /** Whether a reflection that completes in this conversation ends its session: a society role's home. */
+  /**
+   * Whether a reflection that completes in this conversation ends its session: a society role's or
+   * a project member's home.
+   */
   readonly afreshAfterReflection?: boolean | undefined;
   /** Present for roles that route on behalf of the user; absent for everyone else. */
   readonly societyView?: SocietyView | null | undefined;

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fakeBoard } from "./board.js";
 
 // Headless Chromium starts with --hide-scrollbars, under which a scrollbar on Working now's list
@@ -190,3 +190,137 @@ for (const size of [
     expect(await place()).toEqual(idle);
   });
 }
+
+/**
+ * The middle of where part of a row is drawn, in pixels from the top of the row's screenshot at
+ * the window's scale of 1: the rows holding at least half the strongest light over the ground
+ * within the given columns.
+ */
+async function drawnMiddle(
+  page: Page,
+  shot: Buffer,
+  columns: { from: number; to: number },
+): Promise<number> {
+  return page.evaluate(
+    async ({ bytes, from, to }) => {
+      const image = await createImageBitmap(new Blob([new Uint8Array(bytes)]));
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context?.drawImage(image, 0, 0);
+      const data = context?.getImageData(0, 0, image.width, image.height).data ?? [];
+      const rows: number[] = [];
+      for (let y = 0; y < image.height; y += 1) {
+        let strongest = -Infinity;
+        for (let x = from; x < to; x += 1) {
+          const [red = 0, green = 0, blue = 0] = data.slice(
+            (y * image.width + x) * 4,
+            (y * image.width + x) * 4 + 3,
+          );
+          strongest = Math.max(strongest, red + green + blue);
+        }
+        rows.push(strongest);
+      }
+      const ground = Math.min(...rows);
+      const peak = Math.max(...rows) - ground;
+      const drawn = rows.flatMap((value, y) => (value - ground >= peak / 2 ? [y] : []));
+      return ((drawn[0] ?? 0) + (drawn.at(-1) ?? 0) + 1) / 2;
+    },
+    { bytes: [...shot], ...columns },
+  );
+}
+
+/** Every navigator row with a count. */
+const COUNTED = ["/needs-you", "/proposals", "/c/governance", "/c/lab/general", "/p/lab/tasks"];
+
+/**
+ * The navigator, on a view no row of it stands for so every row shows its idle ground, in a
+ * browser that listed the board before lab's general and the society's general had new posts.
+ */
+async function unreadNavigator(page: Page): Promise<Locator> {
+  await fakeBoard(page, { unread: true });
+  await page.addInitScript(() => {
+    localStorage.setItem("stellaris.seen", JSON.stringify({ "*": "1" }));
+  });
+  await page.goto("/p/lab");
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  await expect(navigator.locator('a[href="/c/lab/general"] [title]')).toBeVisible();
+  await page.evaluate(() => document.fonts.load("11px 'Instrument Sans Variable'"));
+  return navigator;
+}
+
+/** A box that must be on the page. */
+async function boxOf(locator: Locator) {
+  const found = await locator.boundingBox();
+  if (found === null) {
+    throw new Error("not on the page");
+  }
+  return found;
+}
+
+/** Where a box's middle is across the page. */
+async function middle(locator: Locator) {
+  const found = await boxOf(locator);
+  return found.x + found.width / 2;
+}
+
+/** The weight a row's name is drawn in. */
+async function nameWeight(row: Locator) {
+  return row.locator(".truncate").evaluate((name) => getComputedStyle(name).fontWeight);
+}
+
+test("every count in the navigator draws its digits in the middle of its pill", async ({
+  page,
+}) => {
+  const navigator = await unreadNavigator(page);
+  for (const href of COUNTED) {
+    const row = navigator.locator(`a[href="${href}"]`);
+    const [box, pill] = await Promise.all([boxOf(row), boxOf(row.locator("[title]"))]);
+    const shot = await row.screenshot();
+    const left = pill.x - box.x;
+    // The pill's ground in its left padding, and its digits inside the padding.
+    const ground = await drawnMiddle(page, shot, {
+      from: Math.round(left + 2),
+      to: Math.round(left + 4),
+    });
+    const digits = await drawnMiddle(page, shot, {
+      from: Math.round(left + 6),
+      to: Math.round(left + pill.width - 6),
+    });
+    // On the row's own line Chromium draws the digits a whole pixel above the pill's middle, the
+    // smallest step they can be off by at this scale. Half a pixel is left for a shape of odd
+    // height, whose middle falls between rows.
+    expect(
+      Math.abs(digits - ground),
+      `${href}: digits ${digits}, pill ${ground}`,
+    ).toBeLessThanOrEqual(0.5);
+  }
+});
+
+test("every count in the navigator is centred on one vertical line, whatever its width", async ({
+  page,
+}) => {
+  const navigator = await unreadNavigator(page);
+  // needs you's 2, governance's 13 and the 1s are pills of three widths.
+  const middles = await Promise.all(
+    COUNTED.map((href) => middle(navigator.locator(`a[href="${href}"] [title]`))),
+  );
+  expect(new Set(middles), `middles ${JSON.stringify(middles)}`).toEqual(new Set([middles[0]]));
+});
+
+test("a channel with posts this browser hasn't seen shows its name in bold and no dot, and tells a screen reader it has new messages", async ({
+  page,
+}) => {
+  const navigator = await unreadNavigator(page);
+  for (const href of ["/c/general", "/c/lab/general"]) {
+    const row = navigator.locator(`a[href="${href}"]`);
+    await expect(row).toHaveAccessibleName(/new messages/);
+    await expect(row.locator('[aria-label="new messages"]')).toHaveCount(0);
+    expect(await nameWeight(row), href).toBe("600");
+  }
+  // A channel read to its end shows neither.
+  const read = navigator.locator('a[href="/c/governance"]');
+  await expect(read).not.toHaveAccessibleName(/new messages/);
+  expect(await nameWeight(read)).toBe("400");
+});

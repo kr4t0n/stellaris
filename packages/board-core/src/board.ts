@@ -232,6 +232,12 @@ export type ImageSink = (
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
 
+/**
+ * How old a top-level post in a project's channel must be before it counts toward the heartbeat of
+ * a reader it does not ask (see `unreadByConversation`): a day, by default.
+ */
+export const CHANNEL_POST_WAIT_MS = 24 * 3_600_000;
+
 /** Whether a turn in flight is the one the actor acts from, which may end its own conversation. */
 function ownTurn(actor: Actor, turn: TurnInFlight): boolean {
   return (
@@ -2018,10 +2024,16 @@ export class Board {
    * when it mentions the user, so the creator can put a wait on the user in; a post that asks the
    * reader counts wherever it is. A closed thread counts for nothing: its conversation has ended,
    * and a turn there could only read its posts and be refused a reply, while a wake queued before
-   * it closed, as for a mention, still runs there.
+   * it closed, as for a mention, still runs there. A top-level post in a project's channel, general
+   * or a workstream's, counts only for a reader it asks until it is `channelPostWaitMs` old, and
+   * then for every reader who has not read it, so a turn there for anything else reads it sooner.
    */
-  async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
+  async unreadByConversation(
+    actor: Actor,
+    options: { channelPostWaitMs?: number | undefined } = {},
+  ): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
+    const waited = this.now().getTime() - (options.channelPostWaitMs ?? CHANNEL_POST_WAIT_MS);
     const counts = new Map<string, UnreadConversation>();
     const threadCounts = new Map<Ulid, ThreadCount>();
     const unscoped = { name: actor.name, role: actor.role };
@@ -2039,11 +2051,22 @@ export class Board {
       ) {
         continue;
       }
-      const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
+      const project = parseChannelRef(message.channel).project;
+      const posted = project ?? SOCIETY_SCOPE;
       if (posted !== scope && scope !== SOCIETY_SCOPE) {
         continue;
       }
       const thread = threadOfPart(part);
+      // A project's channel is read at the next turn there: a top-level post asks a turn of whoever
+      // it asks, and of everyone else only once it has waited unread for `channelPostWaitMs`.
+      if (
+        thread === undefined &&
+        project !== null &&
+        asked !== true &&
+        Date.parse(message.ts) > waited
+      ) {
+        continue;
+      }
       if (thread !== undefined) {
         let counted = threadCounts.get(thread);
         if (counted === undefined) {

@@ -1182,16 +1182,42 @@ describe("Scheduler", () => {
     await board.subscribe(ENG, { channel: "demo/dev" });
     await scheduler.tick();
     expect(scheduler.pendingCount).toBe(0);
+    // A post in a project's channel that asks nobody waits for a turn there, for a day at most.
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
-      ["eng-1", "heartbeat"],
+    expect(runner.dispatches).toHaveLength(0);
+    advance(DAY - 10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.channel])).toEqual([
+      ["eng-1", "heartbeat", "dev"],
     ]);
   });
 
+  it("wakes a home on heartbeat for a project post that asks nobody only once it has waited", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { channelPostWaitMs: 3_600_000 } });
+    const beat = async (ms: number): Promise<void> => {
+      advance(ms);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await board.postMessage(REV, { channel: "demo/general", body: "the build is green" });
+    await beat(10_000);
+    await beat(3_600_000 - 20_000);
+    expect(runner.dispatches).toEqual([]);
+    await beat(10_000);
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.channel])).toEqual([
+      ["eng-1", "demo", "heartbeat", undefined],
+    ]);
+    expect(runner.dispatches[0]?.trigger.heartbeat).toBe("unread");
+  });
+
   it("wakes no heartbeat for a knowledge topic's notice, in a project or the society", async () => {
-    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    // A project's posts count at once, so only the notice's own rule keeps it from waking anyone.
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, channelPostWaitMs: 0 },
+    });
     await board.setRoleCharter(USER, {
       name: "lead",
       purpose: "Leads.",
@@ -1341,7 +1367,8 @@ describe("Scheduler", () => {
   });
 
   it("wakes a heartbeat only in the scope its reasons belong to", async () => {
-    const { board, runner, scheduler } = await setup();
+    // A project's posts count at once, so that each wakes where it belongs.
+    const { board, runner, scheduler } = await setup({ timings: { channelPostWaitMs: 0 } });
     await board.addProject(USER, { slug: "lab" });
     await board.joinProject(USER, { project: "lab", agent: "eng-1" });
     await scheduler.tick();
@@ -2285,13 +2312,16 @@ describe("Scheduler", () => {
   });
 
   it("ends a citizen's conversation of a project's channels when the project is archived", async () => {
-    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, channelPostWaitMs: 0 },
+    });
     await board.addProject(USER, { slug: "lab" });
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
     await scheduler.tick();
     await scheduler.drain();
     // The front desk follows lab's general from outside the project: a post there that asks
-    // nothing of it counts toward its heartbeat in lab's conversation, not its home.
+    // nothing of it, once it has waited, counts toward its heartbeat in lab's conversation, not
+    // its home.
     await board.subscribe({ name: "concierge-1", role: "concierge" }, { channel: "lab/general" });
     await board.postMessage(REV, { channel: "lab/general", body: "lab's build is green" });
     advance(10_000);
@@ -2669,8 +2699,9 @@ describe("Scheduler", () => {
     await scheduler.tick();
     advance(15 * 60_000);
     await scheduler.tick();
-    // rev-1's heartbeat has the post unread too; eng-1's mention and cron are one queued turn.
-    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    // eng-1's mention and cron are one queued turn; rev-1, whom the post doesn't ask, reads it at
+    // its next turn there.
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
     runner.away = false;
     await scheduler.tick();
     await scheduler.drain();

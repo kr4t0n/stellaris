@@ -62,8 +62,8 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
 /**
  * A channel's dot for posts this browser hasn't seen. Beside the count it sits on a line set at the
  * count's size, which shares the count's baseline, raised so its middle is half a capital's height
- * above it, the digits' middle. Centred on the count's box, it showed a pixel below them, since
- * the digits sit high in their line (docs/internals/interface.md).
+ * above it, the digits' middle. Centred on the count's box, as the row centres the rest, it would
+ * sit a pixel below them, since the digits sit high in their line (docs/internals/interface.md).
  */
 function NewDot({ besideCount }: { besideCount: boolean }) {
   const dot = "size-1.5 rounded-full bg-emerald-400";

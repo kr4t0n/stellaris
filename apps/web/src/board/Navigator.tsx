@@ -30,9 +30,10 @@ function heading(active: boolean): string {
 }
 /**
  * A count's type: 11 px on a 16 px line. The font centres its digits between its ascent and descent,
- * but Chromium rounds those to whole pixels and floors the half-leading, so only a line an even
- * number of pixels over their 14 keeps the digits in the middle of the pill, level with the row's
- * other marks. On the row's own 15.7 px line they sit 0.8 px high (docs/internals/interface.md).
+ * but Chromium rounds those to whole device pixels and floors the half-leading. On this line the
+ * digits sit in the middle of the pill at device scales 1 and 3 and within half a device pixel
+ * between, but a device pixel high at 2, where the rounded font takes an odd 27; on the row's own
+ * 15.7 px line they sit 0.8 px high at 1 (docs/internals/interface.md).
  */
 const COUNT_TYPE = "text-[11px] leading-[16px]";
 const ROW_ACTIVE = "bg-surface-2/80 text-fg-primary";
@@ -54,26 +55,57 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
         </span>
         <span className="min-w-0 flex-1 truncate">tasks</span>
         {count > 0 ? (
-          <span
-            title={`${count} tasks in play`}
-            className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
-          >
-            {count}
-          </span>
+          <>
+            <span
+              title={`${count} tasks in play`}
+              className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+            >
+              {count}
+            </span>
+            <DotRoom />
+          </>
         ) : null}
       </Link>
     </li>
   );
 }
 
+/** The new-messages dot's room beside a count that shows none, so every count ends on one line. */
+function DotRoom() {
+  return <span aria-hidden="true" className="w-1.5 shrink-0" />;
+}
+
+/**
+ * A channel's dot for posts this browser hasn't seen, in the column at the row's end. Beside a
+ * count it sits on a line of the count's type, so on the digits' baseline wherever a device scale
+ * puts it, and is raised half a capital's height to the digits' middle: centred on the row, it is
+ * drawn a device pixel below them at a scale of 2 (docs/internals/interface.md).
+ */
+function NewDot({ besideCount }: { besideCount: boolean }) {
+  const dot = "size-1.5 rounded-full bg-emerald-400";
+  return besideCount ? (
+    <span className={COUNT_TYPE}>
+      <span
+        aria-label="new messages"
+        className={`inline-block align-[calc(0.5cap-0.1875rem)] ${dot}`}
+      />
+    </span>
+  ) : (
+    <span aria-label="new messages" className={dot} />
+  );
+}
+
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
-    <span
-      title={title}
-      className={`rounded-md bg-amber-500/15 px-1.5 ${COUNT_TYPE} text-amber-300`}
-    >
-      {value}
-    </span>
+    <>
+      <span
+        title={title}
+        className={`rounded-md bg-amber-500/15 px-1.5 ${COUNT_TYPE} text-amber-300`}
+      >
+        {value}
+      </span>
+      <DotRoom />
+    </>
   );
 }
 
@@ -248,10 +280,9 @@ export function Navigator({
                         </span>
                       ) : null}
                       {fresh ? (
-                        <span
-                          aria-label="new messages"
-                          className="size-1.5 rounded-full bg-emerald-400"
-                        />
+                        <NewDot besideCount={threadCount > 0} />
+                      ) : threadCount > 0 ? (
+                        <DotRoom />
                       ) : null}
                     </Link>
                   </li>

@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { fakeBoard } from "./board.js";
+import { COUNTED, drawnCount, navigatorWithDots } from "./counts.js";
 
 // Headless Chromium starts with --hide-scrollbars, under which a scrollbar on Working now's list
 // would take no room and pass unseen.
@@ -191,108 +192,24 @@ for (const size of [
   });
 }
 
-/**
- * The middle of where part of a row is drawn, in pixels from the top of the row's screenshot at
- * the window's scale of 1: the rows holding at least half the strongest light, or green, over the
- * ground within the given columns.
- */
-async function drawnMiddle(
-  page: Page,
-  shot: Buffer,
-  columns: { from: number; to: number },
-  green = false,
-): Promise<number> {
-  return page.evaluate(
-    async ({ bytes, from, to, byGreen }) => {
-      const image = await createImageBitmap(new Blob([new Uint8Array(bytes)]));
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const context = canvas.getContext("2d");
-      context?.drawImage(image, 0, 0);
-      const data = context?.getImageData(0, 0, image.width, image.height).data ?? [];
-      const rows: number[] = [];
-      for (let y = 0; y < image.height; y += 1) {
-        let strongest = -Infinity;
-        for (let x = from; x < to; x += 1) {
-          const [red = 0, greenPart = 0, blue = 0] = data.slice(
-            (y * image.width + x) * 4,
-            (y * image.width + x) * 4 + 3,
-          );
-          strongest = Math.max(strongest, byGreen ? greenPart - red : red + greenPart + blue);
-        }
-        rows.push(strongest);
-      }
-      const ground = Math.min(...rows);
-      const peak = Math.max(...rows) - ground;
-      const drawn = rows.flatMap((value, y) => (value - ground >= peak / 2 ? [y] : []));
-      return ((drawn[0] ?? 0) + (drawn.at(-1) ?? 0) + 1) / 2;
-    },
-    { bytes: [...shot], ...columns, byGreen: green },
-  );
-}
-
 test("every count in the navigator draws its digits in the middle of its pill, a channel's dot for unseen posts sits level with them, and a dot with no count in the middle of its row", async ({
   page,
 }) => {
-  await fakeBoard(page, { unread: true });
-  // This browser listed the board before those posts.
-  await page.addInitScript(() => {
-    localStorage.setItem("stellaris.seen", JSON.stringify({ "*": "1" }));
-  });
-  // A view no navigator row stands for, so every row shows its idle ground.
-  await page.goto("/p/lab");
-  const navigator = page.getByRole("region", { name: "Board navigator" });
-  await expect(
-    navigator.locator('a[href="/c/lab/general"]').getByLabel("new messages"),
-  ).toBeVisible();
-  await page.evaluate(() => document.fonts.load("11px 'Instrument Sans Variable'"));
-
-  for (const href of [
-    "/needs-you",
-    "/proposals",
-    "/c/governance",
-    "/c/lab/general",
-    "/p/lab/tasks",
-  ]) {
-    const row = navigator.locator(`a[href="${href}"]`);
-    const count = row.locator("[title]");
-    await expect(count).toBeVisible();
-    const [box, pill] = await Promise.all([row.boundingBox(), count.boundingBox()]);
-    if (box === null || pill === null) {
-      throw new Error(`the row for ${href} is not on the page`);
-    }
-    const shot = await row.screenshot();
-    const left = pill.x - box.x;
-    // The pill's ground in its left padding, and its digits inside the padding.
-    const ground = await drawnMiddle(page, shot, {
-      from: Math.round(left + 2),
-      to: Math.round(left + 4),
-    });
-    const digits = await drawnMiddle(page, shot, {
-      from: Math.round(left + 6),
-      to: Math.round(left + pill.width - 6),
-    });
+  const navigator = await navigatorWithDots(page);
+  for (const href of COUNTED) {
+    const drawn = await drawnCount(page, navigator.locator(`a[href="${href}"]`), 1);
     // On the row's own line Chromium draws the digits a whole pixel above the pill's middle, the
     // smallest step they can be off by at this scale. Half a pixel is left for a shape of odd
     // height, whose middle falls between rows.
     expect(
-      Math.abs(digits - ground),
-      `${href}: digits ${digits}, pill ${ground}`,
+      Math.abs(drawn.digits - drawn.ground),
+      `${href}: ${JSON.stringify(drawn)}`,
     ).toBeLessThanOrEqual(0.5);
-
-    if (href === "/c/lab/general") {
-      const dot = await row.getByLabel("new messages").boundingBox();
-      if (dot === null) {
-        throw new Error("lab's general shows no dot");
-      }
-      const green = await drawnMiddle(
-        page,
-        shot,
-        { from: Math.round(dot.x - box.x - 1), to: Math.round(dot.x - box.x + dot.width + 1) },
-        true,
-      );
-      expect(Math.abs(green - digits), `dot ${green}, digits ${digits}`).toBeLessThanOrEqual(0.5);
+    if (drawn.green !== null) {
+      expect(
+        Math.abs(drawn.green - drawn.digits),
+        `${href}: ${JSON.stringify(drawn)}`,
+      ).toBeLessThanOrEqual(0.5);
     }
   }
 
@@ -306,4 +223,26 @@ test("every count in the navigator draws its digits in the middle of its pill, a
     throw new Error("the society's general shows no dot");
   }
   expect(lone.y + lone.height / 2).toBeCloseTo(alone.y + alone.height / 2, 2);
+});
+
+test("every count in the navigator ends on one line, with or without a dot beside it, and every dot for unseen posts sits in one column after them", async ({
+  page,
+}) => {
+  const navigator = await navigatorWithDots(page);
+  const ends = await Promise.all(
+    COUNTED.map(async (href) => {
+      const pill = await navigator.locator(`a[href="${href}"] [title]`).boundingBox();
+      return pill === null ? null : pill.x + pill.width;
+    }),
+  );
+  expect(new Set(ends), `count ends ${JSON.stringify(ends)}`).toEqual(new Set([ends[0]]));
+
+  const dots = await Promise.all(
+    ['a[href="/c/general"]', 'a[href="/c/lab/general"]'].map(async (row) => {
+      const dot = await navigator.locator(row).getByLabel("new messages").boundingBox();
+      return dot === null ? null : dot.x + dot.width / 2;
+    }),
+  );
+  expect(dots[0], `dot centres ${JSON.stringify(dots)}`).toBe(dots[1]);
+  expect(dots[0]).toBeGreaterThan(ends[0] ?? Infinity);
 });

@@ -28,6 +28,13 @@ function heading(active: boolean): string {
     active ? "text-fg-primary" : "text-fg-muted hover:text-fg-primary"
   }`;
 }
+/**
+ * A count's type: 11 px on a 16 px line. The font centres its digits between its ascent and descent,
+ * but Chromium rounds those to whole pixels and floors the half-leading, so only a line an even
+ * number of pixels over their 14 keeps the digits in the middle of the pill, level with the row's
+ * other marks. On the row's own 15.7 px line they sit 0.8 px high (docs/internals/interface.md).
+ */
+const COUNT_TYPE = "text-[11px] leading-[16px]";
 const ROW_ACTIVE = "bg-surface-2/80 text-fg-primary";
 const ROW_IDLE = "text-fg-secondary hover:bg-surface-2/50 hover:text-fg-primary";
 
@@ -49,7 +56,7 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
         {count > 0 ? (
           <span
             title={`${count} tasks in play`}
-            className="rounded-md bg-surface-2/70 px-1.5 text-[11px] text-fg-tertiary"
+            className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
           >
             {count}
           </span>
@@ -59,29 +66,12 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
   );
 }
 
-/**
- * A channel's dot for posts this browser hasn't seen. Beside the count it sits on a line set at the
- * count's size, which shares the count's baseline, raised so its middle is half a capital's height
- * above it, the digits' middle. Centred on the count's box, as the row centres the rest, it would
- * sit a pixel below them, since the digits sit high in their line (docs/internals/interface.md).
- */
-function NewDot({ besideCount }: { besideCount: boolean }) {
-  const dot = "size-1.5 rounded-full bg-emerald-400";
-  return besideCount ? (
-    <span className="text-[11px]">
-      <span
-        aria-label="new messages"
-        className={`inline-block align-[calc(0.5cap-0.1875rem)] ${dot}`}
-      />
-    </span>
-  ) : (
-    <span aria-label="new messages" className={dot} />
-  );
-}
-
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
-    <span title={title} className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300">
+    <span
+      title={title}
+      className={`rounded-md bg-amber-500/15 px-1.5 ${COUNT_TYPE} text-amber-300`}
+    >
       {value}
     </span>
   );
@@ -252,12 +242,17 @@ export function Navigator({
                       {threadCount > 0 ? (
                         <span
                           title={`${threadCount} open threads`}
-                          className="rounded-md bg-surface-2/70 px-1.5 text-[11px] text-fg-tertiary"
+                          className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
                         >
                           {threadCount}
                         </span>
                       ) : null}
-                      {fresh ? <NewDot besideCount={threadCount > 0} /> : null}
+                      {fresh ? (
+                        <span
+                          aria-label="new messages"
+                          className="size-1.5 rounded-full bg-emerald-400"
+                        />
+                      ) : null}
                     </Link>
                   </li>
                 );

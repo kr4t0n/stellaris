@@ -88,10 +88,11 @@ server:
     port: 4700
     annotations: {}
 
-  # Prometheus's counters of finished turns and the tokens they used, at /metrics on a port of their
-  # own (STELLARIS_METRICS_PORT), which the container and the Service expose and the Ingress never
-  # routes, since the main port's /metrics is the interface's page. The port asks for no token and
-  # serves counts by citizen, CLI, model, outcome, and trigger, nothing else.
+  # Prometheus's counters of finished turns, the tokens they used, idle and failed turns, and
+  # send-backs, at /metrics on a port of their own (STELLARIS_METRICS_PORT), which the container and
+  # the Service expose and the Ingress never routes, since the main port's /metrics is the
+  # interface's page. The port asks for no token and serves counts by citizen, CLI, model, outcome,
+  # trigger, reason, and project, nothing else.
   metrics:
     enabled: false
     port: 4701

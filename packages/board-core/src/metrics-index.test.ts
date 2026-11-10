@@ -29,7 +29,7 @@ const TASKS = [
 const GONE = "01ARZ3NDEKTSV4RRFFQ69G5FA9";
 const THREADS = [...TASKS, GONE, "01ARZ3NDEKTSV4RRFFQ69G5FT1"];
 // Everyone who acts; `ops-9` is a citizen only in the second roster, `user` and `board` never.
-const ACTORS = ["eng-1", "rev-1", "desk", "ops-9", "user", "board"];
+const ACTORS = ["eng-1", "rev-1", "con-1", "ops-9", "user", "board"];
 const CHANNELS = ["general", "asks", "lab/general", "lab/build", "ops/general", "ops/deploy"];
 const TRIGGERS = ["mention", "heartbeat", "stage", "cron", "reflection", "manual", "user_post"];
 // `none` leaves the field out.
@@ -40,13 +40,13 @@ const QUARTER = 15 * 60_000;
 
 const ROSTERS: readonly (readonly MetricsCitizen[])[] = [
   [
-    { name: "desk", role: "concierge", memberships: [] },
+    { name: "con-1", role: "concierge", memberships: [] },
     { name: "eng-1", role: "engineer", memberships: ["lab"] },
     { name: "rev-1", role: "reviewer", memberships: ["lab", "ops"] },
   ],
   // eng-1 left lab, as an archive leaves it, and ops-9 joined ops.
   [
-    { name: "desk", role: "concierge", memberships: [] },
+    { name: "con-1", role: "concierge", memberships: [] },
     { name: "eng-1", role: "engineer", memberships: [] },
     { name: "rev-1", role: "reviewer", memberships: ["lab", "ops"] },
     { name: "ops-9", role: "operator", memberships: ["ops"] },
@@ -60,7 +60,7 @@ function task(id: string, names: readonly string[]): Task {
       project: "lab",
       title: `Task ${id.slice(-2)}`,
       status: "done",
-      createdBy: "desk",
+      createdBy: "con-1",
       createdAt: new Date(START).toISOString(),
       updatedAt: new Date(START).toISOString(),
       blockedBy: [],

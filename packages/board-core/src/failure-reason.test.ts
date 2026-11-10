@@ -92,6 +92,14 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     "compaction",
   ],
   ["claude", failed("Prompt is too long"), "context"],
+  // Codex 0.165.0's words through the adapter, for a stub answering `context_length_exceeded`.
+  [
+    "codex",
+    failed(
+      "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+    ),
+    "context",
+  ],
   [
     "claude",
     failed(
@@ -135,6 +143,31 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     ),
     "network",
   ],
+  // The runner's words for a board answering 502 to its pull, as one restarting behind an ingress
+  // does, which it marks `transient`; marked or not, and whatever the answer's body says.
+  [
+    "claude",
+    failed(
+      "the runner could not run the turn: Error: GET /runner/board/manifest answered 502: <html>bad gateway</html>",
+      { transient: true },
+    ),
+    "network",
+  ],
+  [
+    "codex",
+    failed(
+      "the runner could not run the turn: Error: GET /runner/board/manifest answered 502: <html>bad gateway</html>",
+    ),
+    "network",
+  ],
+  [
+    "claude",
+    failed(
+      "the runner could not run the turn: Error: POST /runner/board/read answered 429: Too Many Requests",
+      { transient: true },
+    ),
+    "network",
+  ],
   [
     "claude",
     failed(
@@ -159,7 +192,8 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     failed("Selected model is at capacity. Please try a different model.", { transient: true }),
     "service",
   ],
-  // A mark the words do not explain is the model service's, the one `transient` the adapters set.
+  // A mark the words leave is the adapters', the model service's: Claude Code's words for a
+  // connection that failed or timed out, against a stub.
   ["claude", failed("Request timed out", { transient: true }), "service"],
   ["claude", failed("API Error: Connection dropped (ECONNRESET).", { transient: true }), "service"],
   ["claude", failed("runner runner-1 went away during the turn"), "runner_dropped"],
@@ -170,12 +204,33 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     failed("the turn never reached runner runner-1, which went away", { transient: true }),
     "runner_dropped",
   ],
+  // The hub's, for a runner gone before the job was sent to it, and before the turn was placed.
+  [
+    "codex",
+    failed("runner runner-1 went away before the turn", { transient: true }),
+    "runner_dropped",
+  ],
+  ["claude", failed("the runner is gone"), "runner_dropped"],
   [
     "claude",
     failed("Failed to authenticate: OAuth session expired and could not be refreshed"),
     "auth",
   ],
   ["claude", failed("Not logged in · Please run /login"), "auth"],
+  // Codex 0.165.0's words through the adapter, for a stub refusing its refresh token as revoked,
+  // and the words its binary holds for a refresh that failed otherwise.
+  [
+    "codex",
+    failed(
+      "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
+    ),
+    "auth",
+  ],
+  [
+    "codex",
+    failed("Your access token could not be refreshed. Please log out and sign in again."),
+    "auth",
+  ],
   [
     "claude",
     failed(

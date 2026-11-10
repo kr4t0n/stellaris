@@ -62,6 +62,7 @@ final class FoldTests: XCTestCase {
     defer { window.close() }
     try await window.settle()
     var messages = try expectTheChat("folded", in: window, model, after: nil)
+    try await expectTheAnchorShown("folded", in: window, model)
     XCTAssertNil(model.sky.lastFrame, "the sky drew on the outer display")
     try window.keep("fold-outer", in: self)
 
@@ -71,6 +72,7 @@ final class FoldTests: XCTestCase {
     try window.keep("fold-open-landscape", in: self)
     XCTAssertNotNil(model.sky.lastFrame, "no sky beside the chat on the inner display")
     messages = try expectTheChat("opened", in: window, model, after: messages)
+    try await expectTheAnchorShown("opened", in: window, model)
     XCTAssertLessThan(model.sky.viewport.width, Double(landscape.width) * 0.6)
     XCTAssertEqual(model.sky.viewport.height, Double(landscape.height), accuracy: 1)
     let beside = try await window.until {
@@ -89,6 +91,7 @@ final class FoldTests: XCTestCase {
     try await window.settle()
     try window.keep("fold-open-portrait", in: self)
     messages = try expectTheChat("turned", in: window, model, after: messages)
+    try await expectTheAnchorShown("turned", in: window, model)
     XCTAssertEqual(model.sky.viewport.width, Double(portrait.width), accuracy: 1)
     XCTAssertLessThan(model.sky.viewport.height, Double(portrait.height) * 0.6)
     let below = try await window.until {
@@ -109,6 +112,7 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")
     messages = try expectTheChat("folded again", in: window, model, after: messages)
+    try await expectTheAnchorShown("folded again", in: window, model)
 
     // Open again: the sky comes back with the camera it had.
     window.resize(to: landscape)
@@ -117,6 +121,7 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(model.sky.scene.camera.mode, .manual, "the sky lost its camera")
     XCTAssertEqual(model.sky.scene.camera.target.scale, scale, accuracy: 1e-9)
     _ = try expectTheChat("opened again", in: window, model, after: messages)
+    try await expectTheAnchorShown("opened again", in: window, model)
   }
 
   /// The New thread sheet, open over the chat, stays open with its text as the phone opens, turns,
@@ -308,6 +313,19 @@ final class FoldTests: XCTestCase {
         messages, previous, "\(step): the conversation was built again", line: line)
     }
     return messages
+  }
+
+  /// The message the scroll is anchored at stands whole in the conversation's view, above the
+  /// draft, within the five seconds a later frame has to bring it back: the anchor saved in the
+  /// model says only where the view should be.
+  @MainActor private func expectTheAnchorShown(
+    _ step: String, in window: TestWindow, _ model: AppModel, line: UInt = #line
+  ) async throws {
+    let shown = try await window.until { model.shownRows[.general]?.contains(anchored) == true }
+    XCTAssertTrue(
+      shown,
+      "\(step): the anchored message isn't on screen above the draft; the view shows \(model.shownRows[.general] ?? [])",
+      line: line)
   }
 
   /// Signed in to the fake board, with the scheduler counted and asked every fifth of a second.

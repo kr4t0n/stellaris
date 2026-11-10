@@ -56,6 +56,11 @@ struct ConversationView: View {
         .environment(\.conversationHeight, height)
         .scrollPosition(id: $anchor, anchor: .bottom)
         .defaultScrollAnchor(.bottom)
+        #if DEBUG
+          .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.99) { ids in
+            model.shownRows[feed.conversation] = ids
+          }
+        #endif
         .scrollDismissesKeyboard(.immediately)
         .accessibilityIdentifier("messages")
         .overlay { state }

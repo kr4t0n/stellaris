@@ -119,8 +119,10 @@ struct ChatView: View {
       // The thread's stack, and the plan's or the charter's beside it: two stacks side by side,
       // since a stack inside another's view pushes onto the outer one.
       NavigationStack {
-        ConversationView(feed: model.feed(for: model.history.current))
-          .id(model.history.current)
+        HStack(spacing: 0) {
+          ConversationView(feed: model.feed(for: model.history.current))
+            .id(model.history.current)
+        }
           // What shows where no view draws, as behind the keyboard's rounded corners, below the
           // foot the conversation's own ground ends at while the keyboard is up: the island, not
           // the stack's black.

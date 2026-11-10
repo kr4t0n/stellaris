@@ -1,21 +1,34 @@
-/// <reference types="node" />
-import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { z } from "zod";
 import indexHtml from "../index.html?raw";
 import faviconSvg from "../public/favicon.svg?raw";
 
-const asset = (name: string) => readFileSync(new URL(`../public/${name}`, import.meta.url));
+const images = import.meta.glob<string>("../public/*.{png,ico}", {
+  query: "?inline",
+  import: "default",
+  eager: true,
+});
+const manifests = import.meta.glob<string>("../public/*.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+function asset(name: string) {
+  const url = images[`../public/${name}`];
+  if (url === undefined) throw new Error(`Missing icon: ${name}`);
+  return Uint8Array.from(atob(url.split(",")[1] ?? ""), (char) => char.charCodeAt(0));
+}
 const links = [...indexHtml.matchAll(/<link\b[^>]+>/g)].map((match) =>
   Object.fromEntries(
     [...match[0].matchAll(/([\w-]+)="([^"]*)"/g)].map((attr) => [attr[1], attr[2]]),
   ),
 );
 
-function pngSize(bytes: Buffer) {
-  expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-  expect(bytes.toString("ascii", 12, 16)).toBe("IHDR");
-  return `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+function pngSize(bytes: Uint8Array) {
+  expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(new TextDecoder().decode(bytes.subarray(12, 16))).toBe("IHDR");
+  const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return `${header.getUint32(16)}x${header.getUint32(20)}`;
 }
 
 it.each([
@@ -30,23 +43,30 @@ it.each([
   expect(pngSize(asset(name))).toBe(sizes);
 });
 
-it("links an ICO whose directory and embedded PNG frames agree", () => {
+it("keeps the SVG linked and the conventional ICO unlinked with correctly sized frames", () => {
   expect(links).toContainEqual(
-    expect.objectContaining({ rel: "icon", href: "/favicon.ico", sizes: "16x16 32x32 48x48" }),
+    expect.objectContaining({
+      rel: "icon",
+      href: "/favicon.svg",
+      sizes: "any",
+      type: "image/svg+xml",
+    }),
   );
+  expect(links).not.toContainEqual(expect.objectContaining({ rel: "icon", href: "/favicon.ico" }));
   const ico = asset("favicon.ico");
-  expect(ico.readUInt16LE(0)).toBe(0);
-  expect(ico.readUInt16LE(2)).toBe(1);
-  expect(ico.readUInt16LE(4)).toBe(3);
+  const directory = new DataView(ico.buffer, ico.byteOffset, ico.byteLength);
+  expect(directory.getUint16(0, true)).toBe(0);
+  expect(directory.getUint16(2, true)).toBe(1);
+  expect(directory.getUint16(4, true)).toBe(3);
   let offset = 6 + 3 * 16;
   for (const [index, size] of [16, 32, 48].entries()) {
     const entry = 6 + index * 16;
     expect(ico[entry]).toBe(size);
     expect(ico[entry + 1]).toBe(size);
-    expect(ico.readUInt16LE(entry + 4)).toBe(1);
-    expect(ico.readUInt16LE(entry + 6)).toBe(32);
-    expect(ico.readUInt32LE(entry + 12)).toBe(offset);
-    const length = ico.readUInt32LE(entry + 8);
+    expect(directory.getUint16(entry + 4, true)).toBe(1);
+    expect(directory.getUint16(entry + 6, true)).toBe(32);
+    expect(directory.getUint32(entry + 12, true)).toBe(offset);
+    const length = directory.getUint32(entry + 8, true);
     const frame = ico.subarray(offset, offset + length);
     expect(frame.length).toBe(length);
     expect(pngSize(frame)).toBe(`${size}x${size}`);
@@ -55,8 +75,8 @@ it("links an ICO whose directory and embedded PNG frames agree", () => {
   expect(offset).toBe(ico.length);
   for (const [index, size] of [16, 32].entries()) {
     const entry = 6 + index * 16;
-    const start = ico.readUInt32LE(entry + 12);
-    const end = start + ico.readUInt32LE(entry + 8);
+    const start = directory.getUint32(entry + 12, true);
+    const end = start + directory.getUint32(entry + 8, true);
     expect(ico.subarray(start, end)).toEqual(asset(`favicon-${size}x${size}.png`));
   }
 });
@@ -81,7 +101,7 @@ it("links a named manifest with real icons, source ground colours and browser-de
       ),
     })
     .strict()
-    .parse(JSON.parse(asset("manifest.json").toString()));
+    .parse(JSON.parse(manifests["../public/manifest.json"] ?? "{}"));
   const ground =
     faviconSvg.match(/<linearGradient id="ground"[\s\S]*?<\/linearGradient>/)?.[0] ?? "";
   expect(ground).toContain(`stop-color="${manifest.theme_color}"`);

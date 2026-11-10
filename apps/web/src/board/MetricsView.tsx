@@ -286,7 +286,7 @@ export function MetricsView() {
           {latency.unanswered > 0 ? (
             <Note>
               {latency.unanswered} {latency.unanswered === 1 ? "mention has" : "mentions have"} no
-              turn yet.
+              turn yet or had none within a week.
             </Note>
           ) : null}
           <Table

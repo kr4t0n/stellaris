@@ -26,7 +26,7 @@ export { BoardError, isBoardError } from "./errors.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export { MetricsIndex } from "./metrics-index.js";
-export { answers, MentionMatcher } from "./mention-matching.js";
+export { answers, MENTION_WAIT_MS, MentionMatcher } from "./mention-matching.js";
 export type { MatchingCitizen, Mention, TurnStart } from "./mention-matching.js";
 export { tokenUse } from "./turn-history.js";
 export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
@@ -39,6 +39,8 @@ export type {
   TurnSeries,
   TurnTokenSeries,
 } from "./turn-counters.js";
+export { WAKE_LATENCY_BUCKETS, WakeLatency } from "./wake-latency.js";
+export type { MentionWaitSeries, WakeLatencySeries } from "./wake-latency.js";
 export { FAILURE_REASONS, failureReason } from "./failure-reason.js";
 export type { FailedTurnEnd, FailureReason } from "./failure-reason.js";
 export type { BoardErrorCode } from "./errors.js";

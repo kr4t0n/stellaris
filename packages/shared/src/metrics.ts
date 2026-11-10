@@ -98,7 +98,7 @@ export const MetricsSchema = z.object({
   /** Time from a mention to the start of the turn it woke, in the conversation it was made in. */
   latency: z.object({
     mentions: CountSchema,
-    /** Mentions no turn has followed yet. */
+    /** Mentions no turn has followed yet, or none within the week a mention waits. */
     unanswered: CountSchema,
     medianMs: MsSchema.nullable(),
     slowestMs: MsSchema.nullable(),

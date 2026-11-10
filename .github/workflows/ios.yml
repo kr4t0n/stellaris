@@ -47,9 +47,10 @@ jobs:
 
   app:
     runs-on: xcode-27
-    # What ends a test that hangs, since the stuck-app watcher leaves the step running. Up to 0.4.1
-    # the tests ran up to 48 minutes, counting a run the limit cut with two tests left, and the
-    # steps after them, the runner's own cleanup included, up to 8 more: 70 is a quarter over both.
+    # The backstop behind the test step's own limit. Up to 0.4.1 the tests ran up to 48 minutes,
+    # counting a run the limit cut with two tests left, and the steps after them, the runner's own
+    # cleanup included, up to 8 more: 70 is a quarter over both. A job that hits it ends cancelled,
+    # which skips every step after, the uploads included.
     timeout-minutes: 70
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
@@ -72,9 +73,13 @@ jobs:
       # A copy of the app that XCTest can't end is captured while it still runs, since a step after
       # the tests could come once it has gone, and where the first copies' console goes is kept
       # beside it, as the `stuck-app` artifact. The step fails when a copy launched against the fake
-      # board writes its console to a terminal.
+      # board writes its console to a terminal. The watcher stops nothing, so the step's own limit
+      # ends a test that hangs: a quarter over the tests' 48 minutes, which leaves the steps after
+      # it the job's last 10, a quarter over their 8. A step that hits its limit fails the job
+      # rather than cancelling it, so they still run.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
+        timeout-minutes: 60
         run: |
           set -o pipefail
           output="$RUNNER_TEMP/test-output.txt"
@@ -95,6 +100,29 @@ jobs:
             status=$watched
           fi
           exit "$status"
+      # A step that hits its limit ends its shell alone, leaving xcodebuild and the watcher running.
+      # This interrupts xcodebuild and has the watcher stop once the captures under way are done,
+      # then waits up to a minute for both before ending them. After tests that ended in time it
+      # finds neither.
+      - name: Stop what the tests left running
+        if: ${{ !cancelled() }}
+        run: |
+          touch "$RUNNER_TEMP/test-output.txt.done"
+          running() { pgrep -x xcodebuild >/dev/null || pgrep -f catch-stuck-app.sh >/dev/null; }
+          running || exit 0
+          pgrep -l -x xcodebuild || true
+          pgrep -lf catch-stuck-app.sh || true
+          pkill -INT -x xcodebuild || true
+          for second in $(seq 60); do
+            sleep 1
+            if ! running; then
+              echo "Nothing left after $second s."
+              exit 0
+            fi
+          done
+          echo "Still running after a minute, so ended."
+          pkill -TERM -x xcodebuild || true
+          pkill -TERM -f catch-stuck-app.sh || true
       # The host the build names, expanded into the app's associated domains. A simulator build
       # signs to run locally and keeps its entitlements beside the signature, as Xcode wrote them.
       - name: Show the app's entitlements

@@ -31,6 +31,7 @@ export const TurnHistoryPayloadSchema = z.object({
   summary: z.string().nullable().default(null),
   error: z.string().nullable().default(null),
   toolCalls: z.number().int().nonnegative().optional(),
+  boardActions: z.number().int().nonnegative().optional(),
   turnId: UlidSchema.optional(),
 });
 

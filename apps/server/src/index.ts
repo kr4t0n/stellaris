@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { once } from "node:events";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { Board } from "@stellaris/board-core";
+import { Board, type TurnCounters } from "@stellaris/board-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
 import { SERVER_TOKEN, STELLARIS_VERSION, loadServerConfig } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
@@ -121,20 +122,23 @@ const server = serveBoard(
 );
 
 // Prometheus's counters, only when asked for, on a port of their own: the main port's `/metrics` is
-// the interface's page. They are seeded from the event log once, here, and never read it again.
-const metrics =
-  config.metricsPort === null
-    ? null
-    : serveBoard(
-        {
-          fetch: createMetricsApp(await board.countTurns()).fetch,
-          port: config.metricsPort,
-          hostname: config.host,
-        },
-        (info) => {
-          log.info({ host: info.address, port: info.port }, "metrics listening");
-        },
-      );
+// the interface's page. The port is bound before the scheduler starts, so a port already taken
+// stops the server before any turn, and it answers 503 until the counters are seeded, below.
+let counters: TurnCounters | null = null;
+let metrics: ReturnType<typeof serveBoard> | null = null;
+if (config.metricsPort !== null) {
+  metrics = serveBoard(
+    {
+      fetch: createMetricsApp(() => counters).fetch,
+      port: config.metricsPort,
+      hostname: config.host,
+    },
+    (info) => {
+      log.info({ host: info.address, port: info.port }, "metrics listening");
+    },
+  );
+  await once(metrics, "listening");
+}
 
 await scheduler.start();
 log.info(
@@ -158,3 +162,18 @@ const shutdown = async (signal: string): Promise<void> => {
 };
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// The seed reads the transcripts of turns ended before ends carried their board actions, seconds
+// on a large board, so it comes once the scheduler runs and can drain, rather than holding its
+// wakes; what the scheduler logs meanwhile counts once all the same. One that fails leaves the
+// board running and the metrics port closed.
+if (metrics !== null) {
+  try {
+    counters = await board.countTurns();
+    log.info("metrics seeded");
+  } catch (error) {
+    log.error({ err: error }, "could not seed the metrics; the metrics port is closed");
+    metrics.close();
+    metrics = null;
+  }
+}

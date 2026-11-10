@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Board } from "@stellaris/board-core";
-import type { TurnRecord } from "@stellaris/shared";
+import { Board, FAILURE_REASONS } from "@stellaris/board-core";
+import type { TranscriptEntry, TurnRecord } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMetricsApp, PROMETHEUS_CONTENT_TYPE, prometheusText } from "./prometheus.js";
 import { addWorkRoles } from "./testing/scripted-backend.js";
@@ -187,7 +187,11 @@ describe("Prometheus's turn counters", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function turn(agent: "eng-1" | "eng-2", end: Partial<TurnRecord>): Promise<void> {
+  async function turn(
+    agent: "eng-1" | "eng-2",
+    end: Partial<TurnRecord>,
+    transcript: readonly TranscriptEntry[] = [],
+  ): Promise<void> {
     clock = new Date(clock.getTime() + 60_000);
     const started = await board.beginTurn({
       agent,
@@ -206,12 +210,26 @@ describe("Prometheus's turn counters", () => {
       toolCalls: 0,
       model: agent === "eng-1" ? "claude-opus-5-5" : "gpt-6",
     });
-    await board.finishTurn({
-      ...started,
-      endedAt: clock.toISOString(),
-      exitReason: "completed",
-      ...end,
+    await board.finishTurn(
+      { ...started, endedAt: clock.toISOString(), exitReason: "completed", ...end },
+      transcript,
+    );
+  }
+
+  /** A tool's result as a turn's transcript keeps it. */
+  function result(name: string): TranscriptEntry {
+    return { ts: clock.toISOString(), event: { type: "tool_result", name, ok: true } };
+  }
+
+  /** Sends a two-stage task back from its second stage, as the user. */
+  async function sendBack(): Promise<void> {
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "report",
+      stages: [{ name: "draft" }, { name: "check" }],
     });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, stage: "s1" });
   }
 
   /** Serves the counters as the server does, on a port of their own, and scrapes it. */
@@ -230,15 +248,26 @@ describe("Prometheus's turn counters", () => {
     });
   }
 
-  it("serves both counters in Prometheus's text format, with their help, type, and labels", async () => {
-    await turn("eng-1", {
-      usage: { inputTokens: 12, outputTokens: 340, cacheReadTokens: 56_000, cacheWriteTokens: 780 },
-    });
+  it("serves every counter in Prometheus's text format, with their help, type, and labels", async () => {
+    await turn(
+      "eng-1",
+      {
+        usage: {
+          inputTokens: 12,
+          outputTokens: 340,
+          cacheReadTokens: 56_000,
+          cacheWriteTokens: 780,
+        },
+      },
+      [result("mcp__board__get_task")],
+    );
     await turn("eng-2", {
       exitReason: "error",
+      error: "Prompt is too long",
       usage: { inputTokens: 900, outputTokens: 80, cacheReadTokens: 7_000, cacheWriteTokens: 0 },
     });
-    await turn("eng-2", {});
+    await turn("eng-2", {}, [result("mcp__board__post_message")]);
+    await sendBack();
     const metrics = await serve();
     try {
       const answer = await metrics.scrape();
@@ -248,7 +277,13 @@ describe("Prometheus's turn counters", () => {
       expect([...families.keys()]).toEqual([
         "stellaris_turn_tokens_total",
         "stellaris_turns_total",
+        "stellaris_turns_idle_total",
+        "stellaris_turns_failed_total",
+        "stellaris_task_sendbacks_total",
       ]);
+      for (const family of families.values()) {
+        expect(family.type).toBe("counter");
+      }
       const tokens = families.get("stellaris_turn_tokens_total");
       const turns = families.get("stellaris_turns_total");
       expect(tokens?.type).toBe("counter");
@@ -268,6 +303,20 @@ describe("Prometheus's turn counters", () => {
         { labels: { agent: "eng-1", outcome: "completed", trigger: "stage" }, value: 1 },
         { labels: { agent: "eng-2", outcome: "completed", trigger: "stage" }, value: 1 },
         { labels: { agent: "eng-2", outcome: "failed", trigger: "stage" }, value: 1 },
+      ]);
+      expect(families.get("stellaris_turns_idle_total")?.samples).toEqual([
+        { labels: { agent: "eng-1", trigger: "stage" }, value: 1 },
+      ]);
+      const failed = families.get("stellaris_turns_failed_total");
+      expect(failed?.samples).toEqual([
+        { labels: { agent: "eng-2", cli: "codex", reason: "context" }, value: 1 },
+      ]);
+      // The help names every reason, so a dashboard can list them.
+      for (const reason of FAILURE_REASONS) {
+        expect(failed?.help).toContain(reason);
+      }
+      expect(families.get("stellaris_task_sendbacks_total")?.samples).toEqual([
+        { labels: { project: "demo", by: "user" }, value: 1 },
       ]);
       // The port serves the counters and nothing else.
       for (const route of ["/", "/health", "/api/tokens", "/metrics/x"]) {
@@ -304,20 +353,48 @@ describe("Prometheus's turn counters", () => {
     }
   });
 
-  it("escapes what a label's value holds, and serves both counters before any turn", () => {
+  it("answers 503 while it has no counters, as while the server seeds them, then serves them", async () => {
+    await turn("eng-1", {});
+    let counters: Awaited<ReturnType<Board["countTurns"]>> | null = null;
+    const app = createMetricsApp(() => counters);
+    const waiting = await app.request("/metrics");
+    expect(waiting.status).toBe(503);
+    expect(await waiting.text()).not.toContain("stellaris_");
+    counters = await board.countTurns();
+    const seeded = await app.request("/metrics");
+    expect(seeded.status).toBe(200);
+    expect(parseExposition(await seeded.text()).get("stellaris_turns_total")?.samples).toEqual([
+      { labels: { agent: "eng-1", outcome: "completed", trigger: "stage" }, value: 1 },
+    ]);
+    expect((await app.request("/other")).status).toBe(404);
+  });
+
+  it("escapes what a label's value holds, and serves every counter before any turn", () => {
     const awkward = 'a "quoted" model\\with\na newline';
     const text = prometheusText({
       tokens: [{ agent: "eng-1", cli: "claude", model: awkward, kind: "input", tokens: 5 }],
       turns: [{ agent: "eng-1", outcome: "completed", trigger: awkward, turns: 1 }],
+      idle: [{ agent: "eng-1", trigger: awkward, turns: 1 }],
+      failed: [{ agent: "eng-1", cli: "claude", reason: "other", turns: 1 }],
+      sendBacks: [{ project: "demo", by: awkward, sendBacks: 1 }],
     });
     const families = parseExposition(text);
     expect(families.get("stellaris_turn_tokens_total")?.samples[0]?.labels["model"]).toBe(awkward);
     expect(families.get("stellaris_turns_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
+    expect(families.get("stellaris_turns_idle_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
+    expect(families.get("stellaris_task_sendbacks_total")?.samples[0]?.labels["by"]).toBe(awkward);
 
-    const empty = parseExposition(prometheusText({ tokens: [], turns: [] }));
-    expect([...empty.entries()]).toEqual([
-      ["stellaris_turn_tokens_total", expect.objectContaining({ type: "counter", samples: [] })],
-      ["stellaris_turns_total", expect.objectContaining({ type: "counter", samples: [] })],
-    ]);
+    const empty = parseExposition(
+      prometheusText({ tokens: [], turns: [], idle: [], failed: [], sendBacks: [] }),
+    );
+    expect([...empty.entries()]).toEqual(
+      [
+        "stellaris_turn_tokens_total",
+        "stellaris_turns_total",
+        "stellaris_turns_idle_total",
+        "stellaris_turns_failed_total",
+        "stellaris_task_sendbacks_total",
+      ].map((name) => [name, expect.objectContaining({ type: "counter", samples: [] })]),
+    );
   });
 });

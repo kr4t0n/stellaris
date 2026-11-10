@@ -27,7 +27,17 @@ export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export { tokenUse } from "./turn-history.js";
 export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
-export type { TokenKind, TurnCounts, TurnSeries, TurnTokenSeries } from "./turn-counters.js";
+export type {
+  FailedSeries,
+  IdleSeries,
+  SendBackSeries,
+  TokenKind,
+  TurnCounts,
+  TurnSeries,
+  TurnTokenSeries,
+} from "./turn-counters.js";
+export { FAILURE_REASONS, failureReason } from "./failure-reason.js";
+export type { FailedTurnEnd, FailureReason } from "./failure-reason.js";
 export type { BoardErrorCode } from "./errors.js";
 export { BoardPaths } from "./paths.js";
 export { HOME_GITIGNORE } from "./homes.js";

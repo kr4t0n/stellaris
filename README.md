@@ -1,4 +1,8 @@
-# Stellaris
+<p align="center">
+  <img src="apps/web/public/favicon.svg" alt="Stellaris" width="128" height="128" />
+</p>
+
+<h1 align="center">Stellaris</h1>
 
 A society of autonomous coding agents built from the CLIs you already use, Claude Code
 and Codex, coordinated through one shared board. Agents are independent citizens with

@@ -441,13 +441,26 @@ final class SnapshotTests: XCTestCase {
   }
 
   /// A task's plan whole, ending with what its branch changed, and each captured proposal's
-  /// charter. At 320 points the plan is as wide as its column beside the thread.
+  /// charter. At 320 points the plan is as wide as its column beside the thread. At the largest
+  /// type size the plan with six changes runs past what the harness can draw at the narrower
+  /// widths, so there it is drawn before a turn made the task's branch, and `testATasksChanges`
+  /// draws the changes alone.
   @MainActor func testPlansAndCharters() async throws {
     let model = try await signedIn()
     let task = try XCTUnwrap(model.store.task(exportView))
     await model.store.loadTaskChanges(exportView, using: model)
-    try await Snapshot.recordWhole(
-      PlanView(task: task).environment(model), named: "plan", in: self)
+    let branchless = try await signedIn(token: "no-branch")
+    await branchless.store.loadTaskChanges(exportView, using: branchless)
+    for size in Snapshot.sizes {
+      for type in Snapshot.typeSizes {
+        let name = "plan-\(size.name)-\(type.name)"
+        print("drawing \(name)")
+        let shown = type.name == "largest" ? branchless : model
+        let image = try await Snapshot.image(
+          of: PlanView(task: task).environment(shown), size: size.size, type: type, fitting: true)
+        try Snapshot.keep(image, named: name, in: self)
+      }
+    }
     for proposal in model.store.proposals {
       try await Snapshot.recordWhole(
         CharterView(proposal: proposal).environment(model),
@@ -455,7 +468,8 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// A file's change on the plan's stack, with Whole file in its bar, at every width and type size;
+  /// The plan's Files alone, and a file's change on the plan's stack, with Whole file in its bar,
+  /// at every width and type size;
   /// then, on the outer display, a binary file's, one whose lines didn't change, one the board cut,
   /// a deleted file's, which has no Whole file, and one the runner can't read; and the plan's
   /// Files with the runner away, before the task's branch, with nothing changed, and past the
@@ -472,6 +486,15 @@ final class SnapshotTests: XCTestCase {
         }
         .environment(model))
     }
+    // The plan's Files alone, at every width and type size.
+    let subject = try XCTUnwrap(model.store.task(exportView))
+    try await Snapshot.recordWhole(
+      TaskFiles(task: subject, now: .now)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(MessageColor.island)
+        .environment(model),
+      named: "plan-files", in: self)
     try await Snapshot.record(
       await change("src/export/view.ts", in: model), named: "change-code", in: self)
     for (name, path) in [

@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/changes"
+  },
+  "status": 404,
+  "body": {
+    "error": "NOT_FOUND",
+    "message": "demo has no repository yet, since no turn has run there"
+  }
+}

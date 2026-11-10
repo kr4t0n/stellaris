@@ -377,8 +377,8 @@ interface Building {
 
 function finish(folder: Building): TreeFolder {
   let children: TreeNode[] = [
-    ...[...folder.folders.values()].map(finish).toSorted((a, b) => a.name.localeCompare(b.name)),
-    ...folder.files.toSorted((a, b) => a.name.localeCompare(b.name)),
+    ...[...folder.folders.values()].map(finish).toSorted((a, b) => byName(a.name, b.name)),
+    ...folder.files.toSorted((a, b) => byName(a.name, b.name)),
   ];
   let { name, path } = folder;
   // A folder that holds only one folder reads as one row, as a code host's file tree shows it.
@@ -407,7 +407,10 @@ function finish(folder: Building): TreeFolder {
   };
 }
 
-/** A branch's changed files as a tree of folders, folders before files and each by name. */
+/**
+ * A branch's changed files as a tree of folders, folders before files and each by `byName`, the
+ * same in every locale, as the iOS app's port, which runs the case table, builds it.
+ */
 export function fileTree(changes: readonly BranchFileChange[]): TreeFolder {
   const root: Building = { name: "", path: "", folders: new Map(), files: [] };
   for (const change of changes) {

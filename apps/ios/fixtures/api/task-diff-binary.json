@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/diff/evidence/plot.png"
+  },
+  "status": 200,
+  "body": {
+    "head": {
+      "id": "fixture-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "eng-1"
+    },
+    "path": "evidence/plot.png",
+    "status": "added",
+    "patch": null,
+    "truncated": false
+  }
+}

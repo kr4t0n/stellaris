@@ -566,6 +566,62 @@ public struct BranchFile: Sendable, Hashable, Codable {
   }
 }
 
+/// One file a task's branch changed since it left the project's default branch, with the newest
+/// commit on the branch that touched it.
+public struct BranchFileChange: Sendable, Hashable, Codable {
+  public enum Status: String, Sendable, Hashable {
+    case added, modified, deleted
+  }
+
+  /// Who made the newest commit that touched a file, and when.
+  public struct Touch: Sendable, Hashable, Codable {
+    public let author: String
+    public let at: String
+
+    public init(author: String, at: String) {
+      self.author = author
+      self.at = at
+    }
+  }
+
+  public let path: String
+  public let status: OrUnknown<Status>
+  /// Lines added and removed, or nil for a binary file.
+  public let added: Int?
+  public let removed: Int?
+  /// Nil when the file changed only through a merge of another branch.
+  public let lastChange: Touch?
+
+  public init(
+    path: String, status: OrUnknown<Status>, added: Int?, removed: Int?, lastChange: Touch? = nil
+  ) {
+    self.path = path
+    self.status = status
+    self.added = added
+    self.removed = removed
+    self.lastChange = lastChange
+  }
+}
+
+/// What a task's branch changed since it left the default branch, by path, as of its newest
+/// commit: the first files, as many as the board's `BRANCH_CHANGES_LIMIT`, and how many there were
+/// in all.
+public struct BranchChanges: Sendable, Hashable, Codable {
+  public let head: BranchCommit
+  public let files: [BranchFileChange]
+  public let total: Int
+}
+
+/// What a task's branch did to one file since it left the default branch: the patch's hunks
+/// without its header, or nil for a binary file, cut at a line's end past the board's limit.
+public struct BranchFileDiff: Sendable, Hashable, Codable {
+  public let head: BranchCommit
+  public let path: String
+  public let status: OrUnknown<BranchFileChange.Status>
+  public let patch: String?
+  public let truncated: Bool
+}
+
 /// A project's status page. `revision` counts its updates.
 public struct Dashboard: Sendable, Hashable, Codable {
   public let project: String

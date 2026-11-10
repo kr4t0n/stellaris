@@ -298,3 +298,246 @@ private let segmentAllowed = CharacterSet.urlPathAllowed.subtracting(CharacterSe
 // A task's files and a project's: the web's `/task/$taskId/files/$` and `/p/$slug/files/$`.
 nonisolated(unsafe) private let taskFiles = #/\/task\/([0-9A-HJKMNP-TV-Z]{26})\/files((?:\/[^\/]+)*)/#
 nonisolated(unsafe) private let projectFiles = #/\/p\/([a-z0-9][a-z0-9-]{0,31})\/files((?:\/[^\/]+)*)/#
+
+// MARK: A task's changes
+
+/// What a branch did to a file, in a word and its line counts, as the web's `changeLabel`: "new ·
+/// +40", "+3 −1", "deleted". A status this client doesn't know leads with its own word, "renamed ·
+/// +3 −1".
+public func changeLabel(_ change: BranchFileChange) -> String {
+  changeLabel(status: change.status, added: change.added, removed: change.removed)
+}
+
+public func changeLabel(status: OrUnknown<BranchFileChange.Status>, added: Int?, removed: Int?)
+  -> String
+{
+  if status == .known(.deleted) {
+    return "deleted"
+  }
+  let lines =
+    if let added, let removed {
+      status == .known(.added) ? "+\(added)" : "+\(added) −\(removed)"
+    } else {
+      "binary"
+    }
+  switch status {
+  case .known(.added): return "new · \(lines)"
+  case .unknown(let word): return "\(word) · \(lines)"
+  default: return lines
+  }
+}
+
+/// One line of a patch, with its number in the file on the branch for a line the file still has.
+public struct PatchRow: Sendable, Hashable {
+  public enum Kind: String, Sendable, Hashable {
+    case hunk, added, removed, context, note
+  }
+
+  public let kind: Kind
+  public let text: String
+  public let line: Int?
+
+  public init(kind: Kind, text: String, line: Int? = nil) {
+    self.kind = kind
+    self.text = text
+    self.line = line
+  }
+}
+
+/// A patch's hunks as rows, each added or unchanged line numbered from its hunk's header, as the
+/// web's `patchRows`. Lines split at each LF and are told apart by their first scalar, as the web's
+/// strings are, never by Swift's characters, which take CRLF as one and a mark after a `-` as part
+/// of it.
+public func patchRows(_ patch: String) -> [PatchRow] {
+  if patch.isEmpty {
+    return []
+  }
+  var next = 0
+  return patch.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map {
+    scalars in
+    let text = String(String.UnicodeScalarView(scalars))
+    if let start = hunkStart(Array(scalars)) {
+      next = start
+      return PatchRow(kind: .hunk, text: text)
+    }
+    switch scalars.first {
+    case "-":
+      return PatchRow(kind: .removed, text: text)
+    // "\ No newline at end of file" belongs to the line before it.
+    case "\\":
+      return PatchRow(kind: .note, text: text)
+    default:
+      let line = next
+      next &+= 1
+      return PatchRow(kind: scalars.first == "+" ? .added : .context, text: text, line: line)
+    }
+  }
+}
+
+/// The first line a hunk's header gives the file on the branch, as `@@ -1,3 +12,4 @@` gives 12,
+/// or nil for a line that isn't a header: `^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@`, with `\d` the
+/// ASCII digits, as JavaScript reads it.
+private func hunkStart(_ line: [Unicode.Scalar]) -> Int? {
+  var at = 0
+  func take(_ literal: String) -> Bool {
+    for scalar in literal.unicodeScalars {
+      guard at < line.count, line[at] == scalar else {
+        return false
+      }
+      at += 1
+    }
+    return true
+  }
+  func digits() -> String? {
+    let start = at
+    while at < line.count, ("0"..."9").contains(line[at]) {
+      at += 1
+    }
+    return at > start ? String(String.UnicodeScalarView(line[start..<at])) : nil
+  }
+  func count() -> Bool {
+    let start = at
+    if take(","), digits() == nil {
+      at = start
+      return false
+    }
+    return true
+  }
+  guard take("@@ -"), digits() != nil else {
+    return nil
+  }
+  // An optional count, which a comma without digits after it isn't.
+  let afterOld = at
+  if !count() {
+    at = afterOld
+  }
+  guard take(" +"), let start = digits() else {
+    return nil
+  }
+  let afterNew = at
+  if !count() {
+    at = afterNew
+  }
+  guard take(" @@") else {
+    return nil
+  }
+  return Int(start) ?? 0
+}
+
+/// A file of a branch's changes in the tree, by its name in its folder.
+public struct TreeFile: Sendable, Hashable {
+  public let name: String
+  public let change: BranchFileChange
+}
+
+/// A folder of a branch's changes: `name` may span several folders, `a/b`, where each held
+/// nothing but the next. `files` counts every file under it, and `lastChange` is the newest among
+/// them.
+public struct TreeFolder: Sendable, Hashable {
+  public let name: String
+  public let path: String
+  public let children: [TreeNode]
+  public let files: Int
+  public let lastChange: BranchFileChange.Touch?
+}
+
+public enum TreeNode: Sendable, Hashable {
+  case dir(TreeFolder)
+  case file(TreeFile)
+}
+
+/// A folder of the tree as it is built, its folders by their names' UTF-16 code units, so two
+/// names Swift takes as equal, a composed accent and a decomposed one, stay two folders, as they
+/// are on the web.
+private final class Building {
+  let name: String
+  let path: String
+  var folders: [[UInt16]: Building] = [:]
+  var files: [TreeFile] = []
+
+  init(name: String, path: String) {
+    self.name = name
+    self.path = path
+  }
+
+  func finish() -> TreeFolder {
+    let folders = self.folders.values.map { $0.finish() }.sorted { byName($0.name, $1.name) < 0 }
+    var children =
+      folders.map(TreeNode.dir) + files.sorted { byName($0.name, $1.name) < 0 }.map(TreeNode.file)
+    var name = self.name
+    var path = self.path
+    // A folder that holds only one folder reads as one row, as a code host's file tree shows it.
+    if !self.path.isEmpty, children.count == 1, case .dir(let only)? = children.first {
+      name = "\(name)/\(only.name)"
+      path = only.path
+      children = only.children
+    }
+    var files = 0
+    var lastChange: BranchFileChange.Touch?
+    for child in children {
+      let last: BranchFileChange.Touch?
+      switch child {
+      case .dir(let folder):
+        files += folder.files
+        last = folder.lastChange
+      case .file(let file):
+        files += 1
+        last = file.change.lastChange
+      }
+      if let last, lastChange.map({ compareUnits(last.at, $0.at) > 0 }) ?? true {
+        lastChange = last
+      }
+    }
+    return TreeFolder(
+      name: name, path: path, children: children, files: files, lastChange: lastChange)
+  }
+}
+
+/// A branch's changed files as a tree of folders, folders before files and each by name, as the
+/// web's `fileTree`.
+public func fileTree(_ changes: [BranchFileChange]) -> TreeFolder {
+  let root = Building(name: "", path: "")
+  for change in changes {
+    let parts = change.path.unicodeScalars.split(separator: "/", omittingEmptySubsequences: false)
+      .map { String(String.UnicodeScalarView($0)) }
+    var folder = root
+    for part in parts.dropLast() {
+      let key = Array(part.utf16)
+      if let next = folder.folders[key] {
+        folder = next
+      } else {
+        let next = Building(name: part, path: folder.path.isEmpty ? part : "\(folder.path)/\(part)")
+        folder.folders[key] = next
+        folder = next
+      }
+    }
+    folder.files.append(TreeFile(name: parts.last ?? change.path, change: change))
+  }
+  return root.finish()
+}
+
+/// The folders a tree opens with, as the web's `openFolders`: shallowest first, each opened while
+/// the rows it adds keep the view within `rows`, so a small change shows whole and a large one shows
+/// its shape, with its biggest folders closed. In the order they opened.
+public func openFolders(_ root: TreeFolder, rows: Int = 24) -> [String] {
+  func folders(_ nodes: [TreeNode]) -> [TreeFolder] {
+    nodes.compactMap { node in
+      if case .dir(let folder) = node { folder } else { nil }
+    }
+  }
+  var open: [String] = []
+  var shown = root.children.count
+  var queue = folders(root.children)
+  var at = 0
+  while at < queue.count {
+    let folder = queue[at]
+    at += 1
+    if shown + folder.children.count > rows {
+      continue
+    }
+    open.append(folder.path)
+    shown += folder.children.count
+    queue.append(contentsOf: folders(folder.children))
+  }
+  return open
+}

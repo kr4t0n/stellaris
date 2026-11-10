@@ -1,4 +1,4 @@
-import { BRANCH_FILE_LIMIT_BYTES } from "@stellaris/shared";
+import { BRANCH_FILE_LIMIT_BYTES, BranchFileChangeSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import fileCases from "../../../ios/fixtures/cases/files.json?raw";
@@ -21,6 +21,7 @@ import {
   sizeLabel,
   TABLE_ROWS,
   textOf,
+  type TreeNode,
   viewOf,
 } from "./files.js";
 
@@ -362,7 +363,53 @@ const FileCasesSchema = z.object({
     }),
   ),
   limits: z.object({ tableRows: z.number(), numberedLines: z.number(), fileBytes: z.number() }),
+  trees: z.array(
+    z.object({
+      name: z.string(),
+      rows: z.number().optional(),
+      changes: z.array(BranchFileChangeSchema),
+      tree: z.array(z.unknown()),
+      open: z.array(z.string()),
+    }),
+  ),
+  labels: z.array(
+    z.object({
+      status: BranchFileChangeSchema.shape.status,
+      added: z.number().nullable(),
+      removed: z.number().nullable(),
+      label: z.string(),
+    }),
+  ),
+  patches: z.array(
+    z.object({
+      name: z.string(),
+      patch: z.string(),
+      rows: z.array(
+        z.object({
+          kind: z.enum(["hunk", "added", "removed", "context", "note"]),
+          text: z.string(),
+          line: z.number().optional(),
+        }),
+      ),
+    }),
+  ),
 });
+
+/** A tree's nodes as the case table writes them: a folder with its path, count, newest touch, and
+ * children, and a file by its name and its change's path. */
+function written(nodes: readonly TreeNode[]): unknown[] {
+  return nodes.map((node) =>
+    node.kind === "dir"
+      ? {
+          dir: node.name,
+          path: node.path,
+          files: node.files,
+          ...(node.lastChange === undefined ? {} : { lastChange: node.lastChange }),
+          children: written(node.children),
+        }
+      : { file: node.name, path: node.change.path },
+  );
+}
 
 describe("the files case table the iOS port runs", () => {
   const cases = FileCasesSchema.parse(JSON.parse(fileCases));
@@ -409,5 +456,32 @@ describe("the files case table the iOS port runs", () => {
       numberedLines: NUMBERED_LINES,
       fileBytes: BRANCH_FILE_LIMIT_BYTES,
     });
+  });
+
+  it("builds a branch's changes into the same tree, opened as far, in every locale", () => {
+    expect(cases.trees.length).toBeGreaterThan(5);
+    for (const each of cases.trees) {
+      const tree = fileTree(each.changes);
+      expect({ name: each.name, tree: written(tree.children) }).toEqual({
+        name: each.name,
+        tree: each.tree,
+      });
+      expect({ name: each.name, open: [...openFolders(tree, each.rows)] }).toEqual({
+        name: each.name,
+        open: each.open,
+      });
+    }
+  });
+
+  it("labels each change and numbers each patch's rows as the table says", () => {
+    expect(cases.labels.map((each) => changeLabel(each))).toEqual(
+      cases.labels.map((each) => each.label),
+    );
+    for (const each of cases.patches) {
+      expect({ name: each.name, rows: patchRows(each.patch) }).toEqual({
+        name: each.name,
+        rows: each.rows,
+      });
+    }
   });
 });

@@ -213,6 +213,40 @@ import Testing
     case "error-runner-away":
       let error = try refusal(fixture, BoardAPI.projectFile("demo", path: "").endpoint)
       #expect(error.status == 503 && error.code == "RUNNER_AWAY")
+    case "task-changes":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let changes = try check(fixture, BoardAPI.taskChanges(task.id))
+      #expect(changes.head.id == "fixture-commit" && changes.total == 2)
+      let touch = BranchFileChange.Touch(author: "eng-1", at: "2026-01-01T00:00:00.000Z")
+      #expect(
+        changes.files == [
+          BranchFileChange(
+            path: "evidence/notes.md", status: .known(.added), added: 3, removed: 0,
+            lastChange: touch),
+          BranchFileChange(
+            path: "evidence/plot.png", status: .known(.added), added: nil, removed: nil,
+            lastChange: touch),
+        ])
+      #expect(changes.files.map(changeLabel) == ["new · +3", "new · binary"])
+    case "task-diff":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let diff = try check(fixture, BoardAPI.taskDiff(task.id, path: "evidence/notes.md"))
+      #expect(diff.status == .known(.added) && !diff.truncated)
+      #expect(
+        patchRows(diff.patch ?? "").map(\.line) == [nil, 1, 2, 3],
+        "the notes' three lines, numbered under their hunk")
+    case "task-diff-binary":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let diff = try check(fixture, BoardAPI.taskDiff(task.id, path: "evidence/plot.png"))
+      #expect(diff.path == "evidence/plot.png" && diff.patch == nil && !diff.truncated)
+    case "error-changes-missing":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let error = try refusal(fixture, BoardAPI.taskChanges(task.id).endpoint)
+      #expect(error.status == 404 && error.code == "NOT_FOUND")
+    case "error-changes-away":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let error = try refusal(fixture, BoardAPI.taskChanges(task.id).endpoint)
+      #expect(error.status == 503 && error.code == "RUNNER_AWAY")
     case "turn-stream":
       expectEndpoint(fixture, BoardAPI.turnStream(since: 0))
       #expect(fixture.status == 200)
@@ -297,7 +331,8 @@ import Testing
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
     "messages", "scheduler", "task-file", "turn-stream", "task-files", "task-folder",
-    "task-text-file", "project-files", "error-file-missing", "error-runner-away",
+    "task-text-file", "project-files", "error-file-missing", "error-runner-away", "task-changes",
+    "task-diff", "task-diff-binary", "error-changes-missing", "error-changes-away",
   ]
 
   @discardableResult

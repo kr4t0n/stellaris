@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/changes"
+  },
+  "status": 503,
+  "body": {
+    "error": "RUNNER_AWAY",
+    "message": "runner runner-1, where demo lives, is not connected"
+  }
+}

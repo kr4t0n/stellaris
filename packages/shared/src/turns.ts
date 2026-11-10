@@ -312,5 +312,10 @@ export const TurnHistoryEntrySchema = z.object({
   /** When the log recorded the turn's start; absent when the start is missing from the log. */
   startedAt: IsoDateTimeSchema.optional(),
   toolCalls: z.number().int().nonnegative().optional(),
+  /**
+   * The board actions the turn's transcript holds (`boardActionsIn`), counted as its end was
+   * logged; absent for a turn that kept no transcript, and for one logged before ends carried it.
+   */
+  boardActions: z.number().int().nonnegative().optional(),
 });
 export type TurnHistoryEntry = z.infer<typeof TurnHistoryEntrySchema>;

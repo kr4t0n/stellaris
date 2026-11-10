@@ -151,7 +151,7 @@ import {
   channelConversation,
   placeConversation,
   conversationPart,
-  isBoardAction,
+  boardActionsIn,
   METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
@@ -169,7 +169,7 @@ import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
 import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
-import { TurnCounters } from "./turn-counters.js";
+import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
   exists,
@@ -4322,13 +4322,19 @@ export class Board {
   }
 
   /**
-   * Every finished turn counted for Prometheus: seeded once from the whole event log, then moved
-   * by each turn's end this process appends, so reading the counts never reads the log. The server
-   * logs every turn's end itself; one another process appended would count from the next seed.
+   * Every finished turn and send-back counted for Prometheus: seeded once from the whole event
+   * log, then moved by each event this process appends, so reading the counts never reads the log.
+   * The server logs every turn's end and send-back itself; one another process appended would
+   * count from the next seed. A turn ended before ends carried their board actions has its
+   * transcript read once, here, for the idle count.
    */
   async countTurns(): Promise<TurnCounters> {
     const clis = new Map<string, CliKind | null>();
-    const counters = new TurnCounters((agent) => clis.get(agent) ?? null);
+    const actions = new Map<string, number | null>();
+    const counters = new TurnCounters(
+      (agent) => clis.get(agent) ?? null,
+      (turnId) => actions.get(turnId),
+    );
     // Ends appended while the log is read wait, and count once unless the read held them.
     let waiting: BoardEvent[] | null = [];
     this.events.onAppend((event) => {
@@ -4341,6 +4347,13 @@ export class Board {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     for (const agent of await this.listAgents()) {
       clis.set(agent.name, agent.cli);
+    }
+    // Ends appended from here on carry their board actions, so only the ends read need these.
+    for (const event of events) {
+      const turnId = transcriptToRead(event);
+      if (turnId !== null) {
+        actions.set(turnId, await this.turnActions(event.actor, turnId));
+      }
     }
     const seen = new Set<string>();
     for (const event of events) {
@@ -4363,13 +4376,7 @@ export class Board {
     if (known !== undefined) {
       return known;
     }
-    const count = await this.readTranscript(agent, turnId).then(
-      (entries) =>
-        entries.filter(
-          ({ event }) => event.type === "tool_result" && event.ok && isBoardAction(event.name),
-        ).length,
-      () => null,
-    );
+    const count = await this.readTranscript(agent, turnId).then(boardActionsIn, () => null);
     this.actionCounts.set(turnId, count);
     return count;
   }
@@ -4614,6 +4621,10 @@ export class Board {
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),
         ...(parsed.contextTokens === undefined ? {} : { contextTokens: parsed.contextTokens }),
         toolCalls: parsed.toolCalls,
+        // What the transcript written above holds, so a count of idle turns needs no file read.
+        ...(parsed.id !== undefined && transcript.length > 0
+          ? { boardActions: boardActionsIn(transcript) }
+          : {}),
         model: parsed.model,
         summary: parsed.status?.summary ?? null,
         needsUserDecision: parsed.status?.needsUserDecision ?? false,

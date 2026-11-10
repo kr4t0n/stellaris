@@ -1,7 +1,15 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MEMBER_VERBS, type BoardEvent, type TokenUse, type TurnRecord } from "@stellaris/shared";
+import {
+  BoardEventSchema,
+  MEMBER_VERBS,
+  type BoardEvent,
+  type Metrics,
+  type TokenUse,
+  type TranscriptEntry,
+  type TurnRecord,
+} from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Board } from "./board.js";
 import { EventLog } from "./events.js";
@@ -60,6 +68,127 @@ function seriesOf(agent: string, cli: string, model: string, values: number[]) {
     kind,
     tokens: values[at],
   }));
+}
+
+/** A tool's result as a turn's transcript keeps it. */
+function result(name: string, ok = true): TranscriptEntry {
+  return { ts: "2026-10-13T09:00:30.000Z", event: { type: "tool_result", name, ok } };
+}
+
+/** A turn's end as `finishTurn` logs it, in `lab`, woken by `trigger`. */
+function completedEnd(actor: string, trigger: string, more: object): BoardEvent {
+  return event("turn.completed", actor, { project: "lab", trigger, ...more });
+}
+
+/** A failed turn's end as `finishTurn` logs it. */
+function failedEnd(actor: string, more: object): BoardEvent {
+  return event("turn.failed", actor, {
+    project: "lab",
+    trigger: "stage",
+    exitReason: "error",
+    ...more,
+  });
+}
+
+/** A send-back of a task from stage `from`, as `update_task` logs it. */
+function movedBack(actor: string, project: string, taskId: string, from: string): BoardEvent {
+  return event("task.moved", actor, { taskId, project, from, to: "s1" });
+}
+
+/** Sends a two-stage task in `project` back from its second stage, as `by`. */
+async function sendBack(board: Board, project: string, by: "user" | "eng-1"): Promise<void> {
+  const task = await board.createTask(USER, {
+    project,
+    title: "report",
+    stages: [{ name: "draft" }, { name: "check" }],
+  });
+  await board.advanceTask(USER, { task_id: task.id });
+  const actor = by === "user" ? USER : { name: "eng-1", role: "engineer" };
+  if (by !== "user") {
+    await board.claimTask(actor, { task_id: task.id });
+  }
+  await board.updateTask(actor, { task_id: task.id, stage: "s1", note: "again" });
+}
+
+/**
+ * The board as one from before ends carried their board actions would have left it: every end
+ * logged so far without them, opened afresh, since a board indexes its log as it reads it.
+ */
+async function withOlderEnds(board: Board, now: () => Date): Promise<Board> {
+  const file = board.paths.eventLog();
+  const lines = (await readFile(file, "utf8")).split("\n").map((line) => {
+    if (line === "") {
+      return line;
+    }
+    const logged = BoardEventSchema.parse(JSON.parse(line));
+    const { boardActions: _counted, ...payload } = logged.payload;
+    return JSON.stringify({ ...logged, payload });
+  });
+  await writeFile(file, lines.join("\n"));
+  return Board.open(board.paths.dataDir, { now });
+}
+
+/** Each series' count by the labels `key` picks, summed over the rest. */
+function summed<T>(series: readonly T[], key: (each: T) => string, count: (each: T) => number) {
+  const sums = new Map<string, number>();
+  for (const each of series) {
+    sums.set(key(each), (sums.get(key(each)) ?? 0) + count(each));
+  }
+  return sums;
+}
+
+/**
+ * The idle turns and send-backs the metrics count over the window `all`, keyed as `fromCounters`:
+ * every send-back, by stage and by sender, which the headline's count of the finished tasks' own
+ * leaves out for a task still open.
+ */
+function fromMetrics(metrics: Metrics) {
+  const idleByTrigger = new Map<string, number>();
+  for (const row of metrics.idle.byTrigger) {
+    idleByTrigger.set(row.trigger, (idleByTrigger.get(row.trigger) ?? 0) + row.idle);
+  }
+  const sendBacksByProject = new Map<string, number>();
+  for (const row of metrics.sentBack.byStage) {
+    sendBacksByProject.set(row.project, (sendBacksByProject.get(row.project) ?? 0) + row.count);
+  }
+  return {
+    idle: metrics.idle.idle,
+    idleByAgent: new Map(
+      metrics.idle.byAgent.filter((row) => row.idle > 0).map((row) => [row.agent, row.idle]),
+    ),
+    idleByTrigger: new Map([...idleByTrigger].filter(([, idle]) => idle > 0)),
+    sendBacksByProject,
+    sendBacksBy: new Map(metrics.sentBack.bySender.map((row) => [row.agent, row.count])),
+  };
+}
+
+/** The same measures from the counters. */
+function fromCounters(counts: TurnCounts) {
+  const idleByAgent = summed(
+    counts.idle,
+    (each) => each.agent,
+    (each) => each.turns,
+  );
+  const sendBacksBy = summed(
+    counts.sendBacks,
+    (each) => each.by,
+    (each) => each.sendBacks,
+  );
+  return {
+    idle: [...idleByAgent.values()].reduce((sum, each) => sum + each, 0),
+    idleByAgent,
+    idleByTrigger: summed(
+      counts.idle,
+      (each) => each.trigger,
+      (each) => each.turns,
+    ),
+    sendBacksByProject: summed(
+      counts.sendBacks,
+      (each) => each.project,
+      (each) => each.sendBacks,
+    ),
+    sendBacksBy,
+  };
 }
 
 /** A citizen's input tokens as the counters hold them. */
@@ -172,7 +301,101 @@ describe("TurnCounters", () => {
         { agent: "bo", outcome: "failed", trigger: "heartbeat", turns: 1 },
         { agent: "ghost", outcome: "failed", trigger: "stage", turns: 1 },
       ],
+      idle: [],
+      failed: [
+        { agent: "bo", cli: "codex", reason: "other", turns: 1 },
+        { agent: "ghost", cli: "unknown", reason: "other", turns: 1 },
+      ],
+      sendBacks: [],
     });
+  });
+
+  it("counts a completed turn idle when it took no board action, by its end's count or else its transcript's", () => {
+    const transcripts = new Map<string, number | null>([
+      ["01M4T000000000000000000AA0", 0],
+      ["01M4T000000000000000000AA1", 2],
+      ["01M4T000000000000000000AB0", null],
+    ]);
+    const counters = new TurnCounters(
+      () => "claude",
+      (turnId) => transcripts.get(turnId),
+    );
+    for (const each of [
+      // Counted on its end: nothing, twice, and something.
+      completedEnd("ada", "mention", { turnId: "01M4T000000000000000000BA0", boardActions: 0 }),
+      completedEnd("ada", "heartbeat", { turnId: "01M4T000000000000000000BA1", boardActions: 0 }),
+      completedEnd("ada", "mention", { turnId: "01M4T000000000000000000BA2", boardActions: 3 }),
+      // Logged before ends carried it: the transcript's count, which the end's would override.
+      completedEnd("bo", "stage", { turnId: "01M4T000000000000000000AA0" }),
+      completedEnd("bo", "stage", { turnId: "01M4T000000000000000000AA1" }),
+      completedEnd("bo", "stage", { turnId: "01M4T000000000000000000AA1", boardActions: 0 }),
+      // No transcript, no id, or one the seed never read: unknown, so never idle.
+      completedEnd("bo", "stage", { turnId: "01M4T000000000000000000AB0" }),
+      completedEnd("bo", "stage", {}),
+      completedEnd("bo", "stage", { turnId: "01M4T000000000000000000AC0" }),
+      // A reflection writes memory, not the board, and a failed turn is no idle one.
+      completedEnd("cy", "reflection", { turnId: "01M4T000000000000000000BA3", boardActions: 0 }),
+      event("turn.failed", "cy", { project: "lab", trigger: "mention", boardActions: 0 }),
+    ]) {
+      counters.add(each);
+    }
+    expect(counters.read().idle).toEqual([
+      { agent: "ada", trigger: "heartbeat", turns: 1 },
+      { agent: "ada", trigger: "mention", turns: 1 },
+      { agent: "bo", trigger: "stage", turns: 2 },
+    ]);
+  });
+
+  it("counts each failed turn under its CLI and the reason its end gives", () => {
+    const counters = new TurnCounters((agent) => (agent === "bo" ? "codex" : "claude"));
+    for (const each of [
+      failedEnd("ada", { error: "Prompt is too long" }),
+      failedEnd("ada", { error: "Prompt is too long", cli: "claude" }),
+      failedEnd("ada", { exitReason: "timeout", error: "Prompt is too long" }),
+      failedEnd("ada", {
+        error: "usage limit reached: You've hit your weekly limit · resets Nov 12",
+      }),
+      failedEnd("bo", { error: "Selected model is at capacity. Please try a different model." }),
+      failedEnd("bo", { error: null, resumeFailed: "lost", cli: "codex" }),
+      // A mark a later board adds reads as none.
+      failedEnd("bo", { error: "something new", transient: "maybe", resumeFailed: "later" }),
+      // A completed turn has no reason.
+      event("turn.completed", "ada", {
+        project: "lab",
+        trigger: "stage",
+        error: "Prompt is too long",
+      }),
+    ]) {
+      counters.add(each);
+    }
+    expect(counters.read().failed).toEqual([
+      { agent: "ada", cli: "claude", reason: "context", turns: 2 },
+      { agent: "ada", cli: "claude", reason: "limit", turns: 1 },
+      { agent: "ada", cli: "claude", reason: "timeout", turns: 1 },
+      { agent: "bo", cli: "codex", reason: "other", turns: 1 },
+      { agent: "bo", cli: "codex", reason: "resume_failed", turns: 1 },
+      { agent: "bo", cli: "codex", reason: "service", turns: 1 },
+    ]);
+  });
+
+  it("counts each send-back by its project and whoever sent it back, never by task or stage", () => {
+    const counters = new TurnCounters(() => "claude");
+    for (const each of [
+      movedBack("user", "lab", "01M4T000000000000000000TA0", "s3"),
+      movedBack("user", "lab", "01M4T000000000000000000TA1", "s2"),
+      movedBack("rev", "lab", "01M4T000000000000000000TA0", "s2"),
+      movedBack("rev", "site", "01M4T000000000000000000TA2", "s2"),
+      // One the metrics would not read is not counted either, nor another step of a task.
+      event("task.moved", "rev", { project: "lab" }),
+      event("task.advanced", "rev", { taskId: "01M4T000000000000000000TA2", project: "site" }),
+    ]) {
+      counters.add(each);
+    }
+    expect(counters.read().sendBacks).toEqual([
+      { project: "lab", by: "rev", sendBacks: 1 },
+      { project: "lab", by: "user", sendBacks: 2 },
+      { project: "site", by: "rev", sendBacks: 1 },
+    ]);
   });
 });
 
@@ -340,5 +563,176 @@ describe("Board.countTurns", () => {
     const after = await board.countTurns();
     expect(perCitizen(after.read()).get("eng-1")).toEqual({ turns: 3, usage: [111, 0, 0, 0] });
     expect(perCitizen(after.read())).toEqual(fromTokenUse(await board.tokenUse("all")));
+  });
+
+  /** Records one turn of `agent`, woken by `trigger`, ending with `transcript`. */
+  async function ended(
+    board: Board,
+    agent: "eng-1" | "eng-2",
+    trigger: "mention" | "stage" | "heartbeat" | "cron" | "reflection",
+    transcript: readonly TranscriptEntry[],
+    end: Partial<TurnRecord> = {},
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const started = await board.beginTurn({
+      agent,
+      project: "demo",
+      runner: "server",
+      cli: agent === "eng-1" ? "claude" : "codex",
+      session: null,
+      trigger: {
+        kind: trigger,
+        fromUser: false,
+        reason: "",
+        ...(trigger === "heartbeat" ? { heartbeat: "held" as const } : {}),
+      },
+      startedAt: clock.toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: null,
+    });
+    await board.finishTurn(
+      { ...started, endedAt: clock.toISOString(), exitReason: "completed", ...end },
+      transcript,
+    );
+  }
+
+  it("logs the board actions a turn's transcript holds on its end, and none for a turn that kept none", async () => {
+    const board = await society();
+    const logged: BoardEvent[] = [];
+    board.onEventAppended((appended) => logged.push(appended));
+    await ended(board, "eng-1", "mention", [
+      result("mcp__board__post_message"),
+      result("mcp__board__get_task"),
+      result("mcp__board__claim_task", false),
+      result("Bash"),
+      result("mcp__board__advance_task"),
+    ]);
+    await ended(board, "eng-1", "mention", [result("mcp__board__read_inbox")], {
+      exitReason: "error",
+    });
+    await ended(board, "eng-2", "stage", []);
+    const ends = logged.filter(
+      (each) => each.type.startsWith("turn.") && each.type !== "turn.started",
+    );
+    expect(ends.map((each) => [each.type, each.payload["boardActions"]])).toEqual([
+      ["turn.completed", 2],
+      ["turn.failed", 0],
+      ["turn.completed", undefined],
+    ]);
+    expect((await board.listTurns("eng-1")).map((each) => each.boardActions)).toEqual([2, 0]);
+  });
+
+  it("reads each transcript an older end needs once to seed the idle count, and none a newer end counted", async () => {
+    const older = await society();
+    await ended(older, "eng-1", "stage", [result("Bash")]);
+    await ended(older, "eng-1", "stage", [result("mcp__board__post_message")]);
+    await ended(older, "eng-1", "reflection", [result("Write")]);
+    await ended(older, "eng-2", "mention", [result("Read")], { exitReason: "error" });
+    const board = await withOlderEnds(older, () => clock);
+    await ended(board, "eng-2", "mention", [result("mcp__board__search")]);
+    await ended(board, "eng-2", "mention", [result("mcp__board__post_message")]);
+    const reads = vi.spyOn(Board.prototype, "readTranscript");
+    const counters = await board.countTurns();
+    // The two older completed turns that are not a reflection, each once.
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(counters.read().idle).toEqual([
+      { agent: "eng-1", trigger: "stage", turns: 1 },
+      { agent: "eng-2", trigger: "mention", turns: 1 },
+    ]);
+    reads.mockClear();
+    // A turn ended once the counters listen counts from its end alone.
+    await ended(board, "eng-1", "cron", [result("mcp__board__get_task")]);
+    await ended(board, "eng-1", "cron", []);
+    expect(reads).not.toHaveBeenCalled();
+    expect(counters.read().idle).toContainEqual({ agent: "eng-1", trigger: "cron", turns: 1 });
+  });
+
+  it("counts failed turns by reason and send-backs as they are logged, and seeds them from the log", async () => {
+    const board = await society();
+    await ended(board, "eng-1", "stage", [], {
+      exitReason: "error",
+      error: "Prompt is too long",
+    });
+    await sendBack(board, "demo", "user");
+    const counters = await board.countTurns();
+    await ended(board, "eng-2", "stage", [], {
+      exitReason: "error",
+      error: "Selected model is at capacity. Please try a different model.",
+      transient: true,
+    });
+    await ended(board, "eng-1", "stage", [], { exitReason: "timeout", error: null });
+    await sendBack(board, "demo", "eng-1");
+    await sendBack(board, "demo", "user");
+    const counts = counters.read();
+    expect(counts.failed).toEqual([
+      { agent: "eng-1", cli: "claude", reason: "context", turns: 1 },
+      { agent: "eng-1", cli: "claude", reason: "timeout", turns: 1 },
+      { agent: "eng-2", cli: "codex", reason: "service", turns: 1 },
+    ]);
+    expect(counts.sendBacks).toEqual([
+      { project: "demo", by: "eng-1", sendBacks: 1 },
+      { project: "demo", by: "user", sendBacks: 2 },
+    ]);
+    // A seed from the same log comes to the same counts.
+    const seeded = (await board.countTurns()).read();
+    expect(seeded.failed).toEqual(counts.failed);
+    expect(seeded.sendBacks).toEqual(counts.sendBacks);
+  });
+
+  it("counts idle turns and send-backs as the metrics do over the window all", async () => {
+    const older = await society();
+    await older.addProject(USER, { slug: "site", channels: ["general"] });
+    await ended(older, "eng-1", "stage", [result("Bash"), result("mcp__board__get_task")]);
+    await ended(older, "eng-2", "mention", [result("mcp__board__post_message")]);
+    await ended(older, "eng-2", "mention", []);
+    await sendBack(older, "demo", "user");
+    const board = await withOlderEnds(older, () => clock);
+    await ended(board, "eng-1", "heartbeat", [result("mcp__board__read_inbox")]);
+    await ended(board, "eng-1", "mention", [result("mcp__board__advance_task")]);
+    await ended(board, "eng-1", "stage", [result("mcp__board__claim_task", false)]);
+    await ended(board, "eng-2", "reflection", [result("Edit")]);
+    await ended(board, "eng-2", "cron", [result("Read")]);
+    await ended(board, "eng-2", "cron", []);
+    await ended(board, "eng-1", "mention", [], {
+      exitReason: "error",
+      error: "Prompt is too long",
+    });
+    await sendBack(board, "demo", "eng-1");
+    await sendBack(board, "site", "user");
+    const counters = await board.countTurns();
+    // Some of each are ended once the counters listen.
+    await ended(board, "eng-2", "heartbeat", [result("mcp__board__search")]);
+    await ended(board, "eng-1", "cron", [result("mcp__board__post_message")]);
+    await sendBack(board, "site", "user");
+
+    const tab = fromMetrics(await board.metrics("all"));
+    expect(fromCounters(counters.read())).toEqual(tab);
+    // The comparison covers idle turns of each citizen and each kind of end, and both projects.
+    expect(tab).toEqual({
+      idle: 5,
+      idleByAgent: new Map([
+        ["eng-1", 3],
+        ["eng-2", 2],
+      ]),
+      idleByTrigger: new Map([
+        ["cron", 1],
+        ["heartbeat", 2],
+        ["stage", 2],
+      ]),
+      sendBacksByProject: new Map([
+        ["demo", 2],
+        ["site", 2],
+      ]),
+      sendBacksBy: new Map([
+        ["eng-1", 1],
+        ["user", 3],
+      ]),
+    });
   });
 });

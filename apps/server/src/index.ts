@@ -120,22 +120,6 @@ const server = serveBoard(
   },
 );
 
-// Prometheus's counters, only when asked for, on a port of their own: the main port's `/metrics` is
-// the interface's page. They are seeded from the event log once, here, and never read it again.
-const metrics =
-  config.metricsPort === null
-    ? null
-    : serveBoard(
-        {
-          fetch: createMetricsApp(await board.countTurns()).fetch,
-          port: config.metricsPort,
-          hostname: config.host,
-        },
-        (info) => {
-          log.info({ host: info.address, port: info.port }, "metrics listening");
-        },
-      );
-
 await scheduler.start();
 log.info(
   {
@@ -146,6 +130,10 @@ log.info(
   },
   "scheduler started",
 );
+
+// Prometheus's counters, only when asked for, on a port of their own: the main port's `/metrics` is
+// the interface's page. They are seeded from the event log once, below, and never read it again.
+let metrics: ReturnType<typeof serveBoard> | null = null;
 
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "shutting down; waiting for running turns to report");
@@ -158,3 +146,16 @@ const shutdown = async (signal: string): Promise<void> => {
 };
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// The seed reads the transcripts of turns ended before ends carried their board actions, seconds
+// on a large board, so it comes once the scheduler runs and can drain, rather than holding its
+// wakes; what the scheduler logs meanwhile counts once all the same.
+if (config.metricsPort !== null) {
+  const counters = await board.countTurns();
+  metrics = serveBoard(
+    { fetch: createMetricsApp(counters).fetch, port: config.metricsPort, hostname: config.host },
+    (info) => {
+      log.info({ host: info.address, port: info.port }, "metrics listening");
+    },
+  );
+}

@@ -134,7 +134,8 @@ jobs:
       # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
       # After a test step that hit its limit, its 3 minutes keep the steps after the tests within
       # the job's last 10, beside the stop step's minute and the other steps' 4.6. It has taken up
-      # to 4.9, so a slow run keeps no display pictures, and the job's result stays as it was.
+      # to 4.9 after tests that ran, so a slow run keeps no display pictures, and the job's result
+      # stays as it was.
       - name: Look at the simulator's displays
         if: ${{ !cancelled() }}
         continue-on-error: true

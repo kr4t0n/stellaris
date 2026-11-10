@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { crc32 } from "node:zlib";
 import {
+  boardActionsIn,
   CliQuotaSchema,
   cronFailure,
   cronStoppedAt,
@@ -11,16 +12,19 @@ import {
   MEMBER_VERBS,
   VERB_DESCRIPTIONS,
   type HeartbeatCause,
+  type MetricsWindow,
   type TurnExitReason,
   type Ulid,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { EventLog } from "./events.js";
 import {
   Board,
   BoardError,
+  computeMetrics,
   SYSTEM_ACTOR,
   type Actor,
   type BoardOptions,
@@ -3883,6 +3887,134 @@ describe("Board", () => {
       unknown: 1,
       byAgent: [{ agent: "eng-1", role: "engineer", turns: 2, idle: 1 }],
     });
+  });
+
+  /** A finished turn of eng-1's, a minute long, with the steps its runner kept. */
+  async function endTurn(
+    board: Board,
+    thread: Ulid | undefined,
+    transcript: ReturnType<typeof result>[],
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn(turnIn(thread, clock.toISOString()));
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn(
+      { ...turn, endedAt: clock.toISOString(), exitReason: "completed" },
+      transcript,
+    );
+  }
+
+  /** The metrics as replaying the whole log gives them, every transcript read, as before the index. */
+  async function replayed(board: Board, window: MetricsWindow) {
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    const actions = new Map<string, number | null>();
+    for (const event of events) {
+      const turnId = event.payload["turnId"];
+      if (event.type === "turn.completed" && typeof turnId === "string") {
+        const read = board.readTranscript(event.actor, turnId).then(boardActionsIn, () => null);
+        actions.set(turnId, await read);
+      }
+    }
+    const citizens = (await board.listAgents())
+      .filter((agent) => agent.cli !== null)
+      .map(({ name, role, memberships }) => ({ name, role, memberships }));
+    const tasks = await board.listTasks("demo");
+    return computeMetrics({
+      events,
+      tasks,
+      citizens,
+      actions,
+      activeSignals: new Set(),
+      window,
+      now: clock,
+    });
+  }
+
+  it("answers the metrics from its index, reading no log or transcript once seeded", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "Ship the page",
+      stages: [{ name: "draft" }, { name: "check" }],
+    });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, stage: "s1", note: "again" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 look at this" });
+    await endTurn(board, undefined, [result("mcp__board__post_message", true)]);
+    await endTurn(board, task.id, [result("mcp__board__get_task", true)]);
+    expect(await board.metrics("all")).toStrictEqual(await replayed(board, "all"));
+
+    // After the first answer, each event is counted as it is appended: a stage renamed, a second
+    // send-back, a mention and its answer, a turn without a transcript, and one with an action.
+    await board.planTask(USER, {
+      task_id: task.id,
+      stages: [
+        { id: "s1", name: "draft" },
+        { id: "s2", name: "verify" },
+      ],
+    });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, stage: "s1", note: "once more" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and this" });
+    clock = new Date(clock.getTime() + 25 * 3_600_000);
+    await endTurn(board, undefined, []);
+    await endTurn(board, task.id, [result("mcp__board__claim_task", true)]);
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["metrics"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.metrics(window));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(await replayed(board, window));
+    }
+    // Both send-backs left the stage now named verify, and the day's window holds the last two turns.
+    expect(answers.get("all")?.sentBack.byStage).toEqual([
+      { project: "demo", stage: "verify", count: 2 },
+    ]);
+    expect(answers.get("all")?.latency).toMatchObject({ mentions: 2, unanswered: 0 });
+    expect(answers.get("24h")?.idle).toMatchObject({ turns: 1, idle: 0, unknown: 1 });
+  });
+
+  it("reads an older end's transcript once, at the metrics index's seed", async () => {
+    const { board: older } = await society();
+    await endTurn(older, undefined, [result("mcp__board__post_message", true)]);
+    await endTurn(older, undefined, [result("mcp__board__get_task", true)]);
+    // The log as a board from before ends carried their board actions left it.
+    const file = older.paths.eventLog();
+    const lines = (await readFile(file, "utf8")).split("\n").map((line) => {
+      if (line === "") {
+        return line;
+      }
+      const logged = z.object({ payload: z.record(z.string(), z.unknown()) }).passthrough();
+      const event = logged.parse(JSON.parse(line));
+      const { boardActions: _counted, ...payload } = event.payload;
+      return JSON.stringify({ ...event, payload });
+    });
+    expect(lines.filter((line) => line.includes('"boardActions"'))).toEqual([]);
+    await writeFile(file, lines.join("\n"));
+    const board = await Board.open(dir, { now });
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    expect((await board.metrics("all")).idle).toMatchObject({ turns: 2, idle: 1, unknown: 0 });
+    expect(transcriptRead).toHaveBeenCalledTimes(2);
+    expect((await board.metrics("all")).idle).toMatchObject({ turns: 2, idle: 1, unknown: 0 });
+    expect(transcriptRead).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts once an event appended while the metrics index reads the log", async () => {
+    const { board } = await society();
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 first" });
+    const seeding = board.indexMetrics();
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 second" });
+    await endTurn(board, undefined, [result("mcp__board__post_message", true)]);
+    await seeding;
+    const answer = await board.metrics("all");
+    expect(answer.latency).toMatchObject({ mentions: 2, unanswered: 0 });
+    expect(answer).toStrictEqual(await replayed(board, "all"));
   });
 
   it("lets a citizen set a cron for itself where its turn is, and only planners one for another", async () => {

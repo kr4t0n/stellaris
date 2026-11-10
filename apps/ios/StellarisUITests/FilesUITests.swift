@@ -69,12 +69,12 @@ final class FilesUITests: ShellTestCase {
     // At this size a project's first row fills half the window, so each row is scrolled to.
     for row in ["project-files-demo", "file-src", "file-src/app.ts"] {
       let button = app.buttons[row].firstMatch
-      reveal(app, button)
+      dragUpTo(app, button)
       button.tap()
     }
     let one = app.descendants(matching: .any)["line-9"].firstMatch
     let two = app.descendants(matching: .any)["line-10"].firstMatch
-    reveal(app, two)
+    dragUpTo(app, two)
     XCTAssertTrue(one.exists, "the code shows no line 9 above line 10")
     keepScreen("files-code-largest")
     XCTAssertEqual(
@@ -108,26 +108,6 @@ final class FilesUITests: ShellTestCase {
         "Files doesn't say \(words)")
       keepScreen("files-\(token)")
     }
-  }
-
-  /// Drags what the window shows up until `element`'s middle is on screen: one scrolled in only
-  /// as far as a sliver at the window's foot counts as hittable, and a tap there reaches nothing.
-  /// Each drag is held at its end, so the view moves by the drag alone and can't fling past it.
-  @MainActor private func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
-    let window = app.windows.firstMatch
-    let frame = window.frame
-    func shown() -> Bool {
-      element.exists && element.isHittable
-        && frame.insetBy(dx: 0, dy: 40).contains(
-          CGPoint(x: element.frame.midX, y: element.frame.midY))
-    }
-    _ = element.waitForExistence(timeout: 5)
-    for _ in 0..<20 where !shown() {
-      let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.6))
-      let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
-      start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
-    }
-    XCTAssertTrue(shown(), "\(element) isn't on screen")
   }
 
   /// The app signed in with `token`, at the demo project's files under Board.

@@ -10,7 +10,21 @@ import { serveBoard } from "./serve.js";
 
 const USER = { name: "user", role: "user" } as const;
 
+/** Every series the port serves, in its order, with its type. */
+const FAMILIES = [
+  ["stellaris_turn_tokens_total", "counter"],
+  ["stellaris_turns_total", "counter"],
+  ["stellaris_turns_idle_total", "counter"],
+  ["stellaris_turns_failed_total", "counter"],
+  ["stellaris_task_sendbacks_total", "counter"],
+  ["stellaris_wake_latency_seconds", "histogram"],
+  ["stellaris_wake_mentions_waiting", "gauge"],
+  ["stellaris_wake_mentions_unanswered_total", "counter"],
+];
+
 interface Sample {
+  /** A histogram's samples name what they are: `_bucket`, `_sum`, or `_count`. */
+  readonly suffix?: string;
   readonly labels: Record<string, string>;
   readonly value: number;
 }
@@ -75,7 +89,8 @@ function parseLabels(text: string): Record<string, string> {
 /**
  * Prometheus's text format, version 0.0.4, read strictly: help and type before a metric's samples,
  * each at most once, one group per metric, valid names, quoted and escaped label values, a float
- * value, no series twice, and a newline at the end.
+ * value, no series twice, and a newline at the end. A histogram's `_bucket`, `_sum`, and `_count`
+ * samples are its family's, and its buckets rise with `le` to its count at `+Inf`.
  */
 function parseExposition(text: string): Map<string, Family> {
   check(text.endsWith("\n"), "the text ends with a newline");
@@ -112,8 +127,12 @@ function parseExposition(text: string): Map<string, Family> {
     }
     const parsed = /^([^\s{]+)(?:\{(.*)\})? (\S+)(?: (-?\d+))?$/.exec(line);
     check(parsed !== null, `a sample: ${line}`);
-    const [, name = "", labelText = "", value = ""] = parsed;
-    check(METRIC_NAME.test(name), `a metric name: ${name}`);
+    const [, sampled = "", labelText = "", value = ""] = parsed;
+    check(METRIC_NAME.test(sampled), `a metric name: ${sampled}`);
+    const histogram = /^(.+)(_bucket|_sum|_count)$/.exec(sampled);
+    const stem = histogram?.[1] ?? "";
+    const ofHistogram = histogram !== null && families.get(stem)?.type === "histogram";
+    const name = ofHistogram ? stem : sampled;
     check(current === name || !families.get(name)?.samples.length, `${name} in one group`);
     current = name;
     check(
@@ -122,12 +141,43 @@ function parseExposition(text: string): Map<string, Family> {
     );
     const labels = parseLabels(labelText);
     const key = JSON.stringify([
-      name,
+      sampled,
       Object.entries(labels).toSorted(([a], [b]) => byCodeUnits(a, b)),
     ]);
     check(!series.has(key), `${key} twice`);
     series.add(key);
-    family(name).samples.push({ labels, value: Number(value) });
+    family(name).samples.push({
+      ...(ofHistogram ? { suffix: histogram?.[2] ?? "" } : {}),
+      labels,
+      value: Number(value),
+    });
+  }
+  for (const [name, { type, samples }] of families) {
+    if (type !== "histogram") {
+      continue;
+    }
+    const sets = new Map<string, Sample[]>();
+    for (const each of samples) {
+      const { le, ...rest } = each.labels;
+      check(each.suffix !== "_bucket" || le !== undefined, `${name}'s bucket has an le`);
+      const set = JSON.stringify(Object.entries(rest).toSorted(([a], [b]) => byCodeUnits(a, b)));
+      sets.set(set, [...(sets.get(set) ?? []), each]);
+    }
+    for (const [set, of] of sets) {
+      const buckets = of.filter((each) => each.suffix === "_bucket");
+      // The text format writes infinity as +Inf, which Number reads as NaN.
+      const bounds = buckets.map(({ labels: { le } }) => (le === "+Inf" ? Infinity : Number(le)));
+      check(bounds.toSorted((a, b) => a - b).join() === bounds.join(), `${name}${set}'s le rise`);
+      check(bounds.at(-1) === Infinity, `${name}${set} ends at +Inf`);
+      const counts = buckets.map((each) => each.value);
+      check(counts.toSorted((a, b) => a - b).join() === counts.join(), `${name}${set} cumulative`);
+      const count = of.find((each) => each.suffix === "_count")?.value;
+      check(count === counts.at(-1), `${name}${set}'s +Inf is its count`);
+      check(
+        of.some((each) => each.suffix === "_sum"),
+        `${name}${set} has a sum`,
+      );
+    }
   }
   return families;
 }
@@ -151,6 +201,13 @@ describe("the text format's reader in these tests", () => {
       ['x_total{1a="1"} 2\n', /a label name/],
       ["x-total 2\n", /a metric name: x-total/],
       ["x_total two\n", /a value: two/],
+      ['# TYPE h histogram\nh_bucket{le="1"} 1\ny 1\nh_bucket{le="+Inf"} 1\n', /h in one group/],
+      ['# TYPE h histogram\nh_bucket{le="+Inf"} 2\nh_sum 1\nh_count 1\n', /\+Inf is its count/],
+      [
+        '# TYPE h histogram\nh_bucket{le="1"} 2\nh_bucket{le="+Inf"} 1\nh_sum 1\nh_count 1\n',
+        /cumulative/,
+      ],
+      ['# TYPE h histogram\nh_bucket{le="1"} 1\nh_sum 1\nh_count 1\n', /ends at \+Inf/],
     ];
     for (const [bad, message] of refusals) {
       expect(() => parseExposition(bad)).toThrow(message);
@@ -232,6 +289,33 @@ describe("Prometheus's turn counters", () => {
     await board.updateTask(USER, { task_id: task.id, stage: "s1" });
   }
 
+  /** Starts a turn of `agent`'s at home in demo, `seconds` on, as a mention wakes one. */
+  async function start(agent: string, seconds: number): Promise<void> {
+    clock = new Date(clock.getTime() + seconds * 1000);
+    await board.beginTurn({
+      agent,
+      project: "demo",
+      runner: "server",
+      cli: "claude",
+      session: null,
+      trigger: { kind: "mention", fromUser: true, reason: "" },
+      startedAt: clock.toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: "claude-opus-5-5",
+    });
+  }
+
+  /** The user's post in demo's general channel, which names whoever `body` mentions. */
+  async function ask(body: string): Promise<void> {
+    await board.postMessage(USER, { channel: "demo/general", body });
+  }
+
   /** Serves the counters as the server does, on a port of their own, and scrapes it. */
   async function serve(): Promise<{
     scrape: (route?: string) => Promise<Response>;
@@ -274,16 +358,7 @@ describe("Prometheus's turn counters", () => {
       expect(answer.status).toBe(200);
       expect(answer.headers.get("content-type")).toBe(PROMETHEUS_CONTENT_TYPE);
       const families = parseExposition(await answer.text());
-      expect([...families.keys()]).toEqual([
-        "stellaris_turn_tokens_total",
-        "stellaris_turns_total",
-        "stellaris_turns_idle_total",
-        "stellaris_turns_failed_total",
-        "stellaris_task_sendbacks_total",
-      ]);
-      for (const family of families.values()) {
-        expect(family.type).toBe("counter");
-      }
+      expect([...families].map(([name, { type }]) => [name, type])).toEqual(FAMILIES);
       const tokens = families.get("stellaris_turn_tokens_total");
       const turns = families.get("stellaris_turns_total");
       expect(tokens?.type).toBe("counter");
@@ -369,6 +444,83 @@ describe("Prometheus's turn counters", () => {
     expect((await app.request("/other")).status).toBe(404);
   });
 
+  it("times each mention to the turn that answers it, as the Metrics view does, for a week at most", async () => {
+    await ask("@eng-1 please look");
+    await start("eng-1", 7);
+    const metrics = await serve();
+    try {
+      await ask("@eng-2 and you");
+      await start("eng-2", 45);
+      // A citizen added since the seed is matched too.
+      await board.addAgent(USER, {
+        name: "eng-3",
+        role: "engineer",
+        cli: "claude",
+        memberships: ["demo"],
+      });
+      await ask("@eng-3 welcome");
+      await start("eng-3", 2);
+      await ask("@eng-1 one more");
+      const scrape = async () => parseExposition(await (await metrics.scrape()).text());
+      const bounds = ["1", "2.5", "5", "7.5", "10", "20", "40", "60", "120", "300", "600"];
+      const histogram = (agent: string, first: number, seconds: number) => [
+        ...[...bounds, "1800", "3600", "7200", "+Inf"].map((le, at) => ({
+          suffix: "_bucket",
+          labels: { agent, le },
+          value: at < first ? 0 : 1,
+        })),
+        { suffix: "_sum", labels: { agent }, value: seconds },
+        { suffix: "_count", labels: { agent }, value: 1 },
+      ];
+      let families = await scrape();
+      expect(families.get("stellaris_wake_latency_seconds")?.samples).toEqual([
+        ...histogram("eng-1", bounds.indexOf("7.5"), 7),
+        ...histogram("eng-2", bounds.indexOf("60"), 45),
+        ...histogram("eng-3", bounds.indexOf("2.5"), 2),
+      ]);
+      expect(families.get("stellaris_wake_mentions_waiting")?.samples).toEqual([
+        { labels: { agent: "eng-1" }, value: 1 },
+        { labels: { agent: "eng-2" }, value: 0 },
+        { labels: { agent: "eng-3" }, value: 0 },
+      ]);
+      // The Metrics view counts the same answers, each of a citizen's one its slowest.
+      const tab = (await board.metrics("all")).latency;
+      expect(tab).toMatchObject({ mentions: 3, unanswered: 1 });
+      const slowest = tab.byAgent.map(({ agent, slowestMs }) => [agent, slowestMs]);
+      expect(slowest.toSorted(([a], [b]) => byCodeUnits(String(a), String(b)))).toEqual([
+        ["eng-1", 7_000],
+        ["eng-2", 45_000],
+        ["eng-3", 2_000],
+      ]);
+
+      // A week and a second on, the next turn's start ends the wait, and no turn answers it.
+      await start("eng-2", 7 * 24 * 3600 + 1);
+      await start("eng-1", 1);
+      families = await scrape();
+      const counts = families
+        .get("stellaris_wake_latency_seconds")
+        ?.samples.filter(({ suffix }) => suffix === "_count")
+        .map(({ labels, value }) => [labels["agent"], value]);
+      expect(counts).toEqual([
+        ["eng-1", 1],
+        ["eng-2", 1],
+        ["eng-3", 1],
+      ]);
+      expect(families.get("stellaris_wake_mentions_waiting")?.samples).toContainEqual({
+        labels: { agent: "eng-1" },
+        value: 0,
+      });
+      expect(families.get("stellaris_wake_mentions_unanswered_total")?.samples).toEqual([
+        { labels: { agent: "eng-1" }, value: 1 },
+        { labels: { agent: "eng-2" }, value: 0 },
+        { labels: { agent: "eng-3" }, value: 0 },
+      ]);
+      expect((await board.metrics("all")).latency).toMatchObject({ mentions: 3, unanswered: 1 });
+    } finally {
+      metrics.close();
+    }
+  });
+
   it("escapes what a label's value holds, and serves every counter before any turn", () => {
     const awkward = 'a "quoted" model\\with\na newline';
     const text = prometheusText({
@@ -377,24 +529,48 @@ describe("Prometheus's turn counters", () => {
       idle: [{ agent: "eng-1", trigger: awkward, turns: 1 }],
       failed: [{ agent: "eng-1", cli: "claude", reason: "other", turns: 1 }],
       sendBacks: [{ project: "demo", by: awkward, sendBacks: 1 }],
+      wakeLatency: [
+        {
+          agent: awkward,
+          buckets: [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+          count: 2,
+          sumMs: 7_504,
+        },
+      ],
+      mentions: [{ agent: awkward, waiting: 1, unanswered: 2 }],
     });
     const families = parseExposition(text);
     expect(families.get("stellaris_turn_tokens_total")?.samples[0]?.labels["model"]).toBe(awkward);
     expect(families.get("stellaris_turns_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
     expect(families.get("stellaris_turns_idle_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
     expect(families.get("stellaris_task_sendbacks_total")?.samples[0]?.labels["by"]).toBe(awkward);
+    const wakes = families.get("stellaris_wake_latency_seconds")?.samples ?? [];
+    expect(wakes.map(({ labels }) => labels["agent"])).toEqual(Array(17).fill(awkward));
+    expect(wakes.slice(-3)).toEqual([
+      { suffix: "_bucket", labels: { agent: awkward, le: "+Inf" }, value: 2 },
+      { suffix: "_sum", labels: { agent: awkward }, value: 7.504 },
+      { suffix: "_count", labels: { agent: awkward }, value: 2 },
+    ]);
+    expect(families.get("stellaris_wake_mentions_waiting")?.samples).toEqual([
+      { labels: { agent: awkward }, value: 1 },
+    ]);
+    expect(families.get("stellaris_wake_mentions_unanswered_total")?.samples).toEqual([
+      { labels: { agent: awkward }, value: 2 },
+    ]);
 
     const empty = parseExposition(
-      prometheusText({ tokens: [], turns: [], idle: [], failed: [], sendBacks: [] }),
+      prometheusText({
+        tokens: [],
+        turns: [],
+        idle: [],
+        failed: [],
+        sendBacks: [],
+        wakeLatency: [],
+        mentions: [],
+      }),
     );
     expect([...empty.entries()]).toEqual(
-      [
-        "stellaris_turn_tokens_total",
-        "stellaris_turns_total",
-        "stellaris_turns_idle_total",
-        "stellaris_turns_failed_total",
-        "stellaris_task_sendbacks_total",
-      ].map((name) => [name, expect.objectContaining({ type: "counter", samples: [] })]),
+      FAMILIES.map(([name, type]) => [name, expect.objectContaining({ type, samples: [] })]),
     );
   });
 });

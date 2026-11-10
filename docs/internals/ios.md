@@ -1,6 +1,6 @@
 # The iOS client
 
-How the native client's code is laid out, how the app signs in and keeps its place, how it stays in step with the server, and how it is tested. [AGENTS.md](../../AGENTS.md) states the rules in short, and the commands are in the [README](../../README.md#run-build-test).
+How the native client's code is laid out, how the app signs in and keeps its place, how it stays in step with the server, and how it is tested. [AGENTS.md](../../AGENTS.md) states the rules in short, and the commands are under [Running the tests](#running-the-tests).
 
 ## Layout
 
@@ -177,6 +177,22 @@ The port's viewport adds top and bottom insets to the web's left and right, for 
 `SkyMarks.swift` holds the two CLI marks of `apps/web/src/lib/marks.ts` and the theme's colours the web's `scene.ts` mirrors, and `SkyMarkTests` reads both web files and checks every value against them, so a change there fails BoardKit's tests until it is copied. A CLI the app doesn't know gets a plain ring. `skyPath` reads the marks' SVG path data as a browser's `Path2D` does, numbers run together and one-digit arc flags included, into moves, lines, and cubic curves, turning arcs into quarter-turn curves by the SVG standard's conversion.
 
 ## Tests and CI
+
+### Running the tests
+
+The package's and the app's tests run outside pnpm:
+
+```bash
+cd apps/ios/BoardKit && swift test          # BoardKit with Swift 6, on macOS or Linux; the transport's tests need macOS
+cd apps/ios/BoardKit && xcodebuild test -scheme BoardKit -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1'
+cd apps/ios && xcodegen generate            # the app's Xcode project, from project.yml; never committed
+cd apps/ios && xcodebuild test -project Stellaris.xcodeproj -scheme Stellaris -destination 'platform=iOS Simulator,name=iPhone Duo,OS=27.1'
+scripts/ios/check-adaptivity.sh             # no layout by the screen, the device, or the orientation; part of pnpm lint
+pnpm build && pnpm vitest run apps/server/src/ios-fixtures.test.ts -u   # capture the client's fixtures again after a server change
+pnpm build && pnpm vitest run apps/web/src/sky -u                       # write the sky's tables again after a change to its model, camera, or scene
+```
+
+The app's tests run against a fake board that answers from the fixtures, and keep their screenshots with the results. To build the app for a device, copy `apps/ios/Config/Local.xcconfig.example` to `Local.xcconfig` beside it, which git ignores, and set your team, the app's bundle ID, and your board's host; the board then sets `STELLARIS_APPLE_APP_ID` to `<team>.<bundle ID>`. [docs/guide/ios-device.md](../guide/ios-device.md) takes you from a Mac without the project to the app signed in on your iPhone, step by step.
 
 ### BoardKit's tests run on Linux and on the simulator
 

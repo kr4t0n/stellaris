@@ -1,6 +1,6 @@
 # Building, releasing, and publishing
 
-The toolchain and its rules, what CI checks, how the images, the npm packages, and the chart are built and published, and how commits reach `dev` and releases reach `main`. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail. Deploying a society is in the [README](../../README.md#deployment) and the [chart's README](../../helm/stellaris/README.md).
+The toolchain and its rules, what CI checks, how the images, the npm packages, and the chart are built and published, and how commits reach `dev` and releases reach `main`. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail. Deploying a society is in [docs/guide/deployment.md](../guide/deployment.md) and the [chart's README](../../helm/stellaris/README.md).
 
 ## The toolchain
 

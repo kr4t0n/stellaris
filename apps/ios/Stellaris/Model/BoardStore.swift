@@ -19,6 +19,30 @@ enum Loading: Equatable, Sendable {
   static let unreachable = "Can't reach the board"
 }
 
+/// How a read of a path on a branch stands, apart from its answer: the board's 404 and 503 are
+/// told apart, since a view says each in its own words, as the web's do.
+enum BranchRead: Equatable, Sendable {
+  case loading, loaded
+  /// The branch, or the path on it, isn't there.
+  case missing
+  /// The runner the project lives on isn't connected.
+  case away
+  /// The board couldn't be reached, or refused with this message.
+  case failed(String)
+
+  init(_ error: any Error) {
+    if let error = error as? BoardError, error.status == 404 {
+      self = .missing
+    } else if let error = error as? BoardError, error.status == 503 {
+      self = .away
+    } else if case .failed(let reason) = Loading(error) {
+      self = .failed(reason)
+    } else {
+      self = .failed(Loading.unreachable)
+    }
+  }
+}
+
 /// The board as Board and Needs you show it, loaded when the app signs in, comes back to the
 /// foreground, or is pulled to refresh.
 @MainActor @Observable final class BoardStore {
@@ -53,6 +77,13 @@ enum Loading: Equatable, Sendable {
   /// overtook changes nothing.
   @ObservationIgnored private(set) var taskReads: [String: Int] = [:]
   @ObservationIgnored private(set) var dashboardReads: [String: Int] = [:]
+  /// Each path on a branch as last read, by where it is with no line, and how its read went.
+  private(set) var branchFiles: [FilePlace: BranchFile] = [:]
+  private(set) var branchFileStates: [FilePlace: BranchRead] = [:]
+  @ObservationIgnored private var branchFileReads: [FilePlace: Int] = [:]
+  /// How many views show each path, which an event that touches it reads again; one no view shows
+  /// is read again when a view next shows it.
+  @ObservationIgnored private(set) var branchFilesShown: [FilePlace: Int] = [:]
   /// How the user's own posts are named: the GitHub account signed in, or else "you".
   var userName = "you" {
     didSet { index() }
@@ -161,6 +192,39 @@ enum Loading: Equatable, Sendable {
         dashboardStates[project] = Loading(error)
       }
     }
+  }
+
+  /// Reads a path on a branch, keeping the last answer through a read that fails, as the web keeps
+  /// a query's data; an answer a later read overtook changes nothing.
+  func loadBranchFile(_ place: FilePlace, using model: AppModel) async {
+    let key = place.unlined
+    let signIn = model.generation
+    let read = (branchFileReads[key] ?? 0) + 1
+    branchFileReads[key] = read
+    if branchFiles[key] == nil {
+      branchFileStates[key] = .loading
+    }
+    do {
+      let file = try await model.send(BoardAPI.branchFile(key.source, path: key.path))
+      guard model.generation == signIn, branchFileReads[key] == read else {
+        return
+      }
+      branchFiles[key] = file
+      branchFileStates[key] = .loaded
+    } catch is CancellationError {
+      return
+    } catch {
+      if model.generation == signIn, branchFileReads[key] == read, branchFiles[key] == nil {
+        branchFileStates[key] = BranchRead(error)
+      }
+    }
+  }
+
+  /// Notes that a view shows `place`, or no longer does.
+  func showing(_ place: FilePlace, _ shown: Bool) {
+    let key = place.unlined
+    let count = (branchFilesShown[key] ?? 0) + (shown ? 1 : -1)
+    branchFilesShown[key] = count > 0 ? count : nil
   }
 
   /// A line with each id the board names read as its title, for a place that can't hold a link.
@@ -399,7 +463,16 @@ enum Loading: Equatable, Sendable {
     dashboardStates = [:]
     taskReads = [:]
     dashboardReads = [:]
+    branchFiles = [:]
+    branchFileStates = [:]
+    branchFileReads = [:]
+    branchFilesShown = [:]
   }
+}
+
+extension FilePlace {
+  /// The place with no cited line, which its read and its answer are kept by.
+  var unlined: FilePlace { FilePlace(source: source, path: path) }
 }
 
 extension Proposal {

@@ -53,6 +53,40 @@ final class MessageUITests: ShellTestCase {
     copy.tap()
   }
 
+  /// A link to a file on a task's branch opens it in a sheet over Chat, where the file's own link
+  /// opens the file beside it, and a drag down closes the sheet on the conversation as it was.
+  @MainActor func testOpensAFileAMessageLinksInASheet() {
+    let app = launch()
+    signIn(app)
+    expectGeneral(app)
+    let messages = app.scrollViews["messages"].firstMatch
+    let samples = messages.links["rendering samples"].firstMatch
+    XCTAssertTrue(
+      samples.waitForExistence(timeout: 20),
+      "general's newest message holds no link to the samples")
+    samples.tap()
+    XCTAssertTrue(
+      messages.staticTexts["message-samples-6"].firstMatch.waitForExistence(timeout: 20),
+      "the samples don't open in Chat")
+    let notes = messages.links["its notes"].firstMatch
+    reveal(app, notes)
+    notes.tap()
+    let heading = app.staticTexts["Notes"].firstMatch
+    XCTAssertTrue(heading.waitForExistence(timeout: 20), "the notes don't open in the app")
+    keepScreen("file-sheet")
+    let plot = app.links["plot"].firstMatch
+    XCTAssertTrue(plot.waitForExistence(timeout: 20), "the notes' link to the plot isn't a link")
+    plot.tap()
+    let bar = app.navigationBars["plot.png"].firstMatch
+    XCTAssertTrue(bar.waitForExistence(timeout: 20), "the notes' link doesn't open the plot")
+    keepScreen("file-sheet-image")
+    dragAway(app, bar)
+    XCTAssertTrue(bar.waitForNonExistence(timeout: 20), "a drag down leaves the file open")
+    XCTAssertTrue(
+      notes.waitForExistence(timeout: 20) && notes.isHittable,
+      "the conversation moved while the file was open")
+  }
+
   /// Where a tap starts reaching the conversation: below the window's middle. On the iPhone Duo
   /// simulator's outer display, SpringBoard's status bar reports a frame of 223 by 317 points at
   /// the window's top-leading corner, though it draws in the trailing column, and a tap inside it

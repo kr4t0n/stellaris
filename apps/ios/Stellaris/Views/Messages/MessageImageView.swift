@@ -145,7 +145,8 @@ struct ImageViewer: View {
   }
 }
 
-private struct ZoomableImage: UIViewRepresentable {
+/// An image fitted to its bounds, which a pinch or a double tap zooms: the viewer's, and a file's.
+struct ZoomableImage: UIViewRepresentable {
   let image: UIImage
 
   func makeUIView(context: Context) -> ZoomView {

@@ -4401,10 +4401,10 @@ export class Board {
   }
 
   /**
-   * Every finished turn and send-back counted for Prometheus: seeded once from the whole event
-   * log, then moved by each event this process appends, so reading the counts never reads the log.
-   * The server logs every turn's end and send-back itself; one another process appended would
-   * count from the next seed. A turn ended before ends carried their board actions has its
+   * Every finished turn, send-back, and mention's wake counted for Prometheus: seeded once from
+   * the whole event log, then moved by each event this process appends, so reading the counts never
+   * reads the log. The server logs every turn's end and send-back, and every post, turn start, and
+   * steer, itself; one another process appended would count from the next seed. A turn ended before ends carried their board actions has its
    * transcript read once, here, for the idle count. Mentions are matched with the citizens of
    * the seed, as the Metrics view matches them with today's, and from then on with those of when
    * each is posted.

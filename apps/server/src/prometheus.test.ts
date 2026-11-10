@@ -289,12 +289,19 @@ describe("Prometheus's turn counters", () => {
     await board.updateTask(USER, { task_id: task.id, stage: "s1" });
   }
 
-  /** Starts a turn of `agent`'s at home in demo, `seconds` on, as a mention wakes one. */
-  async function start(agent: string, seconds: number): Promise<void> {
+  /**
+   * Starts a turn of `agent`'s, `seconds` on, as a mention wakes one: at home in demo, or in the
+   * conversation `where` names.
+   */
+  async function start(
+    agent: string,
+    seconds: number,
+    where: { project: string; place?: string } = { project: "demo" },
+  ): Promise<void> {
     clock = new Date(clock.getTime() + seconds * 1000);
     await board.beginTurn({
       agent,
-      project: "demo",
+      ...where,
       runner: "server",
       cli: "claude",
       session: null,
@@ -311,9 +318,9 @@ describe("Prometheus's turn counters", () => {
     });
   }
 
-  /** The user's post in demo's general channel, which names whoever `body` mentions. */
-  async function ask(body: string): Promise<void> {
-    await board.postMessage(USER, { channel: "demo/general", body });
+  /** The user's post in a general channel, demo's by default, naming whoever `body` mentions. */
+  async function ask(body: string, channel = "demo/general"): Promise<void> {
+    await board.postMessage(USER, { channel, body });
   }
 
   /** Serves the counters as the server does, on a port of their own, and scrapes it. */
@@ -516,6 +523,46 @@ describe("Prometheus's turn counters", () => {
         { labels: { agent: "eng-3" }, value: 0 },
       ]);
       expect((await board.metrics("all")).latency).toMatchObject({ mentions: 3, unanswered: 1 });
+    } finally {
+      metrics.close();
+    }
+  });
+
+  it("matches a mention with the memberships of its post, after a join since the seed too", async () => {
+    await board.addProject(USER, { slug: "lab", channels: ["general"] });
+    const metrics = await serve();
+    try {
+      const scrape = async () => parseExposition(await (await metrics.scrape()).text());
+      const waiting = async () =>
+        (await scrape())
+          .get("stellaris_wake_mentions_waiting")
+          ?.samples.find(({ labels }) => labels["agent"] === "eng-1")?.value;
+      // eng-1 is in demo alone, so a mention in lab's channels wakes it in the society scope,
+      // where the conversation of lab's channels answers it: on a bucket's bound, which counts.
+      await ask("@eng-1 a look at lab", "lab/general");
+      await start("eng-1", 5, { project: "society", place: "lab" });
+      await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+      // A member now, it is woken in lab's own home, which the society scope's turn doesn't answer.
+      await ask("@eng-1 another", "lab/general");
+      await start("eng-1", 3, { project: "society", place: "lab" });
+      expect(await waiting()).toBe(1);
+      await start("eng-1", 20, { project: "lab" });
+      expect(await waiting()).toBe(0);
+      const latency = (await scrape()).get("stellaris_wake_latency_seconds")?.samples ?? [];
+      const of = (suffix: string, le?: string) =>
+        latency.find(
+          (sample) =>
+            sample.suffix === suffix &&
+            sample.labels["agent"] === "eng-1" &&
+            sample.labels["le"] === le,
+        )?.value;
+      expect([of("_count"), of("_sum")]).toEqual([2, 28]);
+      expect([
+        of("_bucket", "2.5"),
+        of("_bucket", "5"),
+        of("_bucket", "20"),
+        of("_bucket", "40"),
+      ]).toEqual([0, 1, 1, 2]);
     } finally {
       metrics.close();
     }

@@ -29,7 +29,7 @@ test("the metrics open from the top bar, and the window is part of the address",
   await expect(view).toContainText(
     "30s from a mention to its turn, at the median; the slowest took 1m",
   );
-  await expect(view).toContainText("1 mention has no turn yet.");
+  await expect(view).toContainText("1 mention has no turn yet or had none within a week.");
   await expect(view).toContainText("2 decisions, about 0.3 a day");
   await expect(view).toContainText("needs gpu and no connected runner offers it");
   await expect(view).toContainText("blocked now");

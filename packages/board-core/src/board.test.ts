@@ -4017,6 +4017,72 @@ describe("Board", () => {
     expect(answer).toStrictEqual(await replayed(board, "all"));
   });
 
+  it("names a task finished, sent back, or blocked while the metrics read the tasks they name", async () => {
+    const { board } = await society();
+    const stages = [{ name: "draft" }, { name: "check" }];
+    const titled = (title: string) => board.createTask(USER, { project: "demo", title, stages });
+    const t0 = await titled("Task 0");
+    const t1 = await titled("Task 1");
+    const t2 = await titled("Task 2");
+    const t3 = await titled("Task 3");
+    const t4 = await titled("Task 4");
+    for (const task of [t0, t0, t1, t2, t4]) {
+      await board.advanceTask(USER, { task_id: task.id });
+    }
+    await board.indexMetrics();
+    // Reading each task of a chain makes the index name the next, which only a later round reads:
+    // the second finishes, the third is sent back from check, the fourth blocked, the fifth finished.
+    const next = new Map<string, () => Promise<unknown>>([
+      [t0.id, () => board.advanceTask(USER, { task_id: t1.id })],
+      [t1.id, () => board.updateTask(USER, { task_id: t2.id, stage: "s1", note: "again" })],
+      [
+        t2.id,
+        () =>
+          board.publishSignal({
+            kind: "blocked_capability",
+            key: `blocked_capability:${t3.id}`,
+            summary: "needs gpu and no connected runner offers it",
+            value: 1,
+            project: "demo",
+            taskId: t3.id,
+          }),
+      ],
+      [t3.id, () => board.advanceTask(USER, { task_id: t4.id })],
+    ]);
+    const find = board.findTask.bind(board);
+    // A verb's own reads pass while it writes.
+    let writing = false;
+    const read = vi.spyOn(board, "findTask").mockImplementation(async (id) => {
+      const write = writing ? undefined : next.get(id);
+      if (write !== undefined) {
+        next.delete(id);
+        writing = true;
+        await write();
+        writing = false;
+      }
+      return find(id);
+    });
+    const answer = await board.metrics("all");
+    expect({
+      busiest: answer.messages.busiest.map(({ title }) => title),
+      byStage: answer.sentBack.byStage,
+      blocked: answer.blocked.map(({ title }) => title),
+      unwritten: [...next.keys()],
+    }).toEqual({
+      busiest: ["Task 0", "Task 1", "Task 4"],
+      byStage: [{ project: "demo", stage: "check", count: 1 }],
+      blocked: ["Task 3"],
+      unwritten: [],
+    });
+    // A read a task's write overtook is not kept, so the next ask reads it again; the third task's
+    // was overtaken by a signal alone, which writes no task.
+    read.mockClear();
+    expect(await board.metrics("all")).toStrictEqual(answer);
+    expect(read.mock.calls).toEqual([[t0.id], [t1.id], [t3.id]]);
+    read.mockRestore();
+    expect(answer).toStrictEqual(await replayed(board, "all"));
+  });
+
   it("lets a citizen set a cron for itself where its turn is, and only planners one for another", async () => {
     const { board } = await society();
     // Set from a turn in demo's dev channel, a cron fires in that conversation.

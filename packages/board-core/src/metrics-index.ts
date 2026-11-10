@@ -4,6 +4,7 @@ import {
   type HeartbeatCause,
   type Metrics,
   type MetricsWindow,
+  type TokenUse,
 } from "@stellaris/shared";
 import { z } from "zod";
 import {
@@ -21,6 +22,7 @@ import {
   type DecisionKind,
   type MetricsInput,
 } from "./metrics.js";
+import { sumTokens, tokenEnd, type TokenEnd } from "./turn-history.js";
 
 /** Something that happened, at milliseconds since the epoch. */
 interface Dated {
@@ -72,6 +74,8 @@ interface TurnEnd extends Dated {
   readonly actions: number | null;
 }
 
+interface TokenEndAt extends TokenEnd, Dated {}
+
 interface Finished extends Dated {
   readonly taskId: string;
   readonly project: string;
@@ -113,18 +117,21 @@ function boardActionsOf(event: BoardEvent): number | undefined {
 }
 
 /**
- * The metrics kept up as the log grows, so that answering one reads neither the log nor a
- * transcript: each event `computeMetrics` counts is added once, as it is appended, to a record
- * of its own kind, in the log's order, with what the measures need of it. A window counts the
- * records in it; a task's send-backs and thread posts, and the questions to the user still open,
- * are kept over the whole log as they arrive. Mentions are matched to their answers once, and
- * again only when the citizens or their memberships change, since the wake rule reads those.
+ * The metrics and the citizens' tokens kept up as the log grows, so that answering either reads
+ * neither the log nor a transcript: each event `computeMetrics` or `tokenUse` counts is added
+ * once, as it is appended, to a record of its own kind, in the log's order, with what they need
+ * of it. A window counts the records in it; a task's send-backs and thread posts, and the
+ * questions to the user still open, are kept over the whole log as they arrive. Mentions are
+ * matched to their answers once, and again only when the citizens or their memberships change,
+ * since the wake rule reads those.
  *
- * Its answer for a log equals `computeMetrics`' for the same log, window, tasks, and citizens,
- * which the equality test holds it to.
+ * Its answers for a log equal `computeMetrics`' for the same log, window, tasks, and citizens,
+ * and `tokenUse`'s for the same log and window, which the equality tests hold it to.
  */
 export class MetricsIndex {
   private readonly ends = new Timeline<TurnEnd>();
+  // Every finished turn's tokens, reflections and failed turns included, as `tokenUse` reads them.
+  private readonly tokens = new Timeline<TokenEndAt>();
   private readonly finished = new Timeline<Finished>();
   private readonly sentBack = new Timeline<SentBack>();
   private readonly decisions = new Timeline<Decision>();
@@ -158,9 +165,13 @@ export class MetricsIndex {
     return turn.success && turn.data.trigger !== "reflection" ? (turn.data.turnId ?? null) : null;
   }
 
-  /** Counts an event; one the metrics don't read passes. */
+  /** Counts an event; one neither the metrics nor the tokens read passes. */
   add(event: BoardEvent): void {
     const at = Date.parse(event.ts);
+    const tokens = tokenEnd(event);
+    if (tokens !== null) {
+      this.tokens.push({ at, ...tokens });
+    }
     switch (event.type) {
       case "turn.completed": {
         const turn = TurnPayload.safeParse(event.payload);
@@ -283,6 +294,11 @@ export class MetricsIndex {
       }
     }
     return tally.finish(this.moves, this.posts, unanswered);
+  }
+
+  /** Each citizen's finished turns over a window, and the tokens of those that counted them. */
+  tokenUse(window: MetricsWindow, now: Date): TokenUse {
+    return sumTokens(this.tokens.from(windowStart(window, now)), window, now);
   }
 
   private decide(event: BoardEvent, kind: DecisionKind): void {

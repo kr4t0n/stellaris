@@ -4278,11 +4278,13 @@ export class Board {
       : "";
   }
 
-  /** The steps of one finished turn, as the runner handed them over when it ended. */
   /**
    * Six measures of how the society works over a window, from the metrics index, so that no answer
    * reads the log or a transcript; `activeSignals` says which blocked tasks are blocked still. The
-   * tasks it names are read once each, and again once written.
+   * tasks it names are read once each, and again once written. The index counts each event as it
+   * is appended, a task finished, sent back, or blocked while others are read included, so the
+   * tasks it names are looked at again after each read until none is new, and the answer follows
+   * the last look with no wait between.
    */
   async metrics(
     window: MetricsWindow,
@@ -4297,11 +4299,17 @@ export class Board {
       }
     }
     const tasks: Task[] = [];
-    for (const id of index.tasksRead(window, now)) {
-      const task = await this.metricsTask(id);
-      if (task !== null) {
-        tasks.push(task);
+    const read = new Set<string>();
+    let unread = [...index.tasksRead(window, now)];
+    while (unread.length > 0) {
+      for (const id of unread) {
+        read.add(id);
+        const task = await this.metricsTask(id);
+        if (task !== null) {
+          tasks.push(task);
+        }
       }
+      unread = [...index.tasksRead(window, now)].filter((id) => !read.has(id));
     }
     return index.answer({ tasks, citizens, activeSignals, window, now });
   }
@@ -4458,6 +4466,7 @@ export class Board {
     return count;
   }
 
+  /** The steps of one finished turn, as the runner handed them over when it ended. */
   async readTranscript(agent: Name, turnId: string): Promise<TranscriptEntry[]> {
     // The id names a file, so only a ULID may reach the path.
     const id = UlidSchema.safeParse(turnId);

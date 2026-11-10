@@ -25,6 +25,8 @@ export type {
 export { BoardError, isBoardError } from "./errors.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
+export { answers, MentionMatcher } from "./mention-matching.js";
+export type { MatchingCitizen, Mention, TurnStart } from "./mention-matching.js";
 export { tokenUse } from "./turn-history.js";
 export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
 export type {

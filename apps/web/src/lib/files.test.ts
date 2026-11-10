@@ -1,16 +1,25 @@
+import { BRANCH_FILE_LIMIT_BYTES } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import fileCases from "../../../ios/fixtures/cases/files.json?raw";
 import {
   bytesOf,
   changeLabel,
   citedLine,
+  entriesInOrder,
+  fileLines,
   fileTree,
+  NUMBERED_LINES,
   openFolders,
   linkTarget,
   normalizePath,
+  parentOf,
   parseDelimited,
   patchRows,
   rehypeLineTarget,
+  runnerOf,
   sizeLabel,
+  TABLE_ROWS,
   textOf,
   viewOf,
 } from "./files.js";
@@ -320,5 +329,85 @@ describe("files", () => {
     expect(sizeLabel(812)).toBe("812 B");
     expect(sizeLabel(4300)).toBe("4.2 KB");
     expect(sizeLabel(8 * 1024 * 1024)).toBe("8.0 MB");
+  });
+});
+
+/** The table in `apps/ios/fixtures/cases`, which BoardKit's port of these functions runs too. */
+const FileCasesSchema = z.object({
+  orders: z.array(
+    z.object({
+      name: z.string(),
+      entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })),
+      ordered: z.array(z.string()),
+    }),
+  ),
+  sizes: z.array(z.object({ bytes: z.number(), label: z.string() })),
+  views: z.array(
+    z.object({ name: z.string(), path: z.string(), base64: z.string(), view: z.unknown() }),
+  ),
+  delimited: z.array(
+    z.object({
+      name: z.string(),
+      text: z.string(),
+      separator: z.string(),
+      rows: z.array(z.array(z.string())),
+    }),
+  ),
+  lines: z.array(z.object({ name: z.string(), text: z.string(), lines: z.array(z.string()) })),
+  parents: z.array(z.object({ path: z.string(), parent: z.string() })),
+  runners: z.array(
+    z.object({
+      project: z.object({ runner: z.string().optional(), name: z.string() }).nullable(),
+      words: z.string(),
+    }),
+  ),
+  limits: z.object({ tableRows: z.number(), numberedLines: z.number(), fileBytes: z.number() }),
+});
+
+describe("the files case table the iOS port runs", () => {
+  const cases = FileCasesSchema.parse(JSON.parse(fileCases));
+
+  it("lists a folder in the same order in every locale", () => {
+    expect(
+      cases.orders.map((each) => ({
+        name: each.name,
+        ordered: entriesInOrder(each.entries).map((entry) => `${entry.kind}:${entry.name}`),
+      })),
+    ).toEqual(cases.orders.map((each) => ({ name: each.name, ordered: each.ordered })));
+    // localeCompare would put the accented name after z in Swedish and before it in English.
+    const names = ["Ärende.md", "zeta.md"].map((name) => ({ name, kind: "file" as const }));
+    expect(entriesInOrder(names).map((entry) => entry.name)).toEqual(["zeta.md", "Ärende.md"]);
+  });
+
+  it("labels sizes, picks views, and splits tables and lines as the table says", () => {
+    expect(cases.sizes.map((each) => sizeLabel(each.bytes))).toEqual(
+      cases.sizes.map((each) => each.label),
+    );
+    expect(
+      cases.views.map((each) => ({
+        name: each.name,
+        view: viewOf(each.path, bytesOf(each.base64)),
+      })),
+    ).toEqual(cases.views.map((each) => ({ name: each.name, view: each.view })));
+    expect(
+      cases.delimited.map((each) => ({
+        name: each.name,
+        rows: parseDelimited(each.text, each.separator),
+      })),
+    ).toEqual(cases.delimited.map((each) => ({ name: each.name, rows: each.rows })));
+    expect(cases.lines.map((each) => ({ name: each.name, lines: fileLines(each.text) }))).toEqual(
+      cases.lines.map((each) => ({ name: each.name, lines: each.lines })),
+    );
+    expect(cases.parents.map((each) => parentOf(each.path))).toEqual(
+      cases.parents.map((each) => each.parent),
+    );
+    expect(cases.runners.map((each) => runnerOf(each.project ?? undefined))).toEqual(
+      cases.runners.map((each) => each.words),
+    );
+    expect(cases.limits).toEqual({
+      tableRows: TABLE_ROWS,
+      numberedLines: NUMBERED_LINES,
+      fileBytes: BRANCH_FILE_LIMIT_BYTES,
+    });
   });
 });

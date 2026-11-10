@@ -451,13 +451,43 @@ export function openFolders(root: TreeFolder, rows = 24): Set<string> {
   return open;
 }
 
+/** Two strings by their UTF-16 code units, as `<` compares them. */
+function byUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** A name with the letters A to Z read as a to z, and nothing else changed. */
+function folded(name: string): string {
+  return name.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
+/**
+ * Two names in the order a listing shows them: with the letters A to Z read as a to z, then by
+ * UTF-16 code units. It is the same in every locale, so the iOS app's port, which runs the case
+ * table in `apps/ios/fixtures/cases/files.json`, lists a folder as the web does; `localeCompare`
+ * follows the browser's locale.
+ */
+export function byName(a: string, b: string): number {
+  return byUnits(folded(a), folded(b)) || byUnits(a, b);
+}
+
 /** A folder's entries as a listing shows them: folders first, then files, each by name. */
 export function entriesInOrder<T extends { readonly name: string; readonly kind: "file" | "dir" }>(
   entries: readonly T[],
 ): T[] {
   return entries.toSorted((a, b) =>
-    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1,
+    a.kind === b.kind ? byName(a.name, b.name) : a.kind === "dir" ? -1 : 1,
   );
+}
+
+/** Rows of a table shown at once; a longer one says how many more it has. */
+export const TABLE_ROWS = 1000;
+/** Lines of text numbered one by one; a longer file shows as plain text. */
+export const NUMBERED_LINES = 20_000;
+
+/** A text file's lines as its view numbers them, split at each LF, a last one ending the file. */
+export function fileLines(text: string): string[] {
+  return text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
 }
 
 /** The runner a project lives on, named for a view to say it is away: "pod, the runner Lab lives on". */

@@ -1,0 +1,75 @@
+name: probe-step-timeout
+
+# Not for merge. Whether the steps after one that hits its own `timeout-minutes` still run on
+# `!cancelled()`, beside a job that hits its job-level limit. Each job writes what the expressions
+# saw, and keeps it as an artifact on `!cancelled()` and on `always()`.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  step-limit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sleep past the step's limit
+        id: sleep
+        timeout-minutes: 1
+        run: sleep 120
+      - name: Write a file when not cancelled
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "not-cancelled: sleep outcome=${{ steps.sleep.outcome }} conclusion=${{ steps.sleep.conclusion }} job.status=${{ job.status }}" |
+            tee "$RUNNER_TEMP/out/not-cancelled.txt"
+      - name: Write a file always
+        if: ${{ always() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "always: sleep outcome=${{ steps.sleep.outcome }} conclusion=${{ steps.sleep.conclusion }} job.status=${{ job.status }}" |
+            tee "$RUNNER_TEMP/out/always.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: step-limit
+          path: ${{ runner.temp }}/out
+          retention-days: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: step-limit-always
+          path: ${{ runner.temp }}/out
+          retention-days: 1
+
+  job-limit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Sleep past the job's limit
+        id: sleep
+        run: sleep 120
+      - name: Write a file when not cancelled
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "not-cancelled: sleep outcome=${{ steps.sleep.outcome }} conclusion=${{ steps.sleep.conclusion }} job.status=${{ job.status }}" |
+            tee "$RUNNER_TEMP/out/not-cancelled.txt"
+      - name: Write a file always
+        if: ${{ always() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "always: sleep outcome=${{ steps.sleep.outcome }} conclusion=${{ steps.sleep.conclusion }} job.status=${{ job.status }}" |
+            tee "$RUNNER_TEMP/out/always.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: job-limit
+          path: ${{ runner.temp }}/out
+          retention-days: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: job-limit-always
+          path: ${{ runner.temp }}/out
+          retention-days: 1

@@ -172,7 +172,9 @@ private struct PatchLines: View {
     .monospacedDigit()
     .padding(.horizontal, 8)
     .padding(.vertical, 1)
-    .background(PatchTone.ground(row.kind))
+    // A rectangle named, so a run of lines reads as one band: a colour alone drew each row's
+    // ground with rounded corners on the simulator.
+    .background(PatchTone.ground(row.kind), in: Rectangle())
   }
 }
 

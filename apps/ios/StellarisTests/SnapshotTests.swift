@@ -481,6 +481,24 @@ final class SnapshotTests: XCTestCase {
     ] {
       try await keepAtTheOuterDisplay(await change(path, in: model), named: name)
     }
+    // The deleted file's removed lines read as one band down the patch's leading edge, a point
+    // in from it, with no notch where one line's ground meets the next's: a colour alone as each
+    // line's background drew it with rounded corners.
+    let deleted = try await Snapshot.image(
+      of: await change("src/export/old.ts", in: model), size: CGSize(width: 410, height: 678),
+      type: Snapshot.typeSizes[0])
+    var bands = 0
+    var inBand = false
+    for y in stride(from: 100.0, to: 600.0, by: 0.5) {
+      let red = Snapshot.color(in: deleted, at: CGPoint(x: 17, y: y)).map {
+        $0.red > $0.green + 8
+      }
+      if red == true, !inBand {
+        bands += 1
+      }
+      inBand = red == true
+    }
+    XCTAssertEqual(bands, 1, "the removed lines' ground breaks into \(bands) bands")
     let away = try await signedIn(token: "runner-away")
     try await keepAtTheOuterDisplay(
       await change("src/export/view.ts", in: away), named: "change-runner-away")

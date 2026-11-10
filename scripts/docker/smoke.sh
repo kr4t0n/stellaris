@@ -34,8 +34,8 @@ same "the server image's admin CLI version" "$(docker run --rm "$server_image" s
 same "the server image's server version" \
   "$(docker run --rm "$server_image" node /app/server/dist/index.js --version)" "$version"
 same "the runner image's runner version" "$(docker run --rm "$runner_image" stellaris-runner --version)" "$version"
-# The account the chart's securityContext and the README's volume steps assume, and the CLIs, git,
-# kubectl, helm with its diff plugin, and helmfile that turns shell out to, on the PATH the image
+# The account the chart's securityContext and the deployment guide's volume steps assume, and the CLIs,
+# git, kubectl, helm with its diff plugin, and helmfile that turns shell out to, on the PATH the image
 # sets. None of them leaves the container: kubectl's --client keeps it from looking for a cluster,
 # helm's plugin list and `helm diff version` read and run the plugin from climage's root-owned
 # HELM_PLUGINS as this account, and helmfile's --version flag, unlike its version command, asks

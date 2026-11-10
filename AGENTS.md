@@ -46,6 +46,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Build before lint, since the type-aware rules need the declaration files. Keep lint warning-free, with type guards or Zod instead of assertions.
 - `.husky/pre-commit` runs gitleaks on what is staged. Where husky is off (`HUSKY=0`, as on every runner), run `gitleaks git --pre-commit --staged --redact --no-banner` yourself before each commit; a verified false positive goes in `.gitleaks.toml`.
 - `CLAUDE.md` holds only `@AGENTS.md`. Claude Code loads `AGENTS.md` by itself only where no `CLAUDE.md` exists, so anything added to `CLAUDE.md` must keep that line.
+- The README is for people: at most about 260 lines and 14 KB, wrapped near 90 columns, with no paragraph in a table cell. A new feature gets one bullet there and a new setting one table row; their detail goes to `docs/guide` (a variable's to `deployment.md`) or `docs/internals`, and so does more of what is there once it passes that size.
 
 ### Board core ([board.md](./docs/internals/board.md))
 

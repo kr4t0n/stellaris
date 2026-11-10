@@ -32,8 +32,9 @@ const THREADS = [...TASKS, GONE, "01ARZ3NDEKTSV4RRFFQ69G5FT1"];
 const ACTORS = ["eng-1", "rev-1", "desk", "ops-9", "user", "board"];
 const CHANNELS = ["general", "asks", "lab/general", "lab/build", "ops/general", "ops/deploy"];
 const TRIGGERS = ["mention", "heartbeat", "stage", "cron", "reflection", "manual", "user_post"];
-const HEARTBEATS = ["unread", "held", "waiting", "not-a-cause", undefined];
-const STAGES = ["s1", "s2", "s3", "s9", undefined];
+// `none` leaves the field out.
+const HEARTBEATS = ["unread", "held", "waiting", "not-a-cause", "none"];
+const STAGES = ["s1", "s2", "s3", "s9", "none"];
 const START = Date.parse("2026-10-01T00:00:00.000Z");
 const QUARTER = 15 * 60_000;
 
@@ -148,7 +149,7 @@ function generate(seed: number, count: number): Log {
         ...(turnId === undefined ? {} : { turnId }),
         ...where(),
         trigger: pick(TRIGGERS),
-        ...(heartbeat === undefined ? {} : { heartbeat }),
+        ...(heartbeat === "none" ? {} : { heartbeat }),
         ...(counted < 0.5 ? { boardActions: Math.floor(next() * 3) } : {}),
       };
       if (turnId !== undefined && counted >= 0.5) {
@@ -174,7 +175,7 @@ function generate(seed: number, count: number): Log {
       payload = {
         taskId: pick([...TASKS, GONE]),
         project: pick(["lab", "ops"]),
-        ...(from === undefined ? {} : { from }),
+        ...(from === "none" ? {} : { from }),
       };
     } else if (kind < 0.83) {
       type = "task.completed";

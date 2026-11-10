@@ -297,7 +297,7 @@ const SIGNAL_SHAPES = [
   ["noValue", 0.79],
   ["emptySummary", 0.86],
   ["badTask", 0.93],
-  ["notAnObject", 1],
+  ["valueNotANumber", 1],
 ] as const;
 type SignalShape = (typeof SIGNAL_SHAPES)[number][0];
 
@@ -306,7 +306,7 @@ type SignalShape = (typeof SIGNAL_SHAPES)[number][0];
  * `shapes` by the event's id: only the fields every signal has, every field it may have, fields
  * appended as undefined, as a publisher may hand them over, and payloads its schema refuses (a
  * kind it does not know, no value, an empty summary, a task that is no id, and a value that is
- * no object). Every other event stays as the log has it.
+ * no number). Every other event stays as the log has it.
  */
 function withSignals(
   log: Log,

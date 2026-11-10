@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects/demo/files"
+  },
+  "status": 503,
+  "body": {
+    "error": "RUNNER_AWAY",
+    "message": "runner runner-1, where demo lives, is not connected"
+  }
+}

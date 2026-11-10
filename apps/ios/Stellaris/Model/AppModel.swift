@@ -566,11 +566,14 @@ enum SignInFailure: Error, Equatable {
       await store.loadDashboard(project, using: self)
     }
     // A path on a branch a view shows; one none shows is read again when a view next shows it.
+    // A project's path never read on the branch the project names as its default now is read
+    // too, as when an event changed that branch, which makes the projects stale and no file.
     for place in store.branchFilesShown.keys {
       let stale =
         switch place.source {
         case .task(let id): touched("task-file", id)
-        case .project(let slug): touched("project-file", slug)
+        case .project(let slug):
+          touched("project-file", slug) || store.branchFileState(place) == nil
         }
       if stale {
         await store.loadBranchFile(place, using: self)

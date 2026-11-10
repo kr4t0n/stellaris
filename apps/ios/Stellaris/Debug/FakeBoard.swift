@@ -251,6 +251,9 @@
       if method == "POST", path == "/api/verbs/approve" || path == "/api/verbs/reject" {
         return decide(path, request: request, token: token)
       }
+      if method == "POST", path == "/api/verbs/configure_project" {
+        return configureProject(request: request, token: token)
+      }
       if method == "POST", path == "/api/verbs/update_dashboard" {
         return updateDashboard(request: request, token: token)
       }
@@ -262,7 +265,7 @@
       case ("GET", "/api/society"): return fixture("society")
       case ("GET", "/api/members"): return fixture("members")
       case ("GET", "/api/scheduler"): return fixture("scheduler")
-      case ("GET", "/api/projects"): return fixture("projects")
+      case ("GET", "/api/projects"): return (200, json(projects(for: token)))
       case ("GET", "/api/channels"): return fixture("channels")
       case ("GET", "/api/channels/general"):
         return (200, json(general + posted(in: "general", by: token)))
@@ -351,6 +354,42 @@
       var dashboard: Data?
       /// The images the token posted, by id.
       var images: [String: Data] = [:]
+      /// The demo project's default branch as the token last configured it.
+      var defaultBranch: String?
+    }
+
+    /// The demo project's default branch for `token`: one it configured, else the captured one.
+    private static func defaultBranch(for token: String) -> String {
+      written.withLock { $0[token]?.defaultBranch } ?? "main"
+    }
+
+    /// The projects as captured, the demo project on the default branch `token` configured.
+    private static func projects(for token: String) -> [Any] {
+      let captured = body("projects") as? [[String: Any]] ?? []
+      return captured.map { project in
+        guard project["slug"] as? String == "demo" else {
+          return project
+        }
+        var changed = project
+        changed["defaultBranch"] = defaultBranch(for: token)
+        return changed
+      }
+    }
+
+    /// The demo project with a new default branch, as the web's Edit sets it and the board logs
+    /// `project.configured`, which the app never sends but a test does while the app reads.
+    private static func configureProject(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      guard let branch = input["default_branch"] as? String else {
+        return fixture("error-refused")
+      }
+      written.withLock { written in
+        var mine = written[token] ?? Written()
+        mine.defaultBranch = branch
+        written[token] = mine
+      }
+      let demo = projects(for: token).first { ($0 as? [String: Any])?["slug"] as? String == "demo" }
+      return (200, json(demo ?? [:]))
     }
 
     /// Keeps an image a token posts, as the board does, and refuses bytes of no kind it keeps.
@@ -914,6 +953,12 @@
       }
       if token == "empty-branch" {
         return read.path.isEmpty ? fixture("project-files") : fixture("error-file-missing")
+      }
+      // A branch the token made the default holds a note alone.
+      guard defaultBranch(for: token) == "main" else {
+        return listing(
+          ["NOTES.md": Data("# Notes on \(defaultBranch(for: token))\n".utf8)], large: [:],
+          path: read.path, author: "rev-1")
       }
       return listing(demoFiles, large: demoLarge, path: read.path, author: "eng-1")
     }

@@ -216,6 +216,43 @@ final class FoldTests: XCTestCase {
     }
   }
 
+  /// Chat's file sheet, with a folder pushed in it, stays open through the poses with both, and a
+  /// file and a folder on Board's own stack stay there too, since both stacks live in the model.
+  @MainActor func testTheFilesStayOpenThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let root = FilePlace(source: .project("demo"), path: "")
+    let folder = FilePlace(source: .project("demo"), path: "src")
+    model.browse(root)
+    model.browsing?.path = [.files(folder)]
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    let poses = [
+      ("folded", outer), ("opened", landscape), ("turned", portrait), ("folded again", outer),
+    ]
+    for (step, size) in poses {
+      window.resize(to: size)
+      try await window.settle()
+      let presented = try await window.until { window.presentsSheet }
+      try window.keep("fold-files-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertTrue(presented, "\(step): the file sheet closed")
+      XCTAssertEqual(
+        model.browsing, FileBrowse(root: root, path: [.files(folder)]),
+        "\(step): the file sheet lost its place")
+    }
+    model.browsing = nil
+    model.tab = .board
+    model.boardPath = [.files(root), .files(folder)]
+    for (step, size) in poses {
+      window.resize(to: size)
+      try await window.settle()
+      try window.keep("fold-board-files-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertEqual(
+        model.boardPath, [.files(root), .files(folder)], "\(step): Board lost its place")
+    }
+  }
+
   /// Chat still shows #general with its draft and its anchor, in the scroll view it had before, so
   /// the split built nothing again.
   @MainActor private func expectTheChat(

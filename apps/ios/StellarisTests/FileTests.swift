@@ -36,42 +36,46 @@ import Testing
   @Test func readsAFolderAFileAndWhatTheBoardRefuses() async throws {
     let model = try await signedIn()
     await model.store.loadBranchFile(root, using: model)
-    #expect(model.store.branchFileStates[root] == .loaded)
-    let entries = entriesInOrder(model.store.branchFiles[root]?.entries ?? []).map(\.name)
+    #expect(model.store.branchFileState(root) == .loaded)
+    let entries = entriesInOrder(model.store.branchFile(root)?.entries ?? []).map(\.name)
     #expect(Array(entries.prefix(3)) == [".github", "docs", "src"])
     #expect(entries.contains("README.md") && entries.contains("dump.json"))
 
     // A cited line reads the file it is in, kept with no line.
     let code = FilePlace(source: .project("demo"), path: "src/app.ts", line: 30)
     await model.store.loadBranchFile(code, using: model)
-    let file = try #require(model.store.branchFiles[code.unlined])
+    let file = try #require(model.store.branchFile(code))
     #expect(file.kind == .known(.file))
-    guard case .text(let text) = viewOf(file.path, file.data ?? Data()) else {
+    // Decoded once as the answer landed, for the view to draw with no work of its own.
+    let shown = try #require(model.store.shownFile(code))
+    guard case .text? = shown.view else {
       Issue.record("the code isn't text")
       return
     }
-    #expect(fileLines(text).count == 80)
-    #expect(fileLines(text)[29].hasPrefix("export function exportChannel"))
+    #expect(shown.lines.count == 80)
+    #expect(shown.lines[29].hasPrefix("export function exportChannel"))
+    #expect(shown.data == file.data)
 
     let large = FilePlace(source: .project("demo"), path: "dump.json")
     await model.store.loadBranchFile(large, using: model)
-    #expect(model.store.branchFiles[large]?.content == nil)
-    #expect(model.store.branchFiles[large]?.size == 12_686_643)
+    #expect(model.store.branchFile(large)?.content == nil)
+    #expect(model.store.branchFile(large)?.size == 12_686_643)
+    #expect(model.store.shownFile(large)?.view == nil)
 
     let missing = FilePlace(source: .project("demo"), path: "notes/plan.md")
     await model.store.loadBranchFile(missing, using: model)
-    #expect(model.store.branchFileStates[missing] == .missing)
-    #expect(model.store.branchFiles[missing] == nil)
+    #expect(model.store.branchFileState(missing) == .missing)
+    #expect(model.store.branchFile(missing) == nil)
 
     let away = try await signedIn(token: "runner-away")
     await away.store.loadBranchFile(root, using: away)
-    #expect(away.store.branchFileStates[root] == .away)
+    #expect(away.store.branchFileState(root) == .away)
     // The project names the runner it lives on, which the view says is away.
     #expect(runnerOf(away.store.projects.first) == "runner-1, the runner Demo lives on")
 
     let empty = try await signedIn(token: "empty-branch")
     await empty.store.loadBranchFile(root, using: empty)
-    #expect(empty.store.branchFiles[root]?.entries == [])
+    #expect(empty.store.branchFile(root)?.entries == [])
   }
 
   @Test func chatsFileSheetKeepsItsStackUntilSignOut() async throws {
@@ -98,10 +102,44 @@ import Testing
     model.store.showing(shown, true)
     model.store.showing(other, true)
     await model.reread([["project-file", "demo"]])
-    #expect(model.store.branchFiles[shown] != nil)
-    #expect(model.store.branchFiles[hidden] == nil)
-    #expect(model.store.branchFiles[other] == nil, "a project's event read a task's branch")
+    #expect(model.store.branchFile(shown) != nil)
+    #expect(model.store.branchFile(hidden) == nil)
+    #expect(model.store.branchFile(other) == nil, "a project's event read a task's branch")
     model.store.showing(shown, false)
     #expect(model.store.branchFilesShown[shown] == nil)
+  }
+
+  private struct ConfigureInput: Encodable {
+    let project: String
+    let defaultBranch: String
+
+    enum CodingKeys: String, CodingKey {
+      case project
+      case defaultBranch = "default_branch"
+    }
+  }
+
+  @Test func aNewDefaultBranchIsReadAfreshWhenItsEventLands() async throws {
+    let model = try await signedIn(token: "configure-\(UUID().uuidString)")
+    model.store.showing(root, true)
+    await model.store.loadBranchFile(root, using: model)
+    #expect(model.store.branchFile(root)?.entries?.contains { $0.name == "src" } == true)
+
+    // The web's Edit makes another branch the project's default, and the board logs it.
+    let configure: BoardRequest<Project> = try BoardAPI.verb(
+      "configure_project", ConfigureInput(project: "demo", defaultBranch: "trunk"))
+    _ = try await model.send(configure)
+    let logged = #"""
+      {"id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "ts": "2026-01-01T00:00:00.000Z",
+       "type": "project.configured", "actor": "user", "payload": {"project": "demo"}}
+      """#
+    let event = try JSONDecoder().decode(BoardEvent.self, from: Data(logged.utf8))
+    await model.reread(Set(staleKeys(for: event)))
+
+    // The event makes the projects stale and no file, and the new branch's tree is read for the
+    // view that shows the root, not the old branch's kept under the new name.
+    #expect(model.store.projects.first { $0.slug == "demo" }?.defaultBranch == "trunk")
+    #expect(model.store.branchFileState(root) == .loaded)
+    #expect(model.store.branchFile(root)?.entries?.map(\.name) == ["NOTES.md"])
   }
 }

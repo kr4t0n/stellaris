@@ -24,7 +24,7 @@ struct BranchFileView: View {
     .navigationTitle(place.name)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      if let file = model.store.branchFiles[key], file.kind == .known(.file), let data = file.data {
+      if let data = model.store.shownFile(key)?.data {
         ToolbarItem(placement: .primaryAction) {
           ShareLink(
             item: SharedFile(name: place.name, data: data), preview: SharePreview(place.name)
@@ -35,7 +35,8 @@ struct BranchFileView: View {
         }
       }
     }
-    .task(id: key) {
+    // Read again when the project's default branch changes, which the key names.
+    .task(id: model.store.fileKey(key)) {
       await model.store.loadBranchFile(key, using: model)
     }
     .onAppear { model.store.showing(key, true) }
@@ -44,17 +45,17 @@ struct BranchFileView: View {
 
   @ViewBuilder private func content(now: Date) -> some View {
     let key = place.unlined
-    if let file = model.store.branchFiles[key] {
+    if let file = model.store.branchFile(key) {
       if file.kind == .known(.dir) {
         folder(file, now: now)
       } else {
         FileContent(
-          file: file, place: place, heading: heading(file.commit, now: now), open: open,
-          opened: opened)
+          file: file, shown: model.store.shownFile(key), place: place,
+          heading: heading(file.commit, now: now), open: open, opened: opened)
       }
     } else {
       Group {
-        switch model.store.branchFileStates[key] ?? .loading {
+        switch model.store.branchFileState(key) ?? .loading {
         case .missing:
           StateLine(words: missing)
         case .away:
@@ -193,10 +194,12 @@ private struct EntryRow: View {
   }
 }
 
-/// A file's content by its kind, under where it is and its branch's commit.
+/// A file's content by its kind, under where it is and its branch's commit, from what the store
+/// decoded when the answer landed, so a redraw decodes nothing.
 private struct FileContent: View {
   @Environment(AppModel.self) private var model
   let file: BranchFile
+  let shown: ShownFile?
   let place: FilePlace
   let heading: String
   let open: (FilePlace) -> Void
@@ -204,8 +207,8 @@ private struct FileContent: View {
 
   var body: some View {
     let name = place.name
-    if let data = file.data {
-      switch viewOf(file.path, data) {
+    if let shown, let data = shown.data, let view = shown.view {
+      switch view {
       case .markdown(let text):
         scrolling {
           MessageBody(
@@ -222,12 +225,15 @@ private struct FileContent: View {
       case .table(let rows):
         scrolling { FileTable(rows: rows) }
       case .text(let text):
-        NumberedText(text: text, heading: heading, cited: place.line)
+        NumberedText(text: text, lines: shown.lines, heading: heading, cited: place.line)
       case .binary:
         scrolling {
           Notice(words: "\(name) is not text (\(sizeLabel(file.size ?? data.count))).")
         }
       }
+    } else if file.content != nil {
+      ProgressView()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       scrolling {
         let limit = sizeLabel(branchFileLimitBytes)
@@ -294,13 +300,16 @@ private struct StateLine: View {
 /// to the middle once; past `fileNumberedLines` lines, the text as it is. Lines never wrap: the
 /// text scrolls sideways.
 private struct NumberedText: View {
-  @ScaledMetric(relativeTo: .caption) private var digit: CGFloat = 7.5
   let text: String
+  /// The text's lines, split once when the file was read.
+  let lines: [String]
   let heading: String
   let cited: Int?
 
   var body: some View {
-    let lines = fileLines(text)
+    // The widest number, in the numbers' own font, sizes the gutter, so no number breaks onto a
+    // second line at any type size.
+    let widest = String(repeating: "8", count: String(lines.count).count)
     VStack(alignment: .leading, spacing: 0) {
       Heading(words: heading)
         .padding(.horizontal, 16)
@@ -316,8 +325,8 @@ private struct NumberedText: View {
               .textSelection(.enabled)
           } else {
             LazyVStack(alignment: .leading, spacing: 0) {
-              ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                row(number: index + 1, line: line, gutter: CGFloat(String(lines.count).count))
+              ForEach(lines.indices, id: \.self) { index in
+                row(number: index + 1, line: lines[index], widest: widest)
               }
             }
             .padding(.vertical, 12)
@@ -336,13 +345,16 @@ private struct NumberedText: View {
     }
   }
 
-  private func row(number: Int, line: String, gutter: CGFloat) -> some View {
+  private func row(number: Int, line: String, widest: String) -> some View {
     let marked = number == cited
     return HStack(alignment: .firstTextBaseline, spacing: 12) {
-      Text("\(number)")
-        .foregroundStyle(MessageColor.muted)
-        .frame(width: gutter * digit + 4, alignment: .trailing)
-        .accessibilityHidden(true)
+      ZStack(alignment: .trailing) {
+        Text(widest).hidden()
+        Text("\(number)")
+          .foregroundStyle(MessageColor.muted)
+      }
+      .fixedSize()
+      .accessibilityHidden(true)
       Text(line.isEmpty ? " " : line)
         .foregroundStyle(MessageColor.secondary)
         .fixedSize()

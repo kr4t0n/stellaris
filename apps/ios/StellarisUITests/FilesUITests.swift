@@ -51,6 +51,34 @@ final class FilesUITests: ShellTestCase {
     keepScreen("files-code")
   }
 
+  /// At the largest type size a line's number stays on one line: a row numbered with two digits
+  /// stands as tall as one numbered with one. The app is signed in at the default size and
+  /// launched again at the largest.
+  @MainActor func testKeepsLineNumbersOnOneLineAtTheLargestSize() {
+    var app = launch()
+    signIn(app)
+    expectGeneral(app)
+    app.terminate()
+    app = launch(
+      reset: false,
+      arguments: [
+        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+      ])
+    expectGeneral(app)
+    tab(app, "Board")
+    pick(app, "project-files-demo")
+    pick(app, "file-src")
+    pick(app, "file-src/app.ts")
+    let one = app.descendants(matching: .any)["line-9"].firstMatch
+    let two = app.descendants(matching: .any)["line-10"].firstMatch
+    XCTAssertTrue(one.waitForExistence(timeout: 20), "the code shows no line 9")
+    XCTAssertTrue(two.waitForExistence(timeout: 20), "the code shows no line 10")
+    keepScreen("files-code-largest")
+    XCTAssertEqual(
+      two.frame.height, one.frame.height, accuracy: 1,
+      "line 10's row is \(two.frame.height) pt tall against line 9's \(one.frame.height) pt")
+  }
+
   /// A table shows its cells, a quoted one whole.
   @MainActor func testShowsATable() {
     let app = openFiles(token: "fixture-token")

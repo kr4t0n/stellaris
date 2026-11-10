@@ -77,10 +77,12 @@ enum BranchRead: Equatable, Sendable {
   /// overtook changes nothing.
   @ObservationIgnored private(set) var taskReads: [String: Int] = [:]
   @ObservationIgnored private(set) var dashboardReads: [String: Int] = [:]
-  /// Each path on a branch as last read, by where it is with no line, and how its read went.
-  private(set) var branchFiles: [FilePlace: BranchFile] = [:]
-  private(set) var branchFileStates: [FilePlace: BranchRead] = [:]
-  @ObservationIgnored private var branchFileReads: [FilePlace: Int] = [:]
+  /// Each path on a branch as last read, how its read went, and what its view shows, by
+  /// `fileKey`.
+  private(set) var branchFiles: [BranchFileKey: BranchFile] = [:]
+  private(set) var branchFileStates: [BranchFileKey: BranchRead] = [:]
+  private(set) var shownFiles: [BranchFileKey: ShownFile] = [:]
+  @ObservationIgnored private var branchFileReads: [BranchFileKey: Int] = [:]
   /// How many views show each path, which an event that touches it reads again; one no view shows
   /// is read again when a view next shows it.
   @ObservationIgnored private(set) var branchFilesShown: [FilePlace: Int] = [:]
@@ -194,10 +196,33 @@ enum BranchRead: Equatable, Sendable {
     }
   }
 
+  /// What a path's read is kept by: the place with no line, and for a project's default branch
+  /// the branch the board names as it now, as the web keys its query, so a project whose default
+  /// branch changed is read afresh rather than shown under the old branch's answer.
+  func fileKey(_ place: FilePlace) -> BranchFileKey {
+    switch place.source {
+    case .task:
+      BranchFileKey(place: place.unlined, branch: nil)
+    case .project(let slug):
+      BranchFileKey(
+        place: place.unlined, branch: projects.first { $0.slug == slug }?.defaultBranch)
+    }
+  }
+
+  /// The path's last answer on the branch it is kept by now.
+  func branchFile(_ place: FilePlace) -> BranchFile? { branchFiles[fileKey(place)] }
+
+  /// How the path's read on the branch it is kept by now went; nil before its first.
+  func branchFileState(_ place: FilePlace) -> BranchRead? { branchFileStates[fileKey(place)] }
+
+  /// What the path's view shows, worked out when its answer landed.
+  func shownFile(_ place: FilePlace) -> ShownFile? { shownFiles[fileKey(place)] }
+
   /// Reads a path on a branch, keeping the last answer through a read that fails, as the web keeps
-  /// a query's data; an answer a later read overtook changes nothing.
+  /// a query's data; an answer a later read overtook changes nothing. A file's content is decoded
+  /// once, off the main actor, as the web's view keeps `viewOf`'s answer, never as a view redraws.
   func loadBranchFile(_ place: FilePlace, using model: AppModel) async {
-    let key = place.unlined
+    let key = fileKey(place)
     let signIn = model.generation
     let read = (branchFileReads[key] ?? 0) + 1
     branchFileReads[key] = read
@@ -205,11 +230,13 @@ enum BranchRead: Equatable, Sendable {
       branchFileStates[key] = .loading
     }
     do {
-      let file = try await model.send(BoardAPI.branchFile(key.source, path: key.path))
+      let file = try await model.send(BoardAPI.branchFile(key.place.source, path: key.place.path))
+      let shown = await ShownFile.decoding(file)
       guard model.generation == signIn, branchFileReads[key] == read else {
         return
       }
       branchFiles[key] = file
+      shownFiles[key] = shown
       branchFileStates[key] = .loaded
     } catch is CancellationError {
       return
@@ -465,8 +492,36 @@ enum BranchRead: Equatable, Sendable {
     dashboardReads = [:]
     branchFiles = [:]
     branchFileStates = [:]
+    shownFiles = [:]
     branchFileReads = [:]
     branchFilesShown = [:]
+  }
+}
+
+/// A path on a branch as its read is kept: the place with no line, and the branch the board named
+/// as the project's default when it was read, or nil for a task's branch.
+struct BranchFileKey: Hashable, Sendable {
+  let place: FilePlace
+  let branch: String?
+}
+
+/// What a file's view shows, worked out once when its answer lands: its bytes, the kind `viewOf`
+/// reads it as, and a text file's lines, each nil or empty where it has none, as for a folder or a
+/// file past the board's limit.
+struct ShownFile: Sendable {
+  let data: Data?
+  let view: FileView?
+  let lines: [String]
+
+  @concurrent static func decoding(_ file: BranchFile) async -> ShownFile {
+    guard file.kind == .known(.file), let data = file.data else {
+      return ShownFile(data: nil, view: nil, lines: [])
+    }
+    let view = viewOf(file.path, data)
+    if case .text(let text) = view {
+      return ShownFile(data: data, view: view, lines: fileLines(text))
+    }
+    return ShownFile(data: data, view: view, lines: [])
   }
 }
 

@@ -72,7 +72,7 @@ packages/
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex app-server`
 helm/stellaris/    the Helm chart
-scripts/           the npm packages' build, and smoke tests of the images and chart
+scripts/           npm packaging, image smoke tests, chart and iOS layout checks
 docs/              guides, the code's internals by area, and the design record
 data/              runtime data, ignored by git
 ```
@@ -81,9 +81,11 @@ data/              runtime data, ignored by git
 
 ## Prerequisites
 
-- **Node** 24 or newer (`.node-version`) and **pnpm** 12 (`packageManager`).
+- **Node** 24 or newer (`.node-version`) and **pnpm** 12 (`packageManager`), through
+  corepack, which Node ships before 25: on Node 25 or newer, `npm install -g corepack`.
 - **Git** 2.27 or newer, on the board server's machine, which keeps every agent's home
-  as a repository, and on every machine that runs turns.
+  as a repository, and on every machine that runs turns, where the runner's account
+  needs a global `user.name` and `user.email` for the commits agents make.
 - **[gitleaks](https://github.com/gitleaks/gitleaks/releases)**, the standalone binary,
   to commit here: the commit hook runs it on what is staged.
 - **Claude Code's login** or `ANTHROPIC_API_KEY` where turns run; the Agent SDK brings
@@ -103,7 +105,7 @@ data/              runtime data, ignored by git
 
 ```bash
 git clone https://github.com/kr4t0n/stellaris.git && cd stellaris
-corepack enable     # or prefix commands with `corepack pnpm`
+corepack enable     # pnpm, at the version `packageManager` pins
 pnpm install        # also installs the commit hook, through husky
 pnpm build          # every package and app; also the type check
 pnpm build:web      # the interface, which the board server serves

@@ -77,7 +77,7 @@ The board server and each runner read their own; the [README](../../README.md#en
 
 ### The board server
 
-- `STELLARIS_DATA_DIR` (`./data`): the runtime data directory, which holds the board, agent homes, and the event log; read by the server and the admin CLI. It is resolved from the folder a process starts in, and `pnpm --filter` starts the server in `apps/server`, so give it as an absolute path.
+- `STELLARIS_DATA_DIR` (`./data`): the runtime data directory, which holds the board, agent homes, and the event log; read by the server and the admin CLI. It is resolved from the folder a process starts in, and `pnpm --filter` starts the server and the runner in their own app folders, `apps/server` and `apps/runner`, so give it as an absolute path.
 - `STELLARIS_HOST` (`127.0.0.1`) and `STELLARIS_PORT` (`4700`): where the server listens.
 - `STELLARIS_METRICS_PORT` (none): a second port on `STELLARIS_HOST` that serves Prometheus's turn and token counters at `/metrics`, apart from the interface's `/metrics`.
 - `STELLARIS_PUBLIC_URL` (none): one address every runner's agents reach the board's MCP endpoint at, overriding each runner's `STELLARIS_SERVER_URL`.
@@ -100,7 +100,7 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 
 - `STELLARIS_SERVER_URL` (`http://127.0.0.1:4700`): the board server, as this machine reaches it; its agents reach the MCP endpoint under the same address.
 - `STELLARIS_RUNNER_TOKEN` (none): a token `runner add` printed; without it the runner uses what an enrollment saved, or enrolls.
-- `STELLARIS_RUNNER_DIR` (`./runner-data`): its own data directory: the board mirror, agent homes, repositories, and worktrees.
+- `STELLARIS_RUNNER_DIR` (`./runner-data`): its own data directory: the board mirror, agent homes, repositories, and worktrees, and the `credentials.json` an enrollment saves. It is resolved from the folder the runner starts in, `apps/runner` under `pnpm --filter`, where git ignores nothing of it, so give an absolute path outside the checkout.
 - `STELLARIS_LOG_LEVEL` (`info`): the runner's log level; `debug` also logs the CLI's stderr.
 - `STELLARIS_CONCURRENCY` (`2`): turns at once on its machine; a number or `unlimited`.
 - `STELLARIS_CLIS` (`claude,codex`): the CLIs it runs turns with.

@@ -121,9 +121,9 @@ enum SignInFailure: Error, Equatable {
   /// Follows the board's events while the app is in front, and reads again what they touch.
   let live = LiveUpdates()
   #if DEBUG
-    /// The rows each conversation shows whole, as its scroll view last reported them, which a
-    /// test hosted in the app reads to see where the scroll stands: it finds none of SwiftUI's
-    /// rows among UIKit's views.
+    /// The rows each conversation shows at least half of, as its scroll view last reported them,
+    /// which a test hosted in the app reads to see where the scroll stands: it finds none of
+    /// SwiftUI's rows among UIKit's views.
     var shownRows: [Conversation: [String]] = [:]
   #endif
 

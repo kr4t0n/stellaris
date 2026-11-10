@@ -57,7 +57,7 @@ struct ConversationView: View {
         .scrollPosition(id: $anchor, anchor: .bottom)
         .defaultScrollAnchor(.bottom)
         #if DEBUG
-          .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.99) { ids in
+          .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.5) { ids in
             model.shownRows[feed.conversation] = ids
           }
         #endif

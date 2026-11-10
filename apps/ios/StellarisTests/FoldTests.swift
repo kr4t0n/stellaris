@@ -315,9 +315,10 @@ final class FoldTests: XCTestCase {
     return messages
   }
 
-  /// The message the scroll is anchored at stands whole in the conversation's view, above the
-  /// draft, within the five seconds a later frame has to bring it back: the anchor saved in the
-  /// model says only where the view should be.
+  /// The message the scroll is anchored at is on screen, at least half of it, in the
+  /// conversation's view above the draft, within the five seconds a later frame has to bring it
+  /// back: the anchor saved in the model says only where the view should be. The foot's row is
+  /// never reported whole, even where it shows all but its last points.
   @MainActor private func expectTheAnchorShown(
     _ step: String, in window: TestWindow, _ model: AppModel, line: UInt = #line
   ) async throws {

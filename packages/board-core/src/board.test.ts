@@ -13,6 +13,7 @@ import {
   VERB_DESCRIPTIONS,
   type HeartbeatCause,
   type MetricsWindow,
+  type OpsSignal,
   type TurnExitReason,
   type TurnRecord,
   type Ulid,
@@ -43,6 +44,15 @@ const tokens = (input: number) => ({
   outputTokens: input / 10,
   cacheReadTokens: input * 10,
   cacheWriteTokens: input / 5,
+});
+
+/** The `n`th signal, with the fields every signal has and those `more` adds. */
+const signal = (n: number, more: Partial<OpsSignal> = {}): OpsSignal => ({
+  kind: n % 3 === 0 ? "waiting_stage" : n % 3 === 1 ? "backlog" : "turn_cost",
+  key: `key-${n % 7}`,
+  summary: `signal ${n}`,
+  value: n,
+  ...more,
 });
 
 /** A turn record of eng-1 in demo, in a thread's conversation or at home. */
@@ -4116,6 +4126,116 @@ describe("Board", () => {
     expect(answers.get("24h")?.citizens).toEqual([
       { agent: "eng-1", turns: 2, withUsage: 2, usage: tokens(50) },
     ]);
+  });
+
+  it("answers the signals from the metrics index as the log's read does, reading no log once seeded", async () => {
+    const { board } = await society();
+    // Before the seed: signals this board logged, a turn's end, and lines an older board wrote,
+    // two of which the signal schema refuses.
+    for (let n = 0; n < 300; n += 1) {
+      await board.publishSignal(signal(n, n % 2 === 0 ? { project: "demo", taskId: ulid() } : {}));
+    }
+    await endWith(board, {});
+    const raw = async (payload: Record<string, unknown>) =>
+      writeFile(
+        board.paths.eventLog(),
+        `${JSON.stringify({ id: ulid(), ts: clock.toISOString(), type: "ops.signal", actor: "board", payload })}\n`,
+        { flag: "a" },
+      );
+    await raw({ kind: "backlog", key: "older", summary: "an older board's signal", value: 1 });
+    await raw({ kind: "a kind no board logs", key: "k", summary: "s", value: 1 });
+    await raw({ kind: "backlog", key: "k", summary: "no value" });
+    await board.indexMetrics();
+    // After it: signals this process appends, some handed over with fields undefined, which the
+    // log's line leaves out.
+    for (let n = 300; n < 600; n += 1) {
+      await board.publishSignal(
+        signal(
+          n,
+          n % 5 === 0
+            ? { project: undefined, taskId: undefined, wakes: undefined }
+            : { wakes: n % 2 === 0 },
+        ),
+      );
+    }
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    // None, one, the API's default, the turn host's read, all, one past all, and far past.
+    const limits = [0, 1, 100, 501, 601, 602, 10_000];
+    const answers = [];
+    for (const limit of limits) {
+      answers.push(await board.listSignals(limit));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    // The same records in the same order as a board with no index reads from the log.
+    const reopened = await Board.open(dir, { now });
+    for (const [at, limit] of limits.entries()) {
+      expect(answers[at], `limit ${limit}`).toStrictEqual(await reopened.listSignals(limit));
+    }
+    const all = answers[0] ?? [];
+    expect(all).toHaveLength(601);
+    expect(all.map((record) => record.signal.summary)).toContain("an older board's signal");
+    expect(answers[3]?.[0]?.signal.summary).toBe("signal 100");
+    expect(answers[1]?.map((record) => record.signal.summary)).toEqual(["signal 599"]);
+    const handed = all.find((record) => record.signal.summary === "signal 300");
+    expect(Object.keys(handed?.signal ?? {})).toEqual(["kind", "key", "summary", "value"]);
+  });
+
+  it("reads the signals from the log, seeding no index, while the process has none", async () => {
+    const { board } = await society();
+    await board.publishSignal(signal(1));
+    // A turn's end whose board actions a seed would read from its transcript.
+    await endWith(board, {});
+    const seed = vi.spyOn(board, "indexMetrics");
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const read = await board.listSignals();
+    expect(read.map((record) => record.signal.summary)).toEqual(["signal 1"]);
+    expect(seed).not.toHaveBeenCalled();
+    expect(logRead).toHaveBeenCalledTimes(1);
+    expect(transcriptRead).not.toHaveBeenCalled();
+    // A seed would have read it.
+    await board.indexMetrics();
+    expect(transcriptRead).toHaveBeenCalled();
+  });
+
+  it("answers the signals once a seed under way ends, and from the log when it failed", async () => {
+    const { board } = await society();
+    await board.publishSignal(signal(1));
+    const logRead = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        // Once the index listens: a signal the read takes, then one it misses.
+        await board.publishSignal(signal(2));
+        const events = await board.readEvents(since, limit);
+        await board.publishSignal(signal(3));
+        return events;
+      });
+    const seeding = board.indexMetrics();
+    const asked = board.listSignals();
+    const [, answer] = await Promise.all([seeding, asked]);
+    expect(answer.map((record) => record.signal.summary)).toEqual([
+      "signal 1",
+      "signal 2",
+      "signal 3",
+    ]);
+    // The seed's read and the one it made inside the mock, and none for the ask.
+    expect(logRead).toHaveBeenCalledTimes(2);
+    logRead.mockRestore();
+    // Another board, whose seed fails while the ask waits for it.
+    const reopened = await Board.open(dir, { now });
+    const failing = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockRejectedValueOnce(new Error("the disk went away"));
+    const failed = reopened.indexMetrics();
+    const fallback = reopened.listSignals();
+    await expect(failed).rejects.toThrow("the disk went away");
+    expect(await fallback).toStrictEqual(answer);
+    expect(failing).toHaveBeenCalledTimes(2);
+    failing.mockRestore();
   });
 
   it("names a task finished, sent back, or blocked while the metrics read the tasks they name", async () => {

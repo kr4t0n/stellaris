@@ -429,25 +429,31 @@ describe("metrics index", () => {
     expect(compared).toBe(120 * 3 * 4 * 3);
   });
 
-  it("counts the tokens of a log whose ends take every shape, so the comparison is not of empty answers", () => {
+  it("counts the tokens of logs whose ends take every shape, so the comparison is not of empty answers", () => {
+    // Over the logs the equality test compares, every shape of end the history reads or refuses.
+    const compared = Array.from({ length: 120 }, (_, at) =>
+      withTokens(generate(at + 1, 240), at + 1),
+    ).flat();
+    const allEnds = compared.filter(
+      (event) => event.type === "turn.completed" || event.type === "turn.failed",
+    );
+    const shapes = {
+      failed: allEnds.filter((event) => event.type === "turn.failed").length,
+      reflection: allEnds.filter((event) => event.payload["trigger"] === "reflection").length,
+      unreadable: allEnds.filter((event) => event.payload["unreadable"] === true).length,
+      badTurnId: allEnds.filter((event) => event.payload["turnId"] === "not-a-turn").length,
+      badUsage: allEnds.filter((event) => usageOf(event)["inputTokens"] === -1).length,
+      noCache: allEnds.filter(
+        (event) => "inputTokens" in usageOf(event) && !("cacheReadTokens" in usageOf(event)),
+      ).length,
+    };
+    for (const [shape, count] of Object.entries(shapes)) {
+      expect(count, shape).toBeGreaterThan(5);
+    }
     const events = withTokens(generate(7, 240), 7);
     const ends = events.filter(
       (event) => event.type === "turn.completed" || event.type === "turn.failed",
     );
-    expect(ends.filter((event) => event.type === "turn.failed").length).toBeGreaterThan(5);
-    expect(
-      ends.filter((event) => event.payload["trigger"] === "reflection").length,
-    ).toBeGreaterThan(2);
-    expect(ends.filter((event) => event.payload["unreadable"] === true).length).toBeGreaterThan(0);
-    expect(ends.filter((event) => event.payload["turnId"] === "not-a-turn").length).toBeGreaterThan(
-      0,
-    );
-    expect(ends.filter((event) => usageOf(event)["inputTokens"] === -1).length).toBeGreaterThan(0);
-    expect(
-      ends.filter(
-        (event) => "inputTokens" in usageOf(event) && !("cacheReadTokens" in usageOf(event)),
-      ).length,
-    ).toBeGreaterThan(0);
     const index = new MetricsIndex();
     for (const event of events) {
       index.add(event);

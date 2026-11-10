@@ -4278,7 +4278,6 @@ export class Board {
       : "";
   }
 
-  /** The steps of one finished turn, as the runner handed them over when it ended. */
   /**
    * Six measures of how the society works over a window, from the metrics index, so that no answer
    * reads the log or a transcript; `activeSignals` says which blocked tasks are blocked still. The
@@ -4465,6 +4464,7 @@ export class Board {
     return count;
   }
 
+  /** The steps of one finished turn, as the runner handed them over when it ended. */
   async readTranscript(agent: Name, turnId: string): Promise<TranscriptEntry[]> {
     // The id names a file, so only a ULID may reach the path.
     const id = UlidSchema.safeParse(turnId);

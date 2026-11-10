@@ -353,6 +353,22 @@ describe("Prometheus's turn counters", () => {
     }
   });
 
+  it("answers 503 while it has no counters, as while the server seeds them, then serves them", async () => {
+    await turn("eng-1", {});
+    let counters: Awaited<ReturnType<Board["countTurns"]>> | null = null;
+    const app = createMetricsApp(() => counters);
+    const waiting = await app.request("/metrics");
+    expect(waiting.status).toBe(503);
+    expect(await waiting.text()).not.toContain("stellaris_");
+    counters = await board.countTurns();
+    const seeded = await app.request("/metrics");
+    expect(seeded.status).toBe(200);
+    expect(parseExposition(await seeded.text()).get("stellaris_turns_total")?.samples).toEqual([
+      { labels: { agent: "eng-1", outcome: "completed", trigger: "stage" }, value: 1 },
+    ]);
+    expect((await app.request("/other")).status).toBe(404);
+  });
+
   it("escapes what a label's value holds, and serves every counter before any turn", () => {
     const awkward = 'a "quoted" model\\with\na newline';
     const text = prometheusText({

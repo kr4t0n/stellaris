@@ -48,13 +48,18 @@ export function prometheusText(counts: TurnCounts): string {
 
 /**
  * What the metrics port serves: `GET /metrics`, read from the counters alone, and nothing else.
- * It asks for no token, so it carries counts and names, never a message or a secret.
+ * It asks for no token, so it carries counts and names, never a message or a secret. Given a
+ * function, it answers 503 while that gives no counters, as while the server seeds them.
  */
-export function createMetricsApp(counters: TurnCounters): Hono {
+export function createMetricsApp(counters: TurnCounters | (() => TurnCounters | null)): Hono {
+  const current = typeof counters === "function" ? counters : () => counters;
   const app = new Hono();
-  app.get("/metrics", (c) =>
-    c.body(prometheusText(counters.read()), 200, { "content-type": PROMETHEUS_CONTENT_TYPE }),
-  );
+  app.get("/metrics", (c) => {
+    const counted = current();
+    return counted === null
+      ? c.text("the counters are not seeded yet", 503)
+      : c.body(prometheusText(counted.read()), 200, { "content-type": PROMETHEUS_CONTENT_TYPE });
+  });
   app.notFound((c) => c.text("not found", 404));
   return app;
 }

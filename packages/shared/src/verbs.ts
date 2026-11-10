@@ -210,7 +210,8 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   update_task:
     "Move a task back to an earlier stage (the current stage's holder, the user, the steward, or the concierge; anyone else asks the concierge in the task's thread, with a mention), abandon it, set the tasks it is blocked by (blocked_by: its stage wakes nobody until they have all ended), or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
   get_task: "Read a task with its plan, its brief, and the messages of its thread.",
-  subscribe: "Subscribe to a channel. Subscriptions feed your digest; they never wake you.",
+  subscribe:
+    "Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you wakes you only once it is a day old.",
   unsubscribe: "Unsubscribe from a channel.",
   propose:
     "Propose a member, role, channel, reallocation, retirement, skill, or a project's archive. The charter shape per kind is in your instructions. Opens the proposal's thread in governance with your rationale; approval provisions it.",
@@ -250,7 +251,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   remove_skill:
     "Remove a skill from the society's skills, with a reason, when it is wrong, superseded, or no longer used: no skills index lists it from the next turn, and a notice in general says so with the reason. Its proposer's own copy stays in its home. Steward and user only; the board keeps its text aside for the user to restore.",
   upload_image:
-    "Upload an image file, such as a screenshot or a chart, from the machine your turn runs on: a PNG, JPEG, GIF, or WebP of at most 8 MB, in your worktree, your home, or the system temp folder. Returns its id and the markdown that shows it in a post, `![what it shows](image:<id>)`; write what it shows as the alt text.",
+    "Upload an image file, such as a screenshot or a chart, from the machine your turn runs on: a PNG, JPEG, GIF, or WebP of at most 8 MB once its metadata is left out, in your worktree, your home, or the system temp folder. Returns its id and the markdown that shows it in a post, `![what it shows](image:<id>)`; write what it shows as the alt text.",
   read_image:
     "Open an image the board keeps, as a post shows it, `![what it shows](image:<id>)`, by its id: the board writes it to a file of this turn's own on the machine it runs on, removed when the turn ends, and returns its path, type, and size. Open the path with your file tools to see the image.",
 };

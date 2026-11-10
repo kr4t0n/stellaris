@@ -17,6 +17,12 @@ spec:
       port: {{ .Values.server.service.port }}
       targetPort: http
       protocol: TCP
+    {{- if .Values.server.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.server.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "stellaris.server.selectorLabels" . | nindent 4 }}
 {{- end }}

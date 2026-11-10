@@ -202,11 +202,17 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The launch screen, which no test or picture covers.
 - Whether iOS's GitHub sign-in sheet is dark: iOS draws it, not the app, so it may not follow the app's setting.
 
+**The app's icon**
+
+- The icon on the Home Screen in each appearance (touch and hold the Home Screen, then Edit > Customize): Default, Dark, Clear and Tinted, each with the light and the dark wallpaper. The three stars stay apart, the upper meteor passes clear of the large star, and its tail fades out before the icon's top edge. CI draws the six only with Icon Composer's tool, not with a device's glass over a real wallpaper.
+- The icon at its smallest, in Spotlight, Settings' list, and the App Library: the three stars stay apart, and the meteors' faint tails in Clear and Tinted.
+
 **Touch and the keyboard on the outer display**
 
 - A link or an image in the top-leading part of Chat opens. On the simulator, a tap inside the status bar's frame there, 223 by 317 points from the window's corner, reaches no message and scrolls the conversation to its top instead.
 - At the largest text size (Settings > Accessibility > Display & Text Size > Larger Text), the plan's half-height sheet closes with a drag down on its bar, at its middle or its foot. In CI, only a drag on its content closed it.
 - The keyboard covers the side bar, its tabs included, until a scroll puts it away.
+- With the keyboard up, the keyboard's rounded corners, at its top and at the display's foot, show the ground above each corner, never black: the chat's gray in Chat, behind the New thread, Advance, and Reject sheets, and with the chat under the sky on the inner display. Beside the sky, the corners on the sky's side show the sky's own darker ground. CI checks every case but the one beside the sky, on the simulator's outer display.
 - At rest, the composer is a capsule with no Send, and its bottom sits on the same line as the side bar's foot, as Safari's address bar does beside its own bar. The app places it 24 points above the window's foot, where iOS draws the bar on the simulator, since iOS gives no way to move the bar.
 - Tapping the composer shows a round Send in the side bar's column, where Safari shows its ×, while the keyboard covers the bar. Send is dim while the draft is empty or an image uploads, and a tap on it posts. Return adds a line. A scroll puts the keyboard away and hides Send, and the draft stays.
 - With a hardware keyboard (a Bluetooth one, or the Simulator's I/O > Keyboard > Connect Hardware Keyboard), tapping the composer shows Send at the capsule's trailing end, clear of the side bar's tabs, and the capsule rises 12 points above the safe area while the field has the focus. CI types with the software keyboard only.
@@ -229,7 +235,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Split View at its narrowest on the inner display shows the chat alone.
 - The composer and the keyboard in each pose, and whether the keyboard stays up and the composer keeps its place through a fold, a turn or an unfold.
 - Photos inside the composer's capsule, and Paste in the draft's long-press menu. Pick several photos at once, among them one the camera took (HEIC, which Photos hands over as a JPEG), a screenshot (PNG, which stays a PNG), and one from iCloud that has to download first; each should land where it was put. Paste an image copied in another app, such as Safari or Photos, then text, from the draft's menu, and check that the caret stays where the image went, that each image shows as a thumbnail above the draft, from the photo while it uploads and from the board once kept, and that its × takes it out. CI pastes only an image the test put on the pasteboard, and picks no photo.
-- A posted camera photo's metadata: take a photo with Location Services on for Camera, check that Photos shows where it was taken, and post it from the app. Open the image the board keeps (`/api/images/<id>` with the token) and read its EXIF: it should hold no location, camera, or date, only the orientation, and the photo should show upright and in the same colours as in Photos.
+- A posted camera photo's metadata: take a photo with Location Services on for Camera, check that Photos shows where it was taken, and post it from the app. Open the image the board keeps (`/api/images/<id>` with the token) and read its EXIF: it should hold no location, camera, or date, only the orientation, and the photo should show upright and in the same colours as in Photos. Then post the same photo from the board in the phone's browser and read that copy's EXIF too: the board leaves out the same itself, whatever the browser sends.
 - Whether an HDR photo posted from the app shows as bright as in Photos: the app leaves out anything after a JPEG's first picture, so a gain map kept there goes.
 - Paste from the draft's menu with text and a picture copied together, such as a selection in Notes or on a web page. The web pastes the text then; what iOS hands the draft is untested.
 - Ten large photos picked at once, such as 48-megapixel ones: the app should stay up while they upload.

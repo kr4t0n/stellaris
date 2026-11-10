@@ -278,7 +278,12 @@ export class RunnerHub implements TurnRunner {
     return { name, version: this.version };
   }
 
-  /** A registered runner's stream opened. Returns what to call when it closes. */
+  /**
+   * A registered runner's stream opened. Returns what to call when it closes. A turn its hello
+   * listed that the board has ended, as one whose runner came back after the grace period, is told
+   * to stop before anything else goes down the stream, since its CLI still works there; a runner
+   * that lists no CLI it can stop, as one from before stops, is sent none.
+   */
   async attach(name: Name, send: RunnerSend): Promise<() => Promise<void>> {
     const seat = this.seats.get(name);
     if (seat === undefined) {
@@ -289,6 +294,13 @@ export class RunnerHub implements TurnRunner {
     if (seat.grace !== null) {
       clearTimeout(seat.grace);
       seat.grace = null;
+    }
+    if (seat.hello.stoppableClis.length > 0) {
+      for (const turnId of seat.hello.turns) {
+        if (this.host.runnerOf(turnId) !== name) {
+          void this.stopEnded(seat, turnId);
+        }
+      }
     }
     for (const { job } of seat.unacked.values()) {
       if (send({ type: "turn", job })) {
@@ -649,6 +661,7 @@ export class RunnerHub implements TurnRunner {
         await this.host.abortTurn(
           opened.job.turnId,
           `runner ${seat.name} went away before the turn`,
+          { transient: true },
         );
       } else {
         this.expectAck(seat, opened.job);
@@ -1307,6 +1320,33 @@ export class RunnerHub implements TurnRunner {
     }
   }
 
+  /** Has a runner stop the CLI of a turn it still runs that the board has ended. */
+  private async stopEnded(seat: Seat, turnId: Ulid): Promise<void> {
+    try {
+      const stopped = await this.request(
+        seat,
+        (request) => ({ type: "stop", request, turnId }),
+        CONTROL_TIMEOUT_MS,
+      );
+      if (stopped === true) {
+        this.log.warn(
+          { runner: seat.name, turnId },
+          "stopped a turn the board had ended, which its runner still ran",
+        );
+      } else {
+        this.log.info(
+          { runner: seat.name, turnId },
+          "a turn the board had ended was no longer running on its runner",
+        );
+      }
+    } catch (error) {
+      this.log.warn(
+        { runner: seat.name, turnId, error: String(error) },
+        "could not stop a turn the board had ended",
+      );
+    }
+  }
+
   private async detach(seat: Seat): Promise<void> {
     seat.send = null;
     this.runnerChanged(seat.name);
@@ -1329,11 +1369,15 @@ export class RunnerHub implements TurnRunner {
         return;
       }
       for (const turnId of this.host.turnsOn(seat.name)) {
+        // A job the runner never acknowledged, nor sent a step of, most likely never arrived, so
+        // its wake may go again; a turn under way may have done work a resend would do twice.
+        const unsent = seat.unacked.has(turnId);
         void this.host.abortTurn(
           turnId,
-          seat.unacked.has(turnId)
+          unsent
             ? `the turn never reached runner ${seat.name}, which went away`
             : `runner ${seat.name} went away during the turn`,
+          { transient: unsent },
         );
       }
     }, this.graceMs);

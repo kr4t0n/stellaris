@@ -125,6 +125,29 @@ function labPost(minute: number, author: string, body: string, notice?: unknown)
   };
 }
 
+/** Twelve topics open in the society's governance, listed only with `unread`. */
+const GOVERNANCE_TOPICS = Array.from({ length: 12 }, (_, at) => ({
+  id: `01M3Q2PPPPPPPPPPPPPPPPPP${String(at + 1).padStart(2, "0")}`,
+  channel: "governance",
+  title: `Topic ${at + 1}`,
+  state: "open",
+  openedBy: "desk",
+  openedAt: CREATED,
+  body: "",
+  messages: 0,
+  lastMessageId: null,
+}));
+
+/** The society's general's one post, listed only with `unread`. */
+const SOCIETY_POST = {
+  id: "01M3Q2NNNNNNNNNNNNNNNNNNN1",
+  author: "desk",
+  channel: "general",
+  ts: CREATED,
+  mentions: [],
+  body: "The runners restart at noon.",
+};
+
 const EXPERIMENTS = { kind: "knowledge", topic: "experiments", project: "lab" };
 
 /** lab's general: talk, and the notes knowledge verbs posted. */
@@ -292,10 +315,10 @@ export const POSTED_IMAGES = [
   "01M3Q2RRRRRRRRRRRRRRRRRRS3",
 ];
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+export const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** A PNG chunk: its length, its type, its data, and the checksum of type and data. */
-function pngChunk(type: string, data: Buffer): Buffer {
+export function pngChunk(type: string, data: Buffer): Buffer {
   const head = Buffer.alloc(8);
   head.writeUInt32BE(data.length, 0);
   head.write(type, 4, "latin1");
@@ -1250,10 +1273,17 @@ export async function fakeBoard(
      * Citizens list run out of room.
      */
     crowded?: boolean;
+    /**
+     * Lists lab's general with its posts and the society's general with one, so a browser that
+     * listed the board before them shows both as unread: lab's with its open thread's count, the
+     * society's with none. Opens twelve topics in governance too, a count of two digits.
+     */
+    unread?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
   const archived = options.archived === true;
+  const unread = options.unread === true;
   const asks = options.asks === true ? askFixtures() : new Map<string, AskFixture>();
   let answering: string | null = null;
   const writes: Write[] = [];
@@ -1951,6 +1981,7 @@ export async function fakeBoard(
         return json(route, { thread: ARCHIVE_THREAD, messages: [ARCHIVE_PITCH] });
       case "/api/threads":
         return json(route, [
+          ...(unread ? GOVERNANCE_TOPICS : []),
           ...(archived
             ? [{ ...ARCHIVE_THREAD, messages: 1, lastMessageId: ARCHIVE_PITCH.id }]
             : []),
@@ -1987,6 +2018,7 @@ export async function fakeBoard(
           ? json(route, SOCIETY_SKILL_FILES)
           : json(route, { error: "NOT_FOUND", message: "the society has no skill uv-setup" }, 404);
       case "/api/channels/general":
+        return json(route, unread ? [SOCIETY_POST] : []);
       case "/api/channels/governance":
       case "/api/channels/asks":
         return json(route, []);
@@ -2021,10 +2053,19 @@ export async function fakeBoard(
         return json(route, enrolling ? [enrollment] : []);
       case "/api/channels":
         return json(route, [
-          channel("general"),
+          unread
+            ? { ...channel("general"), messages: 1, lastMessageId: SOCIETY_POST.id }
+            : channel("general"),
           channel("governance"),
           channel("asks"),
-          { ...channel("general"), ref: "lab/general", project: "lab" },
+          {
+            ...channel("general"),
+            ref: "lab/general",
+            project: "lab",
+            ...(unread
+              ? { messages: LAB_GENERAL.length, lastMessageId: LAB_GENERAL.at(-1)?.id ?? null }
+              : {}),
+          },
           ...labChannels.map((each) => ({
             ...channel(each.name),
             ref: `lab/${each.name}`,

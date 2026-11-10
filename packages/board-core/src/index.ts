@@ -1,4 +1,4 @@
-export { Board, CLOSING_ATTEMPTS, SYSTEM_ACTOR } from "./board.js";
+export { Board, CHANNEL_POST_WAIT_MS, CLOSING_ATTEMPTS, SYSTEM_ACTOR } from "./board.js";
 export type {
   UserRequest,
   Actor,
@@ -26,6 +26,8 @@ export { BoardError, isBoardError } from "./errors.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export { tokenUse } from "./turn-history.js";
+export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
+export type { TokenKind, TurnCounts, TurnSeries, TurnTokenSeries } from "./turn-counters.js";
 export type { BoardErrorCode } from "./errors.js";
 export { BoardPaths } from "./paths.js";
 export { HOME_GITIGNORE } from "./homes.js";

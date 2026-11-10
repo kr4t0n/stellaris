@@ -47,7 +47,10 @@ jobs:
 
   app:
     runs-on: xcode-27
-    timeout-minutes: 45
+    # What ends a test that hangs, since the stuck-app watcher leaves the step running. Up to 0.4.1
+    # the tests ran up to 48 minutes, counting a run the limit cut with two tests left, and the
+    # steps after them, the runner's own cleanup included, up to 8 more: 70 is a quarter over both.
+    timeout-minutes: 70
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       # XcodeGen from its release, checked against the digest GitHub lists for the asset.
@@ -127,6 +130,17 @@ jobs:
               "$RUNNER_TEMP/screens/displays/display-$display.png"
           done
           exit 0
+      # The app's icon as Icon Composer draws it in each of iOS's appearances, for review.
+      - name: Draw the app's icon
+        if: ${{ !cancelled() }}
+        run: |
+          ictool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          mkdir -p "$RUNNER_TEMP/screens/icon"
+          for rendition in Default Dark ClearLight ClearDark TintedLight TintedDark; do
+            "$ictool" apps/ios/Icon/AppIcon.icon --export-image \
+              --output-file "$RUNNER_TEMP/screens/icon/$rendition.png" --platform iOS \
+              --rendition "$rendition" --width 1024 --height 1024 --scale 1
+          done
       - name: Collect the screenshots
         if: ${{ !cancelled() }}
         run: |

@@ -88,8 +88,9 @@ export interface TurnResult {
   /** Set when the CLI could not resume the requested session, which failed the turn before any model call. */
   readonly resumeFailed?: ResumeFailure | undefined;
   /**
-   * Set when the model service turned the turn away for now, as when it was overloaded or failed
-   * on its side and the CLI's own retries ran out. A plan's usage limit is not transient.
+   * Set when the turn failed in a way a minute may cure: the model service turned it away, as when
+   * it was overloaded or failed on its side, once the CLI's own retries ran out, or the request was
+   * cut off on its way. A plan's usage limit is not transient, nor any other refusal.
    */
   readonly transient?: boolean | undefined;
 }

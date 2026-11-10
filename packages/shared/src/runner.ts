@@ -97,7 +97,11 @@ export const RunnerHelloSchema = z.object({
   gitIdentityMissing: z.array(GitIdentityPartSchema).optional(),
   /** Turns the runner runs at once, or null for no limit. */
   slots: z.number().int().positive().nullable(),
-  /** Turns the runner is still running, when it registers again; the server fails the rest of its turns. */
+  /**
+   * Turns the runner is still running, when it registers again: the server fails the rest of its
+   * turns, and has any of these it has ended stopped once the stream opens, when the runner lists
+   * a CLI it can stop.
+   */
   turns: z.array(UlidSchema).default([]),
 });
 export type RunnerHello = z.infer<typeof RunnerHelloSchema>;
@@ -319,9 +323,9 @@ export const TurnOutcomeSchema = z.object({
    */
   resumeFailed: ResumeFailureSchema.optional(),
   /**
-   * Set when the model service turned the turn away for now, as when it was overloaded or failed
-   * on its side, which the scheduler answers by sending the same wake again within minutes. A
-   * runner from before never sends it.
+   * Set when the turn failed for now: the model service turned it away or cut it off, or the runner
+   * could not reach the board before the CLI started. The scheduler answers it by sending the same
+   * wake again within minutes. A runner from before never sends it.
    */
   transient: z.boolean().optional(),
   /** The model the CLI reported, when it reported one. */

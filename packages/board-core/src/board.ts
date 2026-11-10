@@ -27,6 +27,7 @@ import {
   describeCharter,
   EffortSchema,
   githubRepository,
+  IMAGE_KIND_NAMES,
   IMAGE_LIMIT_BYTES,
   IMAGE_SCHEME,
   imageDescription,
@@ -163,10 +164,12 @@ import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
 import { FileTree } from "./files.js";
 import { HomeRepos } from "./homes.js";
+import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import { computeMetrics } from "./metrics.js";
 import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
+import { TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
   exists,
@@ -228,6 +231,12 @@ export type ImageSink = (
 
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
+
+/**
+ * How old a top-level post in a project's channel must be before it counts toward the heartbeat of
+ * a reader it does not ask (see `unreadByConversation`): a day, by default.
+ */
+export const CHANNEL_POST_WAIT_MS = 24 * 3_600_000;
 
 /** Whether a turn in flight is the one the actor acts from, which may end its own conversation. */
 function ownTurn(actor: Actor, turn: TurnInFlight): boolean {
@@ -2015,10 +2024,16 @@ export class Board {
    * when it mentions the user, so the creator can put a wait on the user in; a post that asks the
    * reader counts wherever it is. A closed thread counts for nothing: its conversation has ended,
    * and a turn there could only read its posts and be refused a reply, while a wake queued before
-   * it closed, as for a mention, still runs there.
+   * it closed, as for a mention, still runs there. A top-level post in a project's channel, general
+   * or a workstream's, counts only for a reader it asks until it is `channelPostWaitMs` old, and
+   * then for every reader who has not read it, so a turn there for anything else reads it sooner.
    */
-  async unreadByConversation(actor: Actor): Promise<UnreadConversation[]> {
+  async unreadByConversation(
+    actor: Actor,
+    options: { channelPostWaitMs?: number | undefined } = {},
+  ): Promise<UnreadConversation[]> {
     const { cursors, upto } = await this.digestSnapshot(actor.name);
+    const waited = this.now().getTime() - (options.channelPostWaitMs ?? CHANNEL_POST_WAIT_MS);
     const counts = new Map<string, UnreadConversation>();
     const threadCounts = new Map<Ulid, ThreadCount>();
     const unscoped = { name: actor.name, role: actor.role };
@@ -2036,11 +2051,22 @@ export class Board {
       ) {
         continue;
       }
-      const posted = parseChannelRef(message.channel).project ?? SOCIETY_SCOPE;
+      const project = parseChannelRef(message.channel).project;
+      const posted = project ?? SOCIETY_SCOPE;
       if (posted !== scope && scope !== SOCIETY_SCOPE) {
         continue;
       }
       const thread = threadOfPart(part);
+      // A project's channel is read at the next turn there: a top-level post asks a turn of whoever
+      // it asks, and of everyone else only once it has waited unread for `channelPostWaitMs`.
+      if (
+        thread === undefined &&
+        project !== null &&
+        asked !== true &&
+        Date.parse(message.ts) > waited
+      ) {
+        continue;
+      }
       if (thread !== undefined) {
         let counted = threadCounts.get(thread);
         if (counted === undefined) {
@@ -2577,9 +2603,9 @@ export class Board {
   /**
    * Keeps an image a citizen's turn names by its path, read on the runner the turn runs on, which
    * refuses a file outside the turn's worktree, the citizen's home, and the system temp folder.
-   * Only the bytes of a PNG, JPEG, GIF, or WebP of at most `IMAGE_LIMIT_BYTES` are kept, checked
-   * here again whatever the runner said, under a new id outside the projection, so no runner
-   * mirrors them and no prompt carries them: a post shows the image by its `image:` address.
+   * Only a PNG, JPEG, GIF, or WebP of at most `IMAGE_LIMIT_BYTES` is kept, checked here again
+   * whatever the runner said, without its metadata, under a new id outside the projection, so no
+   * runner mirrors it and no prompt carries it: a post shows the image by its `image:` address.
    */
   async uploadImage(actor: Actor, input: VerbInput<"upload_image">): Promise<UploadedImage> {
     const args = VerbInputs.upload_image.parse(input);
@@ -2614,8 +2640,13 @@ export class Board {
 
   /**
    * Keeps `bytes` under a new id when they are a PNG, JPEG, GIF, or WebP of at most
-   * `IMAGE_LIMIT_BYTES`, and answers the markdown that shows them, described by `name`. `what`
-   * names the image in a refusal.
+   * `IMAGE_LIMIT_BYTES` that reads to its end, without its metadata (`withoutMetadata`), and
+   * answers the markdown that shows it, described by `name`. `what` names the image in a refusal.
+   * The limit is for the bytes as they came, as the route's body cap measures them, and bounds
+   * what is read; what is kept is checked against it too, since an orientation written smaller
+   * than the board writes it grows by a few bytes. The runner, the web's composer, and the app
+   * strip an image before they send it, and stripping it again changes nothing, but an older
+   * runner, page, or app sends one as it was.
    */
   private async keepImage(
     actor: Actor,
@@ -2636,19 +2667,34 @@ export class Board {
         `${what} is ${bytes.byteLength} bytes, over the ${IMAGE_LIMIT_BYTES} an image may be`,
       );
     }
+    // Read before the mutex, which every other write waits on: an image of 8 MiB built to take the
+    // most steps takes a few hundred milliseconds.
+    const kept = withoutMetadata(bytes);
+    if (kept === null) {
+      throw new BoardError(
+        "VALIDATION",
+        `${what} does not read to its end as a ${IMAGE_KIND_NAMES[type]}, so its metadata cannot be told from its picture; save it again and send that copy`,
+      );
+    }
+    if (kept.byteLength > IMAGE_LIMIT_BYTES) {
+      throw new BoardError(
+        "VALIDATION",
+        `${what} is ${kept.byteLength} bytes without its metadata, over the ${IMAGE_LIMIT_BYTES} an image may be`,
+      );
+    }
     return this.mutex.run(async () => {
       const id = this.newId();
-      await writeFileAtomic(this.paths.image(id), bytes);
+      await writeFileAtomic(this.paths.image(id), kept);
       await this.events.append("image.uploaded", actor.name, {
         id,
         type,
-        size: bytes.byteLength,
+        size: kept.byteLength,
       });
       const description = imageDescription(name);
       return {
         id,
         type,
-        size: bytes.byteLength,
+        size: kept.byteLength,
         markdown: `![${description}](${IMAGE_SCHEME}${id})`,
       };
     });
@@ -4275,6 +4321,41 @@ export class Board {
     return tokenUse(events, window, this.now());
   }
 
+  /**
+   * Every finished turn counted for Prometheus: seeded once from the whole event log, then moved
+   * by each turn's end this process appends, so reading the counts never reads the log. The server
+   * logs every turn's end itself; one another process appended would count from the next seed.
+   */
+  async countTurns(): Promise<TurnCounters> {
+    const clis = new Map<string, CliKind | null>();
+    const counters = new TurnCounters((agent) => clis.get(agent) ?? null);
+    // Ends appended while the log is read wait, and count once unless the read held them.
+    let waiting: BoardEvent[] | null = [];
+    this.events.onAppend((event) => {
+      if (waiting === null) {
+        counters.add(event);
+      } else {
+        waiting.push(event);
+      }
+    });
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    for (const agent of await this.listAgents()) {
+      clis.set(agent.name, agent.cli);
+    }
+    const seen = new Set<string>();
+    for (const event of events) {
+      seen.add(event.id);
+      counters.add(event);
+    }
+    for (const event of waiting) {
+      if (!seen.has(event.id)) {
+        counters.add(event);
+      }
+    }
+    waiting = null;
+    return counters;
+  }
+
   /** The board actions a finished turn took, from its transcript; null when it kept none. */
   private async turnActions(agent: Name, turnId: string): Promise<number | null> {
     // A transcript is written before its turn's end is logged and never changes after.
@@ -4527,6 +4608,7 @@ export class Board {
         trigger: parsed.trigger.kind,
         ...(parsed.trigger.heartbeat === undefined ? {} : { heartbeat: parsed.trigger.heartbeat }),
         session: parsed.session,
+        cli: parsed.cli,
         exitReason: parsed.exitReason,
         costUsd: parsed.costUsd,
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),

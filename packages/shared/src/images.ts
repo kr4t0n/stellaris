@@ -25,6 +25,14 @@ export const IMAGE_MEDIA_TYPES: Readonly<Record<ImageType, string>> = {
   webp: "image/webp",
 };
 
+/** Each kind of image as a refusal names it. */
+export const IMAGE_KIND_NAMES: Readonly<Record<ImageType, string>> = {
+  png: "PNG",
+  jpeg: "JPEG",
+  gif: "GIF",
+  webp: "WebP",
+};
+
 function startsWith(bytes: Uint8Array, prefix: ArrayLike<number>, at = 0): boolean {
   for (let index = 0; index < prefix.length; index += 1) {
     if (bytes[at + index] !== prefix[index]) {

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="color-01-meteor-upper" gradientUnits="userSpaceOnUse" x1="580" y1="10" x2="200" y2="235">
+      <stop offset="0" stop-color="#bcb1f4" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#bcb1f4" stop-opacity="0.14"/>
+      <stop offset="0.7" stop-color="#b8d5f3" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#dffff8" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+  <path d="M580 10 L191.746229 221.060299 Q192.255721 239.585428 208.253771 248.939701 Z" fill="url(#color-01-meteor-upper)" opacity="0.2"/>
+  <path d="M580 10 L197.019472 229.966219 Q192.255721 239.585428 202.980528 240.033781 Z" fill="url(#color-01-meteor-upper)"/>
+  <circle cx="200" cy="235" r="9" fill="#c9eee9" opacity="0.5"/>
+  <circle cx="200" cy="235" r="4.05" fill="#f4fffc"/>
+</svg>

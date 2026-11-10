@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -17,6 +19,7 @@ import {
   type AgentBackend,
   type PullRequestOps,
   type ResidentSession,
+  type TurnControl,
   type TurnResult,
 } from "@stellaris/runner-core";
 import {
@@ -37,12 +40,14 @@ import {
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
+  type TurnRecord,
   type Usage,
 } from "@stellaris/shared";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
 
@@ -386,12 +391,6 @@ async function commitEmpty(cwd: string, agent: string, message: string): Promise
 /** A verb's answer or refusal, as a JSON object. */
 const AnswerSchema = z.record(z.string(), z.unknown());
 
-/** The smallest PNG there is: one transparent pixel. */
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-  "base64",
-);
-
 const deskPost = {
   agent: "desk",
   project: "society",
@@ -468,6 +467,88 @@ async function idleRepeats(board: Board, count: number): Promise<void> {
       wakes: false,
     });
   }
+}
+
+/**
+ * A CLI whose turns run until the test ends them, logging as each starts, is asked to stop, and
+ * ends, so a test can tell whether two ever ran at once. A stop ends nothing by itself: the test
+ * ends the turn, as a real CLI winds down some time after its interrupt.
+ */
+class LoggedBackend implements AgentBackend {
+  readonly kind = "claude" as const;
+  readonly stops = true;
+  readonly log: string[] = [];
+  private readonly ends: Array<PromiseWithResolvers<void>> = [];
+
+  newSession(): Promise<string> {
+    return Promise.resolve("session-1");
+  }
+
+  async runTurn(
+    _request: object,
+    _onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
+    const ended = Promise.withResolvers<void>();
+    this.ends.push(ended);
+    const turn = this.ends.length;
+    let stopped = false;
+    this.log.push(`start ${turn}`);
+    const detach = control?.attach({
+      stop: () => {
+        stopped = true;
+        this.log.push(`stop ${turn}`);
+      },
+    });
+    await ended.promise;
+    detach?.();
+    this.log.push(`end ${turn}`);
+    return stopped
+      ? { ...completed("stopped"), status: null, exitReason: "interrupted" }
+      : completed("done");
+  }
+
+  /** Ends the nth turn, counted from 1. */
+  end(turn: number): void {
+    this.ends[turn - 1]?.resolve();
+  }
+}
+
+/**
+ * A runner's way to the server that the test can take down as a network fails: the event stream it
+ * holds is cut, and every call fails at once until the network is back.
+ */
+function failingNetwork(): { fetch: typeof fetch; down: () => void; up: () => void } {
+  let down = false;
+  const streams = new Set<AbortController>();
+  return {
+    fetch: (input, init) => {
+      if (down) {
+        return Promise.reject(new TypeError("fetch failed"));
+      }
+      const url = input instanceof Request ? input.url : input.toString();
+      if (!url.endsWith("/runner/stream")) {
+        return fetch(input, init);
+      }
+      const cut = new AbortController();
+      streams.add(cut);
+      const signal = init?.signal ?? null;
+      return fetch(input, {
+        ...init,
+        signal: signal === null ? cut.signal : AbortSignal.any([signal, cut.signal]),
+      });
+    },
+    down: () => {
+      down = true;
+      for (const stream of streams) {
+        stream.abort();
+      }
+      streams.clear();
+    },
+    up: () => {
+      down = false;
+    },
+  };
 }
 
 /** When each spend report was logged, oldest first. */
@@ -1939,9 +2020,9 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).toContain(note);
   });
 
-  it("keeps the session after a reflection outside a society role's home", async () => {
-    const { board } = await Board.init(dir, { name: "kept" });
-    await board.addProject(USER, { slug: "demo" });
+  it("starts a project member's home afresh once a reflection there completes, and keeps its threads' and channels' sessions", async () => {
+    const { board } = await Board.init(dir, { name: "afresh-project" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
     await board.setRoleCharter(USER, {
       name: "engineer",
       purpose: "Builds.",
@@ -1951,6 +2032,122 @@ describe("turns on a runner over the runner protocol", () => {
     await board.addAgent(USER, {
       name: "eng-1",
       role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const topic = await board.openThread(USER, { channel: "demo/general", title: "a question" });
+    const handed: Array<[string, boolean]> = [];
+    const prompts: string[] = [];
+    const outcomes: TurnResult[] = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(outcomes.shift() ?? completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const home = manual("eng-1", "demo");
+    const inThread = { ...home, thread: { id: topic.id, task: false } };
+    const inChannel = { ...home, channel: "release" };
+    const save = "This conversation's session ends with this turn";
+    const note = "## Your session started afresh";
+
+    // The home, a thread, and a channel each start a session of their own.
+    await run(home);
+    await run(inThread);
+    await run(inChannel);
+    expect(handed).toEqual([
+      ["s-1", true],
+      ["s-2", true],
+      ["s-3", true],
+    ]);
+    const reflected = await run(reflection("eng-1", "demo"));
+    expect(reflected).toMatchObject({
+      exitReason: "completed",
+      session: "s-1",
+      sessionDropped: true,
+    });
+    expect(prompts.at(-1)).toContain(save);
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "pod" });
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.completed" && event.payload["trigger"] === "reflection",
+    );
+    expect(ended.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ project: "demo", session: "s-1", sessionDropped: true }),
+    ]);
+
+    // The next home turn starts a session, told why rather than given the first-turn notes, and
+    // the one after resumes it, told nothing.
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-4", true]);
+    expect(prompts.at(-1)).toContain(note);
+    expect(prompts.at(-1)).not.toContain("## First turn");
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-4", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+
+    // The thread and the channel resume theirs, told nothing.
+    await run(inThread);
+    expect(handed.at(-1)).toEqual(["s-2", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+    await run(inChannel);
+    expect(handed.at(-1)).toEqual(["s-3", false]);
+    expect(prompts.at(-1)).not.toContain(note);
+    expect(await board.readSessions("eng-1", "demo", topic.id)).toEqual({
+      claude: "s-2",
+      runner: "pod",
+    });
+    expect(await board.readSessions("eng-1", "demo", "#release")).toEqual({
+      claude: "s-3",
+      runner: "pod",
+    });
+
+    // A reflection that fails, times out, or is stopped keeps the home's session.
+    const unfinished: TurnResult[] = [
+      { ...completed(""), status: null, exitReason: "error", error: "the CLI ended" },
+      { ...completed(""), status: null, exitReason: "timeout", error: "turn timed out" },
+      { ...completed(""), status: null, exitReason: "stopped" },
+    ];
+    for (const outcome of unfinished) {
+      outcomes.push(outcome);
+      const kept = await run(reflection("eng-1", "demo"));
+      expect(kept.exitReason).toBe(outcome.exitReason);
+      expect(kept.sessionDropped).toBeUndefined();
+      await run(home);
+      expect(handed.at(-1)).toEqual(["s-4", false]);
+      expect(prompts.at(-1)).not.toContain(note);
+    }
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-4", runner: "pod" });
+  });
+
+  it("keeps the session after a reflection in a work role's home outside projects, and in a project home of a role that does not reflect", async () => {
+    const { board } = await Board.init(dir, { name: "kept" });
+    await board.addProject(USER, { slug: "demo" });
+    for (const [name, reflects] of [
+      ["engineer", true],
+      ["scribe", false],
+    ] as const) {
+      await board.setRoleCharter(USER, {
+        name,
+        purpose: "Builds.",
+        verbs: [...MEMBER_VERBS],
+        wakeTriggers: ["heartbeat"],
+        reflects,
+      });
+    }
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await board.addAgent(USER, {
+      name: "scribe-1",
+      role: "scribe",
       cli: "claude",
       memberships: ["demo"],
     });
@@ -1967,18 +2164,22 @@ describe("turns on a runner over the runner protocol", () => {
       },
     };
     const { run } = await start(board, backend);
-    // A work role's home in its project, and its home outside projects, where it was asked.
-    for (const project of ["demo", "society"]) {
-      await run(manual("eng-1", project));
-      const reflected = await run(reflection("eng-1", project));
+    // A work role's home outside projects, where it was asked, and the project home of a role
+    // that does not reflect, where the user asked for one anyway.
+    for (const [agent, project] of [
+      ["eng-1", "society"],
+      ["scribe-1", "demo"],
+    ] as const) {
+      await run(manual(agent, project));
+      const reflected = await run(reflection(agent, project));
       expect(reflected.sessionDropped).toBeUndefined();
       expect(prompts.at(-1)).toContain("## Reflection");
       expect(prompts.at(-1)).not.toContain("This conversation's session ends with this turn");
-      await run(manual("eng-1", project));
+      await run(manual(agent, project));
       expect(handed.at(-1)).toEqual([handed.at(-2)?.[0], false]);
     }
-    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-1", runner: "pod" });
-    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-2", runner: "pod" });
+    expect(await board.readSessions("eng-1", "society")).toEqual({ claude: "s-1", runner: "pod" });
+    expect(await board.readSessions("scribe-1", "demo")).toEqual({ claude: "s-2", runner: "pod" });
   });
 
   it("records a turn the model service turned away as transient, and only a failed one", async () => {
@@ -2009,6 +2210,190 @@ describe("turns on a runner over the runner protocol", () => {
       ["turn.failed", true],
       ["turn.completed", null],
     ]);
+  });
+
+  it("marks a turn transient whose runner could not reach the board before its CLI started, and no other failure there", async () => {
+    const { board } = await Board.init(dir, { name: "unreachable" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    let ran = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => {
+        ran += 1;
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    // A server that sends the manifest's headers and part of its body, then closes the connection,
+    // as when a read times out: fetch says `terminated`.
+    const cutting = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-length": "1000" });
+      response.write('{"files":{', () => response.socket?.destroy());
+    });
+    cutting.listen(0, "127.0.0.1");
+    await once(cutting, "listening");
+    onTestFinished(() => new Promise<void>((resolve) => cutting.close(() => resolve())));
+    const cutAt = cutting.address();
+    const cutUrl = `http://127.0.0.1:${typeof cutAt === "object" && cutAt !== null ? cutAt.port : 0}`;
+    // How the next pull of the board's copy goes: its connection closed unanswered, as a proxy
+    // may close it, or cut in its answer's body, or answered with this status or with what is
+    // not JSON.
+    let manifest: "dropped" | "cut" | "garbled" | number | null = null;
+    let homes = false;
+    const live = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      drop: (request) => {
+        const { pathname } = new URL(request.url);
+        return (
+          (manifest === "dropped" && pathname === "/runner/board/manifest") ||
+          (homes && pathname.startsWith("/runner/homes/"))
+        );
+      },
+      fetch: (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (!url.endsWith("/runner/board/manifest")) {
+          return fetch(input, init);
+        }
+        if (manifest === "cut") {
+          return fetch(`${cutUrl}/runner/board/manifest`, init);
+        }
+        if (manifest === "garbled") {
+          return Promise.resolve(new Response("<html>gateway</html>", { status: 200 }));
+        }
+        if (typeof manifest === "number") {
+          return Promise.resolve(new Response("refused", { status: manifest }));
+        }
+        return fetch(input, init);
+      },
+    });
+    society = live;
+    const post = { ...deskPost, agent: "concierge-1" };
+    const pulling = async (how: NonNullable<typeof manifest>): Promise<TurnRecord> => {
+      manifest = how;
+      try {
+        return await live.run(post);
+      } finally {
+        manifest = null;
+      }
+    };
+    await live.run(post);
+
+    // The server out of reach, or failing on its side: nothing ran, so the wake may go again.
+    const dropped = await pulling("dropped");
+    expect(dropped.error).toMatch(/^the runner could not run the turn: .*other side closed/);
+    expect(dropped.transient).toBe(true);
+    const cut = await pulling("cut");
+    expect(cut.error).toMatch(/^the runner could not run the turn: TypeError: terminated/);
+    expect(cut.transient).toBe(true);
+    for (const status of [503, 429]) {
+      expect(await pulling(status)).toMatchObject({
+        error: expect.stringContaining(`answered ${status}`),
+        transient: true,
+      });
+    }
+
+    // A refusal, or an answer the runner cannot read, would come again in a minute.
+    for (const how of [403, "garbled"] as const) {
+      const refused = await pulling(how);
+      expect(refused.error).toMatch(/^the runner could not run the turn/);
+      expect(refused.transient).toBeUndefined();
+    }
+
+    // So does a git failure, as of the agent's home, which comes after the pull.
+    homes = true;
+    const unfetched = await live.run(post);
+    homes = false;
+    expect(unfetched.error).toMatch(/^the runner could not run the turn: Error: git fetch failed/);
+    expect(unfetched.transient).toBeUndefined();
+    expect(ran).toBe(1);
+  });
+
+  it("sends a turn its runner could not start for want of the board again, and a cut-off one in its session", async () => {
+    let clock = Date.parse("2026-11-09T10:00:00.000Z");
+    const now = () => new Date(clock);
+    const { board } = await Board.init(dir, { name: "resend" }, { now });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    const handed: Array<{ session: string; newSession: boolean }> = [];
+    const outcomes: TurnResult[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: (request) => {
+        handed.push({ session: request.session, newSession: request.newSession });
+        return Promise.resolve(outcomes.shift() ?? completed("ran"));
+      },
+    };
+    let dropping = false;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      now,
+      drop: (request) => dropping && new URL(request.url).pathname === "/runner/board/manifest",
+    });
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now,
+      timings: {
+        debounceMs: 0,
+        userDebounceMs: 0,
+        heartbeatMs: 3_600_000,
+        transientRetryMs: [60_000],
+      },
+    });
+    const pass = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    /** How the concierge's latest turn ended. */
+    const lastEnd = async (): Promise<unknown> =>
+      (await board.readEvents(null, 1_000))
+        .filter(
+          (event) =>
+            event.actor === "concierge-1" && ["turn.completed", "turn.failed"].includes(event.type),
+        )
+        .map((event) => [event.type, event.payload["transient"] ?? null])
+        .at(-1);
+    // Onboarding runs first.
+    for (let i = 0; i < 3; i += 1) {
+      await pass();
+    }
+    const before = handed.length;
+
+    // The board's copy never arrives, so the turn fails before its CLI starts.
+    dropping = true;
+    await board.postMessage(USER, { channel: "general", body: "Is the build green?" });
+    await pass();
+    dropping = false;
+    expect(await lastEnd()).toEqual(["turn.failed", true]);
+    expect(handed).toHaveLength(before);
+
+    // A minute later the same wake goes again, and reaches the CLI; the heartbeat is an hour away.
+    clock += 59_000;
+    await pass();
+    expect(handed).toHaveLength(before);
+    clock += 1_000;
+    await pass();
+    expect(handed).toHaveLength(before + 1);
+    expect(await lastEnd()).toEqual(["turn.completed", null]);
+
+    // A turn the API cut off after its CLI had worked goes again in the session holding that work.
+    outcomes.push({
+      ...completed(""),
+      status: null,
+      exitReason: "error",
+      error: "API Error: 499 Client Closed Request",
+      transient: true,
+    });
+    await board.postMessage(USER, { channel: "general", body: "And the deploy?" });
+    await pass();
+    clock += 60_000;
+    await pass();
+    const [cut, resent] = handed.slice(before + 1);
+    expect(cut).toEqual({ session: "session-1", newSession: false });
+    expect(resent).toEqual(cut);
+    expect(handed).toHaveLength(before + 3);
   });
 
   it("keeps a session its CLI may resume next time, and drops it after three such turns in a row", async () => {
@@ -3527,13 +3912,24 @@ describe("turns on a runner over the runner protocol", () => {
     });
     expect(await first).toMatchObject({ exitReason: "completed" });
 
-    // A job that never arrived on a runner that then stays away is said to have never reached it.
+    // A job that never arrived on a runner that then stays away is said to have never reached it,
+    // and since nothing ran, the same wake may go again.
     const second = run(dispatch);
     await vi.waitFor(() => expect(delivered).toHaveLength(2));
     await detach();
     expect(await second).toMatchObject({
       exitReason: "error",
       error: expect.stringContaining("never reached runner ghost"),
+      transient: true,
+    });
+
+    // Nor did one the hub could not even send, its runner's stream gone.
+    await hub.register("ghost", hello);
+    await hub.attach("ghost", () => false);
+    expect(await run(dispatch)).toMatchObject({
+      exitReason: "error",
+      error: "runner ghost went away before the turn",
+      transient: true,
     });
   });
 
@@ -3689,6 +4085,237 @@ describe("turns on a runner over the runner protocol", () => {
     gate.resolve();
     expect(await long).toMatchObject({ exitReason: "completed" });
     expect(started).toBe(2);
+  });
+
+  it("stops the CLI of a turn the board ended while its runner was away, once the runner is back", async () => {
+    const { board } = await Board.init(dir, { name: "ended-away" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    const network = failingNetwork();
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      fetch: network.fetch,
+      graceMs: 300,
+    });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
+
+    // The runner's network fails for longer than the grace period: the board ends the turn and
+    // frees its conversation, while the CLI, cut off from the board, works on.
+    network.down();
+    const ended = await first;
+    expect(ended).toMatchObject({
+      exitReason: "error",
+      error: "runner pod went away during the turn",
+    });
+    // Its CLI may have done work a resend would do twice, so its wake waits for the heartbeat.
+    expect(ended.transient).toBeUndefined();
+    expect(runner.turns).toHaveLength(1);
+
+    // Back, the runner lists the turn in its hello, and the server has it stop the CLI.
+    network.up();
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), {
+      timeout: 10_000,
+    });
+
+    // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
+    // workspace only once that CLI has ended.
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(backend.log).toEqual(["start 1", "stop 1"]);
+    backend.end(1);
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]));
+    backend.end(2);
+    expect(await next).toMatchObject({ exitReason: "completed" });
+    await vi.waitFor(() => expect(runner.turns).toEqual([]));
+  });
+
+  it("runs one turn of a conversation at a time on a runner, stopping the earlier for the next", async () => {
+    const { board } = await Board.init(dir, { name: "one-at-a-time" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    for (const name of ["eng-1", "eng-2"]) {
+      await board.addAgent(USER, { name, role: "engineer", cli: "claude", memberships: ["demo"] });
+    }
+    const backend = new LoggedBackend();
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    const { run, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+
+    // The server sends a conversation's next turn only once it has ended the last, so a second job
+    // of the conversation means the board no longer holds the first, by whatever path it ended:
+    // the runner stops it, and starts the second in the workspace only once its CLI has ended.
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(backend.log).toEqual(["start 1", "stop 1"]);
+
+    // Another citizen's turn, in a conversation of its own, does not wait.
+    const other = run(manual("eng-2", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]));
+    backend.end(2);
+    expect(await other).toMatchObject({ exitReason: "completed" });
+
+    backend.end(1);
+    await vi.waitFor(() =>
+      expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+    );
+    backend.end(3);
+    expect(await first).toMatchObject({ exitReason: "stopped" });
+    expect(await next).toMatchObject({ exitReason: "completed" });
+  });
+
+  it("keeps a turn running, unstopped, on a runner back within the grace period", async () => {
+    const { board } = await Board.init(dir, { name: "back-in-grace" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    const network = failingNetwork();
+    let hellos = 0;
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      fetch: network.fetch,
+      graceMs: 3_000,
+      drop: (request) => {
+        if (new URL(request.url).pathname === "/runner/hello") {
+          hellos += 1;
+        }
+        return false;
+      },
+    });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
+    const said = hellos;
+
+    // The network fails for less than the grace period. The runner says hello again, listing the
+    // turn, which the board still holds, so nothing stops it, neither then nor once the grace
+    // period would have run out.
+    network.down();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    network.up();
+    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), { timeout: 5_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]));
+    expect(runner.turns).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(backend.log).toEqual(["start 1"]);
+    backend.end(1);
+    expect(await first).toMatchObject({ exitReason: "completed" });
+  });
+
+  it("ends a turn the user stops while it waits for its conversation's earlier one, its CLI never started", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-waiting" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    const { run, hub, runner } = society;
+    const first = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    const next = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
+    const waiting = runner.turns[1] ?? "";
+
+    // The user stops the turn that waits. It ends once the earlier turn's CLI has ended, without
+    // starting its own.
+    expect(await hub.stop(waiting, "user")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(runner.turns).toHaveLength(2);
+    backend.end(1);
+    expect(await next).toMatchObject({ exitReason: "stopped" });
+    expect(await first).toMatchObject({ exitReason: "stopped" });
+    expect(backend.log).toEqual(["start 1", "stop 1", "end 1"]);
+  });
+
+  it("sends the stop for a turn the board has ended only to a runner that lists a CLI it can stop", async () => {
+    const { board } = await Board.init(dir, { name: "ended-older-runner" });
+    society = await startTestSociety({ board, backends: () => ({ claude: new LoggedBackend() }) });
+    const { hub } = society;
+    // A turn the runner still runs and the host no longer holds, as after the grace period.
+    const ended = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const hello: RunnerHello = {
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      residentClis: [],
+      steerableClis: [],
+      stoppableClis: [],
+      branchReads: true,
+      branchChanges: true,
+      quotaReads: true,
+      imageReads: false,
+      imageWrites: false,
+      projectMoves: false,
+      capabilities: [],
+      slots: null,
+      turns: [ended],
+    };
+
+    // A runner from before stops lists none it can stop, and would skip the message.
+    await board.addRunner(USER, "older");
+    await hub.register("older", hello);
+    const toOlder: RunnerMessage[] = [];
+    await hub.attach("older", (message) => toOlder.push(message) > 0);
+    expect(toOlder).toEqual([]);
+
+    await board.addRunner(USER, "newer");
+    await hub.register("newer", { ...hello, stoppableClis: ["claude"] });
+    const toNewer: RunnerMessage[] = [];
+    await hub.attach("newer", (message) => toNewer.push(message) > 0);
+    expect(toNewer).toEqual([{ type: "stop", request: expect.any(String), turnId: ended }]);
+    const [stop] = toNewer;
+    if (stop?.type === "stop") {
+      hub.answer("newer", stop.request, { ok: true, value: true });
+    }
   });
 
   it("counts a turn's steps or outcome as its job's receipt, for a runner that never posts one", async () => {
@@ -4868,7 +5495,7 @@ describe("turns on a runner over the runner protocol", () => {
       memberships: ["demo"],
     });
     // The user's image is as large as the board takes, so the whole of it crosses the stream.
-    const largest = Buffer.concat([PIXEL, Buffer.alloc(IMAGE_LIMIT_BYTES - PIXEL.length, 7)]);
+    const largest = pngOfSize(IMAGE_LIMIT_BYTES);
     const posted = await board.postImage(USER, largest, "board.png");
     const answers = new Map<string, { status: number; body: Record<string, unknown> }>();
     const opened = new Map<string, Buffer>();

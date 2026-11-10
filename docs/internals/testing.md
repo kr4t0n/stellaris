@@ -140,6 +140,7 @@ The WHATWG URL parser resolves `.` and `..` segments, `%2E%2E` included, before 
 - The content island's resize handle is `getByRole("button", { name: /^Width of the board's content/ })`, its accessible name gives the width, and `ArrowRight` narrows it by 32 px and `ArrowLeft` widens it. An init script setting `localStorage` `stellaris.contentWidth` to a number sets the island to that width from the first frame.
 - Measure an item relative to its scroller (`rect.y - scroller.y + scrollTop`), not by `offsetTop`, which changes with any new positioned wrapper.
 - The Citizens list's rows are subgrids as wide as every column together, so their own `scrollWidth` never shows overflow; read sideways overflow on the list's scroller. A grid item's box spans its whole column, so check where text is drawn with a `Range` over the cell's text nodes.
+- Playwright's `deviceScaleFactor`, a device descriptor's included, scales the picture but still lays text out in CSS pixels, while Chromium at a real scale lays it out in device pixels and rounds a font differently: a count's digits sat a device pixel high at a real 2 and level at an emulated one. For a real scale, launch Chromium with `--force-device-scale-factor=<n>` and open the context with a null viewport, so `devicePixelRatio` reads `n`, from a project with no device descriptor: a descriptor's `deviceScaleFactor` refuses a null viewport, and so does a context a test makes itself in a project that has one, since Playwright fills every option the test leaves out from the project.
 
 ### What the first page loads
 

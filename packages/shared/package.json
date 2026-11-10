@@ -15,6 +15,10 @@
     "./mentions": {
       "types": "./dist/mentions.d.ts",
       "default": "./dist/mentions.js"
+    },
+    "./image-metadata": {
+      "types": "./dist/image-metadata.d.ts",
+      "default": "./dist/image-metadata.js"
     }
   },
   "dependencies": {

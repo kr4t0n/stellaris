@@ -13,8 +13,9 @@ final class SubjectUITests: ShellTestCase {
   private let channelProposal = "00000000000000000000000006"
   private let reallocation = "00000000000000000000000008"
 
-  /// A stage that waits on the user opens from Needs you with Advance in the bar; the note sent
-  /// with it shows in the task's thread, and the task moves on to its next stage.
+  /// A stage that waits on the user opens from Needs you with Advance in the bar, whose sheet has
+  /// the chat's ground behind the keyboard; the note sent with it shows in the task's thread, and
+  /// the task moves on to its next stage.
   @MainActor func testAdvancesAStageThatWaitsOnYou() {
     let app = launch()
     signIn(app)
@@ -31,7 +32,7 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(note.waitForExistence(timeout: 20), "Advance opens no sheet")
     note.tap()
     note.typeText("The design is approved.")
-    keepScreen("advance")
+    expectTheGroundBehindTheKeyboard(app, beside: note, "advance")
     expectInTheSideColumn(app, app.buttons["advance-confirm"].firstMatch)
     pick(app, "advance-confirm")
     let posted = app.scrollViews["messages"].staticTexts
@@ -59,8 +60,8 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("task-not-yours")
   }
 
-  /// Reject asks for a reason, which a swipe away keeps; the rejection shows in the strip, and
-  /// closes the proposal's thread.
+  /// Reject asks for a reason, with the chat's ground behind the keyboard, and a swipe away keeps
+  /// it; the rejection shows in the strip, and closes the proposal's thread.
   @MainActor func testRejectsAProposalWithItsReason() {
     let app = launch()
     signIn(app)
@@ -77,6 +78,7 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet")
     reason.tap()
     reason.typeText("One reviewer keeps up for now.")
+    expectTheGroundBehindTheKeyboard(app, beside: reason, "reject")
     dragAway(app, app.navigationBars["Reject"].firstMatch)
     XCTAssertTrue(reason.waitForNonExistence(timeout: 20), "the sheet doesn't go")
     pick(app, "reject")

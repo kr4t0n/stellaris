@@ -144,7 +144,10 @@ interface OpenTurn {
   /** The turn's own token, revoked when the turn ends; a warm session's lives on with the session. */
   readonly coldToken: string | null;
   readonly residentKey: string | null;
-  /** Whether a reflection that completes here ends the session: a society role's home. */
+  /**
+   * Whether a reflection that completes here ends the session: a society role's or a project
+   * member's home.
+   */
   readonly afreshAfterReflection: boolean;
   readonly keepLeases: ReturnType<typeof setInterval>;
   readonly done: (record: TurnRecord) => void;
@@ -367,10 +370,13 @@ export class TurnHost {
       !newSession && lastTurn?.session === recorded && lastTurn.resumeFailed === "retry"
         ? (lastTurn.resumeRetries ?? 1)
         : 0;
-    // A society role's home keeps no session past a reflection, which saved what it keeps into the
-    // home's files; the turn after one starts afresh, and is no citizen's first turn.
+    // A home keeps no session past a reflection, which saved what it keeps into the home's files: a
+    // society role's in the society scope, and a project member's whose role reflects. The turn
+    // after one starts afresh, and is no citizen's first turn.
     const afreshAfterReflection =
-      charter.societyScope && agent.role !== USER_ROLE && societyScope && part === undefined;
+      agent.role !== USER_ROLE &&
+      part === undefined &&
+      (societyScope ? charter.societyScope : charter.reflects);
     const afterReflection =
       lastTurn?.trigger.kind === "reflection" && lastTurn.sessionDropped === true;
 
@@ -824,8 +830,9 @@ export class TurnHost {
     const dropSession =
       job.session !== null &&
       (outcome.resumeFailed === "lost" || (resumeRetries ?? 0) >= RESUME_RETRIES);
-    // A society role's home starts afresh once a reflection there completed: the runner pushed the
-    // home before it reported the outcome, so the next turn's instructions carry what it kept.
+    // A society role's or a project member's home starts afresh once a reflection there completed:
+    // the runner pushed the home before it reported the outcome, so the next turn's instructions
+    // carry what it kept.
     const reflected =
       turn.afreshAfterReflection &&
       turn.record.trigger.kind === "reflection" &&
@@ -998,8 +1005,15 @@ export class TurnHost {
     return { dropWorkspace: ended && (closing ? decided : !outcome.leftovers) };
   }
 
-  /** Ends a turn whose outcome will never come, as when its runner went away, as failed. */
-  async abortTurn(turnId: Ulid, reason: string): Promise<void> {
+  /**
+   * Ends a turn whose outcome will never come, as when its runner went away, as failed; `transient`
+   * when its job never reached the runner, so the same wake may pass in a minute.
+   */
+  async abortTurn(
+    turnId: Ulid,
+    reason: string,
+    options: { readonly transient?: boolean | undefined } = {},
+  ): Promise<void> {
     const turn = this.open.get(turnId);
     if (turn === undefined) {
       return;
@@ -1015,6 +1029,7 @@ export class TurnHost {
       exitReason: "error",
       error: reason,
       toolCalls: turn.transcript.filter((entry) => entry.event.type === "tool_call").length,
+      ...(options.transient === true ? { transient: true } : {}),
     };
     if (await this.recorded(turn, () => this.board.finishTurn(finished, turn.transcript))) {
       this.log.warn({ agent: turn.job.agent, project: turn.job.scope, reason }, "turn aborted");

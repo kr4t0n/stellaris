@@ -1,4 +1,9 @@
-import { SYSTEM_ACTOR, type Board, type UnreadConversation } from "@stellaris/board-core";
+import {
+  CHANNEL_POST_WAIT_MS,
+  SYSTEM_ACTOR,
+  type Board,
+  type UnreadConversation,
+} from "@stellaris/board-core";
 import {
   channelConversation,
   conversationPart,
@@ -141,6 +146,11 @@ export interface SchedulerTimings {
   readonly debounceMs: number;
   readonly userDebounceMs: number;
   readonly heartbeatMs: number;
+  /**
+   * A top-level post in a project's channel that asks a member nothing counts toward the member's
+   * heartbeat once it is this old; until then the member reads it at its next turn there.
+   */
+  readonly channelPostWaitMs: number;
   /** A current stage without a holder for this long is signalled as waiting. */
   readonly waitingStageMs: number;
   readonly leaseSweepMs: number;
@@ -166,13 +176,13 @@ export interface SchedulerTimings {
   /** Cadence of reflection turns for roles that reflect, counted from the scheduler's first sight of the member. */
   readonly reflectionMs: number;
   /**
-   * A society role's home session whose latest model call read this many tokens asks for a
-   * reflection ahead of the cadence, after which the home starts afresh.
+   * A society role's or a project member's home session whose latest model call read this many
+   * tokens asks for a reflection ahead of the cadence, after which the home starts afresh.
    */
   readonly sessionCapTokens: number;
   /**
-   * After a turn the model service turned away for now, the same wake goes again after each of
-   * these delays in turn, one per refusal in a row; once they are spent, the heartbeat takes over.
+   * After a turn that failed for now, the same wake goes again after each of these delays in turn,
+   * one per such failure in a row; once they are spent, the heartbeat takes over.
    */
   readonly transientRetryMs: readonly number[];
 }
@@ -182,6 +192,7 @@ export const DEFAULT_TIMINGS: SchedulerTimings = Object.freeze({
   debounceMs: 30_000,
   userDebounceMs: 5_000,
   heartbeatMs: 15 * 60_000,
+  channelPostWaitMs: CHANNEL_POST_WAIT_MS,
   waitingStageMs: 10 * 60_000,
   leaseSweepMs: 60_000,
   opsIntervalMs: 5 * 60_000,
@@ -204,6 +215,7 @@ export const SchedulerTimingsSchema = z
     debounceMs: z.number().nonnegative(),
     userDebounceMs: z.number().nonnegative(),
     heartbeatMs: z.number().positive(),
+    channelPostWaitMs: z.number().nonnegative(),
     waitingStageMs: z.number().positive(),
     leaseSweepMs: z.number().positive(),
     opsIntervalMs: z.number().positive(),
@@ -289,12 +301,21 @@ const StateSchema = z.object({
   /** When each member last reflected, or was first seen; the cadence counts from here. */
   lastReflection: z.record(z.string(), z.string()).default({}),
   /**
-   * The home session each society member last asked for an early reflection for, once per
-   * session, and whether that reflection still waits to be queued.
+   * The session each home last asked for an early reflection for, once per session, by the home's
+   * `sessionKey`, and whether that reflection still waits to be queued. A key of a member's name
+   * alone, kept before a project's homes asked, is its society home.
    */
   earlyReflection: z
     .record(z.string(), z.object({ session: z.string(), due: z.boolean() }))
-    .default({}),
+    .default({})
+    .transform((early) =>
+      Object.fromEntries(
+        Object.entries(early).map(([key, asked]) => [
+          key.includes("/") ? key : sessionKey(key, SOCIETY_SCOPE),
+          asked,
+        ]),
+      ),
+    ),
 });
 type State = z.infer<typeof StateSchema>;
 
@@ -435,7 +456,7 @@ export class Scheduler {
   private readonly sweeping = new Set<Promise<void>>();
   /** Crons whose fire's turn is running; a cron's next time passes while one is. */
   private readonly cronsInFlight = new Set<Ulid>();
-  /** Turns in a row the model service turned away, by session key, which `retryRefused` counts. */
+  /** Turns in a row that failed for now, by session key, which `retryRefused` counts. */
   private readonly refused = new Map<string, number>();
   private state: State = StateSchema.parse({
     cursor: null,
@@ -1507,7 +1528,9 @@ export class Scheduler {
           continue;
         }
         this.state.lastHeartbeat[cadence] = iso(now);
-        unread ??= await this.board.unreadByConversation(actor);
+        unread ??= await this.board.unreadByConversation(actor, {
+          channelPostWaitMs: this.timings.channelPostWaitMs,
+        });
         held ??= await this.board.heldClaims(agent.name);
         pendingCrons ??= (await this.board.listCrons()).filter(
           (cron) => cronStoppedAt(cron) === null,
@@ -1692,22 +1715,24 @@ export class Scheduler {
   }
 
   /**
-   * A society role's home session that a turn left at `sessionCapTokens` or more, by its latest
-   * model call, asks for a reflection ahead of the cadence, which `checkReflections` queues once
-   * none of the member's turns is queued or running; the reflection's end starts the home afresh
+   * A home session that a turn left at `sessionCapTokens` or more, by its latest model call, asks
+   * for a reflection ahead of the cadence, which `checkReflections` queues in that home once none
+   * of the member's turns is queued or running: a society role's home in the society scope, and
+   * the home of a project's member whose role reflects. The reflection's end starts the home afresh
    * (`TurnHost`), so its history goes only once a reflection saved what to keep. A session asks
    * once, so a reflection that fails leaves the next to the cadence, and none asks while a
-   * reflection is queued or running.
+   * reflection is queued or running in its home.
    */
   private async checkSessionSize(event: BoardEvent): Promise<void> {
     const { payload } = event;
     const tokens = payload["contextTokens"];
     const session = stringOf(payload["session"]);
+    const project = stringOf(payload["project"]);
     if (
       typeof tokens !== "number" ||
       tokens < this.timings.sessionCapTokens ||
       session === null ||
-      payload["project"] !== SOCIETY_SCOPE ||
+      project === null ||
       payload["thread"] !== undefined ||
       payload["channel"] !== undefined ||
       payload["place"] !== undefined ||
@@ -1721,31 +1746,42 @@ export class Scheduler {
       return;
     }
     const charter = await this.board.readRole(agent.role).catch(() => null);
-    if (charter === null || !charter.societyScope || !charter.reflects) {
+    if (charter === null || !charter.reflects || !this.isHome(agent, charter, project)) {
       return;
     }
-    if (this.state.earlyReflection[agent.name]?.session === session) {
+    const home = sessionKey(agent.name, project);
+    if (this.state.earlyReflection[home]?.session === session) {
       return;
     }
-    const ofAgent = (key: string): boolean => parseSessionKey(key)?.agent === agent.name;
     const reflecting =
-      [...this.pending].some(
-        ([key, item]) => ofAgent(key) && item.dispatch.trigger.kind === "reflection",
-      ) || [...this.exclusive].some(([key, kind]) => ofAgent(key) && kind === "reflection");
+      this.pending.get(home)?.dispatch.trigger.kind === "reflection" ||
+      this.exclusive.get(home) === "reflection";
     if (reflecting) {
       return;
     }
-    this.state.earlyReflection[agent.name] = { session, due: true };
+    // A new request goes behind every other, so `checkReflections` serves homes in the order they
+    // asked: an object keeps a key it already has in its first place.
+    delete this.state.earlyReflection[home];
+    this.state.earlyReflection[home] = { session, due: true };
     this.log.info(
-      { agent: agent.name, contextTokens: tokens, cap: this.timings.sessionCapTokens },
+      { agent: agent.name, project, contextTokens: tokens, cap: this.timings.sessionCapTokens },
       "home session past the cap; a reflection is due",
     );
   }
 
   /**
+   * Whether a member's home in a scope starts afresh after a reflection, as `TurnHost` decides: a
+   * society role's in the society scope, and its own in each project it belongs to.
+   */
+  private isHome(agent: Agent, charter: RoleCharter, scope: Name): boolean {
+    return scope === SOCIETY_SCOPE ? charter.societyScope : agent.memberships.includes(scope);
+  }
+
+  /**
    * Every `reflectionMs`, a member whose charter reflects takes a reflection turn in the scope of
-   * its latest working turn, unless it has not worked since its last reflection; a society member
-   * whose home session passed the cap takes one in its home ahead of the cadence, which restarts it.
+   * its latest working turn, unless it has not worked since its last reflection; a member one of
+   * whose homes passed the cap takes one in that home ahead of the cadence, which restarts it, one
+   * home at a time, in the order they asked.
    */
   private async checkReflections(now: number): Promise<void> {
     for (const agent of await this.board.listAgents()) {
@@ -1756,17 +1792,26 @@ export class Scheduler {
       if (!charter.reflects) {
         continue;
       }
-      const early = this.state.earlyReflection[agent.name];
-      if (early?.due === true) {
+      const due = Object.entries(this.state.earlyReflection).filter(
+        ([key, early]) => early.due && parseSessionKey(key)?.agent === agent.name,
+      );
+      if (due.length > 0) {
         if (!this.busy(agent.name)) {
-          this.state.lastReflection[agent.name] = iso(now);
-          this.state.earlyReflection[agent.name] = { ...early, due: false };
-          this.enqueue(
-            agent.name,
-            SOCIETY_SCOPE,
-            { kind: "reflection", reason: "home session past the cap" },
-            now,
-          );
+          for (const [key, early] of due) {
+            this.state.earlyReflection[key] = { ...early, due: false };
+            const scope = parseSessionKey(key)?.scope;
+            // A home the member has since left asks for nothing.
+            if (scope !== undefined && this.isHome(agent, charter, scope)) {
+              this.state.lastReflection[agent.name] = iso(now);
+              this.enqueue(
+                agent.name,
+                scope,
+                { kind: "reflection", reason: "home session past the cap" },
+                now,
+              );
+              break;
+            }
+          }
         }
         continue;
       }
@@ -2404,21 +2449,24 @@ export class Scheduler {
         this.exclusive.set(key, "onboarding");
       } else if (dispatch.trigger.kind === "reflection") {
         this.exclusive.set(key, "reflection");
-        // Any reflection that starts is the one an early request waited for.
-        const early = this.state.earlyReflection[dispatch.agent];
+        // Any reflection that starts in a home is the one an early request there waited for; one in
+        // another of the member's homes cannot end this home's session, so its request still waits.
+        const early = this.state.earlyReflection[key];
         if (early?.due === true) {
-          this.state.earlyReflection[dispatch.agent] = { ...early, due: false };
+          this.state.earlyReflection[key] = { ...early, due: false };
         }
       }
     }
   }
 
   /**
-   * A turn the model service turned away for now, overloaded or failing on its side, is sent again:
-   * the same wake in the same conversation, after the next delay of `transientRetryMs`, with every
-   * check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a new
-   * post's, runs the conversation instead. Once the delays are spent the heartbeat takes over, and
-   * a `turn_refused` signal, which wakes nobody, says so. A turn that ends any other way ends the run.
+   * A turn that failed for now is sent again: the model service turned it away or cut it off, the
+   * runner could not reach the board before its CLI started, or its job never reached the runner.
+   * The same wake goes in the same conversation, after the next delay of `transientRetryMs`, with
+   * every check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a
+   * new post's, runs the conversation instead. Once the delays are spent the heartbeat takes over,
+   * and a `turn_refused` signal, which wakes nobody, says so. A turn that ends any other way ends
+   * the run.
    */
   private async retryRefused(key: string, item: PendingTurn, record: TurnRecord): Promise<void> {
     if (record.transient !== true || record.exitReason !== "error") {
@@ -2433,12 +2481,13 @@ export class Scheduler {
       if (this.pending.has(key)) {
         return;
       }
-      // What was steered into the refused turn was never read there, so it may be steered again.
+      // What was steered into the failed turn may not have been read there, so it may be
+      // steered again.
       const { steeredThrough: _steered, ...retry } = item;
       this.pending.set(key, { ...retry, readyAt: this.now().getTime() + delay });
       this.log.info(
         { agent: dispatch.agent, project: dispatch.project, refused, delayMs: delay },
-        "the model service turned the turn away, sending its wake again",
+        "the turn failed for now, sending its wake again",
       );
       return;
     }
@@ -2457,7 +2506,7 @@ export class Scheduler {
     await this.board.publishSignal({
       kind: "turn_refused",
       key: `turn_refused:${key}`,
-      summary: `${dispatch.agent}'s turns in ${where} were turned away by the model service ${refused} times in a row${record.model === null ? "" : ` on ${record.model}`}, the last with "${record.error ?? "no error"}"; its heartbeat takes over`,
+      summary: `${dispatch.agent}'s turns in ${where} failed for now ${refused} times in a row${record.model === null ? "" : ` on ${record.model}`}, the last with "${record.error ?? "no error"}"; its heartbeat takes over`,
       value: refused,
       threshold: refused,
       agent: dispatch.agent,

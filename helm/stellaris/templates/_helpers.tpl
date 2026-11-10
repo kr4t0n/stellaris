@@ -178,6 +178,13 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- if not (or (kindIs "invalid" $proxies) (regexMatch "^[0-9]*$" (toString $proxies))) -}}
 {{- fail (printf "server.config.trustedProxies must be a number of proxies or empty, not %q" (toString $proxies)) -}}
 {{- end -}}
+{{- $metrics := .Values.server.metrics -}}
+{{- if and $metrics.serviceMonitor.enabled (not $metrics.enabled) -}}
+{{- fail "server.metrics.serviceMonitor needs server.metrics.enabled, whose port it scrapes" -}}
+{{- end -}}
+{{- if and $metrics.enabled (eq (int $metrics.port) (int .Values.server.containerPort)) -}}
+{{- fail "server.metrics.port must differ from server.containerPort, whose /metrics is the interface's page" -}}
+{{- end -}}
 {{- $github := .Values.auth.github -}}
 {{- if $github.enabled -}}
 {{- if not $github.clientId -}}

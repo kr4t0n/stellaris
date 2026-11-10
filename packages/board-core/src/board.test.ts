@@ -1,11 +1,13 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { crc32 } from "node:zlib";
 import {
   CliQuotaSchema,
   cronFailure,
   cronStoppedAt,
   IMAGE_LIMIT_BYTES,
+  imageTypeOf,
   MEMBER_VERBS,
   VERB_DESCRIPTIONS,
   type HeartbeatCause,
@@ -15,6 +17,7 @@ import {
 import { execa } from "execa";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   Board,
   BoardError,
@@ -76,6 +79,75 @@ const heartbeat = (cause: HeartbeatCause) => ({
   reason: "",
   heartbeat: cause,
 });
+
+/** The smallest PNG there is: one transparent pixel. */
+const PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/** A PNG chunk of `type` holding `data`, with its CRC. */
+function pngChunk(type: string, data: Uint8Array): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const check = Buffer.alloc(4);
+  check.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, check]);
+}
+
+/**
+ * The pixel as a PNG of `size` bytes, a second chunk of image data filling it out: every byte of
+ * it is a chunk that draws the picture, so the board keeps all of it.
+ */
+function pngOfSize(size: number, besideHeader: Buffer = Buffer.alloc(0)): Buffer {
+  const fill = Buffer.alloc(size - PIXEL.length - besideHeader.length - 12);
+  return Buffer.concat([
+    PIXEL.subarray(0, 33),
+    besideHeader,
+    PIXEL.subarray(33, -12),
+    pngChunk("IDAT", fill),
+    PIXEL.subarray(-12),
+  ]);
+}
+
+/** The images BoardKit's stripper and the board's run, with what is kept of each, from base64. */
+const IMAGE_CASES = z
+  .object({ name: z.string(), image: z.base64(), kept: z.base64().nullable() })
+  .array()
+  .parse(
+    JSON.parse(
+      await readFile(
+        new URL("../../../apps/ios/fixtures/cases/image-metadata.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  )
+  .map((each) => ({
+    name: each.name,
+    image: Buffer.from(each.image, "base64"),
+    kept: each.kept === null ? null : Buffer.from(each.kept, "base64"),
+  }));
+
+/**
+ * What keeping a case of `IMAGE_CASES` gives, named `what`, when the caller names the image
+ * `name`: what is kept, or why it is refused.
+ */
+function keptOrRefused(each: (typeof IMAGE_CASES)[number], what: string, name: string): object {
+  const type = imageTypeOf(each.image);
+  const names = { png: "PNG", jpeg: "JPEG", gif: "GIF", webp: "WebP" };
+  if (each.kept !== null) {
+    return { what, type, size: each.kept.length, bytes: each.kept.toString("hex") };
+  }
+  return {
+    what,
+    code: "VALIDATION",
+    message:
+      type === null
+        ? `${name} is not a PNG, JPEG, GIF, or WebP image by its first bytes`
+        : `${name} does not read to its end as a ${names[type]}, so its metadata cannot be told from its picture; save it again and send that copy`,
+  };
+}
 
 /** The refusal of ending a conversation under `who`'s turn there. */
 function cut(who: string): object {
@@ -393,14 +465,14 @@ describe("Board", () => {
   it("scans a digest without holding up a post, and counts nothing written during the scan", async () => {
     const { board } = await society();
     for (let n = 0; n < 500; n += 1) {
-      await board.postMessage(REV, { channel: "demo/general", body: `note ${n}` });
+      await board.postMessage(REV, { channel: "demo/general", body: `@eng-1 note ${n}` });
     }
     let scanned = false;
     const scan = board.unreadByConversation(ENG).then((counts) => {
       scanned = true;
       return counts;
     });
-    await board.postMessage(REV, { channel: "demo/general", body: "meanwhile" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 meanwhile" });
     // The post did not wait for the heartbeat's scan of five hundred messages.
     expect(scanned).toBe(false);
     // The scan took its mark before the post, so it counts the five hundred alone; the next sees it.
@@ -798,12 +870,77 @@ describe("Board", () => {
     expect(await unread(REV, later.id)).toBe(0);
   });
 
+  it("counts a top-level post in a project's channel for whoever it asks, and for everyone else once a day old", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const FRONT: Actor = { name: "concierge-1", role: "concierge" };
+    await board.addAgent(USER, { ...FRONT, cli: "claude" });
+    const STEWARD: Actor = { name: "steward-1", role: "steward" };
+    await board.addAgent(USER, { ...STEWARD, cli: "claude" });
+    await board.subscribe(ENG, { channel: "demo/dev" });
+    const unread = async (actor: Actor) =>
+      (await board.unreadByConversation(actor)).map(({ scope, thread, channel, place, count }) => [
+        scope,
+        thread ?? channel ?? place,
+        count,
+      ]);
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "which cache?" });
+
+    // Fresh, in general and in a workstream's channel alike, a post asks a turn of whoever it
+    // mentions and of nobody else; the user's asks the front desk's, outside the project.
+    await board.postMessage(REV, { channel: "demo/general", body: "the build is green" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "the release plan" });
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-2 the date?" });
+    await board.postMessage(USER, { channel: "demo/general", body: "what is next?" });
+    // A thread's post and the society's general count as before.
+    await board.postMessage(REV, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { channel: "general", body: "the society's build is green" });
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 1]]);
+    expect(await unread(FRONT)).toEqual([
+      ["society", "demo", 1],
+      ["society", null, 1],
+    ]);
+    expect(await unread(STEWARD)).toEqual([["society", null, 1]]);
+    // Each is in the digest all the same, read at the next turn there.
+    const home = { ...ENG, scope: "demo" };
+    expect((await board.readDigest(home, { advance: false })).messages.map((m) => m.body)).toEqual([
+      "the build is green\n",
+      "@eng-2 the date?\n",
+      "what is next?\n",
+      "the society's build is green\n",
+    ]);
+
+    // A day after, every post still unread asks a turn of every reader it reaches.
+    clock = new Date(clock.getTime() + 24 * 3_600_000 - 1);
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    clock = new Date(clock.getTime() + 1);
+    expect(await unread(ENG)).toEqual([
+      ["demo", null, 3],
+      ["demo", "dev", 1],
+      ["demo", topic.id, 1],
+    ]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
+    expect(await unread(FRONT)).toEqual([
+      ["society", "demo", 1],
+      ["society", null, 1],
+    ]);
+
+    // A turn there reads them, and they ask nothing more of anyone it read them for.
+    await board.readDigest(home, { advance: true });
+    await board.readDigest({ ...home, channel: "dev" }, { advance: true });
+    expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
+  });
+
   it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
     const { board } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };
     await board.addAgent(USER, { ...STEW, cli: "claude" });
+    // A project's posts count at once, so only the notice's own rule keeps it out.
     const home = async (actor: Actor, scope: string): Promise<number> =>
-      (await board.unreadByConversation(actor)).find(
+      (await board.unreadByConversation(actor, { channelPostWaitMs: 0 })).find(
         (entry) =>
           entry.scope === scope &&
           entry.thread === null &&
@@ -868,9 +1005,10 @@ describe("Board", () => {
     const news = await board.postMessage(REV, { channel: "general", body: "the build is green" });
     expect(await ids("dev")).toEqual([inDev.id, asked.id]);
     expect(await ids()).toEqual([inGeneral.id, news.id]);
+    // Each counts toward the heartbeat where it is filed, but the post that asks nothing of eng-1.
     expect(await board.unreadByConversation(ENG)).toEqual([
       { scope: "demo", thread: null, channel: null, place: null, count: 1 },
-      { scope: "demo", thread: null, channel: "dev", place: null, count: 2 },
+      { scope: "demo", thread: null, channel: "dev", place: null, count: 1 },
     ]);
 
     // A channel token reads its channel, and its turn moves that conversation's cursor alone.
@@ -4031,14 +4169,14 @@ describe("Board", () => {
       code: "VALIDATION",
       message: expect.stringContaining("is not a PNG, JPEG, GIF, or WebP image"),
     });
-    bytes = Buffer.concat([png, Buffer.alloc(IMAGE_LIMIT_BYTES - png.length + 1)]);
+    bytes = pngOfSize(IMAGE_LIMIT_BYTES + 1);
     await expect(board.uploadImage(turn, upload)).rejects.toMatchObject({
       code: "VALIDATION",
       message: expect.stringContaining(`is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608`),
     });
-    bytes = bytes.subarray(0, IMAGE_LIMIT_BYTES);
+    bytes = pngOfSize(IMAGE_LIMIT_BYTES);
     const largest = await board.uploadImage(turn, upload);
-    expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
+    expect(Buffer.from((await board.readImage(largest.id)).bytes).equals(bytes)).toBe(true);
     // A runner's refusal reaches the citizen as it was given.
     board.readImagesWith(() =>
       Promise.reject(new BoardError("FORBIDDEN", "/etc/passwd is outside your worktree")),
@@ -4116,7 +4254,7 @@ describe("Board", () => {
       code: "VALIDATION",
       message: "the image is not a PNG, JPEG, GIF, or WebP image by its first bytes",
     });
-    const over = Buffer.concat([png, Buffer.alloc(IMAGE_LIMIT_BYTES - png.length + 1)]);
+    const over = pngOfSize(IMAGE_LIMIT_BYTES + 1);
     await expect(board.postImage(USER, over, "big.png")).rejects.toMatchObject({
       code: "VALIDATION",
       message: `big.png is ${IMAGE_LIMIT_BYTES + 1} bytes, over the 8388608 an image may be`,
@@ -4125,8 +4263,84 @@ describe("Board", () => {
     expect((await readdir(path.join(dir, "images"))).toSorted()).toEqual(
       [named.id, unnamed.id].toSorted(),
     );
-    const largest = await board.postImage(USER, over.subarray(0, IMAGE_LIMIT_BYTES), "big.png");
-    expect((await board.readImage(largest.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
+    const most = pngOfSize(IMAGE_LIMIT_BYTES);
+    const largest = await board.postImage(USER, most, "big.png");
+    expect(Buffer.from((await board.readImage(largest.id)).bytes).equals(most)).toBe(true);
+  });
+
+  it("keeps an image without its metadata, posted by the user or uploaded by a turn alike, and refuses one that doesn't read to its end", async () => {
+    const { board } = await society();
+    const turn: Actor = { ...ENG, scope: "demo", thread: "01M4WY483E0XG4Q2ZTHAX3JBZV" };
+    let bytes: Uint8Array = PIXEL;
+    board.readImagesWith(() => Promise.resolve(bytes));
+    const named = { postImage: "shot", uploadImage: "/tmp/shots/shot" };
+    const keep = (via: "postImage" | "uploadImage", image: Uint8Array) => {
+      bytes = image;
+      return via === "postImage"
+        ? board.postImage(USER, image, named.postImage)
+        : board.uploadImage(turn, { path: named.uploadImage });
+    };
+    // The table BoardKit's stripper runs, which the app runs before it posts.
+    expect(IMAGE_CASES.length).toBeGreaterThan(40);
+    const outcomes: object[] = [];
+    const expected: object[] = [];
+    const kept: number[] = [];
+    for (const each of IMAGE_CASES) {
+      for (const via of ["postImage", "uploadImage"] as const) {
+        const what = `${each.name}, through ${via}`;
+        try {
+          const { type, size, id } = await keep(via, each.image);
+          const served = (await board.readImage(id)).bytes;
+          outcomes.push({ what, type, size, bytes: Buffer.from(served).toString("hex") });
+        } catch (error) {
+          outcomes.push(
+            error instanceof BoardError
+              ? { what, code: error.code, message: error.message }
+              : { what, thrown: error },
+          );
+        }
+        expected.push(keptOrRefused(each, what, named[via]));
+        if (each.kept !== null) {
+          kept.push(each.kept.length);
+        }
+      }
+    }
+    expect(outcomes).toEqual(expected);
+    // What the event log says of each is what was kept.
+    expect(
+      (await board.readEvents(null, 1_000))
+        .filter((event) => event.type === "image.uploaded")
+        .map((event) => event.payload["size"]),
+    ).toEqual(kept);
+
+    // A refusal names the image as the caller did, and says what to do.
+    const cutShort = IMAGE_CASES.find((each) => each.name === "a JPEG cut at byte 12 of 170");
+    await expect(board.postImage(USER, cutShort?.image ?? PIXEL, "photo.jpg")).rejects.toThrow(
+      "photo.jpg does not read to its end as a JPEG, so its metadata cannot be told from its picture; save it again and send that copy",
+    );
+    bytes = cutShort?.image ?? PIXEL;
+    await expect(board.uploadImage(turn, { path: "/tmp/shots/photo.jpg" })).rejects.toThrow(
+      "/tmp/shots/photo.jpg does not read to its end as a JPEG",
+    );
+  });
+
+  it("holds what it keeps to the limit too, which an orientation written smaller than the board's outgrows", async () => {
+    const { board } = await society();
+    // A TIFF header and a directory that overlaps it, turning the picture in 18 bytes, where the
+    // board's own block of the orientation alone takes 26.
+    const turned = pngChunk("eXIf", Buffer.from("4d4d002a0000000601120003000000010006", "hex"));
+    const over = pngOfSize(IMAGE_LIMIT_BYTES, turned);
+    await expect(board.postImage(USER, over, "turned.png")).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: `turned.png is ${IMAGE_LIMIT_BYTES + 8} bytes without its metadata, over the 8388608 an image may be`,
+    });
+    const most = await board.postImage(
+      USER,
+      pngOfSize(IMAGE_LIMIT_BYTES - 8, turned),
+      "turned.png",
+    );
+    expect(most.size).toBe(IMAGE_LIMIT_BYTES);
+    expect((await board.readImage(most.id)).bytes).toHaveLength(IMAGE_LIMIT_BYTES);
   });
 
   it("hands an image it keeps to the calling turn's runner, by its id or its image: address", async () => {

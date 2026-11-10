@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
@@ -28,6 +28,14 @@ function heading(active: boolean): string {
     active ? "text-fg-primary" : "text-fg-muted hover:text-fg-primary"
   }`;
 }
+/**
+ * A count's type: 11 px on a 16 px line. The font centres its digits between its ascent and descent,
+ * but Chromium rounds those to whole device pixels and floors the half-leading. On this line the
+ * digits sit in the middle of the pill at device scales 1 and 3 and within half a device pixel
+ * between, but a device pixel high at 2, where the rounded font takes an odd 27; on the row's own
+ * 15.7 px line they sit 0.8 px high at 1 (docs/internals/interface.md).
+ */
+const COUNT_TYPE = "text-[11px] leading-[16px]";
 const ROW_ACTIVE = "bg-surface-2/80 text-fg-primary";
 const ROW_IDLE = "text-fg-secondary hover:bg-surface-2/50 hover:text-fg-primary";
 
@@ -47,23 +55,38 @@ function TasksEntry({ slug, active }: { slug: string; active: boolean }) {
         </span>
         <span className="min-w-0 flex-1 truncate">tasks</span>
         {count > 0 ? (
-          <span
-            title={`${count} tasks in play`}
-            className="rounded-md bg-surface-2/70 px-1.5 text-[11px] text-fg-tertiary"
-          >
-            {count}
-          </span>
+          <RowEnd>
+            <span
+              title={`${count} tasks in play`}
+              className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+            >
+              {count}
+            </span>
+          </RowEnd>
         ) : null}
       </Link>
     </li>
   );
 }
 
+/**
+ * The end of a row that shows a count: a slot 28 px wide, about a three-digit count's width, whose
+ * middle is the same line in every row, so counts are centred on it; a wider one grows both ways.
+ */
+function RowEnd({ children }: { children: ReactNode }) {
+  return <span className="flex w-7 shrink-0 justify-center">{children}</span>;
+}
+
 function Count({ value, title }: { value: number; title: string }) {
   return value === 0 ? null : (
-    <span title={title} className="rounded-md bg-amber-500/15 px-1.5 text-[11px] text-amber-300">
-      {value}
-    </span>
+    <RowEnd>
+      <span
+        title={title}
+        className={`rounded-md bg-amber-500/15 px-1.5 ${COUNT_TYPE} text-amber-300`}
+      >
+        {value}
+      </span>
+    </RowEnd>
   );
 }
 
@@ -109,8 +132,8 @@ function Governance({ active }: { active: GovernanceView | null }) {
 
 /**
  * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
- * order the sky places them, each with its open threads and a dot when something is new since
- * this browser looked, and last the archived projects, each opening its overview.
+ * order the sky places them, each with its open threads and its name in bold when something is new
+ * since this browser looked, and last the archived projects, each opening its overview.
  */
 export function Navigator({
   activeChannel,
@@ -229,19 +252,16 @@ export function Navigator({
                       <span className={`min-w-0 flex-1 truncate ${fresh ? "font-semibold" : ""}`}>
                         {channel.name}
                       </span>
+                      {fresh ? <span className="sr-only">new messages</span> : null}
                       {threadCount > 0 ? (
-                        <span
-                          title={`${threadCount} open threads`}
-                          className="rounded-md bg-surface-2/70 px-1.5 text-[11px] text-fg-tertiary"
-                        >
-                          {threadCount}
-                        </span>
-                      ) : null}
-                      {fresh ? (
-                        <span
-                          aria-label="new messages"
-                          className="size-1.5 rounded-full bg-emerald-400"
-                        />
+                        <RowEnd>
+                          <span
+                            title={`${threadCount} open threads`}
+                            className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+                          >
+                            {threadCount}
+                          </span>
+                        </RowEnd>
                       ) : null}
                     </Link>
                   </li>

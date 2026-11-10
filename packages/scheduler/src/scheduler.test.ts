@@ -1182,16 +1182,42 @@ describe("Scheduler", () => {
     await board.subscribe(ENG, { channel: "demo/dev" });
     await scheduler.tick();
     expect(scheduler.pendingCount).toBe(0);
+    // A post in a project's channel that asks nobody waits for a turn there, for a day at most.
     advance(10_000);
     await scheduler.tick();
     await scheduler.drain();
-    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([
-      ["eng-1", "heartbeat"],
+    expect(runner.dispatches).toHaveLength(0);
+    advance(DAY - 10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind, d.channel])).toEqual([
+      ["eng-1", "heartbeat", "dev"],
     ]);
   });
 
+  it("wakes a home on heartbeat for a project post that asks nobody only once it has waited", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { channelPostWaitMs: 3_600_000 } });
+    const beat = async (ms: number): Promise<void> => {
+      advance(ms);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await board.postMessage(REV, { channel: "demo/general", body: "the build is green" });
+    await beat(10_000);
+    await beat(3_600_000 - 20_000);
+    expect(runner.dispatches).toEqual([]);
+    await beat(10_000);
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind, d.channel])).toEqual([
+      ["eng-1", "demo", "heartbeat", undefined],
+    ]);
+    expect(runner.dispatches[0]?.trigger.heartbeat).toBe("unread");
+  });
+
   it("wakes no heartbeat for a knowledge topic's notice, in a project or the society", async () => {
-    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    // A project's posts count at once, so only the notice's own rule keeps it from waking anyone.
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, channelPostWaitMs: 0 },
+    });
     await board.setRoleCharter(USER, {
       name: "lead",
       purpose: "Leads.",
@@ -1341,7 +1367,8 @@ describe("Scheduler", () => {
   });
 
   it("wakes a heartbeat only in the scope its reasons belong to", async () => {
-    const { board, runner, scheduler } = await setup();
+    // A project's posts count at once, so that each wakes where it belongs.
+    const { board, runner, scheduler } = await setup({ timings: { channelPostWaitMs: 0 } });
     await board.addProject(USER, { slug: "lab" });
     await board.joinProject(USER, { project: "lab", agent: "eng-1" });
     await scheduler.tick();
@@ -1744,13 +1771,11 @@ describe("Scheduler", () => {
     expect(turns().map(([, , kind]) => kind)).toEqual(["manual", "manual", "reflection"]);
     runner.dispatches.length = 0;
 
-    // Neither a thread of the member's, a work role's home, nor its home outside projects asks.
+    // Neither a thread of the member's nor a work role's home outside projects asks.
     await turn("steward-1", "society", { session: "s-3", contextTokens: 5_000, thread: topic.id });
-    await turn("eng-1", "demo", { session: "s-4", contextTokens: 5_000 });
     await turn("eng-1", "society", { session: "s-5", contextTokens: 5_000 });
     expect(turns().map(([agent, project, kind]) => [agent, project, kind])).toEqual([
       ["steward-1", "society", "manual"],
-      ["eng-1", "demo", "manual"],
       ["eng-1", "society", "manual"],
     ]);
   });
@@ -1800,6 +1825,205 @@ describe("Scheduler", () => {
       await scheduler.drain();
     }
     expect(kinds()).toEqual(["manual", "reflection", "manual"]);
+  });
+
+  it("asks a project member's home for one reflection there right after a turn leaves its session past the cap, and each of its homes for its own", async () => {
+    const timings = { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 };
+    const { board, runner, scheduler } = await setup({ record: true, timings });
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    const topic = await board.openThread(USER, { channel: "demo/general", title: "a question" });
+    const settle = async (passes = 3): Promise<void> => {
+      for (let i = 0; i < passes; i += 1) {
+        await scheduler.tick();
+        await scheduler.drain();
+      }
+    };
+    await settle();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "onboarding"],
+    ]);
+    runner.dispatches.length = 0;
+    const turns = (): Array<[string, string, string]> =>
+      runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind]);
+    /** One turn of a member's home, whose record says how large its session had grown. */
+    const turn = async (project: Name, outcome: Partial<TurnRecord>): Promise<void> => {
+      runner.outcomes.push(outcome);
+      await board.requestWake(USER, { agent: "eng-1", project, reason: "work" });
+      await settle(2);
+    };
+
+    // Below the cap nothing follows; at it, a reflection in that project's home.
+    await turn("demo", { session: "s-1", contextTokens: 999 });
+    await turn("demo", { session: "s-1", contextTokens: 1_000 });
+    expect(turns()).toEqual([
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "demo", "reflection"],
+    ]);
+    expect(runner.dispatches.at(-1)?.trigger).toMatchObject({
+      reason: "home session past the cap",
+    });
+    expect(runner.dispatches.at(-1)?.thread).toBeUndefined();
+    runner.dispatches.length = 0;
+
+    // A session asks once, and a new one asks again.
+    await turn("demo", { session: "s-1", contextTokens: 2_000 });
+    await turn("demo", { session: "s-2", contextTokens: 1_500 });
+    expect(turns()).toEqual([
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "demo", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
+
+    // Neither a thread nor a channel of the member's in the project asks.
+    await turn("demo", { session: "s-3", contextTokens: 5_000, thread: topic.id });
+    await turn("demo", { session: "s-4", contextTokens: 5_000, channel: "dev" });
+    expect(turns()).toEqual([
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "demo", "manual"],
+    ]);
+    runner.dispatches.length = 0;
+
+    // Another home of the member's asks for its own, though the first asked already.
+    await turn("lab", { session: "s-5", contextTokens: 5_000 });
+    expect(turns()).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "lab", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
+
+    // Two homes past the cap at once each get one, one after the other.
+    runner.outcomes.push({ session: "s-6", contextTokens: 5_000 });
+    runner.outcomes.push({ session: "s-7", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await settle(4);
+    expect(turns()).toEqual([
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "reflection"],
+      ["eng-1", "lab", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
+    // In the order they asked this time, though demo asked first before.
+    runner.outcomes.push({ session: "s-8", contextTokens: 5_000 });
+    runner.outcomes.push({ session: "s-9", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await settle(4);
+    expect(turns()).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "manual"],
+      ["eng-1", "lab", "reflection"],
+      ["eng-1", "demo", "reflection"],
+    ]);
+    runner.dispatches.length = 0;
+
+    // A reflection in one home answers no request of another's: lab passes the cap while the user's
+    // reflection waits for demo, and gets its own after it.
+    runner.hold = true;
+    runner.outcomes.push({ session: "s-10", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await scheduler.tick();
+    await board.requestWake(USER, {
+      agent: "eng-1",
+      project: "demo",
+      reason: "reflect now",
+      kind: "reflection",
+    });
+    await scheduler.tick();
+    expect(turns()).toEqual([["eng-1", "lab", "manual"]]);
+    runner.hold = false;
+    runner.releaseHeld();
+    await settle(4);
+    expect(turns()).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "reflection"],
+      ["eng-1", "lab", "reflection"],
+    ]);
+  });
+
+  it("reads an early reflection kept under a member's name alone as its society home's", async () => {
+    const timings = { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 };
+    const { board, runner, scheduler } = await setup({ record: true, timings });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    // A scheduler from before project homes asked kept its requests by name: one still waits.
+    const saved = await board.readState("scheduler", z.record(z.string(), z.unknown()), {});
+    saved["earlyReflection"] = { "steward-1": { session: "s-1", due: true } };
+    await board.writeState("scheduler", saved);
+    const upgraded = new Scheduler({
+      board,
+      runner,
+      now,
+      timings: { debounceMs: 1_000, userDebounceMs: 0, ...timings },
+    });
+    await upgraded.tick();
+    await upgraded.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["steward-1", "society", "reflection"],
+    ]);
+    // The session it asked for asks no more, and the request is kept under the home's key.
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "steward-1", project: "society", reason: "work" });
+    for (let i = 0; i < 2; i += 1) {
+      await upgraded.tick();
+      await upgraded.drain();
+    }
+    expect(runner.dispatches.map((d) => d.trigger.kind)).toEqual(["reflection", "manual"]);
+    const state = await board.readState(
+      "scheduler",
+      z.object({ earlyReflection: z.record(z.string(), z.unknown()) }),
+      { earlyReflection: {} },
+    );
+    expect(state.earlyReflection).toEqual({ "steward-1/society": { session: "s-1", due: false } });
+  });
+
+  it("queues no early reflection in a project the member left while its request waited", async () => {
+    const timings = { ...OFF_REFLECTION, sessionCapTokens: 1_000, heartbeatMs: 3_600_000 };
+    const { board, runner, scheduler } = await setup({ record: true, timings });
+    await board.addProject(USER, { slug: "lab" });
+    await board.joinProject(USER, { project: "lab", agent: "eng-1" });
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    runner.dispatches.length = 0;
+
+    // lab's home passes the cap while a wake in demo waits for a runner, so its request waits too.
+    runner.outcomes.push({ session: "s-1", contextTokens: 5_000 });
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.away = true;
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "work" });
+    await scheduler.tick();
+    const early = async (): Promise<unknown> =>
+      (
+        await board.readState(
+          "scheduler",
+          z.object({ earlyReflection: z.record(z.string(), z.unknown()) }),
+          { earlyReflection: {} },
+        )
+      ).earlyReflection;
+    expect(await early()).toEqual({ "eng-1/lab": { session: "s-1", due: true } });
+
+    // The member leaves lab before the request is served: demo's wake runs, and lab gets nothing.
+    await board.leaveProject(USER, { project: "lab", agent: "eng-1" });
+    runner.away = false;
+    for (let i = 0; i < 3; i += 1) {
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+    expect(runner.dispatches.map((d) => [d.agent, d.project, d.trigger.kind])).toEqual([
+      ["eng-1", "lab", "manual"],
+      ["eng-1", "demo", "manual"],
+    ]);
+    expect(await early()).toEqual({ "eng-1/lab": { session: "s-1", due: false } });
   });
 
   it("lets a pass under way finish and save its cursor before it stops", async () => {
@@ -2285,13 +2509,16 @@ describe("Scheduler", () => {
   });
 
   it("ends a citizen's conversation of a project's channels when the project is archived", async () => {
-    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, channelPostWaitMs: 0 },
+    });
     await board.addProject(USER, { slug: "lab" });
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
     await scheduler.tick();
     await scheduler.drain();
     // The front desk follows lab's general from outside the project: a post there that asks
-    // nothing of it counts toward its heartbeat in lab's conversation, not its home.
+    // nothing of it, once it has waited, counts toward its heartbeat in lab's conversation, not
+    // its home.
     await board.subscribe({ name: "concierge-1", role: "concierge" }, { channel: "lab/general" });
     await board.postMessage(REV, { channel: "lab/general", body: "lab's build is green" });
     advance(10_000);
@@ -2669,8 +2896,9 @@ describe("Scheduler", () => {
     await scheduler.tick();
     advance(15 * 60_000);
     await scheduler.tick();
-    // rev-1's heartbeat has the post unread too; eng-1's mention and cron are one queued turn.
-    expect(scheduler.pendingPairs).toEqual(["eng-1/demo", "rev-1/demo"]);
+    // eng-1's mention and cron are one queued turn; rev-1, whom the post doesn't ask, reads it at
+    // its next turn there.
+    expect(scheduler.pendingPairs).toEqual(["eng-1/demo"]);
     runner.away = false;
     await scheduler.tick();
     await scheduler.drain();

@@ -4,10 +4,11 @@ import {
   type MetricsWindow,
   type Task,
 } from "@stellaris/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MetricsIndex } from "./metrics-index.js";
-import { computeMetrics, type MetricsCitizen } from "./metrics.js";
+import { computeMetrics, MetricsTally, type MetricsCitizen } from "./metrics.js";
 import { tokenUse } from "./turn-history.js";
+import { WakeLatency } from "./wake-latency.js";
 
 /** A small seeded generator, so a failing log can be made again from its seed. */
 function random(seed: number): () => number {
@@ -38,6 +39,7 @@ const HEARTBEATS = ["unread", "held", "waiting", "not-a-cause", "none"];
 const STAGES = ["s1", "s2", "s3", "s9", "none"];
 const START = Date.parse("2026-10-01T00:00:00.000Z");
 const QUARTER = 15 * 60_000;
+const DAY = 24 * 3_600_000;
 
 const ROSTERS: readonly (readonly MetricsCitizen[])[] = [
   [
@@ -92,8 +94,9 @@ interface Log {
  * A log of every shape the measures read: turns in threads, channels, and projects' channels,
  * with and without ids, counts, and heartbeat causes; posts naming citizens, others, the author,
  * and the user, by citizens, the user, and the board; steers; finished, sent back, and advanced
- * tasks; decided proposals; signals; payloads the metrics cannot read; and a clock that now and
- * then steps back.
+ * tasks; decided proposals; signals; payloads the metrics cannot read; a clock that now and
+ * then steps back, rarely by more than the week a mention waits; and a few gaps of days, so
+ * mentions wait past it.
  */
 function generate(seed: number, count: number): Log {
   const next = random(seed);
@@ -111,8 +114,17 @@ function generate(seed: number, count: number): Log {
   for (let n = 0; n < count; n += 1) {
     // On a quarter-hour grid, so events share moments and rows tie, whose order then shows.
     clock += Math.floor(next() * 6) * QUARTER;
+    if (next() < 0.01) {
+      clock += (4 + Math.floor(next() * 4)) * DAY;
+    }
     // Now and then the board's clock steps back.
-    const at = next() < 0.04 ? clock - Math.floor(next() * 12) * QUARTER : clock;
+    const back = next();
+    const at =
+      back < 0.04
+        ? clock - Math.floor(next() * 12) * QUARTER
+        : back < 0.045
+          ? clock - 8 * DAY
+          : clock;
     const id = `01M3S${String(seed % 1000).padStart(3, "0")}${String(n).padStart(18, "0")}`;
     const actor = pick(ACTORS);
     const turnId =
@@ -228,7 +240,6 @@ function actionsFor({ events, transcripts }: Log): Map<string, number | null> {
 }
 
 const WINDOWS: readonly MetricsWindow[] = ["24h", "7d", "all"];
-const DAY = 86_400_000;
 
 /** The count of tokens a turn's end carries, as written; empty when it carries none. */
 function usageOf(event: BoardEvent): Record<string, unknown> {
@@ -272,6 +283,28 @@ function withTokens(log: Log, seed: number): BoardEvent[] {
       payload: { ...event.payload, ...counted },
     };
   });
+}
+
+/** The user's post naming `name` in a thread, `seconds` after the logs' start. */
+function post(seconds: number, name: string): BoardEvent {
+  return {
+    id: `01M3S0000000000000000000${String(seconds).padStart(2, "0")}`,
+    ts: new Date(START + seconds * 1000).toISOString(),
+    type: "message.posted",
+    actor: "user",
+    payload: { channel: "lab/general", thread: TASKS[0], mentions: [name] },
+  };
+}
+
+/** `agent`'s turn starting in that thread, `seconds` after the logs' start. */
+function start(seconds: number, agent: string): BoardEvent {
+  return {
+    id: `01M3T0000000000000000000${String(seconds).padStart(2, "0")}`,
+    ts: new Date(START + seconds * 1000).toISOString(),
+    type: "turn.started",
+    actor: agent,
+    payload: { project: "lab", thread: TASKS[0], trigger: "mention" },
+  };
 }
 
 /** A turn's end of eng-1's with `payload` over a counted turn's fields. */
@@ -329,7 +362,8 @@ describe("metrics index", () => {
   });
 
   it("counts a log whose every measure is busy, so the comparison is not of empty answers", () => {
-    const log = generate(7, 240);
+    // Its mentions are answered, waiting, and past their week, too.
+    const log = generate(14, 240);
     const index = new MetricsIndex((turnId) => log.transcripts.get(turnId));
     for (const event of log.events) {
       index.add(event);
@@ -438,5 +472,79 @@ describe("metrics index", () => {
     expect(
       MetricsIndex.transcriptToRead({ ...end({ turnId: "t1" }), type: "turn.failed" }),
     ).toBeNull();
+  });
+});
+
+describe("Prometheus's wake latency", () => {
+  it("counts the answers the Metrics view times over the window all, and those still unanswered", () => {
+    // The tab's own latencies, as it counts each answered mention, since its answer gives none's total.
+    const timed = vi.spyOn(MetricsTally.prototype, "answered");
+    let answered = 0;
+    let expired = 0;
+    for (let seed = 1; seed <= 120; seed += 1) {
+      const log = generate(seed, 240);
+      for (const citizens of ROSTERS) {
+        const wakes = new WakeLatency(new Map(citizens.map((citizen) => [citizen.name, citizen])));
+        for (const event of log.events) {
+          wakes.add(event);
+        }
+        timed.mockClear();
+        const tab = computeMetrics({
+          events: log.events,
+          tasks: ALL_TASKS,
+          citizens,
+          actions: actionsFor(log),
+          activeSignals: new Set(),
+          window: "all",
+          now: new Date(Date.parse(log.events.at(-1)?.ts ?? "") + 60_000),
+        });
+        const expected = new Map<string, { count: number; sumMs: number }>();
+        for (const [agent, ms] of timed.mock.calls) {
+          const row = expected.get(agent) ?? { count: 0, sumMs: 0 };
+          expected.set(agent, { count: row.count + 1, sumMs: row.sumMs + ms });
+        }
+        const latencies = wakes.latencies();
+        expect(
+          new Map(latencies.map(({ agent, count, sumMs }) => [agent, { count, sumMs }])),
+          `seed ${seed}`,
+        ).toEqual(expected);
+        for (const { buckets, count } of latencies) {
+          // Cumulative, as Prometheus reads a histogram's buckets, up to the count at +Inf.
+          expect(buckets.toSorted((a, b) => a - b)).toEqual(buckets);
+          expect(buckets.at(-1) ?? 0).toBeLessThanOrEqual(count);
+        }
+        const counted = latencies.reduce((sum, { count }) => sum + count, 0);
+        expect(counted, `seed ${seed}`).toBe(tab.latency.mentions);
+        const waits = wakes.unanswered();
+        expect(
+          waits.reduce((sum, { waiting, unanswered }) => sum + waiting + unanswered, 0),
+          `seed ${seed}`,
+        ).toBe(tab.latency.unanswered);
+        answered += counted;
+        expired += waits.reduce((sum, { unanswered }) => sum + unanswered, 0);
+      }
+    }
+    timed.mockRestore();
+    // Enough of both that the comparison is not of empty counts.
+    expect(answered).toBeGreaterThan(1_000);
+    expect(expired).toBeGreaterThan(100);
+  });
+
+  it("matches a mention with the citizens of when it was posted, so one added since counts", () => {
+    const roster = new Map([["eng-1", { name: "eng-1", memberships: ["lab"] }]]);
+    const wakes = new WakeLatency(roster);
+    wakes.add(post(0, "ops-9"));
+    wakes.add(start(3, "ops-9"));
+    roster.set("ops-9", { name: "ops-9", memberships: ["lab"] });
+    wakes.add(post(10, "ops-9"));
+    wakes.add(post(11, "eng-1"));
+    wakes.add(start(16, "ops-9"));
+    expect(wakes.latencies().map(({ agent, count, sumMs }) => ({ agent, count, sumMs }))).toEqual([
+      { agent: "ops-9", count: 1, sumMs: 6_000 },
+    ]);
+    expect(wakes.unanswered()).toEqual([
+      { agent: "eng-1", waiting: 1, unanswered: 0 },
+      { agent: "ops-9", waiting: 0, unanswered: 0 },
+    ]);
   });
 });

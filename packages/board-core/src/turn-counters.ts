@@ -7,7 +7,9 @@ import {
 } from "@stellaris/shared";
 import { z } from "zod";
 import { failureReason, type FailureReason } from "./failure-reason.js";
+import type { MatchingCitizen } from "./mention-matching.js";
 import { TurnHistoryPayloadSchema } from "./turn-history.js";
+import { WakeLatency, type MentionWaitSeries, type WakeLatencySeries } from "./wake-latency.js";
 
 /** The kinds of token a turn's usage holds, as the token counter labels them. */
 export const TOKEN_KINDS = ["input", "output", "cache_read", "cache_write"] as const;
@@ -68,6 +70,8 @@ export interface TurnCounts {
   readonly idle: readonly IdleSeries[];
   readonly failed: readonly FailedSeries[];
   readonly sendBacks: readonly SendBackSeries[];
+  readonly wakeLatency: readonly WakeLatencySeries[];
+  readonly mentions: readonly MentionWaitSeries[];
 }
 
 // What a failed turn's end adds to the history's fields for its reason. A value a later board
@@ -107,10 +111,12 @@ function byKey<T>(entries: ReadonlyMap<string, T>): T[] {
 /**
  * Every finished turn counted as it ends, for Prometheus: the turns `tokenUse` counts over all
  * time, by the same schema, so the two agree, and the tokens of those that counted them; the
- * finished turns that took no board action and the send-backs, as the metrics count them over the
- * window `all`; and the failed turns by `failureReason`. Labels name a citizen, a CLI, a model, a
- * kind of token, an outcome, a trigger, a reason, and a project, never a thread, a task, a stage,
- * or a turn. Adding is the only change, so every series only grows.
+ * finished turns that took no board action, the send-backs, and the wake latency of each answered
+ * mention, as the metrics count them over the window `all`; the mentions still waiting and those
+ * that waited too long; and the failed turns by `failureReason`. Labels name a citizen, a CLI, a
+ * model, a kind of token, an outcome, a trigger, a reason, and a project, never a thread, a task,
+ * a stage, or a turn. Adding is the only change, so every series only grows, but the mentions
+ * waiting, which a mention's answer or its age takes away.
  */
 export class TurnCounters {
   private readonly tokens = new Map<string, TurnTokenSeries>();
@@ -118,23 +124,29 @@ export class TurnCounters {
   private readonly idle = new Map<string, IdleSeries>();
   private readonly failed = new Map<string, FailedSeries>();
   private readonly sendBacks = new Map<string, SendBackSeries>();
+  private readonly wakes: WakeLatency;
 
   /**
    * `cliOf` names a citizen's CLI for an end logged before ends named theirs: a turn runs on the
    * CLI its citizen's record names, which nothing changes after the citizen is added.
    * `actionsOf` gives the board actions of a turn whose end was logged before ends carried them,
-   * read from its transcript, and null or nothing for a turn that kept none.
+   * read from its transcript, and null or nothing for a turn that kept none. `citizens` are those
+   * a mention can name, read as each post is counted, so a map kept current names one added since.
    */
   constructor(
     private readonly cliOf: (agent: string) => CliKind | null,
     private readonly actionsOf: (turnId: string) => number | null | undefined = () => undefined,
-  ) {}
+    citizens: ReadonlyMap<string, MatchingCitizen> = new Map(),
+  ) {
+    this.wakes = new WakeLatency(citizens);
+  }
 
   /**
-   * Counts a turn's end, `turn.completed` or `turn.failed`, and a send-back, `task.moved`, and
-   * passes over any other event.
+   * Counts a turn's end, `turn.completed` or `turn.failed`, a send-back, `task.moved`, and for the
+   * wake latency a post, a turn's start, and a steer, and passes over any other event.
    */
   add(event: BoardEvent): void {
+    this.wakes.add(event);
     if (event.type === "task.moved") {
       const moved = TaskMovedSchema.safeParse(event.payload);
       if (moved.success) {
@@ -213,6 +225,8 @@ export class TurnCounters {
       idle: byKey(this.idle),
       failed: byKey(this.failed),
       sendBacks: byKey(this.sendBacks),
+      wakeLatency: this.wakes.latencies(),
+      mentions: this.wakes.unanswered(),
     };
   }
 }

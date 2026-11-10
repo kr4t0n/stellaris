@@ -323,6 +323,33 @@ describe("metrics", () => {
     expect(metrics.latency).toMatchObject({ mentions: 1, unanswered: 0, medianMs: 20_000 });
   });
 
+  it("lets a mention wait a week, after which no turn answers it and it counts as unanswered", () => {
+    const metrics = measured(
+      input(
+        [
+          mention("09-20T10:00:00", "eng-1", "lab/general", A),
+          mention("09-20T10:00:00", "rev-1", "lab/general", A),
+          // A week to the second still answers; a second more does not.
+          start("09-27T10:00:00", "eng-1", "lab", A),
+          start("09-27T10:00:01", "rev-1", "lab", A),
+          // A mention a week before a moment the log has passed, as the clock stepped back that
+          // far, never waits, whatever turn follows it.
+          start("10-01T09:00:00", "rev-1", "society"),
+          mention("09-23T08:00:00", "eng-1", "lab/general", B),
+          start("09-23T08:00:05", "eng-1", "lab", B),
+        ],
+        { window: "all" },
+      ),
+    );
+    expect(metrics.latency).toEqual({
+      mentions: 1,
+      unanswered: 2,
+      medianMs: 604_800_000,
+      slowestMs: 604_800_000,
+      byAgent: [{ agent: "eng-1", mentions: 1, medianMs: 604_800_000, slowestMs: 604_800_000 }],
+    });
+  });
+
   it("counts the user's decisions by day: proposals, answers to questions, and stages", () => {
     const metrics = measured(
       input(

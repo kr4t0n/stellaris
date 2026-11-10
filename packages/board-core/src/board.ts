@@ -166,6 +166,7 @@ import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
+import type { MatchingCitizen } from "./mention-matching.js";
 import { MetricsIndex } from "./metrics-index.js";
 import { TurnHistoryPayloadSchema } from "./turn-history.js";
 import { transcriptToRead, TurnCounters } from "./turn-counters.js";
@@ -793,6 +794,9 @@ export class Board {
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
   private metricsIndex: Promise<MetricsIndex> | null = null;
+  // The citizens Prometheus's wake latency matches mentions with, once seeded, kept current by
+  // every write of an agent's record.
+  private mentionRoster: Map<string, MatchingCitizen> | null = null;
   // The tasks the metrics name, by id, each dropped as it is written; null for one not found.
   private readonly metricsTasks = new Map<string, Task | null>();
   private taskWrites = 0;
@@ -4407,18 +4411,23 @@ export class Board {
   }
 
   /**
-   * Every finished turn and send-back counted for Prometheus: seeded once from the whole event
-   * log, then moved by each event this process appends, so reading the counts never reads the log.
-   * The server logs every turn's end and send-back itself; one another process appended would
-   * count from the next seed. A turn ended before ends carried their board actions has its
-   * transcript read once, here, for the idle count.
+   * Every finished turn, send-back, and mention's wake counted for Prometheus: seeded once from
+   * the whole event log, then moved by each event this process appends, so reading the counts never
+   * reads the log. The server logs every turn's end and send-back, and every post, turn start, and
+   * steer, itself; one another process appended would count from the next seed. A turn ended before ends carried their board actions has its
+   * transcript read once, here, for the idle count. Mentions are matched with the citizens of
+   * the seed, as the Metrics view matches them with today's, and from then on with those of when
+   * each is posted.
    */
   async countTurns(): Promise<TurnCounters> {
     const clis = new Map<string, CliKind | null>();
     const actions = new Map<string, number | null>();
+    const roster = new Map<string, MatchingCitizen>();
+    this.mentionRoster = roster;
     const counters = new TurnCounters(
       (agent) => clis.get(agent) ?? null,
       (turnId) => actions.get(turnId),
+      roster,
     );
     // Ends appended while the log is read wait, and count once unless the read held them.
     let waiting: BoardEvent[] | null = [];
@@ -4432,6 +4441,10 @@ export class Board {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     for (const agent of await this.listAgents()) {
       clis.set(agent.name, agent.cli);
+      // A record written while the list was read is in the roster already, and newer.
+      if (agent.cli !== null && !roster.has(agent.name)) {
+        roster.set(agent.name, { name: agent.name, memberships: agent.memberships });
+      }
     }
     // Ends appended from here on carry their board actions, so only the ends read need these.
     for (const event of events) {
@@ -5447,6 +5460,7 @@ export class Board {
     seedInstructions?: string,
   ): Promise<void> {
     await writeJson(this.paths.agentFile(agent.name), agent);
+    this.noteAgent(agent);
     await this.writeAgentRole(agent.name, charter, seedInstructions?.trim() ?? "");
     await ensureDir(this.paths.agentMemory(agent.name));
     if (!(await exists(this.paths.agentMemoryCore(agent.name)))) {
@@ -5623,7 +5637,18 @@ export class Board {
     const current = await this.readAgent(name);
     const next = AgentSchema.parse(mutate(current));
     await writeJson(this.paths.agentFile(name), next);
+    this.noteAgent(next);
     return next;
+  }
+
+  /**
+   * Keeps the wake latency's roster as the record just written has it, as the Metrics view reads
+   * citizens: those that take turns.
+   */
+  private noteAgent(agent: Agent): void {
+    if (this.mentionRoster !== null && agent.cli !== null) {
+      this.mentionRoster.set(agent.name, { name: agent.name, memberships: agent.memberships });
+    }
   }
 
   private async updateProject(slug: Name, mutate: (project: Project) => Project): Promise<Project> {

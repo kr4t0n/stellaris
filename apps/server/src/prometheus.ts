@@ -1,4 +1,10 @@
-import { FAILURE_REASONS, type TurnCounters, type TurnCounts } from "@stellaris/board-core";
+import {
+  FAILURE_REASONS,
+  WAKE_LATENCY_BUCKETS,
+  type TurnCounters,
+  type TurnCounts,
+  type WakeLatencySeries,
+} from "@stellaris/board-core";
 import { Hono } from "hono";
 
 /** Prometheus's text exposition format, version 0.0.4, which every Prometheus scrapes. */
@@ -12,6 +18,18 @@ function quoted(value: string): string {
 function sample(name: string, labels: Record<string, string>, value: number): string {
   const pairs = Object.entries(labels).map(([label, text]) => `${label}=${quoted(text)}`);
   return `${name}{${pairs.join(",")}} ${value}`;
+}
+
+/** One citizen's wake-latency histogram: its buckets, then its sum and count, in seconds. */
+function histogram(name: string, { agent, buckets, count, sumMs }: WakeLatencySeries): string[] {
+  return [
+    ...WAKE_LATENCY_BUCKETS.map((bound, at) =>
+      sample(`${name}_bucket`, { agent, le: String(bound) }, buckets[at] ?? 0),
+    ),
+    sample(`${name}_bucket`, { agent, le: "+Inf" }, count),
+    sample(`${name}_sum`, { agent }, sumMs / 1000),
+    sample(`${name}_count`, { agent }, count),
+  ];
 }
 
 /** The counters in Prometheus's text format: each counter's help, type, and series. */
@@ -41,6 +59,19 @@ export function prometheusText(counts: TurnCounts): string {
     "# TYPE stellaris_task_sendbacks_total counter",
     ...counts.sendBacks.map(({ project, by, sendBacks }) =>
       sample("stellaris_task_sendbacks_total", { project, by }, sendBacks),
+    ),
+    "# HELP stellaris_wake_latency_seconds Seconds from a post naming a citizen to the turn that answered it, its start or the steer that handed it the post, by citizen.",
+    "# TYPE stellaris_wake_latency_seconds histogram",
+    ...counts.wakeLatency.flatMap((series) => histogram("stellaris_wake_latency_seconds", series)),
+    "# HELP stellaris_wake_mentions_waiting Mentions of a citizen no turn has answered yet, by citizen; each waits a week at most.",
+    "# TYPE stellaris_wake_mentions_waiting gauge",
+    ...counts.mentions.map(({ agent, waiting }) =>
+      sample("stellaris_wake_mentions_waiting", { agent }, waiting),
+    ),
+    "# HELP stellaris_wake_mentions_unanswered_total Mentions of a citizen no turn answered within a week, by citizen.",
+    "# TYPE stellaris_wake_mentions_unanswered_total counter",
+    ...counts.mentions.map(({ agent, unanswered }) =>
+      sample("stellaris_wake_mentions_unanswered_total", { agent }, unanswered),
     ),
     "",
   ].join("\n");

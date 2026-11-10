@@ -307,6 +307,8 @@ describe("TurnCounters", () => {
         { agent: "ghost", cli: "unknown", reason: "other", turns: 1 },
       ],
       sendBacks: [],
+      wakeLatency: [],
+      mentions: [],
     });
   });
 

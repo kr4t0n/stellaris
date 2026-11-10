@@ -28,6 +28,13 @@ export const MessagePayload = z.object({
 });
 const SteeredPayload = z.object({ messages: z.array(z.string()) });
 
+/**
+ * How long a mention waits for its answer: a week, the longest windowed view. Once the log has
+ * gone further past it, no turn or steer answers it and it counts as unanswered, so a mention
+ * nobody answers is held no longer.
+ */
+export const MENTION_WAIT_MS = 7 * 24 * 3_600_000;
+
 /** A citizen as the matching needs it: where a mention in a project's channel would wake it. */
 export interface MatchingCitizen {
   readonly name: string;
@@ -94,15 +101,27 @@ export function answers(mention: Mention, turn: TurnStart): boolean {
 /**
  * Pairs each mention of a citizen with the turn that answered it, as wake latency counts them:
  * its delivery into a turn already running in its conversation, the `turn.steered` naming its
- * post, else the first later turn of its citizen that `answers` it. Feed it the log's posts, turn
- * starts, and steers in the log's order. A mention's answer depends on that mention and the events
- * after it alone, so a window counts the mentions made in it, however many others were fed.
+ * post, else the first later turn of its citizen that `answers` it, while the log is within
+ * `MENTION_WAIT_MS` of it. Feed it the log's posts, turn starts, and steers in the log's order.
+ * A mention's answer depends on that mention and the events after it alone, so a window counts the
+ * mentions made in it, however many others were fed. The log's latest moment, which ends a wait,
+ * is read from the turn starts, the steers, and the posts that make a mention, which every caller
+ * feeds alike; a post made earlier than a mention can't move it past that mention.
  */
 export class MentionMatcher {
   // By citizen, in the order they were made, since only the citizen's own turns answer them.
   private readonly waiting = new Map<string, Mention[]>();
+  // By citizen, the mentions that waited past `MENTION_WAIT_MS` unanswered.
+  private readonly expired = new Map<string, number>();
+  // The latest moment the log has reached, which never falls, as the board's clock can step back.
+  private latest = -Infinity;
+  // When the oldest waiting mention was made, so the waits are looked over only once one is due.
+  private oldest = Infinity;
 
-  /** `citizens` are those a mention can name, with today's memberships. */
+  /**
+   * `citizens` are those a mention can name, with their memberships: read as each post is
+   * matched, so a map kept current names a citizen added since.
+   */
   constructor(private readonly citizens: ReadonlyMap<string, MatchingCitizen>) {}
 
   /**
@@ -119,6 +138,7 @@ export class MentionMatcher {
     }
     const thread = message.data.thread ?? null;
     const project = parseChannelRef(message.data.channel).project;
+    const at = Date.parse(event.ts);
     const made: Mention[] = [];
     for (const name of new Set(message.data.mentions)) {
       const citizen = this.citizens.get(name);
@@ -127,7 +147,7 @@ export class MentionMatcher {
       }
       const mention: Mention = {
         agent: name,
-        at: Date.parse(event.ts),
+        at,
         message: message.data.id ?? null,
         thread,
         channel: message.data.channel,
@@ -135,11 +155,19 @@ export class MentionMatcher {
           (scope): scope is string => scope !== null,
         ),
       };
-      const waiting = this.waiting.get(name);
-      if (waiting === undefined) {
-        this.waiting.set(name, [mention]);
+      this.reach(at);
+      // A mention made a week before a moment the log has already passed, as when the clock
+      // steps back that far, never waits.
+      if (this.latest - at > MENTION_WAIT_MS) {
+        this.expired.set(name, (this.expired.get(name) ?? 0) + 1);
       } else {
-        waiting.push(mention);
+        const waiting = this.waiting.get(name);
+        if (waiting === undefined) {
+          this.waiting.set(name, [mention]);
+        } else {
+          waiting.push(mention);
+        }
+        this.oldest = Math.min(this.oldest, at);
       }
       made.push(mention);
     }
@@ -151,6 +179,9 @@ export class MentionMatcher {
    * conversation answers every mention of its citizen waiting there.
    */
   answer(event: BoardEvent): Mention[] {
+    if (event.type === "turn.started" || event.type === "turn.steered") {
+      this.reach(Date.parse(event.ts));
+    }
     const waiting = this.waiting.get(event.actor) ?? [];
     let answered: Mention[] = [];
     if (event.type === "turn.started") {
@@ -188,12 +219,50 @@ export class MentionMatcher {
     return answered;
   }
 
-  /** The mentions no turn has answered yet. */
+  /** The mentions no turn has answered: those waiting still, and those that waited too long. */
   get unanswered(): number {
     let count = 0;
-    for (const waiting of this.waiting.values()) {
-      count += waiting.length;
+    for (const { waiting, expired } of this.unansweredBy().values()) {
+      count += waiting + expired;
     }
     return count;
+  }
+
+  /**
+   * By citizen, for every citizen mentioned so far, the mentions waiting now and those that
+   * waited past `MENTION_WAIT_MS` unanswered.
+   */
+  unansweredBy(): Map<string, { readonly waiting: number; readonly expired: number }> {
+    const counts = new Map<string, { waiting: number; expired: number }>();
+    for (const [agent, waiting] of this.waiting) {
+      counts.set(agent, { waiting: waiting.length, expired: 0 });
+    }
+    for (const [agent, expired] of this.expired) {
+      counts.set(agent, { waiting: counts.get(agent)?.waiting ?? 0, expired });
+    }
+    return counts;
+  }
+
+  /** Moves the log's latest moment on to `at`, and lets go of the mentions that waited past it. */
+  private reach(at: number): void {
+    if (!(at > this.latest)) {
+      return;
+    }
+    this.latest = at;
+    if (this.latest - this.oldest <= MENTION_WAIT_MS) {
+      return;
+    }
+    let oldest = Infinity;
+    for (const [agent, waiting] of this.waiting) {
+      const kept = waiting.filter((mention) => this.latest - mention.at <= MENTION_WAIT_MS);
+      if (kept.length < waiting.length) {
+        this.waiting.set(agent, kept);
+        this.expired.set(agent, (this.expired.get(agent) ?? 0) + waiting.length - kept.length);
+      }
+      for (const mention of kept) {
+        oldest = Math.min(oldest, mention.at);
+      }
+    }
+    this.oldest = oldest;
   }
 }

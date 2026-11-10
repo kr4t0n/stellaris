@@ -3,6 +3,17 @@ import { instructionsHash, renderInstructions } from "./render.js";
 
 const places = { homeDir: "/data/agents/eng-1", boardDir: "/data/board" };
 
+/** An engineer's instructions' input at a channel wait. */
+function at(channelPostWaitMs: number) {
+  return {
+    agentName: "eng-1",
+    roleCharter: "# engineer",
+    memoryCore: "",
+    ...places,
+    channelPostWaitMs,
+  };
+}
+
 describe("config-home rendering", () => {
   it("renders instructions from role and memory, with the onboarding preamble only when asked", () => {
     const base = renderInstructions({
@@ -113,6 +124,10 @@ describe("config-home rendering", () => {
     expect(full).toContain(
       "a durable fact about a project as a place (runners, access, flow, where results live) goes through `write_knowledge`",
     );
+    // The project channel wakes only whom a post asks, so a lesson posted there names who acts on it.
+    expect(full).toContain(
+      "something the whole project should know now, post it to the project channel, mentioning whoever is to act on it, and anything about one task, in the task's thread.",
+    );
     // A repeated procedure is a candidate, and a skill only its author uses is not proposed.
     expect(full).toContain("followed twice is a candidate for a skill");
     expect(full).toContain(
@@ -155,6 +170,25 @@ describe("config-home rendering", () => {
     expect(text).toContain(
       "- A post at the top of a project's channel, general or another, wakes only whoever it mentions; everyone else reads it at their next turn there, at the latest about a day later. So mention whoever must act on it or know it soon.",
     );
+  });
+
+  it("names the channel wait the server runs with, and none where every post counts at once", () => {
+    expect(renderInstructions(at(6 * 3_600_000))).toContain(
+      "- A post at the top of a project's channel, general or another, wakes only whoever it mentions; everyone else reads it at their next turn there, at the latest about 6 hours later. So mention whoever must act on it or know it soon.",
+    );
+    expect(renderInstructions(at(90 * 60_000))).toContain(
+      "everyone else reads it at their next turn there, at the latest about 90 minutes later.",
+    );
+    // The default, set or left out, renders the same instructions.
+    const { channelPostWaitMs: _wait, ...unset } = at(0);
+    expect(renderInstructions(at(24 * 3_600_000))).toBe(renderInstructions(unset));
+    const old = renderInstructions(at(0));
+    expect(old).toContain(
+      "- A post at the top of a project's channel, general or another, wakes whoever it mentions, and everyone else who follows the channel at their next heartbeat. So mention whoever must act on it soon.",
+    );
+    expect(old).not.toContain("at the latest about");
+    // A session holding instructions drawn at another wait takes the new ones.
+    expect(instructionsHash(at(3_600_000))).not.toBe(instructionsHash(unset));
   });
 
   it("has a citizen show an image by uploading it and linking its id, never by pasting its bytes", () => {

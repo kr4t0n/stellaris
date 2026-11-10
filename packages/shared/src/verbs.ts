@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CHANNEL_POST_WAIT_MS,
   CompletionEffectSchema,
   DefaultBranchSchema,
   MergeSubjectSchema,
@@ -8,6 +9,7 @@ import {
   ProposalKindSchema,
   PullRequestUrlSchema,
   StageIdSchema,
+  durationInWords,
 } from "./board.js";
 import { CronExpressionSchema, TimeZoneSchema } from "./crons.js";
 import { ImagePathSchema, ImageRefSchema } from "./images.js";
@@ -210,8 +212,7 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   update_task:
     "Move a task back to an earlier stage (the current stage's holder, the user, the steward, or the concierge; anyone else asks the concierge in the task's thread, with a mention), abandon it, set the tasks it is blocked by (blocked_by: its stage wakes nobody until they have all ended), or link its pull request (pull_request: url, with the merge commit's merge_subject and merge_body), which a ghpr task needs before its last stage completes. A note is posted to the task's thread.",
   get_task: "Read a task with its plan, its brief, and the messages of its thread.",
-  subscribe:
-    "Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you wakes you only once it is a day old.",
+  subscribe: subscribeDescription(CHANNEL_POST_WAIT_MS),
   unsubscribe: "Unsubscribe from a channel.",
   propose:
     "Propose a member, role, channel, reallocation, retirement, skill, or a project's archive. The charter shape per kind is in your instructions. Opens the proposal's thread in governance with your rationale; approval provisions it.",
@@ -255,3 +256,29 @@ export const VERB_DESCRIPTIONS: Readonly<Record<VerbName, string>> = {
   read_image:
     "Open an image the board keeps, as a post shows it, `![what it shows](image:<id>)`, by its id: the board writes it to a file of this turn's own on the machine it runs on, removed when the turn ends, and returns its path, type, and size. Open the path with your file tools to see the image.",
 };
+
+/** The timings a verb's description names, as the server runs with them. */
+export interface VerbTimings {
+  /** The scheduler's `channelPostWaitMs`; `CHANNEL_POST_WAIT_MS` when left out. */
+  readonly channelPostWaitMs?: number | undefined;
+}
+
+/**
+ * When a post in a project's channel that asks the reader nothing wakes a follower: once it has
+ * waited `channelPostWaitMs`, or with 0, which counts every post at once, at the next heartbeat.
+ */
+function subscribeDescription(channelPostWaitMs: number): string {
+  const wakes =
+    channelPostWaitMs === 0
+      ? "wakes you at your next heartbeat"
+      : `wakes you only once it is ${durationInWords(channelPostWaitMs)} old`;
+  return `Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you ${wakes}.`;
+}
+
+/** The tool descriptions at the timings the server runs with; `VERB_DESCRIPTIONS` are at the defaults. */
+export function verbDescriptions(timings: VerbTimings = {}): Readonly<Record<VerbName, string>> {
+  return {
+    ...VERB_DESCRIPTIONS,
+    subscribe: subscribeDescription(timings.channelPostWaitMs ?? CHANNEL_POST_WAIT_MS),
+  };
+}

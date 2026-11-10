@@ -2,11 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isBoardError, type Actor, type Board } from "@stellaris/board-core";
 import {
-  VERB_DESCRIPTIONS,
   VERB_NAMES,
   VerbInputs,
+  verbDescriptions,
   type RoleCharter,
   type VerbName,
+  type VerbTimings,
 } from "@stellaris/shared";
 import type { z } from "zod";
 
@@ -33,19 +34,29 @@ export interface BoardToolDefinition {
   readonly inputSchema: z.ZodType;
 }
 
-export const BOARD_TOOLS: readonly BoardToolDefinition[] = VERB_NAMES.map((name) => ({
-  name,
-  description: VERB_DESCRIPTIONS[name],
-  inputSchema: VerbInputs[name],
-}));
+/** Every verb's tool, its description at the timings the server runs with (`verbDescriptions`). */
+export function boardTools(timings: VerbTimings = {}): readonly BoardToolDefinition[] {
+  const descriptions = verbDescriptions(timings);
+  return VERB_NAMES.map((name) => ({
+    name,
+    description: descriptions[name],
+    inputSchema: VerbInputs[name],
+  }));
+}
+
+/** Every verb's tool at the default timings. */
+export const BOARD_TOOLS: readonly BoardToolDefinition[] = boardTools();
 
 /** The tools a role may see. The user sees everything; everyone else sees exactly their charter's verbs. */
-export function toolsForRole(charter: RoleCharter): readonly BoardToolDefinition[] {
+export function toolsForRole(
+  charter: RoleCharter,
+  tools: readonly BoardToolDefinition[] = BOARD_TOOLS,
+): readonly BoardToolDefinition[] {
   if (charter.name === "user") {
-    return BOARD_TOOLS;
+    return tools;
   }
   const granted = new Set<VerbName>(charter.verbs);
-  return BOARD_TOOLS.filter((tool) => granted.has(tool.name));
+  return tools.filter((tool) => granted.has(tool.name));
 }
 
 function describeError(error: unknown): string {
@@ -63,13 +74,14 @@ export async function createBoardMcpServer(
   board: Board,
   actor: Actor,
   version: string,
+  timings: VerbTimings = {},
 ): Promise<McpServer> {
   const server = new McpServer(
     { name: "stellaris-board", version },
     { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS },
   );
   const charter = await board.readRole(actor.role);
-  for (const tool of toolsForRole(charter)) {
+  for (const tool of toolsForRole(charter, boardTools(timings))) {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
@@ -94,14 +106,16 @@ export async function createBoardMcpServer(
 /**
  * Handles one Streamable HTTP request for an already-authenticated actor. Stateless by design:
  * a server and transport are created per request, so the tool list is always the actor's role.
+ * `timings` are the scheduler's, which some tools' descriptions name.
  */
 export async function handleMcpRequest(
   board: Board,
   actor: Actor,
   request: Request,
   version: string,
+  timings: VerbTimings = {},
 ): Promise<Response> {
-  const server = await createBoardMcpServer(board, actor, version);
+  const server = await createBoardMcpServer(board, actor, version, timings);
   // No sessionIdGenerator means stateless mode: every request stands alone.
   const transport = new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,

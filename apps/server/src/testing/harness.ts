@@ -32,6 +32,8 @@ export interface TestSocietyOptions {
   readonly turnTimeoutMs?: number | null | undefined;
   readonly maxTurns?: number | null | undefined;
   readonly residentIdleMs?: number | undefined;
+  /** The scheduler's `channelPostWaitMs`, which the turn contract and `subscribe` over MCP name. */
+  readonly channelPostWaitMs?: number | undefined;
   readonly turns?: TurnHub | undefined;
   readonly scheduler?: AppDependencies["scheduler"] | undefined;
   readonly webDir?: string | undefined;
@@ -133,6 +135,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     turnTimeoutMs: options.turnTimeoutMs,
     maxTurns: options.maxTurns,
     residentIdleMs: options.residentIdleMs ?? 60_000,
+    channelPostWaitMs: options.channelPostWaitMs,
     ...(options.now === undefined ? {} : { now: options.now }),
     onEvent: (agent, scope, event, conversation) => turns.push(agent, scope, event, conversation),
   });
@@ -156,6 +159,7 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     models: new ModelCatalog(hub),
     quotas: new QuotaReads(hub),
     enrollments: new EnrollmentDesk(board, { pollIntervalMs: 50 }),
+    channelPostWaitMs: options.channelPostWaitMs,
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     ...(options.signIn === undefined ? {} : { signIn: options.signIn }),

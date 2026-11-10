@@ -85,6 +85,8 @@ export interface TurnHostOptions {
   readonly maxTurns?: number | null | undefined;
   /** How long a warm session stays warm after its last turn. */
   readonly residentIdleMs?: number | undefined;
+  /** The scheduler's `channelPostWaitMs`, which the turn contract names; its default when left out. */
+  readonly channelPostWaitMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: HostLog | undefined;
   /** Every event of a turn as it arrives, with the turn's scope and conversation there. */
@@ -256,6 +258,7 @@ export class TurnHost {
   private readonly turnTimeoutMs: number | null;
   private readonly maxTurns: number | null;
   private readonly residentIdleMs: number;
+  private readonly channelPostWaitMs: number | undefined;
   private readonly now: () => Date;
   private readonly log: HostLog;
   private readonly onEvent: TurnHostOptions["onEvent"];
@@ -270,6 +273,7 @@ export class TurnHost {
       options.turnTimeoutMs === undefined ? DEFAULT_TURN_TIMEOUT_MS : options.turnTimeoutMs;
     this.maxTurns = options.maxTurns === undefined ? DEFAULT_MAX_TURNS : options.maxTurns;
     this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
+    this.channelPostWaitMs = options.channelPostWaitMs;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? SILENT;
     this.onEvent = options.onEvent;
@@ -434,6 +438,9 @@ export class TurnHost {
         })),
       ],
       ...(onboarding === null ? {} : { onboarding }),
+      ...(this.channelPostWaitMs === undefined
+        ? {}
+        : { channelPostWaitMs: this.channelPostWaitMs }),
     };
     const instructions = renderInstructions(rendered);
     // Both CLIs keep the instructions a session began with when they resume it, whatever they are

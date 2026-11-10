@@ -35,6 +35,31 @@ export function isBoardChannel(project: string | null, name: string): boolean {
 }
 
 /**
+ * How old a top-level post in a project's channel must be before it counts toward the heartbeat of
+ * a reader it does not ask (see `unreadByConversation`): a day, by default. A society sets its own
+ * as the scheduler's `channelPostWaitMs`, and 0 counts every post at once.
+ */
+export const CHANNEL_POST_WAIT_MS = 24 * 3_600_000;
+
+const DURATION_UNITS = [
+  { ms: 86_400_000, one: "a day", many: "days" },
+  { ms: 3_600_000, one: "an hour", many: "hours" },
+  { ms: 60_000, one: "a minute", many: "minutes" },
+  { ms: 1_000, one: "a second", many: "seconds" },
+  { ms: 1, one: "a millisecond", many: "milliseconds" },
+] as const;
+
+/**
+ * A positive whole number of milliseconds in words, exactly, in the largest unit that divides it:
+ * `a day`, `36 hours`, `90 minutes`. What a citizen is told of a timing is the timing itself.
+ */
+export function durationInWords(ms: number): string {
+  const unit = DURATION_UNITS.find((each) => ms % each.ms === 0) ?? DURATION_UNITS[4];
+  const count = ms / unit.ms;
+  return count === 1 ? unit.one : `${count} ${unit.many}`;
+}
+
+/**
  * The scope of a turn that belongs to no project. Dispatches, sessions, and turn records use it in
  * place of a project slug, and the runner uses the agent's home as the working directory. No
  * project may take the name.

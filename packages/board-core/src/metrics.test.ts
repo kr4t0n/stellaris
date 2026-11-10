@@ -2,9 +2,11 @@ import {
   MetricsSchema,
   TaskFrontmatterSchema,
   type BoardEvent,
+  type Metrics,
   type Task,
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { MetricsIndex } from "./metrics-index.js";
 import { computeMetrics, type MetricsInput } from "./metrics.js";
 
 const A = "01M3S0000000000000000000AA";
@@ -111,9 +113,20 @@ function input(events: BoardEvent[], extra: Partial<MetricsInput> = {}): Metrics
   };
 }
 
+/** The measures of an input, which the index, fed the same log, answers alike. */
+function measured(given: MetricsInput): Metrics {
+  const metrics = computeMetrics(given);
+  const index = new MetricsIndex((turnId) => given.actions.get(turnId));
+  for (const logged of given.events) {
+    index.add(logged);
+  }
+  expect(index.answer(given)).toStrictEqual(metrics);
+  return metrics;
+}
+
 describe("metrics", () => {
   it("splits heartbeats by what each woke for, and keeps those recorded without it as plain", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           turn("10-01T08:00:00", "eng-1", "heartbeat", "T1", "held"),
@@ -148,7 +161,7 @@ describe("metrics", () => {
   });
 
   it("counts turns that changed nothing, leaving reflections out and turns without transcripts apart", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           turn("09-29T10:00:00", "rev-1", "heartbeat", "T0"),
@@ -190,7 +203,7 @@ describe("metrics", () => {
       event(ts, "message.posted", actor, { channel: "lab/general", thread, mentions: [] });
     const moved = (ts: string, actor: string, id: string): BoardEvent =>
       event(ts, "task.moved", actor, { taskId: id, project: "lab", from: "s2", to: "s1" });
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         moved("09-28T10:00:00", "rev-1", A),
         post("09-28T10:00:00", "eng-1", A),
@@ -225,7 +238,7 @@ describe("metrics", () => {
   });
 
   it("times a mention to the turn it woke, in the same conversation and scope", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "eng-1", "lab/general"),
         // A home turn elsewhere, and a turn in a thread, do not answer a channel mention in lab.
@@ -256,7 +269,7 @@ describe("metrics", () => {
   });
 
   it("times a mention in a channel beside general to that channel's turn, not the home's", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "eng-1", "lab/release"),
         start("10-01T10:00:05", "eng-1", "lab", undefined, "heartbeat"),
@@ -276,7 +289,7 @@ describe("metrics", () => {
   });
 
   it("times a mention outside the citizen's projects to that project's turn, not another's or home's", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           // concierge-1 is in no project: a mention in lab's channels is lab's conversation's to answer.
@@ -301,7 +314,7 @@ describe("metrics", () => {
   });
 
   it("answers a mention in a project its citizen has since left, as an archive leaves it", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "rev-1", "old/general", A),
         start("10-01T10:00:20", "rev-1", "old"),
@@ -311,7 +324,7 @@ describe("metrics", () => {
   });
 
   it("counts the user's decisions by day: proposals, answers to questions, and stages", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           event("09-30T09:00:00", "proposal.decided", "user", { proposalId: A }),
@@ -356,7 +369,7 @@ describe("metrics", () => {
         project: "lab",
         value: 1,
       });
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([signal("10-01T09:00:00"), signal("10-01T11:00:00")], {
         activeSignals: new Set([`blocked_capability:${C}`]),
       }),

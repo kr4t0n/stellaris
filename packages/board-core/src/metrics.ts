@@ -1,11 +1,6 @@
 import {
-  HeartbeatCauseSchema,
   METRICS_WINDOW_MS,
-  channelConversation,
-  parseChannelRef,
-  placeConversation,
   USER_NAME,
-  wakeScope,
   type BoardEvent,
   type HeartbeatCause,
   type Metrics,
@@ -13,6 +8,7 @@ import {
   type Task,
 } from "@stellaris/shared";
 import { z } from "zod";
+import { MentionMatcher, MessagePayload, TurnPayload } from "./mention-matching.js";
 
 /** A citizen as the metrics need it: its role, and where a channel mention would wake it. */
 export interface MetricsCitizen {
@@ -35,37 +31,28 @@ export interface MetricsInput {
   readonly now: Date;
 }
 
-// A turn's events carry its thread as the thread's id, its channel by name, and a project's channels'
-// conversation by the project, all absent for a home turn. A heartbeat's carry what it woke for,
-// since the board kept it; one it does not know counts as a heartbeat without one.
-const TurnPayload = z.object({
-  turnId: z.string().optional(),
-  project: z.string(),
-  thread: z.string().optional(),
-  channel: z.string().optional(),
-  place: z.string().optional(),
-  trigger: z.string(),
-  heartbeat: HeartbeatCauseSchema.optional().catch(undefined),
-});
-const TaskPayload = z.object({
+export const TaskPayload = z.object({
   taskId: z.string(),
   project: z.string(),
   from: z.string().optional(),
 });
-const MessagePayload = z.object({
-  id: z.string().optional(),
-  channel: z.string(),
-  thread: z.string().nullable().optional(),
-  mentions: z.array(z.string()).default([]),
-});
-const SteeredPayload = z.object({ messages: z.array(z.string()) });
-const SignalPayload = z.object({
+export const SignalPayload = z.object({
   kind: z.string(),
   key: z.string(),
   summary: z.string(),
   taskId: z.string().optional(),
   project: z.string().optional(),
 });
+export type SignalPayload = z.infer<typeof SignalPayload>;
+
+/** A decision of the user's, as the decisions measure counts them by day. */
+export type DecisionKind = "proposals" | "answers" | "stages";
+
+/** The start of a window, in milliseconds since the epoch, or null for the whole log. */
+export function windowStart(window: MetricsWindow, now: Date): number | null {
+  const span = METRICS_WINDOW_MS[window];
+  return span === null ? null : now.getTime() - span;
+}
 
 function median(values: readonly number[]): number | null {
   const sorted = values.toSorted((a, b) => a - b);
@@ -86,107 +73,232 @@ function byCount<T extends { count: number }>(a: T, b: T): number {
   return b.count - a.count;
 }
 
-/** A mention waiting for its turn: who was named, where, and when. */
-interface Mention {
-  readonly agent: string;
-  readonly at: number;
-  /** The post that made it, which a turn already running may have been handed. */
-  readonly message: string | null;
-  /** The thread it was made in, or null for a top-level post. */
-  readonly thread: string | null;
-  /** The channel it was posted in. */
-  readonly channel: string;
-  /**
-   * Scopes the mention may have woken its citizen in: the channel's project, and the scope the
-   * wake rule gives with today's memberships, which an archive since may have changed.
-   */
-  readonly scopes: readonly string[];
-}
-
 /**
- * Whether a turn is the one a mention woke: in the mention's thread, or for a top-level mention
- * the conversation of its channel in the scope it wakes, the home for general, and in the society
- * scope that of its project's channels for a project's channel. Before threads, channels, and
- * projects seen from the society had conversations of their own, a mention in one woke the home
- * of the scope, so a home turn woken by a mention answers one.
+ * What the six measures gather over a window, one counted event at a time, and the answer shaped
+ * from it. `computeMetrics` feeds one from the log and the index from what it kept, so the two
+ * differ only in which events they count, and in the order they count them, which sets the order
+ * of rows that tie.
  */
-function answers(
-  mention: Mention,
-  turn: {
-    agent: string;
-    at: number;
-    thread: string | null;
-    channel: string | null;
-    place: string | null;
-    project: string;
-    trigger: string;
-  },
-): boolean {
-  if (mention.agent !== turn.agent || mention.at > turn.at) {
-    return false;
+export class MetricsTally {
+  private readonly tasks: ReadonlyMap<string, Task>;
+  private readonly citizens: ReadonlyMap<string, MetricsCitizen>;
+  // Turns that changed nothing on the board, by trigger and, for a heartbeat, what it woke for.
+  private readonly turnRows = new Map<
+    string,
+    { trigger: string; heartbeat: HeartbeatCause | undefined; turns: number; idle: number }
+  >();
+  private readonly agentRows = new Map<string, { turns: number; idle: number }>();
+  private turns = 0;
+  private idle = 0;
+  private unknown = 0;
+  private readonly finished = new Map<string, string>();
+  private readonly movedFrom = new Map<string, number>();
+  private readonly movedBy = new Map<string, number>();
+  // The user's decisions by day.
+  private readonly days = new Map<string, { proposals: number; answers: number; stages: number }>();
+  private readonly latencies = new Map<string, number[]>();
+  private readonly blocked = new Map<
+    string,
+    { project: string | null; summary: string; firstAt: string; lastAt: string; key: string }
+  >();
+
+  constructor(
+    private readonly input: Pick<
+      MetricsInput,
+      "tasks" | "citizens" | "activeSignals" | "window" | "now"
+    >,
+  ) {
+    this.tasks = new Map(input.tasks.map((task) => [task.id, task]));
+    this.citizens = new Map(input.citizens.map((citizen) => [citizen.name, citizen]));
   }
-  if (turn.thread !== null) {
-    return mention.thread === turn.thread;
+
+  /** A finished turn that is not a reflection, with its board actions, null when unknown. */
+  turnEnded(
+    agent: string,
+    trigger: string,
+    heartbeat: HeartbeatCause | undefined,
+    actions: number | null,
+  ): void {
+    if (actions === null) {
+      this.unknown += 1;
+      return;
+    }
+    const nothing = actions === 0 ? 1 : 0;
+    this.turns += 1;
+    this.idle += nothing;
+    const key = heartbeat === undefined ? trigger : `${trigger}\u0000${heartbeat}`;
+    const row = this.turnRows.get(key) ?? { trigger, heartbeat, turns: 0, idle: 0 };
+    this.turnRows.set(key, { ...row, turns: row.turns + 1, idle: row.idle + nothing });
+    const own = this.agentRows.get(agent) ?? { turns: 0, idle: 0 };
+    this.agentRows.set(agent, { turns: own.turns + 1, idle: own.idle + nothing });
   }
-  if (!mention.scopes.includes(turn.project)) {
-    return false;
+
+  taskFinished(taskId: string, project: string): void {
+    this.finished.set(taskId, project);
   }
-  const topLevel = mention.thread === null;
-  const own = topLevel ? channelConversation(turn.project, mention.channel) : undefined;
-  const place = topLevel ? placeConversation(turn.project, mention.channel) : undefined;
-  if (turn.channel !== null) {
-    return topLevel && own === turn.channel;
+
+  /** A send-back, named by the stage its task left as the task names it now. */
+  sentBack(taskId: string, project: string, from: string | undefined, by: string): void {
+    const stage =
+      this.tasks.get(taskId)?.stages.find((each) => each.id === from)?.name ?? from ?? "?";
+    bump(this.movedFrom, `${project}\u0000${stage}`);
+    bump(this.movedBy, by);
   }
-  if (turn.place !== null) {
-    return topLevel && place === turn.place;
+
+  decided(ts: string, kind: DecisionKind): void {
+    const day = ts.slice(0, 10);
+    const row = this.days.get(day) ?? { proposals: 0, answers: 0, stages: 0 };
+    row[kind] += 1;
+    this.days.set(day, row);
   }
-  return (topLevel && own === undefined && place === undefined) || turn.trigger === "mention";
+
+  /** A mention answered `ms` after it was made. */
+  answered(agent: string, ms: number): void {
+    const list = this.latencies.get(agent);
+    if (list === undefined) {
+      this.latencies.set(agent, [ms]);
+    } else {
+      list.push(ms);
+    }
+  }
+
+  /** A `blocked_capability` signal naming a task. */
+  blockedOn(taskId: string, ts: string, signal: SignalPayload): void {
+    const seen = this.blocked.get(taskId);
+    this.blocked.set(taskId, {
+      project: signal.project ?? null,
+      summary: signal.summary,
+      firstAt: seen?.firstAt ?? ts,
+      lastAt: ts,
+      key: signal.key,
+    });
+  }
+
+  /**
+   * The answer, with the send-backs and thread posts of every task over the whole log, and the
+   * mentions made in the window that still wait.
+   */
+  finish(
+    moves: ReadonlyMap<string, number>,
+    posts: ReadonlyMap<string, number>,
+    unanswered: number,
+  ): Metrics {
+    const { now, window } = this.input;
+    const since = windowStart(window, now);
+    const finishedIds = [...this.finished.keys()];
+    const messagesOf = (id: string): number => posts.get(id) ?? 0;
+    const projects = new Map<string, { finished: number; messages: number }>();
+    for (const [id, project] of this.finished) {
+      const row = projects.get(project) ?? { finished: 0, messages: 0 };
+      projects.set(project, {
+        finished: row.finished + 1,
+        messages: row.messages + messagesOf(id),
+      });
+    }
+    const allLatencies = [...this.latencies.values()].flat();
+
+    return {
+      window,
+      since: since === null ? null : new Date(since).toISOString(),
+      until: now.toISOString(),
+      idle: {
+        turns: this.turns,
+        idle: this.idle,
+        unknown: this.unknown,
+        byTrigger: [...this.turnRows.values()]
+          .map(({ heartbeat, ...row }) => ({
+            ...row,
+            ...(heartbeat === undefined ? {} : { heartbeat }),
+          }))
+          .toSorted((a, b) => b.idle - a.idle || b.turns - a.turns),
+        byAgent: [...this.agentRows]
+          .map(([agent, row]) => ({ agent, role: this.citizens.get(agent)?.role ?? null, ...row }))
+          .toSorted((a, b) => b.idle - a.idle || b.turns - a.turns),
+      },
+      sentBack: {
+        finished: finishedIds.length,
+        sendBacks: finishedIds.reduce((sum, id) => sum + (moves.get(id) ?? 0), 0),
+        tasksSentBack: finishedIds.filter((id) => (moves.get(id) ?? 0) > 0).length,
+        byStage: [...this.movedFrom]
+          .map(([key, count]) => {
+            const [project = "", stage = ""] = key.split("\u0000");
+            return { project, stage, count };
+          })
+          .toSorted(byCount),
+        bySender: [...this.movedBy].map(([agent, count]) => ({ agent, count })).toSorted(byCount),
+      },
+      messages: {
+        finished: finishedIds.length,
+        messages: finishedIds.reduce((sum, id) => sum + messagesOf(id), 0),
+        byProject: [...projects]
+          .map(([project, row]) => ({ project, ...row }))
+          .toSorted((a, b) => b.messages - a.messages),
+        busiest: finishedIds
+          .map((id) => ({
+            taskId: id,
+            title: this.tasks.get(id)?.title ?? id,
+            project: this.finished.get(id) ?? "",
+            messages: messagesOf(id),
+          }))
+          .toSorted((a, b) => b.messages - a.messages)
+          .slice(0, 5),
+      },
+      latency: {
+        mentions: allLatencies.length,
+        unanswered,
+        medianMs: median(allLatencies),
+        slowestMs: allLatencies.length === 0 ? null : Math.max(...allLatencies),
+        byAgent: [...this.latencies]
+          .map(([agent, list]) => ({
+            agent,
+            mentions: list.length,
+            medianMs: median(list) ?? 0,
+            slowestMs: Math.max(...list),
+          }))
+          .toSorted((a, b) => b.medianMs - a.medianMs),
+      },
+      decisions: {
+        total: [...this.days.values()].reduce(
+          (sum, row) => sum + row.proposals + row.answers + row.stages,
+          0,
+        ),
+        byDay: [...this.days]
+          .map(([day, row]) => ({ day, ...row }))
+          .toSorted((a, b) => b.day.localeCompare(a.day)),
+      },
+      blocked: [...this.blocked].map(([taskId, row]) => ({
+        taskId,
+        title: this.tasks.get(taskId)?.title ?? null,
+        project: row.project,
+        summary: row.summary,
+        firstAt: row.firstAt,
+        lastAt: row.lastAt,
+        holds: this.input.activeSignals.has(row.key),
+      })),
+    };
+  }
 }
 
 /**
  * Six measures of how the society works, from its event log alone (and the action counts read
  * from the turns' transcripts). A window counts what happened in it; what a measure needs from
  * before it, such as the send-backs of a task finished inside it, is read from the whole log.
+ *
+ * This is the measures' definition, which the server answers from `MetricsIndex` instead so that
+ * no request reads the log: a change to a measure changes both, and the index's equality test
+ * holds them to the same answer.
  */
 export function computeMetrics(input: MetricsInput): Metrics {
   const { events, now, window } = input;
-  const span = METRICS_WINDOW_MS[window];
-  const since = span === null ? null : now.getTime() - span;
+  const since = windowStart(window, now);
   const inWindow = (ts: string): boolean => since === null || Date.parse(ts) >= since;
-  const tasks = new Map(input.tasks.map((task) => [task.id, task]));
-  const citizens = new Map(input.citizens.map((citizen) => [citizen.name, citizen]));
-
-  // Turns that changed nothing on the board, by trigger and, for a heartbeat, what it woke for.
-  const turnRows = new Map<
-    string,
-    { trigger: string; heartbeat: HeartbeatCause | undefined; turns: number; idle: number }
-  >();
-  const agentRows = new Map<string, { turns: number; idle: number }>();
-  let turns = 0;
-  let idle = 0;
-  let unknown = 0;
+  const tally = new MetricsTally(input);
+  const matcher = new MentionMatcher(new Map(input.citizens.map((each) => [each.name, each])));
   // Send-backs and thread posts, by task, over the whole log.
   const moves = new Map<string, number>();
   const posts = new Map<string, number>();
-  const finished = new Map<string, string>();
-  const movedFrom = new Map<string, number>();
-  const movedBy = new Map<string, number>();
-  // The user's decisions by day, and the places where a question to the user waits for an answer.
-  const days = new Map<string, { proposals: number; answers: number; stages: number }>();
+  // The places where a question to the user waits for an answer.
   const asked = new Set<string>();
-  const decide = (ts: string, kind: "proposals" | "answers" | "stages"): void => {
-    const day = ts.slice(0, 10);
-    const row = days.get(day) ?? { proposals: 0, answers: 0, stages: 0 };
-    row[kind] += 1;
-    days.set(day, row);
-  };
-  // Mentions waiting for the turn they woke, and the latencies found.
-  let waiting: Mention[] = [];
-  const latencies = new Map<string, number[]>();
-  const blocked = new Map<
-    string,
-    { project: string | null; summary: string; firstAt: string; lastAt: string; key: string }
-  >();
 
   for (const event of events) {
     const counted = inWindow(event.ts);
@@ -198,74 +310,22 @@ export function computeMetrics(input: MetricsInput): Metrics {
         }
         const actions =
           turn.data.turnId === undefined ? null : (input.actions.get(turn.data.turnId) ?? null);
-        if (actions === null) {
-          unknown += 1;
-          break;
-        }
-        const nothing = actions === 0 ? 1 : 0;
-        turns += 1;
-        idle += nothing;
-        const { trigger, heartbeat } = turn.data;
-        const key = heartbeat === undefined ? trigger : `${trigger}\u0000${heartbeat}`;
-        const row = turnRows.get(key) ?? { trigger, heartbeat, turns: 0, idle: 0 };
-        turnRows.set(key, { ...row, turns: row.turns + 1, idle: row.idle + nothing });
-        const own = agentRows.get(event.actor) ?? { turns: 0, idle: 0 };
-        agentRows.set(event.actor, { turns: own.turns + 1, idle: own.idle + nothing });
+        tally.turnEnded(event.actor, turn.data.trigger, turn.data.heartbeat, actions);
         break;
       }
-      case "turn.started": {
-        const turn = TurnPayload.safeParse(event.payload);
-        if (!turn.success) {
-          break;
-        }
-        const at = Date.parse(event.ts);
-        const started = {
-          agent: event.actor,
-          at,
-          thread: turn.data.thread ?? null,
-          channel: turn.data.channel ?? null,
-          place: turn.data.place ?? null,
-          project: turn.data.project,
-          trigger: turn.data.trigger,
-        };
-        // A turn in a conversation answers every mention of its citizen waiting there.
-        const answered = waiting.filter((mention) => answers(mention, started));
-        if (answered.length > 0) {
-          latencies.set(event.actor, [
-            ...(latencies.get(event.actor) ?? []),
-            ...answered.map((mention) => at - mention.at),
-          ]);
-          waiting = waiting.filter((mention) => !answered.includes(mention));
-        }
-        break;
-      }
+      case "turn.started":
       case "turn.steered": {
-        // A mention delivered into a turn already running in its conversation is answered there.
-        const steered = SteeredPayload.safeParse(event.payload);
-        if (!steered.success) {
-          break;
-        }
-        const delivered = new Set(steered.data.messages);
+        // Mentions are made only in the window, so every one answered here counts.
         const at = Date.parse(event.ts);
-        const answered = waiting.filter(
-          (mention) =>
-            mention.agent === event.actor &&
-            mention.message !== null &&
-            delivered.has(mention.message),
-        );
-        if (answered.length > 0) {
-          latencies.set(event.actor, [
-            ...(latencies.get(event.actor) ?? []),
-            ...answered.map((mention) => at - mention.at),
-          ]);
-          waiting = waiting.filter((mention) => !answered.includes(mention));
+        for (const mention of matcher.answer(event)) {
+          tally.answered(event.actor, at - mention.at);
         }
         break;
       }
       case "task.completed": {
         const task = TaskPayload.safeParse(event.payload);
         if (counted && task.success) {
-          finished.set(task.data.taskId, task.data.project);
+          tally.taskFinished(task.data.taskId, task.data.project);
         }
         break;
       }
@@ -276,27 +336,22 @@ export function computeMetrics(input: MetricsInput): Metrics {
         }
         bump(moves, task.data.taskId);
         if (counted) {
-          const stage =
-            tasks.get(task.data.taskId)?.stages.find((each) => each.id === task.data.from)?.name ??
-            task.data.from ??
-            "?";
-          bump(movedFrom, `${task.data.project}\u0000${stage}`);
-          bump(movedBy, event.actor);
+          tally.sentBack(task.data.taskId, task.data.project, task.data.from, event.actor);
           if (event.actor === USER_NAME) {
-            decide(event.ts, "stages");
+            tally.decided(event.ts, "stages");
           }
         }
         break;
       }
       case "task.advanced": {
         if (counted && event.actor === USER_NAME) {
-          decide(event.ts, "stages");
+          tally.decided(event.ts, "stages");
         }
         break;
       }
       case "proposal.decided": {
         if (counted && event.actor === USER_NAME) {
-          decide(event.ts, "proposals");
+          tally.decided(event.ts, "proposals");
         }
         break;
       }
@@ -312,30 +367,13 @@ export function computeMetrics(input: MetricsInput): Metrics {
         const place = thread ?? `#${message.data.channel}`;
         if (event.actor === USER_NAME) {
           if (asked.delete(place) && counted) {
-            decide(event.ts, "answers");
+            tally.decided(event.ts, "answers");
           }
         } else if (message.data.mentions.includes(USER_NAME)) {
           asked.add(place);
         }
-        if (!counted || event.actor === "board") {
-          break;
-        }
-        const project = parseChannelRef(message.data.channel).project;
-        for (const name of new Set(message.data.mentions)) {
-          const citizen = citizens.get(name);
-          if (citizen === undefined || name === event.actor) {
-            continue;
-          }
-          waiting.push({
-            agent: name,
-            at: Date.parse(event.ts),
-            message: message.data.id ?? null,
-            thread,
-            channel: message.data.channel,
-            scopes: [project, wakeScope(citizen, project)].filter(
-              (scope): scope is string => scope !== null,
-            ),
-          });
+        if (counted) {
+          matcher.post(event);
         }
         break;
       }
@@ -345,17 +383,9 @@ export function computeMetrics(input: MetricsInput): Metrics {
           break;
         }
         const id = signal.data.taskId;
-        if (id === undefined) {
-          break;
+        if (id !== undefined) {
+          tally.blockedOn(id, event.ts, signal.data);
         }
-        const seen = blocked.get(id);
-        blocked.set(id, {
-          project: signal.data.project ?? null,
-          summary: signal.data.summary,
-          firstAt: seen?.firstAt ?? event.ts,
-          lastAt: event.ts,
-          key: signal.data.key,
-        });
         break;
       }
       default:
@@ -363,92 +393,5 @@ export function computeMetrics(input: MetricsInput): Metrics {
     }
   }
 
-  const finishedIds = [...finished.keys()];
-  const messagesOf = (id: string): number => posts.get(id) ?? 0;
-  const projects = new Map<string, { finished: number; messages: number }>();
-  for (const [id, project] of finished) {
-    const row = projects.get(project) ?? { finished: 0, messages: 0 };
-    projects.set(project, { finished: row.finished + 1, messages: row.messages + messagesOf(id) });
-  }
-  const allLatencies = [...latencies.values()].flat();
-
-  return {
-    window,
-    since: since === null ? null : new Date(since).toISOString(),
-    until: now.toISOString(),
-    idle: {
-      turns,
-      idle,
-      unknown,
-      byTrigger: [...turnRows.values()]
-        .map(({ heartbeat, ...row }) => ({
-          ...row,
-          ...(heartbeat === undefined ? {} : { heartbeat }),
-        }))
-        .toSorted((a, b) => b.idle - a.idle || b.turns - a.turns),
-      byAgent: [...agentRows]
-        .map(([agent, row]) => ({ agent, role: citizens.get(agent)?.role ?? null, ...row }))
-        .toSorted((a, b) => b.idle - a.idle || b.turns - a.turns),
-    },
-    sentBack: {
-      finished: finishedIds.length,
-      sendBacks: finishedIds.reduce((sum, id) => sum + (moves.get(id) ?? 0), 0),
-      tasksSentBack: finishedIds.filter((id) => (moves.get(id) ?? 0) > 0).length,
-      byStage: [...movedFrom]
-        .map(([key, count]) => {
-          const [project = "", stage = ""] = key.split("\u0000");
-          return { project, stage, count };
-        })
-        .toSorted(byCount),
-      bySender: [...movedBy].map(([agent, count]) => ({ agent, count })).toSorted(byCount),
-    },
-    messages: {
-      finished: finishedIds.length,
-      messages: finishedIds.reduce((sum, id) => sum + messagesOf(id), 0),
-      byProject: [...projects]
-        .map(([project, row]) => ({ project, ...row }))
-        .toSorted((a, b) => b.messages - a.messages),
-      busiest: finishedIds
-        .map((id) => ({
-          taskId: id,
-          title: tasks.get(id)?.title ?? id,
-          project: finished.get(id) ?? "",
-          messages: messagesOf(id),
-        }))
-        .toSorted((a, b) => b.messages - a.messages)
-        .slice(0, 5),
-    },
-    latency: {
-      mentions: allLatencies.length,
-      unanswered: waiting.length,
-      medianMs: median(allLatencies),
-      slowestMs: allLatencies.length === 0 ? null : Math.max(...allLatencies),
-      byAgent: [...latencies]
-        .map(([agent, list]) => ({
-          agent,
-          mentions: list.length,
-          medianMs: median(list) ?? 0,
-          slowestMs: Math.max(...list),
-        }))
-        .toSorted((a, b) => b.medianMs - a.medianMs),
-    },
-    decisions: {
-      total: [...days.values()].reduce(
-        (sum, row) => sum + row.proposals + row.answers + row.stages,
-        0,
-      ),
-      byDay: [...days]
-        .map(([day, row]) => ({ day, ...row }))
-        .toSorted((a, b) => b.day.localeCompare(a.day)),
-    },
-    blocked: [...blocked].map(([taskId, row]) => ({
-      taskId,
-      title: tasks.get(taskId)?.title ?? null,
-      project: row.project,
-      summary: row.summary,
-      firstAt: row.firstAt,
-      lastAt: row.lastAt,
-      holds: input.activeSignals.has(row.key),
-    })),
-  };
+  return tally.finish(moves, posts, matcher.unanswered);
 }

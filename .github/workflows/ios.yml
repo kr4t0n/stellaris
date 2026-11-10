@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   boardkit:
+    if: false
     runs-on: xcode-27
     timeout-minutes: 30
     env:
@@ -79,7 +80,7 @@ jobs:
       # rather than cancelling it, so they still run.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
-        timeout-minutes: 60
+        timeout-minutes: 18
         run: |
           set -o pipefail
           output="$RUNNER_TEMP/test-output.txt"

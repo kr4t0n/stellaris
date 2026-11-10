@@ -1,10 +1,13 @@
 import { OpsSignalSchema, type BoardEvent, type OpsSignal, type Ulid } from "@stellaris/shared";
 
-/** An operations signal the log holds, with its event's id and time. */
+/**
+ * An operations signal the log holds, with its event's id and time. The metrics index hands out
+ * the records it keeps, which live as long as the process, so nothing may change one.
+ */
 export interface SignalRecord {
   readonly id: Ulid;
   readonly ts: string;
-  readonly signal: OpsSignal;
+  readonly signal: Readonly<OpsSignal>;
 }
 
 /**

@@ -875,14 +875,14 @@
     // MARK: Branches
 
     /// A read of a path on a branch: a task's, or a project's default one, the path decoded.
-    private struct BranchRead {
+    private struct PathRead {
       let task: String?
       let project: String?
       let path: String
     }
 
     /// The branch and the path a request reads, or nil for a request that reads no branch.
-    private static func branchRead(_ path: String) -> BranchRead? {
+    private static func branchRead(_ path: String) -> PathRead? {
       for (prefix, isTask) in [("/api/tasks/", true), ("/api/projects/", false)]
       where path.hasPrefix(prefix) {
         let parts = path.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
@@ -892,7 +892,7 @@
         let owner = String(parts[0])
         let inside = parts.dropFirst(2).map { String($0).removingPercentEncoding ?? String($0) }
           .joined(separator: "/")
-        return BranchRead(
+        return PathRead(
           task: isTask ? owner : nil, project: isTask ? nil : owner, path: inside)
       }
       return nil
@@ -902,7 +902,7 @@
     /// samples show, with the plot and its notes, and the demo project's default branch, a folder
     /// of each depth and a file of each kind the app shows. The token `runner-away` finds the
     /// project's runner away, and `empty-branch` the project's branch as its first commit left it.
-    private static func branch(_ read: BranchRead, token: String) -> (Int, Data) {
+    private static func branch(_ read: PathRead, token: String) -> (Int, Data) {
       if token == "runner-away" {
         return fixture("error-runner-away")
       }

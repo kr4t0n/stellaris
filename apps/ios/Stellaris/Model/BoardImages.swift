@@ -18,8 +18,8 @@ enum ImageFailure: Error {
 
 /// The images messages show, each loaded as its source asks and decoded off the main actor: an
 /// uploaded one with the token, kept by its id, since an upload never changes; one on a task's
-/// branch, read through the board from the project's runner; and one on the web, over `https`
-/// without the token.
+/// branch or a project's default branch, read through the board from the project's runner; and one
+/// on the web, over `https` without the token.
 @MainActor final class BoardImages {
   private let uploads = NSCache<NSString, UIImage>()
 

@@ -1,5 +1,6 @@
 import BoardKit
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// A file or a folder on a task's branch or a project's default branch, as the web's file view

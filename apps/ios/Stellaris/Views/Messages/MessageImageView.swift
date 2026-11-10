@@ -158,7 +158,7 @@ struct ZoomableImage: UIViewRepresentable {
 
 /// A scroll view that fits its image to its bounds, zooms in to four times that with a pinch or a
 /// double tap, and keeps the image centred while it is smaller than the view.
-private final class ZoomView: UIScrollView, UIScrollViewDelegate {
+final class ZoomView: UIScrollView, UIScrollViewDelegate {
   private let imageView: UIImageView
   /// The bounds the image was last fitted to.
   private var fitted = CGSize.zero

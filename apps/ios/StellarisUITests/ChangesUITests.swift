@@ -12,7 +12,7 @@ final class ChangesUITests: ShellTestCase {
   @MainActor func testOpensAChangeThenTheWholeFileFromThePlan() {
     let app = openPlan(token: "fixture-token")
     let row = app.buttons["change-src/export/view.ts"].firstMatch
-    reveal(app, row)
+    dragUpTo(app, row)
     XCTAssertTrue(row.label.contains("+5 −2"), "the change's row says \(row.label)")
     let deleted = app.buttons["change-src/export/old.ts"].firstMatch
     XCTAssertTrue(deleted.label.contains("deleted"), "the deleted file's row says \(deleted.label)")
@@ -34,7 +34,7 @@ final class ChangesUITests: ShellTestCase {
     dragAway(app, app.navigationBars["view.ts"].firstMatch)
     XCTAssertTrue(first.waitForNonExistence(timeout: 20), "a drag down leaves the file open")
     pick(app, "plan")
-    reveal(app, row)
+    dragUpTo(app, row)
     row.tap()
     XCTAssertTrue(nine.waitForExistence(timeout: 20), "the change didn't open again")
     nine.tap()
@@ -57,7 +57,7 @@ final class ChangesUITests: ShellTestCase {
     ] {
       let app = openPlan(token: token)
       let state = app.staticTexts["changes-state"].firstMatch
-      reveal(app, state)
+      dragUpTo(app, state)
       XCTAssertEqual(state.label, words, "Files doesn't say why it lists nothing")
       keepScreen("plan-files-\(token)")
     }

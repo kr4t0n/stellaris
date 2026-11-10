@@ -69,12 +69,12 @@ final class FilesUITests: ShellTestCase {
     // At this size a project's first row fills half the window, so each row is scrolled to.
     for row in ["project-files-demo", "file-src", "file-src/app.ts"] {
       let button = app.buttons[row].firstMatch
-      reveal(app, button)
+      dragUpTo(app, button)
       button.tap()
     }
     let one = app.descendants(matching: .any)["line-9"].firstMatch
     let two = app.descendants(matching: .any)["line-10"].firstMatch
-    reveal(app, two)
+    dragUpTo(app, two)
     XCTAssertTrue(one.exists, "the code shows no line 9 above line 10")
     keepScreen("files-code-largest")
     XCTAssertEqual(

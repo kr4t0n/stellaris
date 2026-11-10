@@ -141,7 +141,7 @@ class ShellTestCase: XCTestCase {
   /// Drags what the window shows up until `element`'s middle is on screen: one scrolled in only
   /// as far as a sliver at the window's foot counts as hittable, and a tap there reaches nothing.
   /// Each drag is held at its end, so the view moves by the drag alone and can't fling past it.
-  @MainActor func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
+  @MainActor func dragUpTo(_ app: XCUIApplication, _ element: XCUIElement) {
     let window = app.windows.firstMatch
     let frame = window.frame
     func shown() -> Bool {

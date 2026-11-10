@@ -257,6 +257,9 @@
       if method == "POST", path == "/api/verbs/update_dashboard" {
         return updateDashboard(request: request, token: token)
       }
+      if method == "GET", let read = changesRead(path) {
+        return changes(read, token: token)
+      }
       if method == "GET", let read = branchRead(path) {
         return branch(read, token: token)
       }
@@ -1015,13 +1018,187 @@
     }
 
     /// The task's branch the samples show: the plot and its notes, as the server's capture has
-    /// the notes.
+    /// the notes, and the files its changes name that the branch still has.
     private static var taskFiles: [String: Data] {
       let notes = (body("task-text-file") as? [String: Any])?["content"] as? String
       return [
         plot.path: drawing(width: 600, height: 360, label: "plot.png", hue: 0.33),
         "evidence/notes.md": notes.flatMap { Data(base64Encoded: $0) } ?? Data(),
+        "src/export/view.ts": Data((exportView.joined(separator: "\n") + "\n").utf8),
+        "scripts/run.sh": Data("#!/bin/sh\npnpm test\n".utf8),
+        "data/export.json": Data((exportRows(400).joined(separator: "\n") + "\n").utf8),
       ]
+    }
+
+    // MARK: A task's changes
+
+    /// A read of what a task's branch changed, or of what it did to one file, the path decoded.
+    private struct ChangesRead {
+      let task: String
+      /// The file whose change is read; nil for the list.
+      let path: String?
+    }
+
+    /// What a request reads of a task's changes, or nil for a request that reads none.
+    private static func changesRead(_ path: String) -> ChangesRead? {
+      guard path.hasPrefix("/api/tasks/") else {
+        return nil
+      }
+      let parts = path.dropFirst("/api/tasks/".count)
+        .split(separator: "/", omittingEmptySubsequences: false)
+      guard parts.count >= 2 else {
+        return nil
+      }
+      if parts.count == 2, parts[1] == "changes" {
+        return ChangesRead(task: String(parts[0]), path: nil)
+      }
+      guard parts.count > 2, parts[1] == "diff" else {
+        return nil
+      }
+      let inside = parts.dropFirst(2).map { String($0).removingPercentEncoding ?? String($0) }
+        .joined(separator: "/")
+      return ChangesRead(task: String(parts[0]), path: inside)
+    }
+
+    /// One file the samples' task's branch changed: what happened to it, who touched it last and
+    /// that many minutes after nine, and its patch, nil for a binary file, cut or whole.
+    private struct Change {
+      let path: String
+      let status: String
+      let added: Int?
+      let removed: Int?
+      let author: String
+      let minute: Int
+      let patch: String?
+      var truncated = false
+
+      var listed: [String: Any] {
+        [
+          "path": path, "status": status, "added": added ?? NSNull(),
+          "removed": removed ?? NSNull(),
+          "lastChange": ["author": author, "at": FakeBoard.time(minute)],
+        ]
+      }
+    }
+
+    /// What the samples' task's branch changed since it left the default branch: the notes and
+    /// the plot as the server's capture has them, code changed in two hunks, a file deleted, a
+    /// script whose mode alone changed, and data whose patch the board cut.
+    private static var taskChanges: [Change] {
+      let notes = (body("task-diff") as? [String: Any])?["patch"] as? String
+      let removed = (1...12).map { "-// the old export, line \($0) of 12" }
+      let added = exportRows(400).prefix(120).map { "+" + $0 }
+      return [
+        Change(
+          path: "evidence/notes.md", status: "added", added: 3, removed: 0, author: "eng-1",
+          minute: 45, patch: notes),
+        Change(
+          path: plot.path, status: "added", added: nil, removed: nil, author: "eng-1", minute: 45,
+          patch: nil),
+        Change(
+          path: "src/export/view.ts", status: "modified", added: 5, removed: 2, author: "rev-1",
+          minute: 20, patch: exportPatch),
+        Change(
+          path: "src/export/old.ts", status: "deleted", added: 0, removed: 12, author: "rev-1",
+          minute: 20, patch: (["@@ -1,12 +0,0 @@"] + removed).joined(separator: "\n")),
+        Change(
+          path: "scripts/run.sh", status: "modified", added: 0, removed: 0, author: "eng-1",
+          minute: 5, patch: ""),
+        Change(
+          path: "data/export.json", status: "added", added: 400, removed: 0, author: "eng-1",
+          minute: 40, patch: (["@@ -0,0 +1,400 @@"] + added).joined(separator: "\n"),
+          truncated: true),
+      ]
+    }
+
+    /// The export view on the task's branch, as its patch leaves it.
+    private static var exportView: [String] {
+      (1...46).map { line in
+        switch line {
+        case 1: "// The export view: a channel's messages as a page."
+        case 7: "export function exportView(channel: Channel): View {"
+        case 8: "  const messages = channel.messages;"
+        case 9: "  const title = `#${channel.name}`;"
+        case 10: "  const empty = messages.length === 0;"
+        case 11: "  // An empty channel says so rather than showing a blank page."
+        case 12: "  return empty ? renderEmpty(title) : render(title, messages);"
+        case 13, 45: "}"
+        case 14: ""
+        case 15: "export function render(title: string, messages: Message[]): View {"
+        case 44: "  return view;"
+        case 46: "export const exportVersion = 2;"
+        default: "// step \(line) of the export view"
+        }
+      }
+    }
+
+    /// What the task's branch did to the export view, in two hunks, numbered as `exportView` is.
+    private static let exportPatch = [
+      "@@ -8,8 +8,10 @@ export function exportView(channel: Channel): View {",
+      "   const messages = channel.messages;",
+      "-  const title = channel.name;",
+      "-  return render(title, messages);",
+      "+  const title = `#${channel.name}`;",
+      "+  const empty = messages.length === 0;",
+      "+  // An empty channel says so rather than showing a blank page.",
+      "+  return empty ? renderEmpty(title) : render(title, messages);",
+      " }",
+      " ",
+      " export function render(title: string, messages: Message[]): View {",
+      "@@ -42,2 +44,3 @@ export function render(title: string, messages: Message[]): View {",
+      "   return view;",
+      " }",
+      "+export const exportVersion = 2;",
+    ].joined(separator: "\n")
+
+    /// The export's data, a row to a line.
+    private static func exportRows(_ count: Int) -> [String] {
+      (1...count).map { #"  {"run": \#($0), "seconds": 0.4, "messages": 120},"# }
+    }
+
+    /// What the samples' task's branch changed, or what it did to one file. The token
+    /// `runner-away` finds the project's runner away, `no-branch` the task with no branch yet,
+    /// `nothing-changed` its branch as it left the default one, and `many-changes` more files than
+    /// the board lists.
+    private static func changes(_ read: ChangesRead, token: String) -> (Int, Data) {
+      if token == "runner-away" {
+        return fixture("error-changes-away")
+      }
+      guard read.task == plot.task else {
+        return fixture("error-not-found")
+      }
+      if token == "no-branch" {
+        return fixture("error-changes-missing")
+      }
+      let head: [String: Any] = [
+        "id": "4f2c9e1a7b3d5c8e0f1a2b3c4d5e6f708192a3b4", "at": time(45), "author": "eng-1",
+      ]
+      guard let path = read.path else {
+        if token == "nothing-changed" {
+          return (200, json(["head": head, "files": [Any](), "total": 0]))
+        }
+        if token == "many-changes" {
+          let files = (0..<500).map { index in
+            Change(
+              path: "data/runs/run-\(index).json", status: "added", added: 12, removed: 0,
+              author: "eng-1", minute: 45, patch: nil
+            ).listed
+          }
+          return (200, json(["head": head, "files": files, "total": 734]))
+        }
+        let files = taskChanges.map(\.listed)
+        return (200, json(["head": head, "files": files, "total": files.count]))
+      }
+      guard let change = taskChanges.first(where: { $0.path == path }) else {
+        return fixture("error-not-found")
+      }
+      return (
+        200,
+        json([
+          "head": head, "path": path, "status": change.status, "patch": change.patch ?? NSNull(),
+          "truncated": change.truncated,
+        ])
+      )
     }
 
     /// The demo project's default branch: markdown that links the files beside it, a table, a

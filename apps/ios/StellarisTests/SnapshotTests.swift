@@ -440,16 +440,59 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// A task's plan whole, and each captured proposal's charter.
+  /// A task's plan whole, ending with what its branch changed, and each captured proposal's
+  /// charter. At 320 points the plan is as wide as its column beside the thread.
   @MainActor func testPlansAndCharters() async throws {
     let model = try await signedIn()
     let task = try XCTUnwrap(model.store.task(exportView))
+    await model.store.loadTaskChanges(exportView, using: model)
     try await Snapshot.recordWhole(
       PlanView(task: task).environment(model), named: "plan", in: self)
     for proposal in model.store.proposals {
       try await Snapshot.recordWhole(
         CharterView(proposal: proposal).environment(model),
         named: "charter-\(proposal.kind.rawValue)", in: self)
+    }
+  }
+
+  /// A file's change on the plan's stack, with Whole file in its bar, at every width and type size;
+  /// then, on the outer display, a binary file's, one whose lines didn't change, one the board cut,
+  /// a deleted file's, which has no Whole file, and one the runner can't read; and the plan's
+  /// Files with the runner away, before the task's branch, with nothing changed, and past the
+  /// board's limit.
+  @MainActor func testATasksChanges() async throws {
+    let model = try await signedIn()
+    await model.store.loadTaskChanges(exportView, using: model)
+    let task = exportView
+    func change(_ path: String, in model: AppModel) async -> AnyView {
+      await model.store.loadTaskDiff(ChangeKey(task: task, path: path), using: model)
+      return AnyView(
+        NavigationStack {
+          ChangeView(taskId: task, path: path) { _ in }
+        }
+        .environment(model))
+    }
+    try await Snapshot.record(
+      await change("src/export/view.ts", in: model), named: "change-code", in: self)
+    for (name, path) in [
+      ("change-binary", "evidence/plot.png"), ("change-no-lines", "scripts/run.sh"),
+      ("change-cut", "data/export.json"), ("change-deleted", "src/export/old.ts"),
+      ("change-notes", "evidence/notes.md"),
+    ] {
+      try await keepAtTheOuterDisplay(await change(path, in: model), named: name)
+    }
+    let away = try await signedIn(token: "runner-away")
+    try await keepAtTheOuterDisplay(
+      await change("src/export/view.ts", in: away), named: "change-runner-away")
+    for token in ["runner-away", "no-branch", "nothing-changed", "many-changes"] {
+      let other = try await signedIn(token: token)
+      await other.store.loadTaskChanges(exportView, using: other)
+      let task = try XCTUnwrap(other.store.task(exportView))
+      let files = TaskFiles(task: task, now: .now)
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(MessageColor.island)
+      try await keepAtTheOuterDisplay(files.environment(other), named: "plan-files-\(token)")
     }
   }
 

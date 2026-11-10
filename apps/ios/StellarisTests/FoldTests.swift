@@ -216,6 +216,43 @@ final class FoldTests: XCTestCase {
     }
   }
 
+  /// A file's change, pushed on the plan's own stack, stays on it as the phone opens, turns, and
+  /// folds: in the plan's sheet on the outer display and beside the sky in landscape, and in its
+  /// column beside the thread in portrait, where the change takes the column's stack.
+  @MainActor func testAChangeStaysOpenThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let task = "00000000000000000000000010"
+    let change = BoardPlace.change(task: task, path: "src/export/view.ts")
+    model.open(.thread(task))
+    model.inspecting = task
+    model.push(change, onPlanOf: task)
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    for (step, size, sheet) in [
+      ("folded", outer, true), ("opened", landscape, true), ("turned", portrait, false),
+      ("folded again", outer, true),
+    ] {
+      window.resize(to: size)
+      try await window.settle()
+      let presented = try await window.until { window.presentsSheet == sheet }
+      let shown = try await window.until { window.barTitles().contains("view.ts") }
+      try window.keep("fold-change-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertTrue(presented, "\(step): the plan isn't \(sheet ? "in a sheet" : "beside the thread")")
+      XCTAssertEqual(model.inspecting, task, "\(step): the plan closed")
+      XCTAssertEqual(model.planPaths[task], [change], "\(step): the plan lost its change")
+      XCTAssertTrue(shown, "\(step): no bar shows the change: \(window.barTitles())")
+      if !sheet {
+        // The change's scroll view, in the column at the chat's trailing side.
+        let column = try await window.until {
+          window.scrollFrames().contains { $0.minX >= size.width / 2 - 40 && $0.width >= 240 }
+        }
+        XCTAssertTrue(column, "\(step): no column beside the thread: \(window.scrollFrames())")
+      }
+    }
+  }
+
   /// Chat's file sheet, with a folder pushed in it, stays open through the poses with both, and a
   /// file and a folder on Board's own stack stay there too, since both stacks live in the model.
   @MainActor func testTheFilesStayOpenThroughTheFold() async throws {
@@ -342,6 +379,17 @@ final class FoldTests: XCTestCase {
       .map { frame(of: $0) }
   }
 
+  /// The titles the window's navigation bars, a presented sheet's included, show at the top.
+  func barTitles() -> [String] {
+    var bars = views(UINavigationBar.self)
+    var presented = host.presentedViewController
+    while let controller = presented {
+      bars += views(UINavigationBar.self, in: controller.view)
+      presented = controller.presentedViewController
+    }
+    return bars.compactMap { $0.topItem?.title }
+  }
+
   /// Whether the window presents a sheet over its root.
   var presentsSheet: Bool {
     host.presentedViewController != nil
@@ -373,9 +421,9 @@ final class FoldTests: XCTestCase {
     try Snapshot.keep(image, named: name, in: test)
   }
 
-  private func views<T: UIView>(_ type: T.Type) -> [T] {
+  private func views<T: UIView>(_ type: T.Type, in root: UIView? = nil) -> [T] {
     var found: [T] = []
-    var queue: [UIView] = [window]
+    var queue: [UIView] = [root ?? window]
     while let view = queue.popLast() {
       if let match = view as? T {
         found.append(match)

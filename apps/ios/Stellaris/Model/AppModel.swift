@@ -11,11 +11,12 @@ enum LinkOutcome: Equatable {
   case nowhere
 }
 
-/// A place Board's stack, or a file sheet's, shows: a project's dashboard and tasks, or a file or
-/// a folder on a branch.
+/// A place Board's stack, a file sheet's, or a plan's shows: a project's dashboard and tasks, a
+/// file or a folder on a branch, or what a task's branch did to a file.
 enum BoardPlace: Hashable {
   case project(String)
   case files(FilePlace)
+  case change(task: String, path: String)
 }
 
 /// The file or the folder a link in Chat opened, and what was opened from it since, which Chat
@@ -84,8 +85,20 @@ enum SignInFailure: Error, Equatable {
   /// What each decision's reason says so far, kept as the notes are.
   var reasons: [Verdict: String] = [:]
   /// The task or the proposal whose plan or charter is open beside its thread, or in a sheet where
-  /// there is no room beside it.
-  var inspecting: String?
+  /// there is no room beside it. Closing it, or opening another, drops what its plan had pushed.
+  var inspecting: String? {
+    didSet {
+      if let closed = oldValue, closed != inspecting {
+        planPaths[closed] = nil
+      }
+    }
+  }
+  /// The changes and the files each open plan has pushed on its own stack, the last one shown, by
+  /// task, so a fold that moves the plan between its column and its sheet keeps them.
+  var planPaths: [String: [BoardPlace]] = [:]
+  /// The folders of each task's changes the user opened or closed, by task and folder, over those
+  /// the tree opens with, as the web keeps them while its list refreshes.
+  var changeFolders: [String: [String: Bool]] = [:]
   /// The tasks and the proposals whose advance or decision is on its way to the board. Neither goes
   /// again until the board answers: an advance names no stage, so a second would finish the next.
   private(set) var underWay: Set<String> = []
@@ -579,6 +592,14 @@ enum SignInFailure: Error, Equatable {
         await store.loadBranchFile(place, using: self)
       }
     }
+    // A task's changes and a file's change a view shows; one none shows is read when a view next
+    // shows it.
+    for task in store.taskChangesShown.keys where touched("task-changes", task) {
+      await store.loadTaskChanges(task, using: self)
+    }
+    for key in store.taskDiffsShown.keys where touched("task-diff", key.task) {
+      await store.loadTaskDiff(key, using: self)
+    }
     sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
   }
 
@@ -604,6 +625,21 @@ enum SignInFailure: Error, Equatable {
   /// Opens a file or a folder on a branch in Chat's file sheet, in place of any it showed.
   func browse(_ place: FilePlace) {
     browsing = FileBrowse(root: place)
+  }
+
+  /// Pushes a file's change, or a file or a folder on a branch, on the stack of `task`'s plan.
+  func push(_ place: BoardPlace, onPlanOf task: String) {
+    planPaths[task, default: []].append(place)
+  }
+
+  /// Whether a folder of `task`'s changes is open: as the user left it, else as the tree opens.
+  func isOpen(_ folder: String, of task: String, opened: Set<String>) -> Bool {
+    changeFolders[task]?[folder] ?? opened.contains(folder)
+  }
+
+  /// Opens a folder of `task`'s changes, or closes it.
+  func toggle(_ folder: String, of task: String, opened: Set<String>) {
+    changeFolders[task, default: [:]][folder] = !isOpen(folder, of: task, opened: opened)
   }
 
   /// The project of the conversation Chat shows, which the sky frames and brightens, as the web's
@@ -736,6 +772,8 @@ enum SignInFailure: Error, Equatable {
     deciding = nil
     reasons = [:]
     inspecting = nil
+    planPaths = [:]
+    changeFolders = [:]
     underWay = []
     refusals = [:]
     uploading = [:]

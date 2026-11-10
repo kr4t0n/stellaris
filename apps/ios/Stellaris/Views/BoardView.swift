@@ -68,6 +68,8 @@ struct BoardView: View {
           ProjectView(slug: slug)
         case .files(let file):
           BranchFileView(place: file) { model.boardPath.append(.files($0)) }
+        case .change(let task, let path):
+          ChangeView(taskId: task, path: path) { model.boardPath.append(.files($0)) }
         }
       }
     }

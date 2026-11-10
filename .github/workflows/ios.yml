@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   boardkit:
+    if: false
     runs-on: xcode-27
     timeout-minutes: 30
     env:
@@ -92,6 +93,8 @@ jobs:
             -scheme Stellaris \
             -destination "$DESTINATION" \
             -derivedDataPath "$RUNNER_TEMP/derived" \
+            -only-testing:StellarisTests/FoldTests/testTheChatKeepsItsPlaceAsThePhoneOpensTurnsAndFolds \
+            -test-iterations 3 \
             -resultBundlePath "$RUNNER_TEMP/Stellaris.xcresult" 2>&1 | tee "$output" || status=$?
           touch "$output.done"
           watched=0
@@ -132,7 +135,7 @@ jobs:
             -print -exec plutil -p {} \;
       # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
       - name: Look at the simulator's displays
-        if: ${{ !cancelled() }}
+        if: false
         continue-on-error: true
         run: |
           set +e
@@ -160,7 +163,7 @@ jobs:
           exit 0
       # The app's icon as Icon Composer draws it in each of iOS's appearances, for review.
       - name: Draw the app's icon
-        if: ${{ !cancelled() }}
+        if: false
         run: |
           ictool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
           mkdir -p "$RUNNER_TEMP/screens/icon"

@@ -12,19 +12,18 @@ struct TaskFiles: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack(alignment: .firstTextBaseline, spacing: 12) {
-        SectionTitle("Files")
-        Spacer(minLength: 0)
-        Button {
-          model.push(.files(FilePlace(source: .task(task.id), path: "")), onPlanOf: task.id)
-        } label: {
-          Text("Browse the branch")
-            .font(MessageType.small())
-            .foregroundStyle(MessageColor.secondary)
-            .underline()
+      // Browse the branch beside the heading where both fit on a line, and under it where they
+      // don't, as at the largest type sizes, rather than broken over three lines beside it.
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+          SectionTitle("Files")
+          Spacer(minLength: 0)
+          browse
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("browse-branch")
+        VStack(alignment: .leading, spacing: 4) {
+          SectionTitle("Files")
+          browse
+        }
       }
       content
     }
@@ -89,6 +88,20 @@ struct TaskFiles: View {
         StateWords(words: "Reading the task's branch…")
       }
     }
+  }
+
+  /// Browse the branch, which pushes the branch's root on the plan's stack.
+  private var browse: some View {
+    Button {
+      model.push(.files(FilePlace(source: .task(task.id), path: "")), onPlanOf: task.id)
+    } label: {
+      Text("Browse the branch")
+        .font(MessageType.small())
+        .foregroundStyle(MessageColor.secondary)
+        .underline()
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("browse-branch")
   }
 
   /// Retry, since on a phone nothing else reads the changes again while the plan shows, where the
@@ -217,7 +230,8 @@ private struct ChangeRow: View {
 }
 
 /// A row of the tree on one line, the name cut in the middle, as the web's; at the accessibility
-/// sizes, where one line leaves the name no room, what happened and who touched it go under it.
+/// sizes, where one line leaves the name no room, what happened and who touched it go under it,
+/// each on a line of its own.
 private struct TreeLine<Lead: View, Name: View, Meta: View, Touch: View>: View {
   @Environment(\.dynamicTypeSize) private var typeSize
   let depth: Int
@@ -234,7 +248,8 @@ private struct TreeLine<Lead: View, Name: View, Meta: View, Touch: View>: View {
           name()
             .font(MessageType.small())
             .fixedSize(horizontal: false, vertical: true)
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
+          // Each on a line of its own: side by side, each wrapped in half the width.
+          VStack(alignment: .leading, spacing: 2) {
             meta()
             touched()
           }

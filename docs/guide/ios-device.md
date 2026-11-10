@@ -1,6 +1,6 @@
 # Running the iOS app on an iPhone
 
-How to build the iOS app on a Mac, install it on your own iPhone, and sign in to your board. The commands for the app's tests are in the [README](../../README.md#run-build-test), and how the app works in [docs/internals/ios.md](../internals/ios.md).
+How to build the iOS app on a Mac, install it on your own iPhone, and sign in to your board. The commands for the app's tests, and how the app works, are in [docs/internals/ios.md](../internals/ios.md#running-the-tests).
 
 ## What you need
 

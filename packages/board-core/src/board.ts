@@ -152,7 +152,6 @@ import {
   placeConversation,
   conversationPart,
   boardActionsIn,
-  METRICS_WINDOW_MS,
   type Metrics,
   type MetricsWindow,
   type TokenUse,
@@ -167,7 +166,7 @@ import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
-import { computeMetrics } from "./metrics.js";
+import { MetricsIndex } from "./metrics-index.js";
 import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
 import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
@@ -793,6 +792,10 @@ export class Board {
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
+  private metricsIndex: Promise<MetricsIndex> | null = null;
+  // The tasks the metrics name, by id, each dropped as it is written; null for one not found.
+  private readonly metricsTasks = new Map<string, Task | null>();
+  private taskWrites = 0;
   private readonly leaseMs: number;
   private readonly now: () => Date;
   private readonly roleCache = new Map<Name, RoleCharter>();
@@ -4277,39 +4280,111 @@ export class Board {
 
   /** The steps of one finished turn, as the runner handed them over when it ended. */
   /**
-   * Six measures of how the society works over a window, from the event log and the board actions
-   * in each finished turn's transcript; `activeSignals` says which blocked tasks are blocked still.
+   * Six measures of how the society works over a window, from the metrics index, so that no answer
+   * reads the log or a transcript; `activeSignals` says which blocked tasks are blocked still. The
+   * tasks it names are read once each, and again once written.
    */
   async metrics(
     window: MetricsWindow,
     activeSignals: ReadonlySet<string> = new Set(),
   ): Promise<Metrics> {
+    const index = await this.indexMetrics();
     const now = this.now();
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const tasks: Task[] = [];
-    for (const project of await listDirs(this.paths.projects())) {
-      tasks.push(...(await this.listTasks(project)));
-    }
     const citizens = [];
     for (const agent of await this.listAgents()) {
       if (agent.cli !== null) {
         citizens.push({ name: agent.name, role: agent.role, memberships: agent.memberships });
       }
     }
-    const span = METRICS_WINDOW_MS[window];
-    const since = span === null ? null : now.getTime() - span;
-    const actions = new Map<string, number | null>();
-    for (const event of events) {
-      const turnId = event.payload["turnId"];
-      if (
-        event.type === "turn.completed" &&
-        typeof turnId === "string" &&
-        (since === null || Date.parse(event.ts) >= since)
-      ) {
-        actions.set(turnId, await this.turnActions(event.actor, turnId));
+    const tasks: Task[] = [];
+    for (const id of index.tasksRead(window, now)) {
+      const task = await this.metricsTask(id);
+      if (task !== null) {
+        tasks.push(task);
       }
     }
-    return computeMetrics({ events, tasks, citizens, actions, activeSignals, window, now });
+    return index.answer({ tasks, citizens, activeSignals, window, now });
+  }
+
+  /**
+   * The metrics index: seeded once from the whole event log on first use, as the server does at
+   * its start, then kept up by each event this process appends. The server logs every event a
+   * measure counts itself; one another process appended would count from the next seed. A turn
+   * ended before ends carried their board actions has its transcript read once, here, through
+   * the same cache as the counters' seed. A seed that fails is tried again by the next call.
+   */
+  indexMetrics(): Promise<MetricsIndex> {
+    this.metricsIndex ??= this.seedMetrics().catch((error: unknown) => {
+      this.metricsIndex = null;
+      throw error;
+    });
+    return this.metricsIndex;
+  }
+
+  private async seedMetrics(): Promise<MetricsIndex> {
+    const actions = new Map<string, number | null>();
+    const index = new MetricsIndex((turnId) => actions.get(turnId));
+    // Events appended while the log is read wait, and count once unless the read held them.
+    let waiting: BoardEvent[] | null = [];
+    const stop = this.events.onAppend((event) => {
+      if (waiting === null) {
+        index.add(event);
+      } else {
+        waiting.push(event);
+      }
+    });
+    try {
+      const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+      for (const event of events) {
+        const turnId = MetricsIndex.transcriptToRead(event);
+        if (turnId !== null) {
+          actions.set(turnId, await this.turnActions(event.actor, turnId));
+        }
+      }
+      const seen = new Set<string>();
+      for (const event of events) {
+        seen.add(event.id);
+        index.add(event);
+      }
+      for (const event of waiting) {
+        if (!seen.has(event.id)) {
+          index.add(event);
+        }
+      }
+      waiting = null;
+      // Ends appended from here on carry their board actions, or kept no transcript.
+      actions.clear();
+      return index;
+    } catch (error) {
+      stop();
+      throw error;
+    }
+  }
+
+  /** A task the metrics name by its id, or null when no project holds one. */
+  private async metricsTask(id: string): Promise<Task | null> {
+    const known = this.metricsTasks.get(id);
+    if (known !== undefined) {
+      return known;
+    }
+    const writes = this.taskWrites;
+    const ulid = UlidSchema.safeParse(id);
+    const task = ulid.success
+      ? await this.findTask(ulid.data).then(
+          (found) => found.task,
+          (error: unknown) => {
+            if (error instanceof BoardError && error.code === "NOT_FOUND") {
+              return null;
+            }
+            throw error;
+          },
+        )
+      : null;
+    // A task written while it was read may have been read before the write.
+    if (writes === this.taskWrites) {
+      this.metricsTasks.set(id, task);
+    }
+    return task;
   }
 
   /**
@@ -6655,6 +6730,8 @@ export class Board {
     );
     const data = TaskFrontmatterSchema.parse(clean);
     await writeMarkdown(this.paths.task(project, task.id), data, body);
+    this.metricsTasks.delete(task.id);
+    this.taskWrites += 1;
     return { ...data, body };
   }
 

@@ -177,3 +177,13 @@ if (metrics !== null) {
     metrics = null;
   }
 }
+
+// The Metrics view's index reads the whole log once too, after the counters' seed when there is
+// one, so the older ends' transcripts it read are not read again. One that fails is tried again by
+// the view's next ask.
+try {
+  await board.indexMetrics();
+  log.info("metrics index seeded");
+} catch (error) {
+  log.error({ err: error }, "could not seed the metrics index");
+}

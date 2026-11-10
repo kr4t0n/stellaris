@@ -115,95 +115,97 @@ struct ChatView: View {
 
   var body: some View {
     let subject = model.subject(of: model.history.current)
-    NavigationStack {
-      HStack(spacing: 0) {
+    HStack(spacing: 0) {
+      // The thread's stack, and the plan's or the charter's beside it: two stacks side by side,
+      // since a stack inside another's view pushes onto the outer one.
+      NavigationStack {
         ConversationView(feed: model.feed(for: model.history.current))
           .id(model.history.current)
-        if columnShown, let subject {
-          Rectangle().fill(MessageColor.line).frame(width: 1)
-          SubjectDetail(subject: subject)
-            .frame(width: 320)
-        }
+          // What shows where no view draws, as behind the keyboard's rounded corners, below the
+          // foot the conversation's own ground ends at while the keyboard is up: the island, not
+          // the stack's black.
+          .containerBackground(MessageColor.island, for: .navigation)
+          .toolbar {
+            if let back = model.back {
+              ToolbarItem(placement: .cancellationAction) {
+                Button {
+                  model.goBack()
+                } label: {
+                  Label("Back to \(model.name(of: back))", systemImage: "chevron.backward")
+                }
+                .accessibilityIdentifier("back")
+              }
+            }
+            if let channel = openChannel {
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  model.startingThread = channel
+                } label: {
+                  Label("New thread", systemImage: "plus.bubble")
+                }
+                .accessibilityIdentifier("new-thread")
+              }
+              .visibilityPriority(.high)
+            }
+            if case .task(let task)? = subject {
+              if stageForYou(task) != nil {
+                ToolbarItem(placement: .topBarPinnedTrailing) {
+                  Button {
+                    model.advancing = task.id
+                  } label: {
+                    Label("Advance", systemImage: "checkmark.circle")
+                  }
+                  .disabled(model.underWay.contains(task.id))
+                  .accessibilityIdentifier("advance")
+                }
+              }
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  toggleInspector(task.id)
+                } label: {
+                  Label("Plan", systemImage: "list.number")
+                }
+                .accessibilityIdentifier("plan")
+              }
+              .visibilityPriority(.high)
+            }
+            if case .proposal(let proposal)? = subject {
+              if waitingOnYou(proposal) {
+                ToolbarItem(placement: .topBarPinnedTrailing) {
+                  Button {
+                    model.deciding = Verdict(proposal: proposal.id, choice: .approve)
+                  } label: {
+                    Label("Approve", systemImage: "checkmark.seal")
+                  }
+                  .disabled(model.underWay.contains(proposal.id))
+                  .accessibilityIdentifier("approve")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                  Button {
+                    model.deciding = Verdict(proposal: proposal.id, choice: .reject)
+                  } label: {
+                    Label("Reject", systemImage: "xmark.seal")
+                  }
+                  .disabled(model.underWay.contains(proposal.id))
+                  .accessibilityIdentifier("reject")
+                }
+                .visibilityPriority(.high)
+              }
+              ToolbarItem(placement: .primaryAction) {
+                Button {
+                  toggleInspector(proposal.id)
+                } label: {
+                  Label("Charter", systemImage: "doc.text")
+                }
+                .accessibilityIdentifier("charter")
+              }
+            }
+          }
       }
-      // What shows where no view draws, as behind the keyboard's rounded corners, below the foot
-      // the conversation's own ground ends at while the keyboard is up: the island, not the
-      // stack's black.
-      .containerBackground(MessageColor.island, for: .navigation)
-      .toolbar {
-        if let back = model.back {
-          ToolbarItem(placement: .cancellationAction) {
-            Button {
-              model.goBack()
-            } label: {
-              Label("Back to \(model.name(of: back))", systemImage: "chevron.backward")
-            }
-            .accessibilityIdentifier("back")
-          }
-        }
-        if let channel = openChannel {
-          ToolbarItem(placement: .primaryAction) {
-            Button {
-              model.startingThread = channel
-            } label: {
-              Label("New thread", systemImage: "plus.bubble")
-            }
-            .accessibilityIdentifier("new-thread")
-          }
-          .visibilityPriority(.high)
-        }
-        if case .task(let task)? = subject {
-          if stageForYou(task) != nil {
-            ToolbarItem(placement: .topBarPinnedTrailing) {
-              Button {
-                model.advancing = task.id
-              } label: {
-                Label("Advance", systemImage: "checkmark.circle")
-              }
-              .disabled(model.underWay.contains(task.id))
-              .accessibilityIdentifier("advance")
-            }
-          }
-          ToolbarItem(placement: .primaryAction) {
-            Button {
-              toggleInspector(task.id)
-            } label: {
-              Label("Plan", systemImage: "list.number")
-            }
-            .accessibilityIdentifier("plan")
-          }
-          .visibilityPriority(.high)
-        }
-        if case .proposal(let proposal)? = subject {
-          if waitingOnYou(proposal) {
-            ToolbarItem(placement: .topBarPinnedTrailing) {
-              Button {
-                model.deciding = Verdict(proposal: proposal.id, choice: .approve)
-              } label: {
-                Label("Approve", systemImage: "checkmark.seal")
-              }
-              .disabled(model.underWay.contains(proposal.id))
-              .accessibilityIdentifier("approve")
-            }
-            ToolbarItem(placement: .primaryAction) {
-              Button {
-                model.deciding = Verdict(proposal: proposal.id, choice: .reject)
-              } label: {
-                Label("Reject", systemImage: "xmark.seal")
-              }
-              .disabled(model.underWay.contains(proposal.id))
-              .accessibilityIdentifier("reject")
-            }
-            .visibilityPriority(.high)
-          }
-          ToolbarItem(placement: .primaryAction) {
-            Button {
-              toggleInspector(proposal.id)
-            } label: {
-              Label("Charter", systemImage: "doc.text")
-            }
-            .accessibilityIdentifier("charter")
-          }
-        }
+      if columnShown, let subject {
+        Rectangle().fill(MessageColor.line).frame(width: 1)
+        SubjectStack(subject: subject, placement: placement, beside: true)
+          .frame(width: 320)
       }
     }
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
@@ -230,12 +232,8 @@ struct ChatView: View {
       case .inspect:
         if let subject {
           // No button: it only shows the plan or the charter, so a drag down closes it.
-          NavigationStack {
-            SubjectDetail(subject: subject)
-              .navigationTitle(subject.isTask ? "Plan" : "Charter")
-              .navigationBarTitleDisplayMode(.inline)
-          }
-          .presentationDetents([.medium, .large])
+          SubjectStack(subject: subject, placement: placement, beside: false)
+            .presentationDetents([.medium, .large])
         }
       }
     }
@@ -373,6 +371,49 @@ struct FileSheet: View {
 
   private func close() {
     model.browsing = nil
+  }
+}
+
+/// A task's plan or a proposal's charter on a stack of its own, which the plan pushes a file's
+/// change and the branch's files on, kept in the model by task, so a fold that moves the plan
+/// between its column and its sheet keeps what it shows. Only the stack where the plan shows now,
+/// beside the thread or in the sheet as Chat last settled it, writes to the model: one a fold takes
+/// away writes nothing as it goes.
+struct SubjectStack: View {
+  @Environment(AppModel.self) private var model
+  let subject: Subject
+  fileprivate let placement: PlanPlacement
+  /// Whether this is the stack in the column beside the thread.
+  let beside: Bool
+
+  var body: some View {
+    let id = subject.id
+    NavigationStack(
+      path: Binding(
+        get: { model.planPaths[id] ?? [] },
+        set: { path in
+          if placement.beside == beside, model.inspecting == id {
+            model.planPaths[id] = path.isEmpty ? nil : path
+          }
+        })
+    ) {
+      SubjectDetail(subject: subject)
+        .navigationTitle(subject.isTask ? "Plan" : "Charter")
+        .navigationBarTitleDisplayMode(.inline)
+        .containerBackground(MessageColor.island, for: .navigation)
+        .navigationDestination(for: BoardPlace.self) { place in
+          switch place {
+          case .change(let task, let path):
+            ChangeView(taskId: task, path: path) { model.push(.files($0), onPlanOf: id) }
+          case .files(let file):
+            BranchFileView(
+              place: file, open: { model.push(.files($0), onPlanOf: id) },
+              opened: { model.inspecting = nil })
+          case .project(let slug):
+            ProjectView(slug: slug)
+          }
+        }
+    }
   }
 }
 

@@ -189,6 +189,17 @@ public enum BoardAPI {
     }
   }
 
+  /// What a task's branch changed since it left the default branch, file by file.
+  public static func taskChanges(_ id: String) -> BoardRequest<BranchChanges> {
+    read("/api/tasks/\(component(id))/changes")
+  }
+
+  /// What a task's branch did to one file, counted as its changes are.
+  public static func taskDiff(_ id: String, path: String) -> BoardRequest<BranchFileDiff> {
+    let rest = path.split(separator: "/").map { "/" + component(String($0)) }.joined()
+    return read("/api/tasks/\(component(id))/diff\(rest)")
+  }
+
   /// An image a citizen uploaded, as its bytes.
   public static func image(_ id: String) -> Endpoint {
     Endpoint(method: .get, path: "/api/images/\(component(id))", body: nil, authenticated: true)

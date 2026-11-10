@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/diff/evidence/notes.md"
+  },
+  "status": 200,
+  "body": {
+    "head": {
+      "id": "fixture-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "eng-1"
+    },
+    "path": "evidence/notes.md",
+    "status": "added",
+    "patch": "@@ -0,0 +1,3 @@\n+# Notes\n+\n+The [plot](plot.png) shows the export's timings.",
+    "truncated": false
+  }
+}

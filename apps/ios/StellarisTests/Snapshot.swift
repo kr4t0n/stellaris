@@ -72,6 +72,11 @@ import XCTest
     if fitting {
       let tall = CGSize(width: size.width, height: .greatestFiniteMagnitude)
       let height = ceil(max(host.sizeThatFits(in: tall).height, 1))
+      // A window this tall draws nothing past a limit: in CI, pictures 8,337 pixels tall and
+      // over came out blank, and one of 6,201 drew.
+      XCTAssertLessThanOrEqual(
+        height * scene.screen.scale, 8192,
+        "a picture \(Int(height)) points tall is past what the harness can draw")
       window.frame = CGRect(origin: .zero, size: CGSize(width: size.width, height: height))
       host.view.layoutIfNeeded()
       try await Task.sleep(for: .milliseconds(100))

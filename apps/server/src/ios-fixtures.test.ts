@@ -499,6 +499,9 @@ describe("the answers the iOS client reads", () => {
       text: normaliser.text(turnText),
     });
 
+    // The task's changes before any turn made its branch, which the board answers with a 404.
+    await call("error-changes-missing", "GET", `/api/tasks/${task?.id}/changes`);
+
     // An image on the task's branch, which a message links by its path in a worktree: a turn
     // leaves it, and the board reads it from the project's runner. The commit's id varies by run.
     await society.run({
@@ -523,6 +526,11 @@ describe("the answers the iOS client reads", () => {
     normaliser.secret(root.commit.id, "fixture-first-commit");
     await call("project-files", "GET", "/api/projects/demo/files");
     await call("error-file-missing", "GET", "/api/projects/demo/files/README.md");
+    // What the task's branch changed since it left the default branch, and what it did to the
+    // notes, a file of text, and to the plot, a binary one.
+    await call("task-changes", "GET", `/api/tasks/${task?.id}/changes`);
+    await call("task-diff", "GET", `/api/tasks/${task?.id}/diff/evidence/notes.md`);
+    await call("task-diff-binary", "GET", `/api/tasks/${task?.id}/diff/evidence/plot.png`);
 
     // Where the messages a text names by id are: one the board has, and one it doesn't, which the
     // answer leaves out.
@@ -558,14 +566,15 @@ describe("the answers the iOS client reads", () => {
       "application/octet-stream",
     );
 
-    // The project's runner away, which the board says with a 503, last, since nothing reads a
-    // branch after it.
+    // The project's runner away, which the board says with a 503 for its files and for a task's
+    // changes, last, since nothing reads a branch after it.
     await society.runner.stop();
     await expect.poll(() => society?.hub.connected).toEqual([]);
     await call("error-runner-away", "GET", "/api/projects/demo/files");
+    await call("error-changes-away", "GET", `/api/tasks/${task?.id}/changes`);
 
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(47);
+    expect(captures.size).toBe(52);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

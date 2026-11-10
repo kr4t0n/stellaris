@@ -55,6 +55,14 @@ struct NewThreadDraft: Equatable, Sendable {
 enum Subject: Equatable, Sendable {
   case task(BoardTask)
   case proposal(Proposal)
+
+  /// The task's or the proposal's id, which its thread has too.
+  var id: String {
+    switch self {
+    case .task(let task): task.id
+    case .proposal(let proposal): proposal.id
+    }
+  }
 }
 
 /// A decision on a proposal being written: which proposal, and which way.

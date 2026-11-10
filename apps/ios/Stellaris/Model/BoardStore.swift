@@ -43,6 +43,26 @@ enum BranchRead: Equatable, Sendable {
   }
 }
 
+/// How a read of a file's change on a task's branch stands, apart from its answer: the board's 503
+/// is told apart, and any other refusal keeps the board's words, as the web shows them.
+enum ChangeRead: Equatable, Sendable {
+  case loading, loaded
+  /// The runner the project lives on isn't connected.
+  case away
+  /// The board couldn't be reached, or refused with this message.
+  case failed(String)
+
+  init(_ error: any Error) {
+    if let error = error as? BoardError, error.status == 503 {
+      self = .away
+    } else if case .failed(let reason) = Loading(error) {
+      self = .failed(reason)
+    } else {
+      self = .failed(Loading.unreachable)
+    }
+  }
+}
+
 /// The board as Board and Needs you show it, loaded when the app signs in, comes back to the
 /// foreground, or is pulled to refresh.
 @MainActor @Observable final class BoardStore {
@@ -86,6 +106,20 @@ enum BranchRead: Equatable, Sendable {
   /// How many views show each path, which an event that touches it reads again; one no view shows
   /// is read again when a view next shows it.
   @ObservationIgnored private(set) var branchFilesShown: [FilePlace: Int] = [:]
+  /// What each task's branch changed as last read, with the tree its plan shows, and how its read
+  /// went, by task.
+  private(set) var taskChanges: [String: ShownChanges] = [:]
+  private(set) var taskChangeStates: [String: BranchRead] = [:]
+  @ObservationIgnored private var taskChangeReads: [String: Int] = [:]
+  /// How many views show each task's changes, which an event that touches them reads again.
+  @ObservationIgnored private(set) var taskChangesShown: [String: Int] = [:]
+  /// What each task's branch did to a file as last read, with its patch's rows, and how its read
+  /// went, by task and path.
+  private(set) var taskDiffs: [ChangeKey: ShownDiff] = [:]
+  private(set) var taskDiffStates: [ChangeKey: ChangeRead] = [:]
+  @ObservationIgnored private var taskDiffReads: [ChangeKey: Int] = [:]
+  /// How many views show each file's change, which an event that touches it reads again.
+  @ObservationIgnored private(set) var taskDiffsShown: [ChangeKey: Int] = [:]
   /// How the user's own posts are named: the GitHub account signed in, or else "you".
   var userName = "you" {
     didSet { index() }
@@ -252,6 +286,71 @@ enum BranchRead: Equatable, Sendable {
     let key = place.unlined
     let count = (branchFilesShown[key] ?? 0) + (shown ? 1 : -1)
     branchFilesShown[key] = count > 0 ? count : nil
+  }
+
+  /// Reads what a task's branch changed, keeping the last answer through a read that fails, as the
+  /// web keeps a query's data; an answer a later read overtook changes nothing. The tree is built
+  /// once, off the main actor, as the answer lands.
+  func loadTaskChanges(_ task: String, using model: AppModel) async {
+    let signIn = model.generation
+    let read = (taskChangeReads[task] ?? 0) + 1
+    taskChangeReads[task] = read
+    if taskChanges[task] == nil {
+      taskChangeStates[task] = .loading
+    }
+    do {
+      let changes = try await model.send(BoardAPI.taskChanges(task))
+      let shown = await ShownChanges.building(changes)
+      guard model.generation == signIn, taskChangeReads[task] == read else {
+        return
+      }
+      taskChanges[task] = shown
+      taskChangeStates[task] = .loaded
+    } catch is CancellationError {
+      return
+    } catch {
+      if model.generation == signIn, taskChangeReads[task] == read, taskChanges[task] == nil {
+        taskChangeStates[task] = BranchRead(error)
+      }
+    }
+  }
+
+  /// Reads what a task's branch did to one file, as `loadTaskChanges` reads its changes, its rows
+  /// worked out once as the answer lands.
+  func loadTaskDiff(_ key: ChangeKey, using model: AppModel) async {
+    let signIn = model.generation
+    let read = (taskDiffReads[key] ?? 0) + 1
+    taskDiffReads[key] = read
+    if taskDiffs[key] == nil {
+      taskDiffStates[key] = .loading
+    }
+    do {
+      let diff = try await model.send(BoardAPI.taskDiff(key.task, path: key.path))
+      let shown = await ShownDiff.reading(diff)
+      guard model.generation == signIn, taskDiffReads[key] == read else {
+        return
+      }
+      taskDiffs[key] = shown
+      taskDiffStates[key] = .loaded
+    } catch is CancellationError {
+      return
+    } catch {
+      if model.generation == signIn, taskDiffReads[key] == read, taskDiffs[key] == nil {
+        taskDiffStates[key] = ChangeRead(error)
+      }
+    }
+  }
+
+  /// Notes that a view shows a task's changes, or no longer does.
+  func showingChanges(_ task: String, _ shown: Bool) {
+    let count = (taskChangesShown[task] ?? 0) + (shown ? 1 : -1)
+    taskChangesShown[task] = count > 0 ? count : nil
+  }
+
+  /// Notes that a view shows a file's change, or no longer does.
+  func showingDiff(_ key: ChangeKey, _ shown: Bool) {
+    let count = (taskDiffsShown[key] ?? 0) + (shown ? 1 : -1)
+    taskDiffsShown[key] = count > 0 ? count : nil
   }
 
   /// A line with each id the board names read as its title, for a place that can't hold a link.
@@ -495,6 +594,14 @@ enum BranchRead: Equatable, Sendable {
     shownFiles = [:]
     branchFileReads = [:]
     branchFilesShown = [:]
+    taskChanges = [:]
+    taskChangeStates = [:]
+    taskChangeReads = [:]
+    taskChangesShown = [:]
+    taskDiffs = [:]
+    taskDiffStates = [:]
+    taskDiffReads = [:]
+    taskDiffsShown = [:]
   }
 }
 
@@ -522,6 +629,35 @@ struct ShownFile: Sendable {
       return ShownFile(data: data, view: view, lines: fileLines(text))
     }
     return ShownFile(data: data, view: view, lines: [])
+  }
+}
+
+/// A file a task's branch changed, which its change is read and kept by.
+struct ChangeKey: Hashable, Sendable {
+  let task: String
+  let path: String
+}
+
+/// What a task's branch changed, with the tree the plan shows of it and the folders that tree opens
+/// with, built once when the answer lands, as the web's view keeps `fileTree`'s answer.
+struct ShownChanges: Sendable {
+  let changes: BranchChanges
+  let tree: TreeFolder
+  let opened: Set<String>
+
+  @concurrent static func building(_ changes: BranchChanges) async -> ShownChanges {
+    let tree = fileTree(changes.files)
+    return ShownChanges(changes: changes, tree: tree, opened: Set(openFolders(tree)))
+  }
+}
+
+/// What a task's branch did to a file, with its patch as rows, read once when the answer lands.
+struct ShownDiff: Sendable {
+  let diff: BranchFileDiff
+  let rows: [PatchRow]
+
+  @concurrent static func reading(_ diff: BranchFileDiff) async -> ShownDiff {
+    ShownDiff(diff: diff, rows: patchRows(diff.patch ?? ""))
   }
 }
 

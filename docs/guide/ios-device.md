@@ -249,6 +249,12 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - A file of tens of thousands of lines scrolls smoothly both ways, and a link to a line deep in it opens with that line in the middle.
 - A link to a file on a task's branch in a message, and one in a task's brief in the plan's sheet: the file opens in a sheet over Chat, in place of the plan, and a drag down closes it.
 
+**A task's changes**
+
+- A real task's plan, scrolled to its end: Files lists what its branch changed as a tree, each file with what happened to it and who touched it last, a deleted one struck through. A folder opens and closes in place. CI lists only the fake board's six changes.
+- A file's change on a real branch: removed lines red, added ones green, long lines wrapping, and a tap on a line's number opening the whole file at that line. Whole file opens it at its top. A long patch scrolls smoothly, and one the board cut says so at its foot.
+- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Plan and Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
+
 **Text**
 
 - A New thread title pasted past 200 characters. The cap lives in the model, behind a binding, and is tested only there; a field that shows more than 200 opens a thread with the first 200.

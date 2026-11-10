@@ -447,9 +447,8 @@ describe("metrics index", () => {
         (event) => "inputTokens" in usageOf(event) && !("cacheReadTokens" in usageOf(event)),
       ).length,
     };
-    for (const [shape, count] of Object.entries(shapes)) {
-      expect(count, shape).toBeGreaterThan(5);
-    }
+    // The shapes of which the logs hold five or fewer, by name.
+    expect(Object.entries(shapes).filter(([, count]) => count <= 5)).toEqual([]);
     const events = withTokens(generate(7, 240), 7);
     const ends = events.filter(
       (event) => event.type === "turn.completed" || event.type === "turn.failed",

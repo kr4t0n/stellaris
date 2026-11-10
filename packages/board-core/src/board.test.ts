@@ -14,6 +14,7 @@ import {
   type HeartbeatCause,
   type MetricsWindow,
   type TurnExitReason,
+  type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
 import { execa } from "execa";
@@ -26,6 +27,7 @@ import {
   BoardError,
   computeMetrics,
   SYSTEM_ACTOR,
+  tokenUse,
   type Actor,
   type BoardOptions,
   type TurnInFlight,
@@ -34,6 +36,14 @@ import {
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
+
+/** A turn's tokens, each kind a multiple of its input, so a sum is the tokens of the inputs' sum. */
+const tokens = (input: number) => ({
+  inputTokens: input,
+  outputTokens: input / 10,
+  cacheReadTokens: input * 10,
+  cacheWriteTokens: input / 5,
+});
 
 /** A turn record of eng-1 in demo, in a thread's conversation or at home. */
 /** A tool's result as a turn's transcript keeps it. */
@@ -4015,6 +4025,97 @@ describe("Board", () => {
     const answer = await board.metrics("all");
     expect(answer.latency).toMatchObject({ mentions: 2, unanswered: 0 });
     expect(answer).toStrictEqual(await replayed(board, "all"));
+  });
+
+  /** A finished turn of eng-1's at home, a minute long, ended as `how` says. */
+  async function endWith(
+    board: Board,
+    how: Partial<Pick<TurnRecord, "exitReason" | "error" | "usage" | "trigger">>,
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn(turnIn(undefined, clock.toISOString()));
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn({
+      ...turn,
+      endedAt: clock.toISOString(),
+      exitReason: "completed",
+      ...how,
+    });
+  }
+
+  it("answers the tokens from the metrics index, reading no log or transcript once seeded", async () => {
+    const { board } = await society();
+    await endWith(board, { usage: tokens(10) });
+    // A failed turn, one without a count, and a reflection are turns all the same.
+    await endWith(board, { exitReason: "error", error: "boom", usage: tokens(20) });
+    await endWith(board, {});
+    await endWith(board, {
+      trigger: { kind: "reflection", fromUser: false, reason: "scheduled" },
+      usage: tokens(30),
+    });
+    // Two days on, so the day's window holds only what follows.
+    clock = new Date(clock.getTime() + 2 * 86_400_000);
+    await endWith(board, { usage: tokens(40) });
+    await board.indexMetrics();
+    await endWith(board, { exitReason: "timeout", usage: tokens(50) });
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["tokenUse"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.tokenUse(window));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(tokenUse(events, window, clock));
+    }
+    expect(answers.get("all")?.citizens).toEqual([
+      { agent: "eng-1", turns: 6, withUsage: 5, usage: tokens(150) },
+    ]);
+    expect(answers.get("24h")?.citizens).toEqual([
+      { agent: "eng-1", turns: 2, withUsage: 2, usage: tokens(90) },
+    ]);
+  });
+
+  it("counts once a turn's end appended while the index reads the log, wherever the clock stands", async () => {
+    const { board } = await society();
+    await endWith(board, { usage: tokens(10) });
+    clock = new Date(clock.getTime() + 2 * 86_400_000);
+    await endWith(board, { usage: tokens(20) });
+    const latest = clock;
+    const logRead = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        // Once the index listens: an end the read takes, then one it misses, logged as the clock
+        // steps back a day and a half, before the day's window and after the ends in it.
+        await endWith(board, { usage: tokens(30) });
+        const events = await board.readEvents(since, limit);
+        clock = new Date(clock.getTime() - 36 * 3_600_000);
+        await endWith(board, { exitReason: "error", error: "boom", usage: tokens(40) });
+        return events;
+      });
+    await board.indexMetrics();
+    const seeded = logRead.mock.calls.length;
+    clock = new Date(latest.getTime() + 3_600_000);
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["tokenUse"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.tokenUse(window));
+    }
+    expect(logRead.mock.calls.length).toBe(seeded);
+    logRead.mockRestore();
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(tokenUse(events, window, clock));
+    }
+    expect(answers.get("all")?.citizens).toEqual([
+      { agent: "eng-1", turns: 4, withUsage: 4, usage: tokens(100) },
+    ]);
+    expect(answers.get("24h")?.citizens).toEqual([
+      { agent: "eng-1", turns: 2, withUsage: 2, usage: tokens(50) },
+    ]);
   });
 
   it("names a task finished, sent back, or blocked while the metrics read the tasks they name", async () => {

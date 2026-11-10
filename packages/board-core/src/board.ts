@@ -168,7 +168,7 @@ import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import type { MatchingCitizen } from "./mention-matching.js";
 import { MetricsIndex } from "./metrics-index.js";
-import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
+import { TurnHistoryPayloadSchema } from "./turn-history.js";
 import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
@@ -4319,11 +4319,12 @@ export class Board {
   }
 
   /**
-   * The metrics index: seeded once from the whole event log on first use, as the server does at
-   * its start, then kept up by each event this process appends. The server logs every event a
-   * measure counts itself; one another process appended would count from the next seed. A turn
-   * ended before ends carried their board actions has its transcript read once, here, through
-   * the same cache as the counters' seed. A seed that fails is tried again by the next call.
+   * The metrics index, which answers the metrics and the citizens' tokens: seeded once from the
+   * whole event log on first use, as the server does at its start, then kept up by each event
+   * this process appends. The server logs every event a measure or the tokens count itself; one
+   * another process appended would count from the next seed. A turn ended before ends carried
+   * their board actions has its transcript read once, here, through the same cache as the
+   * counters' seed. A seed that fails is tried again by the next call.
    */
   indexMetrics(): Promise<MetricsIndex> {
     this.metricsIndex ??= this.seedMetrics().catch((error: unknown) => {
@@ -4401,11 +4402,12 @@ export class Board {
 
   /**
    * Each citizen's finished turns over a window and the tokens of those that counted them, from
-   * the event log alone, which holds every turn's end whatever runner it ran on.
+   * the metrics index, which keeps every turn's end the event log holds, whatever runner it ran
+   * on, so that no answer reads the log.
    */
   async tokenUse(window: MetricsWindow): Promise<TokenUse> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    return tokenUse(events, window, this.now());
+    const index = await this.indexMetrics();
+    return index.tokenUse(window, this.now());
   }
 
   /**

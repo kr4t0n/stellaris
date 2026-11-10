@@ -178,9 +178,9 @@ if (metrics !== null) {
   }
 }
 
-// The Metrics view's index reads the whole log once too, after the counters' seed when there is
-// one, so the older ends' transcripts it read are not read again. One that fails is tried again by
-// the view's next ask.
+// The index that answers the Metrics view and the citizens' tokens reads the whole log once too,
+// after the counters' seed when there is one, so the older ends' transcripts it read are not read
+// again. One that fails is tried again by the next ask of either.
 try {
   await board.indexMetrics();
   log.info("metrics index seeded");

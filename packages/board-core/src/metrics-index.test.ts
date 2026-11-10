@@ -7,6 +7,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { MetricsIndex } from "./metrics-index.js";
 import { computeMetrics, MetricsTally, type MetricsCitizen } from "./metrics.js";
+import { tokenUse } from "./turn-history.js";
 import { WakeLatency } from "./wake-latency.js";
 
 /** A small seeded generator, so a failing log can be made again from its seed. */
@@ -240,6 +241,50 @@ function actionsFor({ events, transcripts }: Log): Map<string, number | null> {
 
 const WINDOWS: readonly MetricsWindow[] = ["24h", "7d", "all"];
 
+/** The count of tokens a turn's end carries, as written; empty when it carries none. */
+function usageOf(event: BoardEvent): Record<string, unknown> {
+  const counted = event.payload["usage"];
+  return typeof counted === "object" && counted !== null ? { ...counted } : {};
+}
+
+/**
+ * The log with what `tokenUse` reads on its turns' ends: some failed, some counting tokens, some
+ * an older count without the cache, and some a count or a turn id the turn history cannot read.
+ * Reflections, ends of payloads it cannot read, and turns' starts stay as the log has them.
+ */
+function withTokens(log: Log, seed: number): BoardEvent[] {
+  const next = random(seed * 104_729);
+  const tokens = (): number => Math.floor(next() * 5_000);
+  return log.events.map((event) => {
+    if (event.type !== "turn.completed") {
+      return event;
+    }
+    const kind = next();
+    const counted =
+      kind < 0.45
+        ? {
+            usage: {
+              inputTokens: tokens(),
+              outputTokens: tokens(),
+              cacheReadTokens: tokens(),
+              cacheWriteTokens: tokens(),
+            },
+          }
+        : kind < 0.6
+          ? { usage: { inputTokens: tokens(), outputTokens: tokens() } }
+          : kind < 0.65
+            ? { usage: { inputTokens: -1, outputTokens: tokens() } }
+            : kind < 0.7
+              ? { turnId: "not-a-turn" }
+              : {};
+    return {
+      ...event,
+      type: next() < 0.3 ? "turn.failed" : event.type,
+      payload: { ...event.payload, ...counted },
+    };
+  });
+}
+
 /** The user's post naming `name` in a thread, `seconds` after the logs' start. */
 function post(seconds: number, name: string): BoardEvent {
   return {
@@ -344,6 +389,84 @@ describe("metrics index", () => {
     );
     expect(all.blocked.some((row) => row.holds)).toBe(true);
     expect(all.blocked.some((row) => row.title === null)).toBe(true);
+  });
+
+  it("answers the tokens as tokenUse does, for every window and moment, as events arrive", () => {
+    let compared = 0;
+    for (let seed = 1; seed <= 120; seed += 1) {
+      const events = withTokens(generate(seed, 240), seed);
+      const index = new MetricsIndex();
+      const next = random(seed * 6151);
+      let added = 0;
+      for (const upTo of [80, 160, 240]) {
+        for (const event of events.slice(added, upTo)) {
+          index.add(event);
+        }
+        added = upTo;
+        const seen = events.slice(0, upTo);
+        const last = Date.parse(seen.at(-1)?.ts ?? "");
+        const earlier = Date.parse(seen[Math.floor(next() * upTo)]?.ts ?? "");
+        // Just after the last event, hours on, and a day and a week after an earlier event, so a
+        // window starts inside an hour and on an event.
+        const moments = [
+          last + 60_000,
+          last + Math.floor(next() * 30 * 3_600_000),
+          earlier + DAY,
+          earlier + 7 * DAY,
+        ];
+        for (const at of moments) {
+          const now = new Date(at);
+          for (const window of WINDOWS) {
+            expect(
+              index.tokenUse(window, now),
+              `seed ${seed} at ${upTo}, ${window}, ${now.toISOString()}`,
+            ).toStrictEqual(tokenUse(seen, window, now));
+            compared += 1;
+          }
+        }
+      }
+    }
+    expect(compared).toBe(120 * 3 * 4 * 3);
+  });
+
+  it("counts the tokens of logs whose ends take every shape, so the comparison is not of empty answers", () => {
+    // Over the logs the equality test compares, every shape of end the history reads or refuses.
+    const compared = Array.from({ length: 120 }, (_, at) =>
+      withTokens(generate(at + 1, 240), at + 1),
+    ).flat();
+    const allEnds = compared.filter(
+      (event) => event.type === "turn.completed" || event.type === "turn.failed",
+    );
+    const shapes = {
+      failed: allEnds.filter((event) => event.type === "turn.failed").length,
+      reflection: allEnds.filter((event) => event.payload["trigger"] === "reflection").length,
+      unreadable: allEnds.filter((event) => event.payload["unreadable"] === true).length,
+      badTurnId: allEnds.filter((event) => event.payload["turnId"] === "not-a-turn").length,
+      badUsage: allEnds.filter((event) => usageOf(event)["inputTokens"] === -1).length,
+      noCache: allEnds.filter(
+        (event) => "inputTokens" in usageOf(event) && !("cacheReadTokens" in usageOf(event)),
+      ).length,
+    };
+    // The shapes of which the logs hold five or fewer, by name.
+    expect(Object.entries(shapes).filter(([, count]) => count <= 5)).toEqual([]);
+    const events = withTokens(generate(7, 240), 7);
+    const ends = events.filter(
+      (event) => event.type === "turn.completed" || event.type === "turn.failed",
+    );
+    const index = new MetricsIndex();
+    for (const event of events) {
+      index.add(event);
+    }
+    const now = new Date(Date.parse(events.at(-1)?.ts ?? "") + 60_000);
+    const all = index.tokenUse("all", now);
+    expect(all.citizens.length).toBeGreaterThanOrEqual(5);
+    expect(all.citizens.some((row) => row.withUsage > 0 && row.withUsage < row.turns)).toBe(true);
+    const turns = (answer: typeof all): number =>
+      answer.citizens.reduce((sum, row) => sum + row.turns, 0);
+    // Ends the history cannot read are left out, and the day's window holds fewer than all.
+    expect(turns(all)).toBeLessThan(ends.length);
+    expect(turns(index.tokenUse("24h", now))).toBeGreaterThan(0);
+    expect(turns(index.tokenUse("24h", now))).toBeLessThan(turns(all));
   });
 
   it("reads the transcript only of a counted end logged before ends carried their count", () => {

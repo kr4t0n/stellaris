@@ -53,26 +53,36 @@ struct BranchFileView: View {
           opened: opened)
       }
     } else {
-      switch model.store.branchFileStates[key] ?? .loading {
-      case .missing:
-        StateLine(words: missing)
-      case .away:
-        StateLine(
-          words:
-            "\(runnerOf(project)), is not connected, so the \(whose) files cannot be read now.")
-      case .failed(let reason):
-        VStack(spacing: 12) {
-          StateLine(words: reason)
-          Button("Retry") {
-            Task { await model.store.loadBranchFile(key, using: model) }
+      Group {
+        switch model.store.branchFileStates[key] ?? .loading {
+        case .missing:
+          StateLine(words: missing)
+        case .away:
+          // Retry, since on a phone nothing else reads it again while the view shows, where the web
+          // can reload its page.
+          VStack(spacing: 12) {
+            StateLine(
+              words:
+                "\(runnerOf(project)), is not connected, so the \(whose) files cannot be read now.")
+            Button("Retry") {
+              Task { await model.store.loadBranchFile(key, using: model) }
+            }
+          }
+        case .failed(let reason):
+          VStack(spacing: 12) {
+            StateLine(words: reason)
+            Button("Retry") {
+              Task { await model.store.loadBranchFile(key, using: model) }
+            }
+          }
+        case .loading, .loaded:
+          VStack(spacing: 12) {
+            ProgressView()
+            StateLine(words: "Reading \(place.name) from the \(whose) runner…")
           }
         }
-      case .loading, .loaded:
-        VStack(spacing: 12) {
-          ProgressView()
-          StateLine(words: "Reading \(place.name) from the \(whose) runner…")
-        }
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 
@@ -266,7 +276,7 @@ private struct Notice: View {
   }
 }
 
-/// How a read stands while there is no answer to show, centred in the view.
+/// How a read stands while there is no answer to show, which its container centres.
 private struct StateLine: View {
   let words: String
 
@@ -275,8 +285,7 @@ private struct StateLine: View {
       .font(MessageType.text())
       .foregroundStyle(MessageColor.secondary)
       .multilineTextAlignment(.center)
-      .padding(24)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .padding(.horizontal, 24)
       .accessibilityIdentifier("file-state")
   }
 }
@@ -315,8 +324,10 @@ private struct NumberedText: View {
           }
         }
         .onAppear {
+          // In the middle from top to bottom, and at the leading edge, so its number shows: a
+          // centre anchor centres sideways too, which scrolled the numbers out of view.
           if let cited {
-            proxy.scrollTo(cited, anchor: .center)
+            proxy.scrollTo(cited, anchor: .leading)
           }
         }
       }

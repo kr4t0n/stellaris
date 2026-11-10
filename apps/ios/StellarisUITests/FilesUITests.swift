@@ -33,6 +33,10 @@ final class FilesUITests: ShellTestCase {
     XCTAssertTrue(cited.waitForExistence(timeout: 20), "the link doesn't open the code")
     XCTAssertTrue(cited.isSelected, "the cited line isn't marked")
     XCTAssertTrue(cited.isHittable, "the cited line isn't on screen")
+    // Its row starts at the window's leading edge, so its number is in view, not scrolled sideways.
+    XCTAssertGreaterThanOrEqual(
+      cited.frame.minX, app.windows.firstMatch.frame.minX - 1,
+      "the cited line is scrolled sideways, its number out of view")
     keepScreen("files-cited-line")
   }
 

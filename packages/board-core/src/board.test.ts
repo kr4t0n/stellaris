@@ -4063,14 +4063,17 @@ describe("Board", () => {
       return find(id);
     });
     const answer = await board.metrics("all");
-    expect([...next.keys()]).toEqual([]);
-    expect(answer.messages.busiest.map(({ title }) => title)).toEqual([
-      "Task 0",
-      "Task 1",
-      "Task 4",
-    ]);
-    expect(answer.sentBack.byStage).toEqual([{ project: "demo", stage: "check", count: 1 }]);
-    expect(answer.blocked.map(({ title }) => title)).toEqual(["Task 3"]);
+    expect({
+      busiest: answer.messages.busiest.map(({ title }) => title),
+      byStage: answer.sentBack.byStage,
+      blocked: answer.blocked.map(({ title }) => title),
+      unwritten: [...next.keys()],
+    }).toEqual({
+      busiest: ["Task 0", "Task 1", "Task 4"],
+      byStage: [{ project: "demo", stage: "check", count: 1 }],
+      blocked: ["Task 3"],
+      unwritten: [],
+    });
     // A read a task's write overtook is not kept, so the next ask reads it again; the third task's
     // was overtaken by a signal alone, which writes no task.
     read.mockClear();

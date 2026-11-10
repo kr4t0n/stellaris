@@ -200,7 +200,7 @@ ingress:
 - `stellaris_turns_failed_total{agent,cli,reason}`, failed turns by `reason`: `timeout`, `resume_failed`, `compaction`, `context`, `limit`, `auth`, `model`, `runner_dropped`, `network`, `service`, or `other`;
 - `stellaris_task_sendbacks_total{project,by}`, task stages sent back to an earlier stage, by who sent them back.
 
-The server counts them from its event log once its scheduler has started, and from each turn's end and send-back after that, so a restart doesn't reset them. Turns logged before the server recorded each turn's board actions have their transcripts read for the idle count, which takes some seconds on a board with many of them, so the port opens that much after the server. The port asks for no token and serves only these counts. With the Prometheus Operator, `server.metrics.serviceMonitor.enabled` adds a ServiceMonitor for the port, with the labels your Prometheus's `serviceMonitorSelector` matches:
+The server counts them from its event log once its scheduler has started, and from each turn's end and send-back after that, so a restart doesn't reset them. Turns logged before the server recorded each turn's board actions have their transcripts read for the idle count, which takes some seconds on a board with many of them, and the port answers 503 until then. The port asks for no token and serves only these counts. With the Prometheus Operator, `server.metrics.serviceMonitor.enabled` adds a ServiceMonitor for the port, with the labels your Prometheus's `serviceMonitorSelector` matches:
 
 ```yaml
 server:

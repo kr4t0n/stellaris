@@ -172,8 +172,21 @@ public enum BoardAPI {
 
   /// A path on a task's branch, read from its project's runner: a file, or a folder.
   public static func taskFile(_ id: String, path: String) -> BoardRequest<BranchFile> {
+    branchFile(.task(id), path: path)
+  }
+
+  /// A path on a project's default branch, as the clone on its runner has it: a file, or a folder.
+  public static func projectFile(_ slug: String, path: String) -> BoardRequest<BranchFile> {
+    branchFile(.project(slug), path: path)
+  }
+
+  /// A path on a task's branch or a project's default branch; the empty path is its root.
+  public static func branchFile(_ source: FileSource, path: String) -> BoardRequest<BranchFile> {
     let rest = path.split(separator: "/").map { "/" + component(String($0)) }.joined()
-    return read("/api/tasks/\(component(id))/files\(rest)")
+    switch source {
+    case .task(let id): return read("/api/tasks/\(component(id))/files\(rest)")
+    case .project(let slug): return read("/api/projects/\(component(slug))/files\(rest)")
+    }
   }
 
   /// An image a citizen uploaded, as its bytes.

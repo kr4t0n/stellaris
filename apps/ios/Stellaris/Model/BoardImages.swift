@@ -12,14 +12,14 @@ struct ViewedImage: Identifiable {
 enum ImageFailure: Error {
   /// Its bytes aren't an image, or the board sent none, as for a file too large to send.
   case unreadable
-  /// Nothing the app can load: an address that isn't `https`, or a project's file.
+  /// Nothing the app can load: an address that isn't `https`.
   case unsupported
 }
 
 /// The images messages show, each loaded as its source asks and decoded off the main actor: an
 /// uploaded one with the token, kept by its id, since an upload never changes; one on a task's
-/// branch, read through the board from the project's runner; and one on the web, over `https`
-/// without the token.
+/// branch or a project's default branch, read through the board from the project's runner; and one
+/// on the web, over `https` without the token.
 @MainActor final class BoardImages {
   private let uploads = NSCache<NSString, UIImage>()
 
@@ -37,14 +37,12 @@ enum ImageFailure: Error {
       let image = try await Self.decode(data)
       uploads.setObject(image, forKey: id as NSString, cost: data.count)
       return image
-    case .file(.task(let task), let path):
-      let file = try await model.send(BoardAPI.taskFile(task, path: path))
+    case .file(let source, let path):
+      let file = try await model.send(BoardAPI.branchFile(source, path: path))
       guard let data = file.data else {
         throw ImageFailure.unreadable
       }
       return try await Self.decode(data)
-    case .file(.project, _):
-      throw ImageFailure.unsupported
     case .web(let href):
       guard let url = URL(string: href), url.scheme?.lowercased() == "https" else {
         throw ImageFailure.unsupported
@@ -57,7 +55,8 @@ enum ImageFailure: Error {
     }
   }
 
-  @concurrent private nonisolated static func decode(_ data: Data) async throws -> UIImage {
+  /// An image's bytes as a picture ready to draw, off the main actor.
+  @concurrent nonisolated static func decode(_ data: Data) async throws -> UIImage {
     guard let image = UIImage(data: data) else {
       throw ImageFailure.unreadable
     }

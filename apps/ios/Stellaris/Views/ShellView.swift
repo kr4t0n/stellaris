@@ -225,6 +225,8 @@ struct ChatView: View {
         AdvanceSheet(taskId: task)
       case .decide(let verdict):
         DecisionSheet(verdict: verdict)
+      case .files:
+        FileSheet()
       case .inspect:
         if let subject {
           // No button: it only shows the plan or the charter, so a drag down closes it.
@@ -294,6 +296,7 @@ struct ChatView: View {
         case .newThread: model.startingThread = nil
         case .advance: model.advancing = nil
         case .decide: model.deciding = nil
+        case .files: model.browsing = nil
         case .inspect: model.inspecting = nil
         }
       })
@@ -310,6 +313,10 @@ struct ChatView: View {
     }
     if let verdict = model.deciding {
       return .decide(verdict)
+    }
+    // Before the plan, since a file a link in the plan opened takes the plan's sheet.
+    if let browse = model.browsing {
+      return .files(browse.root)
     }
     if known, !beside, let id = subjectId, model.inspecting == id {
       return .inspect(id)
@@ -330,9 +337,43 @@ enum ChatSheet: Hashable, Identifiable {
   case newThread(String)
   case advance(String)
   case decide(Verdict)
+  /// A file or a folder on a branch a link opened.
+  case files(FilePlace)
   case inspect(String)
 
   var id: Self { self }
+}
+
+/// The file or the folder a link in Chat opened, with a stack of its own for what it opens in
+/// turn, both kept in the model, so a fold keeps what it shows. No button: it only shows a file, so
+/// a drag down closes it; a link to something Chat opens closes it too.
+struct FileSheet: View {
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    if let browse = model.browsing {
+      NavigationStack(
+        path: Binding(
+          get: { model.browsing?.path ?? [] },
+          set: { model.browsing?.path = $0 })
+      ) {
+        BranchFileView(place: browse.root, open: { push($0) }, opened: { close() })
+          .navigationDestination(for: BoardPlace.self) { place in
+            if case .files(let file) = place {
+              BranchFileView(place: file, open: { push($0) }, opened: { close() })
+            }
+          }
+      }
+    }
+  }
+
+  private func push(_ place: FilePlace) {
+    model.browsing?.path.append(.files(place))
+  }
+
+  private func close() {
+    model.browsing = nil
+  }
 }
 
 /// A task's plan or a proposal's charter.

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects/demo/files"
+  },
+  "status": 200,
+  "body": {
+    "kind": "dir",
+    "path": "",
+    "commit": {
+      "id": "fixture-first-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "stellaris-board"
+    },
+    "entries": []
+  }
+}

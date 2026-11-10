@@ -30,13 +30,14 @@ public enum MessageLink: Sendable, Hashable {
   case web(String)
 
   /// What a link to `href` does, once the filter has kept it; nil where it goes nowhere, as for a
-  /// path on a machine or an uploaded image, which read as text.
-  public init?(href: String) {
+  /// path on a machine or an uploaded image, which read as text. A relative path in a file on a
+  /// branch is the file beside it, in `base`'s folder.
+  public init?(href: String, base: FileBase? = nil) {
     if let entity = entityOfHref(href) {
       self = .entity(entity)
       return
     }
-    switch linkTarget(href) {
+    switch linkTarget(href, base: base) {
     case .file(let source, let path, let line):
       self = .file(source: source, path: path, line: line)
     case .upload, .local:
@@ -129,11 +130,12 @@ public indirect enum MessageBlock: Sendable, Hashable {
 public struct MessageDocument: Sendable, Hashable {
   public let blocks: [MessageBlock]
 
-  /// Reads `markdown`, with each id `entities` knows read as a link named by its title.
-  public init(markdown: String, entities: [String: EntityTitle] = [:]) {
+  /// Reads `markdown`, with each id `entities` knows read as a link named by its title, and, for a
+  /// file on a branch, its relative links and images as the files beside it in `base`'s folder.
+  public init(markdown: String, entities: [String: EntityTitle] = [:], base: FileBase? = nil) {
     // Quotes and dashes stay as written, as the web shows them.
     let document = Document(parsing: markdown, options: [.disableSmartOpts])
-    blocks = MarkdownReader(entities: entities).blocks(document.children)
+    blocks = MarkdownReader(entities: entities, base: base).blocks(document.children)
   }
 
   public init(blocks: [MessageBlock]) {
@@ -153,6 +155,8 @@ private enum Pending {
 
 private struct MarkdownReader {
   let entities: [String: EntityTitle]
+  /// Where a file's relative links and images resolve, for a file on a branch.
+  let base: FileBase?
 
   func blocks(_ children: MarkupChildren) -> [MessageBlock] {
     children.compactMap(block)
@@ -294,7 +298,7 @@ private struct MarkdownReader {
           pending.append(.code(code.code, style, link))
         }
       case let anchor as Markdown.Link:
-        let target = MessageLink(href: keptHref(anchor.destination ?? ""))
+        let target = MessageLink(href: keptHref(anchor.destination ?? ""), base: base)
         collect(anchor.children, style: style, link: link ?? target, inLink: true, into: &pending)
       case let image as Markdown.Image:
         pending.append(.image(self.image(image, link: link)))
@@ -326,7 +330,7 @@ private struct MarkdownReader {
     let source = keptHref(image.source ?? "")
     let alt = image.children.map(plain).joined()
     let loads: MessageImageSource?
-    switch linkTarget(source) {
+    switch linkTarget(source, base: base) {
     case .file(let from, let path, _): loads = .file(source: from, path: path)
     case .upload(let id): loads = .upload(id)
     case .local: loads = nil

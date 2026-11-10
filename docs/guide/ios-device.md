@@ -242,6 +242,13 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
 - The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
 
+**A branch's files**
+
+- Board > a project > Files, on a real project's default branch: a folder of each depth, a long file of code, a markdown file whose relative links and images go to the files beside it, a CSV, and an image, which a pinch zooms. CI browses only the fake board's small branch.
+- Share on a file, then Save to Files: the file keeps its name and its bytes. CI can't drive the share sheet.
+- A file of tens of thousands of lines scrolls smoothly both ways, and a link to a line deep in it opens with that line in the middle.
+- A link to a file on a task's branch in a message, and one in a task's brief in the plan's sheet: the file opens in a sheet over Chat, in place of the plan, and a drag down closes it.
+
 **Text**
 
 - A New thread title pasted past 200 characters. The cap lives in the model, behind a binding, and is tested only there; a field that shows more than 200 opens a thread with the first 200.

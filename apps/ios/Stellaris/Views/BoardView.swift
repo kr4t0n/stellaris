@@ -1,9 +1,10 @@
 import BoardKit
 import SwiftUI
 
-/// The board's places: the society's channels, then each project's dashboard and tasks, channels,
-/// and tasks in play. Picking a channel or a task opens it in Chat; a project's dashboard and tasks
-/// open here, kept in the model as the place Board shows.
+/// The board's places: the society's channels, then each project's dashboard and tasks, files,
+/// channels, and tasks in play. Picking a channel or a task opens it in Chat; a project's dashboard
+/// and tasks, and its default branch's files, open here, kept in the model as the place Board
+/// shows.
 struct BoardView: View {
   @Environment(AppModel.self) private var model
 
@@ -19,10 +20,18 @@ struct BoardView: View {
         }
         ForEach(model.store.openProjects, id: \.slug) { project in
           Section(project.name) {
-            NavigationLink(value: project.slug) {
+            NavigationLink(value: BoardPlace.project(project.slug)) {
               Label("Dashboard and tasks", systemImage: "rectangle.grid.1x2")
             }
             .accessibilityIdentifier("project-\(project.slug)")
+            .islandRow()
+            // The branch's name shows once it opens, above its files.
+            NavigationLink(
+              value: BoardPlace.files(FilePlace(source: .project(project.slug), path: ""))
+            ) {
+              Label("Files", systemImage: "folder")
+            }
+            .accessibilityIdentifier("project-files-\(project.slug)")
             .islandRow()
             ForEach(model.store.channels(of: project.slug), id: \.ref) { channel in
               ChannelRow(channel: channel)
@@ -53,8 +62,13 @@ struct BoardView: View {
           .accessibilityIdentifier("settings")
         }
       }
-      .navigationDestination(for: String.self) { slug in
-        ProjectView(slug: slug)
+      .navigationDestination(for: BoardPlace.self) { place in
+        switch place {
+        case .project(let slug):
+          ProjectView(slug: slug)
+        case .files(let file):
+          BranchFileView(place: file) { model.boardPath.append(.files($0)) }
+        }
       }
     }
   }
@@ -170,7 +184,7 @@ struct ProjectView: View {
     .task(id: slug) {
       await model.store.loadDashboard(slug, using: model)
     }
-    .modifier(FollowsBoardLinks())
+    .modifier(FollowsBoardLinks(files: { model.boardPath.append(.files($0)) }))
   }
 
   /// The dashboard's text, read as a message is, or how its read stands.

@@ -97,6 +97,8 @@ public struct Project: Sendable, Hashable, Codable {
   public let onDone: OrUnknown<CompletionEffect>
   /// Set once the project is archived.
   public let archived: ProjectArchive?
+  /// The runner the project lives on, once its first turn has run there.
+  public let runner: String?
 
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -114,6 +116,7 @@ public struct Project: Sendable, Hashable, Codable {
       try container.decodeIfPresent(OrUnknown<CompletionEffect>.self, forKey: .onDone)
       ?? .known(.none)
     archived = try container.decodeIfPresent(ProjectArchive.self, forKey: .archived)
+    runner = try container.decodeIfPresent(String.self, forKey: .runner)
   }
 }
 
@@ -520,8 +523,28 @@ public struct MessageRef: Sendable, Hashable, Codable {
   }
 }
 
-/// A path on a task's branch as the board reads it from the project's runner: a file, with its
-/// bytes in base64, or a folder.
+/// The newest commit of a branch, which a read of it shows the tree at.
+public struct BranchCommit: Sendable, Hashable, Codable {
+  public let id: String
+  public let at: String
+  public let author: String
+}
+
+/// What a folder on a branch holds: a file, with its size, or a folder, whose size is nil.
+public struct BranchEntry: Sendable, Hashable, Codable {
+  public let name: String
+  public let kind: OrUnknown<BranchFile.Kind>
+  public let size: Int?
+
+  public init(name: String, kind: OrUnknown<BranchFile.Kind>, size: Int? = nil) {
+    self.name = name
+    self.kind = kind
+    self.size = size
+  }
+}
+
+/// A path on a task's branch or a project's default branch as the board reads it from the
+/// project's runner: a file, with its size and its bytes in base64, or a folder with its entries.
 public struct BranchFile: Sendable, Hashable, Codable {
   public enum Kind: String, Sendable, Hashable {
     case file, dir
@@ -529,8 +552,13 @@ public struct BranchFile: Sendable, Hashable, Codable {
 
   public let kind: OrUnknown<Kind>
   public let path: String
-  /// A file's bytes in base64; nil for a folder, or for a file too large for the board to send.
+  public let commit: BranchCommit
+  /// A file's size in bytes; nil for a folder.
+  public let size: Int?
+  /// A file's bytes in base64; nil for a folder, or for a file larger than the board sends.
   public let content: String?
+  /// A folder's entries, in the order the runner gave them; nil for a file.
+  public let entries: [BranchEntry]?
 
   /// A file's bytes, when the board sent them.
   public var data: Data? {

@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/files"
+  },
+  "status": 200,
+  "body": {
+    "kind": "dir",
+    "path": "",
+    "commit": {
+      "id": "fixture-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "eng-1"
+    },
+    "entries": [
+      {
+        "name": "evidence",
+        "kind": "dir",
+        "size": null
+      }
+    ]
+  }
+}

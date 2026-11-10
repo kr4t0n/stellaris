@@ -4,8 +4,8 @@ import Testing
 @testable import BoardKit
 
 /// The ports run the case tables the web's own `staleKeys`, `needsYou`, `postedLine`, `withTitles`,
-/// link, `mentionAt`, upload placeholder, `firstParagraph`, and `describeCharter` tests run, and
-/// the one `withoutMetadata` in `shared` runs.
+/// link, `mentionAt`, upload placeholder, `firstParagraph`, `describeCharter`, and file tests run,
+/// and the one `withoutMetadata` in `shared` runs.
 @Suite struct CaseTableTests {
   struct StaleKeysCase: Decodable {
     let event: BoardEvent
@@ -380,5 +380,124 @@ import Testing
       let kept = try each.kept.map { try #require(Data(base64Encoded: $0), "\(each.name)") }
       #expect(withoutMetadata(image) == kept, "\(each.name)")
     }
+  }
+
+  struct FileCases: Decodable {
+    struct Entry: Decodable {
+      let name: String
+      let kind: String
+    }
+    struct Order: Decodable {
+      let name: String
+      let entries: [Entry]
+      let ordered: [String]
+    }
+    struct Size: Decodable {
+      let bytes: Int
+      let label: String
+    }
+    struct Shown: Decodable {
+      let kind: String
+      let text: String?
+      let type: String?
+      let rows: [[String]]?
+    }
+    struct View: Decodable {
+      let name: String
+      let path: String
+      let base64: String
+      let view: Shown
+    }
+    struct Delimited: Decodable {
+      let name: String
+      let text: String
+      let separator: String
+      let rows: [[String]]
+    }
+    struct Lines: Decodable {
+      let name: String
+      let text: String
+      let lines: [String]
+    }
+    struct Parent: Decodable {
+      let path: String
+      let parent: String
+    }
+    struct Runner: Decodable {
+      struct Project: Decodable {
+        let runner: String?
+        let name: String
+      }
+      let project: Project?
+      let words: String
+    }
+    struct Limits: Decodable {
+      let tableRows: Int
+      let numberedLines: Int
+      let fileBytes: Int
+    }
+    let orders: [Order]
+    let sizes: [Size]
+    let views: [View]
+    let delimited: [Delimited]
+    let lines: [Lines]
+    let parents: [Parent]
+    let runners: [Runner]
+    let limits: Limits
+  }
+
+  /// Text as the web compares it, by UTF-16 code units: Swift's `==` takes a decomposed accent for
+  /// the composed one, and would pass an order the web doesn't give.
+  private func units(_ texts: [String]) -> [[UInt16]] {
+    texts.map { Array($0.utf16) }
+  }
+
+  @Test func filesAgreeWithTheWeb() throws {
+    let cases = try Fixture.table("files", as: FileCases.self)
+    #expect(cases.orders.count > 5 && cases.views.count > 20 && cases.delimited.count > 10)
+    for each in cases.orders {
+      let entries = each.entries.map {
+        BranchEntry(name: $0.name, kind: OrUnknown(rawValue: $0.kind))
+      }
+      let ordered = entriesInOrder(entries).map { "\($0.kind.rawValue):\($0.name)" }
+      #expect(units(ordered) == units(each.ordered), "\(each.name)")
+    }
+    for each in cases.sizes {
+      #expect(sizeLabel(each.bytes) == each.label, "\(each.bytes)")
+    }
+    for each in cases.views {
+      let data = try #require(Data(base64Encoded: each.base64), "\(each.name)")
+      let shown: FileView? =
+        switch each.view.kind {
+        case "markdown": each.view.text.map(FileView.markdown)
+        case "image": each.view.type.map(FileView.image)
+        case "table": each.view.rows.map(FileView.table)
+        case "text": each.view.text.map(FileView.text)
+        case "binary": .binary
+        default: nil
+        }
+      let view = viewOf(each.path, data)
+      #expect(view == shown, "\(each.name)")
+      if case .text(let text) = view, let expected = each.view.text {
+        #expect(units([text]) == units([expected]), "\(each.name)")
+      }
+    }
+    for each in cases.delimited {
+      let separator = try #require(each.separator.unicodeScalars.first)
+      let rows = parseDelimited(each.text, separator: separator)
+      #expect(rows.map(units) == each.rows.map(units), "\(each.name)")
+    }
+    for each in cases.lines {
+      #expect(units(fileLines(each.text)) == units(each.lines), "\(each.name)")
+    }
+    for each in cases.parents {
+      #expect(parentOf(each.path) == each.parent, "\(each.path)")
+    }
+    for each in cases.runners {
+      #expect(runnerOf(runner: each.project?.runner, name: each.project?.name) == each.words)
+    }
+    #expect(cases.limits.tableRows == fileTableRows)
+    #expect(cases.limits.numberedLines == fileNumberedLines)
+    #expect(cases.limits.fileBytes == branchFileLimitBytes)
   }
 }

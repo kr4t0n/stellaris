@@ -4043,7 +4043,7 @@ describe("Board", () => {
     });
   }
 
-  it("answers the tokens from the metrics index, reading no log once seeded", async () => {
+  it("answers the tokens from the metrics index, reading no log or transcript once seeded", async () => {
     const { board } = await society();
     await endWith(board, { usage: tokens(10) });
     // A failed turn, one without a count, and a reflection are turns all the same.
@@ -4059,12 +4059,15 @@ describe("Board", () => {
     await board.indexMetrics();
     await endWith(board, { exitReason: "timeout", usage: tokens(50) });
     const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
     const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["tokenUse"]>>>();
     for (const window of ["24h", "7d", "all"] as const) {
       answers.set(window, await board.tokenUse(window));
     }
     expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
     logRead.mockRestore();
+    transcriptRead.mockRestore();
     const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
     for (const [window, answer] of answers) {
       expect(answer).toStrictEqual(tokenUse(events, window, clock));

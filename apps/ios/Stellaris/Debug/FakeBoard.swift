@@ -10,7 +10,10 @@
   /// launched with `-StellarisReset`. The society's general channel holds sixty made-up messages,
   /// enough to scroll, the newest linking to a thread of samples of what a message can hold:
   /// markdown, code, a wide table, links, mentions, and images uploaded, on a task's branch, on the
-  /// web at `images.example.com`, on a runner alone, and gone. It takes posts and new threads,
+  /// web at `images.example.com`, on a runner alone, and gone, and a link to a file on the task's
+  /// branch. It answers that branch and the demo project's default branch, a folder of each depth
+  /// and a file of each kind, which the token `runner-away` finds away and `empty-branch` empty.
+  /// It takes posts and new threads,
   /// images the user posts, which it answers six seconds late for the token `slow-uploads`, the
   /// user's advance of a task's stage, the user's approval or rejection of a proposal, and a new
   /// dashboard for the demo project, which its reads then show to the token that wrote them alone,
@@ -248,15 +251,21 @@
       if method == "POST", path == "/api/verbs/approve" || path == "/api/verbs/reject" {
         return decide(path, request: request, token: token)
       }
+      if method == "POST", path == "/api/verbs/configure_project" {
+        return configureProject(request: request, token: token)
+      }
       if method == "POST", path == "/api/verbs/update_dashboard" {
         return updateDashboard(request: request, token: token)
+      }
+      if method == "GET", let read = branchRead(path) {
+        return branch(read, token: token)
       }
       switch (method, path) {
       case ("GET", "/api/me"): return fixture("me")
       case ("GET", "/api/society"): return fixture("society")
       case ("GET", "/api/members"): return fixture("members")
       case ("GET", "/api/scheduler"): return fixture("scheduler")
-      case ("GET", "/api/projects"): return fixture("projects")
+      case ("GET", "/api/projects"): return (200, json(projects(for: token)))
       case ("GET", "/api/channels"): return fixture("channels")
       case ("GET", "/api/channels/general"):
         return (200, json(general + posted(in: "general", by: token)))
@@ -273,7 +282,6 @@
         return (200, written)
       case ("GET", "/api/threads"): return (200, json(threads + opened(by: token)))
       case ("GET", "/api/messages"): return (200, json(lookUp(request)))
-      case ("GET", "/api/tasks/\(plot.task)/files/\(plot.path)"): return (200, json(plotFile))
       case ("DELETE", "/api/sign-in"): return fixture("sign-out")
       case ("GET", _) where path.hasPrefix("/api/channels/"):
         let ref = String(path.dropFirst("/api/channels/".count)).removingPercentEncoding ?? ""
@@ -346,6 +354,42 @@
       var dashboard: Data?
       /// The images the token posted, by id.
       var images: [String: Data] = [:]
+      /// The demo project's default branch as the token last configured it.
+      var defaultBranch: String?
+    }
+
+    /// The demo project's default branch for `token`: one it configured, else the captured one.
+    private static func defaultBranch(for token: String) -> String {
+      written.withLock { $0[token]?.defaultBranch } ?? "main"
+    }
+
+    /// The projects as captured, the demo project on the default branch `token` configured.
+    private static func projects(for token: String) -> [Any] {
+      let captured = body("projects") as? [[String: Any]] ?? []
+      return captured.map { project in
+        guard project["slug"] as? String == "demo" else {
+          return project
+        }
+        var changed = project
+        changed["defaultBranch"] = defaultBranch(for: token)
+        return changed
+      }
+    }
+
+    /// The demo project with a new default branch, as the web's Edit sets it and the board logs
+    /// `project.configured`, which the app never sends but a test does while the app reads.
+    private static func configureProject(request: URLRequest, token: String) -> (Int, Data) {
+      let input = bodyData(of: request).flatMap(object) ?? [:]
+      guard let branch = input["default_branch"] as? String else {
+        return fixture("error-refused")
+      }
+      written.withLock { written in
+        var mine = written[token] ?? Written()
+        mine.defaultBranch = branch
+        written[token] = mine
+      }
+      let demo = projects(for: token).first { ($0 as? [String: Any])?["slug"] as? String == "demo" }
+      return (200, json(demo ?? [:]))
     }
 
     /// Keeps an image a token posts, as the board does, and refuses bytes of no kind it keeps.
@@ -822,7 +866,8 @@
 
           A capture wider than the column: ![The export view at 1600 px](https://\(webImages)/wide.png)
 
-          The plot on the task's branch: ![The plot](/data/worktrees/eng-1/.tasks/\(plot.task)/\(plot.path))
+          The plot on the task's branch: ![The plot](/data/worktrees/eng-1/.tasks/\(plot.task)/\(plot.path)), \
+          and [its notes](/data/worktrees/eng-1/.tasks/\(plot.task)/evidence/notes.md).
 
           On the runner alone: ![the run log](/tmp/run/log.png). And one the board no longer has: \
           ![The first draft](image:\(gone))
@@ -866,20 +911,166 @@
       ]
     }
 
+    // MARK: Branches
+
+    /// A read of a path on a branch: a task's, or a project's default one, the path decoded.
+    private struct PathRead {
+      let task: String?
+      let project: String?
+      let path: String
+    }
+
+    /// The branch and the path a request reads, or nil for a request that reads no branch.
+    private static func branchRead(_ path: String) -> PathRead? {
+      for (prefix, isTask) in [("/api/tasks/", true), ("/api/projects/", false)]
+      where path.hasPrefix(prefix) {
+        let parts = path.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count >= 2, parts[1] == "files" else {
+          return nil
+        }
+        let owner = String(parts[0])
+        let inside = parts.dropFirst(2).map { String($0).removingPercentEncoding ?? String($0) }
+          .joined(separator: "/")
+        return PathRead(
+          task: isTask ? owner : nil, project: isTask ? nil : owner, path: inside)
+      }
+      return nil
+    }
+
+    /// A path on a branch as the board reads it from the project's runner: the task's branch the
+    /// samples show, with the plot and its notes, and the demo project's default branch, a folder
+    /// of each depth and a file of each kind the app shows. The token `runner-away` finds the
+    /// project's runner away, and `empty-branch` the project's branch as its first commit left it.
+    private static func branch(_ read: PathRead, token: String) -> (Int, Data) {
+      if token == "runner-away" {
+        return fixture("error-runner-away")
+      }
+      if read.task == plot.task {
+        return listing(taskFiles, large: [:], path: read.path, author: "eng-1")
+      }
+      guard read.project == "demo" else {
+        return fixture("error-not-found")
+      }
+      if token == "empty-branch" {
+        return read.path.isEmpty ? fixture("project-files") : fixture("error-file-missing")
+      }
+      // A branch the token made the default holds a note alone.
+      guard defaultBranch(for: token) == "main" else {
+        return listing(
+          ["NOTES.md": Data("# Notes on \(defaultBranch(for: token))\n".utf8)], large: [:],
+          path: read.path, author: "rev-1")
+      }
+      return listing(demoFiles, large: demoLarge, path: read.path, author: "eng-1")
+    }
+
+    /// The answer for `path` on a branch holding `files` and the `large` ones, by path: a file, a
+    /// folder's entries, or the board's 404.
+    private static func listing(
+      _ files: [String: Data], large: [String: Int], path: String, author: String
+    ) -> (Int, Data) {
+      let commit: [String: Any] = [
+        "id": "4f2c9e1a7b3d5c8e0f1a2b3c4d5e6f708192a3b4", "at": time(0), "author": author,
+      ]
+      if let data = files[path] {
+        return (
+          200,
+          json([
+            "kind": "file", "path": path, "commit": commit, "size": data.count,
+            "content": data.base64EncodedString(),
+          ])
+        )
+      }
+      if let size = large[path] {
+        return (
+          200,
+          json([
+            "kind": "file", "path": path, "commit": commit, "size": size, "content": NSNull(),
+          ])
+        )
+      }
+      let prefix = path.isEmpty ? "" : path + "/"
+      var entries: [String: [String: Any]] = [:]
+      let sizes = files.mapValues(\.count).merging(large) { first, _ in first }
+      for (file, size) in sizes where file.hasPrefix(prefix) {
+        let rest = file.dropFirst(prefix.count)
+        if let slash = rest.firstIndex(of: "/") {
+          let name = String(rest[..<slash])
+          entries[name] = ["name": name, "kind": "dir", "size": NSNull()]
+        } else {
+          entries[String(rest)] = ["name": String(rest), "kind": "file", "size": size]
+        }
+      }
+      guard !entries.isEmpty || path.isEmpty else {
+        return fixture("error-file-missing")
+      }
+      return (
+        200,
+        json([
+          "kind": "dir", "path": path, "commit": commit,
+          // In the order git lists them, by their bytes, which the app puts in its own order.
+          "entries": entries.keys.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
+            .compactMap { entries[$0] },
+        ])
+      )
+    }
+
+    /// The task's branch the samples show: the plot and its notes, as the server's capture has
+    /// the notes.
+    private static var taskFiles: [String: Data] {
+      let notes = (body("task-text-file") as? [String: Any])?["content"] as? String
+      return [
+        plot.path: drawing(width: 600, height: 360, label: "plot.png", hue: 0.33),
+        "evidence/notes.md": notes.flatMap { Data(base64Encoded: $0) } ?? Data(),
+      ]
+    }
+
+    /// The demo project's default branch: markdown that links the files beside it, a table, a
+    /// picture, a file of code long enough to scroll, a folder in a folder, and a binary file.
+    private static var demoFiles: [String: Data] {
+      let app = (1...80).map { line in
+        switch line {
+        case 1: "// The export view: a channel's messages as markdown."
+        case 30: "export function exportChannel(channel: string, messages: Message[]): string {"
+        case 31: "  return messages.map((message) => `**${message.author}**: ${message.body}`).join(\"\\n\\n\");"
+        case 32: "}"
+        default: line % 10 == 0 ? "" : "const step\(line) = \(line); // a line of the export, \(line) of 80"
+        }
+      }
+      return [
+        "README.md": Data(
+          """
+          # Demo
+
+          The export view turns a channel's messages into markdown. The [plan](docs/plan.md) says \
+          what comes first, and [the export](src/app.ts:30) is where it happens.
+
+          ![The export's timings](plot.png)
+          """.utf8),
+        "docs/plan.md": Data(
+          """
+          # The plan
+
+          1. The export view
+          2. The empty state
+
+          Back to the [readme](../README.md).
+          """.utf8),
+        "src/app.ts": Data((app.joined(separator: "\n") + "\n").utf8),
+        ".github/workflows/ci.yml": Data("name: ci\non: [push]\n".utf8),
+        "results.csv": Data(
+          "run,seconds,messages\n1,0.41,120\n2,0.37,120\n3,\"0.52, cold\",240\n".utf8),
+        "plot.png": drawing(width: 600, height: 360, label: "plot.png", hue: 0.33),
+        "model.bin": Data([0, 1, 2, 3, 0xFF]),
+      ]
+    }
+
+    /// Files on the demo project's branch larger than the board sends, with their sizes.
+    private static let demoLarge = ["dump.json": 12_686_643]
+
     // MARK: Pictures
 
     /// The image on the task's branch that the samples show.
     private static let plot = (task: "00000000000000000000000010", path: "evidence/plot.png")
-
-    /// The board's answer for the plot, as it reads the file from the project's runner.
-    private static var plotFile: [String: Any] {
-      let png = drawing(width: 600, height: 360, label: "plot.png", hue: 0.33)
-      return [
-        "kind": "file", "path": plot.path, "size": png.count,
-        "commit": ["id": "fixture-commit", "at": time(0), "author": "eng-1"],
-        "content": png.base64EncodedString(),
-      ]
-    }
 
     /// A picture the fake board serves: the uploaded image the samples show, the images a token
     /// posted, to that token, and the one on the web; nil for any other request.

@@ -47,6 +47,11 @@ import UIKit
     #expect(
       MessageText.url(for: file)?.relativeString
         == "/task/\(task)/files/evidence/policy%20plot.png?line=12")
+    // Which the app reads back as the same place, and opens itself.
+    let carried = try #require(MessageText.url(for: file)?.relativeString)
+    #expect(
+      FilePlace(href: carried)
+        == FilePlace(source: .task(task), path: "evidence/policy plot.png", line: 12))
     let address = MessageText.url(for: .web("//example.com/x"))
     #expect(address?.absoluteString == "https://example.com/x")
     #expect(MessageText.url(for: .web("#top")) == nil)

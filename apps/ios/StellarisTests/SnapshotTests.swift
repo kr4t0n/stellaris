@@ -177,7 +177,7 @@ final class SnapshotTests: XCTestCase {
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
     try await expectIslandGray(ShellView().environment(model), named: "board")
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     try await expectIslandGray(ShellView().environment(model), named: "board-project")
     model.tab = .needsYou
     try await expectIslandGray(ShellView().environment(model), named: "needs-you")
@@ -239,7 +239,7 @@ final class SnapshotTests: XCTestCase {
     let model = try await signedIn()
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     var band = CGRect.null
     let image = try await Snapshot.image(
       of: ShellView().environment(model), size: CGSize(width: 410, height: 678),
@@ -471,8 +471,57 @@ final class SnapshotTests: XCTestCase {
     let model = try await signedIn()
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     try await Snapshot.record(ShellView().environment(model), named: "board-project", in: self)
+  }
+
+  /// A project's files under Board: Board with its Files row, the branch's root, markdown, and
+  /// code at a cited line at every width and type size; a table, an image, a binary file, one over
+  /// the board's limit, a path the branch doesn't have, the runner away, and an empty branch at
+  /// the outer display's; and a file a message linked, in Chat's sheet.
+  @MainActor func testTheFiles() async throws {
+    let model = try await signedIn()
+    model.tab = .board
+    try await Snapshot.record(ShellView().environment(model), named: "board-files-row", in: self)
+    func place(_ path: String, line: Int? = nil) -> FilePlace {
+      FilePlace(source: .project("demo"), path: path, line: line)
+    }
+    for (name, file) in [
+      ("files-root", place("")), ("files-markdown", place("README.md")),
+      ("files-code", place("src/app.ts", line: 30)),
+    ] {
+      await model.store.loadBranchFile(file, using: model)
+      model.boardPath = [.files(file)]
+      try await Snapshot.record(ShellView().environment(model), named: name, in: self)
+    }
+    for (name, file) in [
+      ("files-table", place("results.csv")), ("files-image", place("plot.png")),
+      ("files-binary", place("model.bin")), ("files-too-large", place("dump.json")),
+      ("files-missing", place("notes/plan.md")),
+    ] {
+      await model.store.loadBranchFile(file, using: model)
+      model.boardPath = [.files(file)]
+      try await keepAtTheOuterDisplay(ShellView().environment(model), named: name)
+    }
+    for token in ["runner-away", "empty-branch"] {
+      let other = try await signedIn(token: token)
+      await other.store.loadBranchFile(place(""), using: other)
+      other.tab = .board
+      other.boardPath = [.files(place(""))]
+      try await keepAtTheOuterDisplay(ShellView().environment(other), named: "files-\(token)")
+    }
+    let notes = FilePlace(source: .task(exportView), path: "evidence/notes.md")
+    await model.store.loadBranchFile(notes, using: model)
+    model.browse(notes)
+    try await keepAtTheOuterDisplay(FileSheet().environment(model), named: "files-sheet")
+  }
+
+  /// Draws `view` once, at the outer display's width and the default type size.
+  @MainActor private func keepAtTheOuterDisplay(_ view: some View, named name: String) async throws
+  {
+    let image = try await Snapshot.image(
+      of: view, size: CGSize(width: 410, height: 678), type: Snapshot.typeSizes[0])
+    try Snapshot.keep(image, named: "\(name)-410-default", in: self)
   }
 
   /// A task at a gate that waits on the user, and a member proposal that waits on the user.

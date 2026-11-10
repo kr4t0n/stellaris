@@ -216,10 +216,13 @@ struct ConversationView: View {
 }
 
 /// Follows a link in the board's text as `AppModel.follow` says: what the board names opens in Chat,
-/// after `opened`, an address on the web in Safari, and anything else nowhere.
+/// after `opened`; a file or a folder on a branch opens with `files`, by default in Chat's file
+/// sheet, after `opened`; an address on the web opens in Safari, and anything else nowhere.
 struct FollowsBoardLinks: ViewModifier {
   @Environment(AppModel.self) private var model
+  // `opened` first, so a trailing closure is it, as before `files` was added.
   var opened: () -> Void = {}
+  var files: ((FilePlace) -> Void)? = nil
 
   func body(content: Content) -> some View {
     content.environment(
@@ -228,6 +231,14 @@ struct FollowsBoardLinks: ViewModifier {
         switch model.follow(url) {
         case .opened:
           opened()
+          return .handled
+        case .file(let place):
+          if let files {
+            files(place)
+          } else {
+            opened()
+            model.browse(place)
+          }
           return .handled
         case .nowhere:
           return .handled

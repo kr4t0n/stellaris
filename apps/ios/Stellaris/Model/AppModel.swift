@@ -2,11 +2,27 @@ import BoardKit
 import Foundation
 import Observation
 
-/// What following a link did: opened what it names in Chat, asks for Safari, or went nowhere.
+/// What following a link did: opened what it names in Chat, found a file or a folder on a branch
+/// for the view it was followed in to open, asks for Safari, or went nowhere.
 enum LinkOutcome: Equatable {
   case opened
+  case file(FilePlace)
   case safari(URL)
   case nowhere
+}
+
+/// A place Board's stack, or a file sheet's, shows: a project's dashboard and tasks, or a file or
+/// a folder on a branch.
+enum BoardPlace: Hashable {
+  case project(String)
+  case files(FilePlace)
+}
+
+/// The file or the folder a link in Chat opened, and what was opened from it since, which Chat
+/// presents in a sheet with a stack of its own.
+struct FileBrowse: Hashable {
+  var root: FilePlace
+  var path: [BoardPlace] = []
 }
 
 /// Why a sign-in didn't take.
@@ -36,8 +52,11 @@ enum SignInFailure: Error, Equatable {
   /// Why the app is back at sign-in, when the board ended the sign-in.
   private(set) var notice: String?
   var tab: AppTab = .chat
-  /// The projects Board has opened, the last one shown, kept here so a fold keeps Board's place.
-  var boardPath: [String] = []
+  /// The projects and the files Board has opened, the last one shown, kept here so a fold keeps
+  /// Board's place.
+  var boardPath: [BoardPlace] = []
+  /// The file a link in Chat opened, which Chat presents in a sheet, with where it went from there.
+  var browsing: FileBrowse?
   var showsSettings = false
   private(set) var history = ChatHistory()
   private(set) var memory: ConversationMemory?
@@ -546,6 +565,20 @@ enum SignInFailure: Error, Equatable {
     for project in store.dashboardReads.keys where touched("dashboard", project) {
       await store.loadDashboard(project, using: self)
     }
+    // A path on a branch a view shows; one none shows is read again when a view next shows it.
+    // A project's path never read on the branch the project names as its default now is read
+    // too, as when an event changed that branch, which makes the projects stale and no file.
+    for place in store.branchFilesShown.keys {
+      let stale =
+        switch place.source {
+        case .task(let id): touched("task-file", id)
+        case .project(let slug):
+          touched("project-file", slug) || store.branchFileState(place) == nil
+        }
+      if stale {
+        await store.loadBranchFile(place, using: self)
+      }
+    }
     sky.markStale(SkyStore.reads.filter { touched($0) }, using: self)
   }
 
@@ -568,6 +601,11 @@ enum SignInFailure: Error, Equatable {
     return feed
   }
 
+  /// Opens a file or a folder on a branch in Chat's file sheet, in place of any it showed.
+  func browse(_ place: FilePlace) {
+    browsing = FileBrowse(root: place)
+  }
+
   /// The project of the conversation Chat shows, which the sky frames and brightens, as the web's
   /// does a project the board has open: a project's channel, or a thread in one, once the thread
   /// or its task is known.
@@ -588,8 +626,9 @@ enum SignInFailure: Error, Equatable {
   }
 
   /// Where a link in a message goes. A task's, a proposal's, or a thread's link, or a message's,
-  /// opens it in Chat; a cron's or a file's opens the board's own page for it in Safari, as does an
-  /// address on the web; anything else goes nowhere.
+  /// opens it in Chat; a file's or a folder's on a branch is for the view it was followed in to
+  /// open; a cron's opens the board's own page for it in Safari, as does an address on the web;
+  /// anything else goes nowhere.
   func follow(_ url: URL) -> LinkOutcome {
     guard url.scheme == nil else {
       let scheme = url.scheme?.lowercased() ?? ""
@@ -610,6 +649,9 @@ enum SignInFailure: Error, Equatable {
         break
       }
     }
+    if let place = FilePlace(href: href) {
+      return .file(place)
+    }
     guard href.hasPrefix("/"), let board else {
       return .nowhere
     }
@@ -623,14 +665,15 @@ enum SignInFailure: Error, Equatable {
     document(id: message.id, markdown: message.body)
   }
 
-  /// Markdown the board keeps under `id`, a message's, a task's brief, or a dashboard, read as a
-  /// message is, once for its text and the ids the board names.
-  func document(id: String, markdown: String) -> MessageDocument {
+  /// Markdown the board keeps under `id`, a message's, a task's brief, a dashboard, or a file on a
+  /// branch, read as a message is, once for its text and the ids the board names; a file's
+  /// relative links and images go to the files beside it in `base`'s folder.
+  func document(id: String, markdown: String, base: FileBase? = nil) -> MessageDocument {
     let entities = store.entities
     if let kept = documents[id], kept.body == markdown, kept.entities == entities {
       return kept.document
     }
-    let document = MessageDocument(markdown: markdown, entities: entities)
+    let document = MessageDocument(markdown: markdown, entities: entities, base: base)
     documents[id] = (markdown, entities, document)
     return document
   }
@@ -670,6 +713,7 @@ enum SignInFailure: Error, Equatable {
     memory = ConversationMemory(board: board, defaults: environment.defaults)
     history = ChatHistory()
     boardPath = []
+    browsing = nil
     marks = [:]
     newThreads = [:]
     forgetSubjects()
@@ -718,6 +762,7 @@ enum SignInFailure: Error, Equatable {
     sky.clear()
     history = ChatHistory()
     boardPath = []
+    browsing = nil
     showsSettings = false
     self.notice = notice
     phase = .signedOut

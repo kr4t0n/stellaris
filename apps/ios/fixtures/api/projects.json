@@ -11,7 +11,8 @@
       "repo": null,
       "defaultBranch": "main",
       "channels": [
-        "general"
+        "general",
+        "release"
       ],
       "archivedChannels": [],
       "members": [
@@ -23,7 +24,8 @@
       ],
       "requiredCapabilities": [],
       "createdAt": "2026-01-01T00:00:00.000Z",
-      "onDone": "none"
+      "onDone": "none",
+      "runner": "runner-1"
     }
   ]
 }

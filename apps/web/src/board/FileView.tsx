@@ -8,11 +8,14 @@ import { ApiError } from "../lib/api.js";
 import {
   bytesOf,
   citedLine,
+  fileLines,
   imageType,
   normalizePath,
+  NUMBERED_LINES,
   parentOf,
   runnerOf,
   sizeLabel,
+  TABLE_ROWS,
   viewOf,
   type FileSource,
 } from "../lib/files.js";
@@ -24,10 +27,6 @@ const BACK =
   "grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary";
 const DOWNLOAD =
   "inline-flex h-7 shrink-0 items-center rounded-md px-3 text-xs text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary";
-/** Rows of a table shown at once; a longer one says how many more it has. */
-const TABLE_ROWS = 1000;
-/** Lines of text numbered one by one; a longer file shows as plain text. */
-const NUMBERED_LINES = 20_000;
 
 /** Where the path sits: the branch's root, then each folder, each a link but the last. */
 function Trail({ source, path }: { source: FileSource; path: string }) {
@@ -100,7 +99,7 @@ function Table({ rows }: { rows: string[][] }) {
 
 /** Text with its lines numbered and the cited one marked. */
 function TextLines({ text, line }: { text: string; line: number | undefined }) {
-  const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+  const lines = fileLines(text);
   const frame =
     "mt-3 overflow-x-auto rounded-lg bg-surface-0/80 p-3 font-mono text-[12px] leading-relaxed text-fg-secondary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]";
   if (lines.length > NUMBERED_LINES) {

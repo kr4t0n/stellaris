@@ -12,7 +12,7 @@ final class ChangesUITests: ShellTestCase {
   @MainActor func testOpensAChangeThenTheWholeFileFromThePlan() {
     let app = openPlan(token: "fixture-token")
     let row = app.buttons["change-src/export/view.ts"].firstMatch
-    dragUpTo(app, row)
+    swipeTo(app, row)
     XCTAssertTrue(row.label.contains("+5 −2"), "the change's row says \(row.label)")
     let deleted = app.buttons["change-src/export/old.ts"].firstMatch
     XCTAssertTrue(deleted.label.contains("deleted"), "the deleted file's row says \(deleted.label)")
@@ -34,7 +34,7 @@ final class ChangesUITests: ShellTestCase {
     dragAway(app, app.navigationBars["view.ts"].firstMatch)
     XCTAssertTrue(first.waitForNonExistence(timeout: 20), "a drag down leaves the file open")
     pick(app, "plan")
-    dragUpTo(app, row)
+    swipeTo(app, row)
     row.tap()
     XCTAssertTrue(nine.waitForExistence(timeout: 20), "the change didn't open again")
     nine.tap()
@@ -57,10 +57,32 @@ final class ChangesUITests: ShellTestCase {
     ] {
       let app = openPlan(token: token)
       let state = app.staticTexts["changes-state"].firstMatch
-      dragUpTo(app, state)
-      XCTAssertEqual(state.label, words, "Files doesn't say why it lists nothing")
+      let said = expectation(for: NSPredicate(format: "label == %@", words), evaluatedWith: state)
+      wait(for: [said], timeout: 20)
+      swipeTo(app, state)
       keepScreen("plan-files-\(token)")
     }
+  }
+
+  /// Swipes the plan's sheet up until `element` stands whole on screen: the first swipe raises the
+  /// sheet to its full height, and the next scroll it towards its end, where the plan's Files are.
+  /// A slow drag held at its end, as `dragUpTo` makes, moved neither the half-height sheet nor
+  /// its content in CI.
+  @MainActor private func swipeTo(_ app: XCUIApplication, _ element: XCUIElement) {
+    let window = app.windows.firstMatch
+    func shown() -> Bool {
+      element.exists && element.isHittable && element.frame.minY >= window.frame.minY
+        && element.frame.maxY <= window.frame.maxY - 1
+    }
+    XCTAssertTrue(element.waitForExistence(timeout: 20), "the plan has no \(element)")
+    for _ in 0..<8 where !shown() {
+      window.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.8))
+        .press(
+          forDuration: 0.05,
+          thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.2)),
+          withVelocity: .fast, thenHoldForDuration: 0)
+    }
+    XCTAssertTrue(shown(), "\(element) isn't whole on screen")
   }
 
   /// The app signed in with `token`, at the export task's plan, opened from Needs you.

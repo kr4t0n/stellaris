@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   ASK_CHANNEL,
   AgentSchema,
+  CHANNEL_POST_WAIT_MS,
   ArchiveProposalSchema,
   currentStage,
   channelRef,
@@ -233,11 +234,8 @@ export type ImageSink = (
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
 
-/**
- * How old a top-level post in a project's channel must be before it counts toward the heartbeat of
- * a reader it does not ask (see `unreadByConversation`): a day, by default.
- */
-export const CHANNEL_POST_WAIT_MS = 24 * 3_600_000;
+/** The scheduler's default for `channelPostWaitMs`, which `unreadByConversation` takes when left out. */
+export { CHANNEL_POST_WAIT_MS };
 
 /** Whether a turn in flight is the one the actor acts from, which may end its own conversation. */
 function ownTurn(actor: Actor, turn: TurnInFlight): boolean {

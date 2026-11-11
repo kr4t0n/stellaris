@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Board } from "@stellaris/board-core";
 import { Scheduler } from "@stellaris/scheduler";
 import {
@@ -576,7 +578,11 @@ describe("turns on a runner over the runner protocol", () => {
   async function start(
     board: Board,
     backend: AgentBackend,
-    options: { turnTimeoutMs?: number | null; residentIdleMs?: number } = {},
+    options: {
+      turnTimeoutMs?: number | null;
+      residentIdleMs?: number;
+      channelPostWaitMs?: number;
+    } = {},
   ): Promise<TestSociety> {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }), ...options });
     return society;
@@ -2676,6 +2682,34 @@ describe("turns on a runner over the runner protocol", () => {
     await run(deskPost);
     expect(backend.closes).toEqual(["desk:session-1"]);
     expect(backend.starts).toHaveLength(2);
+  });
+
+  it("draws the turn contract and subscribe's description at the channel wait the server runs with", async () => {
+    const { board } = await Board.init(dir, { name: "channel-wait" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const backend = new InstructionsBackend();
+    const { run, url } = await start(board, backend, { channelPostWaitMs: 6 * 3_600_000 });
+    await run(manual("steward-1", "society"));
+    expect(backend.turns.at(-1)?.instructions).toContain(
+      "everyone else reads it at their next turn there, at the latest about 6 hours later.",
+    );
+    // The same server's MCP endpoint, which the turn's CLI lists its tools from.
+    const { token } = await board.addAgent(USER, {
+      name: "steward-2",
+      role: "steward",
+      cli: "claude",
+    });
+    const client = new Client({ name: "test-client", version: "0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${token}` } },
+      }),
+    );
+    const { tools } = await client.listTools();
+    await client.close();
+    expect(tools.find((tool) => tool.name === "subscribe")?.description).toContain(
+      "wakes you only once it is 6 hours old.",
+    );
   });
 
   it("carries changed instructions into a resumed session's prompt once, and none into a new or unchanged one", async () => {

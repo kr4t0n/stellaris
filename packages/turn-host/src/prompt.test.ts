@@ -932,6 +932,10 @@ describe("buildTurnPrompt", () => {
     expect(empty).toContain(
       "Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel",
     );
+    // The project channel wakes only whom a post asks, so the proposal names who acts on it.
+    expect(empty).toContain(
+      "propose it in that task's thread or the project channel, mentioning whoever is to act on it;",
+    );
     expect(empty).toContain(
       "a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge",
     );

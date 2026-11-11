@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   capOutput,
+  CHANNEL_POST_WAIT_MS,
   channelConversation,
   channelRef,
   conversationPart,
+  durationInWords,
   IsoDateTimeSchema,
   isSafeRelativePath,
   loadRunnerConfig,
@@ -20,6 +22,8 @@ import {
   sessionKey,
   TaskFrontmatterSchema,
   turnStatusJsonSchema,
+  VERB_DESCRIPTIONS,
+  verbDescriptions,
   VerbInputs,
   wakeScope,
 } from "./index.js";
@@ -151,6 +155,50 @@ describe("verb inputs", () => {
       body: "",
       required_capabilities: [],
     });
+  });
+});
+
+/** What subscribe's description says at a channel wait, or at the default. */
+function subscribe(channelPostWaitMs?: number): string {
+  return verbDescriptions(channelPostWaitMs === undefined ? {} : { channelPostWaitMs }).subscribe;
+}
+
+describe("verb descriptions", () => {
+  it("say a timing exactly, in the largest unit that divides it", () => {
+    expect(
+      [86_400_000, 172_800_000, 3_600_000, 129_600_000, 5_400_000, 60_000, 30_000, 1_500, 1].map(
+        durationInWords,
+      ),
+    ).toEqual([
+      "a day",
+      "2 days",
+      "an hour",
+      "36 hours",
+      "90 minutes",
+      "a minute",
+      "30 seconds",
+      "1500 milliseconds",
+      "a millisecond",
+    ]);
+  });
+
+  it("say when a project channel's post wakes a follower, at the wait the server runs with", () => {
+    expect(CHANNEL_POST_WAIT_MS).toBe(86_400_000);
+    expect(VERB_DESCRIPTIONS.subscribe).toBe(
+      "Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you wakes you only once it is a day old.",
+    );
+    expect(subscribe()).toBe(VERB_DESCRIPTIONS.subscribe);
+    expect(subscribe(6 * 3_600_000)).toBe(
+      "Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you wakes you only once it is 6 hours old.",
+    );
+    // 0 counts every post at once, so there is no wait to name.
+    expect(subscribe(0)).toBe(
+      "Subscribe to a channel. Its posts feed your digest, read at your next turn there; in a project's channel, one that asks nothing of you wakes you at your next heartbeat.",
+    );
+    // Only subscribe's description names the wait.
+    const { subscribe: _changed, ...others } = verbDescriptions({ channelPostWaitMs: 0 });
+    const { subscribe: _default, ...defaults } = VERB_DESCRIPTIONS;
+    expect(others).toEqual(defaults);
   });
 });
 

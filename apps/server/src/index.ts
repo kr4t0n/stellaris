@@ -38,6 +38,8 @@ const log = pino({ level: config.logLevel });
 const board = await Board.open(config.dataDir);
 const mcpUrl = `${config.publicUrl ?? SERVER_TOKEN}/mcp`;
 const turns = new TurnHub();
+// Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
+const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 
 // The server runs no turns: it prepares each one as a job for a runner that connected to it.
 const host = new TurnHost({
@@ -46,6 +48,8 @@ const host = new TurnHost({
   turnTimeoutMs: config.turnTimeoutMs,
   maxTurns: config.toolRounds,
   residentIdleMs: config.residentIdleMs,
+  // The turn contract says how long a project's channel's post waits, as the scheduler counts it.
+  channelPostWaitMs: timings.channelPostWaitMs,
   log,
   onEvent: (agent, scope, event, conversation) => {
     turns.push(agent, scope, event, conversation);
@@ -60,8 +64,6 @@ board.readImagesWith((actor, file) => runners.readTurnImage(actor, file));
 board.openImagesWith((actor, image) => runners.writeTurnImage(actor, image));
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
-// Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
-const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 const scheduler = new Scheduler({ board, runner: runners, log, concurrency, timings });
 
 // What the API shows: the scheduler's queues and the runners' warm sessions, read live.
@@ -100,6 +102,7 @@ const app = createApp({
   enrollments: new EnrollmentDesk(board),
   trustedProxies: config.trustedProxies,
   log,
+  channelPostWaitMs: timings.channelPostWaitMs,
 });
 const server = serveBoard(
   { fetch: app.fetch, port: config.port, hostname: config.host },

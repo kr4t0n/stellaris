@@ -903,6 +903,8 @@ describe("Board", () => {
     const STEWARD: Actor = { name: "steward-1", role: "steward" };
     await board.addAgent(USER, { ...STEWARD, cli: "claude" });
     await board.subscribe(ENG, { channel: "demo/dev" });
+    // Outside the project, a society role that follows its general reads it in the society scope.
+    await board.subscribe(STEWARD, { channel: "demo/general" });
     const unread = async (actor: Actor) =>
       (await board.unreadByConversation(actor)).map(({ scope, thread, channel, place, count }) => [
         scope,
@@ -939,6 +941,7 @@ describe("Board", () => {
     // A day after, every post still unread asks a turn of every reader it reaches.
     clock = new Date(clock.getTime() + 24 * 3_600_000 - 1);
     expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(STEWARD)).toEqual([["society", null, 1]]);
     clock = new Date(clock.getTime() + 1);
     expect(await unread(ENG)).toEqual([
       ["demo", null, 3],
@@ -948,6 +951,10 @@ describe("Board", () => {
     expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
     expect(await unread(FRONT)).toEqual([
       ["society", "demo", 1],
+      ["society", null, 1],
+    ]);
+    expect(await unread(STEWARD)).toEqual([
+      ["society", "demo", 3],
       ["society", null, 1],
     ]);
 

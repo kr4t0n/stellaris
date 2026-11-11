@@ -1,7 +1,12 @@
 import { MEMBER_VERBS, RoleCharterSchema, SEED_ROLES } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { BOARD_TOOLS, toolsForRole } from "./index.js";
+import { BOARD_TOOLS, boardTools, toolsForRole } from "./index.js";
+
+/** What a tool list says of subscribe. */
+function subscribe(tools: ReturnType<typeof boardTools>): string | undefined {
+  return tools.find((tool) => tool.name === "subscribe")?.description;
+}
 
 describe("board tools", () => {
   it("defines one tool per verb with a description", () => {
@@ -45,6 +50,20 @@ describe("board tools", () => {
       },
       required: ["image_id"],
     });
+  });
+
+  it("describes subscribe at the channel wait the server runs with, for every role", () => {
+    expect(subscribe(BOARD_TOOLS)).toContain("wakes you only once it is a day old.");
+    const hourly = boardTools({ channelPostWaitMs: 3_600_000 });
+    expect(subscribe(hourly)).toContain("wakes you only once it is an hour old.");
+    expect(subscribe(boardTools({ channelPostWaitMs: 0 }))).toContain(
+      "wakes you at your next heartbeat.",
+    );
+    const steward = SEED_ROLES.find((role) => role.name === "steward");
+    if (steward === undefined) {
+      throw new Error("seed roles missing");
+    }
+    expect(subscribe(toolsForRole(steward, hourly))).toContain("once it is an hour old.");
   });
 
   it("shows remove_skill to the steward and the user alone", () => {

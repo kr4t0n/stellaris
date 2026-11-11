@@ -214,7 +214,7 @@ describe("Board runtime support", () => {
     await board.addRunner(USER, "laptop");
     expect(await board.pinAgent("eng-1", "pod")).toBe("pod");
     expect(await board.pinAgent("eng-1", "laptop")).toBe("pod");
-    // A move names where the pin was, so two turns that find it gone move it once.
+    // A move names where the pin was, so two turns finding its runner without the CLI move it once.
     expect(await board.pinAgent("eng-1", "laptop", "pod")).toBe("laptop");
     expect(await board.pinAgent("eng-1", "pod", "pod")).toBe("laptop");
     const placed = (await board.readEvents(null, 500)).filter((e) => e.type === "agent.placed");

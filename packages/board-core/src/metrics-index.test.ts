@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MetricsIndex } from "./metrics-index.js";
 import { computeMetrics, MetricsTally, type MetricsCitizen } from "./metrics.js";
 import { signalsIn } from "./signals.js";
-import { tokenUse } from "./turn-history.js";
+import { entriesOf, tokenUse, TurnHistoryPayloadSchema, turnHistoryIn } from "./turn-history.js";
 import { WakeLatency } from "./wake-latency.js";
 
 /** A small seeded generator, so a failing log can be made again from its seed. */
@@ -367,6 +367,143 @@ function limitsFor(count: number): number[] {
   return [0, 1, 2, 100, 501, Number.NaN, -1, count - 1, count, count + 1, 10 * count + 1_000];
 }
 
+/** The shapes of turn `withHistory` gives its starts and ends, each counted by name. */
+const HISTORY_SHAPES = [
+  "paired",
+  "startMissing",
+  "secondEnd",
+  "othersStart",
+  "noTurnId",
+  "refused",
+  "failed",
+  "ownHeartbeat",
+  "startHeartbeat",
+  "laterCause",
+  "replacedStart",
+  "handedUndefined",
+] as const;
+type HistoryShape = (typeof HISTORY_SHAPES)[number];
+
+/**
+ * The log with turns whose starts and ends pair as a citizen's history pairs them, or fail to:
+ * ends of a start of the citizen's own, of none logged, of one an earlier end took, of another
+ * citizen's, of no turn id, and of a payload the history refuses; starts naming a cause, one a
+ * later board added, or none, and starts of a turn started before; and fields handed over as
+ * undefined, as a caller may hand them to `append`. Each turn event's shapes are in `shapes` by
+ * its id; every other event stays as the log has it.
+ */
+function withHistory(
+  events: readonly BoardEvent[],
+  seed: number,
+): { events: BoardEvent[]; shapes: Map<string, HistoryShape[]> } {
+  const next = random(seed * 49_157);
+  const pickFrom = <T>(values: readonly T[]): T | undefined =>
+    values[Math.floor(next() * values.length)];
+  const open = new Map<string, string[]>();
+  const ended = new Map<string, string[]>();
+  const started: { actor: string; turnId: string }[] = [];
+  const shapes = new Map<string, HistoryShape[]>();
+  const reshaped = events.map((event) => {
+    const turnId = event.payload["turnId"];
+    if (event.type === "turn.started" && typeof turnId === "string") {
+      const waiting = open.get(event.actor) ?? [];
+      open.set(event.actor, waiting);
+      const kept: HistoryShape[] = [];
+      const again = next() < 0.15 ? pickFrom(waiting) : undefined;
+      if (again !== undefined) {
+        kept.push("replacedStart");
+      } else {
+        waiting.push(turnId);
+        started.push({ actor: event.actor, turnId });
+      }
+      const cause = next();
+      const heartbeat =
+        cause < 0.3
+          ? { heartbeat: pickFrom(["unread", "held", "waiting"]) }
+          : cause < 0.4
+            ? { heartbeat: "a cause from a later board" }
+            : cause < 0.5
+              ? { heartbeat: undefined, thread: undefined }
+              : {};
+      if (cause < 0.5) {
+        kept.push(cause < 0.3 ? "startHeartbeat" : cause < 0.4 ? "laterCause" : "handedUndefined");
+      }
+      shapes.set(event.id, kept);
+      return { ...event, payload: { ...event.payload, turnId: again ?? turnId, ...heartbeat } };
+    }
+    if (event.type !== "turn.completed" && event.type !== "turn.failed") {
+      return event;
+    }
+    const kept: HistoryShape[] = event.type === "turn.failed" ? ["failed"] : [];
+    if (!TurnHistoryPayloadSchema.safeParse(event.payload).success) {
+      shapes.set(event.id, [...kept, "refused"]);
+      return event;
+    }
+    if (typeof event.payload["heartbeat"] === "string") {
+      kept.push("ownHeartbeat");
+    }
+    const waiting = open.get(event.actor) ?? [];
+    const done = ended.get(event.actor) ?? [];
+    ended.set(event.actor, done);
+    const others = started.filter((begun) => begun.actor !== event.actor);
+    const roll = next();
+    let named: { turnId?: string | undefined } = {};
+    if (roll < 0.5 && waiting.length > 0) {
+      const at = Math.floor(next() * waiting.length);
+      const [paired] = waiting.splice(at, 1);
+      named = { turnId: paired };
+      done.push(paired ?? "");
+      kept.push("paired");
+    } else if (roll < 0.6 && done.length > 0) {
+      named = { turnId: pickFrom(done) };
+      kept.push("secondEnd");
+    } else if (roll < 0.7 && others.length > 0) {
+      named = { turnId: pickFrom(others)?.turnId };
+      kept.push("othersStart");
+    } else if (roll < 0.8) {
+      kept.push("noTurnId");
+    } else if (typeof turnId === "string") {
+      named = { turnId };
+      kept.push("startMissing");
+    } else {
+      kept.push("noTurnId");
+    }
+    const handed = next() < 0.2;
+    if (handed) {
+      kept.push("handedUndefined");
+    }
+    const { turnId: _own, ...payload } = event.payload;
+    shapes.set(event.id, kept);
+    return {
+      ...event,
+      payload: {
+        ...payload,
+        ...named,
+        ...(handed ? { thread: undefined, usage: undefined, toolCalls: undefined } : {}),
+      },
+    };
+  });
+  return { events: reshaped, shapes };
+}
+
+/** The entries of the ends an index keeps, each read back from its line in `written`. */
+function entriesFrom(
+  index: MetricsIndex,
+  written: readonly BoardEvent[],
+  agent: string,
+  limit: number,
+): Promise<ReturnType<typeof turnHistoryIn> | null> {
+  const lines = new Map(written.map((event) => [event.id, event]));
+  return entriesOf(agent, index.turnEnds(agent, limit), async (ids) =>
+    ids.map((id) => lines.get(id) ?? null),
+  );
+}
+
+/** The limits a history's ask can give: none, a few, the API's default, the triage's, and around the count. */
+function historyLimits(count: number): number[] {
+  return [0, 1, 2, 50, 5_000, Number.NaN, -1, count - 1, count, count + 1];
+}
+
 /** The user's post naming `name` in a thread, `seconds` after the logs' start. */
 function post(seconds: number, name: string): BoardEvent {
   return {
@@ -627,6 +764,96 @@ describe("metrics index", () => {
     // Fields handed over as undefined are left out, as the log's line leaves them out.
     expect(handedFields).toHaveLength(counts.get("undefined") ?? 0);
     expect(new Set(handedFields)).toEqual(new Set(["kind, key, summary, value"]));
+  });
+
+  it("keeps the ends each citizen's history lists as the log's read does, for every limit, as events arrive", async () => {
+    let compared = 0;
+    for (let seed = 1; seed <= 120; seed += 1) {
+      const { events } = withHistory(withTokens(generate(seed, 240), seed), seed);
+      const index = new MetricsIndex();
+      let added = 0;
+      for (const upTo of [80, 160, 240]) {
+        // Fed as this process appends them; the log's read parses what was written.
+        for (const event of events.slice(added, upTo)) {
+          index.add(event);
+        }
+        added = upTo;
+        const written = readBack(events.slice(0, upTo));
+        for (const agent of [...ACTORS, "nobody"]) {
+          const count = turnHistoryIn(written, agent, 0).length;
+          for (const limit of historyLimits(count)) {
+            expect(
+              await entriesFrom(index, written, agent, limit),
+              `seed ${seed} at ${upTo}, ${agent}, limit ${limit}`,
+            ).toStrictEqual(turnHistoryIn(written, agent, limit));
+            compared += 1;
+          }
+        }
+      }
+    }
+    expect(compared).toBe(120 * 3 * (ACTORS.length + 1) * historyLimits(0).length);
+    // One log long enough that one citizen's history holds more than the triage's 5,000.
+    const long = generate(121, 40_000).events.map((event, n) =>
+      event.type.startsWith("turn.") && n % 10 < 7 ? { ...event, actor: "eng-1" } : event,
+    );
+    const { events } = withHistory(withTokens({ events: long, transcripts: new Map() }, 121), 121);
+    const index = new MetricsIndex();
+    for (const event of events) {
+      index.add(event);
+    }
+    const written = readBack(events);
+    const count = turnHistoryIn(written, "eng-1", 0).length;
+    expect(count).toBeGreaterThan(5_000);
+    for (const limit of [0, 1, 50, 5_000, count + 1]) {
+      expect(
+        await entriesFrom(index, written, "eng-1", limit),
+        `the long log, limit ${limit}`,
+      ).toStrictEqual(turnHistoryIn(written, "eng-1", limit));
+    }
+    expect(index.turnEnds("eng-1", 5_000)).toHaveLength(5_000);
+  });
+
+  it("keeps histories of every shape, so the comparison is not of empty answers", () => {
+    // Over the logs the equality test compares, every shape of start and end, and entries that
+    // carry a start's time, a heartbeat, or neither.
+    const logs = Array.from({ length: 120 }, (_, at) =>
+      withHistory(withTokens(generate(at + 1, 240), at + 1), at + 1),
+    );
+    const counts = new Map<HistoryShape, number>(HISTORY_SHAPES.map((shape) => [shape, 0]));
+    const entries = { startedAt: 0, heartbeat: 0, neither: 0 };
+    for (const { events, shapes } of logs) {
+      for (const kept of shapes.values()) {
+        for (const shape of kept) {
+          counts.set(shape, (counts.get(shape) ?? 0) + 1);
+        }
+      }
+      const written = readBack(events);
+      for (const agent of ACTORS) {
+        for (const entry of turnHistoryIn(written, agent, 0)) {
+          entries.startedAt += entry.startedAt === undefined ? 0 : 1;
+          entries.heartbeat += entry.heartbeat === undefined ? 0 : 1;
+          entries.neither += entry.startedAt === undefined && entry.heartbeat === undefined ? 1 : 0;
+        }
+      }
+    }
+    // The shapes of which the logs hold five or fewer, by name.
+    expect([...counts].filter(([, count]) => count <= 5)).toEqual([]);
+    expect(Object.entries(entries).filter(([, count]) => count <= 5)).toEqual([]);
+  });
+
+  it("keeps an end's id and its start, not the entry", () => {
+    const index = new MetricsIndex();
+    const begun: BoardEvent = {
+      ...start(1, "eng-1"),
+      payload: { turnId: "01M3T000000000000000000001", project: "lab", heartbeat: "held" },
+    };
+    index.add(begun);
+    index.add(
+      end({ turnId: "01M3T000000000000000000001", summary: "a long summary ".repeat(100) }),
+    );
+    expect(index.turnEnds("eng-1", 50)).toStrictEqual([
+      { id: "01M3S000000000000000000001", start: { ts: begun.ts, heartbeat: "held" } },
+    ]);
   });
 
   it("reads the transcript only of a counted end logged before ends carried their count", () => {

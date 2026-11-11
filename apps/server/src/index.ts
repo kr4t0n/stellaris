@@ -181,10 +181,11 @@ if (metrics !== null) {
   }
 }
 
-// The index that answers the Metrics view, the citizens' tokens, and the signals reads the whole
-// log once too, after the counters' seed when there is one, so the older ends' transcripts it read
-// are not read again. The signals come from the log until it is seeded. One that fails is tried
-// again by the next ask of the metrics or the tokens.
+// The index that answers the Metrics view, the citizens' tokens, the signals, and which turns a
+// citizen's history lists reads the whole log once too, after the counters' seed when there is
+// one, so the older ends' transcripts it read are not read again. The signals and the turns come
+// from the whole log until it is seeded. One that fails is tried again by the next ask of the
+// metrics or the tokens.
 try {
   await board.indexMetrics();
   log.info("metrics index seeded");

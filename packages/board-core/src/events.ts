@@ -17,11 +17,37 @@ const ID_PREFIX_BYTES = 64;
 
 const NEWLINE = 0x0a;
 
+/**
+ * Lines read back by id this close are read in one piece with what lies between them, up to this
+ * much in all: one read of a few lines' gap costs less than a read of each.
+ */
+const READ_GAP_BYTES = 16 * 1024;
+const READ_SPAN_BYTES = 1024 * 1024;
+
+/** The event a line holds when it reads as the one with this id; null otherwise. */
+function readLine(text: string, id: Ulid): BoardEvent | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const event = BoardEventSchema.safeParse(value);
+  return event.success && event.data.id === id ? event.data : null;
+}
+
 /** One complete line of the log: its event's id and the bytes it spans, newline excluded. */
 interface LogLine {
   readonly id: Ulid;
   readonly start: number;
   readonly end: number;
+}
+
+/** Bytes of the log read in one piece for the lines in them, once read. */
+interface Piece {
+  readonly start: number;
+  end: number;
+  bytes: Buffer | null;
 }
 
 /**
@@ -103,6 +129,93 @@ export class EventLog {
         JSON.parse(span.toString("utf8", line.start - first.start, line.end - first.start)),
       ),
     );
+  }
+
+  /**
+   * The events with these ids, in the order asked, each read and parsed from its own line, so an
+   * ask decodes only the lines it returns, wherever they lie; null for an id the log holds no
+   * line of, or whose line no longer reads back as that event, as after the log was replaced.
+   */
+  async readIds(ids: readonly Ulid[]): Promise<(BoardEvent | null)[]> {
+    await this.refresh();
+    const lines = this.linesOf(ids);
+    if (lines.every((line) => line === null)) {
+      return lines.map(() => null);
+    }
+    // Pieces of the file in its order, each one line or several near one another.
+    const pieces: Piece[] = [];
+    const pieceOf = new Map<LogLine, Piece>();
+    const found = lines.filter((line) => line !== null).toSorted((a, b) => a.start - b.start);
+    for (const line of found) {
+      let piece = pieces.at(-1);
+      if (
+        piece === undefined ||
+        line.start - piece.end > READ_GAP_BYTES ||
+        line.end - piece.start > READ_SPAN_BYTES
+      ) {
+        piece = { start: line.start, end: line.end, bytes: null };
+        pieces.push(piece);
+      }
+      piece.end = Math.max(piece.end, line.end);
+      pieceOf.set(line, piece);
+    }
+    const handle = await open(this.file, "r");
+    try {
+      await Promise.all(
+        pieces.map(async (piece) => {
+          const buffer = Buffer.alloc(piece.end - piece.start);
+          const { bytesRead } = await handle.read(buffer, 0, buffer.length, piece.start);
+          piece.bytes = buffer.subarray(0, bytesRead);
+        }),
+      );
+    } finally {
+      await handle.close();
+    }
+    return lines.map((line) => {
+      const piece = line === null ? undefined : pieceOf.get(line);
+      const bytes = piece?.bytes ?? null;
+      // A line the file no longer reaches, as when it was cut short, reads as none.
+      if (line === null || piece === undefined || bytes === null) {
+        return null;
+      }
+      if (line.end - piece.start > bytes.length) {
+        return null;
+      }
+      return readLine(
+        bytes.toString("utf8", line.start - piece.start, line.end - piece.start),
+        line.id,
+      );
+    });
+  }
+
+  /**
+   * The line of each id: found by halving the lines, since one process's ids grow with its log,
+   * and, for any that misses, as another process's line out of that order would, in a map of
+   * every line made once for the ask.
+   */
+  private linesOf(ids: readonly Ulid[]): (LogLine | null)[] {
+    let byId: Map<Ulid, LogLine> | null = null;
+    return ids.map((id) => {
+      let low = 0;
+      let high = this.lines.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        const line = this.lines[middle];
+        if (line === undefined) {
+          break;
+        }
+        if (line.id === id) {
+          return line;
+        }
+        if (line.id < id) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      byId ??= new Map(this.lines.map((line) => [line.id, line]));
+      return byId.get(id) ?? null;
+    });
   }
 
   /** The id of the newest event, or null for an empty log. */

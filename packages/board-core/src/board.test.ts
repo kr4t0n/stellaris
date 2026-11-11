@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { crc32 } from "node:zlib";
 import {
+  boardActionsIn,
   CliQuotaSchema,
   cronFailure,
   cronStoppedAt,
@@ -11,17 +12,23 @@ import {
   MEMBER_VERBS,
   VERB_DESCRIPTIONS,
   type HeartbeatCause,
+  type MetricsWindow,
+  type OpsSignal,
   type TurnExitReason,
+  type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
 import { execa } from "execa";
 import { ulid } from "ulid";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { EventLog } from "./events.js";
 import {
   Board,
   BoardError,
+  computeMetrics,
   SYSTEM_ACTOR,
+  tokenUse,
   type Actor,
   type BoardOptions,
   type TurnInFlight,
@@ -30,6 +37,23 @@ import {
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
+
+/** A turn's tokens, each kind a multiple of its input, so a sum is the tokens of the inputs' sum. */
+const tokens = (input: number) => ({
+  inputTokens: input,
+  outputTokens: input / 10,
+  cacheReadTokens: input * 10,
+  cacheWriteTokens: input / 5,
+});
+
+/** The `n`th signal, with the fields every signal has and those `more` adds. */
+const signal = (n: number, more: Partial<OpsSignal> = {}): OpsSignal => ({
+  kind: n % 3 === 0 ? "waiting_stage" : n % 3 === 1 ? "backlog" : "turn_cost",
+  key: `key-${n % 7}`,
+  summary: `signal ${n}`,
+  value: n,
+  ...more,
+});
 
 /** A turn record of eng-1 in demo, in a thread's conversation or at home. */
 /** A tool's result as a turn's transcript keeps it. */
@@ -168,6 +192,8 @@ describe("Board", () => {
   });
 
   afterEach(async () => {
+    // A spy a failed test left in place would count the next test's calls too.
+    vi.restoreAllMocks();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -879,6 +905,8 @@ describe("Board", () => {
     const STEWARD: Actor = { name: "steward-1", role: "steward" };
     await board.addAgent(USER, { ...STEWARD, cli: "claude" });
     await board.subscribe(ENG, { channel: "demo/dev" });
+    // Outside the project, a society role that follows its general reads it in the society scope.
+    await board.subscribe(STEWARD, { channel: "demo/general" });
     const unread = async (actor: Actor) =>
       (await board.unreadByConversation(actor)).map(({ scope, thread, channel, place, count }) => [
         scope,
@@ -915,6 +943,7 @@ describe("Board", () => {
     // A day after, every post still unread asks a turn of every reader it reaches.
     clock = new Date(clock.getTime() + 24 * 3_600_000 - 1);
     expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
+    expect(await unread(STEWARD)).toEqual([["society", null, 1]]);
     clock = new Date(clock.getTime() + 1);
     expect(await unread(ENG)).toEqual([
       ["demo", null, 3],
@@ -926,12 +955,105 @@ describe("Board", () => {
       ["society", "demo", 1],
       ["society", null, 1],
     ]);
+    expect(await unread(STEWARD)).toEqual([
+      ["society", "demo", 3],
+      ["society", null, 1],
+    ]);
 
     // A turn there reads them, and they ask nothing more of anyone it read them for.
     await board.readDigest(home, { advance: true });
     await board.readDigest({ ...home, channel: "dev" }, { advance: true });
     expect(await unread(ENG)).toEqual([["demo", topic.id, 1]]);
     expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
+  });
+
+  it("reads the posts a home has read already, newest kept, and moves no cursor", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const STEWARD: Actor = { name: "steward-1", role: "steward" };
+    await board.addAgent(USER, { ...STEWARD, cli: "claude" });
+    await board.subscribe(ENG, { channel: "demo/dev" });
+    await board.subscribe(STEWARD, { channel: "demo/general" });
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "which cache?" });
+    const home = { ...ENG, scope: "demo" };
+    const recent = async (
+      actor: Actor & { scope: string },
+      since: Date,
+      limit = 10,
+    ): Promise<string[]> =>
+      (await board.readRecentlyRead(actor, { since, limit })).map((m) => m.body.trim());
+    const start = clock;
+
+    await board.postMessage(REV, { channel: "demo/general", body: "an hour before" });
+    clock = new Date(clock.getTime() + 3_600_000);
+    const hourLater = clock;
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-2 the date?" });
+    await board.postMessage(ENG, { channel: "demo/general", body: "my own post" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "the release plan" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 answer this in dev" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { channel: "general", body: "the society's build is green" });
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Warm.",
+      revision: 0,
+    });
+    await board.postMessage(USER, { channel: "demo/general", body: "what is next?" });
+    // Nothing read yet, so nothing to show.
+    expect(await recent(home, start)).toEqual([]);
+
+    // A turn at home reads general's posts, the news, and the notice.
+    expect((await board.readDigest(home, { advance: true })).messages).toHaveLength(5);
+    await board.postMessage(REV, { channel: "demo/general", body: "not read yet" });
+
+    // What it read in general, but the news and the notice: not its own post, another channel's,
+    // a thread's, or one it has not read. The newest are kept, and none older than the time given.
+    expect(await recent(home, start)).toEqual([
+      "an hour before",
+      "@eng-2 the date?",
+      "what is next?",
+    ]);
+    expect(await recent(home, hourLater)).toEqual(["@eng-2 the date?", "what is next?"]);
+    expect(await recent(home, start, 1)).toEqual(["what is next?"]);
+
+    // Showing them moves no cursor: the unread post stays unread, and the one that asks eng-2
+    // still counts for eng-2.
+    const cursors = await readFile(board.paths.agentCursors("eng-1"), "utf8");
+    const unread = await board.unreadByConversation(ENG);
+    await recent(home, start);
+    expect(await readFile(board.paths.agentCursors("eng-1"), "utf8")).toBe(cursors);
+    expect(await board.unreadByConversation(ENG)).toEqual(unread);
+    expect(
+      (await board.readDigest(home, { advance: false })).messages.map((m) => m.body.trim()),
+    ).toEqual(["not read yet"]);
+    expect(
+      (await board.readDigest({ ...ENG2, scope: "demo" }, { advance: false })).messages.map((m) =>
+        m.body.trim(),
+      ),
+    ).toContain("@eng-2 the date?");
+    expect(
+      (await board.unreadByConversation(ENG2)).find((each) => each.scope === "demo")?.count,
+    ).toBe(1);
+
+    // A society role's home reads the society's general alone, not a project's channels it follows,
+    // which a conversation of their own reads.
+    const stewardHome = { ...STEWARD, scope: "society" };
+    await board.readDigest({ ...stewardHome, place: "demo" }, { advance: true });
+    expect((await board.readDigest(stewardHome, { advance: true })).messages).toHaveLength(1);
+    expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
+
+    // An archived place's posts are filed at home from then on, though the home never read them: a
+    // channel's, and a project's seen from the society.
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    expect(await recent(home, start)).toEqual([
+      "an hour before",
+      "@eng-2 the date?",
+      "what is next?",
+    ]);
+    await board.archiveProject(USER, { project: "demo", reason: "done" });
+    expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
   });
 
   it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
@@ -3883,6 +4005,578 @@ describe("Board", () => {
       unknown: 1,
       byAgent: [{ agent: "eng-1", role: "engineer", turns: 2, idle: 1 }],
     });
+  });
+
+  /** A finished turn of eng-1's, a minute long, with the steps its runner kept. */
+  async function endTurn(
+    board: Board,
+    thread: Ulid | undefined,
+    transcript: ReturnType<typeof result>[],
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn(turnIn(thread, clock.toISOString()));
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn(
+      { ...turn, endedAt: clock.toISOString(), exitReason: "completed" },
+      transcript,
+    );
+  }
+
+  /** The metrics as replaying the whole log gives them, every transcript read, as before the index. */
+  async function replayed(board: Board, window: MetricsWindow) {
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    const actions = new Map<string, number | null>();
+    for (const event of events) {
+      const turnId = event.payload["turnId"];
+      if (event.type === "turn.completed" && typeof turnId === "string") {
+        const read = board.readTranscript(event.actor, turnId).then(boardActionsIn, () => null);
+        actions.set(turnId, await read);
+      }
+    }
+    const citizens = (await board.listAgents())
+      .filter((agent) => agent.cli !== null)
+      .map(({ name, role, memberships }) => ({ name, role, memberships }));
+    const tasks = await board.listTasks("demo");
+    return computeMetrics({
+      events,
+      tasks,
+      citizens,
+      actions,
+      activeSignals: new Set(),
+      window,
+      now: clock,
+    });
+  }
+
+  it("answers the metrics from its index, reading no log or transcript once seeded", async () => {
+    const { board } = await society();
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "Ship the page",
+      stages: [{ name: "draft" }, { name: "check" }],
+    });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, stage: "s1", note: "again" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 look at this" });
+    await endTurn(board, undefined, [result("mcp__board__post_message", true)]);
+    await endTurn(board, task.id, [result("mcp__board__get_task", true)]);
+    expect(await board.metrics("all")).toStrictEqual(await replayed(board, "all"));
+
+    // After the first answer, each event is counted as it is appended: a stage renamed, a second
+    // send-back, a mention and its answer, a turn without a transcript, and one with an action.
+    await board.planTask(USER, {
+      task_id: task.id,
+      stages: [
+        { id: "s1", name: "draft" },
+        { id: "s2", name: "verify" },
+      ],
+    });
+    await board.advanceTask(USER, { task_id: task.id });
+    await board.updateTask(USER, { task_id: task.id, stage: "s1", note: "once more" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and this" });
+    clock = new Date(clock.getTime() + 25 * 3_600_000);
+    await endTurn(board, undefined, []);
+    await endTurn(board, task.id, [result("mcp__board__claim_task", true)]);
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["metrics"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.metrics(window));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(await replayed(board, window));
+    }
+    // Both send-backs left the stage now named verify, and the day's window holds the last two turns.
+    expect(answers.get("all")?.sentBack.byStage).toEqual([
+      { project: "demo", stage: "verify", count: 2 },
+    ]);
+    expect(answers.get("all")?.latency).toMatchObject({ mentions: 2, unanswered: 0 });
+    expect(answers.get("24h")?.idle).toMatchObject({ turns: 1, idle: 0, unknown: 1 });
+  });
+
+  it("reads an older end's transcript once, at the metrics index's seed", async () => {
+    const { board: older } = await society();
+    await endTurn(older, undefined, [result("mcp__board__post_message", true)]);
+    await endTurn(older, undefined, [result("mcp__board__get_task", true)]);
+    // The log as a board from before ends carried their board actions left it.
+    const file = older.paths.eventLog();
+    const lines = (await readFile(file, "utf8")).split("\n").map((line) => {
+      if (line === "") {
+        return line;
+      }
+      const logged = z.object({ payload: z.record(z.string(), z.unknown()) }).passthrough();
+      const event = logged.parse(JSON.parse(line));
+      const { boardActions: _counted, ...payload } = event.payload;
+      return JSON.stringify({ ...event, payload });
+    });
+    expect(lines.filter((line) => line.includes('"boardActions"'))).toEqual([]);
+    await writeFile(file, lines.join("\n"));
+    const board = await Board.open(dir, { now });
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    expect((await board.metrics("all")).idle).toMatchObject({ turns: 2, idle: 1, unknown: 0 });
+    expect(transcriptRead).toHaveBeenCalledTimes(2);
+    expect((await board.metrics("all")).idle).toMatchObject({ turns: 2, idle: 1, unknown: 0 });
+    expect(transcriptRead).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts once an event appended while the metrics index reads the log", async () => {
+    const { board } = await society();
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 first" });
+    const seeding = board.indexMetrics();
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 second" });
+    await endTurn(board, undefined, [result("mcp__board__post_message", true)]);
+    await seeding;
+    const answer = await board.metrics("all");
+    expect(answer.latency).toMatchObject({ mentions: 2, unanswered: 0 });
+    expect(answer).toStrictEqual(await replayed(board, "all"));
+  });
+
+  /** A finished turn of eng-1's at home, a minute long, ended as `how` says. */
+  async function endWith(
+    board: Board,
+    how: Partial<Pick<TurnRecord, "exitReason" | "error" | "usage" | "trigger">>,
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn(turnIn(undefined, clock.toISOString()));
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn({
+      ...turn,
+      endedAt: clock.toISOString(),
+      exitReason: "completed",
+      ...how,
+    });
+  }
+
+  it("answers the tokens from the metrics index, reading no log or transcript once seeded", async () => {
+    const { board } = await society();
+    await endWith(board, { usage: tokens(10) });
+    // A failed turn, one without a count, and a reflection are turns all the same.
+    await endWith(board, { exitReason: "error", error: "boom", usage: tokens(20) });
+    await endWith(board, {});
+    await endWith(board, {
+      trigger: { kind: "reflection", fromUser: false, reason: "scheduled" },
+      usage: tokens(30),
+    });
+    // Two days on, so the day's window holds only what follows.
+    clock = new Date(clock.getTime() + 2 * 86_400_000);
+    await endWith(board, { usage: tokens(40) });
+    await board.indexMetrics();
+    await endWith(board, { exitReason: "timeout", usage: tokens(50) });
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["tokenUse"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.tokenUse(window));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(tokenUse(events, window, clock));
+    }
+    expect(answers.get("all")?.citizens).toEqual([
+      { agent: "eng-1", turns: 6, withUsage: 5, usage: tokens(150) },
+    ]);
+    expect(answers.get("24h")?.citizens).toEqual([
+      { agent: "eng-1", turns: 2, withUsage: 2, usage: tokens(90) },
+    ]);
+  });
+
+  it("counts once a turn's end appended while the index reads the log, wherever the clock stands", async () => {
+    const { board } = await society();
+    await endWith(board, { usage: tokens(10) });
+    clock = new Date(clock.getTime() + 2 * 86_400_000);
+    await endWith(board, { usage: tokens(20) });
+    const latest = clock;
+    const logRead = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        // Once the index listens: an end the read takes, then one it misses, logged as the clock
+        // steps back a day and a half, before the day's window and after the ends in it.
+        await endWith(board, { usage: tokens(30) });
+        const events = await board.readEvents(since, limit);
+        clock = new Date(clock.getTime() - 36 * 3_600_000);
+        await endWith(board, { exitReason: "error", error: "boom", usage: tokens(40) });
+        return events;
+      });
+    await board.indexMetrics();
+    const seeded = logRead.mock.calls.length;
+    clock = new Date(latest.getTime() + 3_600_000);
+    const answers = new Map<MetricsWindow, Awaited<ReturnType<Board["tokenUse"]>>>();
+    for (const window of ["24h", "7d", "all"] as const) {
+      answers.set(window, await board.tokenUse(window));
+    }
+    expect(logRead.mock.calls.length).toBe(seeded);
+    logRead.mockRestore();
+    const events = await board.readEvents(null, Number.MAX_SAFE_INTEGER);
+    for (const [window, answer] of answers) {
+      expect(answer).toStrictEqual(tokenUse(events, window, clock));
+    }
+    expect(answers.get("all")?.citizens).toEqual([
+      { agent: "eng-1", turns: 4, withUsage: 4, usage: tokens(100) },
+    ]);
+    expect(answers.get("24h")?.citizens).toEqual([
+      { agent: "eng-1", turns: 2, withUsage: 2, usage: tokens(50) },
+    ]);
+  });
+
+  it("answers the signals from the metrics index as the log's read does, reading no log once seeded", async () => {
+    const { board } = await society();
+    // Before the seed: signals this board logged, a turn's end, and lines an older board wrote,
+    // two of which the signal schema refuses.
+    for (let n = 0; n < 300; n += 1) {
+      await board.publishSignal(signal(n, n % 2 === 0 ? { project: "demo", taskId: ulid() } : {}));
+    }
+    await endWith(board, {});
+    const raw = async (payload: Record<string, unknown>) =>
+      writeFile(
+        board.paths.eventLog(),
+        `${JSON.stringify({ id: ulid(), ts: clock.toISOString(), type: "ops.signal", actor: "board", payload })}\n`,
+        { flag: "a" },
+      );
+    await raw({ kind: "backlog", key: "older", summary: "an older board's signal", value: 1 });
+    await raw({ kind: "a kind no board logs", key: "k", summary: "s", value: 1 });
+    await raw({ kind: "backlog", key: "k", summary: "no value" });
+    await board.indexMetrics();
+    // After it: signals this process appends, some handed over with fields undefined, which the
+    // log's line leaves out.
+    for (let n = 300; n < 600; n += 1) {
+      await board.publishSignal(
+        signal(
+          n,
+          n % 5 === 0
+            ? { project: undefined, taskId: undefined, wakes: undefined }
+            : { wakes: n % 2 === 0 },
+        ),
+      );
+    }
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    // None, one, the API's default, the turn host's read, all, one past all, and far past.
+    const limits = [0, 1, 100, 501, 601, 602, 10_000];
+    const answers = [];
+    for (const limit of limits) {
+      answers.push(await board.listSignals(limit));
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    transcriptRead.mockRestore();
+    // The same records in the same order as a board with no index reads from the log.
+    const reopened = await Board.open(dir, { now });
+    for (const [at, limit] of limits.entries()) {
+      expect(answers[at], `limit ${limit}`).toStrictEqual(await reopened.listSignals(limit));
+    }
+    const all = answers[0] ?? [];
+    expect(all).toHaveLength(601);
+    expect(all.map((record) => record.signal.summary)).toContain("an older board's signal");
+    expect(answers[3]?.[0]?.signal.summary).toBe("signal 100");
+    expect(answers[1]?.map((record) => record.signal.summary)).toEqual(["signal 599"]);
+    const handed = all.find((record) => record.signal.summary === "signal 300");
+    expect(Object.keys(handed?.signal ?? {})).toEqual(["kind", "key", "summary", "value"]);
+  });
+
+  it("reads the signals from the log, seeding no index, while the process has none", async () => {
+    const { board } = await society();
+    await board.publishSignal(signal(1));
+    // A turn's end whose board actions a seed would read from its transcript.
+    await endWith(board, {});
+    const seed = vi.spyOn(board, "indexMetrics");
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    const read = await board.listSignals();
+    expect(read.map((record) => record.signal.summary)).toEqual(["signal 1"]);
+    expect(seed).not.toHaveBeenCalled();
+    expect(logRead).toHaveBeenCalledTimes(1);
+    expect(transcriptRead).not.toHaveBeenCalled();
+    // A seed would have read it.
+    await board.indexMetrics();
+    expect(transcriptRead).toHaveBeenCalled();
+  });
+
+  it("answers the signals once a seed under way ends, and from the log when it failed", async () => {
+    const { board } = await society();
+    await board.publishSignal(signal(1));
+    const logRead = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        // Once the index listens: a signal the read takes, then one it misses.
+        await board.publishSignal(signal(2));
+        const events = await board.readEvents(since, limit);
+        await board.publishSignal(signal(3));
+        return events;
+      });
+    const seeding = board.indexMetrics();
+    const asked = board.listSignals();
+    const [, answer] = await Promise.all([seeding, asked]);
+    expect(answer.map((record) => record.signal.summary)).toEqual([
+      "signal 1",
+      "signal 2",
+      "signal 3",
+    ]);
+    // The seed's read and the one it made inside the mock, and none for the ask.
+    expect(logRead).toHaveBeenCalledTimes(2);
+    logRead.mockRestore();
+    // Another board, whose seed fails while the ask waits for it.
+    const reopened = await Board.open(dir, { now });
+    const failing = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockRejectedValueOnce(new Error("the disk went away"));
+    const failed = reopened.indexMetrics();
+    const fallback = reopened.listSignals();
+    await expect(failed).rejects.toThrow("the disk went away");
+    expect(await fallback).toStrictEqual(answer);
+    expect(failing).toHaveBeenCalledTimes(2);
+    failing.mockRestore();
+  });
+
+  /** A finished turn of `agent`'s at home, a minute long, ended as `how` says. */
+  async function turnOf(
+    board: Board,
+    agent: string,
+    how: Partial<Pick<TurnRecord, "exitReason" | "error" | "trigger">> = {},
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn({
+      ...turnIn(undefined, clock.toISOString()),
+      agent,
+      ...(how.trigger === undefined ? {} : { trigger: how.trigger }),
+    });
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn({
+      ...turn,
+      endedAt: clock.toISOString(),
+      exitReason: "completed",
+      ...how,
+    });
+  }
+
+  /** Lines another process wrote: a turn whose start is missing, ends naming a heartbeat or not, and an end the history refuses. */
+  async function olderTurns(board: Board): Promise<void> {
+    const raw = async (id: string, type: string, payload: Record<string, unknown>) =>
+      writeFile(
+        board.paths.eventLog(),
+        `${JSON.stringify({ id, ts: clock.toISOString(), type, actor: "eng-1", payload })}\n`,
+        { flag: "a" },
+      );
+    const where = { project: "demo", trigger: "heartbeat" };
+    const [missing, own, startOnly] = [ulid(), ulid(), ulid()];
+    await raw(ulid(), "turn.completed", { ...where, turnId: missing, exitReason: "completed" });
+    await raw(ulid(), "turn.started", { ...where, turnId: own, heartbeat: "waiting" });
+    await raw(ulid(), "turn.completed", { ...where, turnId: own, heartbeat: "unread" });
+    await raw(ulid(), "turn.started", { ...where, turnId: startOnly, heartbeat: "held" });
+    // Out of the log's order: an id older than every line before it.
+    await raw(ulid(Date.parse("2026-01-01T00:00:00.000Z")), "turn.completed", {
+      ...where,
+      turnId: startOnly,
+      summary: "a line out of order",
+    });
+    await raw(ulid(), "turn.completed", { unreadable: true });
+  }
+
+  it("answers a citizen's turns from the metrics index as the log's read does, reading only their lines once seeded", async () => {
+    const { board } = await society();
+    // Before the seed: more of eng-1's turns than the API's default, some failed and some
+    // heartbeats, one of rev-1's, and lines another process wrote.
+    for (let n = 0; n < 55; n += 1) {
+      await turnOf(
+        board,
+        "eng-1",
+        n % 7 === 0
+          ? { exitReason: "error", error: "boom" }
+          : n % 5 === 0
+            ? { trigger: heartbeat("held") }
+            : {},
+      );
+    }
+    await turnOf(board, "rev-1");
+    await olderTurns(board);
+    await board.indexMetrics();
+    // After it: turns this process logs, of both.
+    for (let n = 0; n < 5; n += 1) {
+      await turnOf(board, n % 2 === 0 ? "eng-1" : "rev-1");
+    }
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const linesRead = vi.spyOn(EventLog.prototype, "readIds");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    // None, one, the API's default, the triage's, all, one past all, far past, and NaN.
+    const asks = ["eng-1", "rev-1", "nobody"].flatMap((agent) =>
+      [0, 1, 50, 5_000, 61, 62, 10_000, Number.NaN].map((limit) => ({ agent, limit })),
+    );
+    const answers = [];
+    for (const { agent, limit } of asks) {
+      const before = linesRead.mock.calls.length;
+      const answer = await board.listTurns(agent, limit);
+      // Only the lines of the entries it gives.
+      expect(
+        linesRead.mock.calls.slice(before).flatMap(([ids]) => ids),
+        `${agent}, limit ${limit}`,
+      ).toEqual(answer.map((entry) => entry.id));
+      answers.push(answer);
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    linesRead.mockRestore();
+    transcriptRead.mockRestore();
+    // The same entries in the same order as a board with no index reads from the log.
+    const reopened = await Board.open(dir, { now });
+    for (const [at, { agent, limit }] of asks.entries()) {
+      expect(answers[at], `${agent}, limit ${limit}`).toStrictEqual(
+        await reopened.listTurns(agent, limit),
+      );
+    }
+    const all = answers[0] ?? [];
+    expect(all).toHaveLength(61);
+    expect(answers[2]).toHaveLength(50);
+    expect(answers[8]).toHaveLength(3);
+    // The turn whose start is missing has no start; an end's own heartbeat goes before its
+    // start's; a start's goes to an end that names none, read out of the log's order.
+    const older = all.filter((entry) => entry.trigger === "heartbeat" && entry.costUsd === 0);
+    expect(
+      older
+        .slice(-3)
+        .map((entry) => [entry.heartbeat, entry.startedAt === undefined, entry.summary]),
+    ).toEqual([
+      [undefined, true, null],
+      ["unread", false, null],
+      ["held", false, "a line out of order"],
+    ]);
+  });
+
+  it("reads a citizen's turns from the log when it no longer holds a line the index kept", async () => {
+    const { board } = await society();
+    for (let n = 0; n < 4; n += 1) {
+      await turnOf(board, "eng-1");
+    }
+    await board.indexMetrics();
+    const kept = await board.listTurns("eng-1");
+    // The log replaced by one without its second turn's end.
+    const file = board.paths.eventLog();
+    const gone = kept[1]?.id ?? "";
+    const lines = (await readFile(file, "utf8")).split("\n");
+    await writeFile(file, lines.filter((line) => !line.includes(gone)).join("\n"));
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const read = await board.listTurns("eng-1");
+    expect(logRead).toHaveBeenCalledTimes(1);
+    logRead.mockRestore();
+    expect(read.map((entry) => entry.id)).toEqual(
+      kept.filter((entry) => entry.id !== gone).map((entry) => entry.id),
+    );
+    expect(read).toStrictEqual(await (await Board.open(dir, { now })).listTurns("eng-1"));
+  });
+
+  it("reads a citizen's turns from the log, seeding no index, while the process has none, and waits for a seed under way", async () => {
+    const { board } = await society();
+    await turnOf(board, "eng-1");
+    const seed = vi.spyOn(board, "indexMetrics");
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const linesRead = vi.spyOn(EventLog.prototype, "readIds");
+    expect(await board.listTurns("eng-1")).toHaveLength(1);
+    expect(seed).not.toHaveBeenCalled();
+    expect(logRead).toHaveBeenCalledTimes(1);
+    expect(linesRead).not.toHaveBeenCalled();
+    seed.mockRestore();
+    logRead.mockRestore();
+    // A seed under way, during whose read a turn ends: the ask waits for it, then reads lines.
+    const seeding = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        const events = await board.readEvents(since, limit);
+        await turnOf(board, "eng-1");
+        return events;
+      });
+    const seeded = board.indexMetrics();
+    const asked = board.listTurns("eng-1");
+    const [, answer] = await Promise.all([seeded, asked]);
+    expect(answer).toHaveLength(2);
+    expect(seeding).toHaveBeenCalledTimes(2);
+    expect(linesRead).toHaveBeenCalledTimes(1);
+    seeding.mockRestore();
+    linesRead.mockRestore();
+    // Another board, whose seed fails while the ask waits for it.
+    const reopened = await Board.open(dir, { now });
+    const failing = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockRejectedValueOnce(new Error("the disk went away"));
+    const failed = reopened.indexMetrics();
+    const fallback = reopened.listTurns("eng-1");
+    await expect(failed).rejects.toThrow("the disk went away");
+    expect(await fallback).toStrictEqual(answer);
+    expect(failing).toHaveBeenCalledTimes(2);
+    failing.mockRestore();
+  });
+
+  it("names a task finished, sent back, or blocked while the metrics read the tasks they name", async () => {
+    const { board } = await society();
+    const stages = [{ name: "draft" }, { name: "check" }];
+    const titled = (title: string) => board.createTask(USER, { project: "demo", title, stages });
+    const t0 = await titled("Task 0");
+    const t1 = await titled("Task 1");
+    const t2 = await titled("Task 2");
+    const t3 = await titled("Task 3");
+    const t4 = await titled("Task 4");
+    for (const task of [t0, t0, t1, t2, t4]) {
+      await board.advanceTask(USER, { task_id: task.id });
+    }
+    await board.indexMetrics();
+    // Reading each task of a chain makes the index name the next, which only a later round reads:
+    // the second finishes, the third is sent back from check, the fourth blocked, the fifth finished.
+    const next = new Map<string, () => Promise<unknown>>([
+      [t0.id, () => board.advanceTask(USER, { task_id: t1.id })],
+      [t1.id, () => board.updateTask(USER, { task_id: t2.id, stage: "s1", note: "again" })],
+      [
+        t2.id,
+        () =>
+          board.publishSignal({
+            kind: "blocked_capability",
+            key: `blocked_capability:${t3.id}`,
+            summary: "needs gpu and no connected runner offers it",
+            value: 1,
+            project: "demo",
+            taskId: t3.id,
+          }),
+      ],
+      [t3.id, () => board.advanceTask(USER, { task_id: t4.id })],
+    ]);
+    const find = board.findTask.bind(board);
+    // A verb's own reads pass while it writes.
+    let writing = false;
+    const read = vi.spyOn(board, "findTask").mockImplementation(async (id) => {
+      const write = writing ? undefined : next.get(id);
+      if (write !== undefined) {
+        next.delete(id);
+        writing = true;
+        await write();
+        writing = false;
+      }
+      return find(id);
+    });
+    const answer = await board.metrics("all");
+    expect({
+      busiest: answer.messages.busiest.map(({ title }) => title),
+      byStage: answer.sentBack.byStage,
+      blocked: answer.blocked.map(({ title }) => title),
+      unwritten: [...next.keys()],
+    }).toEqual({
+      busiest: ["Task 0", "Task 1", "Task 4"],
+      byStage: [{ project: "demo", stage: "check", count: 1 }],
+      blocked: ["Task 3"],
+      unwritten: [],
+    });
+    // A read a task's write overtook is not kept, so the next ask reads it again; the third task's
+    // was overtaken by a signal alone, which writes no task.
+    read.mockClear();
+    expect(await board.metrics("all")).toStrictEqual(answer);
+    expect(read.mock.calls).toEqual([[t0.id], [t1.id], [t3.id]]);
+    read.mockRestore();
+    expect(answer).toStrictEqual(await replayed(board, "all"));
   });
 
   it("lets a citizen set a cron for itself where its turn is, and only planners one for another", async () => {

@@ -75,6 +75,8 @@ export interface AppDependencies {
   readonly log?: { warn(details: object, message: string): void } | undefined;
   /** How long a board-event stream waits for an append before it writes a ping; 15 seconds by default. */
   readonly eventStreamPingMs?: number | undefined;
+  /** The scheduler's `channelPostWaitMs`, which `subscribe`'s description over MCP names. */
+  readonly channelPostWaitMs?: number | undefined;
 }
 
 type Env = { Variables: { actor: Actor } };
@@ -689,7 +691,9 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     if (actor === null) {
       return c.json({ error: "UNAUTHORIZED", message: "a valid bearer token is required" }, 401);
     }
-    return handleMcpRequest(board, actor, c.req.raw, version);
+    return handleMcpRequest(board, actor, c.req.raw, version, {
+      channelPostWaitMs: deps.channelPostWaitMs,
+    });
   });
 
   // Compressed, since the bundle is a megabyte raw and often crosses a slow forwarded link. The

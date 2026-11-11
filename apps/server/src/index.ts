@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { once } from "node:events";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { Board } from "@stellaris/board-core";
+import { Board, type TurnCounters } from "@stellaris/board-core";
 import { parseTimings, Scheduler } from "@stellaris/scheduler";
 import { SERVER_TOKEN, STELLARIS_VERSION, loadServerConfig } from "@stellaris/shared";
 import { RunnerHub, TurnHost } from "@stellaris/turn-host";
@@ -37,6 +38,8 @@ const log = pino({ level: config.logLevel });
 const board = await Board.open(config.dataDir);
 const mcpUrl = `${config.publicUrl ?? SERVER_TOKEN}/mcp`;
 const turns = new TurnHub();
+// Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
+const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 
 // The server runs no turns: it prepares each one as a job for a runner that connected to it.
 const host = new TurnHost({
@@ -45,6 +48,8 @@ const host = new TurnHost({
   turnTimeoutMs: config.turnTimeoutMs,
   maxTurns: config.toolRounds,
   residentIdleMs: config.residentIdleMs,
+  // The turn contract says how long a project's channel's post waits, as the scheduler counts it.
+  channelPostWaitMs: timings.channelPostWaitMs,
   log,
   onEvent: (agent, scope, event, conversation) => {
     turns.push(agent, scope, event, conversation);
@@ -59,8 +64,6 @@ board.readImagesWith((actor, file) => runners.readTurnImage(actor, file));
 board.openImagesWith((actor, image) => runners.writeTurnImage(actor, image));
 
 const concurrency = config.concurrency ?? Number.POSITIVE_INFINITY;
-// Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.
-const timings = parseTimings(JSON.parse(process.env["STELLARIS_TIMINGS"] ?? "{}"));
 const scheduler = new Scheduler({ board, runner: runners, log, concurrency, timings });
 
 // What the API shows: the scheduler's queues and the runners' warm sessions, read live.
@@ -99,6 +102,7 @@ const app = createApp({
   enrollments: new EnrollmentDesk(board),
   trustedProxies: config.trustedProxies,
   log,
+  channelPostWaitMs: timings.channelPostWaitMs,
 });
 const server = serveBoard(
   { fetch: app.fetch, port: config.port, hostname: config.host },
@@ -121,20 +125,23 @@ const server = serveBoard(
 );
 
 // Prometheus's counters, only when asked for, on a port of their own: the main port's `/metrics` is
-// the interface's page. They are seeded from the event log once, here, and never read it again.
-const metrics =
-  config.metricsPort === null
-    ? null
-    : serveBoard(
-        {
-          fetch: createMetricsApp(await board.countTurns()).fetch,
-          port: config.metricsPort,
-          hostname: config.host,
-        },
-        (info) => {
-          log.info({ host: info.address, port: info.port }, "metrics listening");
-        },
-      );
+// the interface's page. The port is bound before the scheduler starts, so a port already taken
+// stops the server before any turn, and it answers 503 until the counters are seeded, below.
+let counters: TurnCounters | null = null;
+let metrics: ReturnType<typeof serveBoard> | null = null;
+if (config.metricsPort !== null) {
+  metrics = serveBoard(
+    {
+      fetch: createMetricsApp(() => counters).fetch,
+      port: config.metricsPort,
+      hostname: config.host,
+    },
+    (info) => {
+      log.info({ host: info.address, port: info.port }, "metrics listening");
+    },
+  );
+  await once(metrics, "listening");
+}
 
 await scheduler.start();
 log.info(
@@ -158,3 +165,30 @@ const shutdown = async (signal: string): Promise<void> => {
 };
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// The seed reads the transcripts of turns ended before ends carried their board actions, seconds
+// on a large board, so it comes once the scheduler runs and can drain, rather than holding its
+// wakes; what the scheduler logs meanwhile counts once all the same. One that fails leaves the
+// board running and the metrics port closed.
+if (metrics !== null) {
+  try {
+    counters = await board.countTurns();
+    log.info("metrics seeded");
+  } catch (error) {
+    log.error({ err: error }, "could not seed the metrics; the metrics port is closed");
+    metrics.close();
+    metrics = null;
+  }
+}
+
+// The index that answers the Metrics view, the citizens' tokens, the signals, and which turns a
+// citizen's history lists reads the whole log once too, after the counters' seed when there is
+// one, so the older ends' transcripts it read are not read again. The signals and the turns come
+// from the whole log until it is seeded. One that fails is tried again by the next ask of the
+// metrics or the tokens.
+try {
+  await board.indexMetrics();
+  log.info("metrics index seeded");
+} catch (error) {
+  log.error({ err: error }, "could not seed the metrics index");
+}

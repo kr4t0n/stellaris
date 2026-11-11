@@ -17,6 +17,8 @@ struct ConversationView: View {
   @State private var anchor: String?
   /// How tall the messages' view is, which caps an image's height.
   @State private var height: CGFloat = .infinity
+  /// How wide the messages' view is, zero until it is first laid out.
+  @State private var width: CGFloat = 0
   /// The window's safe area beyond the conversation's bottom and trailing edges, the keyboard's
   /// height at the foot while it is up, which places the draft against the side bar. Read here,
   /// where the draft's own padding can't move it.
@@ -53,9 +55,29 @@ struct ConversationView: View {
           .padding(.bottom, 6)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        // A turn or a fold changes the view's width, which wraps every row again, and the scroll
+        // kept an offset its rows no longer match. So the message it is anchored at goes back to
+        // the foot once the rows near it have their new heights; the newest, at the foot, is
+        // the bottom anchor's.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { next in
+          let turned = width > 0 && next != width
+          width = next
+          guard turned, let anchor, anchor != items.last?.id else {
+            return
+          }
+          Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            proxy.scrollTo(anchor, anchor: .bottom)
+          }
+        }
         .environment(\.conversationHeight, height)
         .scrollPosition(id: $anchor, anchor: .bottom)
         .defaultScrollAnchor(.bottom)
+        #if DEBUG
+          .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.5) { ids in
+            model.shownRows[feed.conversation] = ids
+          }
+        #endif
         .scrollDismissesKeyboard(.immediately)
         .accessibilityIdentifier("messages")
         .overlay { state }
@@ -216,10 +238,13 @@ struct ConversationView: View {
 }
 
 /// Follows a link in the board's text as `AppModel.follow` says: what the board names opens in Chat,
-/// after `opened`, an address on the web in Safari, and anything else nowhere.
+/// after `opened`; a file or a folder on a branch opens with `files`, by default in Chat's file
+/// sheet, after `opened`; an address on the web opens in Safari, and anything else nowhere.
 struct FollowsBoardLinks: ViewModifier {
   @Environment(AppModel.self) private var model
+  // `opened` first, so a trailing closure is it, as before `files` was added.
   var opened: () -> Void = {}
+  var files: ((FilePlace) -> Void)? = nil
 
   func body(content: Content) -> some View {
     content.environment(
@@ -228,6 +253,14 @@ struct FollowsBoardLinks: ViewModifier {
         switch model.follow(url) {
         case .opened:
           opened()
+          return .handled
+        case .file(let place):
+          if let files {
+            files(place)
+          } else {
+            opened()
+            model.browse(place)
+          }
           return .handled
         case .nowhere:
           return .handled

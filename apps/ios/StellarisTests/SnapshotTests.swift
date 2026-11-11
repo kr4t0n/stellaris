@@ -177,7 +177,7 @@ final class SnapshotTests: XCTestCase {
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
     try await expectIslandGray(ShellView().environment(model), named: "board")
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     try await expectIslandGray(ShellView().environment(model), named: "board-project")
     model.tab = .needsYou
     try await expectIslandGray(ShellView().environment(model), named: "needs-you")
@@ -239,7 +239,7 @@ final class SnapshotTests: XCTestCase {
     let model = try await signedIn()
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     var band = CGRect.null
     let image = try await Snapshot.image(
       of: ShellView().environment(model), size: CGSize(width: 410, height: 678),
@@ -440,16 +440,100 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// A task's plan whole, and each captured proposal's charter.
+  /// A task's plan whole, ending with what its branch changed, and each captured proposal's
+  /// charter. At 320 points the plan is as wide as its column beside the thread. At the largest
+  /// type size the plan with six changes runs past what the harness can draw at the narrower
+  /// widths, so there it is drawn before a turn made the task's branch, and `testATasksChanges`
+  /// draws the changes alone.
   @MainActor func testPlansAndCharters() async throws {
     let model = try await signedIn()
     let task = try XCTUnwrap(model.store.task(exportView))
-    try await Snapshot.recordWhole(
-      PlanView(task: task).environment(model), named: "plan", in: self)
+    await model.store.loadTaskChanges(exportView, using: model)
+    let branchless = try await signedIn(token: "no-branch")
+    await branchless.store.loadTaskChanges(exportView, using: branchless)
+    for size in Snapshot.sizes {
+      for type in Snapshot.typeSizes {
+        let name = "plan-\(size.name)-\(type.name)"
+        print("drawing \(name)")
+        let shown = type.name == "largest" ? branchless : model
+        let image = try await Snapshot.image(
+          of: PlanView(task: task).environment(shown), size: size.size, type: type, fitting: true)
+        try Snapshot.keep(image, named: name, in: self)
+      }
+    }
     for proposal in model.store.proposals {
       try await Snapshot.recordWhole(
         CharterView(proposal: proposal).environment(model),
         named: "charter-\(proposal.kind.rawValue)", in: self)
+    }
+  }
+
+  /// The plan's Files alone, and a file's change on the plan's stack, with Whole file in its bar,
+  /// at every width and type size;
+  /// then, on the outer display, a binary file's, one whose lines didn't change, one the board cut,
+  /// a deleted file's, which has no Whole file, and one the runner can't read; and the plan's
+  /// Files with the runner away, before the task's branch, with nothing changed, and past the
+  /// board's limit.
+  @MainActor func testATasksChanges() async throws {
+    let model = try await signedIn()
+    await model.store.loadTaskChanges(exportView, using: model)
+    let task = exportView
+    func change(_ path: String, in model: AppModel) async -> AnyView {
+      await model.store.loadTaskDiff(ChangeKey(task: task, path: path), using: model)
+      return AnyView(
+        NavigationStack {
+          ChangeView(taskId: task, path: path) { _ in }
+        }
+        .environment(model))
+    }
+    // The plan's Files alone, at every width and type size.
+    let subject = try XCTUnwrap(model.store.task(exportView))
+    try await Snapshot.recordWhole(
+      TaskFiles(task: subject, now: .now)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(MessageColor.island)
+        .environment(model),
+      named: "plan-files", in: self)
+    try await Snapshot.record(
+      await change("src/export/view.ts", in: model), named: "change-code", in: self)
+    for (name, path) in [
+      ("change-binary", "evidence/plot.png"), ("change-no-lines", "scripts/run.sh"),
+      ("change-cut", "data/export.json"), ("change-deleted", "src/export/old.ts"),
+      ("change-notes", "evidence/notes.md"),
+    ] {
+      try await keepAtTheOuterDisplay(await change(path, in: model), named: name)
+    }
+    // The deleted file's removed lines read as one band down the patch's leading edge, a point
+    // in from it, with no notch where one line's ground meets the next's: a colour alone as each
+    // line's background drew it with rounded corners.
+    let deleted = try await Snapshot.image(
+      of: await change("src/export/old.ts", in: model), size: CGSize(width: 410, height: 678),
+      type: Snapshot.typeSizes[0])
+    var bands = 0
+    var inBand = false
+    for y in stride(from: 100.0, to: 600.0, by: 0.5) {
+      let red = Snapshot.color(in: deleted, at: CGPoint(x: 17, y: y)).map {
+        $0.red > $0.green + 8
+      }
+      if red == true, !inBand {
+        bands += 1
+      }
+      inBand = red == true
+    }
+    XCTAssertEqual(bands, 1, "the removed lines' ground breaks into \(bands) bands")
+    let away = try await signedIn(token: "runner-away")
+    try await keepAtTheOuterDisplay(
+      await change("src/export/view.ts", in: away), named: "change-runner-away")
+    for token in ["runner-away", "no-branch", "nothing-changed", "many-changes"] {
+      let other = try await signedIn(token: token)
+      await other.store.loadTaskChanges(exportView, using: other)
+      let task = try XCTUnwrap(other.store.task(exportView))
+      let files = TaskFiles(task: task, now: .now)
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(MessageColor.island)
+      try await keepAtTheOuterDisplay(files.environment(other), named: "plan-files-\(token)")
     }
   }
 
@@ -471,8 +555,57 @@ final class SnapshotTests: XCTestCase {
     let model = try await signedIn()
     await model.store.loadDashboard("demo", using: model)
     model.tab = .board
-    model.boardPath = ["demo"]
+    model.boardPath = [.project("demo")]
     try await Snapshot.record(ShellView().environment(model), named: "board-project", in: self)
+  }
+
+  /// A project's files under Board: Board with its Files row, the branch's root, markdown, and
+  /// code at a cited line at every width and type size; a table, an image, a binary file, one over
+  /// the board's limit, a path the branch doesn't have, the runner away, and an empty branch at
+  /// the outer display's; and a file a message linked, in Chat's sheet.
+  @MainActor func testTheFiles() async throws {
+    let model = try await signedIn()
+    model.tab = .board
+    try await Snapshot.record(ShellView().environment(model), named: "board-files-row", in: self)
+    func place(_ path: String, line: Int? = nil) -> FilePlace {
+      FilePlace(source: .project("demo"), path: path, line: line)
+    }
+    for (name, file) in [
+      ("files-root", place("")), ("files-markdown", place("README.md")),
+      ("files-code", place("src/app.ts", line: 30)),
+    ] {
+      await model.store.loadBranchFile(file, using: model)
+      model.boardPath = [.files(file)]
+      try await Snapshot.record(ShellView().environment(model), named: name, in: self)
+    }
+    for (name, file) in [
+      ("files-table", place("results.csv")), ("files-image", place("plot.png")),
+      ("files-binary", place("model.bin")), ("files-too-large", place("dump.json")),
+      ("files-missing", place("notes/plan.md")),
+    ] {
+      await model.store.loadBranchFile(file, using: model)
+      model.boardPath = [.files(file)]
+      try await keepAtTheOuterDisplay(ShellView().environment(model), named: name)
+    }
+    for token in ["runner-away", "empty-branch"] {
+      let other = try await signedIn(token: token)
+      await other.store.loadBranchFile(place(""), using: other)
+      other.tab = .board
+      other.boardPath = [.files(place(""))]
+      try await keepAtTheOuterDisplay(ShellView().environment(other), named: "files-\(token)")
+    }
+    let notes = FilePlace(source: .task(exportView), path: "evidence/notes.md")
+    await model.store.loadBranchFile(notes, using: model)
+    model.browse(notes)
+    try await keepAtTheOuterDisplay(FileSheet().environment(model), named: "files-sheet")
+  }
+
+  /// Draws `view` once, at the outer display's width and the default type size.
+  @MainActor private func keepAtTheOuterDisplay(_ view: some View, named name: String) async throws
+  {
+    let image = try await Snapshot.image(
+      of: view, size: CGSize(width: 410, height: 678), type: Snapshot.typeSizes[0])
+    try Snapshot.keep(image, named: "\(name)-410-default", in: self)
   }
 
   /// A task at a gate that waits on the user, and a member proposal that waits on the user.

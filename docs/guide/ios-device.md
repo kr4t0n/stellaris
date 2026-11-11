@@ -1,6 +1,6 @@
 # Running the iOS app on an iPhone
 
-How to build the iOS app on a Mac, install it on your own iPhone, and sign in to your board. The commands for the app's tests are in the [README](../../README.md#run-build-test), and how the app works in [docs/internals/ios.md](../internals/ios.md).
+How to build the iOS app on a Mac, install it on your own iPhone, and sign in to your board. The commands for the app's tests, and how the app works, are in [docs/internals/ios.md](../internals/ios.md#running-the-tests).
 
 ## What you need
 
@@ -241,6 +241,19 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Ten large photos picked at once, such as 48-megapixel ones: the app should stay up while they upload.
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
 - The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
+
+**A branch's files**
+
+- Board > a project > Files, on a real project's default branch: a folder of each depth, a long file of code, a markdown file whose relative links and images go to the files beside it, a CSV, and an image, which a pinch zooms. CI browses only the fake board's small branch.
+- Share on a file, then Save to Files: the file keeps its name and its bytes. CI can't drive the share sheet.
+- A file of tens of thousands of lines scrolls smoothly both ways, and a link to a line deep in it opens with that line in the middle.
+- A link to a file on a task's branch in a message, and one in a task's brief in the plan's sheet: the file opens in a sheet over Chat, in place of the plan, and a drag down closes it.
+
+**A task's changes**
+
+- A real task's plan, scrolled to its end: Files lists what its branch changed as a tree, each file with what happened to it and who touched it last, a deleted one struck through. A folder opens and closes in place. CI lists only the fake board's six changes.
+- A file's change on a real branch: removed lines red, added ones green, long lines wrapping, and a tap on a line's number opening the whole file at that line. Whole file opens it at its top. A long patch scrolls smoothly, and one the board cut says so at its foot.
+- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Plan and Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
 
 **Text**
 

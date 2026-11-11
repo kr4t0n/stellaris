@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { UsageSchema } from "./events.js";
+import { UsageSchema, type TranscriptEntry } from "./events.js";
 import { IsoDateTimeSchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 import { HeartbeatCauseSchema } from "./turns.js";
@@ -24,6 +24,13 @@ export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_tas
 export function isBoardAction(tool: string): boolean {
   const verb = /^mcp__board__(.+)$/.exec(tool)?.[1];
   return verb !== undefined && !READ_VERBS.some((read) => read === verb);
+}
+
+/** The board actions a turn's steps took: the calls of a writing verb that succeeded. */
+export function boardActionsIn(entries: readonly TranscriptEntry[]): number {
+  return entries.filter(
+    ({ event }) => event.type === "tool_result" && event.ok && isBoardAction(event.name),
+  ).length;
 }
 
 const CountSchema = z.number().int().nonnegative();
@@ -91,7 +98,7 @@ export const MetricsSchema = z.object({
   /** Time from a mention to the start of the turn it woke, in the conversation it was made in. */
   latency: z.object({
     mentions: CountSchema,
-    /** Mentions no turn has followed yet. */
+    /** Mentions no turn has followed yet, or none within the week a mention waits. */
     unanswered: CountSchema,
     medianMs: MsSchema.nullable(),
     slowestMs: MsSchema.nullable(),

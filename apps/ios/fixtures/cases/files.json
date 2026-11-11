@@ -1,0 +1,2398 @@
+{
+  "orders": [
+    {
+      "name": "folders first, then files, each by name",
+      "entries": [
+        {
+          "name": "zeta.md",
+          "kind": "file"
+        },
+        {
+          "name": "apps",
+          "kind": "dir"
+        },
+        {
+          "name": "README.md",
+          "kind": "file"
+        },
+        {
+          "name": ".github",
+          "kind": "dir"
+        },
+        {
+          "name": "AGENTS.md",
+          "kind": "file"
+        },
+        {
+          "name": "docs",
+          "kind": "dir"
+        }
+      ],
+      "ordered": [
+        "dir:.github",
+        "dir:apps",
+        "dir:docs",
+        "file:AGENTS.md",
+        "file:README.md",
+        "file:zeta.md"
+      ]
+    },
+    {
+      "name": "the letters A to Z read as a to z, then by code units",
+      "entries": [
+        {
+          "name": "b.md",
+          "kind": "file"
+        },
+        {
+          "name": "B.md",
+          "kind": "file"
+        },
+        {
+          "name": "a.md",
+          "kind": "file"
+        },
+        {
+          "name": "A.md",
+          "kind": "file"
+        }
+      ],
+      "ordered": ["file:A.md", "file:a.md", "file:B.md", "file:b.md"]
+    },
+    {
+      "name": "punctuation and digits by their code units",
+      "entries": [
+        {
+          "name": "_notes.md",
+          "kind": "file"
+        },
+        {
+          "name": "10.md",
+          "kind": "file"
+        },
+        {
+          "name": "9.md",
+          "kind": "file"
+        },
+        {
+          "name": ".gitignore",
+          "kind": "file"
+        },
+        {
+          "name": "a-b.md",
+          "kind": "file"
+        },
+        {
+          "name": "a.b.md",
+          "kind": "file"
+        },
+        {
+          "name": "a_b.md",
+          "kind": "file"
+        }
+      ],
+      "ordered": [
+        "file:.gitignore",
+        "file:10.md",
+        "file:9.md",
+        "file:_notes.md",
+        "file:a-b.md",
+        "file:a.b.md",
+        "file:a_b.md"
+      ]
+    },
+    {
+      "name": "letters past Z by their code units, after z",
+      "entries": [
+        {
+          "name": "Ärende.md",
+          "kind": "file"
+        },
+        {
+          "name": "zeta.md",
+          "kind": "file"
+        },
+        {
+          "name": "ärende.md",
+          "kind": "file"
+        },
+        {
+          "name": "Zeta.md",
+          "kind": "file"
+        },
+        {
+          "name": "éclair.md",
+          "kind": "file"
+        }
+      ],
+      "ordered": [
+        "file:Zeta.md",
+        "file:zeta.md",
+        "file:Ärende.md",
+        "file:ärende.md",
+        "file:éclair.md"
+      ]
+    },
+    {
+      "name": "a surrogate pair by its code units, before a letter past it",
+      "entries": [
+        {
+          "name": "ｚ.md",
+          "kind": "file"
+        },
+        {
+          "name": "😀.md",
+          "kind": "file"
+        }
+      ],
+      "ordered": ["file:😀.md", "file:ｚ.md"]
+    },
+    {
+      "name": "a decomposed accent apart from the composed one",
+      "entries": [
+        {
+          "name": "é.md",
+          "kind": "file"
+        },
+        {
+          "name": "é.md",
+          "kind": "file"
+        }
+      ],
+      "ordered": ["file:é.md", "file:é.md"]
+    },
+    {
+      "name": "a folder and a file of one name, the folder first",
+      "entries": [
+        {
+          "name": "docs",
+          "kind": "file"
+        },
+        {
+          "name": "docs",
+          "kind": "dir"
+        }
+      ],
+      "ordered": ["dir:docs", "file:docs"]
+    },
+    {
+      "name": "nothing",
+      "entries": [],
+      "ordered": []
+    }
+  ],
+  "sizes": [
+    {
+      "bytes": 0,
+      "label": "0 B"
+    },
+    {
+      "bytes": 1,
+      "label": "1 B"
+    },
+    {
+      "bytes": 812,
+      "label": "812 B"
+    },
+    {
+      "bytes": 1023,
+      "label": "1023 B"
+    },
+    {
+      "bytes": 1024,
+      "label": "1.0 KB"
+    },
+    {
+      "bytes": 1075,
+      "label": "1.0 KB"
+    },
+    {
+      "bytes": 1076,
+      "label": "1.1 KB"
+    },
+    {
+      "bytes": 1280,
+      "label": "1.3 KB"
+    },
+    {
+      "bytes": 4300,
+      "label": "4.2 KB"
+    },
+    {
+      "bytes": 1048524,
+      "label": "1023.9 KB"
+    },
+    {
+      "bytes": 1048525,
+      "label": "1024.0 KB"
+    },
+    {
+      "bytes": 1048575,
+      "label": "1024.0 KB"
+    },
+    {
+      "bytes": 1048576,
+      "label": "1.0 MB"
+    },
+    {
+      "bytes": 1310720,
+      "label": "1.3 MB"
+    },
+    {
+      "bytes": 8388608,
+      "label": "8.0 MB"
+    },
+    {
+      "bytes": 12686643,
+      "label": "12.1 MB"
+    }
+  ],
+  "views": [
+    {
+      "name": "markdown",
+      "path": "report.md",
+      "base64": "IyBIaQo=",
+      "view": {
+        "kind": "markdown",
+        "text": "# Hi\n"
+      }
+    },
+    {
+      "name": "markdown by an upper-case extension",
+      "path": "notes.MARKDOWN",
+      "base64": "Tm90ZXM=",
+      "view": {
+        "kind": "markdown",
+        "text": "Notes"
+      }
+    },
+    {
+      "name": "markdown in a folder",
+      "path": "docs/plan.md",
+      "base64": "LSBvbmU=",
+      "view": {
+        "kind": "markdown",
+        "text": "- one"
+      }
+    },
+    {
+      "name": "an image by its extension, whatever its bytes",
+      "path": "plot.PNG",
+      "base64": "iVA=",
+      "view": {
+        "kind": "image",
+        "type": "image/png"
+      }
+    },
+    {
+      "name": "a JPEG",
+      "path": "photo.jpeg",
+      "base64": "/9g=",
+      "view": {
+        "kind": "image",
+        "type": "image/jpeg"
+      }
+    },
+    {
+      "name": "a JPG",
+      "path": "photo.jpg",
+      "base64": "/9g=",
+      "view": {
+        "kind": "image",
+        "type": "image/jpeg"
+      }
+    },
+    {
+      "name": "a GIF",
+      "path": "anim.gif",
+      "base64": "R0lGODlh",
+      "view": {
+        "kind": "image",
+        "type": "image/gif"
+      }
+    },
+    {
+      "name": "a WebP",
+      "path": "a.webp",
+      "base64": "UklGRg==",
+      "view": {
+        "kind": "image",
+        "type": "image/webp"
+      }
+    },
+    {
+      "name": "an AVIF",
+      "path": "x.avif",
+      "base64": "AA==",
+      "view": {
+        "kind": "image",
+        "type": "image/avif"
+      }
+    },
+    {
+      "name": "a BMP",
+      "path": "b.bmp",
+      "base64": "Qk0=",
+      "view": {
+        "kind": "image",
+        "type": "image/bmp"
+      }
+    },
+    {
+      "name": "an icon",
+      "path": "favicon.ico",
+      "base64": "AAABAA==",
+      "view": {
+        "kind": "image",
+        "type": "image/x-icon"
+      }
+    },
+    {
+      "name": "an SVG is an image, though it is text",
+      "path": "icon.svg",
+      "base64": "PHN2Zy8+",
+      "view": {
+        "kind": "image",
+        "type": "image/svg+xml"
+      }
+    },
+    {
+      "name": "a CSV table",
+      "path": "data.csv",
+      "base64": "YSxiCjEsMg==",
+      "view": {
+        "kind": "table",
+        "rows": [
+          ["a", "b"],
+          ["1", "2"]
+        ]
+      }
+    },
+    {
+      "name": "a TSV table",
+      "path": "data.tsv",
+      "base64": "YQliCjEJ",
+      "view": {
+        "kind": "table",
+        "rows": [
+          ["a", "b"],
+          ["1", ""]
+        ]
+      }
+    },
+    {
+      "name": "a log as text",
+      "path": "run.log",
+      "base64": "b2sK",
+      "view": {
+        "kind": "text",
+        "text": "ok\n"
+      }
+    },
+    {
+      "name": "a name with no extension as text",
+      "path": "Makefile",
+      "base64": "YWxsOgo=",
+      "view": {
+        "kind": "text",
+        "text": "all:\n"
+      }
+    },
+    {
+      "name": "a dot file has no extension",
+      "path": ".gitignore",
+      "base64": "bm9kZV9tb2R1bGVzCg==",
+      "view": {
+        "kind": "text",
+        "text": "node_modules\n"
+      }
+    },
+    {
+      "name": "a file named .md alone is text, not markdown",
+      "path": ".md",
+      "base64": "IyBub3QgbWFya2Rvd24=",
+      "view": {
+        "kind": "text",
+        "text": "# not markdown"
+      }
+    },
+    {
+      "name": "the last extension counts",
+      "path": "photo.JPG.txt",
+      "base64": "YSBjYXB0aW9u",
+      "view": {
+        "kind": "text",
+        "text": "a caption"
+      }
+    },
+    {
+      "name": "empty text",
+      "path": "empty.txt",
+      "base64": "",
+      "view": {
+        "kind": "text",
+        "text": ""
+      }
+    },
+    {
+      "name": "a byte-order mark is dropped",
+      "path": "bom.txt",
+      "base64": "77u/aGk=",
+      "view": {
+        "kind": "text",
+        "text": "hi"
+      }
+    },
+    {
+      "name": "emoji and CRLF stay as written",
+      "path": "notes.txt",
+      "base64": "8J+YgA0Kb2s=",
+      "view": {
+        "kind": "text",
+        "text": "😀\r\nok"
+      }
+    },
+    {
+      "name": "a NUL makes it binary",
+      "path": "model.bin",
+      "base64": "AAEC",
+      "view": {
+        "kind": "binary"
+      }
+    },
+    {
+      "name": "bytes that aren't UTF-8 are binary",
+      "path": "archive.tar.gz",
+      "base64": "H4sIAA==",
+      "view": {
+        "kind": "binary"
+      }
+    },
+    {
+      "name": "a Latin-1 byte is binary",
+      "path": "latin1.txt",
+      "base64": "6Q==",
+      "view": {
+        "kind": "binary"
+      }
+    },
+    {
+      "name": "an encoded surrogate is binary",
+      "path": "surrogate.txt",
+      "base64": "7aCA",
+      "view": {
+        "kind": "binary"
+      }
+    },
+    {
+      "name": "an overlong slash is binary",
+      "path": "overlong.txt",
+      "base64": "wK8=",
+      "view": {
+        "kind": "binary"
+      }
+    },
+    {
+      "name": "a sequence cut short is binary",
+      "path": "cut.txt",
+      "base64": "4oI=",
+      "view": {
+        "kind": "binary"
+      }
+    }
+  ],
+  "delimited": [
+    {
+      "name": "quotes hold separators, line breaks and doubled quotes",
+      "text": "name,note\r\nada,\"says \"\"hi\"\", twice\"\nref,\"two\nlines\"\n",
+      "separator": ",",
+      "rows": [
+        ["name", "note"],
+        ["ada", "says \"hi\", twice"],
+        ["ref", "two\nlines"]
+      ]
+    },
+    {
+      "name": "tabs, a last field empty",
+      "text": "a\tb\n1\t",
+      "separator": "\t",
+      "rows": [
+        ["a", "b"],
+        ["1", ""]
+      ]
+    },
+    {
+      "name": "nothing",
+      "text": "",
+      "separator": ",",
+      "rows": []
+    },
+    {
+      "name": "one row with no line end",
+      "text": "a,b",
+      "separator": ",",
+      "rows": [["a", "b"]]
+    },
+    {
+      "name": "one row with a line end",
+      "text": "a,b\n",
+      "separator": ",",
+      "rows": [["a", "b"]]
+    },
+    {
+      "name": "a last field empty before a line end",
+      "text": "a,\n",
+      "separator": ",",
+      "rows": [["a", ""]]
+    },
+    {
+      "name": "a line end alone",
+      "text": "\n",
+      "separator": ",",
+      "rows": [[""]]
+    },
+    {
+      "name": "CR alone ends a row",
+      "text": "a\r\rb",
+      "separator": ",",
+      "rows": [["a"], [""], ["b"]]
+    },
+    {
+      "name": "a quote inside a field is kept",
+      "text": "x\"y,z",
+      "separator": ",",
+      "rows": [["x\"y", "z"]]
+    },
+    {
+      "name": "text after a closing quote joins the field",
+      "text": "\"a\"b,c",
+      "separator": ",",
+      "rows": [["ab", "c"]]
+    },
+    {
+      "name": "a quote never closed runs to the end",
+      "text": "\"open,x\ny",
+      "separator": ",",
+      "rows": [["open,x\ny"]]
+    },
+    {
+      "name": "two empty quoted fields",
+      "text": "\"\",\"\"",
+      "separator": ",",
+      "rows": [["", ""]]
+    },
+    {
+      "name": "letters past ASCII and emoji",
+      "text": "é,😀\r\n1,2",
+      "separator": ",",
+      "rows": [
+        ["é", "😀"],
+        ["1", "2"]
+      ]
+    },
+    {
+      "name": "a comma in a TSV is text",
+      "text": "a,b\tc",
+      "separator": "\t",
+      "rows": [["a,b", "c"]]
+    }
+  ],
+  "lines": [
+    {
+      "name": "a last LF ends the file",
+      "text": "a\nb\n",
+      "lines": ["a", "b"]
+    },
+    {
+      "name": "no last LF",
+      "text": "a\nb",
+      "lines": ["a", "b"]
+    },
+    {
+      "name": "nothing",
+      "text": "",
+      "lines": [""]
+    },
+    {
+      "name": "one LF",
+      "text": "\n",
+      "lines": [""]
+    },
+    {
+      "name": "two LFs",
+      "text": "\n\n",
+      "lines": ["", ""]
+    },
+    {
+      "name": "CRLF keeps its CR on each line",
+      "text": "a\r\nb\r\n",
+      "lines": ["a\r", "b\r"]
+    },
+    {
+      "name": "a blank line between",
+      "text": "a\n\nb",
+      "lines": ["a", "", "b"]
+    },
+    {
+      "name": "CR alone is no line end",
+      "text": "a\rb",
+      "lines": ["a\rb"]
+    },
+    {
+      "name": "emoji and letters past ASCII",
+      "text": "😀\né\n",
+      "lines": ["😀", "é"]
+    }
+  ],
+  "parents": [
+    {
+      "path": "",
+      "parent": ""
+    },
+    {
+      "path": "a.md",
+      "parent": ""
+    },
+    {
+      "path": "docs/a.md",
+      "parent": "docs"
+    },
+    {
+      "path": "a/b/c",
+      "parent": "a/b"
+    }
+  ],
+  "runners": [
+    {
+      "project": {
+        "runner": "runner-1",
+        "name": "Lab"
+      },
+      "words": "runner-1, the runner Lab lives on"
+    },
+    {
+      "project": {
+        "name": "Lab"
+      },
+      "words": "The runner Lab lives on"
+    },
+    {
+      "project": null,
+      "words": "The runner the project lives on"
+    }
+  ],
+  "limits": {
+    "tableRows": 1000,
+    "numberedLines": 20000,
+    "fileBytes": 8388608
+  },
+  "trees": [
+    {
+      "name": "folders first, each by name, a folder holding one folder read as one row",
+      "changes": [
+        {
+          "path": "report.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/b.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/README.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/a.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "ref",
+            "at": "2026-10-08T10:00:00.000Z"
+          }
+        },
+        {
+          "path": "docs/api/v1/spec.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": ".gitignore",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "docs/api/v1",
+          "path": "docs/api/v1",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "spec.md",
+              "path": "docs/api/v1/spec.md"
+            }
+          ]
+        },
+        {
+          "dir": "evidence",
+          "path": "evidence",
+          "files": 3,
+          "lastChange": {
+            "author": "ref",
+            "at": "2026-10-08T10:00:00.000Z"
+          },
+          "children": [
+            {
+              "dir": "analysis",
+              "path": "evidence/analysis",
+              "files": 2,
+              "lastChange": {
+                "author": "ref",
+                "at": "2026-10-08T10:00:00.000Z"
+              },
+              "children": [
+                {
+                  "file": "a.json",
+                  "path": "evidence/analysis/a.json"
+                },
+                {
+                  "file": "b.json",
+                  "path": "evidence/analysis/b.json"
+                }
+              ]
+            },
+            {
+              "file": "README.md",
+              "path": "evidence/README.md"
+            }
+          ]
+        },
+        {
+          "file": ".gitignore",
+          "path": ".gitignore"
+        },
+        {
+          "file": "report.md",
+          "path": "report.md"
+        }
+      ],
+      "open": ["docs/api/v1", "evidence", "evidence/analysis"]
+    },
+    {
+      "name": "names in the same order in every locale",
+      "changes": [
+        {
+          "path": "Ärende.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "zeta.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "_notes.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "10.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "CLAUDE.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "claude.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "é.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "é.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "apps/a.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "Apps/b.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "~tmp/c.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "a b/d.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "a-b/e.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "a.b/f.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "a b",
+          "path": "a b",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "d.md",
+              "path": "a b/d.md"
+            }
+          ]
+        },
+        {
+          "dir": "a-b",
+          "path": "a-b",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "e.md",
+              "path": "a-b/e.md"
+            }
+          ]
+        },
+        {
+          "dir": "a.b",
+          "path": "a.b",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "f.md",
+              "path": "a.b/f.md"
+            }
+          ]
+        },
+        {
+          "dir": "Apps",
+          "path": "Apps",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "b.md",
+              "path": "Apps/b.md"
+            }
+          ]
+        },
+        {
+          "dir": "apps",
+          "path": "apps",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "a.md",
+              "path": "apps/a.md"
+            }
+          ]
+        },
+        {
+          "dir": "~tmp",
+          "path": "~tmp",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "c.md",
+              "path": "~tmp/c.md"
+            }
+          ]
+        },
+        {
+          "file": "10.md",
+          "path": "10.md"
+        },
+        {
+          "file": "_notes.md",
+          "path": "_notes.md"
+        },
+        {
+          "file": "CLAUDE.md",
+          "path": "CLAUDE.md"
+        },
+        {
+          "file": "claude.md",
+          "path": "claude.md"
+        },
+        {
+          "file": "é.md",
+          "path": "é.md"
+        },
+        {
+          "file": "zeta.md",
+          "path": "zeta.md"
+        },
+        {
+          "file": "Ärende.md",
+          "path": "Ärende.md"
+        },
+        {
+          "file": "é.md",
+          "path": "é.md"
+        }
+      ],
+      "open": ["a b", "a-b", "a.b", "Apps", "apps", "~tmp"]
+    },
+    {
+      "name": "two folders Swift would take as one, a composed accent and a decomposed one",
+      "changes": [
+        {
+          "path": "café/a.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "café/b.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "café",
+          "path": "café",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "b.md",
+              "path": "café/b.md"
+            }
+          ]
+        },
+        {
+          "dir": "café",
+          "path": "café",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "a.md",
+              "path": "café/a.md"
+            }
+          ]
+        }
+      ],
+      "open": ["café", "café"]
+    },
+    {
+      "name": "a lone folder at the top merges with the folder it holds, the root never",
+      "changes": [
+        {
+          "path": "src/app/view.ts",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "src/app/old.ts",
+          "status": "deleted",
+          "added": 0,
+          "removed": 12,
+          "lastChange": {
+            "author": "rev-1",
+            "at": "2026-10-08T11:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "src/app",
+          "path": "src/app",
+          "files": 2,
+          "lastChange": {
+            "author": "rev-1",
+            "at": "2026-10-08T11:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "old.ts",
+              "path": "src/app/old.ts"
+            },
+            {
+              "file": "view.ts",
+              "path": "src/app/view.ts"
+            }
+          ]
+        }
+      ],
+      "open": ["src/app"]
+    },
+    {
+      "name": "a folder's newest touch, a file only a merge changed counting none",
+      "changes": [
+        {
+          "path": "a/x.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "a/y.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "rev-1",
+            "at": "2026-10-08T14:00:00.000Z"
+          }
+        },
+        {
+          "path": "a/z.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-2",
+            "at": "2026-10-08T12:00:00.000Z"
+          }
+        },
+        {
+          "path": "a/merged.md",
+          "status": "modified",
+          "added": 3,
+          "removed": 1
+        },
+        {
+          "path": "b/merged.md",
+          "status": "modified",
+          "added": null,
+          "removed": null
+        }
+      ],
+      "tree": [
+        {
+          "dir": "a",
+          "path": "a",
+          "files": 4,
+          "lastChange": {
+            "author": "rev-1",
+            "at": "2026-10-08T14:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "merged.md",
+              "path": "a/merged.md"
+            },
+            {
+              "file": "x.md",
+              "path": "a/x.md"
+            },
+            {
+              "file": "y.md",
+              "path": "a/y.md"
+            },
+            {
+              "file": "z.md",
+              "path": "a/z.md"
+            }
+          ]
+        },
+        {
+          "dir": "b",
+          "path": "b",
+          "files": 1,
+          "children": [
+            {
+              "file": "merged.md",
+              "path": "b/merged.md"
+            }
+          ]
+        }
+      ],
+      "open": ["a", "b"]
+    },
+    {
+      "name": "open from the top while the rows fit, the biggest closed",
+      "changes": [
+        {
+          "path": ".gitignore",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "case-studies.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/README.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-0.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-1.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-2.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-3.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-4.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-5.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-6.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-7.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-8.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-9.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-10.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-11.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-12.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-13.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-14.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-15.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/file-16.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/0.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/1.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/2.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/3.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/4.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/5.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/6.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/7.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/8.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/9.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/10.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/11.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/12.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/13.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/14.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/15.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/16.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/17.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/18.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/19.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/20.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/21.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/22.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/23.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/24.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/25.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/26.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/27.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/28.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "evidence/analysis/scalar-groups/29.json",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "evidence",
+          "path": "evidence",
+          "files": 48,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "dir": "analysis",
+              "path": "evidence/analysis",
+              "files": 47,
+              "lastChange": {
+                "author": "eng-1",
+                "at": "2026-10-08T09:00:00.000Z"
+              },
+              "children": [
+                {
+                  "dir": "scalar-groups",
+                  "path": "evidence/analysis/scalar-groups",
+                  "files": 30,
+                  "lastChange": {
+                    "author": "eng-1",
+                    "at": "2026-10-08T09:00:00.000Z"
+                  },
+                  "children": [
+                    {
+                      "file": "0.json",
+                      "path": "evidence/analysis/scalar-groups/0.json"
+                    },
+                    {
+                      "file": "1.json",
+                      "path": "evidence/analysis/scalar-groups/1.json"
+                    },
+                    {
+                      "file": "10.json",
+                      "path": "evidence/analysis/scalar-groups/10.json"
+                    },
+                    {
+                      "file": "11.json",
+                      "path": "evidence/analysis/scalar-groups/11.json"
+                    },
+                    {
+                      "file": "12.json",
+                      "path": "evidence/analysis/scalar-groups/12.json"
+                    },
+                    {
+                      "file": "13.json",
+                      "path": "evidence/analysis/scalar-groups/13.json"
+                    },
+                    {
+                      "file": "14.json",
+                      "path": "evidence/analysis/scalar-groups/14.json"
+                    },
+                    {
+                      "file": "15.json",
+                      "path": "evidence/analysis/scalar-groups/15.json"
+                    },
+                    {
+                      "file": "16.json",
+                      "path": "evidence/analysis/scalar-groups/16.json"
+                    },
+                    {
+                      "file": "17.json",
+                      "path": "evidence/analysis/scalar-groups/17.json"
+                    },
+                    {
+                      "file": "18.json",
+                      "path": "evidence/analysis/scalar-groups/18.json"
+                    },
+                    {
+                      "file": "19.json",
+                      "path": "evidence/analysis/scalar-groups/19.json"
+                    },
+                    {
+                      "file": "2.json",
+                      "path": "evidence/analysis/scalar-groups/2.json"
+                    },
+                    {
+                      "file": "20.json",
+                      "path": "evidence/analysis/scalar-groups/20.json"
+                    },
+                    {
+                      "file": "21.json",
+                      "path": "evidence/analysis/scalar-groups/21.json"
+                    },
+                    {
+                      "file": "22.json",
+                      "path": "evidence/analysis/scalar-groups/22.json"
+                    },
+                    {
+                      "file": "23.json",
+                      "path": "evidence/analysis/scalar-groups/23.json"
+                    },
+                    {
+                      "file": "24.json",
+                      "path": "evidence/analysis/scalar-groups/24.json"
+                    },
+                    {
+                      "file": "25.json",
+                      "path": "evidence/analysis/scalar-groups/25.json"
+                    },
+                    {
+                      "file": "26.json",
+                      "path": "evidence/analysis/scalar-groups/26.json"
+                    },
+                    {
+                      "file": "27.json",
+                      "path": "evidence/analysis/scalar-groups/27.json"
+                    },
+                    {
+                      "file": "28.json",
+                      "path": "evidence/analysis/scalar-groups/28.json"
+                    },
+                    {
+                      "file": "29.json",
+                      "path": "evidence/analysis/scalar-groups/29.json"
+                    },
+                    {
+                      "file": "3.json",
+                      "path": "evidence/analysis/scalar-groups/3.json"
+                    },
+                    {
+                      "file": "4.json",
+                      "path": "evidence/analysis/scalar-groups/4.json"
+                    },
+                    {
+                      "file": "5.json",
+                      "path": "evidence/analysis/scalar-groups/5.json"
+                    },
+                    {
+                      "file": "6.json",
+                      "path": "evidence/analysis/scalar-groups/6.json"
+                    },
+                    {
+                      "file": "7.json",
+                      "path": "evidence/analysis/scalar-groups/7.json"
+                    },
+                    {
+                      "file": "8.json",
+                      "path": "evidence/analysis/scalar-groups/8.json"
+                    },
+                    {
+                      "file": "9.json",
+                      "path": "evidence/analysis/scalar-groups/9.json"
+                    }
+                  ]
+                },
+                {
+                  "file": "file-0.json",
+                  "path": "evidence/analysis/file-0.json"
+                },
+                {
+                  "file": "file-1.json",
+                  "path": "evidence/analysis/file-1.json"
+                },
+                {
+                  "file": "file-10.json",
+                  "path": "evidence/analysis/file-10.json"
+                },
+                {
+                  "file": "file-11.json",
+                  "path": "evidence/analysis/file-11.json"
+                },
+                {
+                  "file": "file-12.json",
+                  "path": "evidence/analysis/file-12.json"
+                },
+                {
+                  "file": "file-13.json",
+                  "path": "evidence/analysis/file-13.json"
+                },
+                {
+                  "file": "file-14.json",
+                  "path": "evidence/analysis/file-14.json"
+                },
+                {
+                  "file": "file-15.json",
+                  "path": "evidence/analysis/file-15.json"
+                },
+                {
+                  "file": "file-16.json",
+                  "path": "evidence/analysis/file-16.json"
+                },
+                {
+                  "file": "file-2.json",
+                  "path": "evidence/analysis/file-2.json"
+                },
+                {
+                  "file": "file-3.json",
+                  "path": "evidence/analysis/file-3.json"
+                },
+                {
+                  "file": "file-4.json",
+                  "path": "evidence/analysis/file-4.json"
+                },
+                {
+                  "file": "file-5.json",
+                  "path": "evidence/analysis/file-5.json"
+                },
+                {
+                  "file": "file-6.json",
+                  "path": "evidence/analysis/file-6.json"
+                },
+                {
+                  "file": "file-7.json",
+                  "path": "evidence/analysis/file-7.json"
+                },
+                {
+                  "file": "file-8.json",
+                  "path": "evidence/analysis/file-8.json"
+                },
+                {
+                  "file": "file-9.json",
+                  "path": "evidence/analysis/file-9.json"
+                }
+              ]
+            },
+            {
+              "file": "README.md",
+              "path": "evidence/README.md"
+            }
+          ]
+        },
+        {
+          "file": ".gitignore",
+          "path": ".gitignore"
+        },
+        {
+          "file": "case-studies.md",
+          "path": "case-studies.md"
+        }
+      ],
+      "open": ["evidence", "evidence/analysis"]
+    },
+    {
+      "name": "open within four rows",
+      "rows": 4,
+      "changes": [
+        {
+          "path": "a/one.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "a/two.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "b/three.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        },
+        {
+          "path": "c/d/four.md",
+          "status": "added",
+          "added": 1,
+          "removed": 0,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          }
+        }
+      ],
+      "tree": [
+        {
+          "dir": "a",
+          "path": "a",
+          "files": 2,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "one.md",
+              "path": "a/one.md"
+            },
+            {
+              "file": "two.md",
+              "path": "a/two.md"
+            }
+          ]
+        },
+        {
+          "dir": "b",
+          "path": "b",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "three.md",
+              "path": "b/three.md"
+            }
+          ]
+        },
+        {
+          "dir": "c/d",
+          "path": "c/d",
+          "files": 1,
+          "lastChange": {
+            "author": "eng-1",
+            "at": "2026-10-08T09:00:00.000Z"
+          },
+          "children": [
+            {
+              "file": "four.md",
+              "path": "c/d/four.md"
+            }
+          ]
+        }
+      ],
+      "open": ["b"]
+    },
+    {
+      "name": "nothing changed",
+      "changes": [],
+      "tree": [],
+      "open": []
+    }
+  ],
+  "labels": [
+    {
+      "status": "added",
+      "added": 40,
+      "removed": 0,
+      "label": "new · +40"
+    },
+    {
+      "status": "added",
+      "added": 0,
+      "removed": 0,
+      "label": "new · +0"
+    },
+    {
+      "status": "added",
+      "added": null,
+      "removed": null,
+      "label": "new · binary"
+    },
+    {
+      "status": "modified",
+      "added": 3,
+      "removed": 1,
+      "label": "+3 −1"
+    },
+    {
+      "status": "modified",
+      "added": 0,
+      "removed": 0,
+      "label": "+0 −0"
+    },
+    {
+      "status": "modified",
+      "added": null,
+      "removed": null,
+      "label": "binary"
+    },
+    {
+      "status": "deleted",
+      "added": 0,
+      "removed": 9,
+      "label": "deleted"
+    },
+    {
+      "status": "deleted",
+      "added": null,
+      "removed": null,
+      "label": "deleted"
+    }
+  ],
+  "patches": [
+    {
+      "name": "two hunks, a note after the last line",
+      "patch": "@@ -1,3 +1,3 @@ # Report\n # Report\n-old\n+new\n end\n@@ -20 +20,2 @@\n tail\n+more\n\\ No newline at end of file",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -1,3 +1,3 @@ # Report"
+        },
+        {
+          "kind": "context",
+          "text": " # Report",
+          "line": 1
+        },
+        {
+          "kind": "removed",
+          "text": "-old"
+        },
+        {
+          "kind": "added",
+          "text": "+new",
+          "line": 2
+        },
+        {
+          "kind": "context",
+          "text": " end",
+          "line": 3
+        },
+        {
+          "kind": "hunk",
+          "text": "@@ -20 +20,2 @@"
+        },
+        {
+          "kind": "context",
+          "text": " tail",
+          "line": 20
+        },
+        {
+          "kind": "added",
+          "text": "+more",
+          "line": 21
+        },
+        {
+          "kind": "note",
+          "text": "\\ No newline at end of file"
+        }
+      ]
+    },
+    {
+      "name": "only removals",
+      "patch": "@@ -1,2 +0,0 @@\n-a\n-b",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -1,2 +0,0 @@"
+        },
+        {
+          "kind": "removed",
+          "text": "-a"
+        },
+        {
+          "kind": "removed",
+          "text": "-b"
+        }
+      ]
+    },
+    {
+      "name": "nothing",
+      "patch": "",
+      "rows": []
+    },
+    {
+      "name": "a newline at the end",
+      "patch": "@@ -1 +1 @@\n-a\n+b\n",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -1 +1 @@"
+        },
+        {
+          "kind": "removed",
+          "text": "-a"
+        },
+        {
+          "kind": "added",
+          "text": "+b",
+          "line": 1
+        },
+        {
+          "kind": "context",
+          "text": "",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "name": "CRLF kept in each line",
+      "patch": "@@ -1,2 +1,2 @@\r\n-a\r\n+b\r\n c",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -1,2 +1,2 @@\r"
+        },
+        {
+          "kind": "removed",
+          "text": "-a\r"
+        },
+        {
+          "kind": "added",
+          "text": "+b\r",
+          "line": 1
+        },
+        {
+          "kind": "context",
+          "text": " c",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "name": "a mark after the sign is still the sign's line",
+      "patch": "@@ -3 +3 @@\n-́x\n+́y\n ́z",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -3 +3 @@"
+        },
+        {
+          "kind": "removed",
+          "text": "-́x"
+        },
+        {
+          "kind": "added",
+          "text": "+́y",
+          "line": 3
+        },
+        {
+          "kind": "context",
+          "text": " ́z",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "name": "lines before any hunk count from nothing",
+      "patch": "+stray\n context\n@@ -5,1 +7 @@\n same",
+      "rows": [
+        {
+          "kind": "added",
+          "text": "+stray",
+          "line": 0
+        },
+        {
+          "kind": "context",
+          "text": " context",
+          "line": 1
+        },
+        {
+          "kind": "hunk",
+          "text": "@@ -5,1 +7 @@"
+        },
+        {
+          "kind": "context",
+          "text": " same",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "name": "headers that aren't hunks",
+      "patch": "@@ -1 +١ @@\n@@ -1, +2 @@\n@@ -1 +2,x @@\n@@ -1 +2\n@@ -1,4 +09,2 @@ fn\n+a",
+      "rows": [
+        {
+          "kind": "context",
+          "text": "@@ -1 +١ @@",
+          "line": 0
+        },
+        {
+          "kind": "context",
+          "text": "@@ -1, +2 @@",
+          "line": 1
+        },
+        {
+          "kind": "context",
+          "text": "@@ -1 +2,x @@",
+          "line": 2
+        },
+        {
+          "kind": "context",
+          "text": "@@ -1 +2",
+          "line": 3
+        },
+        {
+          "kind": "hunk",
+          "text": "@@ -1,4 +09,2 @@ fn"
+        },
+        {
+          "kind": "added",
+          "text": "+a",
+          "line": 9
+        }
+      ]
+    },
+    {
+      "name": "a big line number",
+      "patch": "@@ -1 +123456789 @@\n+a\n b",
+      "rows": [
+        {
+          "kind": "hunk",
+          "text": "@@ -1 +123456789 @@"
+        },
+        {
+          "kind": "added",
+          "text": "+a",
+          "line": 123456789
+        },
+        {
+          "kind": "context",
+          "text": " b",
+          "line": 123456790
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Board } from "@stellaris/board-core";
 import { Scheduler } from "@stellaris/scheduler";
 import {
@@ -576,7 +578,11 @@ describe("turns on a runner over the runner protocol", () => {
   async function start(
     board: Board,
     backend: AgentBackend,
-    options: { turnTimeoutMs?: number | null; residentIdleMs?: number } = {},
+    options: {
+      turnTimeoutMs?: number | null;
+      residentIdleMs?: number;
+      channelPostWaitMs?: number;
+    } = {},
   ): Promise<TestSociety> {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }), ...options });
     return society;
@@ -1994,6 +2000,8 @@ describe("turns on a runner over the runner protocol", () => {
     expect(handed.at(-1)).toEqual(["steward-1", "s-3", true]);
     expect(prompts.at(-1)).toContain(note);
     expect(prompts.at(-1)).not.toContain("## First turn");
+    // Its earlier turns read no post in the society's general, so it is shown none.
+    expect(prompts.at(-1)).not.toContain("## Posts read here before this session");
     await run(steward);
     expect(handed.at(-1)).toEqual(["steward-1", "s-3", false]);
     expect(prompts.at(-1)).not.toContain(note);
@@ -2122,6 +2130,113 @@ describe("turns on a runner over the runner protocol", () => {
       expect(prompts.at(-1)).not.toContain(note);
     }
     expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "s-4", runner: "pod" });
+  });
+
+  it("shows a home's new session the posts its earlier turns read there, once, after a reflection or a resume its CLI could not make", async () => {
+    const { board } = await Board.init(dir, { name: "read-before" });
+    await board.addProject(USER, { slug: "demo", channels: ["general", "release"] });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    await board.subscribe({ name: "eng-1", role: "engineer" }, { channel: "demo/release" });
+    const handed: Array<[string, boolean]> = [];
+    const prompts: string[] = [];
+    const outcomes: TurnResult[] = [];
+    let made = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        handed.push([request.session, request.newSession]);
+        prompts.push(request.prompt);
+        return Promise.resolve(outcomes.shift() ?? completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const home = manual("eng-1", "demo");
+    const heading = "## Posts read here before this session";
+    const lost: TurnResult = {
+      ...completed(""),
+      status: null,
+      exitReason: "error",
+      error: "No conversation found with that session ID",
+      resumeFailed: "lost",
+    };
+    const shown = (prompt: string | undefined): string[] => {
+      const text = prompt ?? "";
+      const at = text.indexOf(heading);
+      return at === -1
+        ? []
+        : text
+            .slice(at, text.indexOf("## Unread messages"))
+            .split("\n")
+            .filter((line) => line.startsWith("- ["))
+            .map((line) => line.slice(line.indexOf("): ") + 3));
+    };
+
+    // The first turn reads general, and the reflection after it what came since, with a post in
+    // another channel, which a conversation of its own reads.
+    await board.postMessage(USER, { channel: "demo/general", body: "the plan for the week" });
+    await run(home);
+    expect(prompts.at(-1)).toContain("## First turn");
+    expect(prompts.at(-1)).not.toContain(heading);
+    await board.postMessage(USER, { channel: "demo/general", body: "the release is on Friday" });
+    await board.postMessage(USER, { channel: "demo/release", body: "the release notes" });
+    expect((await run(reflection("eng-1", "demo"))).sessionDropped).toBe(true);
+    await board.postMessage(USER, { channel: "demo/general", body: "a question since" });
+
+    // The next home turn starts a session and is shown what those turns read, apart from its
+    // unread post, which its digest carries; the turn after resumes the session and is shown none.
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-2", true]);
+    expect(prompts.at(-1)).toContain(`${heading} (2)`);
+    expect(shown(prompts.at(-1))).toEqual(["the plan for the week", "the release is on Friday"]);
+    expect(prompts.at(-1)).toContain("## Unread messages (1)");
+    expect(prompts.at(-1)).toContain("a question since");
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-2", false]);
+    expect(prompts.at(-1)).not.toContain(heading);
+
+    // A session the CLI could not resume is dropped, and the home's next session is shown the same.
+    outcomes.push(lost);
+    expect((await run(home)).sessionDropped).toBe(true);
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-3", true]);
+    expect(shown(prompts.at(-1))).toEqual([
+      "the plan for the week",
+      "the release is on Friday",
+      "a question since",
+    ]);
+    await run(home);
+    expect(handed.at(-1)).toEqual(["s-3", false]);
+    expect(prompts.at(-1)).not.toContain(heading);
+
+    // A channel's conversation and a thread's are shown none on a new session after turns there,
+    // though the home has read posts within the week.
+    const topic = await board.openThread(
+      { name: "eng-1", role: "engineer" },
+      { channel: "demo/general", title: "a question" },
+    );
+    for (const conversation of [
+      { ...home, channel: "release" },
+      { ...home, thread: { id: topic.id, task: false } },
+    ]) {
+      await run(conversation);
+      outcomes.push(lost);
+      expect((await run(conversation)).sessionDropped).toBe(true);
+      await run(conversation);
+      expect(handed.at(-1)?.[1]).toBe(true);
+      expect(prompts.at(-1)).not.toContain(heading);
+    }
   });
 
   it("keeps the session after a reflection in a work role's home outside projects, and in a project home of a role that does not reflect", async () => {
@@ -2676,6 +2791,34 @@ describe("turns on a runner over the runner protocol", () => {
     await run(deskPost);
     expect(backend.closes).toEqual(["desk:session-1"]);
     expect(backend.starts).toHaveLength(2);
+  });
+
+  it("draws the turn contract and subscribe's description at the channel wait the server runs with", async () => {
+    const { board } = await Board.init(dir, { name: "channel-wait" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const backend = new InstructionsBackend();
+    const { run, url } = await start(board, backend, { channelPostWaitMs: 6 * 3_600_000 });
+    await run(manual("steward-1", "society"));
+    expect(backend.turns.at(-1)?.instructions).toContain(
+      "everyone else reads it at their next turn there, at the latest about 6 hours later.",
+    );
+    // The same server's MCP endpoint, which the turn's CLI lists its tools from.
+    const { token } = await board.addAgent(USER, {
+      name: "steward-2",
+      role: "steward",
+      cli: "claude",
+    });
+    const client = new Client({ name: "test-client", version: "0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${token}` } },
+      }),
+    );
+    const { tools } = await client.listTools();
+    await client.close();
+    expect(tools.find((tool) => tool.name === "subscribe")?.description).toContain(
+      "wakes you only once it is 6 hours old.",
+    );
   });
 
   it("carries changed instructions into a resumed session's prompt once, and none into a new or unchanged one", async () => {

@@ -3,8 +3,9 @@ import SwiftUI
 
 /// A task's plan as the web's task view lays it out: a send-back, each stage on a timeline with who
 /// may hold it, who holds or held it, and when it was done, what happens once the last stage is
-/// done and what the task waits on, then its brief and its pull request. It opens beside the
-/// task's thread, or in a sheet where there is no room beside it.
+/// done and what the task waits on, then its brief, its pull request, and what its branch changed.
+/// It opens beside the task's thread, or in a sheet where there is no room beside it, on a stack of
+/// its own that a file's change and the branch's files are pushed on.
 struct PlanView: View {
   @Environment(AppModel.self) private var model
   let task: BoardTask
@@ -48,6 +49,8 @@ struct PlanView: View {
             Divider().overlay(MessageColor.line).padding(.vertical, 16)
             PullRequestSection(task: task, link: link, now: context.date)
           }
+          Divider().overlay(MessageColor.line).padding(.vertical, 16)
+          TaskFiles(task: task, now: context.date)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

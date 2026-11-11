@@ -97,6 +97,8 @@ public struct Project: Sendable, Hashable, Codable {
   public let onDone: OrUnknown<CompletionEffect>
   /// Set once the project is archived.
   public let archived: ProjectArchive?
+  /// The runner the project lives on, once its first turn has run there.
+  public let runner: String?
 
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -114,6 +116,7 @@ public struct Project: Sendable, Hashable, Codable {
       try container.decodeIfPresent(OrUnknown<CompletionEffect>.self, forKey: .onDone)
       ?? .known(.none)
     archived = try container.decodeIfPresent(ProjectArchive.self, forKey: .archived)
+    runner = try container.decodeIfPresent(String.self, forKey: .runner)
   }
 }
 
@@ -520,8 +523,28 @@ public struct MessageRef: Sendable, Hashable, Codable {
   }
 }
 
-/// A path on a task's branch as the board reads it from the project's runner: a file, with its
-/// bytes in base64, or a folder.
+/// The newest commit of a branch, which a read of it shows the tree at.
+public struct BranchCommit: Sendable, Hashable, Codable {
+  public let id: String
+  public let at: String
+  public let author: String
+}
+
+/// What a folder on a branch holds: a file, with its size, or a folder, whose size is nil.
+public struct BranchEntry: Sendable, Hashable, Codable {
+  public let name: String
+  public let kind: OrUnknown<BranchFile.Kind>
+  public let size: Int?
+
+  public init(name: String, kind: OrUnknown<BranchFile.Kind>, size: Int? = nil) {
+    self.name = name
+    self.kind = kind
+    self.size = size
+  }
+}
+
+/// A path on a task's branch or a project's default branch as the board reads it from the
+/// project's runner: a file, with its size and its bytes in base64, or a folder with its entries.
 public struct BranchFile: Sendable, Hashable, Codable {
   public enum Kind: String, Sendable, Hashable {
     case file, dir
@@ -529,13 +552,74 @@ public struct BranchFile: Sendable, Hashable, Codable {
 
   public let kind: OrUnknown<Kind>
   public let path: String
-  /// A file's bytes in base64; nil for a folder, or for a file too large for the board to send.
+  public let commit: BranchCommit
+  /// A file's size in bytes; nil for a folder.
+  public let size: Int?
+  /// A file's bytes in base64; nil for a folder, or for a file larger than the board sends.
   public let content: String?
+  /// A folder's entries, in the order the runner gave them; nil for a file.
+  public let entries: [BranchEntry]?
 
   /// A file's bytes, when the board sent them.
   public var data: Data? {
     content.flatMap { Data(base64Encoded: $0) }
   }
+}
+
+/// One file a task's branch changed since it left the project's default branch, with the newest
+/// commit on the branch that touched it.
+public struct BranchFileChange: Sendable, Hashable, Codable {
+  public enum Status: String, Sendable, Hashable {
+    case added, modified, deleted
+  }
+
+  /// Who made the newest commit that touched a file, and when.
+  public struct Touch: Sendable, Hashable, Codable {
+    public let author: String
+    public let at: String
+
+    public init(author: String, at: String) {
+      self.author = author
+      self.at = at
+    }
+  }
+
+  public let path: String
+  public let status: OrUnknown<Status>
+  /// Lines added and removed, or nil for a binary file.
+  public let added: Int?
+  public let removed: Int?
+  /// Nil when the file changed only through a merge of another branch.
+  public let lastChange: Touch?
+
+  public init(
+    path: String, status: OrUnknown<Status>, added: Int?, removed: Int?, lastChange: Touch? = nil
+  ) {
+    self.path = path
+    self.status = status
+    self.added = added
+    self.removed = removed
+    self.lastChange = lastChange
+  }
+}
+
+/// What a task's branch changed since it left the default branch, by path, as of its newest
+/// commit: the first files, as many as the board's `BRANCH_CHANGES_LIMIT`, and how many there were
+/// in all.
+public struct BranchChanges: Sendable, Hashable, Codable {
+  public let head: BranchCommit
+  public let files: [BranchFileChange]
+  public let total: Int
+}
+
+/// What a task's branch did to one file since it left the default branch: the patch's hunks
+/// without its header, or nil for a binary file, cut at a line's end past the board's limit.
+public struct BranchFileDiff: Sendable, Hashable, Codable {
+  public let head: BranchCommit
+  public let path: String
+  public let status: OrUnknown<BranchFileChange.Status>
+  public let patch: String?
+  public let truncated: Bool
 }
 
 /// A project's status page. `revision` counts its updates.

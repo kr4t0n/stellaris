@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/projects/demo/files/README.md"
+  },
+  "status": 404,
+  "body": {
+    "error": "NOT_FOUND",
+    "message": "main has no README.md"
+  }
+}

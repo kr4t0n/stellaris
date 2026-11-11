@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000000000000000000010/changes"
+  },
+  "status": 200,
+  "body": {
+    "head": {
+      "id": "fixture-commit",
+      "at": "2026-01-01T00:00:00.000Z",
+      "author": "eng-1"
+    },
+    "files": [
+      {
+        "path": "evidence/notes.md",
+        "status": "added",
+        "added": 3,
+        "removed": 0,
+        "lastChange": {
+          "author": "eng-1",
+          "at": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      {
+        "path": "evidence/plot.png",
+        "status": "added",
+        "added": null,
+        "removed": null,
+        "lastChange": {
+          "author": "eng-1",
+          "at": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    ],
+    "total": 2
+  }
+}

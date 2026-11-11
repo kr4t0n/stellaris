@@ -85,6 +85,8 @@ export interface TurnHostOptions {
   readonly maxTurns?: number | null | undefined;
   /** How long a warm session stays warm after its last turn. */
   readonly residentIdleMs?: number | undefined;
+  /** The scheduler's `channelPostWaitMs`, which the turn contract names; its default when left out. */
+  readonly channelPostWaitMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly log?: HostLog | undefined;
   /** Every event of a turn as it arrives, with the turn's scope and conversation there. */
@@ -185,6 +187,10 @@ function stuckNotice(stuck: StuckWork): string {
 const MAX_SIGNALS = 30;
 /** How many of the log's newest signal records a reader's prompt is drawn from. */
 const SIGNAL_READ = 500;
+/** How many of the posts its earlier turns read a home's new session is shown, newest kept. */
+const RECENT_POSTS = 10;
+/** How far back those posts go. */
+const RECENT_POSTS_MS = 7 * 24 * 3_600_000;
 /** The turn count that leads the summary of the scheduler's spend report (`reportCost`). */
 const REPORT_TURNS = /^(\d+) turn\(s\) completed /;
 
@@ -256,6 +262,7 @@ export class TurnHost {
   private readonly turnTimeoutMs: number | null;
   private readonly maxTurns: number | null;
   private readonly residentIdleMs: number;
+  private readonly channelPostWaitMs: number | undefined;
   private readonly now: () => Date;
   private readonly log: HostLog;
   private readonly onEvent: TurnHostOptions["onEvent"];
@@ -270,6 +277,7 @@ export class TurnHost {
       options.turnTimeoutMs === undefined ? DEFAULT_TURN_TIMEOUT_MS : options.turnTimeoutMs;
     this.maxTurns = options.maxTurns === undefined ? DEFAULT_MAX_TURNS : options.maxTurns;
     this.residentIdleMs = options.residentIdleMs ?? DEFAULT_RESIDENT_IDLE_MS;
+    this.channelPostWaitMs = options.channelPostWaitMs;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? SILENT;
     this.onEvent = options.onEvent;
@@ -399,6 +407,17 @@ export class TurnHost {
         : null;
     const messages = threadSoFar ?? digest.messages;
     const cursorAfter = threadSoFar?.at(-1)?.id ?? digest.cursor;
+    // A home that starts a new session after turns there, as after a reflection or a resume its CLI
+    // could not make, holds none of the posts those turns read: the newest come along as context,
+    // read already, and showing them moves no cursor.
+    const recentSince = new Date(this.now().getTime() - RECENT_POSTS_MS);
+    const recentlyRead =
+      part === undefined && newSession && lastTurn !== null
+        ? await this.board.readRecentlyRead(
+            { ...actor, scope: dispatch.project },
+            { since: recentSince, limit: RECENT_POSTS },
+          )
+        : [];
     // Stages are a task conversation's business: its own task's, and nothing in other conversations.
     const held =
       task === null
@@ -434,6 +453,9 @@ export class TurnHost {
         })),
       ],
       ...(onboarding === null ? {} : { onboarding }),
+      ...(this.channelPostWaitMs === undefined
+        ? {}
+        : { channelPostWaitMs: this.channelPostWaitMs }),
     };
     const instructions = renderInstructions(rendered);
     // Both CLIs keep the instructions a session began with when they resume it, whatever they are
@@ -541,6 +563,9 @@ export class TurnHost {
       project,
       lastTurn,
       failedCrons,
+      ...(recentlyRead.length === 0
+        ? {}
+        : { recentlyRead: { since: recentSince.toISOString(), messages: recentlyRead } }),
       ...(changedInstructions ? { changedInstructions: instructions } : {}),
       onboarding,
       afreshAfterReflection,

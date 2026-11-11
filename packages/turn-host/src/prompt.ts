@@ -71,6 +71,13 @@ export interface TurnPromptInput {
   readonly project?: Project | null | undefined;
   readonly lastTurn: TurnRecord | null;
   /**
+   * For a home's new session after turns there, the newest top-level posts here those turns read,
+   * posted since `since`, oldest first: what the session lacks. Absent when there are none.
+   */
+  readonly recentlyRead?:
+    | { readonly since: string; readonly messages: readonly Message[] }
+    | undefined;
+  /**
    * The citizen's crons in this conversation whose latest fire's turn failed with nothing catching
    * it up (`cronFailure`), as the board has them now, but those this turn carries.
    */
@@ -144,7 +151,7 @@ const REFLECTION_STEPS = [
   "- Consolidate memory/core.md: keep it to lessons that still hold, about sixty lines at most, and move detail worth keeping to memory/<topic>.md in your home, which the board's search covers for you alone.",
   '- Extract a skill: a procedure you have followed twice is a candidate, and one that makes a citizen better at a kind of work on any project goes to skills/<name>/SKILL.md, frontmatter with `name` and a one-line `description` and then the steps, with any script or reference it uses in the same folder. Propose it with kind "skill" when more than one citizen would use it and nothing in it is tied to one place; one only you use stays yours.',
   "- Refresh profile.md: one paragraph on what you do well and what to send your way; the roster the front desk routes with is built from it.",
-  "- Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel; a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
+  "- Share: how a codebase behaves goes in its AGENTS.md or README through a task like any change to the code, so propose it in that task's thread or the project channel, mentioning whoever is to act on it; a durable fact about this scope as a place (runners, access, flow, where results live) goes through write_knowledge; a norm the whole society should follow goes to the steward as a plain post in general.",
 ];
 
 /** The step a reflection takes where the session ends with it. */
@@ -158,6 +165,8 @@ const INSTRUCTIONS_CHANGED =
   "Your instructions changed since this conversation last received them. Between the tags below are the whole of them now: they replace the instructions this conversation began with and any earlier text like this, so where the two differ, follow these, and a rule missing from them no longer applies.";
 const MAX_BODY_CHARS = 1_500;
 const MAX_PROFILE_CHARS = 200;
+/** How much of a post read before a home's new session its line shows. */
+const MAX_LEAD_CHARS = 300;
 
 function clip(text: string): string {
   const trimmed = text.trim();
@@ -302,6 +311,26 @@ function rosterLine(member: Member): string {
       : `last turn ${member.lastTurnAt ?? ""} ${member.lastTurnOutcome}`.trim(),
   ].filter((part) => part.length > 0);
   return `- ${member.name}: ${parts.join("; ")}. Profile: ${profileLine(member.profile)}`;
+}
+
+/**
+ * A post's first paragraph that is not a heading, on one line, cut at `MAX_LEAD_CHARS` and never
+ * between the two halves of a character.
+ */
+function leadOf(body: string): string {
+  const blocks = body
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+  const lead = (blocks.find((block) => !/^#{1,6}(\s|$)/.test(block)) ?? blocks[0] ?? "").replaceAll(
+    /\s+/g,
+    " ",
+  );
+  if (lead.length <= MAX_LEAD_CHARS) {
+    return lead;
+  }
+  const cut = lead.slice(0, MAX_LEAD_CHARS - 1);
+  return `${(/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut).trimEnd()}…`;
 }
 
 /** Messages as the digest shows them: where and when each was posted, by whom, and its body. */
@@ -725,6 +754,21 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
           : `open to ${stage === undefined ? "anyone" : assignee(stage)}`;
       lines.push(planLine(task, whose));
     }
+  }
+
+  const recent = input.recentlyRead;
+  if (recent !== undefined && recent.messages.length > 0) {
+    lines.push(
+      "",
+      `## Posts read here before this session (${recent.messages.length})`,
+      "",
+      `This session is new, so it holds none of the posts your earlier turns here read. These are the newest of them, posted since ${recent.since}, oldest first, each cut to its first paragraph: context, read already, asking nothing new of you. The board's files hold each whole by its id.`,
+      "",
+      ...recent.messages.map(
+        (message) =>
+          `- [${message.ts}] ${message.channel} from @${message.author} (message ${message.id}): ${leadOf(message.body)}`,
+      ),
+    );
   }
 
   lines.push(

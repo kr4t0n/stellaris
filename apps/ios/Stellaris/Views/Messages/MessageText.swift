@@ -128,22 +128,16 @@ enum MessageText {
   }
 
   /// The address a link carries in the text: the board's own path for what is on the board, which
-  /// the conversation opens in Chat or in the board's page, and an address on the web as written.
+  /// the app opens in Chat, in a file's view, or in the board's page, and an address on the web as
+  /// written.
   static func url(for link: MessageLink) -> URL? {
     switch link {
     case .entity(let entity):
       return URL(string: entityHref(entity))
     case .file(let source, let path, let line):
-      // The web's file view: `/task/<id>/files/<path>`, or `/p/<slug>/files/<path>` for a project.
-      let place =
-        switch source {
-        case .task(let id): "/task/\(id)/files"
-        case .project(let slug): "/p/\(slug)/files"
-        }
-      let parts = path.split(separator: "/").map {
-        "/" + ($0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0))
-      }
-      return URL(string: place + parts.joined() + (line.map { "?line=\($0)" } ?? ""))
+      // The web's file view: `/task/<id>/files/<path>`, or `/p/<slug>/files/<path>` for a project,
+      // which the app opens itself.
+      return URL(string: FilePlace(source: source, path: path, line: line).href)
     case .web(let href):
       if href.hasPrefix("#") {
         return nil

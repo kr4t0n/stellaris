@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { BoardEvent } from "@stellaris/shared";
@@ -103,6 +103,62 @@ describe("EventLog", () => {
     );
     expect(ids(await log.readSince(first ?? null))).toEqual([late]);
     expect(await log.readSince(late)).toEqual([]);
+  });
+
+  it("reads events by id from their own lines, in the order asked, wherever they lie", async () => {
+    // Lines near one another, a gap wider than a piece's, and more than a piece's size in all.
+    const sizes = [10, 10, 20_000, 10, 300_000, 300_000, 300_000, 300_000, 10, 40_000, 10];
+    const written: BoardEvent[] = [];
+    for (const size of sizes) {
+      written.push(await log.append("message.posted", "eng-1", { body: "x".repeat(size) }));
+    }
+    // Another writer's line, whose id sorts before every line above it.
+    const other = {
+      id: "01M4P000000000000000000001",
+      ts: "2026-10-12T07:00:01.000Z",
+      type: "paused.changed",
+      actor: "user",
+      payload: { paused: false },
+    };
+    await appendFile(file, `${JSON.stringify(other)}\n`, "utf8");
+    // A line still being written.
+    const late = nextId();
+    await appendFile(file, `{"id":"${late}","ts":"2026-10-12T07:00:02.000Z"`, "utf8");
+    const all = await log.readSince(null, Number.MAX_SAFE_INTEGER);
+    expect(ids(all)).toEqual([...ids(written), other.id]);
+    const asked = [
+      ...ids(written).toReversed(),
+      other.id,
+      written[3]?.id ?? "",
+      "01M4Q000000000000000099999",
+      late,
+    ];
+    const read = await log.readIds(asked);
+    const byId = new Map(all.map((event) => [event.id, event]));
+    expect(read).toEqual(asked.map((id) => byId.get(id) ?? null));
+    expect(read.slice(-2)).toEqual([null, null]);
+    expect(await log.readIds([])).toEqual([]);
+  });
+
+  it("reads as none a line that no longer holds the event asked for", async () => {
+    const written = ids(await append(3));
+    expect(ids((await log.readIds(written)).filter((event) => event !== null))).toEqual(written);
+    // The same bytes in place, but the middle line now another event's.
+    const text = await readFile(file, "utf8");
+    const swapped = text.replace(written[1] ?? "", "01M4Q000000000000000077777");
+    expect(swapped.length).toBe(text.length);
+    await writeFile(file, swapped, { flag: "r+" });
+    const read = await log.readIds(written);
+    expect(read.map((event) => event?.id ?? null)).toEqual([written[0], null, written[2]]);
+    // A log cut short, then replaced.
+    await writeFile(file, text.slice(0, text.indexOf("\n") + 1), { flag: "w" });
+    expect((await log.readIds(written)).map((event) => event?.id ?? null)).toEqual([
+      written[0],
+      null,
+      null,
+    ]);
+    await rm(file);
+    expect(await log.readIds(written)).toEqual([null, null, null]);
   });
 
   it("tells each listener of every append until it stops listening", async () => {

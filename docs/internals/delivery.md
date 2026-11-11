@@ -1,6 +1,6 @@
 # Building, releasing, and publishing
 
-The toolchain and its rules, what CI checks, how the images, the npm packages, and the chart are built and published, and how commits reach `dev` and releases reach `main`. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail. Deploying a society is in the [README](../../README.md#deployment) and the [chart's README](../../helm/stellaris/README.md).
+The toolchain and its rules, what CI checks, how the images, the npm packages, and the chart are built and published, and how commits reach `dev` and releases reach `main`. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail. Deploying a society is in [docs/guide/deployment.md](../guide/deployment.md) and the [chart's README](../../helm/stellaris/README.md).
 
 ## The toolchain
 
@@ -42,7 +42,7 @@ Running `pnpm format` touches more than TypeScript; after it runs, exact-match e
 
 ## CI
 
-`ci.yml` runs on every pull request and on every push to `main` and `dev`. Its `check` job, the one the branch rules require, scans the whole history for secrets with a pinned gitleaks whose archive it checks against its sha256, then installs with a frozen lockfile and runs `pnpm build`, `pnpm build:web`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm test:e2e`, the same chain `pnpm check` runs locally without the scan. The `images`, `npm`, and `chart` jobs run beside it, build what a release ships, and push nothing; they are not required. `ios.yml` runs the iOS client's tests on macOS, on pull requests and pushes that change `apps/ios`, and is not required either ([ios.md](ios.md#iosyml-runs-on-macos-and-no-rule-requires-it)). `publish.yml`, `npm-publish.yml`, and `helm-publish.yml` run on pushes to `main`, the first two also on `v*` tags, and all three by hand, never on a pull request, so none of their checks can be required of one.
+`ci.yml` runs on every pull request and on every push to `main` and `dev`. Its `check` job, the one the branch rules require, scans the whole history for secrets with a pinned gitleaks whose archive it checks against its sha256, then installs with a frozen lockfile and runs `pnpm build`, `pnpm build:web`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm test:e2e`, the same chain `pnpm check` runs locally without the scan. `pnpm lint` ends with `scripts/docs/check-links.mjs`, which fails on a relative link in any markdown file git knows to a file that isn't there, or to an anchor its target lacks, reading headings' anchors as GitHub makes them; a heading whose anchor it gets wrong goes into `scripts/docs/github-anchors.json` with the anchor `gh api markdown -f mode=markdown` gives it. The `images`, `npm`, and `chart` jobs run beside it, build what a release ships, and push nothing; they are not required. `ios.yml` runs the iOS client's tests on macOS, on pull requests and pushes that change `apps/ios`, and is not required either ([ios.md](ios.md#iosyml-runs-on-macos-and-no-rule-requires-it)). `publish.yml`, `npm-publish.yml`, and `helm-publish.yml` run on pushes to `main`, the first two also on `v*` tags, and all three by hand, never on a pull request, so none of their checks can be required of one.
 
 ## The commit hook
 

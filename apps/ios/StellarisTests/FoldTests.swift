@@ -62,6 +62,7 @@ final class FoldTests: XCTestCase {
     defer { window.close() }
     try await window.settle()
     var messages = try expectTheChat("folded", in: window, model, after: nil)
+    try await expectTheAnchorShown("folded", in: window, model)
     XCTAssertNil(model.sky.lastFrame, "the sky drew on the outer display")
     try window.keep("fold-outer", in: self)
 
@@ -71,6 +72,7 @@ final class FoldTests: XCTestCase {
     try window.keep("fold-open-landscape", in: self)
     XCTAssertNotNil(model.sky.lastFrame, "no sky beside the chat on the inner display")
     messages = try expectTheChat("opened", in: window, model, after: messages)
+    try await expectTheAnchorShown("opened", in: window, model)
     XCTAssertLessThan(model.sky.viewport.width, Double(landscape.width) * 0.6)
     XCTAssertEqual(model.sky.viewport.height, Double(landscape.height), accuracy: 1)
     let beside = try await window.until {
@@ -89,6 +91,7 @@ final class FoldTests: XCTestCase {
     try await window.settle()
     try window.keep("fold-open-portrait", in: self)
     messages = try expectTheChat("turned", in: window, model, after: messages)
+    try await expectTheAnchorShown("turned", in: window, model)
     XCTAssertEqual(model.sky.viewport.width, Double(portrait.width), accuracy: 1)
     XCTAssertLessThan(model.sky.viewport.height, Double(portrait.height) * 0.6)
     let below = try await window.until {
@@ -109,6 +112,7 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(
       CountedScheduler.asked.withLock { $0 }, folded, "the sky asks while the phone is folded")
     messages = try expectTheChat("folded again", in: window, model, after: messages)
+    try await expectTheAnchorShown("folded again", in: window, model)
 
     // Open again: the sky comes back with the camera it had.
     window.resize(to: landscape)
@@ -117,6 +121,7 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(model.sky.scene.camera.mode, .manual, "the sky lost its camera")
     XCTAssertEqual(model.sky.scene.camera.target.scale, scale, accuracy: 1e-9)
     _ = try expectTheChat("opened again", in: window, model, after: messages)
+    try await expectTheAnchorShown("opened again", in: window, model)
   }
 
   /// The New thread sheet, open over the chat, stays open with its text as the phone opens, turns,
@@ -216,6 +221,80 @@ final class FoldTests: XCTestCase {
     }
   }
 
+  /// A file's change, pushed on the plan's own stack, stays on it as the phone opens, turns, and
+  /// folds: in the plan's sheet on the outer display and beside the sky in landscape, and in its
+  /// column beside the thread in portrait, where the change takes the column's stack.
+  @MainActor func testAChangeStaysOpenThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let task = "00000000000000000000000010"
+    let change = BoardPlace.change(task: task, path: "src/export/view.ts")
+    model.open(.thread(task))
+    model.inspecting = task
+    model.push(change, onPlanOf: task)
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    for (step, size, sheet) in [
+      ("folded", outer, true), ("opened", landscape, true), ("turned", portrait, false),
+      ("folded again", outer, true),
+    ] {
+      window.resize(to: size)
+      try await window.settle()
+      let presented = try await window.until { window.presentsSheet == sheet }
+      let shown = try await window.until { window.barTitles().contains("view.ts") }
+      try window.keep("fold-change-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertTrue(presented, "\(step): the plan isn't \(sheet ? "in a sheet" : "beside the thread")")
+      XCTAssertEqual(model.inspecting, task, "\(step): the plan closed")
+      XCTAssertEqual(model.planPaths[task], [change], "\(step): the plan lost its change")
+      XCTAssertTrue(shown, "\(step): no bar shows the change: \(window.barTitles())")
+      if !sheet {
+        // The change's scroll view, in the column at the chat's trailing side.
+        let column = try await window.until {
+          window.scrollFrames().contains { $0.minX >= size.width / 2 - 40 && $0.width >= 240 }
+        }
+        XCTAssertTrue(column, "\(step): no column beside the thread: \(window.scrollFrames())")
+      }
+    }
+  }
+
+  /// Chat's file sheet, with a folder pushed in it, stays open through the poses with both, and a
+  /// file and a folder on Board's own stack stay there too, since both stacks live in the model.
+  @MainActor func testTheFilesStayOpenThroughTheFold() async throws {
+    continueAfterFailure = false
+    let model = try await signedIn()
+    let root = FilePlace(source: .project("demo"), path: "")
+    let folder = FilePlace(source: .project("demo"), path: "src")
+    model.browse(root)
+    model.browsing?.path = [.files(folder)]
+    let window = try TestWindow(
+      RootView().environment(model).environment(\.scenePhase, .active), size: outer)
+    defer { window.close() }
+    let poses = [
+      ("folded", outer), ("opened", landscape), ("turned", portrait), ("folded again", outer),
+    ]
+    for (step, size) in poses {
+      window.resize(to: size)
+      try await window.settle()
+      let presented = try await window.until { window.presentsSheet }
+      try window.keep("fold-files-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertTrue(presented, "\(step): the file sheet closed")
+      XCTAssertEqual(
+        model.browsing, FileBrowse(root: root, path: [.files(folder)]),
+        "\(step): the file sheet lost its place")
+    }
+    model.browsing = nil
+    model.tab = .board
+    model.boardPath = [.files(root), .files(folder)]
+    for (step, size) in poses {
+      window.resize(to: size)
+      try await window.settle()
+      try window.keep("fold-board-files-\(step.replacingOccurrences(of: " ", with: "-"))", in: self)
+      XCTAssertEqual(
+        model.boardPath, [.files(root), .files(folder)], "\(step): Board lost its place")
+    }
+  }
+
   /// Chat still shows #general with its draft and its anchor, in the scroll view it had before, so
   /// the split built nothing again.
   @MainActor private func expectTheChat(
@@ -234,6 +313,20 @@ final class FoldTests: XCTestCase {
         messages, previous, "\(step): the conversation was built again", line: line)
     }
     return messages
+  }
+
+  /// The message the scroll is anchored at is on screen, at least half of it, in the
+  /// conversation's view above the draft, within the five seconds a later frame has to bring it
+  /// back: the anchor saved in the model says only where the view should be. The foot's row is
+  /// never reported whole, even where it shows all but its last points.
+  @MainActor private func expectTheAnchorShown(
+    _ step: String, in window: TestWindow, _ model: AppModel, line: UInt = #line
+  ) async throws {
+    let shown = try await window.until { model.shownRows[.general]?.contains(anchored) == true }
+    XCTAssertTrue(
+      shown,
+      "\(step): the anchored message isn't on screen above the draft; the view shows \(model.shownRows[.general] ?? [])",
+      line: line)
   }
 
   /// Signed in to the fake board, with the scheduler counted and asked every fifth of a second.
@@ -305,6 +398,17 @@ final class FoldTests: XCTestCase {
       .map { frame(of: $0) }
   }
 
+  /// The titles the window's navigation bars, a presented sheet's included, show at the top.
+  func barTitles() -> [String] {
+    var bars = views(UINavigationBar.self)
+    var presented = host.presentedViewController
+    while let controller = presented {
+      bars += views(UINavigationBar.self, in: controller.view)
+      presented = controller.presentedViewController
+    }
+    return bars.compactMap { $0.topItem?.title }
+  }
+
   /// Whether the window presents a sheet over its root.
   var presentsSheet: Bool {
     host.presentedViewController != nil
@@ -336,9 +440,9 @@ final class FoldTests: XCTestCase {
     try Snapshot.keep(image, named: name, in: test)
   }
 
-  private func views<T: UIView>(_ type: T.Type) -> [T] {
+  private func views<T: UIView>(_ type: T.Type, in root: UIView? = nil) -> [T] {
     var found: [T] = []
-    var queue: [UIView] = [window]
+    var queue: [UIView] = [root ?? window]
     while let view = queue.popLast() {
       if let match = view as? T {
         found.append(match)

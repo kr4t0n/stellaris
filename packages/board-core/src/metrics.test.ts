@@ -2,9 +2,11 @@ import {
   MetricsSchema,
   TaskFrontmatterSchema,
   type BoardEvent,
+  type Metrics,
   type Task,
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
+import { MetricsIndex } from "./metrics-index.js";
 import { computeMetrics, type MetricsInput } from "./metrics.js";
 
 const A = "01M3S0000000000000000000AA";
@@ -111,9 +113,20 @@ function input(events: BoardEvent[], extra: Partial<MetricsInput> = {}): Metrics
   };
 }
 
+/** The measures of an input, which the index, fed the same log, answers alike. */
+function measured(given: MetricsInput): Metrics {
+  const metrics = computeMetrics(given);
+  const index = new MetricsIndex((turnId) => given.actions.get(turnId));
+  for (const logged of given.events) {
+    index.add(logged);
+  }
+  expect(index.answer(given)).toStrictEqual(metrics);
+  return metrics;
+}
+
 describe("metrics", () => {
   it("splits heartbeats by what each woke for, and keeps those recorded without it as plain", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           turn("10-01T08:00:00", "eng-1", "heartbeat", "T1", "held"),
@@ -148,7 +161,7 @@ describe("metrics", () => {
   });
 
   it("counts turns that changed nothing, leaving reflections out and turns without transcripts apart", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           turn("09-29T10:00:00", "rev-1", "heartbeat", "T0"),
@@ -190,7 +203,7 @@ describe("metrics", () => {
       event(ts, "message.posted", actor, { channel: "lab/general", thread, mentions: [] });
     const moved = (ts: string, actor: string, id: string): BoardEvent =>
       event(ts, "task.moved", actor, { taskId: id, project: "lab", from: "s2", to: "s1" });
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         moved("09-28T10:00:00", "rev-1", A),
         post("09-28T10:00:00", "eng-1", A),
@@ -225,7 +238,7 @@ describe("metrics", () => {
   });
 
   it("times a mention to the turn it woke, in the same conversation and scope", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "eng-1", "lab/general"),
         // A home turn elsewhere, and a turn in a thread, do not answer a channel mention in lab.
@@ -256,7 +269,7 @@ describe("metrics", () => {
   });
 
   it("times a mention in a channel beside general to that channel's turn, not the home's", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "eng-1", "lab/release"),
         start("10-01T10:00:05", "eng-1", "lab", undefined, "heartbeat"),
@@ -276,7 +289,7 @@ describe("metrics", () => {
   });
 
   it("times a mention outside the citizen's projects to that project's turn, not another's or home's", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           // concierge-1 is in no project: a mention in lab's channels is lab's conversation's to answer.
@@ -301,7 +314,7 @@ describe("metrics", () => {
   });
 
   it("answers a mention in a project its citizen has since left, as an archive leaves it", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([
         mention("10-01T10:00:00", "rev-1", "old/general", A),
         start("10-01T10:00:20", "rev-1", "old"),
@@ -310,8 +323,35 @@ describe("metrics", () => {
     expect(metrics.latency).toMatchObject({ mentions: 1, unanswered: 0, medianMs: 20_000 });
   });
 
+  it("lets a mention wait a week, after which no turn answers it and it counts as unanswered", () => {
+    const metrics = measured(
+      input(
+        [
+          mention("09-20T10:00:00", "eng-1", "lab/general", A),
+          mention("09-20T10:00:00", "rev-1", "lab/general", A),
+          // A week to the second still answers; a second more does not.
+          start("09-27T10:00:00", "eng-1", "lab", A),
+          start("09-27T10:00:01", "rev-1", "lab", A),
+          // A mention a week before a moment the log has passed, as the clock stepped back that
+          // far, never waits, whatever turn follows it.
+          start("10-01T09:00:00", "rev-1", "society"),
+          mention("09-23T08:00:00", "eng-1", "lab/general", B),
+          start("09-23T08:00:05", "eng-1", "lab", B),
+        ],
+        { window: "all" },
+      ),
+    );
+    expect(metrics.latency).toEqual({
+      mentions: 1,
+      unanswered: 2,
+      medianMs: 604_800_000,
+      slowestMs: 604_800_000,
+      byAgent: [{ agent: "eng-1", mentions: 1, medianMs: 604_800_000, slowestMs: 604_800_000 }],
+    });
+  });
+
   it("counts the user's decisions by day: proposals, answers to questions, and stages", () => {
-    const metrics = computeMetrics(
+    const metrics = measured(
       input(
         [
           event("09-30T09:00:00", "proposal.decided", "user", { proposalId: A }),
@@ -356,7 +396,7 @@ describe("metrics", () => {
         project: "lab",
         value: 1,
       });
-    const metrics = computeMetrics(
+    const metrics = measured(
       input([signal("10-01T09:00:00"), signal("10-01T11:00:00")], {
         activeSignals: new Set([`blocked_capability:${C}`]),
       }),

@@ -52,7 +52,10 @@ import Testing
     case "society":
       #expect(try check(fixture, BoardAPI.society()).channels.contains("general"))
     case "projects":
-      #expect(try check(fixture, BoardAPI.projects()).map(\.slug) == ["demo"])
+      let projects = try check(fixture, BoardAPI.projects())
+      #expect(projects.map(\.slug) == ["demo"])
+      // Read once a turn has run there, so it names the runner the project lives on.
+      #expect(projects.first?.runner == "runner-1")
     case "channels":
       let channels = try check(fixture, BoardAPI.channels())
       #expect(channels.contains { $0.ref == "demo/general" && $0.project == "demo" })
@@ -177,6 +180,73 @@ import Testing
       try check(fixture, BoardAPI.taskFile(task.id, path: file.path))
       #expect(file.kind == .known(.file))
       #expect(file.data?.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47]))
+      #expect(file.size == 70 && file.commit.author == "eng-1" && file.entries == nil)
+    case "task-files":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let root = try check(fixture, BoardAPI.taskFile(task.id, path: ""))
+      #expect(root.kind == .known(.dir) && root.path.isEmpty && root.size == nil)
+      #expect(root.entries == [BranchEntry(name: "evidence", kind: .known(.dir))])
+    case "task-folder":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let folder = try check(fixture, BoardAPI.branchFile(.task(task.id), path: "evidence"))
+      #expect(folder.path == "evidence" && folder.commit.id == "fixture-commit")
+      #expect(
+        entriesInOrder(folder.entries ?? []) == [
+          BranchEntry(name: "notes.md", kind: .known(.file), size: 58),
+          BranchEntry(name: "plot.png", kind: .known(.file), size: 70),
+        ])
+    case "task-text-file":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let file = try check(fixture, BoardAPI.taskFile(task.id, path: "evidence/notes.md"))
+      #expect(file.size == 58)
+      #expect(
+        viewOf(file.path, file.data ?? Data())
+          == .markdown("# Notes\n\nThe [plot](plot.png) shows the export's timings.\n"))
+    case "project-files":
+      let root = try check(fixture, BoardAPI.projectFile("demo", path: ""))
+      // The project's default branch as its runner's first commit left it.
+      #expect(root.kind == .known(.dir) && root.entries == [])
+      #expect(root.commit.author == "stellaris-board")
+    case "error-file-missing":
+      let error = try refusal(fixture, BoardAPI.projectFile("demo", path: "README.md").endpoint)
+      #expect(error.status == 404 && error.code == "NOT_FOUND")
+    case "error-runner-away":
+      let error = try refusal(fixture, BoardAPI.projectFile("demo", path: "").endpoint)
+      #expect(error.status == 503 && error.code == "RUNNER_AWAY")
+    case "task-changes":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let changes = try check(fixture, BoardAPI.taskChanges(task.id))
+      #expect(changes.head.id == "fixture-commit" && changes.total == 2)
+      let touch = BranchFileChange.Touch(author: "eng-1", at: "2026-01-01T00:00:00.000Z")
+      #expect(
+        changes.files == [
+          BranchFileChange(
+            path: "evidence/notes.md", status: .known(.added), added: 3, removed: 0,
+            lastChange: touch),
+          BranchFileChange(
+            path: "evidence/plot.png", status: .known(.added), added: nil, removed: nil,
+            lastChange: touch),
+        ])
+      #expect(changes.files.map(changeLabel) == ["new · +3", "new · binary"])
+    case "task-diff":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let diff = try check(fixture, BoardAPI.taskDiff(task.id, path: "evidence/notes.md"))
+      #expect(diff.status == .known(.added) && !diff.truncated)
+      #expect(
+        patchRows(diff.patch ?? "").map(\.line) == [nil, 1, 2, 3],
+        "the notes' three lines, numbered under their hunk")
+    case "task-diff-binary":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let diff = try check(fixture, BoardAPI.taskDiff(task.id, path: "evidence/plot.png"))
+      #expect(diff.path == "evidence/plot.png" && diff.patch == nil && !diff.truncated)
+    case "error-changes-missing":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let error = try refusal(fixture, BoardAPI.taskChanges(task.id).endpoint)
+      #expect(error.status == 404 && error.code == "NOT_FOUND")
+    case "error-changes-away":
+      let task = try Fixture("task").decode(BoardTask.self)
+      let error = try refusal(fixture, BoardAPI.taskChanges(task.id).endpoint)
+      #expect(error.status == 503 && error.code == "RUNNER_AWAY")
     case "turn-stream":
       expectEndpoint(fixture, BoardAPI.turnStream(since: 0))
       #expect(fixture.status == 200)
@@ -260,7 +330,9 @@ import Testing
     "post-message", "upload-image", "error-upload-image",
     "post-message-thread", "open-thread", "advance-task", "approve", "reject",
     "error-unauthorized", "error-not-found", "error-refused", "event-stream", "members",
-    "messages", "scheduler", "task-file", "turn-stream",
+    "messages", "scheduler", "task-file", "turn-stream", "task-files", "task-folder",
+    "task-text-file", "project-files", "error-file-missing", "error-runner-away", "task-changes",
+    "task-diff", "task-diff-binary", "error-changes-missing", "error-changes-away",
   ]
 
   @discardableResult

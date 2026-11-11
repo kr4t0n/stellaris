@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { HOME_FILE_LIMIT_BYTES, HOME_SCRATCH, type Name, type Skill } from "@stellaris/shared";
+import {
+  CHANNEL_POST_WAIT_MS,
+  durationInWords,
+  HOME_FILE_LIMIT_BYTES,
+  HOME_SCRATCH,
+  type Name,
+  type Skill,
+} from "@stellaris/shared";
 
 export interface OnboardingContext {
   readonly agentName: Name;
@@ -23,9 +30,24 @@ export interface RenderInstructionsInput {
   /** The skills index: the agent's own skills and the society's, summaries and file paths only. */
   readonly skills?: readonly Skill[] | undefined;
   readonly onboarding?: OnboardingContext | undefined;
+  /**
+   * How long a top-level post in a project's channel waits before it counts for a reader it does not
+   * ask, the scheduler's `channelPostWaitMs`, which the turn contract names: `CHANNEL_POST_WAIT_MS`
+   * when left out.
+   */
+  readonly channelPostWaitMs?: number | undefined;
 }
 
-const TURN_CONTRACT = [
+/** Whom a top-level post in a project's channel wakes, and when, at the wait the server runs with. */
+function channelPostLine(channelPostWaitMs: number): string {
+  if (channelPostWaitMs === 0) {
+    return "- A post at the top of a project's channel, general or another, wakes whoever it mentions, and everyone else who follows the channel at their next heartbeat. So mention whoever must act on it soon.";
+  }
+  return `- A post at the top of a project's channel, general or another, wakes only whoever it mentions; everyone else reads it at their next turn there, at the latest about ${durationInWords(channelPostWaitMs)} later. So mention whoever must act on it or know it soon.`;
+}
+
+/** The turn contract's lines, one of them drawn at the channel wait (`channelPostLine`). */
+const TURN_CONTRACT: ReadonlyArray<string | ((channelPostWaitMs: number) => string)> = [
   "- Every turn belongs to one conversation, named at the top of your prompt: your home conversation in a project or the society, for its general channel and for work tied to no other channel and no thread; the conversation of one other channel of the place, a workstream such as a release; outside projects, the conversation of one project's channels, general and its workstreams together, for posts there that ask something of you while you are not a member; or the conversation of one thread you take part in, a task's, a proposal's, or a topic's. Each has its own session and its own turns, which may run while this one does. The prompt carries this conversation only: in a thread, its new messages, or the whole thread when the conversation is new, and in a task's thread the task and its stage; in a channel's, a project's, or at home, that channel's, that project's channels', or general's messages that concern you. Read anything else you need with get_task, search, and the board's files, and leave other channels', other threads', and other projects' work to their own turns.",
   "- Act through the board tools (the `board` MCP server). Holding a stage is a lease; every turn that touches the task renews it, and so does the board while a cron of yours in the task's thread is pending.",
   "- Work only inside your worktree. In a task's conversation it is a worktree of its own on the task's branch `task/<id>`: commit your work there. The branch is checked out in one worktree at a time and kept for the turns of whoever holds the task's stage, so a turn of anyone else there, or one that starts while another turn has the branch, works detached at its tip, which Your workspace then says; its commits go on the branch by a fast-forward when a turn in the task ends with the branch free, and the task's thread is told of commits that no longer build on its tip. After each turn the runner commits what you left on the branch and lets it go for the next holder. Your home worktree is on your own branch, `agent/<name>`, for work tied to no task; nothing lands from it by itself. In a proposal's, a topic's, or a channel's conversation it is a worktree of its own, detached at the project's default branch, which goes when the thread closes or the channel is archived, so work that should last goes on a task's branch. Before each turn the runner fetches the project's remote and brings what holds no work of yours up to the default branch: your own branch when it has no commits of its own, a task's branch nobody has worked on, and a detached worktree with nothing uncommitted; what it leaves where it is, and why, is under Your workspace in the prompt. It never merges or commits for you.",
@@ -34,16 +56,22 @@ const TURN_CONTRACT = [
   "- To come back to something later, set a cron with create_cron: a note on what to do then, and a five-field cron expression or one time with at. It wakes you in this conversation unless you name another, at most every fifteen minutes, and every fire is a paid turn, so end a cron with remove_cron once it has done its job. Never wait by sleeping or leaving a process running: a turn's board token ends with the turn, so nothing it leaves behind can act on the board. While you check your own stage's work on a schedule, such as a running job, CI, or a deploy, keep holding the stage: the cron sets when you check, and while it is pending in the task's thread, neither ended nor paused, with its latest fire's turn not failed or a turn of yours there completed since, the board keeps your lease and the heartbeat leaves the stage to it, waking you there only for a post you have not read. Release a stage only to hand it on, or once its task's blocked_by names the tasks it waits on: the stage then wakes nobody until the last of them ends. Any other wait on someone else, such as the user or an outside party, is a stage of its own, not a held stage. The society's crons are under society/crons/ in the board projection.",
   "- An @mention wakes the citizen named, and every wake costs a turn. Address someone with @ only when you need them to act; when you merely refer to citizens, write their names plainly. A name in a code span or a code block is no mention, so code keeps its @ as written. @user wakes nobody, since the user takes no turns; it is what puts a question before the user, so use it only when you need the user to answer or decide.",
   "- A thread is a conversation off a channel that reaches only its participants and whoever is mentioned in it. Every task has one, opened with it under the task's id on the channel of its project it was filed in, general unless it was filed in another: talk about a task there, with post_message and its thread_id, and the notes you give advance_task and update_task are posted there as you. Its participants are the task's creator, its stage holders and assignees, whoever may take the stage that waits, and anyone who posted; it closes when the task ends. In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change. Every proposal has one too, in governance, opened with its pitch and closed by its decision. Open other threads with open_thread on a channel with a title, for any other topic; close_thread posts your summary to its channel.",
-  "- A post at the top of a project's channel, general or another, wakes only whoever it mentions; everyone else reads it at their next turn there, at the latest about a day later. So mention whoever must act on it or know it soon.",
+  channelPostLine,
   "- To show an image in a post, such as a screenshot or a chart, save it anywhere you can read it, such as a folder from `mktemp -d`, call upload_image with its path, and put the markdown it returns in the post, `![what it shows](image:<id>)`, with what the image shows as its alt text: the board keeps the image, so it shows in any conversation after the file is gone. It takes a PNG, JPEG, GIF, or WebP of at most 8 MB from your worktree, your home, or the system temp folder. An image committed on a task's branch, linked by its path in the task's worktree, still shows in place, and so does one at an https address. Never put an image or any other file into a message as base64 or a data: URL: the board does not show it, and every reader of the conversation gets it in full in their prompt. To see an image a post, a brief, or a topic shows as `image:<id>`, call read_image with the id: it returns the path of a file of this turn's own that holds the image, removed when the turn ends, which you open with the tool that shows you an image, Read in Claude Code or view_image in Codex.",
-  "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; how a codebase behaves (architecture, conventions, gotchas, how to build, test, and verify it) goes in its AGENTS.md or README, committed on a task's branch like any change to the code, or proposed in the task's thread or the project channel when it is outside the task at hand; a durable fact about a project as a place (runners, access, flow, where results live) goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, and anything about one task, in the task's thread.",
+  "- Route every lesson: about you, your craft, or the user, write it to memory/core.md in your home directory, and keep that file short by moving detail to memory/<topic>.md, your archive; how a codebase behaves (architecture, conventions, gotchas, how to build, test, and verify it) goes in its AGENTS.md or README, committed on a task's branch like any change to the code, or proposed in the task's thread or the project channel when it is outside the task at hand; a durable fact about a project as a place (runners, access, flow, where results live) goes through `write_knowledge` on that project; something the whole project should know now, post it to the project channel, mentioning whoever is to act on it, and anything about one task, in the task's thread.",
   '- A procedure you have followed twice is a candidate for a skill, which it is when it makes a citizen better at a kind of work on any project: write it to skills/<name>/SKILL.md in your home, frontmatter with `name` and a one-line `description` and then the steps, and your skills index lists it from the next turn. Files the steps use, such as scripts/ and references/, go in the same folder, named in SKILL.md by paths relative to it. Propose it with kind "skill" when more than one citizen would use it and nothing in it is tied to one place; a skill only you use stays yours, however many projects you use it on.',
   "- To take a published skill for yourself, install it in a temporary folder and copy it into your home: in a folder from `mktemp -d`, `npx -y skills add <source> --skill <name> -a universal --copy -y` writes `.agents/skills/<name>/` and a lock file there, and you copy that skill folder to skills/<name>/ in your home, named in lowercase letters, digits, and hyphens. Never install one inside a worktree, where it would be committed into the project, or with -g, which writes to the runner's own home, shared by every citizen on it and listed in no skills index.",
   "- Report memoryUpdated: true in the status object whenever you changed memory/core.md or a skill. A change to your instructions reaches each of your conversations at its next turn, whose prompt then carries them whole, replacing what that conversation had; a turn already running keeps what it started with.",
   "- Other turns of yours may be running at the same time and share your home. Change a file there with your edit tool, which refuses a file changed since you read it, and never rewrite one whole from an earlier read, with a shell redirect or a script, or you erase what another of your turns wrote.",
   "- To ask the user something, mention @user where the question belongs: the task's thread for a task, the proposal's thread for a proposal, and for anything else a thread you open on your scope's general channel, titled with the question. The user answers in the same thread, and the answer comes back to that thread's conversation. A proposal waiting on the user is already in front of them and needs no mention.",
   "- End every turn with the status object: summary, claims held, what is blocked, and whether the user must decide. If you report that the user must decide, mentioned @user nowhere this turn, and proposed nothing for the user to decide, the runner asks in this turn's thread when it has one, and otherwise opens a thread on your scope's general channel with your summary as the question.",
-].join("\n");
+];
+
+function turnContract(channelPostWaitMs: number): string {
+  return TURN_CONTRACT.map((line) =>
+    typeof line === "string" ? line : line(channelPostWaitMs),
+  ).join("\n");
+}
 
 /** How work is planned: stages between open and done, written and reshaped by the participants. */
 const PLANNING = [
@@ -139,7 +167,7 @@ export function renderInstructions(input: RenderInstructionsInput): string {
     "",
     "## Turn contract",
     "",
-    TURN_CONTRACT,
+    turnContract(input.channelPostWaitMs ?? CHANNEL_POST_WAIT_MS),
     "",
     "## Planning",
     "",

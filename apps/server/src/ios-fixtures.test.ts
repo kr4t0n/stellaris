@@ -37,13 +37,17 @@ const PLOT = Buffer.from(
   "base64",
 );
 
-/** eng-1's CLI: its one turn leaves a plot on the task's branch. */
+/** Notes beside the plot, which link it, as a file of text the app shows. */
+const NOTES = "# Notes\n\nThe [plot](plot.png) shows the export's timings.\n";
+
+/** eng-1's CLI: its one turn leaves a plot and its notes on the task's branch. */
 const plotting: AgentBackend = {
   kind: "codex",
   newSession: () => Promise.resolve("session-1"),
   runTurn: async (request) => {
     await mkdir(path.join(request.spec.cwd, "evidence"), { recursive: true });
     await writeFile(path.join(request.spec.cwd, "evidence", "plot.png"), PLOT);
+    await writeFile(path.join(request.spec.cwd, "evidence", "notes.md"), NOTES);
     return {
       events: [],
       finalText: "Plotted.",
@@ -356,7 +360,6 @@ describe("the answers the iOS client reads", () => {
     await call("error-app-token", "POST", "/auth/app/token", exchange, null);
     await call("me", "GET", "/api/me");
     await call("society", "GET", "/api/society");
-    await call("projects", "GET", "/api/projects");
     await call("channels", "GET", "/api/channels");
     await call("channel", "GET", "/api/channels/demo/general");
     await call("threads", "GET", "/api/threads");
@@ -496,6 +499,9 @@ describe("the answers the iOS client reads", () => {
       text: normaliser.text(turnText),
     });
 
+    // The task's changes before any turn made its branch, which the board answers with a 404.
+    await call("error-changes-missing", "GET", `/api/tasks/${task?.id}/changes`);
+
     // An image on the task's branch, which a message links by its path in a worktree: a turn
     // leaves it, and the board reads it from the project's runner. The commit's id varies by run.
     await society.run({
@@ -509,6 +515,22 @@ describe("the answers the iOS client reads", () => {
     const file = BranchFileSchema.parse(await read(fileRoute));
     normaliser.secret(file.commit.id, "fixture-commit");
     await call("task-file", "GET", fileRoute);
+    // The project, which now names the runner it lives on, and the files on its branches: the
+    // task's branch at its root and in a folder, and a file of text there; the project's default
+    // branch, as its first commit left it, empty; and a path the branch doesn't have.
+    await call("projects", "GET", "/api/projects");
+    await call("task-files", "GET", `/api/tasks/${task?.id}/files`);
+    await call("task-folder", "GET", `/api/tasks/${task?.id}/files/evidence`);
+    await call("task-text-file", "GET", `/api/tasks/${task?.id}/files/evidence/notes.md`);
+    const root = BranchFileSchema.parse(await read("/api/projects/demo/files"));
+    normaliser.secret(root.commit.id, "fixture-first-commit");
+    await call("project-files", "GET", "/api/projects/demo/files");
+    await call("error-file-missing", "GET", "/api/projects/demo/files/README.md");
+    // What the task's branch changed since it left the default branch, and what it did to the
+    // notes, a file of text, and to the plot, a binary one.
+    await call("task-changes", "GET", `/api/tasks/${task?.id}/changes`);
+    await call("task-diff", "GET", `/api/tasks/${task?.id}/diff/evidence/notes.md`);
+    await call("task-diff-binary", "GET", `/api/tasks/${task?.id}/diff/evidence/plot.png`);
 
     // Where the messages a text names by id are: one the board has, and one it doesn't, which the
     // answer leaves out.
@@ -544,8 +566,15 @@ describe("the answers the iOS client reads", () => {
       "application/octet-stream",
     );
 
+    // The project's runner away, which the board says with a 503 for its files and for a task's
+    // changes, last, since nothing reads a branch after it.
+    await society.runner.stop();
+    await expect.poll(() => society?.hub.connected).toEqual([]);
+    await call("error-runner-away", "GET", "/api/projects/demo/files");
+    await call("error-changes-away", "GET", `/api/tasks/${task?.id}/changes`);
+
     expect(events.map((event) => event.type)).toContain("proposal.decided");
-    expect(captures.size).toBe(41);
+    expect(captures.size).toBe(52);
     for (const [name, capture] of captures) {
       await expect(`${JSON.stringify(capture, null, 2)}\n`).toMatchFileSnapshot(
         `../../ios/fixtures/api/${name}.json`,

@@ -1,10 +1,11 @@
 import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { decodeTime, monotonicFactory } from "ulid";
+import { decodeTime, encodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
   ASK_CHANNEL,
   AgentSchema,
+  CHANNEL_POST_WAIT_MS,
   ArchiveProposalSchema,
   currentStage,
   channelRef,
@@ -92,7 +93,6 @@ import {
   type Dashboard,
   type Decision,
   type GitIdentityPart,
-  type HeartbeatCause,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
@@ -151,8 +151,7 @@ import {
   channelConversation,
   placeConversation,
   conversationPart,
-  isBoardAction,
-  METRICS_WINDOW_MS,
+  boardActionsIn,
   type Metrics,
   type MetricsWindow,
   type TokenUse,
@@ -167,9 +166,11 @@ import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
-import { computeMetrics } from "./metrics.js";
-import { tokenUse, TurnHistoryPayloadSchema } from "./turn-history.js";
-import { TurnCounters } from "./turn-counters.js";
+import type { MatchingCitizen } from "./mention-matching.js";
+import { MetricsIndex } from "./metrics-index.js";
+import { signalsIn, type SignalRecord } from "./signals.js";
+import { entriesOf, turnHistoryIn } from "./turn-history.js";
+import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
   exists,
@@ -232,11 +233,8 @@ export type ImageSink = (
 /** How many closing turns a workspace left with work on no branch gets before it is left alone. */
 export const CLOSING_ATTEMPTS = 3;
 
-/**
- * How old a top-level post in a project's channel must be before it counts toward the heartbeat of
- * a reader it does not ask (see `unreadByConversation`): a day, by default.
- */
-export const CHANNEL_POST_WAIT_MS = 24 * 3_600_000;
+/** The scheduler's default for `channelPostWaitMs`, which `unreadByConversation` takes when left out. */
+export { CHANNEL_POST_WAIT_MS };
 
 /** Whether a turn in flight is the one the actor acts from, which may end its own conversation. */
 function ownTurn(actor: Actor, turn: TurnInFlight): boolean {
@@ -318,12 +316,6 @@ export interface RunnerPatch {
   readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
 }
 
-export interface SignalRecord {
-  readonly id: Ulid;
-  readonly ts: string;
-  readonly signal: OpsSignal;
-}
-
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 
@@ -348,11 +340,6 @@ const SignInsSchema = z.object({
     .default([]),
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
-
-const TurnStartPayloadSchema = z.object({
-  turnId: UlidSchema,
-  heartbeat: TurnHistoryPayloadSchema.shape.heartbeat,
-});
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -793,6 +780,13 @@ export class Board {
   private readonly newId = monotonicFactory();
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
+  private metricsIndex: Promise<MetricsIndex> | null = null;
+  // The citizens Prometheus's wake latency matches mentions with, once seeded, kept current by
+  // every write of an agent's record.
+  private mentionRoster: Map<string, MatchingCitizen> | null = null;
+  // The tasks the metrics name, by id, each dropped as it is written; null for one not found.
+  private readonly metricsTasks = new Map<string, Task | null>();
+  private taskWrites = 0;
   private readonly leaseMs: number;
   private readonly now: () => Date;
   private readonly roleCache = new Map<Name, RoleCharter>();
@@ -1823,62 +1817,41 @@ export class Board {
     return this.mutex.run(() => this.publishSignalUnlocked(signal));
   }
 
-  /** The most recent operations signals from the event log, oldest first. */
+  /**
+   * The newest `limit` operations signals, oldest first: from the metrics index once this process
+   * has one, waiting for a seed under way, so a reader's prompt on the server, which seeds it at
+   * its start, reads no log; from the event log otherwise, as for the admin CLI, which opens the
+   * board for one command and would read every older turn's transcript to seed it. A seed that
+   * fails leaves this answer to the log until one succeeds.
+   */
   async listSignals(limit = 100): Promise<SignalRecord[]> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const records: SignalRecord[] = [];
-    for (const event of events) {
-      if (event.type !== "ops.signal") {
-        continue;
-      }
-      const parsed = OpsSignalSchema.safeParse(event.payload);
-      if (parsed.success) {
-        records.push({ id: event.id, ts: event.ts, signal: parsed.data });
-      }
+    const index = await this.metricsIndex?.catch(() => null);
+    if (index !== undefined && index !== null) {
+      return index.signals(limit);
     }
-    return records.slice(-limit);
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return signalsIn(events, limit);
   }
 
-  /** A citizen's finished turns, oldest first, from the event log. */
+  /**
+   * A citizen's newest `limit` finished turns, oldest first, as `turnHistoryIn` lists them from
+   * the event log. Once this process has a metrics index, waiting for a seed under way, the index
+   * names the ends and only their lines are read, so an ask costs its own entries, not the log;
+   * otherwise, as for the admin CLI, or when the log no longer holds a line the index kept, the
+   * whole log is read. Like `listSignals`, it never starts a seed.
+   */
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const entries: TurnHistoryEntry[] = [];
-    // A turn's start pairs with its end by the turn's id, and gives what a heartbeat woke for to
-    // an end that lacks it.
-    const starts = new Map<string, { ts: string; heartbeat: HeartbeatCause | undefined }>();
-    for (const event of events) {
-      if (event.actor !== agent) {
-        continue;
-      }
-      if (event.type === "turn.started") {
-        const start = TurnStartPayloadSchema.safeParse(event.payload);
-        if (start.success) {
-          starts.set(start.data.turnId, { ts: event.ts, heartbeat: start.data.heartbeat });
-        }
-        continue;
-      }
-      if (event.type !== "turn.completed" && event.type !== "turn.failed") {
-        continue;
-      }
-      const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
-      if (parsed.success) {
-        const { heartbeat: ended, ...turn } = parsed.data;
-        const start = turn.turnId === undefined ? undefined : starts.get(turn.turnId);
-        if (turn.turnId !== undefined) {
-          starts.delete(turn.turnId);
-        }
-        const heartbeat = ended ?? start?.heartbeat;
-        entries.push({
-          id: event.id,
-          ts: event.ts,
-          outcome: event.type === "turn.failed" ? "failed" : "completed",
-          ...turn,
-          ...(heartbeat === undefined ? {} : { heartbeat }),
-          ...(start === undefined ? {} : { startedAt: start.ts }),
-        });
+    const index = await this.metricsIndex?.catch(() => null);
+    if (index !== undefined && index !== null) {
+      const entries = await entriesOf(agent, index.turnEnds(agent, limit), (ids) =>
+        this.events.readIds(ids),
+      );
+      if (entries !== null) {
+        return entries;
       }
     }
-    return entries.slice(-limit);
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return turnHistoryIn(events, agent, limit);
   }
 
   async setPaused(actor: Actor, paused: boolean): Promise<void> {
@@ -2008,6 +1981,49 @@ export class Board {
         ? from.digest
         : cursorOf(from, conversation.scope, conversation.part));
     return { messages: filed.map((entry) => entry.message), cursor };
+  }
+
+  /**
+   * The newest top-level posts in a scope's `general` that the citizen's home conversation there
+   * has read already: what its digest carried, at or before the conversation's cursor, posted since
+   * `since`, at most `limit`, oldest first. Knowledge notices are left out, which the turn's
+   * knowledge list names, and so are the news a work role reads at home and an archived place's
+   * posts, which the home files from the archive on but read, if at all, in that place's own
+   * conversation. A home whose session started afresh has none of them in its context, so the turn
+   * host shows them; nothing here moves a cursor.
+   */
+  async readRecentlyRead(
+    actor: Actor & { readonly scope: Name },
+    options: { readonly since: Date; readonly limit: number },
+  ): Promise<Message[]> {
+    const { cursors } = await this.digestSnapshot(actor.name);
+    const read = cursorOf(cursors, actor.scope);
+    // The scan starts at the lowest id a message written at `since` can carry. Ids take the wall
+    // clock's time and a post's `ts` the board's, so the window itself is held to `ts`.
+    const since = options.since.getTime();
+    const after = `${encodeTime(since, 10)}${"0".repeat(16)}`;
+    if (read === null || read <= after) {
+      return [];
+    }
+    // The home's digest as it was when its cursor stood at `since`, up to where it stands now.
+    const from: Cursors = {
+      ...NO_CURSORS,
+      digest: after,
+      scopes: { [actor.scope]: after },
+      news: after,
+    };
+    const general = channelRef(actor.scope === SOCIETY_SCOPE ? null : actor.scope, "general");
+    const filed = await this.digestSince(actor, from, read, { scope: actor.scope, part: null });
+    return filed
+      .filter(
+        (entry) =>
+          entry.news !== true &&
+          entry.message.channel === general &&
+          entry.message.notice?.kind !== "knowledge" &&
+          Date.parse(entry.message.ts) >= since,
+      )
+      .map((entry) => entry.message)
+      .slice(-options.limit);
   }
 
   /**
@@ -4275,60 +4291,155 @@ export class Board {
       : "";
   }
 
-  /** The steps of one finished turn, as the runner handed them over when it ended. */
   /**
-   * Six measures of how the society works over a window, from the event log and the board actions
-   * in each finished turn's transcript; `activeSignals` says which blocked tasks are blocked still.
+   * Six measures of how the society works over a window, from the metrics index, so that no answer
+   * reads the log or a transcript; `activeSignals` says which blocked tasks are blocked still. The
+   * tasks it names are read once each, and again once written. The index counts each event as it
+   * is appended, a task finished, sent back, or blocked while others are read included, so the
+   * tasks it names are looked at again after each read until none is new, and the answer follows
+   * the last look with no wait between.
    */
   async metrics(
     window: MetricsWindow,
     activeSignals: ReadonlySet<string> = new Set(),
   ): Promise<Metrics> {
+    const index = await this.indexMetrics();
     const now = this.now();
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const tasks: Task[] = [];
-    for (const project of await listDirs(this.paths.projects())) {
-      tasks.push(...(await this.listTasks(project)));
-    }
     const citizens = [];
     for (const agent of await this.listAgents()) {
       if (agent.cli !== null) {
         citizens.push({ name: agent.name, role: agent.role, memberships: agent.memberships });
       }
     }
-    const span = METRICS_WINDOW_MS[window];
-    const since = span === null ? null : now.getTime() - span;
-    const actions = new Map<string, number | null>();
-    for (const event of events) {
-      const turnId = event.payload["turnId"];
-      if (
-        event.type === "turn.completed" &&
-        typeof turnId === "string" &&
-        (since === null || Date.parse(event.ts) >= since)
-      ) {
-        actions.set(turnId, await this.turnActions(event.actor, turnId));
+    const tasks: Task[] = [];
+    const read = new Set<string>();
+    let unread = [...index.tasksRead(window, now)];
+    while (unread.length > 0) {
+      for (const id of unread) {
+        read.add(id);
+        const task = await this.metricsTask(id);
+        if (task !== null) {
+          tasks.push(task);
+        }
       }
+      unread = [...index.tasksRead(window, now)].filter((id) => !read.has(id));
     }
-    return computeMetrics({ events, tasks, citizens, actions, activeSignals, window, now });
+    return index.answer({ tasks, citizens, activeSignals, window, now });
+  }
+
+  /**
+   * The metrics index, which answers the metrics, the citizens' tokens, the signals, and which
+   * turns a citizen's history lists: seeded once from the whole event log on first use, as the
+   * server does at its start, then kept up by each event this process appends. The server logs
+   * every event a measure or the tokens count, every signal, and every turn's start and end,
+   * itself; one another process appended would count from the next seed. A
+   * turn ended before ends carried their board actions has its transcript read once, here,
+   * through the same cache as the counters' seed. A seed that fails is tried again by the next
+   * call.
+   */
+  indexMetrics(): Promise<MetricsIndex> {
+    this.metricsIndex ??= this.seedMetrics().catch((error: unknown) => {
+      this.metricsIndex = null;
+      throw error;
+    });
+    return this.metricsIndex;
+  }
+
+  private async seedMetrics(): Promise<MetricsIndex> {
+    const actions = new Map<string, number | null>();
+    const index = new MetricsIndex((turnId) => actions.get(turnId));
+    // Events appended while the log is read wait, and count once unless the read held them.
+    let waiting: BoardEvent[] | null = [];
+    const stop = this.events.onAppend((event) => {
+      if (waiting === null) {
+        index.add(event);
+      } else {
+        waiting.push(event);
+      }
+    });
+    try {
+      const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+      for (const event of events) {
+        const turnId = MetricsIndex.transcriptToRead(event);
+        if (turnId !== null) {
+          actions.set(turnId, await this.turnActions(event.actor, turnId));
+        }
+      }
+      const seen = new Set<string>();
+      for (const event of events) {
+        seen.add(event.id);
+        index.add(event);
+      }
+      for (const event of waiting) {
+        if (!seen.has(event.id)) {
+          index.add(event);
+        }
+      }
+      waiting = null;
+      // Ends appended from here on carry their board actions, or kept no transcript.
+      actions.clear();
+      return index;
+    } catch (error) {
+      stop();
+      throw error;
+    }
+  }
+
+  /** A task the metrics name by its id, or null when no project holds one. */
+  private async metricsTask(id: string): Promise<Task | null> {
+    const known = this.metricsTasks.get(id);
+    if (known !== undefined) {
+      return known;
+    }
+    const writes = this.taskWrites;
+    const ulid = UlidSchema.safeParse(id);
+    const task = ulid.success
+      ? await this.findTask(ulid.data).then(
+          (found) => found.task,
+          (error: unknown) => {
+            if (error instanceof BoardError && error.code === "NOT_FOUND") {
+              return null;
+            }
+            throw error;
+          },
+        )
+      : null;
+    // A task written while it was read may have been read before the write.
+    if (writes === this.taskWrites) {
+      this.metricsTasks.set(id, task);
+    }
+    return task;
   }
 
   /**
    * Each citizen's finished turns over a window and the tokens of those that counted them, from
-   * the event log alone, which holds every turn's end whatever runner it ran on.
+   * the metrics index, which keeps every turn's end the event log holds, whatever runner it ran
+   * on, so that no answer reads the log.
    */
   async tokenUse(window: MetricsWindow): Promise<TokenUse> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    return tokenUse(events, window, this.now());
+    const index = await this.indexMetrics();
+    return index.tokenUse(window, this.now());
   }
 
   /**
-   * Every finished turn counted for Prometheus: seeded once from the whole event log, then moved
-   * by each turn's end this process appends, so reading the counts never reads the log. The server
-   * logs every turn's end itself; one another process appended would count from the next seed.
+   * Every finished turn, send-back, and mention's wake counted for Prometheus: seeded once from
+   * the whole event log, then moved by each event this process appends, so reading the counts never
+   * reads the log. The server logs every turn's end and send-back, and every post, turn start, and
+   * steer, itself; one another process appended would count from the next seed. A turn ended before ends carried their board actions has its
+   * transcript read once, here, for the idle count. Mentions are matched with the citizens of
+   * the seed, as the Metrics view matches them with today's, and from then on with those of when
+   * each is posted.
    */
   async countTurns(): Promise<TurnCounters> {
     const clis = new Map<string, CliKind | null>();
-    const counters = new TurnCounters((agent) => clis.get(agent) ?? null);
+    const actions = new Map<string, number | null>();
+    const roster = new Map<string, MatchingCitizen>();
+    this.mentionRoster = roster;
+    const counters = new TurnCounters(
+      (agent) => clis.get(agent) ?? null,
+      (turnId) => actions.get(turnId),
+      roster,
+    );
     // Ends appended while the log is read wait, and count once unless the read held them.
     let waiting: BoardEvent[] | null = [];
     this.events.onAppend((event) => {
@@ -4341,6 +4452,17 @@ export class Board {
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
     for (const agent of await this.listAgents()) {
       clis.set(agent.name, agent.cli);
+      // A record written while the list was read is in the roster already, and newer.
+      if (agent.cli !== null && !roster.has(agent.name)) {
+        roster.set(agent.name, { name: agent.name, memberships: agent.memberships });
+      }
+    }
+    // Ends appended from here on carry their board actions, so only the ends read need these.
+    for (const event of events) {
+      const turnId = transcriptToRead(event);
+      if (turnId !== null) {
+        actions.set(turnId, await this.turnActions(event.actor, turnId));
+      }
     }
     const seen = new Set<string>();
     for (const event of events) {
@@ -4363,17 +4485,12 @@ export class Board {
     if (known !== undefined) {
       return known;
     }
-    const count = await this.readTranscript(agent, turnId).then(
-      (entries) =>
-        entries.filter(
-          ({ event }) => event.type === "tool_result" && event.ok && isBoardAction(event.name),
-        ).length,
-      () => null,
-    );
+    const count = await this.readTranscript(agent, turnId).then(boardActionsIn, () => null);
     this.actionCounts.set(turnId, count);
     return count;
   }
 
+  /** The steps of one finished turn, as the runner handed them over when it ended. */
   async readTranscript(agent: Name, turnId: string): Promise<TranscriptEntry[]> {
     // The id names a file, so only a ULID may reach the path.
     const id = UlidSchema.safeParse(turnId);
@@ -4614,6 +4731,10 @@ export class Board {
         ...(parsed.usage === null ? {} : { usage: parsed.usage }),
         ...(parsed.contextTokens === undefined ? {} : { contextTokens: parsed.contextTokens }),
         toolCalls: parsed.toolCalls,
+        // What the transcript written above holds, so a count of idle turns needs no file read.
+        ...(parsed.id !== undefined && transcript.length > 0
+          ? { boardActions: boardActionsIn(transcript) }
+          : {}),
         model: parsed.model,
         summary: parsed.status?.summary ?? null,
         needsUserDecision: parsed.status?.needsUserDecision ?? false,
@@ -5350,6 +5471,7 @@ export class Board {
     seedInstructions?: string,
   ): Promise<void> {
     await writeJson(this.paths.agentFile(agent.name), agent);
+    this.noteAgent(agent);
     await this.writeAgentRole(agent.name, charter, seedInstructions?.trim() ?? "");
     await ensureDir(this.paths.agentMemory(agent.name));
     if (!(await exists(this.paths.agentMemoryCore(agent.name)))) {
@@ -5526,7 +5648,18 @@ export class Board {
     const current = await this.readAgent(name);
     const next = AgentSchema.parse(mutate(current));
     await writeJson(this.paths.agentFile(name), next);
+    this.noteAgent(next);
     return next;
+  }
+
+  /**
+   * Keeps the wake latency's roster as the record just written has it, as the Metrics view reads
+   * citizens: those that take turns.
+   */
+  private noteAgent(agent: Agent): void {
+    if (this.mentionRoster !== null && agent.cli !== null) {
+      this.mentionRoster.set(agent.name, { name: agent.name, memberships: agent.memberships });
+    }
   }
 
   private async updateProject(slug: Name, mutate: (project: Project) => Project): Promise<Project> {
@@ -6644,6 +6777,8 @@ export class Board {
     );
     const data = TaskFrontmatterSchema.parse(clean);
     await writeMarkdown(this.paths.task(project, task.id), data, body);
+    this.metricsTasks.delete(task.id);
+    this.taskWrites += 1;
     return { ...data, body };
   }
 

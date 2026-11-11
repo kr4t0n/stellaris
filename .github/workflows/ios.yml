@@ -47,11 +47,10 @@ jobs:
 
   app:
     runs-on: xcode-27
-    # The backstop behind the test step's own limit. Up to 0.4.1 the tests ran up to 48 minutes,
-    # counting a run the limit cut with two tests left, and the steps after them, the runner's own
-    # cleanup included, up to 8 more: 70 is a quarter over both. A job that hits it ends cancelled,
-    # which skips every step after, the uploads included.
-    timeout-minutes: 70
+    # The backstop behind the test step's own limit: its 77 minutes and 10 more for the steps after
+    # the tests, which have taken up to 8, the runner's own cleanup included. A job that hits it
+    # ends cancelled, which skips every step after, the uploads included.
+    timeout-minutes: 87
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       # XcodeGen from its release, checked against the digest GitHub lists for the asset.
@@ -75,12 +74,14 @@ jobs:
       # the tests could come once it has gone, and where the first copies' console goes is kept
       # beside it, as the `stuck-app` artifact. The step fails when a copy launched against the fake
       # board writes its console to a terminal. The watcher stops nothing, so the step's own limit
-      # ends a test that hangs: a quarter over the tests' 48 minutes, which leaves the steps after
-      # it the job's last 10, kept within them by the displays step's own limit. A step that hits
-      # its limit fails the job rather than cancelling it, so they still run.
+      # ends a test that hangs: a quarter over the 61 minutes the tests took on the slowest of five
+      # hosts that ran the same app on the same image, the fastest taking 38. On the slowest the
+      # step's earlier 60 cut the last test 23 s in, and the 61 adds the rest of its minute. That
+      # leaves the steps after it the job's last 10, kept within them by the displays step's own
+      # limit. A step past its limit fails the job rather than cancelling it, so they still run.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
-        timeout-minutes: 60
+        timeout-minutes: 77
         run: |
           set -o pipefail
           output="$RUNNER_TEMP/test-output.txt"

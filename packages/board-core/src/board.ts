@@ -93,7 +93,6 @@ import {
   type Dashboard,
   type Decision,
   type GitIdentityPart,
-  type HeartbeatCause,
   type HomeConflict,
   type HomeFileDiff,
   type HomeHistory,
@@ -170,7 +169,7 @@ import { postMentions } from "./mentions.js";
 import type { MatchingCitizen } from "./mention-matching.js";
 import { MetricsIndex } from "./metrics-index.js";
 import { signalsIn, type SignalRecord } from "./signals.js";
-import { TurnHistoryPayloadSchema } from "./turn-history.js";
+import { entriesOf, turnHistoryIn } from "./turn-history.js";
 import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
   ensureDir,
@@ -341,11 +340,6 @@ const SignInsSchema = z.object({
     .default([]),
 });
 type SignInRecord = z.infer<typeof SignInsSchema>["signIns"][number];
-
-const TurnStartPayloadSchema = z.object({
-  turnId: UlidSchema,
-  heartbeat: TurnHistoryPayloadSchema.shape.heartbeat,
-});
 
 export interface DigestResult {
   readonly messages: Message[];
@@ -1839,46 +1833,25 @@ export class Board {
     return signalsIn(events, limit);
   }
 
-  /** A citizen's finished turns, oldest first, from the event log. */
+  /**
+   * A citizen's newest `limit` finished turns, oldest first, as `turnHistoryIn` lists them from
+   * the event log. Once this process has a metrics index, waiting for a seed under way, the index
+   * names the ends and only their lines are read, so an ask costs its own entries, not the log;
+   * otherwise, as for the admin CLI, or when the log no longer holds a line the index kept, the
+   * whole log is read. Like `listSignals`, it never starts a seed.
+   */
   async listTurns(agent: Name, limit = 50): Promise<TurnHistoryEntry[]> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const entries: TurnHistoryEntry[] = [];
-    // A turn's start pairs with its end by the turn's id, and gives what a heartbeat woke for to
-    // an end that lacks it.
-    const starts = new Map<string, { ts: string; heartbeat: HeartbeatCause | undefined }>();
-    for (const event of events) {
-      if (event.actor !== agent) {
-        continue;
-      }
-      if (event.type === "turn.started") {
-        const start = TurnStartPayloadSchema.safeParse(event.payload);
-        if (start.success) {
-          starts.set(start.data.turnId, { ts: event.ts, heartbeat: start.data.heartbeat });
-        }
-        continue;
-      }
-      if (event.type !== "turn.completed" && event.type !== "turn.failed") {
-        continue;
-      }
-      const parsed = TurnHistoryPayloadSchema.safeParse(event.payload);
-      if (parsed.success) {
-        const { heartbeat: ended, ...turn } = parsed.data;
-        const start = turn.turnId === undefined ? undefined : starts.get(turn.turnId);
-        if (turn.turnId !== undefined) {
-          starts.delete(turn.turnId);
-        }
-        const heartbeat = ended ?? start?.heartbeat;
-        entries.push({
-          id: event.id,
-          ts: event.ts,
-          outcome: event.type === "turn.failed" ? "failed" : "completed",
-          ...turn,
-          ...(heartbeat === undefined ? {} : { heartbeat }),
-          ...(start === undefined ? {} : { startedAt: start.ts }),
-        });
+    const index = await this.metricsIndex?.catch(() => null);
+    if (index !== undefined && index !== null) {
+      const entries = await entriesOf(agent, index.turnEnds(agent, limit), (ids) =>
+        this.events.readIds(ids),
+      );
+      if (entries !== null) {
+        return entries;
       }
     }
-    return entries.slice(-limit);
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return turnHistoryIn(events, agent, limit);
   }
 
   async setPaused(actor: Actor, paused: boolean): Promise<void> {

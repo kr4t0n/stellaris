@@ -23,7 +23,7 @@ import {
   type MetricsInput,
 } from "./metrics.js";
 import { newestSignals, signalRecord, type SignalRecord } from "./signals.js";
-import { sumTokens, tokenEnd, type TokenEnd } from "./turn-history.js";
+import { sumTokens, TurnPairing, type KeptEnd, type TokenEnd } from "./turn-history.js";
 
 /** Something that happened, at milliseconds since the epoch. */
 interface Dated {
@@ -118,16 +118,20 @@ function boardActionsOf(event: BoardEvent): number | undefined {
 }
 
 /**
- * The metrics, the citizens' tokens, and the operations signals kept up as the log grows, so that
- * answering any of them reads neither the log nor a transcript: each event `computeMetrics` or
- * `tokenUse` counts, or `signalsIn` lists, is added once, as it is appended, to a record of its
- * own kind, in the log's order, with what they need of it. A window counts the records in it; a
- * task's send-backs and thread posts, and the questions to the user still open, are kept over
- * the whole log as they arrive. Mentions are matched to their answers once, and again only when
- * the citizens or their memberships change, since the wake rule reads those.
+ * The metrics, the citizens' tokens, the operations signals, and which turns each citizen's
+ * history lists, kept up as the log grows, so that answering any of them reads neither the whole
+ * log nor a transcript: each event `computeMetrics` or `tokenUse` counts, or `signalsIn` or
+ * `turnHistoryIn` lists, is added once, as it is appended, to a record of its own kind, in the
+ * log's order, with what they need of it. A window counts the records in it; a task's send-backs
+ * and thread posts, and the questions to the user still open, are kept over the whole log as they
+ * arrive. Mentions are matched to their answers once, and again only when the citizens or their
+ * memberships change, since the wake rule reads those. A history keeps each end's id and the
+ * start it pairs with, not the entry, whose summary and error are most of the log's turn ends:
+ * the entries are read back from the ends' own lines (`entriesOf`).
  *
  * Its answers for a log equal `computeMetrics`' for the same log, window, tasks, and citizens,
- * `tokenUse`'s for the same log and window, and `signalsIn`'s for the same log and limit, which
+ * `tokenUse`'s for the same log and window, and `signalsIn`'s for the same log and limit, and the
+ * entries of the ends it keeps equal `turnHistoryIn`'s for the same log, citizen, and limit, which
  * the equality tests hold it to.
  */
 export class MetricsIndex {
@@ -140,6 +144,9 @@ export class MetricsIndex {
   private readonly blocked = new Timeline<Blocked>();
   // Every signal the log holds that its schema reads, as `listSignals` answers them.
   private readonly signalRecords: SignalRecord[] = [];
+  // Each citizen's ends the history reads, paired with their starts as the log's replay pairs them.
+  private readonly pairing = new TurnPairing();
+  private readonly histories = new Map<string, KeptEnd[]>();
   // Send-backs and thread posts, by task, over the whole log.
   private readonly moves = new Map<string, number>();
   private readonly posts = new Map<string, number>();
@@ -169,12 +176,16 @@ export class MetricsIndex {
     return turn.success && turn.data.trigger !== "reflection" ? (turn.data.turnId ?? null) : null;
   }
 
-  /** Counts an event; one neither the metrics nor the tokens read passes. */
+  /** Counts an event; one neither the metrics, the tokens, the signals, nor a history read passes. */
   add(event: BoardEvent): void {
     const at = Date.parse(event.ts);
-    const tokens = tokenEnd(event);
-    if (tokens !== null) {
-      this.tokens.push({ at, ...tokens });
+    // The tokens count the ends the history lists, read once for both, as `tokenEnd` reads them.
+    const ended = this.pairing.add(event);
+    if (ended !== null) {
+      this.tokens.push({ at, agent: event.actor, usage: ended.turn.usage });
+      const history = this.histories.get(event.actor) ?? [];
+      this.histories.set(event.actor, history);
+      history.push({ id: event.id, start: ended.start });
     }
     switch (event.type) {
       case "turn.completed": {
@@ -312,6 +323,14 @@ export class MetricsIndex {
   /** The newest `limit` signals, oldest first, as `signalsIn` reads them from the log. */
   signals(limit: number): SignalRecord[] {
     return newestSignals(this.signalRecords, limit);
+  }
+
+  /**
+   * The ends of a citizen's turns `turnHistoryIn` lists for `limit`, oldest first, cut as it cuts,
+   * each with the start it pairs with; `entriesOf` reads their entries from their lines.
+   */
+  turnEnds(agent: string, limit: number): KeptEnd[] {
+    return (this.histories.get(agent) ?? []).slice(-limit);
   }
 
   private decide(event: BoardEvent, kind: DecisionKind): void {

@@ -4334,6 +4334,183 @@ describe("Board", () => {
     failing.mockRestore();
   });
 
+  /** A finished turn of `agent`'s at home, a minute long, ended as `how` says. */
+  async function turnOf(
+    board: Board,
+    agent: string,
+    how: Partial<Pick<TurnRecord, "exitReason" | "error" | "trigger">> = {},
+  ): Promise<void> {
+    clock = new Date(clock.getTime() + 60_000);
+    const turn = await board.beginTurn({
+      ...turnIn(undefined, clock.toISOString()),
+      agent,
+      ...(how.trigger === undefined ? {} : { trigger: how.trigger }),
+    });
+    clock = new Date(clock.getTime() + 60_000);
+    await board.finishTurn({
+      ...turn,
+      endedAt: clock.toISOString(),
+      exitReason: "completed",
+      ...how,
+    });
+  }
+
+  /** Lines another process wrote: a turn whose start is missing, ends naming a heartbeat or not, and an end the history refuses. */
+  async function olderTurns(board: Board): Promise<void> {
+    const raw = async (id: string, type: string, payload: Record<string, unknown>) =>
+      writeFile(
+        board.paths.eventLog(),
+        `${JSON.stringify({ id, ts: clock.toISOString(), type, actor: "eng-1", payload })}\n`,
+        { flag: "a" },
+      );
+    const where = { project: "demo", trigger: "heartbeat" };
+    const [missing, own, startOnly] = [ulid(), ulid(), ulid()];
+    await raw(ulid(), "turn.completed", { ...where, turnId: missing, exitReason: "completed" });
+    await raw(ulid(), "turn.started", { ...where, turnId: own, heartbeat: "waiting" });
+    await raw(ulid(), "turn.completed", { ...where, turnId: own, heartbeat: "unread" });
+    await raw(ulid(), "turn.started", { ...where, turnId: startOnly, heartbeat: "held" });
+    // Out of the log's order: an id older than every line before it.
+    await raw(ulid(Date.parse("2026-01-01T00:00:00.000Z")), "turn.completed", {
+      ...where,
+      turnId: startOnly,
+      summary: "a line out of order",
+    });
+    await raw(ulid(), "turn.completed", { unreadable: true });
+  }
+
+  it("answers a citizen's turns from the metrics index as the log's read does, reading only their lines once seeded", async () => {
+    const { board } = await society();
+    // Before the seed: more of eng-1's turns than the API's default, some failed and some
+    // heartbeats, one of rev-1's, and lines another process wrote.
+    for (let n = 0; n < 55; n += 1) {
+      await turnOf(
+        board,
+        "eng-1",
+        n % 7 === 0
+          ? { exitReason: "error", error: "boom" }
+          : n % 5 === 0
+            ? { trigger: heartbeat("held") }
+            : {},
+      );
+    }
+    await turnOf(board, "rev-1");
+    await olderTurns(board);
+    await board.indexMetrics();
+    // After it: turns this process logs, of both.
+    for (let n = 0; n < 5; n += 1) {
+      await turnOf(board, n % 2 === 0 ? "eng-1" : "rev-1");
+    }
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const linesRead = vi.spyOn(EventLog.prototype, "readIds");
+    const transcriptRead = vi.spyOn(board, "readTranscript");
+    // None, one, the API's default, the triage's, all, one past all, far past, and NaN.
+    const asks = ["eng-1", "rev-1", "nobody"].flatMap((agent) =>
+      [0, 1, 50, 5_000, 61, 62, 10_000, Number.NaN].map((limit) => ({ agent, limit })),
+    );
+    const answers = [];
+    for (const { agent, limit } of asks) {
+      const before = linesRead.mock.calls.length;
+      const answer = await board.listTurns(agent, limit);
+      // Only the lines of the entries it gives.
+      expect(
+        linesRead.mock.calls.slice(before).flatMap(([ids]) => ids),
+        `${agent}, limit ${limit}`,
+      ).toEqual(answer.map((entry) => entry.id));
+      answers.push(answer);
+    }
+    expect(logRead).not.toHaveBeenCalled();
+    expect(transcriptRead).not.toHaveBeenCalled();
+    logRead.mockRestore();
+    linesRead.mockRestore();
+    transcriptRead.mockRestore();
+    // The same entries in the same order as a board with no index reads from the log.
+    const reopened = await Board.open(dir, { now });
+    for (const [at, { agent, limit }] of asks.entries()) {
+      expect(answers[at], `${agent}, limit ${limit}`).toStrictEqual(
+        await reopened.listTurns(agent, limit),
+      );
+    }
+    const all = answers[0] ?? [];
+    expect(all).toHaveLength(61);
+    expect(answers[2]).toHaveLength(50);
+    expect(answers[8]).toHaveLength(3);
+    // The turn whose start is missing has no start; an end's own heartbeat goes before its
+    // start's; a start's goes to an end that names none, read out of the log's order.
+    const older = all.filter((entry) => entry.trigger === "heartbeat" && entry.costUsd === 0);
+    expect(
+      older
+        .slice(-3)
+        .map((entry) => [entry.heartbeat, entry.startedAt === undefined, entry.summary]),
+    ).toEqual([
+      [undefined, true, null],
+      ["unread", false, null],
+      ["held", false, "a line out of order"],
+    ]);
+  });
+
+  it("reads a citizen's turns from the log when it no longer holds a line the index kept", async () => {
+    const { board } = await society();
+    for (let n = 0; n < 4; n += 1) {
+      await turnOf(board, "eng-1");
+    }
+    await board.indexMetrics();
+    const kept = await board.listTurns("eng-1");
+    // The log replaced by one without its second turn's end.
+    const file = board.paths.eventLog();
+    const gone = kept[1]?.id ?? "";
+    const lines = (await readFile(file, "utf8")).split("\n");
+    await writeFile(file, lines.filter((line) => !line.includes(gone)).join("\n"));
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const read = await board.listTurns("eng-1");
+    expect(logRead).toHaveBeenCalledTimes(1);
+    logRead.mockRestore();
+    expect(read.map((entry) => entry.id)).toEqual(
+      kept.filter((entry) => entry.id !== gone).map((entry) => entry.id),
+    );
+    expect(read).toStrictEqual(await (await Board.open(dir, { now })).listTurns("eng-1"));
+  });
+
+  it("reads a citizen's turns from the log, seeding no index, while the process has none, and waits for a seed under way", async () => {
+    const { board } = await society();
+    await turnOf(board, "eng-1");
+    const seed = vi.spyOn(board, "indexMetrics");
+    const logRead = vi.spyOn(EventLog.prototype, "readSince");
+    const linesRead = vi.spyOn(EventLog.prototype, "readIds");
+    expect(await board.listTurns("eng-1")).toHaveLength(1);
+    expect(seed).not.toHaveBeenCalled();
+    expect(logRead).toHaveBeenCalledTimes(1);
+    expect(linesRead).not.toHaveBeenCalled();
+    seed.mockRestore();
+    logRead.mockRestore();
+    // A seed under way, during whose read a turn ends: the ask waits for it, then reads lines.
+    const seeding = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockImplementationOnce(async (since, limit) => {
+        const events = await board.readEvents(since, limit);
+        await turnOf(board, "eng-1");
+        return events;
+      });
+    const seeded = board.indexMetrics();
+    const asked = board.listTurns("eng-1");
+    const [, answer] = await Promise.all([seeded, asked]);
+    expect(answer).toHaveLength(2);
+    expect(seeding).toHaveBeenCalledTimes(2);
+    expect(linesRead).toHaveBeenCalledTimes(1);
+    seeding.mockRestore();
+    linesRead.mockRestore();
+    // Another board, whose seed fails while the ask waits for it.
+    const reopened = await Board.open(dir, { now });
+    const failing = vi
+      .spyOn(EventLog.prototype, "readSince")
+      .mockRejectedValueOnce(new Error("the disk went away"));
+    const failed = reopened.indexMetrics();
+    const fallback = reopened.listTurns("eng-1");
+    await expect(failed).rejects.toThrow("the disk went away");
+    expect(await fallback).toStrictEqual(answer);
+    expect(failing).toHaveBeenCalledTimes(2);
+    failing.mockRestore();
+  });
+
   it("names a task finished, sent back, or blocked while the metrics read the tasks they name", async () => {
     const { board } = await society();
     const stages = [{ name: "draft" }, { name: "check" }];

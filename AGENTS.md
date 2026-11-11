@@ -44,6 +44,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Schemas first: a new field goes into `packages/shared` and is validated at every boundary ([board.md](./docs/internals/board.md#schemas-first)).
 - Never guess an SDK surface: read the Agent SDK's and the MCP SDK's type definitions in `node_modules` first ([adapters.md](./docs/internals/adapters.md#never-guess-an-sdk-surface)).
 - Build before lint, since the type-aware rules need the declaration files. Keep lint warning-free, with type guards or Zod instead of assertions.
+- `pnpm lint` ends with `scripts/docs/check-links.mjs`: every relative link in the repository's markdown must name a file that exists, and its `#anchor` a heading or HTML anchor there, read as GitHub makes them.
 - `.husky/pre-commit` runs gitleaks on what is staged. Where husky is off (`HUSKY=0`, as on every runner), run `gitleaks git --pre-commit --staged --redact --no-banner` yourself before each commit; a verified false positive goes in `.gitleaks.toml`.
 - `CLAUDE.md` holds only `@AGENTS.md`. Claude Code loads `AGENTS.md` by itself only where no `CLAUDE.md` exists, so anything added to `CLAUDE.md` must keep that line.
 - The README is for people: at most about 260 lines and 14 KB, wrapped near 90 columns, with no paragraph in a table cell. A new feature gets one bullet there and a new setting one table row; their detail goes to `docs/guide` (a variable's to `deployment.md`) or `docs/internals`, and so does more of what is there once it passes that size.
@@ -173,7 +174,7 @@ One long-running process, the board server, hosts the only writer of the data di
 
 ### Tests ([testing.md](./docs/internals/testing.md))
 
-- Tests live beside the code as `*.test.ts` and run with Vitest from the root. Board and scheduler tests use a temporary data directory and an injected clock. `apps/server`'s `integration.test.ts` and `runner.test.ts` run a server and a runner in one process over real HTTP with a scripted backend (`startTestSociety`).
+- Tests live beside the code as `*.test.ts`, and a script's under `scripts/` as `*.test.mjs`, and run with Vitest from the root. Board and scheduler tests use a temporary data directory and an injected clock. `apps/server`'s `integration.test.ts` and `runner.test.ts` run a server and a runner in one process over real HTTP with a scripted backend (`startTestSociety`).
 - Browser tests are `apps/web/e2e/*.spec.ts`, run by Playwright against the built interface with every `/api` request answered by the fake board, except the exit test, `society.spec.ts`, which starts a board server of its own per test.
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
 

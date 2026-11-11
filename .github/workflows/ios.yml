@@ -48,8 +48,9 @@ jobs:
   app:
     runs-on: xcode-27
     # The backstop behind the test step's own limit: its 77 minutes and 10 more for the steps after
-    # the tests, which have taken up to 8, the runner's own cleanup included. A job that hits it
-    # ends cancelled, which skips every step after, the uploads included.
+    # the tests, the runner's own cleanup included, which the displays step's own limit keeps
+    # within them. In six runs of November 2026 those took up to 7.6. A job that hits it ends
+    # cancelled, which skips every step after, the uploads included.
     timeout-minutes: 87
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
@@ -74,11 +75,13 @@ jobs:
       # the tests could come once it has gone, and where the first copies' console goes is kept
       # beside it, as the `stuck-app` artifact. The step fails when a copy launched against the fake
       # board writes its console to a terminal. The watcher stops nothing, so the step's own limit
-      # ends a test that hangs: a quarter over the 61 minutes the tests took on the slowest of five
-      # hosts that ran the same app on the same image, the fastest taking 38. On the slowest the
-      # step's earlier 60 cut the last test 23 s in, and the 61 adds the rest of its minute. That
-      # leaves the steps after it the job's last 10, kept within them by the displays step's own
-      # limit. A step past its limit fails the job rather than cancelling it, so they still run.
+      # ends a test that hangs: a quarter over the roughly 61 minutes the tests, 80 XCTest cases,
+      # needed on the slowest of five hosts that ran the same app on the same image in November
+      # 2026, the fastest taking 38. On the slowest the step's earlier 60 cut the last test 23 s
+      # in, and the 61 adds the rest of that test and the step's end at the next slowest host's
+      # times. That leaves the steps after it the job's last 10, kept within them by the displays
+      # step's own limit. A step past its limit fails the job rather than cancelling it, so they
+      # still run.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
         timeout-minutes: 77

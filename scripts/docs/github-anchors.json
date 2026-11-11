@@ -641,7 +641,7 @@
     ["@kubitnodes/stellaris", "kubitnodesstellaris"]
   ],
   "document": {
-    "markdown": "# a\n\n# a\n\n# a-1\n\n# a\n\n# Ünïcödé Straße\n\n# 日本語 見出し\n\n# ½ ² Ⅻ ٣ x²\n\n# Emoji 🚀 rocket 👩‍💻 dev\n\n# NBSP&nbsp;here and &amp; &lt;tag&gt; &#65;&#x42;\n\n# snake_case and _emph_ and __strong__ and *star* and **bold**\n\n# `code_with_under` and `a  b` and `` ` ``\n\n# Link [text](x.md) and ![img](y.png) alt and [ref][r]\n\n# <kbd>Ctrl</kbd>+C and <span id=\"inner\">in</span>\n\n# Escaped \\* star \\_ under \\# hash\n\n# Closing hashes ##\n\n# Trailing #hash#\n\n# Multiple   spaces\ttab\n\n# -- dashes -- trailing -\n\n# Dots.and/slashes:colons;semi,comma!bang?q'apos\"quote\n\n# Café Cafe&#x301;\n\n# İstanbul UPPER Case ΣΑΣ\n\n# Price $5 + 10% = ~fair~ ~~gone~~ #12\n\n# Under_score_end_ ‿ tie ‐ hyphen – en — em\n\n#\n\n# ‌zwnj‍zwj\n\n## Ⅷ roman · middot ¶ pilcrow © copy ª ordinal º\n\n\n# 🚀\n\n# 🚀\n\n# x\n\n## A [`code` link](y.md) and <https://example.com/p> and www.example.org\n\n### _foo_bar_ and foo_bar_ and _a_ _b_ and __x__y and _(paren)_\n\n### *emph* text** and a*b*c and 2*3*4\n\n### Ⓐ circled and ﬁ ligature and Ǆ title\n\n- # In a list\n\n> # In a quote\n\n<h2 id=\"raw-h2\">Raw HTML heading</h2>\n\n<details><summary>Sum</summary>\n\n#### Inside details\n\n</details>\n\n#### Trailing spaces   \n\n####### seven\n\n#\ttab after hash\n\n#5 no space\n\n## Big &#9999999; zero &#0; and &#91;b&#93;(c) &amp; d\n\n## Configuration <a name=\"config\"></a>\n\n## CI ![status](https://example.com/badge.svg)\n\n## Upgrading <!-- since 0.4 -->\n\n## <a id=\"install\"></a> Install\n\n## Line<br>break and end<br>\n\n## Trailing nbsp&nbsp;\n\n## _c_<em>n</em> and [k](k.md)_c_\n\n## <https://e.com>_x_ and _y_<https://e.com>\n\n## ![x](y.png)\n\n## ![x](y.png) ![z](w.png)\n\n## <!-- only a comment -->\n\n<h2> Spaced </h2>\n\n<h3>\n  Multi line\n</h3>\n\n## Tab trailing\t\n\n## ~_x_ and _x_~ and ~ _x_\n\n## a~_x_~b\n\n## ~~d~~_u_ and ~~e~~ _v_\n\n## _u_~~d~~ and ~~_w_~~\n\n## \\~_x_ and `~`_y_\n\n## *_* and _u_\n\n## **_x_** and ___y___\n\n## _a *b_ c*\n\n[r]: z.md\n",
+    "markdown": "# a\n\n# a\n\n# a-1\n\n# a\n\n# Ünïcödé Straße\n\n# 日本語 見出し\n\n# ½ ² Ⅻ ٣ x²\n\n# Emoji 🚀 rocket 👩‍💻 dev\n\n# NBSP&nbsp;here and &amp; &lt;tag&gt; &#65;&#x42;\n\n# snake_case and _emph_ and __strong__ and *star* and **bold**\n\n# `code_with_under` and `a  b` and `` ` ``\n\n# Link [text](x.md) and ![img](y.png) alt and [ref][r]\n\n# <kbd>Ctrl</kbd>+C and <span id=\"inner\">in</span>\n\n# Escaped \\* star \\_ under \\# hash\n\n# Closing hashes ##\n\n# Trailing #hash#\n\n# Multiple   spaces\ttab\n\n# -- dashes -- trailing -\n\n# Dots.and/slashes:colons;semi,comma!bang?q'apos\"quote\n\n# Café Cafe&#x301;\n\n# İstanbul UPPER Case ΣΑΣ\n\n# Price $5 + 10% = ~fair~ ~~gone~~ #12\n\n# Under_score_end_ ‿ tie ‐ hyphen – en — em\n\n#\n\n# ‌zwnj‍zwj\n\n## Ⅷ roman · middot ¶ pilcrow © copy ª ordinal º\n\n\n# 🚀\n\n# 🚀\n\n# x\n\n## A [`code` link](y.md) and <https://example.com/p> and www.example.org\n\n### _foo_bar_ and foo_bar_ and _a_ _b_ and __x__y and _(paren)_\n\n### *emph* text** and a*b*c and 2*3*4\n\n### Ⓐ circled and ﬁ ligature and Ǆ title\n\n- # In a list\n\n> # In a quote\n\n<h2 id=\"raw-h2\">Raw HTML heading</h2>\n\n<details><summary>Sum</summary>\n\n#### Inside details\n\n</details>\n\n#### Trailing spaces   \n\n####### seven\n\n#\ttab after hash\n\n#5 no space\n\n## Big &#9999999; zero &#0; and &#91;b&#93;(c) &amp; d\n\n## Configuration <a name=\"config\"></a>\n\n## CI ![status](https://example.com/badge.svg)\n\n## Upgrading <!-- since 0.4 -->\n\n## <a id=\"install\"></a> Install\n\n## Line<br>break and end<br>\n\n## Trailing nbsp&nbsp;\n\n## _c_<em>n</em> and [k](k.md)_c_\n\n## <https://e.com>_x_ and _y_<https://e.com>\n\n## ![x](y.png)\n\n## ![x](y.png) ![z](w.png)\n\n## <!-- only a comment -->\n\n<h2> Spaced </h2>\n\n<h3>\n  Multi line\n</h3>\n\n## Tab trailing\t\n\n## ~_x_ and _x_~ and ~ _x_\n\n## a~_x_~b\n\n## ~~d~~_u_ and ~~e~~ _v_\n\n## _u_~~d~~ and ~~_w_~~\n\n## \\~_x_ and `~`_y_\n\n## *_* and _u_\n\n## **_x_** and ___y___\n\n## _a *b_ c*\n\n## Price €_net_ total and Copyright ©_2026_\n\n## Arrow →_next_ and _a_→ b\n\n## Sum ∑_i_ math, °_c_, +_p_ and —_q_\n\n## a](b) c and x][y] z\n\n## [a](b unclosed\n\n## [a](b) c](d) and [a [b] c](d) e\n\n## ![x] y and [a][nodef] x and [r][] w\n\n## [a](b c) d and [a](b(c \"t\") z\n\n## [r](bad x and ![r](<b>[r][]) q\n\n## [k](<b> \"t\") u and [x](y(z)][x](<y z>) q\n\n## _* ~_* and __a ~___ b\n\n[r]: z.md\n",
     "anchors": [
       "a",
       "a-1",
@@ -706,7 +706,18 @@
       "x-and-y",
       "_-and-u",
       "x-and-y-1",
-      "a-b-c"
+      "a-b-c",
+      "price-_net_-total-and-copyright-_2026_",
+      "arrow-_next_-and-_a_-b",
+      "sum-_i_-math-_c_-p-and-q",
+      "ab-c-and-xy-z",
+      "ab-unclosed",
+      "a-cd-and-a-b-c-e",
+      "x-y-and-anodef-x-and-r-w",
+      "ab-c-d-and-a-z",
+      "rbad-x-and-r-q",
+      "k-u-and-xyzx-q",
+      "_-_-and-__a-___-b"
     ]
   }
 }

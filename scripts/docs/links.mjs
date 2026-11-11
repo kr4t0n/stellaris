@@ -2,17 +2,20 @@
 // links and the anchors it offers, its headings' made by GitHub's rule. A hand-written reader, not a
 // markdown parser, so it knows only what the repository's docs write: ATX headings, also in lists
 // and quotes, fences, code spans, escapes, inline links and images, reference definitions, and raw
-// HTML's headings, `href`, `src`, `id`, and `name`. What it can't read gives no anchor, so a link to
-// it fails rather than passes: a setext heading; a heading or an `id` that holds a named character
-// reference other than the six in `ENTITIES`, which GitHub reads by HTML's whole table; and a
-// heading whose text leaves nothing for an anchor, which GitHub anchors as `""`, `-1`, and so on,
-// or not at all, by the file's other headings.
+// HTML's headings, `href`, `src`, `id`, and `name`. What it knows it can't read gives no anchor, so
+// a link to it fails rather than passes: a setext heading; a heading or an `id` that holds a named
+// character reference other than the six in `ENTITIES`, which GitHub reads by HTML's whole table;
+// and a heading whose text leaves nothing for an anchor, which GitHub anchors as `""`, `-1`, and so
+// on, or not at all, by the file's other headings. It doesn't know an indented code block or an
+// HTML block, so a `#` line in one reads as a heading, nor a bare `www.` address GitHub links.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const ASCII_PUNCTUATION = /^[!-/:-@[-`{-~]$/u;
 const WHITESPACE = /^\s$/u;
-const PUNCTUATION = /^[\p{P}\p{S}]$/u;
+// cmark-gfm takes ASCII punctuation and Unicode's, but not its other symbols, such as `€` or `→`,
+// as punctuation beside an underscore, where CommonMark 0.31 takes all of them.
+const PUNCTUATION = /^[\p{P}!-/:-@[-`{-~]$/u;
 // GitHub keeps a heading's word characters (Unicode's `\w`, as Ruby's `\p{Word}` reads it), hyphens,
 // and spaces, which become hyphens; it drops everything else, other numbers such as `½` and the
 // non-breaking space among them.
@@ -144,9 +147,10 @@ function decodeEntity(whole, dec, hex, name) {
  * The text GitHub reads from a heading's inline markdown: code spans and escapes as written, links'
  * text without their destinations, no images, no HTML tags or comments, entities decoded, and no
  * emphasis marks. Spaces next to what is dropped stay, as on GitHub. Undefined when the text holds
- * a named character reference outside `ENTITIES`.
+ * a named character reference outside `ENTITIES`. `defined` holds the file's reference labels, as
+ * `labelOf` gives them; without it every reference counts as defined.
  */
-export function headingText(markdown) {
+export function headingText(markdown, defined) {
   // Each character keeps what it came from: only plain text's can be markup, and a flanking check
   // sees the source beside it, as CommonMark's does: a code span's backtick, an entity's `&` or `;`,
   // and the `<` or `)` of anything dropped, by an empty character in its place.
@@ -173,52 +177,139 @@ export function headingText(markdown) {
     } else if (token.kind === "autolink") {
       literal(token.value, "<");
     } else {
-      characters.push({ character: "", markup: false, edge: "<" });
+      const raw = markdown.slice(token.start, token.end);
+      characters.push({ character: "", markup: false, edge: "<", raw });
     }
   }
-  const kept = emphasisRemoved(destinationsRemoved(characters));
+  const kept = emphasisRemoved(destinationsRemoved(characters, defined));
   if (kept.some(({ unknown }) => unknown)) return undefined;
   return kept.map(({ character }) => character).join("");
 }
 
-function destinationsRemoved(characters) {
+// Drops each link's destination and each image whole, closing brackets as cmark's
+// `handle_close_bracket` does. A `]` takes the nearest `[` still open, which is spent either way.
+// It makes an inline link when a destination GitHub reads follows, else a reference: a full one by
+// its label, or a collapsed or shortcut one by the text, unless another `[` opened inside it. A
+// label counts only when the file defines it. Once a link forms, the `[` before it, but an image's,
+// open nothing more, since a link holds no link. What makes no link stays text.
+function destinationsRemoved(characters, defined) {
+  const isDefined = (label) => defined === undefined || defined.has(labelOf(label));
+  const text = (from, to) =>
+    characters
+      .slice(from, to)
+      .map(({ character }) => character)
+      .join("");
+  const is = (at, character) =>
+    characters[at]?.markup === true && characters[at].character === character;
   const result = [];
   for (let index = 0; index < characters.length; index += 1) {
-    const { character, markup } = characters[index];
-    const next = characters[index + 1];
-    if (
-      markup &&
-      character === "]" &&
-      next?.markup &&
-      (next.character === "(" || next.character === "[")
-    ) {
-      const close = next.character === "(" ? ")" : "]";
-      let depth = 0;
-      let end = index + 1;
-      for (; end < characters.length; end += 1) {
-        const at = characters[end];
-        if (!at.markup) continue;
-        if (at.character === next.character) depth += 1;
-        else if (at.character === close && --depth === 0) break;
-      }
-      const open = lastOpenBracket(result);
-      // An image's alt text is no part of the heading's text, as GitHub reads it.
-      if (open > 0 && result[open - 1].markup && result[open - 1].character === "!")
-        result.length = open - 1;
-      result.push({ character: "", markup: false, edge: close });
-      index = end;
+    const entry = characters[index];
+    if (is(index, "[")) {
+      const below = lastOpenBracket(result);
+      if (below !== -1) result[below].bracketAfter = true;
+      const previous = result.at(-1);
+      const image = previous?.markup === true && previous.character === "!";
+      result.push({ ...entry, opener: true, image });
       continue;
     }
-    result.push(characters[index]);
+    const open = is(index, "]") ? lastOpenBracket(result) : -1;
+    if (open === -1) {
+      result.push(entry);
+      continue;
+    }
+    const opener = result[open];
+    result[open] = { ...opener, markup: false, spent: true };
+    let end = -1;
+    if (!opener.inactive) {
+      end = is(index + 1, "(") ? inlineEnd(characters, index + 1) : -1;
+      if (end === -1) {
+        const close = is(index + 1, "[") ? labelEnd(characters, index + 1) : -1;
+        const label = close === -1 ? "" : text(index + 2, close);
+        const shown = result
+          .slice(open + 1)
+          .map(({ character }) => character)
+          .join("");
+        const byText = (close === -1 || label === "") && !opener.bracketAfter;
+        if (label !== "" ? isDefined(label) : byText && isDefined(shown)) {
+          end = close === -1 ? index : close;
+        }
+      }
+    }
+    if (end === -1) {
+      result.push(entry);
+      continue;
+    }
+    if (opener.image) {
+      // An image's alt text is no part of the heading's text, as GitHub reads it.
+      result.length = open - 1;
+    } else {
+      for (const earlier of result) if (earlier.opener && !earlier.image) earlier.inactive = true;
+    }
+    result.push({ character: "", markup: false, edge: characters[end].character });
+    index = end;
   }
   return result;
 }
 
 function lastOpenBracket(characters) {
   for (let index = characters.length - 1; index >= 0; index -= 1) {
-    if (characters[index].markup && characters[index].character === "[") return index;
+    if (characters[index].opener && !characters[index].spent) return index;
   }
   return -1;
+}
+
+/** Where a reference's label, opened by the `[` at `at`, ends: its `]`, or -1 when it has none. */
+function labelEnd(characters, at) {
+  for (let index = at + 1; index < characters.length && index - at <= 1000; index += 1) {
+    const { character, markup } = characters[index];
+    if (markup && character === "[") return -1;
+    if (markup && character === "]") return index;
+  }
+  return -1;
+}
+
+/**
+ * Where an inline link's destination and title, opened by the `(` at `at`, end: the `)`, or -1
+ * when GitHub would read none there. A bare destination ends at a space or an unmatched `)`,
+ * and its parentheses need not balance before a space, as GitHub's cmark-gfm reads them.
+ */
+function inlineEnd(characters, at) {
+  const is = (index, set) =>
+    characters[index]?.markup === true && set.includes(characters[index].character);
+  const spaces = (from) => {
+    let index = from;
+    while (is(index, " \t\n")) index += 1;
+    return index;
+  };
+  let index = spaces(at + 1);
+  if (characters[index]?.raw !== undefined) {
+    // An HTML tag or comment where the destination starts is one in angle brackets.
+    index += 1;
+  } else if (is(index, "<")) {
+    index += 1;
+    while (index < characters.length && !is(index, "<>\n")) index += 1;
+    if (!is(index, ">")) return -1;
+    index += 1;
+  } else {
+    let depth = 0;
+    for (; index < characters.length && !is(index, " \t\n"); index += 1) {
+      // A tag's space ends the destination too, and an attribute, not a title or `)`, follows it.
+      if (/\s/u.test(characters[index].raw ?? "")) return -1;
+      if (is(index, "(") && ++depth > 32) return -1;
+      if (is(index, ")") && depth-- === 0) break;
+    }
+    if (index === characters.length) return -1;
+  }
+  const title = spaces(index);
+  if (title > index && is(title, `"'(`)) {
+    const close = characters[title].character === "(" ? ")" : characters[title].character;
+    index = title + 1;
+    while (index < characters.length && !is(index, close)) index += 1;
+    if (index === characters.length) return -1;
+    index += 1;
+  }
+  index = spaces(index);
+  return is(index, ")") ? index : -1;
 }
 
 // `*` and `~` leave no trace in an anchor, but `_` is a word character: an underscore that marks
@@ -242,12 +333,13 @@ function emphasisRemoved(characters) {
     const right =
       !isSpace(before) && (!isPunctuation(before) || isSpace(after) || isPunctuation(after));
     const underscore = character === "_";
+    // A run spends its characters from the inside: a closer from its left end, an opener from
+    // its right, so `low` and `high` bound what it has left.
     runs.push({
       character,
-      start: index,
-      end,
+      low: index,
+      high: end,
       length: end - index,
-      count: end - index,
       opens: underscore ? left && (!right || isPunctuation(before)) : left,
       closes: underscore ? right && (!left || isPunctuation(after)) : right,
       active: true,
@@ -282,17 +374,17 @@ function emphasisRemoved(characters) {
       continue;
     }
     const opener = runs[found];
-    const used = opener.count >= 2 && closer.count >= 2 ? 2 : 1;
+    const used = opener.high - opener.low >= 2 && closer.high - closer.low >= 2 ? 2 : 1;
     for (let k = 0; k < used; k += 1) {
-      dropped.add(opener.start + opener.count - 1);
-      opener.count -= 1;
-      dropped.add(closer.end - closer.count);
-      closer.count -= 1;
+      opener.high -= 1;
+      dropped.add(opener.high);
+      dropped.add(closer.low);
+      closer.low += 1;
     }
     // Whatever runs sit between a pair are text from then on.
     for (let at = found + 1; at < current; at += 1) runs[at].active = false;
-    if (opener.count === 0) opener.active = false;
-    if (closer.count === 0) {
+    if (opener.high === opener.low) opener.active = false;
+    if (closer.high === closer.low) {
       closer.active = false;
       current += 1;
     }
@@ -300,14 +392,14 @@ function emphasisRemoved(characters) {
   return characters.filter((_, index) => !dropped.has(index));
 }
 
-// GitHub's cmark-gfm reads a run of `~` beside an underscore as a letter when a letter is on the
-// run's other side, as in `~~d~~_u_`, which keeps its underscores.
+// GitHub's cmark-gfm judges a run beside a run of `~` by what is on the tildes' other side, as if
+// they weren't there: `~~d~~_u_` keeps its underscores, `~_x_` doesn't, and in `_a ~_` the second
+// underscore can't close.
 function besideTilde(characters, from, step) {
   let at = from;
   while (characters[at]?.markup && characters[at].character === "~") at += step;
   if (at === from) return undefined;
-  const other = neighbour(characters[at], step < 0 ? "end" : "start");
-  return isSpace(other) || isPunctuation(other) ? undefined : "a";
+  return neighbour(characters[at], step < 0 ? "end" : "start");
 }
 
 function neighbour(entry, side) {
@@ -323,10 +415,16 @@ function isPunctuation(character) {
   return PUNCTUATION.test(character);
 }
 
+/** A reference label as CommonMark matches one: case folded, its whitespace collapsed. */
+function labelOf(label) {
+  return label.trim().replace(/\s+/gu, " ").toUpperCase().toLowerCase();
+}
+
 /** A line's container marks, a quote's `>` or a list item's marker, before what it holds. */
 const CONTAINER = String.raw`^[ \t]*(?:>[ \t]?)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?`;
 const FENCE = new RegExp(`${CONTAINER}(\`{3,}|~{3,})(.*)$`, "u");
 const HEADING = new RegExp(`${CONTAINER}(#{1,6})(?:[ \\t]+(.*))?$`, "u");
+const DEFINITION = new RegExp(`${CONTAINER}\\[((?:[^\\]\\\\]|\\\\.)+)\\]:`, "u");
 
 /**
  * A markdown file's anchors (its headings', raw HTML's among them, told apart as GitHub does, and
@@ -335,6 +433,22 @@ const HEADING = new RegExp(`${CONTAINER}(#{1,6})(?:[ \\t]+(.*))?$`, "u");
 export function readMarkdown(source) {
   const found = { anchors: new Set(), links: [], slugger: new Slugger() };
   const lines = source.split(/\r?\n/u);
+  // A heading's reference links are links only when the file defines their labels, anywhere in it.
+  const defined = new Set();
+  let inFence;
+  for (const line of lines) {
+    if (inFence) {
+      if (new RegExp(`${CONTAINER}${inFence}`, "u").test(line)) inFence = undefined;
+      continue;
+    }
+    const open = line.match(FENCE);
+    if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
+      inFence = `${open[1][0]}{${open[1].length},}[ \\t]*$`;
+      continue;
+    }
+    const definition = line.match(DEFINITION);
+    if (definition) defined.add(labelOf(definition[1]));
+  }
   let fence;
   let block = [];
   let blockStart = 0;
@@ -363,7 +477,7 @@ export function readMarkdown(source) {
       const content = (heading[2] ?? "")
         .replace(/(?:^|[ \t]+)#+[ \t]*$/u, "")
         .replace(/[ \t]+$/u, "");
-      addHeading(found, headingText(content));
+      addHeading(found, headingText(content, defined));
       readBlock(line, index, found);
       return;
     }

@@ -168,6 +168,7 @@ import { MoveRepos } from "./moves.js";
 import { postMentions } from "./mentions.js";
 import type { MatchingCitizen } from "./mention-matching.js";
 import { MetricsIndex } from "./metrics-index.js";
+import { signalsIn, type SignalRecord } from "./signals.js";
 import { TurnHistoryPayloadSchema } from "./turn-history.js";
 import { transcriptToRead, TurnCounters } from "./turn-counters.js";
 import {
@@ -316,12 +317,6 @@ export interface RunnerPatch {
    * said nothing, as an older runner's does, which drops what an earlier one reported.
    */
   readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
-}
-
-export interface SignalRecord {
-  readonly id: Ulid;
-  readonly ts: string;
-  readonly signal: OpsSignal;
 }
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
@@ -1830,20 +1825,20 @@ export class Board {
     return this.mutex.run(() => this.publishSignalUnlocked(signal));
   }
 
-  /** The most recent operations signals from the event log, oldest first. */
+  /**
+   * The newest `limit` operations signals, oldest first: from the metrics index once this process
+   * has one, waiting for a seed under way, so a reader's prompt on the server, which seeds it at
+   * its start, reads no log; from the event log otherwise, as for the admin CLI, which opens the
+   * board for one command and would read every older turn's transcript to seed it. A seed that
+   * fails leaves this answer to the log until one succeeds.
+   */
   async listSignals(limit = 100): Promise<SignalRecord[]> {
-    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    const records: SignalRecord[] = [];
-    for (const event of events) {
-      if (event.type !== "ops.signal") {
-        continue;
-      }
-      const parsed = OpsSignalSchema.safeParse(event.payload);
-      if (parsed.success) {
-        records.push({ id: event.id, ts: event.ts, signal: parsed.data });
-      }
+    const index = await this.metricsIndex?.catch(() => null);
+    if (index !== undefined && index !== null) {
+      return index.signals(limit);
     }
-    return records.slice(-limit);
+    const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
+    return signalsIn(events, limit);
   }
 
   /** A citizen's finished turns, oldest first, from the event log. */
@@ -4319,12 +4314,13 @@ export class Board {
   }
 
   /**
-   * The metrics index, which answers the metrics and the citizens' tokens: seeded once from the
-   * whole event log on first use, as the server does at its start, then kept up by each event
-   * this process appends. The server logs every event a measure or the tokens count itself; one
-   * another process appended would count from the next seed. A turn ended before ends carried
-   * their board actions has its transcript read once, here, through the same cache as the
-   * counters' seed. A seed that fails is tried again by the next call.
+   * The metrics index, which answers the metrics, the citizens' tokens, and the signals: seeded
+   * once from the whole event log on first use, as the server does at its start, then kept up by
+   * each event this process appends. The server logs every event a measure or the tokens count,
+   * and every signal, itself; one another process appended would count from the next seed. A
+   * turn ended before ends carried their board actions has its transcript read once, here,
+   * through the same cache as the counters' seed. A seed that fails is tried again by the next
+   * call.
    */
   indexMetrics(): Promise<MetricsIndex> {
     this.metricsIndex ??= this.seedMetrics().catch((error: unknown) => {

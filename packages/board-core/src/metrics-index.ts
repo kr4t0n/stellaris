@@ -22,6 +22,7 @@ import {
   type DecisionKind,
   type MetricsInput,
 } from "./metrics.js";
+import { newestSignals, signalRecord, type SignalRecord } from "./signals.js";
 import { sumTokens, tokenEnd, type TokenEnd } from "./turn-history.js";
 
 /** Something that happened, at milliseconds since the epoch. */
@@ -117,16 +118,17 @@ function boardActionsOf(event: BoardEvent): number | undefined {
 }
 
 /**
- * The metrics and the citizens' tokens kept up as the log grows, so that answering either reads
- * neither the log nor a transcript: each event `computeMetrics` or `tokenUse` counts is added
- * once, as it is appended, to a record of its own kind, in the log's order, with what they need
- * of it. A window counts the records in it; a task's send-backs and thread posts, and the
- * questions to the user still open, are kept over the whole log as they arrive. Mentions are
- * matched to their answers once, and again only when the citizens or their memberships change,
- * since the wake rule reads those.
+ * The metrics, the citizens' tokens, and the operations signals kept up as the log grows, so that
+ * answering any of them reads neither the log nor a transcript: each event `computeMetrics` or
+ * `tokenUse` counts, or `signalsIn` lists, is added once, as it is appended, to a record of its
+ * own kind, in the log's order, with what they need of it. A window counts the records in it; a
+ * task's send-backs and thread posts, and the questions to the user still open, are kept over
+ * the whole log as they arrive. Mentions are matched to their answers once, and again only when
+ * the citizens or their memberships change, since the wake rule reads those.
  *
  * Its answers for a log equal `computeMetrics`' for the same log, window, tasks, and citizens,
- * and `tokenUse`'s for the same log and window, which the equality tests hold it to.
+ * `tokenUse`'s for the same log and window, and `signalsIn`'s for the same log and limit, which
+ * the equality tests hold it to.
  */
 export class MetricsIndex {
   private readonly ends = new Timeline<TurnEnd>();
@@ -136,6 +138,8 @@ export class MetricsIndex {
   private readonly sentBack = new Timeline<SentBack>();
   private readonly decisions = new Timeline<Decision>();
   private readonly blocked = new Timeline<Blocked>();
+  // Every signal the log holds that its schema reads, as `listSignals` answers them.
+  private readonly signalRecords: SignalRecord[] = [];
   // Send-backs and thread posts, by task, over the whole log.
   private readonly moves = new Map<string, number>();
   private readonly posts = new Map<string, number>();
@@ -235,6 +239,10 @@ export class MetricsIndex {
         break;
       }
       case "ops.signal": {
+        const record = signalRecord(event);
+        if (record !== null) {
+          this.signalRecords.push(record);
+        }
         const signal = SignalPayload.safeParse(event.payload);
         if (
           signal.success &&
@@ -299,6 +307,11 @@ export class MetricsIndex {
   /** Each citizen's finished turns over a window, and the tokens of those that counted them. */
   tokenUse(window: MetricsWindow, now: Date): TokenUse {
     return sumTokens(this.tokens.from(windowStart(window, now)), window, now);
+  }
+
+  /** The newest `limit` signals, oldest first, as `signalsIn` reads them from the log. */
+  signals(limit: number): SignalRecord[] {
+    return newestSignals(this.signalRecords, limit);
   }
 
   private decide(event: BoardEvent, kind: DecisionKind): void {

@@ -1,4 +1,6 @@
 import {
+  BoardEventSchema,
+  OPS_SIGNAL_KINDS,
   TaskFrontmatterSchema,
   type BoardEvent,
   type MetricsWindow,
@@ -7,6 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { MetricsIndex } from "./metrics-index.js";
 import { computeMetrics, MetricsTally, type MetricsCitizen } from "./metrics.js";
+import { signalsIn } from "./signals.js";
 import { tokenUse } from "./turn-history.js";
 import { WakeLatency } from "./wake-latency.js";
 
@@ -285,6 +288,85 @@ function withTokens(log: Log, seed: number): BoardEvent[] {
   });
 }
 
+/** The shapes of signal `withSignals` gives, by the share of signals below which each falls. */
+const SIGNAL_SHAPES = [
+  ["bare", 0.25],
+  ["full", 0.5],
+  ["undefined", 0.65],
+  ["unknownKind", 0.72],
+  ["noValue", 0.79],
+  ["emptySummary", 0.86],
+  ["badTask", 0.93],
+  ["valueNotANumber", 1],
+] as const;
+type SignalShape = (typeof SIGNAL_SHAPES)[number][0];
+
+/**
+ * The log with every signal in one of the shapes `listSignals` reads or refuses, its name in
+ * `shapes` by the event's id: only the fields every signal has, every field it may have, fields
+ * appended as undefined, as a publisher may hand them over, and payloads its schema refuses (a
+ * kind it does not know, no value, an empty summary, a task that is no id, and a value that is
+ * no number). Every other event stays as the log has it.
+ */
+function withSignals(
+  log: Log,
+  seed: number,
+): { events: BoardEvent[]; shapes: Map<string, SignalShape> } {
+  const next = random(seed * 15_485_863);
+  const shapes = new Map<string, SignalShape>();
+  const events = log.events.map((event, n) => {
+    if (event.type !== "ops.signal") {
+      return event;
+    }
+    const kind = OPS_SIGNAL_KINDS[Math.floor(next() * OPS_SIGNAL_KINDS.length)];
+    const bare = {
+      kind,
+      key: `${kind}:${Math.floor(next() * 4)}`,
+      summary: `summary ${n}`,
+      value: Math.floor(next() * 100) / 4,
+    };
+    const roll = next();
+    const shape = SIGNAL_SHAPES.find(([, below]) => roll < below)?.[0] ?? "bare";
+    shapes.set(event.id, shape);
+    const payload: Record<string, unknown> =
+      shape === "bare"
+        ? bare
+        : shape === "full"
+          ? {
+              ...bare,
+              threshold: 3,
+              project: "lab",
+              agent: "eng-1",
+              role: "engineer",
+              taskId: TASKS[n % TASKS.length],
+              wakes: next() < 0.5,
+            }
+          : shape === "undefined"
+            ? { ...bare, project: undefined, taskId: undefined, wakes: undefined }
+            : shape === "unknownKind"
+              ? { ...bare, kind: "not-a-kind" }
+              : shape === "noValue"
+                ? { kind: bare.kind, key: bare.key, summary: bare.summary }
+                : shape === "emptySummary"
+                  ? { ...bare, summary: "" }
+                  : shape === "badTask"
+                    ? { ...bare, taskId: "not-a-task" }
+                    : { ...bare, value: { count: bare.value } };
+    return { ...event, payload };
+  });
+  return { events, shapes };
+}
+
+/** The events as a read of the log gives them back: each written as a line, then parsed. */
+function readBack(events: readonly BoardEvent[]): BoardEvent[] {
+  return events.map((event) => BoardEventSchema.parse(JSON.parse(JSON.stringify(event))));
+}
+
+/** The limits an ask can give: none, a few, the turn host's read, NaN, and around the count. */
+function limitsFor(count: number): number[] {
+  return [0, 1, 2, 100, 501, Number.NaN, -1, count - 1, count, count + 1, 10 * count + 1_000];
+}
+
 /** The user's post naming `name` in a thread, `seconds` after the logs' start. */
 function post(seconds: number, name: string): BoardEvent {
   return {
@@ -467,6 +549,84 @@ describe("metrics index", () => {
     expect(turns(all)).toBeLessThan(ends.length);
     expect(turns(index.tokenUse("24h", now))).toBeGreaterThan(0);
     expect(turns(index.tokenUse("24h", now))).toBeLessThan(turns(all));
+  });
+
+  it("lists the signals as the log's read does, for every limit, as events arrive", () => {
+    let compared = 0;
+    for (let seed = 1; seed <= 120; seed += 1) {
+      const { events } = withSignals(generate(seed, 240), seed);
+      const index = new MetricsIndex();
+      let added = 0;
+      for (const upTo of [80, 160, 240]) {
+        // Fed as this process appends them; the log's read parses what was written.
+        for (const event of events.slice(added, upTo)) {
+          index.add(event);
+        }
+        added = upTo;
+        const written = readBack(events.slice(0, upTo));
+        const count = signalsIn(written, 0).length;
+        for (const limit of limitsFor(count)) {
+          expect(index.signals(limit), `seed ${seed} at ${upTo}, limit ${limit}`).toStrictEqual(
+            signalsIn(written, limit),
+          );
+          compared += 1;
+        }
+      }
+    }
+    expect(compared).toBe(120 * 3 * limitsFor(0).length);
+    // One log long enough that the turn host's read of 501 leaves its oldest signals out.
+    const { events } = withSignals(generate(121, 24_000), 121);
+    const index = new MetricsIndex();
+    for (const event of events) {
+      index.add(event);
+    }
+    const written = readBack(events);
+    const count = signalsIn(written, 0).length;
+    expect(count).toBeGreaterThan(600);
+    for (const limit of limitsFor(count)) {
+      expect(index.signals(limit), `the long log, limit ${limit}`).toStrictEqual(
+        signalsIn(written, limit),
+      );
+    }
+    expect(index.signals(501)).toHaveLength(501);
+  });
+
+  it("lists signals of every shape, so the comparison is not of empty answers", () => {
+    // Over the logs the equality test compares, every shape of signal and every kind.
+    const logs = [
+      ...Array.from({ length: 120 }, (_, at) => withSignals(generate(at + 1, 240), at + 1)),
+      withSignals(generate(121, 24_000), 121),
+    ];
+    const counts = new Map<SignalShape, number>(SIGNAL_SHAPES.map(([shape]) => [shape, 0]));
+    const kinds = new Set<unknown>();
+    let listed = 0;
+    // The fields of each listed signal that was handed over with some undefined.
+    const handedFields: string[] = [];
+    for (const { events, shapes } of logs) {
+      for (const shape of shapes.values()) {
+        counts.set(shape, (counts.get(shape) ?? 0) + 1);
+      }
+      const index = new MetricsIndex();
+      for (const event of events) {
+        index.add(event);
+      }
+      for (const record of index.signals(0)) {
+        listed += 1;
+        kinds.add(record.signal.kind);
+        if (shapes.get(record.id) === "undefined") {
+          handedFields.push(Object.keys(record.signal).join(", "));
+        }
+      }
+    }
+    // The shapes of which the logs hold five or fewer, by name.
+    expect([...counts].filter(([, count]) => count <= 5)).toEqual([]);
+    expect(kinds).toEqual(new Set(OPS_SIGNAL_KINDS));
+    // Only the readable shapes are listed: the bare, the full, and the undefined.
+    const readable = ["bare", "full", "undefined"] as const;
+    expect(listed).toBe(readable.reduce((sum, shape) => sum + (counts.get(shape) ?? 0), 0));
+    // Fields handed over as undefined are left out, as the log's line leaves them out.
+    expect(handedFields).toHaveLength(counts.get("undefined") ?? 0);
+    expect(new Set(handedFields)).toEqual(new Set(["kind, key, summary, value"]));
   });
 
   it("reads the transcript only of a counted end logged before ends carried their count", () => {

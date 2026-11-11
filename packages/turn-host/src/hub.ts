@@ -1387,9 +1387,11 @@ export class RunnerHub implements TurnRunner {
 
   /**
    * Where a citizen's work outside any project goes: the runner it is pinned to, waiting while that
-   * runner is busy or away for less than the grace period. A citizen not pinned yet is pinned to the
-   * least busy runner that can take it, and one whose runner has been gone longer, or lacks its CLI,
-   * is moved there, starting its conversations afresh while its home follows it.
+   * runner is busy or away for less than the grace period. One whose runner has been gone longer
+   * keeps its pin, and the turn alone goes to the least busy runner that can take it, starting its
+   * conversation afresh there, so the next turn once the runner is back goes home again. A citizen
+   * not pinned yet is pinned to that runner, and one whose runner is there but lacks its CLI is moved
+   * to it, starting its conversations afresh while its home follows it.
    */
   private async pinnedSeat(
     agent: Name,
@@ -1397,19 +1399,24 @@ export class RunnerHub implements TurnRunner {
     cli: CliKind,
     free: (seat: Seat) => boolean,
   ): Promise<Seat | undefined> {
+    let away = false;
     if (pinned !== undefined) {
       const seat = this.seats.get(pinned);
       if (seat !== undefined && seat.send !== null && seat.hello.clis.includes(cli)) {
         return free(seat) ? seat : undefined;
       }
-      const lacksCli = seat !== undefined && seat.send !== null;
-      if (!lacksCli && this.awayFor(pinned) < this.graceMs) {
+      away = seat === undefined || seat.send === null;
+      if (away && this.awayFor(pinned) < this.graceMs) {
         return undefined;
       }
     }
     const candidate = this.byLoad().find(free);
     if (candidate === undefined) {
       return undefined;
+    }
+    if (away) {
+      this.log.info({ agent, runner: candidate.name, pinned }, "citizen detoured");
+      return candidate;
     }
     const home = await this.board.pinAgent(agent, candidate.name, pinned);
     if (home === candidate.name) {

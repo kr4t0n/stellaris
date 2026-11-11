@@ -3758,7 +3758,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(reads).toEqual(["claude"]);
   });
 
-  it("pins a citizen's work outside projects to one runner, moves it when told, and moves it when its runner is gone", async () => {
+  it("pins a citizen's work outside projects to one runner, moves it when told, and keeps the pin while its runner is gone", async () => {
     const { board } = await Board.init(dir, { name: "pins" });
     await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
     const fresh: Record<string, boolean[]> = { a: [], b: [] };
@@ -3770,20 +3770,27 @@ describe("turns on a runner over the runner protocol", () => {
         return Promise.resolve(completed(`ran on ${runner}`));
       },
     });
+    const network = failingNetwork();
     society = await startTestSociety({
       board,
       runnerName: "a",
       backends: () => ({ claude: backendOn("a") }),
-      extraRunners: [{ name: "b", backends: () => ({ claude: backendOn("b") }) }],
+      extraRunners: [
+        { name: "b", backends: () => ({ claude: backendOn("b") }), fetch: network.fetch },
+      ],
       graceMs: 300,
     });
-    const { run, hub, runners } = society;
+    const { run, hub } = society;
     const turn = {
       agent: "stew",
       project: "society",
       trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
       priority: 1,
     };
+    const placed = async () =>
+      (await board.readEvents(null, 500))
+        .filter((event) => event.type === "agent.placed")
+        .map((event) => event.payload);
 
     // The first turn pins it to the least busy runner, and every later one goes there too.
     expect((await run(turn)).runner).toBe("a");
@@ -3796,8 +3803,9 @@ describe("turns on a runner over the runner protocol", () => {
     expect((await run(turn)).runner).toBe("b");
     expect(fresh["b"]).toEqual([true]);
 
-    // Its runner goes away: the turn waits through the grace period, then moves.
-    await runners.get("b")?.stop();
+    // Its runner goes away: the turn waits through the grace period, then runs elsewhere, starting
+    // its conversation afresh there, while the pin stays.
+    network.down();
     await vi.waitFor(() => expect(hub.connected).toEqual(["a"]));
     expect(
       await hub.assign({
@@ -3808,10 +3816,97 @@ describe("turns on a runner over the runner protocol", () => {
     ).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 350));
     expect((await run(turn)).runner).toBe("a");
+    expect((await run(turn)).runner).toBe("a");
+    expect(fresh["a"]).toEqual([true, false, true, false]);
+    expect((await board.readAgent("stew")).homeRunner).toBe("b");
+    expect(await placed()).toEqual([{ agent: "stew", runner: "a" }]);
+
+    // Back, the runner takes the next turn, which starts afresh, since the last ran elsewhere.
+    network.up();
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    expect((await run(turn)).runner).toBe("b");
+    expect(fresh["b"]).toEqual([true, true]);
+    expect((await board.readAgent("stew")).homeRunner).toBe("b");
+    expect(await placed()).toEqual([{ agent: "stew", runner: "a" }]);
+  });
+
+  it("waits for a citizen's runner that comes back within the grace period", async () => {
+    const { board } = await Board.init(dir, { name: "grace" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const ran: string[] = [];
+    const backendOn = (runner: "a" | "b"): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${runner}`),
+      runTurn: () => {
+        ran.push(runner);
+        return Promise.resolve(completed(`ran on ${runner}`));
+      },
+    });
+    const network = failingNetwork();
+    society = await startTestSociety({
+      board,
+      runnerName: "a",
+      backends: () => ({ claude: backendOn("a") }),
+      extraRunners: [
+        { name: "b", backends: () => ({ claude: backendOn("b") }), fetch: network.fetch },
+      ],
+      graceMs: 60_000,
+    });
+    const { run, hub } = society;
+    const turn = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    await board.setAgentRunner(USER, "stew", "b");
+
+    // Its runner drops: a turn now, and one a while later, wait rather than going to a.
+    network.down();
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a"]));
+    const dispatch = TurnDispatchSchema.parse(turn);
+    expect(await hub.assign(dispatch)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(await hub.assign(dispatch)).toBeNull();
+
+    // Back within the grace period, it takes the turn.
+    network.up();
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    expect((await run(turn)).runner).toBe("b");
+    expect(ran).toEqual(["b"]);
+    expect((await board.readAgent("stew")).homeRunner).toBe("b");
+  });
+
+  it("moves a citizen pinned to a runner that is there but lacks its CLI", async () => {
+    const { board } = await Board.init(dir, { name: "lacks" });
+    await board.addAgent(USER, { name: "stew", role: "steward", cli: "claude" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session"),
+      runTurn: () => Promise.resolve(completed("ran")),
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "a",
+      backends: () => ({ claude: backend }),
+      extraRunners: [{ name: "b", backends: () => ({ codex: { ...backend, kind: "codex" } }) }],
+      graceMs: 60_000,
+    });
+    const { run, hub } = society;
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]));
+    await board.setAgentRunner(USER, "stew", "b");
+
+    // A runner without the CLI is a lasting setting, not an outage: the pin moves at once.
+    const turn = {
+      agent: "stew",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: true, reason: "test" },
+      priority: 1,
+    };
+    expect((await run(turn)).runner).toBe("a");
     expect((await board.readAgent("stew")).homeRunner).toBe("a");
-    const moved = (await board.readEvents(null, 500)).filter((e) => e.type === "agent.placed");
-    expect(moved.map((event) => event.payload)).toEqual([
-      { agent: "stew", runner: "a" },
+    const placed = (await board.readEvents(null, 500)).filter((e) => e.type === "agent.placed");
+    expect(placed.map((event) => event.payload)).toEqual([
       { agent: "stew", runner: "a", from: "b" },
     ]);
   });

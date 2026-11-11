@@ -5218,7 +5218,7 @@ export class Board {
   /**
    * Pins an agent's work outside any project to a runner, unless it is pinned already, and returns
    * where it is pinned. With `from`, it moves the pin only while it still names `from`, so two
-   * turns that both find a runner gone move it once.
+   * turns that both find a runner without the agent's CLI move it once.
    */
   async pinAgent(name: Name, runner: Name, from?: Name): Promise<Name> {
     return this.mutex.run(async () => {

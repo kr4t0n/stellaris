@@ -192,6 +192,8 @@ describe("Board", () => {
   });
 
   afterEach(async () => {
+    // A spy a failed test left in place would count the next test's calls too.
+    vi.restoreAllMocks();
     await rm(dir, { recursive: true, force: true });
   });
 

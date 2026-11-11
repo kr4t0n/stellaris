@@ -56,8 +56,10 @@ describe("anchors", () => {
   });
 
   it("are GitHub's for a document of edge cases, repeated headings told apart", () => {
-    const made = readMarkdown(github.document.markdown).anchors;
-    expect(made).toEqual(new Set(github.document.anchors));
+    // GitHub anchors a heading whose text leaves nothing for one as `""`, `-1`, and so on, or not
+    // at all, by the file's other headings, so the check offers none of those.
+    const sure = github.document.anchors.filter((anchor) => !/^(-\d+)?$/u.test(anchor));
+    expect(readMarkdown(github.document.markdown).anchors).toEqual(new Set(sure));
   });
 });
 
@@ -136,6 +138,32 @@ describe("checkLinks", () => {
       "[g](https://example.com/missing.md), [h](mailto:someone@example.com), [i](//example.com/x).",
     ].join("\n");
     expect(check({ "a.md": text })).toEqual([]);
+  });
+
+  it("reads reference definitions in list items and quotes", () => {
+    const text = ["- [d]: gone.md", "", "> [q]: q.md", "", "[D][d] and [Q][q]"].join("\n");
+    expect(check({ "a.md": text, "q.md": "" })).toEqual([
+      "a.md:1: gone.md names gone.md, which does not exist",
+    ]);
+  });
+
+  it("offers no anchor it can't be sure of, so a link to one fails", () => {
+    const text = [
+      "## Build &rarr; deploy",
+      "",
+      "## 🚀",
+      "",
+      "## 🚀",
+      "",
+      '<a id="caf&eacute;"></a>',
+      "",
+      "[1](#build--deploy) [2](#-1) [3](#café)",
+    ].join("\n");
+    expect(check({ "a.md": text })).toEqual([
+      "a.md:9: #build--deploy names no heading or anchor in a.md",
+      "a.md:9: #-1 names no heading or anchor in a.md",
+      "a.md:9: #café names no heading or anchor in a.md",
+    ]);
   });
 
   it("reads anchors from headings in lists, quotes, and HTML, and from ids and names", () => {

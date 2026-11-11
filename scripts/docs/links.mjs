@@ -2,8 +2,11 @@
 // links and the anchors it offers, its headings' made by GitHub's rule. A hand-written reader, not a
 // markdown parser, so it knows only what the repository's docs write: ATX headings, also in lists
 // and quotes, fences, code spans, escapes, inline links and images, reference definitions, and raw
-// HTML's headings, `href`, `src`, `id`, and `name`. A setext heading is not read, so a link to one
-// fails rather than passes.
+// HTML's headings, `href`, `src`, `id`, and `name`. What it can't read gives no anchor, so a link to
+// it fails rather than passes: a setext heading; a heading or an `id` that holds a named character
+// reference other than the six in `ENTITIES`, which GitHub reads by HTML's whole table; and a
+// heading whose text leaves nothing for an anchor, which GitHub anchors as `""`, `-1`, and so on,
+// or not at all, by the file's other headings.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -113,19 +116,24 @@ function attributes(tag) {
   for (const [, name, double, single, bare] of tag.matchAll(
     /\s([A-Za-z_:][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gu,
   )) {
-    found.set(name.toLowerCase(), decodeEntities(double ?? single ?? bare));
+    found.set(name.toLowerCase(), double ?? single ?? bare);
   }
   return found;
 }
 
-const ENTITY = /&(?:#(\d{1,7})|#[xX]([0-9A-Fa-f]{1,6})|([A-Za-z]+));/gu;
+const ENTITY = /&(?:#(\d{1,7})|#[xX]([0-9A-Fa-f]{1,6})|([A-Za-z][A-Za-z0-9]*));/gu;
 
 function decodeEntities(text) {
   return text.replace(ENTITY, decodeEntity);
 }
 
+/** Whether `text` holds a named character reference outside `ENTITIES`, which it can't decode. */
+function unreadable(text) {
+  return [...text.matchAll(ENTITY)].some(([, , , name]) => name && !Object.hasOwn(ENTITIES, name));
+}
+
 function decodeEntity(whole, dec, hex, name) {
-  if (!dec && !hex) return ENTITIES[name] ?? whole;
+  if (!dec && !hex) return Object.hasOwn(ENTITIES, name) ? ENTITIES[name] : whole;
   // As CommonMark reads one: no code point, a surrogate, or zero is the replacement character.
   const code = Number.parseInt(dec ?? hex, dec ? 10 : 16);
   const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
@@ -134,14 +142,17 @@ function decodeEntity(whole, dec, hex, name) {
 
 /**
  * The text GitHub reads from a heading's inline markdown: code spans and escapes as written, links'
- * text without their destinations, no images, no HTML tags, entities decoded, and no emphasis marks.
+ * text without their destinations, no images, no HTML tags or comments, entities decoded, and no
+ * emphasis marks. Spaces next to what is dropped stay, as on GitHub. Undefined when the text holds
+ * a named character reference outside `ENTITIES`.
  */
 export function headingText(markdown) {
   // Each character keeps what it came from: only plain text's can be markup, and a flanking check
-  // next to a code span sees its backtick.
+  // sees the source beside it, as CommonMark's does: a code span's backtick, an entity's `&` or `;`,
+  // and the `<` or `)` of anything dropped, by an empty character in its place.
   const characters = [];
-  const literal = (text, edge) => {
-    for (const character of text) characters.push({ character, markup: false, edge });
+  const literal = (text, edge, unknown) => {
+    for (const character of text) characters.push({ character, markup: false, edge, unknown });
   };
   for (const token of tokenize(markdown)) {
     if (token.kind === "text") {
@@ -151,20 +162,23 @@ export function headingText(markdown) {
         for (const character of markdown.slice(at, token.start + match.index)) {
           characters.push({ character, markup: true });
         }
-        literal(decodeEntity(...match));
+        literal(decodeEntity(...match), ";", unreadable(match[0]));
         at = token.start + match.index + match[0].length;
       }
       for (const character of markdown.slice(at, token.end)) {
         characters.push({ character, markup: true });
       }
-    } else if (token.kind === "code" || token.kind === "escape" || token.kind === "autolink") {
+    } else if (token.kind === "code" || token.kind === "escape") {
       literal(token.value, token.kind === "code" ? "`" : undefined);
+    } else if (token.kind === "autolink") {
+      literal(token.value, "<");
+    } else {
+      characters.push({ character: "", markup: false, edge: "<" });
     }
   }
-  return emphasisRemoved(destinationsRemoved(characters))
-    .map(({ character }) => character)
-    .join("")
-    .trim();
+  const kept = emphasisRemoved(destinationsRemoved(characters));
+  if (kept.some(({ unknown }) => unknown)) return undefined;
+  return kept.map(({ character }) => character).join("");
 }
 
 function destinationsRemoved(characters) {
@@ -191,6 +205,7 @@ function destinationsRemoved(characters) {
       // An image's alt text is no part of the heading's text, as GitHub reads it.
       if (open > 0 && result[open - 1].markup && result[open - 1].character === "!")
         result.length = open - 1;
+      result.push({ character: "", markup: false, edge: close });
       index = end;
       continue;
     }
@@ -207,49 +222,92 @@ function lastOpenBracket(characters) {
 }
 
 // `*` and `~` leave no trace in an anchor, but `_` is a word character: an underscore that marks
-// emphasis is dropped, and one inside a word is kept, by CommonMark's flanking rules.
+// emphasis is dropped, and one inside a word or between a pair of `*` is kept. So the runs of both
+// go through CommonMark's delimiter algorithm (`process_emphasis` in its spec), which pairs them.
 function emphasisRemoved(characters) {
   const runs = [];
   for (let index = 0; index < characters.length;) {
-    if (!(characters[index].markup && characters[index].character === "_")) {
+    const { character, markup } = characters[index];
+    if (!(markup && (character === "_" || character === "*"))) {
       index += 1;
       continue;
     }
     let end = index;
-    while (end < characters.length && characters[end].markup && characters[end].character === "_")
-      end += 1;
-    const before = neighbour(characters[index - 1], "end");
-    const after = neighbour(characters[end], "start");
+    while (characters[end]?.markup && characters[end].character === character) end += 1;
+    const before =
+      besideTilde(characters, index - 1, -1) ?? neighbour(characters[index - 1], "end");
+    const after = besideTilde(characters, end, 1) ?? neighbour(characters[end], "start");
     const left =
       !isSpace(after) && (!isPunctuation(after) || isSpace(before) || isPunctuation(before));
     const right =
       !isSpace(before) && (!isPunctuation(before) || isSpace(after) || isPunctuation(after));
+    const underscore = character === "_";
     runs.push({
+      character,
       start: index,
       end,
+      length: end - index,
       count: end - index,
-      opens: left && (!right || isPunctuation(before)),
-      closes: right && (!left || isPunctuation(after)),
+      opens: underscore ? left && (!right || isPunctuation(before)) : left,
+      closes: underscore ? right && (!left || isPunctuation(after)) : right,
+      active: true,
     });
     index = end;
   }
   const dropped = new Set();
-  const openers = [];
-  for (const run of runs) {
-    while (run.closes && run.count > 0 && openers.length > 0) {
-      const opener = openers.at(-1);
-      const used = Math.min(opener.count, run.count, 2);
-      for (let k = 0; k < used; k += 1) {
-        dropped.add(opener.start + opener.count - 1 - k);
-        dropped.add(run.end - run.count + k);
-      }
-      opener.count -= used;
-      run.count -= used;
-      if (opener.count === 0) openers.pop();
+  const bottoms = new Map();
+  for (let current = 0; current < runs.length;) {
+    const closer = runs[current];
+    if (!closer.active || !closer.closes) {
+      current += 1;
+      continue;
     }
-    if (run.opens && run.count > 0) openers.push(run);
+    const key = `${closer.character}${closer.opens}${closer.length % 3}`;
+    let found = -1;
+    for (let at = current - 1; at > (bottoms.get(key) ?? -1); at -= 1) {
+      const opener = runs[at];
+      if (!opener.active || !opener.opens || opener.character !== closer.character) continue;
+      // The rule of 3: where either run could both open and close, their lengths may not sum to a
+      // multiple of 3 unless both are one.
+      const both = opener.closes || closer.opens;
+      const sum = opener.length + closer.length;
+      if (both && sum % 3 === 0 && !(opener.length % 3 === 0 && closer.length % 3 === 0)) continue;
+      found = at;
+      break;
+    }
+    if (found === -1) {
+      bottoms.set(key, current - 1);
+      if (!closer.opens) closer.active = false;
+      current += 1;
+      continue;
+    }
+    const opener = runs[found];
+    const used = opener.count >= 2 && closer.count >= 2 ? 2 : 1;
+    for (let k = 0; k < used; k += 1) {
+      dropped.add(opener.start + opener.count - 1);
+      opener.count -= 1;
+      dropped.add(closer.end - closer.count);
+      closer.count -= 1;
+    }
+    // Whatever runs sit between a pair are text from then on.
+    for (let at = found + 1; at < current; at += 1) runs[at].active = false;
+    if (opener.count === 0) opener.active = false;
+    if (closer.count === 0) {
+      closer.active = false;
+      current += 1;
+    }
   }
   return characters.filter((_, index) => !dropped.has(index));
+}
+
+// GitHub's cmark-gfm reads a run of `~` beside an underscore as a letter when a letter is on the
+// run's other side, as in `~~d~~_u_`, which keeps its underscores.
+function besideTilde(characters, from, step) {
+  let at = from;
+  while (characters[at]?.markup && characters[at].character === "~") at += step;
+  if (at === from) return undefined;
+  const other = neighbour(characters[at], step < 0 ? "end" : "start");
+  return isSpace(other) || isPunctuation(other) ? undefined : "a";
 }
 
 function neighbour(entry, side) {
@@ -301,8 +359,11 @@ export function readMarkdown(source) {
     const heading = line.match(HEADING);
     if (heading) {
       flush();
-      const text = headingText((heading[2] ?? "").replace(/(?:^|[ \t]+)#+[ \t]*$/u, ""));
-      if (text !== "") found.anchors.add(found.slugger.slug(text));
+      // CommonMark strips spaces and tabs from a heading's ends, before the closing hashes too.
+      const content = (heading[2] ?? "")
+        .replace(/(?:^|[ \t]+)#+[ \t]*$/u, "")
+        .replace(/[ \t]+$/u, "");
+      addHeading(found, headingText(content));
       readBlock(line, index, found);
       return;
     }
@@ -317,28 +378,39 @@ export function readMarkdown(source) {
   return { anchors: found.anchors, links: found.links };
 }
 
+/** Anchors a heading, unless its text was unreadable or leaves nothing for an anchor. */
+function addHeading({ anchors, slugger }, text) {
+  if (text === undefined) return;
+  const anchor = slugger.slug(text);
+  if (slug(text) !== "") anchors.add(anchor);
+}
+
 /** Reads one block's links and HTML anchors, leaving code, escapes, and comments alone. */
-function readBlock(text, firstLine, { anchors, links, slugger }) {
+function readBlock(text, firstLine, found) {
+  const { anchors, links } = found;
   const lineOf = (offset) => firstLine + 1 + (text.slice(0, offset).match(/\n/gu)?.length ?? 0);
   let masked = "";
   for (const token of tokenize(text)) {
     const raw = text.slice(token.start, token.end);
     masked += token.kind === "text" || token.kind === "html" ? raw : raw.replace(/[^\n]/gu, " ");
     if (token.kind !== "html") continue;
-    const found = attributes(token.value);
+    const values = attributes(token.value);
     for (const name of ["href", "src"]) {
-      if (found.has(name)) links.push({ line: lineOf(token.start), target: found.get(name) });
+      if (values.has(name)) {
+        links.push({ line: lineOf(token.start), target: decodeEntities(values.get(name)) });
+      }
     }
     for (const name of ["id", "name"]) {
-      if (found.has(name)) anchors.add(found.get(name));
+      if (values.has(name) && !unreadable(values.get(name))) {
+        anchors.add(decodeEntities(values.get(name)));
+      }
     }
-    // GitHub makes an anchor for a heading written in HTML too, from its text.
+    // GitHub makes an anchor for a heading written in HTML too, from its text, ends and all.
     const level = token.value.match(/^<h([1-6])[\s>]/iu)?.[1];
     const close = level ? text.slice(token.end).search(new RegExp(`</h${level}\\s*>`, "iu")) : -1;
     if (close !== -1) {
-      const inner = text.slice(token.end, token.end + close).replace(/<[^>]*>/gu, "");
-      const heading = decodeEntities(inner).trim();
-      if (heading !== "") anchors.add(slugger.slug(heading));
+      const inner = text.slice(token.end, token.end + close).replace(/<!--.*?-->|<[^>]*>/gsu, "");
+      addHeading(found, unreadable(inner) ? undefined : decodeEntities(inner));
     }
   }
   for (const match of masked.matchAll(/\]\([ \t]*\n?[ \t]*/gu)) {
@@ -346,7 +418,12 @@ function readBlock(text, firstLine, { anchors, links, slugger }) {
     const target = destination(text, match.index + match[0].length);
     if (target !== undefined) links.push({ line: lineOf(match.index), target });
   }
-  for (const match of masked.matchAll(/^ {0,3}\[(?!\^)(?:[^\]\\\n]|\\.)+\]:[ \t]*\n?[ \t]*/gmu)) {
+  // A definition may sit in a list item or a quote too.
+  const definition = new RegExp(
+    `${CONTAINER}\\[(?!\\^)(?:[^\\]\\\\\\n]|\\\\.)+\\]:[ \\t]*\\n?[ \\t]*`,
+    "gmu",
+  );
+  for (const match of masked.matchAll(definition)) {
     const target = destination(text, match.index + match[0].length);
     if (target !== undefined) links.push({ line: lineOf(match.index), target });
   }

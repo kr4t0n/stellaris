@@ -1063,6 +1063,24 @@ describe("buildTurnPrompt", () => {
     expect(prompt.indexOf(heading)).toBeLessThan(prompt.indexOf("## Unread messages (1)"));
     expect(prompt.split("@eng-1 the date?")).toHaveLength(2);
 
+    // A cut never splits a character in two, and an issue's number opens a paragraph, not a heading.
+    const leadOf = (body: string): string => {
+      const line =
+        buildTurnPrompt({
+          ...base,
+          recentlyRead: {
+            since: "2026-09-21T10:00:00.000Z",
+            messages: [generalPost("01ARZ3NDEKTSV4RRFFQ69G5FAV", body)],
+          },
+        })
+          .split("\n")
+          .find((each) => each.startsWith("- [")) ?? "";
+      return line.slice(line.indexOf("): ") + 3);
+    };
+    expect(leadOf(`${"a".repeat(298)}😀${"b".repeat(10)}`)).toBe(`${"a".repeat(298)}…`);
+    expect(leadOf(`${"a".repeat(297)}😀${"b".repeat(10)}`)).toBe(`${"a".repeat(297)}😀…`);
+    expect(leadOf("#148 landed.\n\nMore below.")).toBe("#148 landed.");
+
     // None to show, no heading.
     for (const recentlyRead of [undefined, { since: "2026-09-21T10:00:00.000Z", messages: [] }]) {
       expect(buildTurnPrompt({ ...base, recentlyRead })).not.toContain("## Posts read here");

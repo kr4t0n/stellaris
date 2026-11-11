@@ -313,17 +313,24 @@ function rosterLine(member: Member): string {
   return `- ${member.name}: ${parts.join("; ")}. Profile: ${profileLine(member.profile)}`;
 }
 
-/** A post's first paragraph that is not a heading, on one line, cut at `MAX_LEAD_CHARS`. */
+/**
+ * A post's first paragraph that is not a heading, on one line, cut at `MAX_LEAD_CHARS` and never
+ * between the two halves of a character.
+ */
 function leadOf(body: string): string {
   const blocks = body
     .split(/\n\s*\n/)
     .map((block) => block.trim())
     .filter((block) => block.length > 0);
-  const lead = (blocks.find((block) => !block.startsWith("#")) ?? blocks[0] ?? "").replaceAll(
+  const lead = (blocks.find((block) => !/^#{1,6}(\s|$)/.test(block)) ?? blocks[0] ?? "").replaceAll(
     /\s+/g,
     " ",
   );
-  return lead.length <= MAX_LEAD_CHARS ? lead : `${lead.slice(0, MAX_LEAD_CHARS - 1).trimEnd()}…`;
+  if (lead.length <= MAX_LEAD_CHARS) {
+    return lead;
+  }
+  const cut = lead.slice(0, MAX_LEAD_CHARS - 1);
+  return `${(/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut).trimEnd()}…`;
 }
 
 /** Messages as the digest shows them: where and when each was posted, by whom, and its body. */

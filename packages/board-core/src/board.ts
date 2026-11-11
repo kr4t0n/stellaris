@@ -2011,11 +2011,13 @@ export class Board {
   }
 
   /**
-   * The newest top-level posts a citizen's home conversation in a scope has read already: what its
-   * digest there carried, at or before the conversation's cursor, posted since `since`, at most
-   * `limit`, oldest first. The news a work role reads at home is left out, and so are knowledge
-   * notices, which the turn's knowledge list names. A home whose session started afresh has none of
-   * them in its context, so the turn host shows them; nothing here moves a cursor.
+   * The newest top-level posts in a scope's `general` that the citizen's home conversation there
+   * has read already: what its digest carried, at or before the conversation's cursor, posted since
+   * `since`, at most `limit`, oldest first. Knowledge notices are left out, which the turn's
+   * knowledge list names, and so are the news a work role reads at home and an archived place's
+   * posts, which the home files from the archive on but read, if at all, in that place's own
+   * conversation. A home whose session started afresh has none of them in its context, so the turn
+   * host shows them; nothing here moves a cursor.
    */
   async readRecentlyRead(
     actor: Actor & { readonly scope: Name },
@@ -2037,11 +2039,13 @@ export class Board {
       scopes: { [actor.scope]: after },
       news: after,
     };
+    const general = channelRef(actor.scope === SOCIETY_SCOPE ? null : actor.scope, "general");
     const filed = await this.digestSince(actor, from, read, { scope: actor.scope, part: null });
     return filed
       .filter(
         (entry) =>
           entry.news !== true &&
+          entry.message.channel === general &&
           entry.message.notice?.kind !== "knowledge" &&
           Date.parse(entry.message.ts) >= since,
       )

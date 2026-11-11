@@ -2164,6 +2164,13 @@ describe("turns on a runner over the runner protocol", () => {
     const { run } = await start(board, backend);
     const home = manual("eng-1", "demo");
     const heading = "## Posts read here before this session";
+    const lost: TurnResult = {
+      ...completed(""),
+      status: null,
+      exitReason: "error",
+      error: "No conversation found with that session ID",
+      resumeFailed: "lost",
+    };
     const shown = (prompt: string | undefined): string[] => {
       const text = prompt ?? "";
       const at = text.indexOf(heading);
@@ -2200,13 +2207,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).not.toContain(heading);
 
     // A session the CLI could not resume is dropped, and the home's next session is shown the same.
-    outcomes.push({
-      ...completed(""),
-      status: null,
-      exitReason: "error",
-      error: "No conversation found with session ID: s-2",
-      resumeFailed: "lost",
-    });
+    outcomes.push(lost);
     expect((await run(home)).sessionDropped).toBe(true);
     await run(home);
     expect(handed.at(-1)).toEqual(["s-3", true]);
@@ -2218,6 +2219,24 @@ describe("turns on a runner over the runner protocol", () => {
     await run(home);
     expect(handed.at(-1)).toEqual(["s-3", false]);
     expect(prompts.at(-1)).not.toContain(heading);
+
+    // A channel's conversation and a thread's are shown none on a new session after turns there,
+    // though the home has read posts within the week.
+    const topic = await board.openThread(
+      { name: "eng-1", role: "engineer" },
+      { channel: "demo/general", title: "a question" },
+    );
+    for (const conversation of [
+      { ...home, channel: "release" },
+      { ...home, thread: { id: topic.id, task: false } },
+    ]) {
+      await run(conversation);
+      outcomes.push(lost);
+      expect((await run(conversation)).sessionDropped).toBe(true);
+      await run(conversation);
+      expect(handed.at(-1)?.[1]).toBe(true);
+      expect(prompts.at(-1)).not.toContain(heading);
+    }
   });
 
   it("keeps the session after a reflection in a work role's home outside projects, and in a project home of a role that does not reflect", async () => {

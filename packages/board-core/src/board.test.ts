@@ -989,6 +989,7 @@ describe("Board", () => {
     await board.postMessage(REV, { channel: "demo/general", body: "@eng-2 the date?" });
     await board.postMessage(ENG, { channel: "demo/general", body: "my own post" });
     await board.postMessage(REV, { channel: "demo/dev", body: "the release plan" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 answer this in dev" });
     await board.postMessage(REV, { thread_id: topic.id, body: "the shared one" });
     await board.postMessage(REV, { channel: "general", body: "the society's build is green" });
     await board.writeKnowledge(REV, {
@@ -1034,9 +1035,22 @@ describe("Board", () => {
       (await board.unreadByConversation(ENG2)).find((each) => each.scope === "demo")?.count,
     ).toBe(1);
 
-    // A society role's home reads the society's general alone, not a project's channels it follows.
+    // A society role's home reads the society's general alone, not a project's channels it follows,
+    // which a conversation of their own reads.
     const stewardHome = { ...STEWARD, scope: "society" };
+    await board.readDigest({ ...stewardHome, place: "demo" }, { advance: true });
     expect((await board.readDigest(stewardHome, { advance: true })).messages).toHaveLength(1);
+    expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
+
+    // An archived place's posts are filed at home from then on, though the home never read them: a
+    // channel's, and a project's seen from the society.
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    expect(await recent(home, start)).toEqual([
+      "an hour before",
+      "@eng-2 the date?",
+      "what is next?",
+    ]);
+    await board.archiveProject(USER, { project: "demo", reason: "done" });
     expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
   });
 

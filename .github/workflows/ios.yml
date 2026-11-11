@@ -60,9 +60,10 @@ jobs:
       DESTINATION: platform=iOS Simulator,name=iPhone Duo,OS=27.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A download GitHub fails for a moment, as with a 504, is retried, for at most two minutes.
       - name: Install XcodeGen
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+          curl -fsSL --retry 5 --retry-max-time 120 -o "$RUNNER_TEMP/xcodegen.zip" \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
           echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
           unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
@@ -75,8 +76,8 @@ jobs:
       # beside it, as the `stuck-app` artifact. The step fails when a copy launched against the fake
       # board writes its console to a terminal. The watcher stops nothing, so the step's own limit
       # ends a test that hangs: a quarter over the tests' 48 minutes, which leaves the steps after
-      # it the job's last 10, a quarter over their 8. A step that hits its limit fails the job
-      # rather than cancelling it, so they still run.
+      # it the job's last 10, kept within them by the displays step's own limit. A step that hits
+      # its limit fails the job rather than cancelling it, so they still run.
       - name: Test the app on the iPhone Duo simulator
         working-directory: apps/ios
         timeout-minutes: 60
@@ -131,9 +132,14 @@ jobs:
           find "$RUNNER_TEMP/derived/Build/Intermediates.noindex" -name 'Stellaris.app*.xcent' \
             -print -exec plutil -p {} \;
       # Which of the simulator's displays simctl can capture, with the app open on its sign-in.
+      # After a test step that hit its limit, its 3 minutes keep the steps after the tests within
+      # the job's last 10, beside the stop step's minute and the other steps' 4.6. It has taken up
+      # to 4.9 after tests that ran, so a slow run keeps no display pictures, and the job's result
+      # stays as it was.
       - name: Look at the simulator's displays
         if: ${{ !cancelled() }}
         continue-on-error: true
+        timeout-minutes: 3
         run: |
           set +e
           mkdir -p "$RUNNER_TEMP/screens/displays"

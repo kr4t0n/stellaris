@@ -4328,10 +4328,11 @@ export class Board {
   }
 
   /**
-   * The metrics index, which answers the metrics, the citizens' tokens, and the signals: seeded
-   * once from the whole event log on first use, as the server does at its start, then kept up by
-   * each event this process appends. The server logs every event a measure or the tokens count,
-   * and every signal, itself; one another process appended would count from the next seed. A
+   * The metrics index, which answers the metrics, the citizens' tokens, the signals, and which
+   * turns a citizen's history lists: seeded once from the whole event log on first use, as the
+   * server does at its start, then kept up by each event this process appends. The server logs
+   * every event a measure or the tokens count, every signal, and every turn's start and end,
+   * itself; one another process appended would count from the next seed. A
    * turn ended before ends carried their board actions has its transcript read once, here,
    * through the same cache as the counters' seed. A seed that fails is tried again by the next
    * call.

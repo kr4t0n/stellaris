@@ -34,6 +34,18 @@ const cronlessDispatch = {
   onboarding: false,
 };
 
+/** A top-level post in demo's general. */
+function generalPost(id: string, body: string) {
+  return {
+    id,
+    author: "rev-1",
+    channel: "demo/general",
+    ts: "2026-09-28T10:00:00.000Z",
+    mentions: [],
+    body,
+  };
+}
+
 /** A heartbeat's prompt, given the instructions it carries as changed, if any. */
 function promptWith(changedInstructions?: string | null): string {
   return buildTurnPrompt({
@@ -1018,6 +1030,61 @@ describe("buildTurnPrompt", () => {
     const timedOut = { ...reflected, exitReason: "timeout" as const, error: "turn timed out" };
     expect(after(timedOut)).not.toContain("## Your session started afresh");
     expect(after(timedOut)).toContain("## Your previous turn did not finish");
+  });
+
+  it("shows a home's new session the posts read there before it, above its unread ones, and no heading for none", () => {
+    const unread = generalPost("01ARZ3NDEKTSV4RRFFQ69G5FAZ", "@eng-1 the date?");
+    const base = {
+      dispatch: cronlessDispatch,
+      messages: [unread],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+    };
+    const long = `${"word ".repeat(80)}end`;
+    const prompt = buildTurnPrompt({
+      ...base,
+      recentlyRead: {
+        since: "2026-09-21T10:00:00.000Z",
+        messages: [
+          generalPost(
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "## A heading\n\nThe build is\ngreen.\n\nMore below.",
+          ),
+          generalPost("01ARZ3NDEKTSV4RRFFQ69G5FAW", long),
+        ],
+      },
+    });
+    const heading = "## Posts read here before this session (2)";
+    expect(prompt).toContain(
+      `${heading}\n\nThis session is new, so it holds none of the posts your earlier turns here read. These are the newest of them, posted since 2026-09-21T10:00:00.000Z, oldest first, each cut to its first paragraph: context, read already, asking nothing new of you. The board's files hold each whole by its id.\n\n- [2026-09-28T10:00:00.000Z] demo/general from @rev-1 (message 01ARZ3NDEKTSV4RRFFQ69G5FAV): The build is green.\n- [2026-09-28T10:00:00.000Z] demo/general from @rev-1 (message 01ARZ3NDEKTSV4RRFFQ69G5FAW): ${long.slice(0, 299).trimEnd()}…\n`,
+    );
+    // Apart from the digest, and above it.
+    expect(prompt.indexOf(heading)).toBeLessThan(prompt.indexOf("## Unread messages (1)"));
+    expect(prompt.split("@eng-1 the date?")).toHaveLength(2);
+
+    // A cut never splits a character in two, and an issue's number opens a paragraph, not a heading.
+    const leadOf = (body: string): string => {
+      const line =
+        buildTurnPrompt({
+          ...base,
+          recentlyRead: {
+            since: "2026-09-21T10:00:00.000Z",
+            messages: [generalPost("01ARZ3NDEKTSV4RRFFQ69G5FAV", body)],
+          },
+        })
+          .split("\n")
+          .find((each) => each.startsWith("- [")) ?? "";
+      return line.slice(line.indexOf("): ") + 3);
+    };
+    expect(leadOf(`${"a".repeat(298)}😀${"b".repeat(10)}`)).toBe(`${"a".repeat(298)}…`);
+    expect(leadOf(`${"a".repeat(297)}😀${"b".repeat(10)}`)).toBe(`${"a".repeat(297)}😀…`);
+    expect(leadOf("#148 landed.\n\nMore below.")).toBe("#148 landed.");
+
+    // None to show, no heading.
+    for (const recentlyRead of [undefined, { since: "2026-09-21T10:00:00.000Z", messages: [] }]) {
+      expect(buildTurnPrompt({ ...base, recentlyRead })).not.toContain("## Posts read here");
+    }
   });
 
   it("makes reconciling a home's conflict copies the first step of a reflection", () => {

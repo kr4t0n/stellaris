@@ -965,6 +965,95 @@ describe("Board", () => {
     expect(await unread(ENG2)).toEqual([["demo", null, 3]]);
   });
 
+  it("reads the posts a home has read already, newest kept, and moves no cursor", async () => {
+    const { board } = await society();
+    const ENG2: Actor = { name: "eng-2", role: "engineer" };
+    await board.addAgent(USER, { ...ENG2, cli: "claude", memberships: ["demo"] });
+    const STEWARD: Actor = { name: "steward-1", role: "steward" };
+    await board.addAgent(USER, { ...STEWARD, cli: "claude" });
+    await board.subscribe(ENG, { channel: "demo/dev" });
+    await board.subscribe(STEWARD, { channel: "demo/general" });
+    const topic = await board.openThread(ENG, { channel: "demo/general", title: "which cache?" });
+    const home = { ...ENG, scope: "demo" };
+    const recent = async (
+      actor: Actor & { scope: string },
+      since: Date,
+      limit = 10,
+    ): Promise<string[]> =>
+      (await board.readRecentlyRead(actor, { since, limit })).map((m) => m.body.trim());
+    const start = clock;
+
+    await board.postMessage(REV, { channel: "demo/general", body: "an hour before" });
+    clock = new Date(clock.getTime() + 3_600_000);
+    const hourLater = clock;
+    await board.postMessage(REV, { channel: "demo/general", body: "@eng-2 the date?" });
+    await board.postMessage(ENG, { channel: "demo/general", body: "my own post" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "the release plan" });
+    await board.postMessage(REV, { channel: "demo/dev", body: "@eng-1 answer this in dev" });
+    await board.postMessage(REV, { thread_id: topic.id, body: "the shared one" });
+    await board.postMessage(REV, { channel: "general", body: "the society's build is green" });
+    await board.writeKnowledge(REV, {
+      project: "demo",
+      topic: "cache",
+      body: "Warm.",
+      revision: 0,
+    });
+    await board.postMessage(USER, { channel: "demo/general", body: "what is next?" });
+    // Nothing read yet, so nothing to show.
+    expect(await recent(home, start)).toEqual([]);
+
+    // A turn at home reads general's posts, the news, and the notice.
+    expect((await board.readDigest(home, { advance: true })).messages).toHaveLength(5);
+    await board.postMessage(REV, { channel: "demo/general", body: "not read yet" });
+
+    // What it read in general, but the news and the notice: not its own post, another channel's,
+    // a thread's, or one it has not read. The newest are kept, and none older than the time given.
+    expect(await recent(home, start)).toEqual([
+      "an hour before",
+      "@eng-2 the date?",
+      "what is next?",
+    ]);
+    expect(await recent(home, hourLater)).toEqual(["@eng-2 the date?", "what is next?"]);
+    expect(await recent(home, start, 1)).toEqual(["what is next?"]);
+
+    // Showing them moves no cursor: the unread post stays unread, and the one that asks eng-2
+    // still counts for eng-2.
+    const cursors = await readFile(board.paths.agentCursors("eng-1"), "utf8");
+    const unread = await board.unreadByConversation(ENG);
+    await recent(home, start);
+    expect(await readFile(board.paths.agentCursors("eng-1"), "utf8")).toBe(cursors);
+    expect(await board.unreadByConversation(ENG)).toEqual(unread);
+    expect(
+      (await board.readDigest(home, { advance: false })).messages.map((m) => m.body.trim()),
+    ).toEqual(["not read yet"]);
+    expect(
+      (await board.readDigest({ ...ENG2, scope: "demo" }, { advance: false })).messages.map((m) =>
+        m.body.trim(),
+      ),
+    ).toContain("@eng-2 the date?");
+    expect(
+      (await board.unreadByConversation(ENG2)).find((each) => each.scope === "demo")?.count,
+    ).toBe(1);
+
+    // A society role's home reads the society's general alone, not a project's channels it follows,
+    // which a conversation of their own reads.
+    const stewardHome = { ...STEWARD, scope: "society" };
+    await board.readDigest({ ...stewardHome, place: "demo" }, { advance: true });
+    expect((await board.readDigest(stewardHome, { advance: true })).messages).toHaveLength(1);
+    expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
+
+    // An archived place's posts are filed at home from then on, though the home never read them: a
+    // channel's, and a project's seen from the society.
+    await board.archiveChannel(USER, { channel: "demo/dev", reason: "shipped" });
+    expect(await recent(home, start)).toEqual([
+      "an hour before",
+      "@eng-2 the date?",
+      "what is next?",
+    ]);
+    await board.archiveProject(USER, { project: "demo", reason: "done" });
+    expect(await recent(stewardHome, start)).toEqual(["the society's build is green"]);
+  });
+
   it("counts no knowledge topic's notice toward a heartbeat, in a project or the society", async () => {
     const { board } = await society();
     const STEW: Actor = { name: "stew", role: "steward" };

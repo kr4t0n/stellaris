@@ -1,6 +1,6 @@
 import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { decodeTime, monotonicFactory } from "ulid";
+import { decodeTime, encodeTime, monotonicFactory } from "ulid";
 import { z } from "zod";
 import {
   ASK_CHANNEL,
@@ -2008,6 +2008,49 @@ export class Board {
         ? from.digest
         : cursorOf(from, conversation.scope, conversation.part));
     return { messages: filed.map((entry) => entry.message), cursor };
+  }
+
+  /**
+   * The newest top-level posts in a scope's `general` that the citizen's home conversation there
+   * has read already: what its digest carried, at or before the conversation's cursor, posted since
+   * `since`, at most `limit`, oldest first. Knowledge notices are left out, which the turn's
+   * knowledge list names, and so are the news a work role reads at home and an archived place's
+   * posts, which the home files from the archive on but read, if at all, in that place's own
+   * conversation. A home whose session started afresh has none of them in its context, so the turn
+   * host shows them; nothing here moves a cursor.
+   */
+  async readRecentlyRead(
+    actor: Actor & { readonly scope: Name },
+    options: { readonly since: Date; readonly limit: number },
+  ): Promise<Message[]> {
+    const { cursors } = await this.digestSnapshot(actor.name);
+    const read = cursorOf(cursors, actor.scope);
+    // The scan starts at the lowest id a message written at `since` can carry. Ids take the wall
+    // clock's time and a post's `ts` the board's, so the window itself is held to `ts`.
+    const since = options.since.getTime();
+    const after = `${encodeTime(since, 10)}${"0".repeat(16)}`;
+    if (read === null || read <= after) {
+      return [];
+    }
+    // The home's digest as it was when its cursor stood at `since`, up to where it stands now.
+    const from: Cursors = {
+      ...NO_CURSORS,
+      digest: after,
+      scopes: { [actor.scope]: after },
+      news: after,
+    };
+    const general = channelRef(actor.scope === SOCIETY_SCOPE ? null : actor.scope, "general");
+    const filed = await this.digestSince(actor, from, read, { scope: actor.scope, part: null });
+    return filed
+      .filter(
+        (entry) =>
+          entry.news !== true &&
+          entry.message.channel === general &&
+          entry.message.notice?.kind !== "knowledge" &&
+          Date.parse(entry.message.ts) >= since,
+      )
+      .map((entry) => entry.message)
+      .slice(-options.limit);
   }
 
   /**

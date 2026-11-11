@@ -1,0 +1,723 @@
+{
+  "headings": [
+    ["AGENTS.md", "agentsmd"],
+    [
+      "Code and build ([delivery.md](./docs/internals/delivery.md#the-toolchain))",
+      "code-and-build-deliverymd"
+    ],
+    ["Board core ([board.md](./docs/internals/board.md))", "board-core-boardmd"],
+    [
+      "Conversations and wakes ([conversations.md](./docs/internals/conversations.md))",
+      "conversations-and-wakes-conversationsmd"
+    ],
+    ["Tasks and landing ([tasks.md](./docs/internals/tasks.md))", "tasks-and-landing-tasksmd"],
+    [
+      "Workspaces and git ([workspaces.md](./docs/internals/workspaces.md))",
+      "workspaces-and-git-workspacesmd"
+    ],
+    [
+      "Runners and adapters ([runners.md](./docs/internals/runners.md), [adapters.md](./docs/internals/adapters.md))",
+      "runners-and-adapters-runnersmd-adaptersmd"
+    ],
+    ["Governance ([governance.md](./docs/internals/governance.md))", "governance-governancemd"],
+    ["Interface ([interface.md](./docs/internals/interface.md))", "interface-interfacemd"],
+    ["The iOS client ([ios.md](./docs/internals/ios.md))", "the-ios-client-iosmd"],
+    [
+      "Delivery and commits ([delivery.md](./docs/internals/delivery.md))",
+      "delivery-and-commits-deliverymd"
+    ],
+    ["Tests ([testing.md](./docs/internals/testing.md))", "tests-testingmd"],
+    ["Technical debt, known", "technical-debt-known"],
+    ["1. Install and build", "1-install-and-build"],
+    ["2. Create the society", "2-create-the-society"],
+    ["3. Start the server and a runner", "3-start-the-server-and-a-runner"],
+    ["4. Sign in and ask", "4-sign-in-and-ask"],
+    ["Run, build, test", "run-build-test"],
+    ["The code, by area", "the-code-by-area"],
+    ["Upgrading from before 0.3.24", "upgrading-from-before-0324"],
+    ["The board server's image", "the-board-servers-image"],
+    ["The runner's image", "the-runners-image"],
+    ["Projects, the society, and citizens", "projects-the-society-and-citizens"],
+    ["Channels, threads, and tasks", "channels-threads-and-tasks"],
+    ["Ids, paths, and files", "ids-paths-and-files"],
+    ["What needs you, and proposals", "what-needs-you-and-proposals"],
+    ["A citizen's turns", "a-citizens-turns"],
+    ["A citizen's memory and settings", "a-citizens-memory-and-settings"],
+    ["1. Set up the Mac", "1-set-up-the-mac"],
+    ["2. Apple's side", "2-apples-side"],
+    ["3. Configure and generate the project", "3-configure-and-generate-the-project"],
+    ["4. Connect the iPhone", "4-connect-the-iphone"],
+    ["5. Build and run", "5-build-and-run"],
+    ["6. Sign in", "6-sign-in"],
+    ["Runners, homes, and workspaces", "runners-homes-and-workspaces"],
+    [
+      "There is no command allowlist, and it must not come back as a default",
+      "there-is-no-command-allowlist-and-it-must-not-come-back-as-a-default"
+    ],
+    [
+      "Only the server starts a conversation's session afresh",
+      "only-the-server-starts-a-conversations-session-afresh"
+    ],
+    [
+      "A resumed session keeps its first instructions, so a change rides in the prompt",
+      "a-resumed-session-keeps-its-first-instructions-so-a-change-rides-in-the-prompt"
+    ],
+    [
+      "The CLI's structured-output validator rejects the 2020-12 JSON Schema dialect",
+      "the-clis-structured-output-validator-rejects-the-2020-12-json-schema-dialect"
+    ],
+    [
+      "A warm Claude turn the API refused once counted as completed, and a warm session whose CLI had ended stayed",
+      "a-warm-claude-turn-the-api-refused-once-counted-as-completed-and-a-warm-session-whose-cli-had-ended-stayed"
+    ],
+    [
+      "A Claude session reports a running total, and a resumed one starts from its saved total",
+      "a-claude-session-reports-a-running-total-and-a-resumed-one-starts-from-its-saved-total"
+    ],
+    [
+      "Claude's model list has a `default` entry that is not a model",
+      "claudes-model-list-has-a-default-entry-that-is-not-a-model"
+    ],
+    [
+      "Codex is not isolated from the account's own configuration",
+      "codex-is-not-isolated-from-the-accounts-own-configuration"
+    ],
+    [
+      "A Codex sub-agent call shows under the name of Claude Code's tool that does the same",
+      "a-codex-sub-agent-call-shows-under-the-name-of-claude-codes-tool-that-does-the-same"
+    ],
+    ["Usage, cost, and models", "usage-cost-and-models"],
+    [
+      "Token counts are a turn's own, and both CLIs report them as something else",
+      "token-counts-are-a-turns-own-and-both-clis-report-them-as-something-else"
+    ],
+    [
+      "A Claude turn counts what the session's `modelUsage` grew by",
+      "a-claude-turn-counts-what-the-sessions-modelusage-grew-by"
+    ],
+    [
+      "A resumed Codex thread may report no totals, and a turn then takes them from its own first update",
+      "a-resumed-codex-thread-may-report-no-totals-and-a-turn-then-takes-them-from-its-own-first-update"
+    ],
+    [
+      "The Codex app server sends a connection every thread it runs, a sub-agent's too",
+      "the-codex-app-server-sends-a-connection-every-thread-it-runs-a-sub-agents-too"
+    ],
+    [
+      "A Codex sub-agent's requests count in the turns of the thread that started it",
+      "a-codex-sub-agents-requests-count-in-the-turns-of-the-thread-that-started-it"
+    ],
+    [
+      "A turn reports how large its session had grown, apart from what it used",
+      "a-turn-reports-how-large-its-session-had-grown-apart-from-what-it-used"
+    ],
+    ["The model is observed, not assumed", "the-model-is-observed-not-assumed"],
+    [
+      "A turn the plan's limit refused once said nothing of the limit",
+      "a-turn-the-plans-limit-refused-once-said-nothing-of-the-limit"
+    ],
+    [
+      "The MCP endpoint caps a request's size and a tool call's elements",
+      "the-mcp-endpoint-caps-a-requests-size-and-a-tool-calls-elements"
+    ],
+    ["Leases, not locks", "leases-not-locks"],
+    ["A mention is an `@name` outside code", "a-mention-is-an-name-outside-code"],
+    [
+      "System posts are authored by whoever acted, or by the board for its own notices",
+      "system-posts-are-authored-by-whoever-acted-or-by-the-board-for-its-own-notices"
+    ],
+    ["The roster, memory, and search", "the-roster-memory-and-search"],
+    [
+      "Memory tiers reach a turn as rendered instructions, never through CLI discovery",
+      "memory-tiers-reach-a-turn-as-rendered-instructions-never-through-cli-discovery"
+    ],
+    ["Knowledge, dashboards, and skills", "knowledge-dashboards-and-skills"],
+    ["Knowledge is a verb, skills are files", "knowledge-is-a-verb-skills-are-files"],
+    [
+      "SKILL.md frontmatter is `name` and `description`",
+      "skillmd-frontmatter-is-name-and-description"
+    ],
+    [
+      "A turn's start is paired from the log, not recorded on its end",
+      "a-turns-start-is-paired-from-the-log-not-recorded-on-its-end"
+    ],
+    [
+      "A turn's thread is an object in its dispatch and an id in its record",
+      "a-turns-thread-is-an-object-in-its-dispatch-and-an-id-in-its-record"
+    ],
+    [
+      "An image is uploaded to the board, and a post shows it by id",
+      "an-image-is-uploaded-to-the-board-and-a-post-shows-it-by-id"
+    ],
+    [
+      "The user posts an image's bytes, under the same checks",
+      "the-user-posts-an-images-bytes-under-the-same-checks"
+    ],
+    [
+      "A turn opens an image the board keeps as a file of its own, with its CLI's reader",
+      "a-turn-opens-an-image-the-board-keeps-as-a-file-of-its-own-with-its-clis-reader"
+    ],
+    [
+      "A citizen's tokens are summed from the event log, and a turn without a count is unknown, never zero",
+      "a-citizens-tokens-are-summed-from-the-event-log-and-a-turn-without-a-count-is-unknown-never-zero"
+    ],
+    [
+      "Prometheus's counters are seeded once from the log, and a scrape reads only them",
+      "prometheuss-counters-are-seeded-once-from-the-log-and-a-scrape-reads-only-them"
+    ],
+    ["Metrics are counted, never judged", "metrics-are-counted-never-judged"],
+    [
+      "The Metrics view, the citizens' tokens, and the signals are answered from an index held to the log's replay",
+      "the-metrics-view-the-citizens-tokens-and-the-signals-are-answered-from-an-index-held-to-the-logs-replay"
+    ],
+    ["A post once waited for a heartbeat's scan", "a-post-once-waited-for-a-heartbeats-scan"],
+    [
+      "Board-event streams once held the server's whole CPU",
+      "board-event-streams-once-held-the-servers-whole-cpu"
+    ],
+    ["Conversations, wakes, and turns", "conversations-wakes-and-turns"],
+    [
+      "A session is a conversation, and each has its own digest",
+      "a-session-is-a-conversation-and-each-has-its-own-digest"
+    ],
+    [
+      "The society scope is a scope, not a project, and every citizen works there when asked there",
+      "the-society-scope-is-a-scope-not-a-project-and-every-citizen-works-there-when-asked-there"
+    ],
+    [
+      "Debounce applies to mentions, stage wakes, finished-task wakes, and signal wakes",
+      "debounce-applies-to-mentions-stage-wakes-finished-task-wakes-and-signal-wakes"
+    ],
+    [
+      "A conversation does not end under someone else's turn",
+      "a-conversation-does-not-end-under-someone-elses-turn"
+    ],
+    [
+      "A question to the user is a mention, asked where it belongs",
+      "a-question-to-the-user-is-a-mention-asked-where-it-belongs"
+    ],
+    [
+      "A society role's home and a project member's start afresh after each reflection",
+      "a-society-roles-home-and-a-project-members-start-afresh-after-each-reflection"
+    ],
+    [
+      "A home's new session is shown the posts its earlier turns read",
+      "a-homes-new-session-is-shown-the-posts-its-earlier-turns-read"
+    ],
+    [
+      "A paused runner holds its turns in the queue, and what waits on it stays quiet",
+      "a-paused-runner-holds-its-turns-in-the-queue-and-what-waits-on-it-stays-quiet"
+    ],
+    [
+      "A project's channels once shared a society role's home",
+      "a-projects-channels-once-shared-a-society-roles-home"
+    ],
+    [
+      "A project member's home once kept its session through every reflection",
+      "a-project-members-home-once-kept-its-session-through-every-reflection"
+    ],
+    [
+      "A question in `general` once rode into the citizen's first project",
+      "a-question-in-general-once-rode-into-the-citizens-first-project"
+    ],
+    ["A mention is a wake, and a wake is a turn", "a-mention-is-a-wake-and-a-wake-is-a-turn"],
+    [
+      "Knowledge notices and others' task-thread posts once woke every reader",
+      "knowledge-notices-and-others-task-thread-posts-once-woke-every-reader"
+    ],
+    [
+      "Unasked posts in a project's channels once woke every follower",
+      "unasked-posts-in-a-projects-channels-once-woke-every-follower"
+    ],
+    [
+      "Sessions were once per citizen and scope, and never ended",
+      "sessions-were-once-per-citizen-and-scope-and-never-ended"
+    ],
+    [
+      "A held stage once woke its holder on every heartbeat between its cron's checks",
+      "a-held-stage-once-woke-its-holder-on-every-heartbeat-between-its-crons-checks"
+    ],
+    [
+      "A newcomer's first stage turn once ran beside its onboarding",
+      "a-newcomers-first-stage-turn-once-ran-beside-its-onboarding"
+    ],
+    ["Building, releasing, and publishing", "building-releasing-and-publishing"],
+    ["TypeScript 7, ESM only", "typescript-7-esm-only"],
+    [
+      "TypeScript 6 and 7 no longer auto-include `@types/*`",
+      "typescript-6-and-7-no-longer-auto-include-types"
+    ],
+    ["`oxfmt` reformats `package.json` and markdown", "oxfmt-reformats-packagejson-and-markdown"],
+    [
+      "The Helm chart deploys the server, and runners when asked",
+      "the-helm-chart-deploys-the-server-and-runners-when-asked"
+    ],
+    ["Commits, branches, and releases", "commits-branches-and-releases"],
+    [
+      "Commits follow Conventional Commits and reach `dev` through pull requests",
+      "commits-follow-conventional-commits-and-reach-dev-through-pull-requests"
+    ],
+    ["pnpm 12's deploy is not offline", "pnpm-12s-deploy-is-not-offline"],
+    ["Roles, proposals, and the society's shape", "roles-proposals-and-the-societys-shape"],
+    [
+      "A charter change reaches its members' role files",
+      "a-charter-change-reaches-its-members-role-files"
+    ],
+    [
+      "Society roles are never in a project; work roles work in projects and are asked anywhere",
+      "society-roles-are-never-in-a-project-work-roles-work-in-projects-and-are-asked-anywhere"
+    ],
+    [
+      "A provisioned member's persistent token is never shown",
+      "a-provisioned-members-persistent-token-is-never-shown"
+    ],
+    ["Retirement archives, it does not delete", "retirement-archives-it-does-not-delete"],
+    [
+      "Signals are counters or timers, keyed, and logged rather than posted",
+      "signals-are-counters-or-timers-keyed-and-logged-rather-than-posted"
+    ],
+    [
+      "A persisting condition wakes at steps, not at every repeat",
+      "a-persisting-condition-wakes-at-steps-not-at-every-repeat"
+    ],
+    ["A project starts with one channel, `general`", "a-project-starts-with-one-channel-general"],
+    [
+      "A channel beside `general` is a workstream, opened and archived by the planners, and followed by choice",
+      "a-channel-beside-general-is-a-workstream-opened-and-archived-by-the-planners-and-followed-by-choice"
+    ],
+    ["A project ends by archive, never by deletion", "a-project-ends-by-archive-never-by-deletion"],
+    [
+      "A one-time migration runs once on open, then goes",
+      "a-one-time-migration-runs-once-on-open-then-goes"
+    ],
+    [
+      "Proposals were once announced in `governance` and decided in `decisions`",
+      "proposals-were-once-announced-in-governance-and-decided-in-decisions"
+    ],
+    ["Asks once opened in `general`", "asks-once-opened-in-general"],
+    [
+      "Signals were once posts in an `ops` society channel",
+      "signals-were-once-posts-in-an-ops-society-channel"
+    ],
+    [
+      "The steward is not a rubber stamp, and each of its turns costs money",
+      "the-steward-is-not-a-rubber-stamp-and-each-of-its-turns-costs-money"
+    ],
+    [
+      "The board is islands over the sky, and every view is an address",
+      "the-board-is-islands-over-the-sky-and-every-view-is-an-address"
+    ],
+    ["What needs the user, and asks", "what-needs-the-user-and-asks"],
+    ["What needs the user is derived, never stored", "what-needs-the-user-is-derived-never-stored"],
+    ["Ids, paths, and a branch's files", "ids-paths-and-a-branchs-files"],
+    [
+      "A path reads as the file it names when a task's branch has it",
+      "a-path-reads-as-the-file-it-names-when-a-tasks-branch-has-it"
+    ],
+    [
+      "A task's view lists what its branch changed, counted from where it left the default branch, and each file opens to its patch",
+      "a-tasks-view-lists-what-its-branch-changed-counted-from-where-it-left-the-default-branch-and-each-file-opens-to-its-patch"
+    ],
+    [
+      "A notice is a post a verb made about its work, drawn apart from talk",
+      "a-notice-is-a-post-a-verb-made-about-its-work-drawn-apart-from-talk"
+    ],
+    [
+      "The interface counts turns in tokens, never dollars",
+      "the-interface-counts-turns-in-tokens-never-dollars"
+    ],
+    ["The Citizens list's token counts", "the-citizens-lists-token-counts"],
+    ["The web app follows argus's look", "the-web-app-follows-arguss-look"],
+    [
+      "The web app reads `@stellaris/shared` from its build output",
+      "the-web-app-reads-stellarisshared-from-its-build-output"
+    ],
+    [
+      "Chromium drops the WebKit scrollbar styles on any element that sets `scrollbar-width` or `scrollbar-color`",
+      "chromium-drops-the-webkit-scrollbar-styles-on-any-element-that-sets-scrollbar-width-or-scrollbar-color"
+    ],
+    ["A `line-clamp-*` beside `block` clamps nothing", "a-line-clamp--beside-block-clamps-nothing"],
+    [
+      "The web dev and preview servers bind 127.0.0.1",
+      "the-web-dev-and-preview-servers-bind-127001"
+    ],
+    [
+      "`@lobehub/icons` is not a dependency on purpose",
+      "lobehubicons-is-not-a-dependency-on-purpose"
+    ],
+    [
+      "The served interface is the build, not the source",
+      "the-served-interface-is-the-build-not-the-source"
+    ],
+    [
+      "A tool call's summary is its whole input on one line",
+      "a-tool-calls-summary-is-its-whole-input-on-one-line"
+    ],
+    [
+      "A count's digits sit high on a line whose half-leading Chromium floors",
+      "a-counts-digits-sit-high-on-a-line-whose-half-leading-chromium-floors"
+    ],
+    [
+      "`applyLive` takes its step cap as an options object",
+      "applylive-takes-its-step-cap-as-an-options-object"
+    ],
+    [
+      "An older server answers `/auth/config` with the interface's page",
+      "an-older-server-answers-authconfig-with-the-interfaces-page"
+    ],
+    [
+      "A cited line once read as part of the file's name",
+      "a-cited-line-once-read-as-part-of-the-files-name"
+    ],
+    [
+      "`apps/ios` holds the app, BoardKit, and their fixtures",
+      "appsios-holds-the-app-boardkit-and-their-fixtures"
+    ],
+    ["XcodeGen writes the app's project", "xcodegen-writes-the-apps-project"],
+    ["The app's icon is an Icon Composer document", "the-apps-icon-is-an-icon-composer-document"],
+    [
+      "BoardKit's core is Foundation alone, and its transport is Apple's",
+      "boardkits-core-is-foundation-alone-and-its-transport-is-apples"
+    ],
+    [
+      "Sign-in takes the board's address, then GitHub or a token",
+      "sign-in-takes-the-boards-address-then-github-or-a-token"
+    ],
+    ["What opens, and what each conversation keeps", "what-opens-and-what-each-conversation-keeps"],
+    [
+      "A channel holds its threads, and opens new ones",
+      "a-channel-holds-its-threads-and-opens-new-ones"
+    ],
+    [
+      "A task's or a proposal's thread shows what it is about, and decides it",
+      "a-tasks-or-a-proposals-thread-shows-what-it-is-about-and-decides-it"
+    ],
+    ["A branch's files open in the app", "a-branchs-files-open-in-the-app"],
+    ["A task's changes end its plan", "a-tasks-changes-end-its-plan"],
+    [
+      "The board's events keep what the app shows current",
+      "the-boards-events-keep-what-the-app-shows-current"
+    ],
+    [
+      "Nothing lays out by the screen, the device, or the orientation",
+      "nothing-lays-out-by-the-screen-the-device-or-the-orientation"
+    ],
+    [
+      "The server's tests capture what the client reads",
+      "the-servers-tests-capture-what-the-client-reads"
+    ],
+    ["The ports run the web's case tables", "the-ports-run-the-webs-case-tables"],
+    ["The web's sky tests write the sky's tables", "the-webs-sky-tests-write-the-skys-tables"],
+    [
+      "The sky's scene is the web's, and its marks and colours are read from the web's files",
+      "the-skys-scene-is-the-webs-and-its-marks-and-colours-are-read-from-the-webs-files"
+    ],
+    [
+      "BoardKit's tests run on Linux and on the simulator",
+      "boardkits-tests-run-on-linux-and-on-the-simulator"
+    ],
+    ["The app's tests run against a fake board", "the-apps-tests-run-against-a-fake-board"],
+    [
+      "`ios.yml` runs on macOS, and no rule requires it",
+      "iosyml-runs-on-macos-and-no-rule-requires-it"
+    ],
+    [
+      "The server runs no turns, and a project lives on one runner at a time",
+      "the-server-runs-no-turns-and-a-project-lives-on-one-runner-at-a-time"
+    ],
+    [
+      "A stream can look open and deliver nothing, so both ends check",
+      "a-stream-can-look-open-and-deliver-nothing-so-both-ends-check"
+    ],
+    [
+      "A turn the board has ended stops on its runner, and the conversation's next waits for it",
+      "a-turn-the-board-has-ended-stops-on-its-runner-and-the-conversations-next-waits-for-it"
+    ],
+    [
+      "A project moves only when the user moves it, carrying its repository",
+      "a-project-moves-only-when-the-user-moves-it-carrying-its-repository"
+    ],
+    [
+      "A move's transfer takes as long as it keeps moving",
+      "a-moves-transfer-takes-as-long-as-it-keeps-moving"
+    ],
+    [
+      "A citizen's model is a setting, the CLI's list is the menu",
+      "a-citizens-model-is-a-setting-the-clis-list-is-the-menu"
+    ],
+    [
+      "A CLI's quota is what its login reported, kept on its runner's record",
+      "a-clis-quota-is-what-its-login-reported-kept-on-its-runners-record"
+    ],
+    [
+      "A limited CLI's turns wait on its runner until the limit lifts",
+      "a-limited-clis-turns-wait-on-its-runner-until-the-limit-lifts"
+    ],
+    [
+      "Shutdown waits for running turns, and the port stays bound until then",
+      "shutdown-waits-for-running-turns-and-the-port-stays-bound-until-then"
+    ],
+    [
+      "A turn may run without a time limit, and then everything that assumed one must not",
+      "a-turn-may-run-without-a-time-limit-and-then-everything-that-assumed-one-must-not"
+    ],
+    ["A runner's waits must hold its process open", "a-runners-waits-must-hold-its-process-open"],
+    ["The old `server` runner is gone", "the-old-server-runner-is-gone"],
+    [
+      "Behind a proxy, every request comes from the proxy",
+      "behind-a-proxy-every-request-comes-from-the-proxy"
+    ],
+    [
+      "The app's sign-in once landed on a custom scheme",
+      "the-apps-sign-in-once-landed-on-a-custom-scheme"
+    ],
+    [
+      "A job once carried the server's own idea of its address",
+      "a-job-once-carried-the-servers-own-idea-of-its-address"
+    ],
+    [
+      "A turn the board had ended once worked on beside its conversation's next",
+      "a-turn-the-board-had-ended-once-worked-on-beside-its-conversations-next"
+    ],
+    ["Tasks, plans, and landing", "tasks-plans-and-landing"],
+    [
+      "A task is a plan; the core knows only its ends",
+      "a-task-is-a-plan-the-core-knows-only-its-ends"
+    ],
+    [
+      "Keeping a gated stage in `plan_task` means restating it",
+      "keeping-a-gated-stage-in-plan_task-means-restating-it"
+    ],
+    ["`holders` is history, `claimedBy` is now", "holders-is-history-claimedby-is-now"],
+    ["The task's thread", "the-tasks-thread"],
+    [
+      "A task holds the work's state; its thread holds the talk",
+      "a-task-holds-the-works-state-its-thread-holds-the-talk"
+    ],
+    [
+      "A stage assigned to a role wakes every member of that role on the project, and one assigned to nobody every member who may hold it",
+      "a-stage-assigned-to-a-role-wakes-every-member-of-that-role-on-the-project-and-one-assigned-to-nobody-every-member-who-may-hold-it"
+    ],
+    [
+      "A stage wake is checked again when its task changes, and at dispatch",
+      "a-stage-wake-is-checked-again-when-its-task-changes-and-at-dispatch"
+    ],
+    [
+      "A `ghpr` task lands through its pull request on GitHub",
+      "a-ghpr-task-lands-through-its-pull-request-on-github"
+    ],
+    [
+      "A stage was once released between checks of its holder's own work",
+      "a-stage-was-once-released-between-checks-of-its-holders-own-work"
+    ],
+    [
+      "Task notes once lived in the task file, and task threads stayed empty",
+      "task-notes-once-lived-in-the-task-file-and-task-threads-stayed-empty"
+    ],
+    [
+      "`NODE_ENV=development` makes a development bundle",
+      "node_envdevelopment-makes-a-development-bundle"
+    ],
+    ["The iOS client's tests live in its package", "the-ios-clients-tests-live-in-its-package"],
+    [
+      "`pnpm test -- --testTimeout=…` keeps the configured timeout",
+      "pnpm-test------testtimeout-keeps-the-configured-timeout"
+    ],
+    [
+      "The resident-session test in `runner.test.ts` fails under heavy load whatever the timeout",
+      "the-resident-session-test-in-runnertestts-fails-under-heavy-load-whatever-the-timeout"
+    ],
+    [
+      "The scheduler test's fake runner records turns only when asked",
+      "the-scheduler-tests-fake-runner-records-turns-only-when-asked"
+    ],
+    [
+      "A runner's disconnect is recorded after its stream closes, so stop the hub before deleting a society",
+      "a-runners-disconnect-is-recorded-after-its-stream-closes-so-stop-the-hub-before-deleting-a-society"
+    ],
+    ["CI's account has no git identity", "cis-account-has-no-git-identity"],
+    [
+      "Claude Code will not wait on a foreground `sleep`",
+      "claude-code-will-not-wait-on-a-foreground-sleep"
+    ],
+    [
+      "The core's first seat is at the center of the sky",
+      "the-cores-first-seat-is-at-the-center-of-the-sky"
+    ],
+    ["A URL's own `..` never reaches a route", "a-urls-own--never-reaches-a-route"],
+    ["Scrolling, focus, and touch", "scrolling-focus-and-touch"],
+    [
+      "The stage's holder has the branch to itself, and commits made beside it follow it",
+      "the-stages-holder-has-the-branch-to-itself-and-commits-made-beside-it-follow-it"
+    ],
+    [
+      "Code keeps what holds no one's work current, and never merges or commits for an agent",
+      "code-keeps-what-holds-no-ones-work-current-and-never-merges-or-commits-for-an-agent"
+    ],
+    [
+      "A merge project's default branch moves only by the runner",
+      "a-merge-projects-default-branch-moves-only-by-the-runner"
+    ],
+    ["Work on no branch is reported, not dropped", "work-on-no-branch-is-reported-not-dropped"],
+    [
+      "The runner once gave every CLI the citizen's git identity",
+      "the-runner-once-gave-every-cli-the-citizens-git-identity"
+    ],
+    [
+      "Homes are git repositories, and the board writes no tracked file in one after creating it",
+      "homes-are-git-repositories-and-the-board-writes-no-tracked-file-in-one-after-creating-it"
+    ],
+    [
+      "Git work on a project's clone is serialized per project",
+      "git-work-on-a-projects-clone-is-serialized-per-project"
+    ],
+    [
+      "`updateInstead` rewrites a home's working tree before it checks the branch",
+      "updateinstead-rewrites-a-homes-working-tree-before-it-checks-the-branch"
+    ],
+    [
+      "A project's clone once never followed its remote",
+      "a-projects-clone-once-never-followed-its-remote"
+    ],
+    [
+      "Channel conversations' records once had no place in a home's ignore file",
+      "channel-conversations-records-once-had-no-place-in-a-homes-ignore-file"
+    ],
+    ["Stellaris: Agent Society Plan", "stellaris-agent-society-plan"],
+    ["1. Motivation", "1-motivation"],
+    ["2. Design principles", "2-design-principles"],
+    ["3. Architecture", "3-architecture"],
+    ["3.1 System view", "31-system-view"],
+    ["3.2 Single turn view", "32-single-turn-view"],
+    ["4. The board", "4-the-board"],
+    ["4.1 Data model", "41-data-model"],
+    ["4.2 Storage and projection", "42-storage-and-projection"],
+    ["4.3 Verbs", "43-verbs"],
+    ["4.4 Channels and threads", "44-channels-and-threads"],
+    ["4.5 How an agent talks to the board", "45-how-an-agent-talks-to-the-board"],
+    ["5. Agents", "5-agents"],
+    ["5.1 Identity and home", "51-identity-and-home"],
+    ["5.2 Sessions, worktrees, permissions", "52-sessions-worktrees-permissions"],
+    ["5.3 The turn contract", "53-the-turn-contract"],
+    ["5.4 Memory tiers", "54-memory-tiers"],
+    ["5.5 Skills and reflection", "55-skills-and-reflection"],
+    ["5.6 Bootstrap and first turns", "56-bootstrap-and-first-turns"],
+    ["5.7 The concierge and resident sessions", "57-the-concierge-and-resident-sessions"],
+    ["5.8 Steering and stopping a running turn", "58-steering-and-stopping-a-running-turn"],
+    ["6. Scheduler", "6-scheduler"],
+    ["6.1 Wake rules", "61-wake-rules"],
+    ["6.2 Runner selection", "62-runner-selection"],
+    ["6.3 Leases and failure", "63-leases-and-failure"],
+    ["6.4 Limits", "64-limits"],
+    ["6.5 Instrumentation", "65-instrumentation"],
+    ["6.6 Crons", "66-crons"],
+    ["7. Runners and remote machines", "7-runners-and-remote-machines"],
+    ["7.1 The runner protocol", "71-the-runner-protocol"],
+    ["7.2 Where a project lives", "72-where-a-project-lives"],
+    ["7.3 Extensions recorded for later", "73-extensions-recorded-for-later"],
+    ["8. Roles and governance", "8-roles-and-governance"],
+    ["8.1 Roles as claims", "81-roles-as-claims"],
+    ["8.2 Seed roles", "82-seed-roles"],
+    ["8.3 Proposals and approval", "83-proposals-and-approval"],
+    ["9. Tasks and their plans", "9-tasks-and-their-plans"],
+    ["9.1 Open, a plan, done", "91-open-a-plan-done"],
+    ["9.2 Completion", "92-completion"],
+    ["9.3 Workspaces and integration", "93-workspaces-and-integration"],
+    ["9.4 The plan format", "94-the-plan-format"],
+    ["9.5 Planning in charters", "95-planning-in-charters"],
+    ["10. Human interaction", "10-human-interaction"],
+    ["10.1 The playground", "101-the-playground"],
+    ["11. Implementation", "11-implementation"],
+    ["11.1 Stack", "111-stack"],
+    ["11.2 Repository layout", "112-repository-layout"],
+    ["11.3 The board server", "113-the-board-server"],
+    ["11.4 Adapters", "114-adapters"],
+    ["11.5 Metrics", "115-metrics"],
+    ["12. Build order", "12-build-order"],
+    ["13. Deferred on purpose", "13-deferred-on-purpose"],
+    ["14. Open items to settle during the build", "14-open-items-to-settle-during-the-build"],
+    ["15. Decision register", "15-decision-register"],
+    ["@kubitnodes/stellaris-runner", "kubitnodesstellaris-runner"],
+    ["@kubitnodes/stellaris", "kubitnodesstellaris"]
+  ],
+  "document": {
+    "markdown": "# a\n\n# a\n\n# a-1\n\n# a\n\n# Ünïcödé Straße\n\n# 日本語 見出し\n\n# ½ ² Ⅻ ٣ x²\n\n# Emoji 🚀 rocket 👩‍💻 dev\n\n# NBSP&nbsp;here and &amp; &lt;tag&gt; &#65;&#x42;\n\n# snake_case and _emph_ and __strong__ and *star* and **bold**\n\n# `code_with_under` and `a  b` and `` ` ``\n\n# Link [text](x.md) and ![img](y.png) alt and [ref][r]\n\n# <kbd>Ctrl</kbd>+C and <span id=\"inner\">in</span>\n\n# Escaped \\* star \\_ under \\# hash\n\n# Closing hashes ##\n\n# Trailing #hash#\n\n# Multiple   spaces\ttab\n\n# -- dashes -- trailing -\n\n# Dots.and/slashes:colons;semi,comma!bang?q'apos\"quote\n\n# Café Cafe&#x301;\n\n# İstanbul UPPER Case ΣΑΣ\n\n# Price $5 + 10% = ~fair~ ~~gone~~ #12\n\n# Under_score_end_ ‿ tie ‐ hyphen – en — em\n\n#\n\n# ‌zwnj‍zwj\n\n## Ⅷ roman · middot ¶ pilcrow © copy ª ordinal º\n\n\n# 🚀\n\n# 🚀\n\n# x\n\n## A [`code` link](y.md) and <https://example.com/p> and www.example.org\n\n### _foo_bar_ and foo_bar_ and _a_ _b_ and __x__y and _(paren)_\n\n### *emph* text** and a*b*c and 2*3*4\n\n### Ⓐ circled and ﬁ ligature and Ǆ title\n\n- # In a list\n\n> # In a quote\n\n<h2 id=\"raw-h2\">Raw HTML heading</h2>\n\n<details><summary>Sum</summary>\n\n#### Inside details\n\n</details>\n\n#### Trailing spaces   \n\n####### seven\n\n#\ttab after hash\n\n#5 no space\n\n## Big &#9999999; zero &#0; and &#91;b&#93;(c) &amp; d\n\n## Configuration <a name=\"config\"></a>\n\n## CI ![status](https://example.com/badge.svg)\n\n## Upgrading <!-- since 0.4 -->\n\n## <a id=\"install\"></a> Install\n\n## Line<br>break and end<br>\n\n## Trailing nbsp&nbsp;\n\n## _c_<em>n</em> and [k](k.md)_c_\n\n## <https://e.com>_x_ and _y_<https://e.com>\n\n## ![x](y.png)\n\n## ![x](y.png) ![z](w.png)\n\n## <!-- only a comment -->\n\n<h2> Spaced </h2>\n\n<h3>\n  Multi line\n</h3>\n\n## Tab trailing\t\n\n## ~_x_ and _x_~ and ~ _x_\n\n## a~_x_~b\n\n## ~~d~~_u_ and ~~e~~ _v_\n\n## _u_~~d~~ and ~~_w_~~\n\n## \\~_x_ and `~`_y_\n\n## *_* and _u_\n\n## **_x_** and ___y___\n\n## _a *b_ c*\n\n## Price €_net_ total and Copyright ©_2026_\n\n## Arrow →_next_ and _a_→ b\n\n## Sum ∑_i_ math, °_c_, +_p_ and —_q_\n\n## a](b) c and x][y] z\n\n## [a](b unclosed\n\n## [a](b) c](d) and [a [b] c](d) e\n\n## ![x] y and [a][nodef] x and [r][] w\n\n## [a](b c) d and [a](b(c \"t\") z\n\n## [r](bad x and ![r](<b>[r][]) q\n\n## [k](<b> \"t\") u and [x](y(z)][x](<y z>) q\n\n## _* ~_* and __a ~___ b\n\n[r]: z.md\n",
+    "anchors": [
+      "a",
+      "a-1",
+      "a-1-1",
+      "a-2",
+      "ünïcödé-straße",
+      "日本語-見出し",
+      "--ⅻ-٣-x",
+      "emoji--rocket-‍-dev",
+      "nbsphere-and--tag-ab",
+      "snake_case-and-emph-and-strong-and-star-and-bold",
+      "code_with_under-and-a--b-and-",
+      "link-text-and--alt-and-ref",
+      "inner",
+      "ctrlc-and-in",
+      "escaped--star-_-under--hash",
+      "closing-hashes",
+      "trailing-hash",
+      "multiple---spacestab",
+      "---dashes----trailing--",
+      "dotsandslashescolonssemicommabangqaposquote",
+      "café-café",
+      "i̇stanbul-upper-case-σασ",
+      "price-5--10--fair-gone-12",
+      "under_score_end_-‿-tie--hyphen--en--em",
+      "",
+      "‌zwnj‍zwj",
+      "ⅷ-roman--middot--pilcrow--copy-ª-ordinal-º",
+      "-1",
+      "-2",
+      "x",
+      "a-code-link-and-httpsexamplecomp-and-wwwexampleorg",
+      "foo_bar-and-foo_bar_-and-a-b-and-__x__y-and-paren",
+      "emph-text-and-abc-and-234",
+      "ⓐ-circled-and-ﬁ-ligature-and-ǆ-title",
+      "in-a-list",
+      "in-a-quote",
+      "raw-h2",
+      "raw-html-heading",
+      "inside-details",
+      "trailing-spaces",
+      "tab-after-hash",
+      "big--zero--and-bc--d",
+      "config",
+      "configuration-",
+      "ci-",
+      "upgrading-",
+      "install",
+      "-install",
+      "linebreak-and-end",
+      "trailing-nbsp",
+      "cn-and-kc",
+      "httpsecomx-and-yhttpsecom",
+      "-",
+      "-spaced-",
+      "--multi-line",
+      "tab-trailing",
+      "x-and-x-and--x",
+      "a_x_b",
+      "d_u_-and-e-v",
+      "_u_d-and-w",
+      "x-and-y",
+      "_-and-u",
+      "x-and-y-1",
+      "a-b-c",
+      "price-_net_-total-and-copyright-_2026_",
+      "arrow-_next_-and-_a_-b",
+      "sum-_i_-math-_c_-p-and-q",
+      "ab-c-and-xy-z",
+      "ab-unclosed",
+      "a-cd-and-a-b-c-e",
+      "x-y-and-anodef-x-and-r-w",
+      "ab-c-d-and-a-z",
+      "rbad-x-and-r-q",
+      "k-u-and-xyzx-q",
+      "_-_-and-__a-___-b"
+    ]
+  }
+}

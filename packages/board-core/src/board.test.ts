@@ -1725,6 +1725,113 @@ describe("Board", () => {
     ]);
   });
 
+  it("renames a runner, for the user alone, with the projects, pins, and sessions that name it, and its token", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "codex" });
+    const quota = CliQuotaSchema.parse({
+      observedAt: clock.toISOString(),
+      source: "turn",
+      status: "allowed",
+    });
+    await board.recordQuota("pod", "claude", quota);
+    // A project living on it, an archived one that did, and one living elsewhere.
+    await board.placeProject("demo", "pod");
+    await board.addProject(USER, { slug: "old" });
+    await board.placeProject("old", "pod");
+    await board.archiveProject(USER, { project: "old", reason: "done" });
+    await board.addProject(USER, { slug: "yard" });
+    await board.placeProject("yard", "far");
+    await board.pinAgent("eng-1", "pod");
+    await board.pinAgent("rev-1", "far");
+    // Every kind of conversation's session record that names it, and one that names another.
+    const thread = await board.createTask(USER, { project: "demo", title: "build" });
+    const records: Array<[string, string | undefined]> = [
+      ["demo", undefined],
+      ["demo", thread.id],
+      ["demo", "#dev"],
+      ["society", "~demo"],
+    ];
+    for (const [scope, part] of records) {
+      await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
+    }
+    await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    const projected = (name: string) => readFile(board.paths.member(name), "utf8");
+
+    // Only the user renames, a runner the board knows, to a free name of the board's shape.
+    await expect(board.renameRunner(ENG, "pod", "gpu-1")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.renameRunner(USER, "ghost", "gpu-1")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(board.renameRunner(USER, "pod", "far")).rejects.toMatchObject({
+      code: "ALREADY_EXISTS",
+    });
+    await expect(board.renameRunner(USER, "pod", "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(board.renameRunner(USER, "pod", "Not A Name")).rejects.toThrow(
+      /lowercase letters/,
+    );
+    expect((await board.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "pod",
+    ]);
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+
+    const renamed = await board.renameRunner(USER, "pod", "gpu-1");
+    expect(renamed).toMatchObject({ projects: ["demo", "old"], agents: ["eng-1"], sessions: 4 });
+    // Its record keeps everything but the name: what it offers, its pauses, and its quotas.
+    const before = { clis: ["claude", "codex"], quotas: { claude: quota } };
+    expect(renamed.runner).toMatchObject({ name: "gpu-1", status: "connected", ...before });
+    expect(renamed.runner.paused?.by).toBe("user");
+    expect(Object.keys(renamed.runner.pausedClis ?? {})).toEqual(["codex"]);
+    expect(await board.readRunner("gpu-1")).toEqual(renamed.runner);
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await readFile(board.paths.runner("gpu-1"), "utf8")).toContain("\n# gpu-1\n");
+    expect((await board.readProject("demo")).runner).toBe("gpu-1");
+    expect((await board.readProject("old")).runner).toBe("gpu-1");
+    expect((await board.readProject("yard")).runner).toBe("far");
+    expect((await board.readAgent("eng-1")).homeRunner).toBe("gpu-1");
+    expect((await board.readAgent("rev-1")).homeRunner).toBe("far");
+    expect(await projected("eng-1")).toContain("homeRunner: gpu-1");
+    for (const [scope, part] of records) {
+      expect(await board.readSessions("eng-1", scope, part)).toEqual({
+        claude: `session-${part ?? scope}`,
+        runner: "gpu-1",
+      });
+    }
+    expect(await board.readSessions("rev-1", "demo")).toEqual({
+      codex: "far-session",
+      runner: "far",
+    });
+    // The runner's token answers to the new name, now and after a restart.
+    expect(board.resolveRunnerToken(token)).toBe("gpu-1");
+    const reopened = await Board.open(dir, { now });
+    expect(reopened.resolveRunnerToken(token)).toBe("gpu-1");
+    expect(await readFile(path.join(board.paths.state(), "runners.json"), "utf8")).not.toContain(
+      '"pod"',
+    );
+
+    // One event says what the rename did; those before it keep the name they were written with.
+    const events = await reopened.readEvents(null);
+    expect(events.filter((event) => event.type === "runner.renamed")).toMatchObject([
+      {
+        actor: "user",
+        payload: { from: "pod", to: "gpu-1", projects: ["demo", "old"], agents: ["eng-1"] },
+      },
+    ]);
+    expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({
+      name: "pod",
+    });
+    // The old name is free again.
+    await reopened.addRunner(USER, "pod");
+  });
+
   it("keeps the lease of a holder the user's pause holds, then lets it lapse from at least half a lease after", async () => {
     // The board's own lease, thirty minutes.
     const { board } = await society({});

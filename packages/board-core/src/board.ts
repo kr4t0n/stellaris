@@ -120,6 +120,7 @@ import {
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
+  type RunnerRenamed,
   type Skill,
   type SkillFileContent,
   type SkillFiles,
@@ -5132,6 +5133,103 @@ export class Board {
     for (const [name, { tokenHash }] of Object.entries(await this.readRunnerTokens())) {
       this.runnerTokens.set(tokenHash, name);
     }
+  }
+
+  /**
+   * Renames a runner, which only the user does, and every record that names it: the projects
+   * living on it, archived ones too, the citizens pinned to it, and every conversation's session
+   * record, so sessions begun there go on resuming under the new name. Its token stays, and now
+   * answers to `to`. Turn records and events keep the name they were written with. The hub
+   * (`RunnerHub.renameRunner`) checks first that nothing runs there.
+   *
+   * The records go first and the runner's own file and token last, so a rename cut short by a
+   * crash leaves `to` unknown and can be run again to finish it.
+   */
+  async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
+    this.assertUser(actor, "only the user may rename a runner");
+    const name = NameSchema.parse(to);
+    return this.mutex.run(async () => {
+      const current = await this.readRunner(from);
+      if (name === from) {
+        throw new BoardError("INVALID_STATE", `runner ${from} is already named ${name}`);
+      }
+      if (await exists(this.paths.runner(name))) {
+        throw new BoardError("ALREADY_EXISTS", `runner ${name} already exists`);
+      }
+      const projects: Name[] = [];
+      for (const slug of await listDirs(this.paths.projects())) {
+        if ((await this.readProject(slug)).runner === from) {
+          await this.updateProject(slug, (project) => ({ ...project, runner: name }));
+          projects.push(slug);
+        }
+      }
+      const agents: Name[] = [];
+      for (const agent of await this.listAgents()) {
+        if (agent.homeRunner === from) {
+          await this.updateAgent(agent.name, (each) => ({ ...each, homeRunner: name }));
+          await this.refreshMember(agent.name);
+          agents.push(agent.name);
+        }
+      }
+      let sessions = 0;
+      for (const file of await this.sessionFiles()) {
+        const record = await readJson(file, SessionsFileSchema);
+        if (record.runner === from) {
+          await writeJson(file, { ...record, runner: name });
+          sessions += 1;
+        }
+      }
+      const tokens = await this.readRunnerTokens();
+      const { [from]: token, ...others } = tokens;
+      await writeJson(this.runnerTokensFile(), {
+        runners: token === undefined ? others : { ...others, [name]: token },
+      });
+      const doc = await readMarkdown(this.paths.runner(from), RunnerSchema);
+      const runner = RunnerSchema.parse({ ...current, name });
+      const heading = `# ${from}\n`;
+      await writeMarkdown(
+        this.paths.runner(name),
+        runner,
+        doc.body.startsWith(heading) ? `# ${name}\n${doc.body.slice(heading.length)}` : doc.body,
+      );
+      await rm(this.paths.runner(from), { force: true });
+      await this.events.append("runner.renamed", actor.name, {
+        from,
+        to: name,
+        projects,
+        agents,
+        sessions,
+      });
+      // Last, with no wait after it: the runner's next request, a registration included, names it
+      // `to` only once the caller holds the rename, so the hub re-keys before any arrives.
+      if (token !== undefined) {
+        this.runnerTokens.set(token.tokenHash, name);
+      }
+      return { runner, projects, agents, sessions };
+    });
+  }
+
+  /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
+  private async sessionFiles(): Promise<string[]> {
+    const files: string[] = [];
+    const add = async (dir: string): Promise<void> => {
+      const file = path.join(dir, "sessions.json");
+      if (await exists(file)) {
+        files.push(file);
+      }
+    };
+    for (const agent of await listDirs(this.paths.agents())) {
+      for (const scope of await listDirs(this.paths.agentProjects(agent))) {
+        const dir = this.paths.agentProject(agent, scope);
+        await add(dir);
+        for (const kind of ["threads", "channels", "places"]) {
+          for (const part of await listDirs(path.join(dir, kind))) {
+            await add(path.join(dir, kind, part));
+          }
+        }
+      }
+    }
+    return files;
   }
 
   /**

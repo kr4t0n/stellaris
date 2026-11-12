@@ -281,6 +281,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       });
     }
   }
+  // The user renames a runner, with every record that names it, once nothing runs there; the hub,
+  // when there is one, checks that and has the runner connect again under its new name.
+  api.put("/runners/:name/name", async (c) => {
+    const from = NameSchema.parse(c.req.param("name"));
+    const body = RunnerBodySchema.parse(await c.req.json());
+    return c.json(
+      deps.runners === undefined
+        ? await board.renameRunner(c.get("actor"), from, body.name)
+        : await deps.runners.renameRunner(c.get("actor"), from, body.name),
+    );
+  });
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.
   api.post("/runners", async (c) => {
     const body = RunnerBodySchema.parse(await c.req.json());

@@ -207,6 +207,24 @@ runner
   });
 
 runner
+  .command("rename <from> <to>")
+  .description(
+    "Rename a runner and every project, pin, and session that names it; its token stays. Stop the server first, or rename it from the runners view",
+  )
+  .action(async (from: string, to: string) => {
+    const board = await open();
+    const renamed = await board.renameRunner(board.userActor(), from, to);
+    print(renamed, () =>
+      [
+        `Runner ${from} renamed ${renamed.runner.name}`,
+        `Projects living on it: ${renamed.projects.join(", ") || "none"}`,
+        `Citizens pinned to it: ${renamed.agents.join(", ") || "none"}`,
+        `Session records rewritten: ${renamed.sessions}`,
+      ].join("\n"),
+    );
+  });
+
+runner
   .command("list")
   .description("List runners and what they offer")
   .action(async () => {

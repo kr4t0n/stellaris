@@ -23,6 +23,7 @@ import {
   SweepResultSchema,
   TurnImageFileSchema,
   TurnImageSchema,
+  USER_ROLE,
   type BranchChanges,
   type BranchFile,
   type BranchFileDiff,
@@ -37,6 +38,7 @@ import {
   type RunnerAnswer,
   type RunnerHello,
   type Runner,
+  type RunnerRenamed,
   type RunnerMessage,
   type RunnerWelcome,
   type RunningTurn,
@@ -74,9 +76,12 @@ export interface RunnerHubOptions {
 
 /** A runner the hub knows: what it registered with, its stream, and the slots it has in use. */
 interface Seat {
-  readonly name: Name;
+  /** Changed only by a rename, which re-keys the seat under the new name. */
+  name: Name;
   hello: RunnerHello;
   send: RunnerSend | null;
+  /** Ends the runner's stream, so it connects again; null while it has none, or ends none. */
+  end: (() => void) | null;
   /** Turns placed on it, from assignment until their record is written. */
   inUse: number;
   warm: Set<string>;
@@ -178,6 +183,10 @@ export class RunnerHub implements TurnRunner {
   private readonly starting = new Map<Name, number>();
   /** Moves started since the hub did, so a placement that a move overtook gives its turn back. */
   private moveStarts = 0;
+  /** The runners being renamed, by their old name: nothing is placed or asked there until it ends. */
+  private readonly renaming = new Set<Name>();
+  /** Renames started since the hub did, so a placement that a rename overtook gives its turn back. */
+  private renameStarts = 0;
   /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
   private readonly limitReads = new Map<string, number>();
   /**
@@ -244,6 +253,7 @@ export class RunnerHub implements TurnRunner {
         name,
         hello,
         send: null,
+        end: null,
         inUse: 0,
         warm: new Set(),
         disconnectedAt: null,
@@ -282,14 +292,16 @@ export class RunnerHub implements TurnRunner {
    * A registered runner's stream opened. Returns what to call when it closes. A turn its hello
    * listed that the board has ended, as one whose runner came back after the grace period, is told
    * to stop before anything else goes down the stream, since its CLI still works there; a runner
-   * that lists no CLI it can stop, as one from before stops, is sent none.
+   * that lists no CLI it can stop, as one from before stops, is sent none. `end` closes the
+   * stream, which a rename does so the runner registers again and learns its new name.
    */
-  async attach(name: Name, send: RunnerSend): Promise<() => Promise<void>> {
+  async attach(name: Name, send: RunnerSend, end?: () => void): Promise<() => Promise<void>> {
     const seat = this.seats.get(name);
     if (seat === undefined) {
       throw new RunnerProtocolError(`runner ${name} must register before it streams`);
     }
     seat.send = send;
+    seat.end = end ?? null;
     seat.disconnectedAt = null;
     if (seat.grace !== null) {
       clearTimeout(seat.grace);
@@ -332,6 +344,7 @@ export class RunnerHub implements TurnRunner {
   async close(): Promise<void> {
     for (const seat of this.seats.values()) {
       seat.send = null;
+      seat.end = null;
       if (seat.grace !== null) {
         clearTimeout(seat.grace);
         seat.grace = null;
@@ -531,6 +544,7 @@ export class RunnerHub implements TurnRunner {
 
   async assign(dispatch: TurnDispatch): Promise<TurnAssignment | null> {
     const starts = this.moveStarts;
+    const renames = this.renameStarts;
     const agent = await this.board.readAgent(dispatch.agent).catch(() => null);
     if (agent === null) {
       return { refused: `no agent ${dispatch.agent}` };
@@ -549,6 +563,7 @@ export class RunnerHub implements TurnRunner {
     const now = this.now();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
+      !this.renaming.has(seat.name) &&
       !receiptOverdue(seat) &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
@@ -605,6 +620,11 @@ export class RunnerHub implements TurnRunner {
       dispatch.project !== SOCIETY_SCOPE &&
       (this.moving.has(dispatch.project) || this.moveStarts !== starts)
     ) {
+      return null;
+    }
+    // A rename that started meanwhile may have renamed the runner the turn would go to, or be about
+    // to, which counts on nothing being placed there.
+    if (this.renameStarts !== renames) {
       return null;
     }
     chosen.inUse += 1;
@@ -834,6 +854,12 @@ export class RunnerHub implements TurnRunner {
         `a move of ${under.join(", ")} is under way; try again once it ends`,
       );
     }
+    if (this.renaming.size > 0) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${[...this.renaming].join(", ")} is being renamed; try again once that ends`,
+      );
+    }
     const move: Move = { id: null, from: null, to, phase: "checking" };
     this.moving.set(slug, move);
     this.moveStarts += 1;
@@ -973,6 +999,92 @@ export class RunnerHub implements TurnRunner {
   }
 
   /** Refuses a runner that cannot take a project's turns: its members' CLIs, the capabilities, a git identity. */
+  /**
+   * Renames a runner, which only the user does, once nothing runs there: no turn in flight or
+   * placed and not yet opened, no request it has not answered (a landing, a file read, a sweep),
+   * and no project move under way. The board rewrites every record that names it
+   * (`Board.renameRunner`). The hub then keeps the runner's seat and its limit reads under the new
+   * name, lets its warm sessions' tokens go, since each warm CLI stamps the name it started with on
+   * its turns, and ends its stream: the runner connects again and learns its new name from the
+   * welcome, as a runner of any release does, while it keeps its seat for the grace period.
+   */
+  async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
+    if (actor.role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user may rename a runner");
+    }
+    const busy = this.renameRefusal(from);
+    if (busy !== null) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${from} cannot be renamed while ${busy}; pause it, and rename it once that ends`,
+      );
+    }
+    this.renaming.add(from);
+    this.renameStarts += 1;
+    let renamed: RunnerRenamed;
+    try {
+      renamed = await this.board.renameRunner(actor, from, to);
+      this.rekey(from, renamed.runner.name);
+    } finally {
+      this.renaming.delete(from);
+    }
+    this.log.info({ from, to: renamed.runner.name }, "runner renamed");
+    const seat = this.seats.get(renamed.runner.name);
+    if (seat !== undefined) {
+      await this.reconnect(seat);
+    }
+    return renamed;
+  }
+
+  /** What runs on a runner, or is under way, that a rename would cut; null when nothing does. */
+  private renameRefusal(runner: Name): string | null {
+    const seat = this.seats.get(runner);
+    const turns = Math.max(seat?.inUse ?? 0, this.host.turnsOn(runner).length);
+    const requests = [...this.pending.values()].filter((each) => each.runner === runner).length;
+    const moves = [...this.moving.keys()];
+    const reasons = [
+      this.renaming.has(runner) ? "it is being renamed" : "",
+      turns > 0 ? `${turns} turn(s) run or start there` : "",
+      requests > 0 ? `${requests} request(s) to it, such as a landing, wait for an answer` : "",
+      moves.length > 0 ? `a move of ${moves.join(", ")} is under way` : "",
+    ].filter((reason) => reason !== "");
+    return reasons.length === 0 ? null : reasons.join(" and ");
+  }
+
+  /** Keeps what the hub holds of a runner under its new name, and has the runner connect again. */
+  private rekey(from: Name, to: Name): void {
+    const seat = this.seats.get(from);
+    if (seat !== undefined) {
+      this.seats.delete(from);
+      seat.name = to;
+      this.seats.set(to, seat);
+    }
+    rekeyed(this.limitReads, from, to);
+    rekeyed(this.limitTries, from, to);
+    // No turn runs there, so every warm session's token is idle; the next turn of each conversation
+    // gets a new one, which starts its CLI again on the saved session, stamping the new name.
+    this.host.warmChanged(from, []);
+    this.runnerChanged(from);
+    this.runnerChanged(to);
+  }
+
+  /**
+   * Ends a runner's stream, so it registers again: as a disconnect, which takes the seat from
+   * placement at once and ends its turns only if it stays away past the grace period.
+   */
+  private async reconnect(seat: Seat): Promise<void> {
+    const end = seat.end;
+    if (seat.send === null || end === null) {
+      return;
+    }
+    const detached = this.detach(seat).finally(() => {
+      this.detaching.delete(detached);
+    });
+    this.detaching.add(detached);
+    end();
+    await detached;
+  }
+
   private async assertCanHost(
     seat: Seat,
     project: ProjectMoved["project"],
@@ -1349,6 +1461,7 @@ export class RunnerHub implements TurnRunner {
 
   private async detach(seat: Seat): Promise<void> {
     seat.send = null;
+    seat.end = null;
     this.runnerChanged(seat.name);
     seat.disconnectedAt = this.now().getTime();
     for (const [id, pending] of this.pending) {
@@ -1566,6 +1679,12 @@ export class RunnerHub implements TurnRunner {
         reject(new RunnerAwayError(`runner ${seat.name} did not answer in time`));
       }, timeoutMs);
       timer.unref?.();
+      // A rename counts on no request being unanswered, since the answer comes under the new name.
+      if (this.renaming.has(seat.name)) {
+        clearTimeout(timer);
+        reject(new RunnerAwayError(`runner ${seat.name} is being renamed`));
+        return;
+      }
       this.pending.set(request, { runner: seat.name, resolve, reject, timer });
       if (seat.send === null || !seat.send(message(request))) {
         this.pending.delete(request);
@@ -1573,6 +1692,20 @@ export class RunnerHub implements TurnRunner {
         reject(new RunnerAwayError(`runner ${seat.name} is not connected`));
       }
     });
+  }
+}
+
+/** Moves the entries a map keeps for a runner, by `runner/cli`, to its new name. */
+function rekeyed<T>(map: Map<string, T>, from: Name, to: Name): void {
+  const moved: Array<[string, T]> = [];
+  for (const entry of map) {
+    if (entry[0].startsWith(`${from}/`)) {
+      moved.push(entry);
+    }
+  }
+  for (const [key, value] of moved) {
+    map.delete(key);
+    map.set(`${to}${key.slice(from.length)}`, value);
   }
 }
 

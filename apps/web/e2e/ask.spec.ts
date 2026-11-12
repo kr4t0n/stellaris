@@ -75,5 +75,5 @@ test("the ask box closes on Escape or a click away, and Space leaves a focused c
   await expect(page.getByRole("button", { name: "Pause" })).toBeFocused();
   await page.keyboard.press("Space");
   await expect(box).toBeHidden();
-  await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
 });

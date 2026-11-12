@@ -4,15 +4,15 @@
 # shows it either way round. A view reads its size classes and its own size instead. Before reading
 # the app, it checks that it catches a planted line of each kind it refuses, and, as a check of its
 # own, that it passes every line it must, such as a blend mode's `.screen`.
-# A screen read is a `.screen` after a name, a call, an optional, a subscript, or a key path's `\`,
-# or at a line's start followed by `.` or `?`. A line that starts with `.screen` followed by
-# neither, as a chain broken on both sides of it leaves one, passes, since a blend mode's case reads
-# the same; and `BlendMode.screen` written whole is refused, so write the case as `.screen` where
-# its type is known.
+# A screen read is a `.screen` after a name, a call, a trailing closure, an optional, a subscript,
+# or a key path's `\`, or at a line's start followed by `.` or `?`. A line that starts with
+# `.screen` followed by neither, as a chain broken on both sides of it leaves one, passes, since a
+# blend mode's case reads the same; and `BlendMode.screen` written whole is refused, so write the
+# case as `.screen` where its type is known.
 # Usage: check-adaptivity.sh [folder...], by default the app's sources and BoardKit's.
 set -euo pipefail
 
-pattern='UIScreen([^A-Za-z0-9_]|$)|([]A-Za-z0-9_?!)]|\\)\.screen([^A-Za-z0-9_]|$)|^[[:space:]]*\.screen[.?]|userInterfaceIdiom|UIUserInterfaceIdiom|UIDevice\.current\.(model|localizedModel)|UIDeviceOrientation|UIInterfaceOrientation|interfaceOrientation|statusBarOrientation|orientationDidChangeNotification|\.orientation([^A-Za-z0-9_]|$)'
+pattern='UIScreen([^A-Za-z0-9_]|$)|([]A-Za-z0-9_?!)}]|\\)\.screen([^A-Za-z0-9_]|$)|^[[:space:]]*\.screen[.?]|userInterfaceIdiom|UIUserInterfaceIdiom|UIDevice\.current\.(model|localizedModel)|UIDeviceOrientation|UIInterfaceOrientation|interfaceOrientation|statusBarOrientation|orientationDidChangeNotification|\.orientation([^A-Za-z0-9_]|$)'
 
 planted=(
   'let width = UIScreen.main.bounds.width'
@@ -24,6 +24,8 @@ planted=(
   'print(scene.screen)'
   'let width = UIApplication.shared.windows[0].screen.bounds.width'
   'let screens = scenes.map(\.screen)'
+  'let bounds = MainActor.assumeIsolated { view.window! }.screen.bounds'
+  '}.screen'
   '  .screen.bounds.width'
   '  .screen?.bounds.width'
   'if UIDevice.current.userInterfaceIdiom == .pad {}'

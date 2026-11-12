@@ -7,8 +7,8 @@ import { LinkedText } from "../components/Entities.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 
 /**
- * PROTOTYPE: the operations log as a view of its own at `/logs`, one of the status tabs: the
- * signals the scheduler measured, newest first. It floated from the HUD before.
+ * The operations log, one of the status views: the signals the scheduler measured, newest first.
+ * It is the server's instrumentation, not conversation, so it has no channel in the board.
  */
 export function LogsView() {
   const signals = useSignals(true);

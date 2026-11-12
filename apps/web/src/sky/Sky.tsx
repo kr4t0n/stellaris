@@ -23,7 +23,7 @@ interface SkyProps {
   readonly onSelectAnchor: (anchor: string) => void;
   readonly onSelectStar: (id: string) => void;
   readonly onSelectTask: (id: string) => void;
-  /** PROTOTYPE: a click on the sky that hits nothing, which opens the board. */
+  /** A click on the sky that hits nothing: no star, task or sphere, and no drag. */
   readonly onSelectSky: () => void;
   /** The live turn stream, whose tool calls flicker stars and whose posts rise from them. */
   readonly live: LiveStore;

@@ -3,8 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
-import { Navigator, type GovernanceView, type SocietyWideView } from "./board/Navigator.js";
-import { StatusTabs, useStatusCounts } from "./board/StatusTabs.js";
+import { Navigator, type GovernanceView } from "./board/Navigator.js";
+import { StatusTabs, statusViewOf, useStatusCounts } from "./board/StatusTabs.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
@@ -77,15 +77,6 @@ function after(pathname: string, prefix: string): string | null {
  * sky to its right. The board's event stream keeps every read current, and the turn stream keeps
  * the live picture of what citizens are doing.
  */
-/** PROTOTYPE: the status views by address, which the navigator's status row and its tabs open. */
-const SOCIETY_WIDE_VIEWS: ReadonlyMap<string, SocietyWideView> = new Map([
-  ["/citizens", "citizens"],
-  ["/runners", "runners"],
-  ["/crons", "crons"],
-  ["/metrics", "metrics"],
-  ["/logs", "logs"],
-]);
-
 export function Playground() {
   const { api, token, signOut, expire } = useSession();
   const client = useQueryClient();
@@ -141,6 +132,21 @@ export function Playground() {
   // Whether focus last moved by pointer rather than Tab. Chromium matches :focus-visible on a
   // clicked button once any key is pressed, so it cannot tell a keyboard user's control apart.
   const pointerFocus = useRef(true);
+  // Whether the latest press began with the ask box open: that press closes the box, and the
+  // click it ends in on empty sky must not also open the board. Read as the press starts, in the
+  // window's capture phase, before the box's own listener closes it and a render moves on.
+  const askOpenNow = useRef(askOpen);
+  useEffect(() => {
+    askOpenNow.current = askOpen;
+  }, [askOpen]);
+  const pressClosedAsk = useRef(false);
+  useEffect(() => {
+    const onPress = (): void => {
+      pressClosedAsk.current = askOpenNow.current;
+    };
+    window.addEventListener("pointerdown", onPress, { capture: true });
+    return () => window.removeEventListener("pointerdown", onPress, { capture: true });
+  }, []);
   const seen = useSeen();
   const search = useSearch({ strict: false });
   // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
@@ -150,8 +156,8 @@ export function Playground() {
   const width = useWindowWidth();
 
   const boardOpen = pathname !== "/";
-  // PROTOTYPE: where the board was last in this tab, so a click on the sky brings it back there;
-  // general before it has been anywhere, as the Board button opened it.
+  // Where the board was last in this tab, so a click on empty sky brings it back as it was left;
+  // the society's general before it has been anywhere.
   const lastBoard = useRef<string | null>(null);
   useEffect(() => {
     if (boardOpen) {
@@ -214,7 +220,7 @@ export function Playground() {
       : pathname === "/proposals" || pathname.startsWith("/proposal/")
         ? "proposals"
         : null;
-  const activeView = SOCIETY_WIDE_VIEWS.get(pathname) ?? null;
+  const activeView = statusViewOf(pathname);
   const attention = useNeedsYou().length;
   const status = useStatusCounts();
   const activeOverview =
@@ -302,8 +308,8 @@ export function Playground() {
     );
   }
 
-  // Governance, the runners, the crons, and the metrics belong to the society as a whole.
-  const societyWide = activeGovernance !== null || pathname === "/metrics" || activeView !== null;
+  // Governance and the status views belong to the society as a whole.
+  const societyWide = activeGovernance !== null || activeView !== null;
   const focus =
     (societyWide ? SOCIETY_SCOPE : null) ??
     activeOverview ??
@@ -364,7 +370,7 @@ export function Playground() {
                 onSelectStar={openStar}
                 onSelectTask={openTask}
                 onSelectSky={() => {
-                  if (!boardOpen) {
+                  if (!boardOpen && !pressClosedAsk.current) {
                     openBoard();
                   }
                 }}

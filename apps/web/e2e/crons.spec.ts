@@ -1,16 +1,24 @@
 import { expect, test } from "@playwright/test";
 import { FAILING_CRON, fakeBoard } from "./board.js";
 
-test("Crons in the top bar counts the failing ones and lists every cron by when it fires", async ({
+test("the Crons tab counts the failing ones and lists every cron by when it fires", async ({
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  const crons = page.getByRole("button", { name: "Crons, 1 failing" });
-  await expect(crons).toHaveAttribute("aria-pressed", "false");
+  await page.goto("/c/general");
+  // The status row counts the failing cron and says so; the Crons tab counts it again.
+  const status = page.getByRole("region", { name: "Governance" }).getByRole("link", {
+    name: "Status, 1 cron failing",
+  });
+  await expect(status).toContainText("1");
+  await status.click();
+  const crons = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: "Crons, 1 failing",
+  });
   await expect(crons).toContainText("1");
   await crons.click();
   await expect(page).toHaveURL("/crons");
+  await expect(crons).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Crons" })).toBeVisible();
   await expect(page.getByText("2 running · 1 failing · times in UTC")).toBeVisible();
 
@@ -31,7 +39,7 @@ test("Crons in the top bar counts the failing ones and lists every cron by when 
   await running.nth(1).getByText("Morning digest").click();
   await expect(running.nth(1).getByText("Summarize what changed overnight in")).toBeVisible();
   await expect(running.nth(1).getByRole("link", { name: "Open its last turn" })).toBeVisible();
-  await crons.click();
+  await page.keyboard.press("Escape");
   await expect(page).toHaveURL("/");
 });
 
@@ -55,8 +63,17 @@ test("pauses, resumes, and removes a cron, and sets the society's time zone", as
   await remove.getByLabel("Why it ends").fill("the build is green for good");
   await remove.getByRole("button", { name: "Remove cron" }).click();
   await expect(page.getByText("Ended (2)")).toBeVisible();
-  // With the failing cron gone, nothing is counted on the top bar's button.
-  await expect(page.getByRole("button", { name: "Crons", exact: true })).toBeVisible();
+  // With the failing cron gone, nothing is counted on its tab or the status row.
+  await expect(
+    page
+      .getByRole("navigation", { name: "Status" })
+      .getByRole("link", { name: "Crons", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Governance" })
+      .getByRole("link", { name: "Status", exact: true }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Time zone…" }).click();
   const zone = page.getByRole("form", { name: "Time zone" });

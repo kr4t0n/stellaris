@@ -1,7 +1,22 @@
 import { Link } from "@tanstack/react-router";
 import { useCrons, useEnrollments, useMembers } from "../lib/session.js";
 import { failingCron } from "./crons.js";
-import type { SocietyWideView } from "./Navigator.js";
+
+/** The society's status views, each at its own address, switched by the strip over them. */
+export type StatusView = "citizens" | "runners" | "crons" | "metrics" | "logs";
+
+const VIEWS: ReadonlyMap<string, StatusView> = new Map([
+  ["/citizens", "citizens"],
+  ["/runners", "runners"],
+  ["/crons", "crons"],
+  ["/metrics", "metrics"],
+  ["/logs", "logs"],
+]);
+
+/** The status view an address opens, if it opens one. */
+export function statusViewOf(pathname: string): StatusView | null {
+  return VIEWS.get(pathname) ?? null;
+}
 
 /** A count's type, as the navigator's. */
 const COUNT_TYPE = "text-[11px] leading-[16px]";
@@ -19,14 +34,14 @@ export function useStatusCounts(): { citizens: number; enrolling: number; failin
 }
 
 /**
- * PROTOTYPE: the strip at the top of the content island over the society's status views, which
- * the navigator's one status row opens: each tab is the view's own address, so a view opened from
- * a link or the corner's chips shows the strip too.
+ * The strip at the top of the content island over the society's status views, which the
+ * navigator's status row opens: each tab is the view's own address, so a view opened from a link
+ * shows the strip too, with the counts the row adds up beside the views they belong to.
  */
-export function StatusTabs({ active }: { active: SocietyWideView }) {
+export function StatusTabs({ active }: { active: StatusView }) {
   const { citizens, enrolling, failing } = useStatusCounts();
   const tabs: ReadonlyArray<{
-    view: SocietyWideView;
+    view: StatusView;
     to: "/citizens" | "/runners" | "/crons" | "/metrics" | "/logs";
     label: string;
     name?: string;

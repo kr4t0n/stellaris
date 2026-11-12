@@ -16,7 +16,7 @@ interface SkyProps {
   /** What is hovered: a star's id, or `task:<id>` for a task's mark. */
   readonly hovered: string | null;
   readonly onHover: (id: string | null) => void;
-  /** Screen space covered by islands at each side; the sky fits between them. */
+  /** Screen space the open board covers at each side; the sky fits the room it leaves. */
   readonly insets: Insets;
   /** The anchor whose sphere is drawn brighter, the project the board has open. */
   readonly focus: string | null;

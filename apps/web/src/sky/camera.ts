@@ -11,7 +11,7 @@ export interface Camera {
   readonly scale: number;
 }
 
-/** The sky's canvas and the islands covering its sides, in CSS pixels. */
+/** The sky's canvas and what the open board covers at its left and right, in CSS pixels. */
 export interface Viewport {
   readonly width: number;
   readonly height: number;

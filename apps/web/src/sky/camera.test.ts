@@ -25,7 +25,7 @@ function screenOf(camera: Camera, view: Viewport, x: number, y: number) {
 }
 
 describe("camera", () => {
-  it("fits the whole sky in the gap between the islands, within the home bounds", () => {
+  it("fits the whole sky in the room the board leaves it, within the home bounds", () => {
     expect(homeCamera(closed, 400)).toEqual({ x: 0, y: 0, scale: 1.25 });
     expect(homeCamera(open, 400).scale).toBe(0.75);
     expect(homeCamera(closed, 4_000).scale).toBe(0.45);

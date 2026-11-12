@@ -4,7 +4,17 @@ import { Island } from "../components/Island.js";
 import type { BoardLayout } from "../lib/layout.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
-import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
+import {
+  useChannels,
+  useCrons,
+  useEnrollments,
+  useMembers,
+  useProjects,
+  useProposals,
+  useTasks,
+  useThreads,
+} from "../lib/session.js";
+import { failingCron } from "./crons.js";
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
 import { LayoutSwitch } from "./LayoutSwitch.js";
@@ -13,6 +23,9 @@ import { WorkingNow } from "./WorkingNow.js";
 
 /** The governance view that is open, if one is. */
 export type GovernanceView = "needs-you" | "proposals";
+
+/** PROTOTYPE: the society-wide view that is open, if one is; they moved here from the HUD. */
+export type SocietyWideView = "citizens" | "runners" | "crons" | "metrics";
 
 interface Group {
   readonly key: string;
@@ -133,6 +146,97 @@ function Governance({ active }: { active: GovernanceView | null }) {
 }
 
 /**
+ * PROTOTYPE: the society's own views, which the HUD opened before: its citizens, runners, crons,
+ * metrics, and, in the `plain` corner, the operations log, which floats over the board as before.
+ * The two amber counts read as the HUD's buttons did.
+ */
+function SocietyViews({
+  active,
+  logs,
+}: {
+  active: SocietyWideView | null;
+  logs: { open: boolean; onToggle: () => void } | null;
+}) {
+  const members = useMembers();
+  const citizens = (members.data ?? []).filter(
+    (member) => member.cli !== null && member.status === "active",
+  ).length;
+  const enrolling = useEnrollments().data?.length ?? 0;
+  const failing = useCrons().data?.filter(failingCron).length ?? 0;
+  const row = (view: SocietyWideView): string =>
+    `${ROW} ${active === view ? ROW_ACTIVE : ROW_IDLE}`;
+  return (
+    <>
+      <li>
+        <Link to="/citizens" className={row("citizens")}>
+          <span aria-hidden="true" className="text-fg-muted">
+            ✦
+          </span>
+          <span className="min-w-0 flex-1 truncate">citizens</span>
+          <RowEnd>
+            <span
+              title={`${citizens} citizens`}
+              className={`rounded-md bg-surface-2/70 px-1.5 ${COUNT_TYPE} text-fg-tertiary`}
+            >
+              {citizens}
+            </span>
+          </RowEnd>
+        </Link>
+      </li>
+      <li>
+        <Link
+          to="/runners"
+          aria-label={enrolling === 0 ? "Runners" : `Runners, ${enrolling} waiting for approval`}
+          className={row("runners")}
+        >
+          <span aria-hidden="true" className="text-fg-muted">
+            ▣
+          </span>
+          <span className="min-w-0 flex-1 truncate">runners</span>
+          <Count value={enrolling} title={`${enrolling} waiting for approval`} />
+        </Link>
+      </li>
+      <li>
+        <Link
+          to="/crons"
+          aria-label={failing === 0 ? "Crons" : `Crons, ${failing} failing`}
+          className={row("crons")}
+        >
+          <span aria-hidden="true" className="text-fg-muted">
+            ◷
+          </span>
+          <span className="min-w-0 flex-1 truncate">crons</span>
+          <Count value={failing} title={`${failing} failing`} />
+        </Link>
+      </li>
+      <li>
+        <Link to="/metrics" className={row("metrics")}>
+          <span aria-hidden="true" className="text-fg-muted">
+            ▥
+          </span>
+          <span className="min-w-0 flex-1 truncate">metrics</span>
+        </Link>
+      </li>
+      {logs === null ? null : (
+        <li>
+          <button
+            type="button"
+            aria-expanded={logs.open}
+            onClick={logs.onToggle}
+            className={`w-full text-left ${ROW} ${logs.open ? ROW_ACTIVE : ROW_IDLE}`}
+          >
+            <span aria-hidden="true" className="text-fg-muted">
+              ≡
+            </span>
+            <span className="min-w-0 flex-1 truncate">logs</span>
+          </button>
+        </li>
+      )}
+    </>
+  );
+}
+
+/**
  * The board's left side, an island of its own or the panel's first column: who is working now, what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and its name in bold when something is new
  * since this browser looked, and last the archived projects, each opening its overview.
@@ -144,9 +248,14 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
+  activeView,
+  logs,
   layout,
   onLayout,
 }: {
+  activeView: SocietyWideView | null;
+  /** PROTOTYPE: the log's row, in the `plain` corner only. */
+  logs: { open: boolean; onToggle: () => void } | null;
   /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
   layout: BoardLayout;
   onLayout: (layout: BoardLayout) => void;
@@ -285,7 +394,9 @@ export function Navigator({
                   </li>
                 );
               })}
-              {group.project === null ? null : (
+              {group.project === null ? (
+                <SocietyViews active={activeView} logs={logs} />
+              ) : (
                 <TasksEntry slug={group.project} active={group.project === activeTasks} />
               )}
             </ul>

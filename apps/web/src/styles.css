@@ -70,9 +70,6 @@
 }
 
 @layer components {
-  .text-display {
-    @apply font-display text-base font-semibold tracking-tight text-fg-primary;
-  }
   /* A pane's title, over everything in the pane. */
   .text-heading {
     @apply text-base font-semibold tracking-tight text-fg-primary;

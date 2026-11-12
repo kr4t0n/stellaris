@@ -32,7 +32,7 @@ interface HudProps {
   readonly onSignOut: () => void;
 }
 
-/** The frame around the sky: the wordmark, what the society is doing, and the way out. */
+/** The frame around the sky: the app's icon, what the society is doing, and the way out. */
 export function Hud({
   society,
   citizens,
@@ -60,7 +60,16 @@ export function Hud({
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
       <div className="flex items-center gap-2.5">
-        <span className="text-display">Stellaris</span>
+        {/* The favicon itself, so the corner keeps in step with the app's icon as the favicon does.
+            It never shrinks: with preflight's `max-width: 100%` the corner would narrow past it in a
+            narrow window, and the controls would slide over the name. */}
+        <img
+          src="/favicon.svg"
+          alt="Stellaris"
+          width={28}
+          height={28}
+          className="size-7 shrink-0"
+        />
         {society === undefined ? null : <span className="text-meta">{society}</span>}
       </div>
       <div className="pointer-events-auto flex items-center gap-2">

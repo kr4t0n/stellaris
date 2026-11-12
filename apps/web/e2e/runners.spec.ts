@@ -157,10 +157,11 @@ test("Runners in the top bar opens the runners view and closes it again", async 
     /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected$/,
     /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away$/,
   ]);
-  // Every row keeps the same nine cells, so each column holds the same thing.
+  // Every row keeps the same eight cells, so each column holds the same thing; the runner's pause
+  // and rename share the last.
   const cells = (row: number) => rows.nth(row).locator(":scope > *");
   for (const row of [0, 1, 2]) {
-    await expect(cells(row)).toHaveCount(9);
+    await expect(cells(row)).toHaveCount(8);
   }
   await expect(cells(2)).toHaveText([
     /claude/,
@@ -171,8 +172,11 @@ test("Runners in the top bar opens the runners view and closes it again", async 
     "lab",
     "away",
     "",
-    "",
   ]);
+  const controls = cells(2).nth(7).getByRole("button");
+  await expect(controls).toHaveCount(2);
+  await expect(controls.nth(0)).toHaveAccessibleName("Pause laptop");
+  await expect(controls.nth(1)).toHaveAccessibleName("Rename laptop…");
   await expect(rows.nth(2).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(2).getByText("v0.3.10")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(0).getByText("v0.3.11")).not.toHaveClass(/text-amber-300/);

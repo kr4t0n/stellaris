@@ -314,7 +314,7 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto_auto] gap-x-3"
+          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -379,35 +379,38 @@ export function RunnersView() {
                 <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
                   {state.label}
                 </span>
-                <button
-                  type="button"
-                  aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                  title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                  aria-disabled={pause.isPending}
-                  onClick={() =>
-                    toggle({ runner: runner.name, paused: runner.paused === undefined })
-                  }
-                  className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                >
-                  <PauseMark paused={runner.paused !== undefined} />
-                </button>
-                <button
-                  type="button"
-                  ref={(button) => {
-                    if (button === null) {
-                      renameButtons.current.delete(runner.name);
-                    } else {
-                      renameButtons.current.set(runner.name, button);
+                {/* The runner's own controls share the last column, so the rename takes no gap of its own. */}
+                <span className="-mr-1 flex items-center">
+                  <button
+                    type="button"
+                    aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                    title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                    aria-disabled={pause.isPending}
+                    onClick={() =>
+                      toggle({ runner: runner.name, paused: runner.paused === undefined })
                     }
-                  }}
-                  aria-label={`Rename ${runner.name}…`}
-                  title={`Rename ${runner.name}…`}
-                  aria-expanded={renaming === runner.name}
-                  onClick={() => setRenaming(renaming === runner.name ? null : runner.name)}
-                  className="-mr-1 rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                >
-                  <RenameMark />
-                </button>
+                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                  >
+                    <PauseMark paused={runner.paused !== undefined} />
+                  </button>
+                  <button
+                    type="button"
+                    ref={(button) => {
+                      if (button === null) {
+                        renameButtons.current.delete(runner.name);
+                      } else {
+                        renameButtons.current.set(runner.name, button);
+                      }
+                    }}
+                    aria-label={`Rename ${runner.name}…`}
+                    title={`Rename ${runner.name}…`}
+                    aria-expanded={renaming === runner.name}
+                    onClick={() => setRenaming(renaming === runner.name ? null : runner.name)}
+                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                  >
+                    <RenameMark />
+                  </button>
+                </span>
                 {renaming === runner.name ? (
                   <RenameRunner
                     runner={runner.name}

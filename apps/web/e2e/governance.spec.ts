@@ -12,7 +12,8 @@ test("a message named by its id reads as who posted it where, and opens there, m
   // "message" before the id, and whose it was, are the title's to say.
   await expect(thread).toContainText("It follows ada's post in Compare shortest-path algorithms.");
   await link.click();
-  await expect(page).toHaveURL(new RegExp(`/thread/${STAGE_TASK}\\?message=`));
+  // A message in a task's thread opens in the task's view, which holds the thread.
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}\\?message=`));
   const marked = page.locator('article[aria-current="true"]');
   await expect(marked).toHaveCount(1);
   await expect(marked).toContainText("Survey done: twelve methods");

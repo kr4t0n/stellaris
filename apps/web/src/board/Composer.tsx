@@ -36,6 +36,18 @@ export type Target =
   | { readonly threadId: string }
   | { readonly ask: true };
 
+/**
+ * A second way to send what the box holds, beside Send, such as finishing a stage with the text as
+ * its note: a round button with a check, named by `label`, its tooltip `title`. It may go with the
+ * box empty; `blocked` says why it can't go at all, in its tooltip.
+ */
+export interface ComposerAction {
+  readonly label: string;
+  readonly title: string;
+  readonly blocked: string | null;
+  readonly run: (text: string) => Promise<unknown>;
+}
+
 const MAX_CANDIDATES = 6;
 
 /** The kinds of image the board keeps, which the file picker offers. */
@@ -47,8 +59,10 @@ function filesDragged(event: DragEvent): boolean {
 }
 
 /**
- * Posts as the user into a channel or a thread, in one row with Send beside the box. Enter sends
- * and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
+ * Posts as the user into a channel or a thread, in one row: a box that is a capsule at one line,
+ * then Send, a round button with an arrow, as the iOS app draws it, lit while there is something to
+ * send and turning while it posts. An `action`, such as Approve, is a round check after it, at the row's end.
+ * Enter sends and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
  * or picked uploads to the board, holding its place in the text with a line of its own that says so
  * until the markdown that shows it, described by its file's name, takes that line's place; Send
  * waits for it.
@@ -61,6 +75,7 @@ export function Composer({
   focusOnOpen = false,
   onPosted,
   onEmptyEscape,
+  action,
 }: {
   target: Target;
   placeholder: string;
@@ -72,6 +87,8 @@ export function Composer({
   onPosted?: (message: Message) => void;
   /** Escape in an empty box, for a composer that closes. */
   onEmptyEscape?: () => void;
+  /** A second button beside Send; Enter still sends. */
+  action?: ComposerAction | undefined;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
@@ -106,6 +123,8 @@ export function Composer({
       const thread = await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) });
       return api.sendMessage({ thread_id: thread.id, body });
     },
+    // A refusal of the action says no more once the user posts again.
+    onMutate: () => act.reset(),
     onSuccess: (message) => {
       setText(initialText);
       setUploadFailure(null);
@@ -119,6 +138,23 @@ export function Composer({
       // A post by the user answers whatever was asked of them where it was posted.
       void client.invalidateQueries({ queryKey: ["requests"] });
       onPosted?.(message);
+    },
+  });
+
+  const act = useMutation({
+    mutationFn: (body: string) => {
+      if (action === undefined) {
+        return Promise.resolve();
+      }
+      return action.run(body);
+    },
+    onSuccess: () => {
+      setText(initialText);
+      setUploadFailure(null);
+      if ("threadId" in target) {
+        void client.invalidateQueries({ queryKey: ["thread", target.threadId] });
+      }
+      void client.invalidateQueries({ queryKey: ["requests"] });
     },
   });
 
@@ -173,12 +209,41 @@ export function Composer({
     setCaret(next.caret);
   };
   const sendable =
-    text.trim() !== "" && text.trim() !== initialText.trim() && !send.isPending && uploading === 0;
+    text.trim() !== "" &&
+    text.trim() !== initialText.trim() &&
+    !send.isPending &&
+    !act.isPending &&
+    uploading === 0;
+  const actionable =
+    action !== undefined &&
+    action.blocked === null &&
+    !send.isPending &&
+    !act.isPending &&
+    uploading === 0;
+  // A button pressed goes busy, or goes, while its request is out, and focus left on it, or on
+  // the page once it has gone, would hand the next keys to the board's own: Space opens the ask
+  // box and Escape closes the board with the draft. So a press puts the keyboard back in the box
+  // first, where those keys are the box's.
   const submit = (): void => {
     if (sendable) {
+      box.current?.focus();
       send.mutate(text.trim());
     }
   };
+  const runAction = (): void => {
+    if (actionable) {
+      box.current?.focus();
+      act.mutate(text.trim());
+    }
+  };
+  // A refusal of the action goes with the action, as when another's advance ended the stage.
+  const hasAction = action !== undefined;
+  const { reset: resetAction } = act;
+  useEffect(() => {
+    if (!hasAction) {
+      resetAction();
+    }
+  }, [hasAction, resetAction]);
 
   /** Uploads each file, holding its place where the caret is, in place of what is selected. */
   const attach = (files: readonly File[]): void => {
@@ -332,115 +397,139 @@ export function Composer({
           ))}
         </ul>
       )}
-      <div
-        onDragOver={(event) => {
-          if (filesDragged(event)) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "copy";
-            setDragging(true);
-          }
-        }}
-        onDragLeave={(event) => {
-          if (
-            !(
-              event.relatedTarget instanceof Node &&
-              event.currentTarget.contains(event.relatedTarget)
-            )
-          ) {
-            setDragging(false);
-          }
-        }}
-        onDrop={(event) => {
-          setDragging(false);
-          if (event.dataTransfer.files.length > 0) {
-            event.preventDefault();
-            attach([...event.dataTransfer.files]);
-          }
-        }}
-        className={`relative flex items-end gap-2 rounded-xl bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
-          dragging
-            ? "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
-            : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-        }`}
-      >
-        {candidates.length > 0 ? (
-          <ul
-            aria-label="Citizens to mention"
-            className="card absolute bottom-full left-2 mb-2 w-60 overflow-hidden py-1"
-          >
-            {candidates.map((member, index) => (
-              <li key={member.name}>
-                <button
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    complete(member.name);
-                  }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-                    index === pick ? "bg-surface-2 text-fg-primary" : "text-fg-secondary"
-                  }`}
-                >
-                  {member.cli === null ? null : <CliIcon cli={member.cli} size={14} />}
-                  <span className="flex-1 truncate">{member.name}</span>
-                  <span className="truncate font-mono text-[11px] text-fg-muted">
-                    {member.role}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <textarea
-          ref={box}
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          onChange={(event) => {
-            setText(event.target.value);
-            setCaret(event.target.selectionStart);
-            setPick(0);
-            setDismissed(false);
-          }}
-          onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-          onKeyDown={onKeyDown}
-          onPaste={(event) => {
-            // Text copied with a picture of it, as from a spreadsheet, pastes as the text.
-            const files = [...event.clipboardData.files];
-            if (files.length > 0 && event.clipboardData.getData("text/plain") === "") {
+      <div className="flex items-end gap-2">
+        <div
+          onDragOver={(event) => {
+            if (filesDragged(event)) {
               event.preventDefault();
-              attach(files);
+              event.dataTransfer.dropEffect = "copy";
+              setDragging(true);
             }
           }}
-          className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
-        />
-        <div className="flex shrink-0 items-center gap-0.5 pb-1.5">
-          <input
-            ref={picker}
-            type="file"
-            accept={IMAGE_TYPES}
-            multiple
-            hidden
+          onDragLeave={(event) => {
+            if (
+              !(
+                event.relatedTarget instanceof Node &&
+                event.currentTarget.contains(event.relatedTarget)
+              )
+            ) {
+              setDragging(false);
+            }
+          }}
+          onDrop={(event) => {
+            setDragging(false);
+            if (event.dataTransfer.files.length > 0) {
+              event.preventDefault();
+              attach([...event.dataTransfer.files]);
+            }
+          }}
+          className={`relative flex min-w-0 flex-1 items-end gap-2 rounded-[20px] bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
+            dragging
+              ? "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
+              : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+          }`}
+        >
+          {candidates.length > 0 ? (
+            <ul
+              aria-label="Citizens to mention"
+              className="card absolute bottom-full left-2 mb-2 w-60 overflow-hidden py-1"
+            >
+              {candidates.map((member, index) => (
+                <li key={member.name}>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      complete(member.name);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                      index === pick ? "bg-surface-2 text-fg-primary" : "text-fg-secondary"
+                    }`}
+                  >
+                    {member.cli === null ? null : <CliIcon cli={member.cli} size={14} />}
+                    <span className="flex-1 truncate">{member.name}</span>
+                    <span className="truncate font-mono text-[11px] text-fg-muted">
+                      {member.role}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <textarea
+            ref={box}
+            rows={1}
+            value={text}
+            placeholder={placeholder}
+            aria-label={placeholder}
             onChange={(event) => {
-              attach([...(event.currentTarget.files ?? [])]);
-              event.currentTarget.value = "";
+              setText(event.target.value);
+              setCaret(event.target.selectionStart);
+              setPick(0);
+              setDismissed(false);
             }}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+            onKeyDown={onKeyDown}
+            onPaste={(event) => {
+              // Text copied with a picture of it, as from a spreadsheet, pastes as the text.
+              const files = [...event.clipboardData.files];
+              if (files.length > 0 && event.clipboardData.getData("text/plain") === "") {
+                event.preventDefault();
+                attach(files);
+              }
+            }}
+            className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
           />
-          <Button
-            aria-label="Add images"
-            title="Add images"
-            onClick={() => picker.current?.click()}
-          >
-            <ImageGlyph />
-          </Button>
-          <Button variant="primary" type="submit" disabled={!sendable}>
-            {send.isPending ? "Sending…" : "Send"}
-          </Button>
+          <div className="flex shrink-0 items-center gap-0.5 pb-1.5">
+            <input
+              ref={picker}
+              type="file"
+              accept={IMAGE_TYPES}
+              multiple
+              hidden
+              onChange={(event) => {
+                attach([...(event.currentTarget.files ?? [])]);
+                event.currentTarget.value = "";
+              }}
+            />
+            <Button
+              aria-label="Add images"
+              title="Add images"
+              onClick={() => picker.current?.click()}
+            >
+              <ImageGlyph />
+            </Button>
+          </div>
         </div>
+        <button
+          type="submit"
+          disabled={!sendable}
+          aria-label="Send"
+          aria-busy={send.isPending}
+          title="Send"
+          className={`grid size-10 shrink-0 place-items-center rounded-full bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
+            sendable ? "text-fg-primary hover:bg-surface-2" : "text-fg-muted"
+          }`}
+        >
+          {send.isPending ? <Spinner /> : <ArrowGlyph />}
+        </button>
+        {action === undefined ? null : (
+          <ActionButton
+            action={action}
+            pending={act.isPending}
+            disabled={!actionable && !act.isPending}
+            onClick={runAction}
+          />
+        )}
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
           {send.error instanceof ApiError ? send.error.message : "The message was not sent."}
+        </p>
+      )}
+      {act.error === null ? null : (
+        <p role="alert" className="mt-2 text-xs text-red-400">
+          {act.error instanceof ApiError ? act.error.message : "The stage was not finished."}
         </p>
       )}
       {uploadFailure === null ? null : (
@@ -449,6 +538,103 @@ export function Composer({
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * The round button an action takes after Send: a check on green, named by the action, and turning
+ * while it goes. The task view's Approve also stands alone in it where its task has no open thread.
+ * It is never `disabled`, which would drop it from the tab order and, with no pointer events, hide
+ * the tooltip that says why it can't go: it is `aria-disabled`, dimmed, and its press does nothing.
+ */
+export function ActionButton({
+  action,
+  pending,
+  disabled,
+  onClick,
+}: {
+  action: ComposerAction;
+  pending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-disabled={disabled || pending}
+      aria-label={action.label}
+      aria-busy={pending}
+      title={action.blocked ?? action.title}
+      onClick={() => {
+        if (!disabled && !pending) {
+          onClick();
+        }
+      }}
+      className={`grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none ${
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : pending
+            ? "cursor-progress"
+            : "hover:bg-emerald-400/25"
+      }`}
+    >
+      {pending ? <Spinner /> : <CheckGlyph />}
+    </button>
+  );
+}
+
+/** An arrow pointing up, Send's mark, in the shape the iOS app's has. */
+function ArrowGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 13.5V2.75M3.25 7.5 8 2.75l4.75 4.75" />
+    </svg>
+  );
+}
+
+/** A check, an action's mark, in the shape the iOS app's Advance has. */
+function CheckGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 8.5 6.5 12 13 4.25" />
+    </svg>
+  );
+}
+
+/** A ring turning while a post or an approval is on its way. */
+function Spinner() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
+      fill="none"
+      aria-hidden="true"
+      className="motion-safe:animate-spin"
+    >
+      <circle cx={8} cy={8} r={6} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1.8} />
+      <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+    </svg>
   );
 }
 

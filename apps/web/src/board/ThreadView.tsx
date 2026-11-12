@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
@@ -7,7 +7,7 @@ import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import { ApiError } from "../lib/api.js";
 import { markSeen } from "../lib/seen.js";
-import { useMembers, useNow, useSession, useTask } from "../lib/session.js";
+import { useMembers, useNow, useSession } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
 import { Composer } from "./Composer.js";
 import { MessageItem } from "./MessageItem.js";
@@ -33,8 +33,6 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);
   const [closing, setClosing] = useState(false);
-  const subject = detail.data?.thread.subject;
-  const task = useTask(subject?.kind === "task" ? subject.id : null);
 
   if (detail.data === undefined) {
     return (
@@ -46,6 +44,17 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
     );
   }
   const { thread } = detail.data;
+  // A task's thread is read in the task's view, which opens at it, so each task has one place.
+  if (thread.subject?.kind === "task") {
+    return (
+      <Navigate
+        to="/task/$taskId"
+        params={{ taskId: thread.subject.id }}
+        search={target === undefined ? {} : { message: target }}
+        replace
+      />
+    );
+  }
   return (
     <>
       <PaneHeader
@@ -69,15 +78,7 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
         )} ${ago(thread.openedAt, now)}`}
         trailing={
           <>
-            {thread.subject?.kind === "task" ? (
-              <Link
-                to="/task/$taskId"
-                params={{ taskId: thread.subject.id }}
-                className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-              >
-                Task →
-              </Link>
-            ) : thread.subject?.kind === "proposal" ? (
+            {thread.subject?.kind === "proposal" ? (
               <Link
                 to="/proposal/$proposalId"
                 params={{ proposalId: thread.subject.id }}
@@ -86,8 +87,7 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
                 Proposal →
               </Link>
             ) : null}
-            {/* A task's thread closes with its task. */}
-            {thread.state === "open" && !closing && thread.subject?.kind !== "task" ? (
+            {thread.state === "open" && !closing ? (
               <Button onClick={() => setClosing(true)}>Close</Button>
             ) : (
               <StateChip state={thread.state} />
@@ -114,7 +114,6 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
             message={message}
             members={members.data}
             now={now}
-            task={task.data}
             target={message.id === target}
           />
         ))}

@@ -4387,7 +4387,7 @@ describe("turns on a runner over the runner protocol", () => {
     await vi.waitFor(() => expect(runner.turns).toEqual([]));
   });
 
-  it("counts a turn running from its start to its end, completed, failed, stopped, or ended once its runner stayed away", async () => {
+  it("counts a turn running from its start to its end, completed, failed, stopped, unrecorded, or ended once its runner stayed away", async () => {
     const { board } = await Board.init(dir, { name: "running" });
     await board.addProject(USER, { slug: "demo" });
     await board.setRoleCharter(USER, {
@@ -4440,10 +4440,21 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await stoppedTurn).toMatchObject({ exitReason: "stopped" });
     expect(running()).toEqual([["demo", "eng-1", 0]]);
 
+    // An end the board could not record ends the turn all the same, which takes it off the gauge
+    // though no end is logged: the host lets the turn go before it records the end.
+    const finish = vi.spyOn(board, "finishTurn").mockRejectedValueOnce(new Error("disk full"));
+    const unrecordedTurn = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 4"));
+    expect(running()).toEqual([["demo", "eng-1", 1]]);
+    backend.end(4);
+    await expect(unrecordedTurn).rejects.toThrow("disk full");
+    finish.mockRestore();
+    expect(running()).toEqual([["demo", "eng-1", 0]]);
+
     // A runner away past the grace period never reports its turn's end: the board ends the turn as
     // failed, which takes it off the gauge while its CLI, cut off, works on.
     const awayTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 4"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 5"));
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     network.down();
@@ -4457,8 +4468,8 @@ describe("turns on a runner over the runner protocol", () => {
       { agent: "eng-1", outcome: "failed", trigger: "manual", turns: 2 },
     ]);
     network.up();
-    await vi.waitFor(() => expect(backend.log).toContain("stop 4"), { timeout: 10_000 });
-    backend.end(4);
+    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), { timeout: 10_000 });
+    backend.end(5);
   });
 
   it("runs one turn of a conversation at a time on a runner, stopping the earlier for the next", async () => {

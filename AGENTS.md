@@ -135,9 +135,10 @@ One long-running process, the board server, hosts the only writer of the data di
 - An event refreshes what it touched: `staleKeys` in `lib/events.ts` maps each event type to the query keys it makes stale, so a new query whose data an event can change needs an entry there.
 - Live turns are a projection of the turn stream (`LiveStore`, `applyLive`), keyed like the scheduler's sessions, and a stored transcript folds through the same `applyLive`.
 - A new write the interface makes needs a fake in `apps/web/e2e/board.ts`.
+- A task's view is its thread under a fixed top: it opens at the newest message and follows, `TaskTop`'s rows open in place within half the room and close again on the next visit, Approve is the thread box's action, and `/thread/<task id>` lands there ([the view](./docs/internals/interface.md#a-tasks-view-is-its-thread-under-a-fixed-top)).
 - What needs the user is derived, never stored.
 - Ids and worktree paths in text read as what they name (`entityIndex`, `linkTarget`), and an uploaded image is `image:<id>`.
-- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row, under a row of its images' thumbnails while it holds any. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
+- The look is argus's: theme tokens in `@theme` in `styles.css`, mirrored at the top of `scene.ts`; one type ladder (`text-heading`, `text-section`, `text-sm`, `text-meta`, and `text-caps` for field labels only); monospace only for code. Every composer is one row, a capsule box with a round Send beside it (and an action's round check before Send), under a row of its images' thumbnails while it holds any. Views explain themselves through headings, labels, values, and states, with no intro lines ([the rule](./docs/internals/interface.md#views-carry-no-intro-lines)).
 
 ### The iOS client ([ios.md](./docs/internals/ios.md))
 

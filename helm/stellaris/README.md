@@ -195,7 +195,8 @@ ingress:
 `server.metrics.enabled` has the server serve these series at `/metrics` on a port of their own, `server.metrics.port` (4701), which the container and the Service expose and the Ingress never routes, since the main port's `/metrics` is the interface's page:
 
 - `stellaris_turns_total{agent,outcome,trigger}`, finished turns, `completed` or `failed`;
-- `stellaris_turn_tokens_total{agent,cli,model,kind}`, the tokens they used, by `kind`: `input`, `output`, `cache_read`, or `cache_write`;
+- `stellaris_turn_tokens_total{project,agent,cli,model,kind}`, the tokens they used, by the turn's scope, a project or `society`, and `kind`: `input`, `output`, `cache_read`, or `cache_write`;
+- `stellaris_turns_running{project,agent}`, a gauge of the turns running now, by the turn's scope, at 0 for each scope and citizen that has run a turn;
 - `stellaris_turns_idle_total{agent,trigger}`, completed turns that took no board action, as the Metrics view counts them: reflections, and turns that kept no transcript, are left out;
 - `stellaris_turns_failed_total{agent,cli,reason}`, failed turns by `reason`: `timeout`, `resume_failed`, `compaction`, `context`, `limit`, `auth`, `model`, `runner_dropped`, `network`, `service`, or `other`;
 - `stellaris_task_sendbacks_total{project,by}`, task stages sent back to an earlier stage, by who sent them back;
@@ -203,7 +204,7 @@ ingress:
 - `stellaris_wake_mentions_waiting{agent}`, a gauge of the mentions no turn has answered yet, each for a week at most;
 - `stellaris_wake_mentions_unanswered_total{agent}`, the mentions no turn answered within a week.
 
-The server counts them from its event log once its scheduler has started, and from each event after that, so a restart doesn't reset them, but for the wake latency after a citizen joins or leaves a project, which the server matches with the memberships it starts with. Turns logged before the server recorded each turn's board actions have their transcripts read for the idle count, which takes some seconds on a board with many of them, and the port answers 503 until then. The port asks for no token and serves only these counts. With the Prometheus Operator, `server.metrics.serviceMonitor.enabled` adds a ServiceMonitor for the port, with the labels your Prometheus's `serviceMonitorSelector` matches:
+The server counts them from its event log once its scheduler has started, and from each event after that, so a restart doesn't reset them, but for the wake latency after a citizen joins or leaves a project, which the server matches with the memberships it starts with. The turns running are what the server holds at each scrape, so a turn under way when it stopped isn't counted after it starts again. Turns logged before the server recorded each turn's board actions have their transcripts read for the idle count, which takes some seconds on a board with many of them, and the port answers 503 until then. The port asks for no token and serves only these counts. With the Prometheus Operator, `server.metrics.serviceMonitor.enabled` adds a ServiceMonitor for the port, with the labels your Prometheus's `serviceMonitorSelector` matches:
 
 ```yaml
 server:

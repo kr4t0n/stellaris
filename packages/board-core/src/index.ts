@@ -33,6 +33,8 @@ export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
 export type {
   FailedSeries,
   IdleSeries,
+  RunningSeries,
+  RunningTurn,
   SendBackSeries,
   TokenKind,
   TurnCounts,

@@ -4428,7 +4428,8 @@ export class Board {
    * steer, itself; one another process appended would count from the next seed. A turn ended before ends carried their board actions has its
    * transcript read once, here, for the idle count. Mentions are matched with the citizens of
    * the seed, as the Metrics view matches them with today's, and from then on with those of when
-   * each is posted.
+   * each is posted. The turns running are those `watchTurns` gives at each read, never a start
+   * the log holds without an end.
    */
   async countTurns(): Promise<TurnCounters> {
     const clis = new Map<string, CliKind | null>();
@@ -4439,6 +4440,7 @@ export class Board {
       (agent) => clis.get(agent) ?? null,
       (turnId) => actions.get(turnId),
       roster,
+      () => this.turnsInFlight(),
     );
     // Ends appended while the log is read wait, and count once unless the read held them.
     let waiting: BoardEvent[] | null = [];

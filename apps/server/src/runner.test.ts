@@ -480,7 +480,7 @@ class LoggedBackend implements AgentBackend {
   readonly kind = "claude" as const;
   readonly stops = true;
   readonly log: string[] = [];
-  private readonly ends: Array<PromiseWithResolvers<void>> = [];
+  private readonly ends: Array<PromiseWithResolvers<TurnResult | undefined>> = [];
 
   newSession(): Promise<string> {
     return Promise.resolve("session-1");
@@ -491,7 +491,7 @@ class LoggedBackend implements AgentBackend {
     _onEvent?: (event: AgentEvent) => void,
     control?: TurnControl,
   ): Promise<TurnResult> {
-    const ended = Promise.withResolvers<void>();
+    const ended = Promise.withResolvers<TurnResult | undefined>();
     this.ends.push(ended);
     const turn = this.ends.length;
     let stopped = false;
@@ -502,17 +502,20 @@ class LoggedBackend implements AgentBackend {
         this.log.push(`stop ${turn}`);
       },
     });
-    await ended.promise;
+    const given = await ended.promise;
     detach?.();
     this.log.push(`end ${turn}`);
-    return stopped
-      ? { ...completed("stopped"), status: null, exitReason: "interrupted" }
-      : completed("done");
+    return (
+      given ??
+      (stopped
+        ? { ...completed("stopped"), status: null, exitReason: "interrupted" }
+        : completed("done"))
+    );
   }
 
-  /** Ends the nth turn, counted from 1. */
-  end(turn: number): void {
-    this.ends[turn - 1]?.resolve();
+  /** Ends the nth turn, counted from 1, as `result` says, else as a stop or a completion. */
+  end(turn: number, result?: TurnResult): void {
+    this.ends[turn - 1]?.resolve(result);
   }
 }
 
@@ -4382,6 +4385,80 @@ describe("turns on a runner over the runner protocol", () => {
     backend.end(2);
     expect(await next).toMatchObject({ exitReason: "completed" });
     await vi.waitFor(() => expect(runner.turns).toEqual([]));
+  });
+
+  it("counts a turn running from its start to its end, completed, failed, stopped, or ended once its runner stayed away", async () => {
+    const { board } = await Board.init(dir, { name: "running" });
+    await board.addProject(USER, { slug: "demo" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    const backend = new LoggedBackend();
+    const network = failingNetwork();
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude: backend }),
+      fetch: network.fetch,
+      graceMs: 300,
+    });
+    const { run, hub } = society;
+    // Seeded as the server seeds them, reading the turns in flight from the host the board watches.
+    const counters = await board.countTurns();
+    const running = () =>
+      counters.read().running.map(({ project, agent, turns }) => [project, agent, turns]);
+    expect(running()).toEqual([]);
+
+    const completedTurn = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    expect(running()).toEqual([["demo", "eng-1", 1]]);
+    backend.end(1);
+    expect(await completedTurn).toMatchObject({ exitReason: "completed" });
+    expect(running()).toEqual([["demo", "eng-1", 0]]);
+
+    const failedTurn = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 2"));
+    expect(running()).toEqual([["demo", "eng-1", 1]]);
+    backend.end(2, { ...completed("broke"), status: null, exitReason: "error", error: "broke" });
+    expect(await failedTurn).toMatchObject({ exitReason: "error" });
+    expect(running()).toEqual([["demo", "eng-1", 0]]);
+
+    const stoppedTurn = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 3"));
+    expect(running()).toEqual([["demo", "eng-1", 1]]);
+    expect(await hub.stop(hub.liveTurns()[0]?.turnId ?? "", "user")).toBe(true);
+    await vi.waitFor(() => expect(backend.log).toContain("stop 3"));
+    backend.end(3);
+    expect(await stoppedTurn).toMatchObject({ exitReason: "stopped" });
+    expect(running()).toEqual([["demo", "eng-1", 0]]);
+
+    // A runner away past the grace period never reports its turn's end: the board ends the turn as
+    // failed, which takes it off the gauge while its CLI, cut off, works on.
+    const awayTurn = run(manual("eng-1", "demo"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 4"));
+    await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
+    expect(running()).toEqual([["demo", "eng-1", 1]]);
+    network.down();
+    expect(await awayTurn).toMatchObject({
+      exitReason: "error",
+      error: "runner pod went away during the turn",
+    });
+    expect(running()).toEqual([["demo", "eng-1", 0]]);
+    expect(counters.read().turns).toEqual([
+      { agent: "eng-1", outcome: "completed", trigger: "manual", turns: 2 },
+      { agent: "eng-1", outcome: "failed", trigger: "manual", turns: 2 },
+    ]);
+    network.up();
+    await vi.waitFor(() => expect(backend.log).toContain("stop 4"), { timeout: 10_000 });
+    backend.end(4);
   });
 
   it("runs one turn of a conversation at a time on a runner, stopping the earlier for the next", async () => {

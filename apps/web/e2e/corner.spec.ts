@@ -5,16 +5,15 @@ import { FAILING_CRON, fakeBoard } from "./board.js";
 // views share one navigator row and a strip of tabs.
 
 function corner(page: Page): Locator {
-  return page.locator("header").filter({ has: page.getByRole("button", { name: "Board" }) });
+  return page.locator("header").filter({ has: page.getByRole("button", { name: "Sign out" }) });
 }
 
-test("with the board closed the corner holds Pause, Board and Sign out, whatever waits", async ({
+test("with the board closed the corner holds two icons, Pause and Sign out, whatever waits", async ({
   page,
 }) => {
   await fakeBoard(page, { enrolling: true, asked: true });
-  await page.goto("/");
-  // Wait until what waits has been read, so a chip that would show has had its chance.
-  await page.getByRole("button", { name: "Board" }).click();
+  await page.goto("/c/general");
+  // Wait until what waits has been read, so anything that would show has had its chance.
   await expect(
     page.getByRole("region", { name: "Board navigator" }).getByRole("link", {
       name: "Status, 1 runner waiting for approval, 1 cron failing",
@@ -22,12 +21,24 @@ test("with the board closed the corner holds Pause, Board and Sign out, whatever
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL("/");
-  const names = await corner(page)
+  // The keyboard's way into the board takes no room until it has focus.
+  const door = corner(page).getByRole("button", { name: "Open the board" });
+  expect((await door.boundingBox())?.width).toBeLessThanOrEqual(1);
+  const shown = await corner(page)
     .getByRole("button")
     .evaluateAll((buttons) =>
-      buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
+      buttons
+        .filter((button) => button.getBoundingClientRect().width > 1)
+        .map((button) => ({
+          name: button.getAttribute("aria-label") ?? button.textContent,
+          text: button.textContent,
+          width: button.getBoundingClientRect().width,
+        })),
     );
-  expect(names).toEqual(["Pause", "Board", "Sign out"]);
+  expect(shown).toEqual([
+    { name: "Pause", text: "", width: 28 },
+    { name: "Sign out", text: "", width: 28 },
+  ]);
 });
 
 test("status is the first row, above needs you and proposals", async ({ page }) => {
@@ -116,23 +127,89 @@ test("the log reads as it did, and Esc closes the board from it", async ({ page 
   await expect(page).toHaveURL("/");
 });
 
-test("what waits on the user is two clicks from the sky, Board then its row; Pause is one", async ({
+test("a click on the sky opens the board, at general first and then where it was", async ({
   page,
 }) => {
-  const board = await fakeBoard(page, { enrolling: true, asked: true });
-  const navigator = page.getByRole("region", { name: "Board navigator" });
-  for (const [row, address] of [
-    [/^needs you/, "/needs-you"],
-    ["Status, 1 runner waiting for approval, 1 cron failing", "/citizens"],
-  ] as const) {
-    await page.goto("/");
-    await corner(page).getByRole("button", { name: "Board" }).click();
-    await navigator.getByRole("link", { name: row }).click();
-    await expect(page).toHaveURL(address);
+  await fakeBoard(page, { enrolling: true });
+  await page.goto("/");
+  const sky = page.locator("canvas");
+  await expect(sky).toBeVisible();
+  // Empty sky, left of the spheres and clear of the corner, the camera and the hint.
+  await page.mouse.click(120, 500);
+  await expect(page).toHaveURL("/c/general");
+  await page
+    .getByRole("region", { name: "Board navigator" })
+    .getByRole("link", { name: /^Status/ })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Status" })
+    .getByRole("link", { name: /^Runners/ })
+    .click();
+  await expect(page).toHaveURL("/runners");
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL("/");
+  await page.mouse.click(120, 500);
+  await expect(page).toHaveURL("/runners");
+  // A drag moves the sky and opens nothing.
+  await page.keyboard.press("Escape");
+  await page.mouse.move(120, 500);
+  await page.mouse.down();
+  await page.mouse.move(220, 560, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL("/");
+});
+
+test("from the keyboard, Tab reaches Open the board after the camera and before the icons", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/");
+  await expect(corner(page).getByRole("button", { name: "Sign out" })).toBeVisible();
+  const order: string[] = [];
+  for (let press = 0; press < 6; press += 1) {
+    await page.keyboard.press("Tab");
+    order.push(
+      await page.evaluate(
+        () =>
+          document.activeElement?.getAttribute("aria-label") ??
+          document.activeElement?.textContent ??
+          "",
+      ),
+    );
   }
+  expect(order).toEqual([
+    "Zoom in",
+    "Zoom out",
+    "Fit the whole sky",
+    "Open the board",
+    "Pause",
+    "Sign out",
+  ]);
+  // Back to the door, which shows while it has focus.
+  for (let press = 0; press < 2; press += 1) {
+    await page.keyboard.press("Shift+Tab");
+  }
+  const door = corner(page).getByRole("button", { name: "Open the board" });
+  await expect(door).toBeFocused();
+  expect((await door.boundingBox())?.width).toBeGreaterThan(40);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL("/c/general");
+  // While the board is open it has its own ✕, so the door goes.
+  await expect(door).toHaveCount(0);
+});
+
+test("Pause is an icon that turns to Resume, amber, while paused", async ({ page }) => {
+  const board = await fakeBoard(page);
   await page.goto("/");
   await corner(page).getByRole("button", { name: "Pause", exact: true }).click();
   await expect.poll(() => board.writes.map((write) => write.path)).toContain("/api/pause");
+  const resume = corner(page).getByRole("button", { name: "Resume", exact: true });
+  await expect(resume).toBeVisible();
+  await expect(resume).toHaveClass(/text-amber-300/);
+  await expect(resume).toHaveAttribute("title", "Paused: resume");
+  await resume.click();
+  await expect(corner(page).getByRole("button", { name: "Pause", exact: true })).toBeVisible();
 });
 
 test("Sign out signs out", async ({ page }) => {
@@ -215,38 +292,4 @@ test("at the narrowest panel beside the sky every tab keeps its label on one lin
   expect(fit.overflow).toBe(0);
   expect(new Set(fit.heights).size).toBe(1);
   expect(fit.right).toBeLessThanOrEqual(fit.end);
-});
-
-test("the way back, if chosen: an amber dot on Board while anything waits, named by its count", async ({
-  page,
-}) => {
-  await page.addInitScript(() => localStorage.setItem("stellaris.boardMark", "dot"));
-  await fakeBoard(page, { enrolling: true, asked: true });
-  await page.goto("/");
-  // 3 need you, 1 runner to approve, 1 cron failing.
-  await expect(corner(page).getByRole("button", { name: "Board, 5 waiting" })).toBeVisible();
-  const names = await corner(page)
-    .getByRole("button")
-    .evaluateAll((buttons) =>
-      buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
-    );
-  expect(names).toEqual(["Pause", "Board, 5 waiting", "Sign out"]);
-});
-
-test("with nothing waiting Board wears no dot", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("stellaris.boardMark", "dot"));
-  await fakeBoard(page);
-  await page.route("**/api/requests", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/proposals", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/crons", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/projects/*/tasks", (route) => route.fulfill({ json: [] }));
-  await page.goto("/");
-  await page.getByRole("button", { name: "Board" }).click();
-  await expect(
-    page
-      .getByRole("region", { name: "Board navigator" })
-      .getByRole("link", { name: "Status", exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(corner(page).getByRole("button", { name: "Board", exact: true })).toBeVisible();
 });

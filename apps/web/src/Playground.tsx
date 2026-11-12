@@ -1,11 +1,10 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
+import { Outlet, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
 import { Navigator, type GovernanceView, type SocietyWideView } from "./board/Navigator.js";
-import { StatusTabs, useStatusCounts } from "./board/StatusTabs.js";
-import { useNeedsYou } from "./board/useNeedsYou.js";
+import { StatusTabs } from "./board/StatusTabs.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { displayName, SignInContext } from "./board/Avatar.js";
@@ -150,6 +149,22 @@ export function Playground() {
   const width = useWindowWidth();
 
   const boardOpen = pathname !== "/";
+  // PROTOTYPE: where the board was last in this tab, so a click on the sky brings it back there;
+  // general before it has been anywhere, as the Board button opened it.
+  const lastBoard = useRef<string | null>(null);
+  useEffect(() => {
+    if (boardOpen) {
+      lastBoard.current = href;
+    }
+  }, [boardOpen, href]);
+  const router = useRouter();
+  const openBoard = (): void => {
+    if (lastBoard.current === null) {
+      void navigate({ to: "/c/$", params: { _splat: "general" } });
+    } else {
+      router.history.push(lastBoard.current);
+    }
+  };
   // Where the board sits and the content's width are the user's, kept per browser; the sky
   // centers in the room they leave.
   const [layout, setLayout] = useState<BoardLayout>(readBoardLayout);
@@ -199,8 +214,6 @@ export function Playground() {
         ? "proposals"
         : null;
   const activeView = SOCIETY_WIDE_VIEWS.get(pathname) ?? null;
-  const attention = useNeedsYou().length;
-  const status = useStatusCounts();
   const activeOverview =
     pathname === "/society" || pathname.startsWith("/skills/")
       ? SOCIETY_SCOPE
@@ -347,6 +360,11 @@ export function Playground() {
                 onSelectAnchor={openProject}
                 onSelectStar={openStar}
                 onSelectTask={openTask}
+                onSelectSky={() => {
+                  if (!boardOpen) {
+                    openBoard();
+                  }
+                }}
                 live={live}
                 card={
                   mark !== undefined ? (
@@ -366,12 +384,7 @@ export function Playground() {
                 onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
                 pauseBusy={pause.isPending}
                 boardOpen={boardOpen}
-                onToggleBoard={() =>
-                  void navigate(
-                    boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } },
-                  )
-                }
-                waiting={attention + status.enrolling + status.failing}
+                onOpenBoard={openBoard}
                 onSignOut={signOut}
               />
               {boardOpen ? (

@@ -5,14 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { asksOf, hasUnseenReply } from "./board/asks.js";
 import { failingCron } from "./board/crons.js";
 import { Navigator, type GovernanceView, type SocietyWideView } from "./board/Navigator.js";
+import { StatusTabs } from "./board/StatusTabs.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { displayName, SignInContext } from "./board/Avatar.js";
 import { EntityContext, NamedIdsContext } from "./components/Entities.js";
-import { Hud, readCornerForm } from "./components/Hud.js";
+import { Hud } from "./components/Hud.js";
 import { Island, ISLAND_SURFACE } from "./components/Island.js";
-import { LogsIsland } from "./components/LogsIsland.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
@@ -79,13 +79,14 @@ function after(pathname: string, prefix: string): string | null {
  * sky to its right. The board's event stream keeps every read current, and the turn stream keeps
  * the live picture of what citizens are doing.
  */
-/** PROTOTYPE: the society's own views by address, which the navigator now opens. */
-const SOCIETY_WIDE_VIEWS: Record<string, SocietyWideView> = {
-  "/citizens": "citizens",
-  "/runners": "runners",
-  "/crons": "crons",
-  "/metrics": "metrics",
-};
+/** PROTOTYPE: the status views by address, which the navigator's status row and its tabs open. */
+const SOCIETY_WIDE_VIEWS: ReadonlyMap<string, SocietyWideView> = new Map([
+  ["/citizens", "citizens"],
+  ["/runners", "runners"],
+  ["/crons", "crons"],
+  ["/metrics", "metrics"],
+  ["/logs", "logs"],
+]);
 
 export function Playground() {
   const { api, token, signOut, expire } = useSession();
@@ -135,9 +136,6 @@ export function Playground() {
   const step = useRouterState({ select: (state) => state.location.state.__TSR_index });
   // Where each step of this tab's history went, for the views' back arrows.
   useEffect(() => recordVisit(step, href), [step, href]);
-  const [logsOpen, setLogsOpen] = useState(false);
-  // PROTOTYPE: which corner the demo draws, read once per load.
-  const [cornerForm] = useState(readCornerForm);
   // The ask box shows only on the route it was opened on: its asks lead into the board.
   const [askAt, setAskAt] = useState<string | null>(null);
   const askOpen = askAt === pathname;
@@ -205,7 +203,7 @@ export function Playground() {
   const attention = useNeedsYou().length;
   const enrolling = useEnrollments().data?.length ?? 0;
   const failingCrons = cronList.data?.filter(failingCron).length ?? 0;
-  const activeView = SOCIETY_WIDE_VIEWS[pathname] ?? null;
+  const activeView = SOCIETY_WIDE_VIEWS.get(pathname) ?? null;
   const activeOverview =
     pathname === "/society" || pathname.startsWith("/skills/")
       ? SOCIETY_SCOPE
@@ -246,8 +244,6 @@ export function Playground() {
       // What floats over the board closes first.
       if (askOpen) {
         setAskAt(null);
-      } else if (logsOpen) {
-        setLogsOpen(false);
       } else if (boardOpen) {
         void navigate({ to: "/" });
       }
@@ -258,7 +254,7 @@ export function Playground() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [boardOpen, logsOpen, askOpen, pathname, navigate]);
+  }, [boardOpen, askOpen, pathname, navigate]);
 
   const rejected = [society, members, projects, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
@@ -294,11 +290,7 @@ export function Playground() {
   }
 
   // Governance, the runners, the crons, and the metrics belong to the society as a whole.
-  const societyWide =
-    activeGovernance !== null ||
-    pathname === "/metrics" ||
-    pathname === "/runners" ||
-    pathname === "/crons";
+  const societyWide = activeGovernance !== null || pathname === "/metrics" || activeView !== null;
   const focus =
     (societyWide ? SOCIETY_SCOPE : null) ??
     activeOverview ??
@@ -388,9 +380,6 @@ export function Playground() {
                     boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } },
                   )
                 }
-                form={cornerForm}
-                logsOpen={logsOpen}
-                onToggleLogs={() => setLogsOpen(!logsOpen)}
                 onSignOut={signOut}
               />
               {boardOpen ? (
@@ -414,11 +403,6 @@ export function Playground() {
                     activeGovernance={activeGovernance}
                     activeOverview={activeOverview}
                     activeView={activeView}
-                    logs={
-                      cornerForm === "plain"
-                        ? { open: logsOpen, onToggle: () => setLogsOpen(!logsOpen) }
-                        : null
-                    }
                   />
                   <Island
                     label="Board content"
@@ -434,11 +418,11 @@ export function Playground() {
                       onResize={resizeContent}
                       onToggle={toggleContentWidth}
                     />
+                    {activeView === null ? null : <StatusTabs active={activeView} />}
                     <Outlet />
                   </Island>
                 </div>
               ) : null}
-              {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
               {askOpen ? (
                 <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
               ) : (

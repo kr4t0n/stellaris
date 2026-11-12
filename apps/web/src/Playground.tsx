@@ -11,7 +11,7 @@ import { CitizenCard } from "./components/CitizenCard.js";
 import { displayName, SignInContext } from "./board/Avatar.js";
 import { EntityContext, NamedIdsContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
-import { Island } from "./components/Island.js";
+import { Island, ISLAND_SURFACE } from "./components/Island.js";
 import { LogsIsland } from "./components/LogsIsland.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { TaskCard } from "./components/TaskCard.js";
@@ -20,13 +20,14 @@ import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import {
   CONTENT_MIN,
-  ISLAND_MARGIN,
   NAVIGATOR_WIDTH,
+  askBoxPlacement,
   contentWidth as widthFor,
   readBoardLayout,
   readChosenWidth,
   saveBoardLayout,
   saveChosenWidth,
+  skyRoom,
   toggledWidth,
   widestContentWidth,
   type BoardLayout,
@@ -73,9 +74,10 @@ function after(pathname: string, prefix: string): string | null {
 
 /**
  * The signed-in view and the root of every route: the sky of citizens, and when a board route is
- * open, the navigator island on the left and the content island on the right, the sky fitting
- * between them. The board's event stream keeps every read current, and the turn stream keeps the
- * live picture of what citizens are doing.
+ * open, the board: around the sky, the navigator island on the left and the content island on the
+ * right with the sky fitting between them, or beside it, both in one panel on the left with the
+ * sky to its right. The board's event stream keeps every read current, and the turn stream keeps
+ * the live picture of what citizens are doing.
  */
 export function Playground() {
   const { api, token, signOut, expire } = useSession();
@@ -142,14 +144,15 @@ export function Playground() {
   const width = useWindowWidth();
 
   const boardOpen = pathname !== "/";
-  // The content island's width is the user's to drag, kept per browser; the sky centers in the rest.
-  const [chosenWidth, setChosenWidth] = useState<ChosenWidth>(readChosenWidth);
-  // Prototype: where the board sits, kept per browser.
+  // Where the board sits and the content's width are the user's, kept per browser; the sky
+  // centers in the room they leave.
   const [layout, setLayout] = useState<BoardLayout>(readBoardLayout);
+  const beside = layout === "beside";
   const chooseLayout = (next: BoardLayout): void => {
     setLayout(next);
     saveBoardLayout(next);
   };
+  const [chosenWidth, setChosenWidth] = useState<ChosenWidth>(readChosenWidth);
   const contentWidth = widthFor(width, chosenWidth, layout);
   const resizeContent = (next: number, done: boolean): void => {
     const held = widthFor(width, next, layout);
@@ -165,14 +168,8 @@ export function Playground() {
     saveChosenWidth(chosen);
   };
   const insets = useMemo<Insets>(
-    () =>
-      !boardOpen
-        ? NO_INSETS
-        : layout === "beside"
-          ? // Prototype: one panel on the left, the sky in all the room to its right.
-            { left: NAVIGATOR_WIDTH + contentWidth + 2 * ISLAND_MARGIN, right: 0 }
-          : { left: NAVIGATOR_WIDTH + 2 * ISLAND_MARGIN, right: contentWidth + 2 * ISLAND_MARGIN },
-    [boardOpen, contentWidth, layout],
+    () => (boardOpen ? skyRoom(layout, contentWidth) : NO_INSETS),
+    [boardOpen, layout, contentWidth],
   );
   // What the open route is about: a channel, directly or through a thread, or a project's tasks,
   // directly or through a task. The navigator highlights it and the sky focuses its project.
@@ -304,14 +301,7 @@ export function Playground() {
       : activeChannel.includes("/")
         ? (activeChannel.split("/")[0] ?? null)
         : SOCIETY_SCOPE);
-  // The ask box sits in the middle of the sky, or of the window when the islands leave too little.
-  const skyWidth = width - insets.left - insets.right;
-  const roomy = skyWidth >= 460;
-  const askWidth = Math.min(560, (roomy ? skyWidth : width) - 32);
-  const askBox = {
-    left: (roomy ? insets.left : 0) + ((roomy ? skyWidth : width) - askWidth) / 2,
-    width: askWidth,
-  };
+  const askBox = askBoxPlacement(width, insets, layout);
   const unread = asksOf(threads.data ?? []).filter((ask) => hasUnseenReply(ask, seen));
   const placeName = (scope: string): string =>
     scope === SOCIETY_SCOPE
@@ -406,15 +396,18 @@ export function Playground() {
                 onToggleLogs={() => setLogsOpen(!logsOpen)}
                 onSignOut={signOut}
               />
-              {boardOpen && layout === "beside" ? (
-                // Prototype: the navigator and the open view in one panel on the left.
-                <Island
-                  label="Board"
-                  className="top-[72px] bottom-4 left-4 flex-row!"
-                  style={{ width: NAVIGATOR_WIDTH + contentWidth }}
+              {boardOpen ? (
+                // The same elements in both layouts, so a switch keeps the open view mounted: beside
+                // the sky this holds both islands as one panel's columns, and around it no box at all.
+                <div
+                  className={
+                    beside
+                      ? `absolute top-[72px] bottom-4 left-4 flex overflow-clip ${ISLAND_SURFACE}`
+                      : "contents"
+                  }
+                  style={beside ? { width: NAVIGATOR_WIDTH + contentWidth } : undefined}
                 >
                   <Navigator
-                    embedded
                     layout={layout}
                     onLayout={chooseLayout}
                     activeChannel={activeChannel}
@@ -424,49 +417,23 @@ export function Playground() {
                     activeGovernance={activeGovernance}
                     activeOverview={activeOverview}
                   />
-                  <section
-                    aria-label="Board content"
-                    className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-clip"
+                  <Island
+                    label="Board content"
+                    bare={beside}
+                    className={beside ? "min-w-0 flex-1" : "top-[72px] right-4 bottom-4"}
+                    style={beside ? undefined : { width: contentWidth }}
                   >
+                    <ResizeHandle
+                      edge={beside ? "right" : "left"}
+                      width={contentWidth}
+                      min={CONTENT_MIN}
+                      max={widestContentWidth(width, layout)}
+                      onResize={resizeContent}
+                      onToggle={toggleContentWidth}
+                    />
                     <Outlet />
-                  </section>
-                  <ResizeHandle
-                    edge="right"
-                    width={contentWidth}
-                    min={CONTENT_MIN}
-                    max={widestContentWidth(width, layout)}
-                    onResize={resizeContent}
-                    onToggle={toggleContentWidth}
-                  />
-                </Island>
-              ) : null}
-              {boardOpen && layout === "around" ? (
-                <Navigator
-                  layout={layout}
-                  onLayout={chooseLayout}
-                  activeChannel={activeChannel}
-                  activeTasks={activeTasks}
-                  activeCitizen={activeCitizen}
-                  activeScope={activeScope}
-                  activeGovernance={activeGovernance}
-                  activeOverview={activeOverview}
-                />
-              ) : null}
-              {boardOpen && layout === "around" ? (
-                <Island
-                  label="Board content"
-                  className="top-[72px] right-4 bottom-4"
-                  style={{ width: contentWidth }}
-                >
-                  <ResizeHandle
-                    width={contentWidth}
-                    min={CONTENT_MIN}
-                    max={widestContentWidth(width, layout)}
-                    onResize={resizeContent}
-                    onToggle={toggleContentWidth}
-                  />
-                  <Outlet />
-                </Island>
+                  </Island>
+                </div>
               ) : null}
               {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
               {askOpen ? (

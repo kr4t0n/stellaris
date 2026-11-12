@@ -7,6 +7,7 @@ import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
+import { LayoutSwitch } from "./LayoutSwitch.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
@@ -132,7 +133,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
 }
 
 /**
- * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
+ * The board's left side, an island of its own or the panel's first column: who is working now, what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and its name in bold when something is new
  * since this browser looked, and last the archived projects, each opening its overview.
  */
@@ -143,13 +144,10 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
-  embedded = false,
   layout,
   onLayout,
 }: {
-  /** Prototype: drawn as the board panel's first column instead of an island of its own. */
-  embedded?: boolean;
-  /** Prototype: where the board sits, and the switch between the two. */
+  /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
   layout: BoardLayout;
   onLayout: (layout: BoardLayout) => void;
   activeChannel: string | null;
@@ -214,7 +212,15 @@ export function Navigator({
   }, [threads.data]);
 
   return (
-    <Frame embedded={embedded}>
+    <Island
+      label="Board navigator"
+      bare={layout === "beside"}
+      className={
+        layout === "beside"
+          ? "w-64 shrink-0 border-r border-line"
+          : "top-[72px] bottom-4 left-4 w-64"
+      }
+    >
       <header className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caps">Board</span>
         <div className="flex items-center gap-1">
@@ -309,99 +315,6 @@ export function Navigator({
           </section>
         )}
       </nav>
-    </Frame>
-  );
-}
-
-/** Prototype: the navigator as an island of its own, or as a column of the one board panel. */
-function Frame({ embedded, children }: { embedded: boolean; children: ReactNode }) {
-  return embedded ? (
-    <section
-      aria-label="Board navigator"
-      className="flex w-64 shrink-0 flex-col border-r border-line"
-    >
-      {children}
-    </section>
-  ) : (
-    <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
-      {children}
     </Island>
-  );
-}
-
-const LAYOUT_NAME: Record<BoardLayout, string> = {
-  around: "Board around the sky",
-  beside: "Board beside the sky",
-};
-
-const SWITCH =
-  "grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none";
-
-/** A window with the board's islands in it and a star for the sky: between them, or to the right. */
-function LayoutMark({ layout }: { layout: BoardLayout }) {
-  return (
-    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true">
-      <rect x="1" y="2.5" width="14" height="11" rx="2" fill="none" stroke="currentColor" />
-      {layout === "around" ? (
-        <>
-          <rect x="2.5" y="4" width="2.5" height="8" rx="0.75" fill="currentColor" />
-          <circle cx="7.75" cy="8" r="1.1" fill="currentColor" />
-          <rect x="10.5" y="4" width="3" height="8" rx="0.75" fill="currentColor" />
-        </>
-      ) : (
-        <>
-          <rect x="2.5" y="4" width="6.5" height="8" rx="0.75" fill="currentColor" />
-          <circle cx="11.75" cy="8" r="1.1" fill="currentColor" />
-        </>
-      )}
-    </svg>
-  );
-}
-
-/**
- * Prototype: the switch between the two layouts, as one button showing the layout it switches to,
- * or (with `stellaris.switchForm` set to `pair` in local storage) as two, the current one pressed.
- */
-function LayoutSwitch({
-  layout,
-  onLayout,
-}: {
-  layout: BoardLayout;
-  onLayout: (layout: BoardLayout) => void;
-}) {
-  const other: BoardLayout = layout === "around" ? "beside" : "around";
-  if (localStorage.getItem("stellaris.switchForm") === "pair") {
-    return (
-      <div role="group" aria-label="Board layout" className="flex rounded-lg bg-surface-2/40 p-0.5">
-        {(["around", "beside"] as const).map((each) => (
-          <button
-            key={each}
-            type="button"
-            aria-label={LAYOUT_NAME[each]}
-            title={LAYOUT_NAME[each]}
-            aria-pressed={each === layout}
-            onClick={() => onLayout(each)}
-            className={`grid h-6 w-7 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-              each === layout
-                ? "bg-surface-2 text-fg-primary"
-                : "text-fg-tertiary hover:text-fg-primary"
-            }`}
-          >
-            <LayoutMark layout={each} />
-          </button>
-        ))}
-      </div>
-    );
-  }
-  return (
-    <button
-      type="button"
-      aria-label={LAYOUT_NAME[other]}
-      title={LAYOUT_NAME[other]}
-      onClick={() => onLayout(other)}
-      className={SWITCH}
-    >
-      <LayoutMark layout={other} />
-    </button>
   );
 }

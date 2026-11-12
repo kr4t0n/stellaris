@@ -38,11 +38,11 @@ export type Target =
 
 /**
  * A second way to send what the box holds, beside Send, such as finishing a stage with the text as
- * its note. It may go with the box empty; `blocked` says why it can't go at all.
+ * its note: a round button with a check, named by `label`, its tooltip `title`. It may go with the
+ * box empty; `blocked` says why it can't go at all, in its tooltip.
  */
 export interface ComposerAction {
   readonly label: string;
-  readonly pendingLabel: string;
   readonly title: string;
   readonly blocked: string | null;
   readonly run: (text: string) => Promise<unknown>;
@@ -59,8 +59,10 @@ function filesDragged(event: DragEvent): boolean {
 }
 
 /**
- * Posts as the user into a channel or a thread, in one row with Send beside the box. Enter sends
- * and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
+ * Posts as the user into a channel or a thread, in one row: a box that is a capsule at one line,
+ * then Send, a round button with an arrow, as the iOS app draws it, lit while there is something to
+ * send and turning while it posts. An `action`, such as Approve, is a round check just before it.
+ * Enter sends and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
  * or picked uploads to the board, holding its place in the text with a line of its own that says so
  * until the markdown that shows it, described by its file's name, takes that line's place; Send
  * waits for it.
@@ -151,6 +153,8 @@ export function Composer({
         void client.invalidateQueries({ queryKey: ["thread", target.threadId] });
       }
       void client.invalidateQueries({ queryKey: ["requests"] });
+      // The button goes once its stage is done, which would leave the focus on the page.
+      box.current?.focus();
     },
   });
 
@@ -400,9 +404,7 @@ export function Composer({
               attach([...event.dataTransfer.files]);
             }
           }}
-          className={`relative flex min-w-0 flex-1 items-end gap-2 bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
-            FORM === "beside" ? "rounded-[20px]" : "rounded-xl"
-          } ${
+          className={`relative flex min-w-0 flex-1 items-end gap-2 rounded-[20px] bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
             dragging
               ? "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
               : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
@@ -478,65 +480,34 @@ export function Composer({
             >
               <ImageGlyph />
             </Button>
-            {FORM === "inside" && action !== undefined ? (
-              <button
-                type="button"
-                disabled={!actionable}
-                aria-label={act.isPending ? action.pendingLabel : action.label}
-                title={action.blocked ?? action.title}
-                onClick={() => act.mutate(text.trim())}
-                className="grid size-7 shrink-0 place-items-center rounded-md bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
-              >
-                {act.isPending ? <Spinner /> : <CheckGlyph />}
-              </button>
-            ) : null}
-            {FORM === "inside" ? (
-              <button
-                type="submit"
-                disabled={!sendable}
-                aria-label={send.isPending ? "Sending" : "Send"}
-                title="Send"
-                className={`grid size-7 shrink-0 place-items-center rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
-                  sendable ? "bg-fg-primary text-surface-0 hover:bg-white" : "text-fg-muted"
-                }`}
-              >
-                {send.isPending ? <Spinner /> : <ArrowGlyph />}
-              </button>
-            ) : null}
           </div>
         </div>
-        {FORM === "beside" && action !== undefined ? (
-          <button
-            type="button"
+        {action === undefined ? null : (
+          <ActionButton
+            action={action}
+            pending={act.isPending}
             disabled={!actionable}
-            aria-label={act.isPending ? action.pendingLabel : action.label}
-            title={action.blocked ?? action.title}
             onClick={() => act.mutate(text.trim())}
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
-          >
-            {act.isPending ? <Spinner /> : <CheckGlyph size={18} />}
-          </button>
-        ) : null}
-        {FORM === "beside" ? (
-          <button
-            type="submit"
-            disabled={!sendable}
-            aria-label={send.isPending ? "Sending" : "Send"}
-            title="Send"
-            className={`grid size-10 shrink-0 place-items-center rounded-full bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
-              sendable ? "text-fg-primary hover:bg-surface-2" : "text-fg-muted"
-            }`}
-          >
-            {send.isPending ? <Spinner /> : <ArrowGlyph size={18} />}
-          </button>
-        ) : null}
+          />
+        )}
+        <button
+          type="submit"
+          disabled={!sendable}
+          aria-label="Send"
+          aria-busy={send.isPending}
+          title="Send"
+          className={`grid size-10 shrink-0 place-items-center rounded-full bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
+            sendable ? "text-fg-primary hover:bg-surface-2" : "text-fg-muted"
+          }`}
+        >
+          {send.isPending ? <Spinner /> : <ArrowGlyph />}
+        </button>
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
           {send.error instanceof ApiError ? send.error.message : "The message was not sent."}
         </p>
       )}
-      {action?.blocked == null ? null : <p className="mt-2 text-meta">{action.blocked}</p>}
       {act.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
           {act.error instanceof ApiError ? act.error.message : "The stage was not finished."}
@@ -552,21 +523,42 @@ export function Composer({
 }
 
 /**
- * Which of the two forms the prototype draws: round buttons beside the box, as the iOS app's Send
- * is, or icons inside it. `stellaris.composerForm` set to `inside` picks the second.
+ * The round button an action takes beside Send: a check on green, named by the action, and turning
+ * while it goes. The task view's Approve also stands alone in it where its task has no open thread.
  */
-const FORM: "beside" | "inside" =
-  typeof localStorage !== "undefined" && localStorage.getItem("stellaris.composerForm") === "inside"
-    ? "inside"
-    : "beside";
+export function ActionButton({
+  action,
+  pending,
+  disabled,
+  onClick,
+}: {
+  action: ComposerAction;
+  pending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={action.label}
+      aria-busy={pending}
+      title={action.blocked ?? action.title}
+      onClick={onClick}
+      className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+    >
+      {pending ? <Spinner /> : <CheckGlyph />}
+    </button>
+  );
+}
 
-/** An arrow pointing up, Send's mark, as the iOS app draws it. */
-function ArrowGlyph({ size = 16 }: { size?: number }) {
+/** An arrow pointing up, Send's mark, in the shape the iOS app's has. */
+function ArrowGlyph() {
   return (
     <svg
       viewBox="0 0 16 16"
-      width={size}
-      height={size}
+      width={18}
+      height={18}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.8}
@@ -579,13 +571,13 @@ function ArrowGlyph({ size = 16 }: { size?: number }) {
   );
 }
 
-/** A check, Approve's mark, as the iOS app's Advance has it. */
-function CheckGlyph({ size = 16 }: { size?: number }) {
+/** A check, an action's mark, in the shape the iOS app's Advance has. */
+function CheckGlyph() {
   return (
     <svg
       viewBox="0 0 16 16"
-      width={size}
-      height={size}
+      width={18}
+      height={18}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.8}
@@ -607,7 +599,7 @@ function Spinner() {
       height={16}
       fill="none"
       aria-hidden="true"
-      className="animate-spin"
+      className="motion-safe:animate-spin"
     >
       <circle cx={8} cy={8} r={6} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1.8} />
       <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />

@@ -1,7 +1,7 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { useId, useState, type ReactNode } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
@@ -17,7 +17,7 @@ import {
   useThreads,
 } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
-import { Composer, type ComposerAction } from "./Composer.js";
+import { ActionButton, Composer, type ComposerAction } from "./Composer.js";
 import { stageForYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { PlanStrip } from "./PlanStrip.js";
@@ -150,22 +150,18 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
   );
 }
 
-/** Approve with no box, for a stage that waits on the user on a task with no open thread. */
+/** Approve alone, for a stage that waits on the user on a task with no open thread to write in. */
 function ApproveAlone({ action }: { action: ComposerAction }) {
   const run = useMutation({ mutationFn: () => action.run("") });
   return (
     <div className="border-t border-line p-3">
-      <div className="flex items-center justify-end gap-2">
-        {action.blocked === null ? null : <p className="mr-auto text-meta">{action.blocked}</p>}
-        <button
-          type="button"
+      <div className="flex justify-end">
+        <ActionButton
+          action={action}
+          pending={run.isPending}
           disabled={action.blocked !== null || run.isPending}
-          title={action.blocked ?? action.title}
           onClick={() => run.mutate()}
-          className="inline-flex h-7 shrink-0 items-center rounded-md bg-emerald-400/15 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-400/25 disabled:opacity-40"
-        >
-          {run.isPending ? action.pendingLabel : action.label}
-        </button>
+        />
       </div>
       <Failure error={run.error} />
     </div>
@@ -174,36 +170,50 @@ function ApproveAlone({ action }: { action: ComposerAction }) {
 
 type Part = "plan" | "files" | "brief" | "pr";
 
-/** A row of the task's top: what it is, one line of where it stands, and a button that opens it. */
+/**
+ * A row of the task's top and what it opens: the button, with what the part is and one line of
+ * where it stands, and under it, while open, the part itself as a region named for it.
+ */
 function Disclosure({
   label,
+  summary,
   open,
   onToggle,
   children,
 }: {
   label: string;
+  summary: ReactNode;
   open: boolean;
   onToggle: () => void;
   children: ReactNode;
 }) {
+  const id = useId();
   return (
-    <button
-      type="button"
-      aria-expanded={open}
-      onClick={onToggle}
-      className="group flex w-full min-w-0 items-baseline gap-2 rounded-md py-1 text-left hover:bg-surface-2/40"
-    >
-      <span
-        aria-hidden="true"
-        className={`inline-block w-2.5 shrink-0 text-[10px] text-fg-muted transition-transform ${open ? "rotate-90" : ""}`}
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+        className="group flex w-full min-w-0 items-baseline gap-2 rounded-md py-1 text-left hover:bg-surface-2/40"
       >
-        ▸
-      </span>
-      <span className="w-[4.75rem] shrink-0 text-caps">{label}</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-fg-tertiary group-hover:text-fg-secondary">
-        {children}
-      </span>
-    </button>
+        <span
+          aria-hidden="true"
+          className={`inline-block w-2.5 shrink-0 text-[10px] text-fg-muted transition-transform ${open ? "rotate-90" : ""}`}
+        >
+          ▸
+        </span>
+        <span className="w-[4.75rem] shrink-0 text-caps">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-fg-tertiary group-hover:text-fg-secondary">
+          {summary}
+        </span>
+      </button>
+      {open ? (
+        <section id={id} aria-label={label} className="mt-1 mb-2 ml-[18px]">
+          {children}
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -224,6 +234,7 @@ function StageLine({ task, now }: { task: Task; now: number }) {
           ? `waiting on you since ${ago(task.stageSince, now)}`
           : `for ${assigneeOf(stage)} · waiting ${ago(task.stageSince, now)}`;
   return (
+    // The stage's name keeps its line, and who it waits on wraps under it where both don't fit.
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
       <span className="min-w-0 truncate text-sm text-fg-primary">
         <span className="text-fg-tertiary">{progressOf(task)} · </span>
@@ -239,11 +250,26 @@ function StageLine({ task, now }: { task: Task; now: number }) {
   );
 }
 
+/** What the task's branch becomes once its last stage is done. */
+function landingOf(task: Task): string {
+  const link = task.pullRequest;
+  if (task.onDone === "merge") {
+    return `task/${task.id} merges onto the default branch`;
+  }
+  if (task.onDone === "ghpr") {
+    return link === undefined
+      ? "its pull request merges on GitHub, once one is linked"
+      : `pull request #${link.number} merges on GitHub`;
+  }
+  return "nothing more";
+}
+
 /**
  * What stays above the thread: the plan's strip and the stage it is at, then a row each for the
- * plan, the files the branch changed, the brief, and the pull request, each opening in place. It
- * takes at most half the room between the header and the box, past which it scrolls as one, a
- * patch included, so the thread keeps the other half.
+ * plan, the files the branch changed, the brief, and a ghpr task's pull request, each opening in
+ * place. Every task opens with all of them closed. The top takes at most half the room between the
+ * header and the box, past which it scrolls as one, a patch included, so the thread keeps the
+ * other half.
  */
 function TaskTop({
   task,
@@ -281,83 +307,77 @@ function TaskTop({
           {ago(task.returned.at, now)}.
         </p>
       )}
-      <Disclosure label="Plan" open={open.has("plan")} onToggle={() => toggle("plan")}>
-        {task.stages.length === 1 ? "1 stage" : `${task.stages.length} stages`}
-        {" · when done, "}
-        {task.onDone === "merge"
-          ? "merges onto the default branch"
-          : task.onDone === "ghpr"
-            ? link === undefined
-              ? "its pull request merges, once linked"
-              : `#${link.number} merges on GitHub`
-            : "nothing more"}
-        {task.blockedBy.length > 0 ? ` · blocked by ${task.blockedBy.length}` : ""}
-      </Disclosure>
-      {open.has("plan") ? (
-        <div className="mt-2 mb-2 ml-[18px]">
-          <ol>
-            {task.stages.map((stage, index) => (
-              <StageItem
-                key={stage.id}
-                stage={stage}
-                index={index}
-                task={task}
-                members={members}
-                now={now}
-              />
-            ))}
-          </ol>
-          <p className="text-meta">
-            When the last stage is done:{" "}
-            {task.onDone === "merge"
-              ? `task/${task.id} merges onto the default branch`
-              : task.onDone === "ghpr"
-                ? link === undefined
-                  ? "its pull request merges on GitHub, once one is linked"
-                  : `pull request #${link.number} merges on GitHub`
-                : "nothing more"}
-            {task.blockedBy.length > 0 ? (
-              <>
-                {" · blocked by "}
-                <LinkedText text={task.blockedBy.join(", ")} />
-              </>
-            ) : null}
-          </p>
-        </div>
-      ) : null}
-      <Disclosure label="Files" open={open.has("files")} onToggle={() => toggle("files")}>
-        {files}
-      </Disclosure>
-      {open.has("files") ? (
-        <div className="mb-2 ml-[18px]">
-          <TaskFileTree task={task} now={now} />
-        </div>
-      ) : null}
-      {brief === "" ? null : (
-        <>
-          <Disclosure label="Brief" open={open.has("brief")} onToggle={() => toggle("brief")}>
-            {brief}
-          </Disclosure>
-          {open.has("brief") ? (
-            <div className="mt-1 mb-2 ml-[18px]">
-              <Markdown text={task.body} />
-            </div>
+      <Disclosure
+        label="Plan"
+        summary={`${task.stages.length === 1 ? "1 stage" : `${task.stages.length} stages`} · when done, ${
+          task.onDone === "merge"
+            ? "merges onto the default branch"
+            : task.onDone === "ghpr"
+              ? link === undefined
+                ? "its pull request merges, once linked"
+                : `#${link.number} merges on GitHub`
+              : "nothing more"
+        }${task.blockedBy.length > 0 ? ` · blocked by ${task.blockedBy.length}` : ""}`}
+        open={open.has("plan")}
+        onToggle={() => toggle("plan")}
+      >
+        <ol className="mt-1">
+          {task.stages.map((stage, index) => (
+            <StageItem
+              key={stage.id}
+              stage={stage}
+              index={index}
+              task={task}
+              members={members}
+              now={now}
+            />
+          ))}
+        </ol>
+        <p className="text-meta">
+          When the last stage is done: {landingOf(task)}
+          {task.blockedBy.length > 0 ? (
+            <>
+              {" · blocked by "}
+              <LinkedText text={task.blockedBy.join(", ")} />
+            </>
           ) : null}
-        </>
+        </p>
+      </Disclosure>
+      <Disclosure
+        label="Files"
+        summary={files}
+        open={open.has("files")}
+        onToggle={() => toggle("files")}
+      >
+        <TaskFileTree task={task} now={now} />
+      </Disclosure>
+      {brief === "" ? null : (
+        <Disclosure
+          label="Brief"
+          summary={brief}
+          open={open.has("brief")}
+          onToggle={() => toggle("brief")}
+        >
+          <Markdown text={task.body} />
+        </Disclosure>
       )}
       {task.onDone !== "ghpr" ? null : (
-        <>
-          <Disclosure label="Pull request" open={open.has("pr")} onToggle={() => toggle("pr")}>
-            {link === undefined
+        <Disclosure
+          label="Pull request"
+          summary={
+            link === undefined
               ? "None linked yet"
-              : `#${link.number} · ${link.subject ?? "linked"} · by ${link.linkedBy} ${ago(link.linkedAt, now)}`}
-          </Disclosure>
-          {open.has("pr") && link !== undefined ? (
-            <div className="mt-1 mb-2 ml-[18px]">
-              <PullRequest task={task} now={now} />
-            </div>
-          ) : null}
-        </>
+              : `#${link.number} · ${link.subject ?? "linked"} · by ${link.linkedBy} ${ago(link.linkedAt, now)}`
+          }
+          open={open.has("pr")}
+          onToggle={() => toggle("pr")}
+        >
+          {link === undefined ? (
+            <p className="text-meta">None linked yet.</p>
+          ) : (
+            <PullRequest task={task} now={now} />
+          )}
+        </Disclosure>
       )}
     </section>
   );
@@ -365,7 +385,9 @@ function TaskTop({
 
 /**
  * Finishing the stage that waits on the user from the thread's box, the box's text as the step's
- * note; on a ghpr task's last stage the board refuses it while no pull request is linked.
+ * note: Approve at a gate, Advance at any other stage. On a ghpr task's last stage the board
+ * refuses it while no pull request is linked, so it waits greyed, the reason in its tooltip; the
+ * top's Pull request row says so too.
  */
 function useApprove(task: Task | undefined): ComposerAction | undefined {
   const { api } = useSession();
@@ -382,7 +404,6 @@ function useApprove(task: Task | undefined): ComposerAction | undefined {
   const label = stage.gate ? "Approve" : "Advance";
   return {
     label,
-    pendingLabel: stage.gate ? "Approving…" : "Advancing…",
     title: `${label} ${stage.name}, with what the box holds as its note`,
     blocked: unlinked ? "No pull request linked yet." : null,
     run: async (text) => {
@@ -396,10 +417,12 @@ function useApprove(task: Task | undefined): ComposerAction | undefined {
 /**
  * One task: the plan's strip and the stage it is at above, the rows that open the plan, the
  * files, the brief and the pull request, then its thread, opening at the newest message and
- * following new ones, with a box that sends to it or, while a stage waits on the user, finishes it.
+ * following new ones as a thread does, or at the message a link named, with one box that posts to
+ * it or, while a stage waits on the user, finishes the stage.
  */
 export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
+  const { message: target } = useSearch({ from: "/task/$taskId" });
   const task = useTask(taskId);
   const threads = useThreads();
   const projects = useProjects();
@@ -456,19 +479,29 @@ export function TaskView() {
           </span>
         }
       />
-      {/* Keyed by its subject: the route keeps the view mounted from one task to the next. */}
+      {/* The top and the thread share the room between the header and the box. */}
       <div className="flex min-h-0 flex-1 flex-col">
+        {/* Keyed by their subject: the route keeps the view mounted from one task to the next. */}
         <TaskTop key={`top:${current.id}`} task={current} now={now} members={members.data} />
         <StickyList
-          key={current.id}
+          key={`${current.id}:${target ?? ""}`}
+          stick={target === undefined}
           ids={messages.data?.messages.map((message) => message.id)}
           className="px-4 pb-3"
         >
-          {threads.data === undefined ? null : thread === undefined ? (
-            <p className="mt-3 text-meta">No thread on this task.</p>
-          ) : (
-            <SubjectThread thread={thread} now={now} task={current} empty="Nothing said yet." />
-          )}
+          <section aria-label="Thread">
+            {threads.data === undefined ? null : thread === undefined ? (
+              <p className="mt-3 text-meta">No thread on this task.</p>
+            ) : (
+              <SubjectThread
+                thread={thread}
+                now={now}
+                task={current}
+                target={target}
+                empty="Nothing said yet."
+              />
+            )}
+          </section>
         </StickyList>
       </div>
       {thread?.state === "open" ? (

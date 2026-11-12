@@ -11,7 +11,9 @@ function distanceToEnd(element: HTMLElement): number {
  * Keeps a scrolling list at its newest item while the reader is there, as chat does, and leaves it
  * alone once the reader scrolls up to read history. With `stick` off, as while a view shows the
  * message a link named, the list starts where the reader is taken instead. With `follow` off, as
- * in a task's view, whose thread comes after its plan, the list never moves by itself.
+ * in a proposal's view, whose thread comes after its charter, the list never moves by itself. A
+ * reader at the end stays there when the list's own box changes, as when the task view's top opens
+ * a row or the composer grows a line.
  *
  * `away` says the reader is away from the end, and `jump` takes them back, pinning the list there
  * again where it follows. `unseen` counts the `ids` newer than the newest the reader was at the end

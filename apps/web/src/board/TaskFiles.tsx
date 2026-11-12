@@ -237,71 +237,7 @@ function ChangeTree({
   );
 }
 
-/**
- * What a task's branch changed since it left the default branch, as a tree of folders: each file
- * with what happened to it and whose turn touched it last, opening to its patch and from there to
- * its file's view, so the work is found whether or not anyone linked it.
- */
-export function TaskFiles({ task, now }: { task: Task; now: number }) {
-  const changes = useTaskChanges(task.id);
-  const projects = useProjects();
-  const branch = `task/${task.id}`;
-
-  let body;
-  if (changes.data !== undefined) {
-    const { files, total, head } = changes.data;
-    body =
-      files.length === 0 ? (
-        <p className="mt-2 text-meta">Nothing changed on {branch} yet.</p>
-      ) : (
-        <>
-          <p className="mt-2 text-meta">
-            {total === 1 ? "1 file" : `${total} files`} changed · newest commit by {head.author}{" "}
-            {ago(head.at, now)}
-          </p>
-          <ChangeTree taskId={task.id} changes={files} now={now} />
-          {total > files.length ? (
-            <p className="mt-2 text-meta">
-              The first {files.length} of {total}
-            </p>
-          ) : null}
-        </>
-      );
-  } else if (changes.error instanceof ApiError && changes.error.status === 404) {
-    body = <p className="mt-2 text-meta">Nothing on {branch} yet.</p>;
-  } else if (changes.error instanceof ApiError && changes.error.status === 503) {
-    const project = projects.data?.find((each) => each.slug === task.project);
-    body = (
-      <p className="mt-2 text-meta">
-        {project?.runner === undefined ? "The runner" : `${project.runner}, the runner`}{" "}
-        {project?.name ?? task.project} lives on, is not connected, so the task's files cannot be
-        listed now.
-      </p>
-    );
-  } else if (changes.error !== null) {
-    body = <p className="mt-2 text-meta">{changes.error.message}</p>;
-  } else {
-    body = <p className="mt-2 text-meta">Reading the task's branch…</p>;
-  }
-
-  return (
-    <section aria-label="Files" className="mt-5 border-t border-line pt-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-section">Files</h3>
-        <FileLink
-          source={{ kind: "task", taskId: task.id }}
-          path=""
-          className="text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
-        >
-          Browse the branch
-        </FileLink>
-      </div>
-      {body}
-    </section>
-  );
-}
-
-/** One line for what a task's branch changed: how many files, how many lines, and whose commit. */
+/** One line for what a task's branch changed: how many files and lines, and whose commit is newest. */
 export function useFilesSummary(task: Task, now: number): string {
   const changes = useTaskChanges(task.id);
   const projects = useProjects();
@@ -310,6 +246,7 @@ export function useFilesSummary(task: Task, now: number): string {
     if (files.length === 0) {
       return "Nothing changed yet";
     }
+    // Over the files listed, which are all of them up to the board's limit.
     const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0);
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     return `${total === 1 ? "1 file" : `${total} files`} · +${added} −${removed} · ${head.author} ${ago(head.at, now)}`;
@@ -324,21 +261,53 @@ export function useFilesSummary(task: Task, now: number): string {
   return changes.error === null ? "Reading the branch…" : changes.error.message;
 }
 
-/** The tree of a task's changed files, for a place that has its own heading. */
+/**
+ * What a task's branch changed since it left the default branch, as a tree of folders: each file
+ * with what happened to it and whose turn touched it last, opening to its patch and from there to
+ * its file's view, so the work is found whether or not anyone linked it. It sits under the task
+ * view's Files row, whose line says how much changed.
+ */
 export function TaskFileTree({ task, now }: { task: Task; now: number }) {
   const changes = useTaskChanges(task.id);
-  if (changes.data === undefined || changes.data.files.length === 0) {
-    return null;
+  const projects = useProjects();
+  const branch = `task/${task.id}`;
+
+  let body;
+  if (changes.data !== undefined) {
+    const { files, total } = changes.data;
+    body =
+      files.length === 0 ? (
+        <p className="text-meta">Nothing changed on {branch} yet.</p>
+      ) : (
+        <>
+          <ChangeTree taskId={task.id} changes={files} now={now} />
+          {total > files.length ? (
+            <p className="mt-2 text-meta">
+              The first {files.length} of {total}
+            </p>
+          ) : null}
+        </>
+      );
+  } else if (changes.error instanceof ApiError && changes.error.status === 404) {
+    body = <p className="text-meta">Nothing on {branch} yet.</p>;
+  } else if (changes.error instanceof ApiError && changes.error.status === 503) {
+    const project = projects.data?.find((each) => each.slug === task.project);
+    body = (
+      <p className="text-meta">
+        {project?.runner === undefined ? "The runner" : `${project.runner}, the runner`}{" "}
+        {project?.name ?? task.project} lives on, is not connected, so the task's files cannot be
+        listed now.
+      </p>
+    );
+  } else if (changes.error !== null) {
+    body = <p className="text-meta">{changes.error.message}</p>;
+  } else {
+    body = <p className="text-meta">Reading the task's branch…</p>;
   }
-  const { files, total } = changes.data;
+
   return (
     <>
-      <ChangeTree taskId={task.id} changes={files} now={now} />
-      {total > files.length ? (
-        <p className="mt-2 text-meta">
-          The first {files.length} of {total}
-        </p>
-      ) : null}
+      {body}
       <FileLink
         source={{ kind: "task", taskId: task.id }}
         path=""

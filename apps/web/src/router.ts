@@ -72,6 +72,8 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/task/$taskId",
+    // `message` is one in the task's thread, marked there; a link to the thread lands here.
+    validateSearch: messageSearch,
     component: lazyRouteComponent(() => import("./board/TaskView.js"), "TaskView"),
   }),
   createRoute({

@@ -70,7 +70,7 @@ export function useRequests() {
   return useQuery({ queryKey: ["requests"], queryFn: api.requests, refetchInterval: 60_000 });
 }
 
-/** The operations log; only the logs island reads it, so it loads when that opens. */
+/** The operations log; only the Logs view reads it, so it loads when that opens. */
 export function useSignals(enabled: boolean) {
   const { api } = useSession();
   return useQuery({

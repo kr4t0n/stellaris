@@ -272,9 +272,12 @@ function unlinkedTask(): FakeTask {
   return task;
 }
 
-/** The same, with a check that names the user before Sign off, waiting on the user now. */
-function earlyApprovalTask(): FakeTask {
-  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate: true, holders: [] };
+/**
+ * The same, with a check that names the user before Sign off, waiting on the user now: a gate, or
+ * with `gate` false a stage the user does.
+ */
+function earlyApprovalTask(gate = true): FakeTask {
+  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate, holders: [] };
   return {
     ...unlinkedTask(),
     stages: [...TASK_STAGES.slice(0, 1), check, ...TASK_STAGES.slice(1)],
@@ -1262,6 +1265,8 @@ export async function fakeBoard(
     unlinked?: boolean;
     /** Links none either, and puts a check naming the user before Sign off, current. */
     earlyApproval?: boolean;
+    /** The same, with the check a stage the user does rather than a gate. */
+    ungated?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
@@ -1365,8 +1370,8 @@ export async function fakeBoard(
   let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
   let task: FakeTask =
-    options.earlyApproval === true
-      ? earlyApprovalTask()
+    options.earlyApproval === true || options.ungated === true
+      ? earlyApprovalTask(options.ungated !== true)
       : options.unlinked === true
         ? unlinkedTask()
         : TASK;

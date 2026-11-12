@@ -378,7 +378,13 @@ test("closing the enlarged image leaves the thread where it was, with the image 
 
 for (const place of [
   { view: "a task's thread", path: `/task/${STAGE_TASK}`, name: "The survey page, before" },
-  { view: "a thread", path: `/thread/${STAGE_TASK}`, name: "The survey page, before" },
+  // The thread's own address lands in the task's view.
+  {
+    view: "a task's thread by its address",
+    path: `/thread/${STAGE_TASK}`,
+    landing: `/task/${STAGE_TASK}`,
+    name: "The survey page, before",
+  },
   { view: "a channel", path: "/c/lab/general", name: "The survey page in lab" },
 ]) {
   for (const window of [
@@ -404,7 +410,7 @@ for (const place of [
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(enlarge).toBeFocused();
-      await expect(page).toHaveURL(new RegExp(`${place.path}$`));
+      await expect(page).toHaveURL(new RegExp(`${place.landing ?? place.path}$`));
     });
   }
 }

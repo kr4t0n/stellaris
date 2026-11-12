@@ -52,8 +52,12 @@ test("a task's view lists the files its branch changed, each opening to its patc
   await page.goto(`/task/${STAGE_TASK}`);
 
   const view = page.getByRole("region", { name: "Board content" });
+  // The top's Files row says how much changed, and opens the tree in place.
+  const row = view.getByRole("button", { name: /^Files/ });
+  await expect(row).toContainText("4 files · +");
+  await expect(row).toContainText("ada");
+  await row.click();
   const files = view.getByRole("region", { name: "Files" });
-  await expect(files).toContainText("4 files changed · newest commit by ada");
   await expect(files).toContainText("new · +7");
   await expect(files).toContainText("+2 −1");
   await expect(files).toContainText("new · binary");
@@ -98,6 +102,9 @@ test("a task's view lists the files its branch changed, each opening to its patc
   await expect(view.getByRole("cell", { name: "A*, tuned" })).toBeVisible();
 
   await view.getByRole("button", { name: "Back to Compare shortest-path algorithms" }).click();
+  // Each visit opens the task with its rows closed.
+  await expect(view.getByRole("region", { name: "Files" })).toHaveCount(0);
+  await view.getByRole("button", { name: /^Files/ }).click();
   await view
     .getByRole("region", { name: "Files" })
     .getByRole("link", { name: "Browse the branch" })

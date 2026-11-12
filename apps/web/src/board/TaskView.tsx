@@ -159,7 +159,7 @@ function ApproveAlone({ action }: { action: ComposerAction }) {
         <ActionButton
           action={action}
           pending={run.isPending}
-          disabled={action.blocked !== null || run.isPending}
+          disabled={action.blocked !== null}
           onClick={() => run.mutate()}
         />
       </div>

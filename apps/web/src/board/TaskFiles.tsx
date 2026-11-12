@@ -246,10 +246,16 @@ export function useFilesSummary(task: Task, now: number): string {
     if (files.length === 0) {
       return "Nothing changed yet";
     }
-    // Over the files listed, which are all of them up to the board's limit.
+    const count = total === 1 ? "1 file" : `${total} files`;
+    const by = `${head.author} ${ago(head.at, now)}`;
+    // Lines are counted over the files listed, all of them up to the board's limit, past which
+    // a sum would fall short of the count beside it.
+    if (files.length < total) {
+      return `${count} · ${by}`;
+    }
     const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0);
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
-    return `${total === 1 ? "1 file" : `${total} files`} · +${added} −${removed} · ${head.author} ${ago(head.at, now)}`;
+    return `${count} · +${added} −${removed} · ${by}`;
   }
   if (changes.error instanceof ApiError && changes.error.status === 404) {
     return "Nothing changed yet";

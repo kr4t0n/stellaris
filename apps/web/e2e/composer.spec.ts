@@ -68,6 +68,8 @@ for (const place of [
 test("the ask box's Send is the same round arrow beside it", async ({ page }) => {
   await fakeBoard(page, { asks: true });
   await page.goto("/");
+  // Space opens the ask box once the board listens for it, as its hint shows.
+  await expect(page.getByRole("button", { name: /to ask$/ })).toBeVisible();
   await page.keyboard.press("Space");
   const ask = page.getByRole("region", { name: "Ask", exact: true });
   const send = ask.getByRole("button", { name: "Send" });

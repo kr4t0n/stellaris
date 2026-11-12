@@ -128,15 +128,19 @@ test("the user approves a stage that names them from the thread's box, its text 
     "title",
     "Approve Sign off, with what the box holds as its note",
   );
-  // A check just before Send, which keeps the box's end.
+  // The check stands to the right of Send, at the box's end, and comes after it from the keyboard.
   const check = await approve.boundingBox();
-  const send = await view.getByRole("button", { name: "Send" }).boundingBox();
+  const sendButton = view.getByRole("button", { name: "Send" });
+  const send = await sendButton.boundingBox();
   if (check === null || send === null) {
     throw new Error("the composer is not laid out");
   }
-  expect(check.x + check.width).toBeLessThanOrEqual(send.x);
+  expect(send.x + send.width).toBeLessThanOrEqual(check.x);
 
   await box.fill("LGTM");
+  await sendButton.focus();
+  await page.keyboard.press("Tab");
+  await expect(approve).toBeFocused();
   await approve.click();
   expect(board.writes.at(-1)).toEqual({
     path: "/api/verbs/advance_task",
@@ -146,6 +150,76 @@ test("the user approves a stage that names them from the thread's box, its text 
   await expect(approve).toHaveCount(0);
   await expect(view.locator("header").first()).toContainText("landing");
   await expect(box).toHaveValue("");
+  await expect(box).toBeFocused();
+});
+
+for (const press of ["mouse", "keyboard"] as const) {
+  test(`a refused Approve, pressed by ${press}, keeps the note in the box with the keyboard there, so Escape leaves the board open`, async ({
+    page,
+  }) => {
+    await fakeBoard(page);
+    await page.route("**/api/verbs/advance_task", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "INVALID_STATE",
+          message: "The stage Sign off is no longer current.",
+        }),
+      });
+    });
+    await page.goto(`/task/${STAGE_TASK}`);
+
+    const view = viewOf(page);
+    const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+    const approve = view.getByRole("button", { name: "Approve", exact: true });
+    await box.fill("LGTM");
+    if (press === "mouse") {
+      await approve.click();
+    } else {
+      await view.getByRole("button", { name: "Send" }).focus();
+      await page.keyboard.press("Tab");
+      await expect(approve).toBeFocused();
+      await page.keyboard.press("Enter");
+    }
+    // While it goes, and once it is refused, the keyboard is in the box, never on the page.
+    await expect(approve).toHaveAttribute("aria-busy", "true");
+    await expect(box).toBeFocused();
+    await expect(view.getByRole("alert")).toHaveText("The stage Sign off is no longer current.");
+    await expect(box).toBeFocused();
+    await expect(box).toHaveValue("LGTM");
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(`/task/${STAGE_TASK}`);
+    await expect(box).toHaveValue("LGTM");
+
+    // A post afterwards says no more of the refusal.
+    await box.press("Enter");
+    await expect(view.getByRole("region", { name: "Thread" })).toContainText("LGTM");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+}
+
+test("Space while an approval goes types in the box rather than opening the ask box", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  const held = Promise.withResolvers<void>();
+  await page.route("**/api/verbs/advance_task", async (route) => {
+    await held.promise;
+    await route.fallback();
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = viewOf(page);
+  const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+  const approve = view.getByRole("button", { name: "Approve", exact: true });
+  await approve.click();
+  await expect(approve).toHaveAttribute("aria-busy", "true");
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("region", { name: "Ask", exact: true })).toHaveCount(0);
+  held.resolve();
+  await expect(approve).toHaveCount(0);
   await expect(box).toBeFocused();
 });
 

@@ -684,8 +684,9 @@ async function pasteTwoAlike(page: Page, second: number[]): Promise<Locator> {
   await deliver(box, "paste", [{ name: "image.png", type: "image/png", bytes: second }]);
   await held.promise;
   await secondAnswered;
-  // The first is still on its way.
+  // The first is still on its way: neither Send nor Approve takes the draft with its line in it.
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
   answered.resolve();
   return box;
 }

@@ -61,7 +61,7 @@ function filesDragged(event: DragEvent): boolean {
 /**
  * Posts as the user into a channel or a thread, in one row: a box that is a capsule at one line,
  * then Send, a round button with an arrow, as the iOS app draws it, lit while there is something to
- * send and turning while it posts. An `action`, such as Approve, is a round check just before it.
+ * send and turning while it posts. An `action`, such as Approve, is a round check after it, at the row's end.
  * Enter sends and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
  * or picked uploads to the board, holding its place in the text with a line of its own that says so
  * until the markdown that shows it, described by its file's name, takes that line's place; Send
@@ -123,6 +123,8 @@ export function Composer({
       const thread = await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) });
       return api.sendMessage({ thread_id: thread.id, body });
     },
+    // A refusal of the action says no more once the user posts again.
+    onMutate: () => act.reset(),
     onSuccess: (message) => {
       setText(initialText);
       setUploadFailure(null);
@@ -153,8 +155,6 @@ export function Composer({
         void client.invalidateQueries({ queryKey: ["thread", target.threadId] });
       }
       void client.invalidateQueries({ queryKey: ["requests"] });
-      // The button goes once its stage is done, which would leave the focus on the page.
-      box.current?.focus();
     },
   });
 
@@ -220,11 +220,30 @@ export function Composer({
     !send.isPending &&
     !act.isPending &&
     uploading === 0;
+  // A button pressed goes busy, or goes, while its request is out, and focus left on it, or on
+  // the page once it has gone, would hand the next keys to the board's own: Space opens the ask
+  // box and Escape closes the board with the draft. So a press puts the keyboard back in the box
+  // first, where those keys are the box's.
   const submit = (): void => {
     if (sendable) {
+      box.current?.focus();
       send.mutate(text.trim());
     }
   };
+  const runAction = (): void => {
+    if (actionable) {
+      box.current?.focus();
+      act.mutate(text.trim());
+    }
+  };
+  // A refusal of the action goes with the action, as when another's advance ended the stage.
+  const hasAction = action !== undefined;
+  const { reset: resetAction } = act;
+  useEffect(() => {
+    if (!hasAction) {
+      resetAction();
+    }
+  }, [hasAction, resetAction]);
 
   /** Uploads each file, holding its place where the caret is, in place of what is selected. */
   const attach = (files: readonly File[]): void => {
@@ -482,14 +501,6 @@ export function Composer({
             </Button>
           </div>
         </div>
-        {action === undefined ? null : (
-          <ActionButton
-            action={action}
-            pending={act.isPending}
-            disabled={!actionable}
-            onClick={() => act.mutate(text.trim())}
-          />
-        )}
         <button
           type="submit"
           disabled={!sendable}
@@ -502,6 +513,14 @@ export function Composer({
         >
           {send.isPending ? <Spinner /> : <ArrowGlyph />}
         </button>
+        {action === undefined ? null : (
+          <ActionButton
+            action={action}
+            pending={act.isPending}
+            disabled={!actionable && !act.isPending}
+            onClick={runAction}
+          />
+        )}
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
@@ -523,8 +542,10 @@ export function Composer({
 }
 
 /**
- * The round button an action takes beside Send: a check on green, named by the action, and turning
+ * The round button an action takes after Send: a check on green, named by the action, and turning
  * while it goes. The task view's Approve also stands alone in it where its task has no open thread.
+ * It is never `disabled`, which would drop it from the tab order and, with no pointer events, hide
+ * the tooltip that says why it can't go: it is `aria-disabled`, dimmed, and its press does nothing.
  */
 export function ActionButton({
   action,
@@ -540,12 +561,22 @@ export function ActionButton({
   return (
     <button
       type="button"
-      disabled={disabled}
+      aria-disabled={disabled || pending}
       aria-label={action.label}
       aria-busy={pending}
       title={action.blocked ?? action.title}
-      onClick={onClick}
-      className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+      onClick={() => {
+        if (!disabled && !pending) {
+          onClick();
+        }
+      }}
+      className={`grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none ${
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : pending
+            ? "cursor-progress"
+            : "hover:bg-emerald-400/25"
+      }`}
     >
       {pending ? <Spinner /> : <CheckGlyph />}
     </button>

@@ -158,7 +158,8 @@ export function Playground() {
   const insets = useMemo<Insets>(
     () =>
       boardOpen
-        ? { left: NAVIGATOR_WIDTH + 2 * ISLAND_MARGIN, right: contentWidth + 2 * ISLAND_MARGIN }
+        ? // Prototype: one panel on the left, the sky in all the room to its right.
+          { left: NAVIGATOR_WIDTH + contentWidth + 2 * ISLAND_MARGIN, right: 0 }
         : NO_INSETS,
     [boardOpen, contentWidth],
   );
@@ -395,29 +396,35 @@ export function Playground() {
                 onSignOut={signOut}
               />
               {boardOpen ? (
-                <Navigator
-                  activeChannel={activeChannel}
-                  activeTasks={activeTasks}
-                  activeCitizen={activeCitizen}
-                  activeScope={activeScope}
-                  activeGovernance={activeGovernance}
-                  activeOverview={activeOverview}
-                />
-              ) : null}
-              {boardOpen ? (
+                // Prototype: the navigator and the open view in one panel on the left.
                 <Island
-                  label="Board content"
-                  className="top-[72px] right-4 bottom-4"
-                  style={{ width: contentWidth }}
+                  label="Board"
+                  className="top-[72px] bottom-4 left-4 flex-row!"
+                  style={{ width: NAVIGATOR_WIDTH + contentWidth }}
                 >
+                  <Navigator
+                    embedded
+                    activeChannel={activeChannel}
+                    activeTasks={activeTasks}
+                    activeCitizen={activeCitizen}
+                    activeScope={activeScope}
+                    activeGovernance={activeGovernance}
+                    activeOverview={activeOverview}
+                  />
+                  <section
+                    aria-label="Board content"
+                    className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-clip"
+                  >
+                    <Outlet />
+                  </section>
                   <ResizeHandle
+                    edge="right"
                     width={contentWidth}
                     min={CONTENT_MIN}
                     max={widestContentWidth(width)}
                     onResize={resizeContent}
                     onToggle={toggleContentWidth}
                   />
-                  <Outlet />
                 </Island>
               ) : null}
               {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}

@@ -7,8 +7,11 @@ const STEP = 32;
 function dragged(
   event: PointerEvent<HTMLButtonElement>,
   from: { x: number; width: number },
+  edge: "left" | "right",
 ): number {
-  return from.width + from.x - event.clientX;
+  return edge === "left"
+    ? from.width + from.x - event.clientX
+    : from.width + event.clientX - from.x;
 }
 
 /**
@@ -22,7 +25,10 @@ export function ResizeHandle({
   max,
   onResize,
   onToggle,
+  edge = "left",
 }: {
+  /** Prototype: which edge of its island the handle sits on; the island grows away from the other. */
+  edge?: "left" | "right";
   width: number;
   min: number;
   max: number;
@@ -42,20 +48,22 @@ export function ResizeHandle({
   };
   const onPointerMove = (event: PointerEvent<HTMLButtonElement>): void => {
     if (drag.current !== null) {
-      onResize(dragged(event, drag.current), false);
+      onResize(dragged(event, drag.current, edge), false);
     }
   };
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>): void => {
     if (drag.current !== null) {
-      onResize(dragged(event, drag.current), true);
+      onResize(dragged(event, drag.current, edge), true);
       drag.current = null;
     }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    const wider = edge === "left" ? "ArrowLeft" : "ArrowRight";
+    const narrower = edge === "left" ? "ArrowRight" : "ArrowLeft";
     const next =
-      event.key === "ArrowLeft"
+      event.key === wider
         ? width + STEP
-        : event.key === "ArrowRight"
+        : event.key === narrower
           ? width - STEP
           : event.key === "Home"
             ? min
@@ -85,7 +93,7 @@ export function ResizeHandle({
       onClick={onClick}
       onDoubleClick={onToggle}
       onKeyDown={onKeyDown}
-      className="absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize touch-none before:absolute before:inset-y-4 before:left-0.5 before:w-0.5 before:rounded-full before:transition-colors hover:before:bg-fg-muted/60 focus-visible:outline-none focus-visible:before:bg-fg-primary/60 active:before:bg-fg-primary/60"
+      className={`absolute inset-y-0 ${edge === "left" ? "left-0" : "right-0"} z-10 w-2 cursor-col-resize touch-none before:absolute before:inset-y-4 ${edge === "left" ? "before:left-0.5" : "before:right-0.5"} before:w-0.5 before:rounded-full before:transition-colors hover:before:bg-fg-muted/60 focus-visible:outline-none focus-visible:before:bg-fg-primary/60 active:before:bg-fg-primary/60`}
     />
   );
 }

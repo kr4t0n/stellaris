@@ -14,9 +14,9 @@ export function defaultContentWidth(window: number): number {
   return Math.round(Math.min(680, Math.max(CONTENT_MIN, window * 0.4)));
 }
 
-/** The widest the content island goes: up to the navigator, with the usual gap between them. */
+/** Prototype: the widest the view goes, the one board panel then reaching the window's right margin. */
 export function widestContentWidth(window: number): number {
-  return Math.max(CONTENT_MIN, window - NAVIGATOR_WIDTH - 3 * ISLAND_MARGIN);
+  return Math.max(CONTENT_MIN, window - NAVIGATOR_WIDTH - 2 * ISLAND_MARGIN);
 }
 
 /** The width the content island takes: the chosen one, held within what the window allows. */

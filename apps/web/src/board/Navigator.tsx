@@ -142,7 +142,10 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
+  embedded = false,
 }: {
+  /** Prototype: drawn as the board panel's first column instead of an island of its own. */
+  embedded?: boolean;
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
@@ -205,7 +208,7 @@ export function Navigator({
   }, [threads.data]);
 
   return (
-    <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
+    <Frame embedded={embedded}>
       <header className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caps">Board</span>
         <Link
@@ -297,6 +300,22 @@ export function Navigator({
           </section>
         )}
       </nav>
+    </Frame>
+  );
+}
+
+/** Prototype: the navigator as an island of its own, or as a column of the one board panel. */
+function Frame({ embedded, children }: { embedded: boolean; children: ReactNode }) {
+  return embedded ? (
+    <section
+      aria-label="Board navigator"
+      className="flex w-64 shrink-0 flex-col border-r border-line"
+    >
+      {children}
+    </section>
+  ) : (
+    <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
+      {children}
     </Island>
   );
 }

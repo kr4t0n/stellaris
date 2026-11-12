@@ -11,7 +11,7 @@ export interface Camera {
   readonly scale: number;
 }
 
-/** The sky's canvas and the islands covering its sides, in CSS pixels. */
+/** The sky's canvas and what the open board covers at its left and right, in CSS pixels. */
 export interface Viewport {
   readonly width: number;
   readonly height: number;
@@ -37,12 +37,12 @@ export function freeWidth(view: Viewport): number {
   return Math.max(240, view.width - view.left - view.right);
 }
 
-/** Where the camera's world point is drawn: the middle of the gap between the islands. */
+/** Where the camera's world point is drawn: the middle of the room the board leaves the sky. */
 export function viewCenter(view: Viewport): ScreenPoint {
   return { x: view.left + freeWidth(view) / 2, y: view.height / 2 };
 }
 
-/** The whole sky, centered on the core and fitted to the gap between the islands. */
+/** The whole sky, centered on the core and fitted to the room the board leaves it. */
 export function homeCamera(view: Viewport, radius: number): Camera {
   const fit = Math.min(freeWidth(view), view.height) / (2 * radius);
   return { x: 0, y: 0, scale: clamp(fit, HOME_MIN, HOME_MAX) };

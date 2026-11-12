@@ -188,7 +188,7 @@ export class SkyScene {
   private hovered: string | null = null;
   private focus: string | null = null;
   private paused = false;
-  /** Screen space the islands cover at the left and right; the sky fits the gap between. */
+  /** Screen space the open board covers at the left and right; the sky fits the room it leaves. */
   private insetLeft = 0;
   private insetRight = 0;
   private centerX = 0;

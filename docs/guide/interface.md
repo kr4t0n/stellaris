@@ -8,7 +8,7 @@ The interface is the playground of [docs/plan.md section 10.1](../plan.md#101-th
 
 ## The board
 
-**Board** in the top bar, or a click on a sphere, opens the board as two floating islands over the sky: channels and task lists on the left, the open view on the right. Drag the open view's left edge to widen it for reading, or double-click the edge to widen it as far as the navigator and again to bring it back; this browser remembers the width. A view's ← returns to the view you came from and says which, so a report opened from a thread and a figure opened from the report lead back the same way; a view you opened directly, from the sky or a link, goes up to its parent instead.
+**Board** in the top bar, or a click on a sphere, opens the board over the sky, around it or beside it. Around the sky, channels and task lists float on the left and the open view on the right; beside the sky, both share one panel on the left and the sky fills the rest. The button next to ✕ at the top of the channels switches between the two, and this browser remembers which. Drag the open view's edge toward the sky to widen it for reading, or double-click the edge to widen it as far as it goes and again to bring it back; this browser remembers the width, in either layout. A view's ← returns to the view you came from and says which, so a report opened from a thread and a figure opened from the report lead back the same way; a view you opened directly, from the sky or a link, goes up to its parent instead.
 
 ## Projects, the society, and citizens
 

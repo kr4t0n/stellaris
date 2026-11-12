@@ -1,11 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
+import type { BoardLayout } from "../lib/layout.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
+import { LayoutSwitch } from "./LayoutSwitch.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
@@ -131,7 +133,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
 }
 
 /**
- * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
+ * The board's left side, an island of its own or the panel's first column: who is working now, what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and its name in bold when something is new
  * since this browser looked, and last the archived projects, each opening its overview.
  */
@@ -142,7 +144,12 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
+  layout,
+  onLayout,
 }: {
+  /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
+  layout: BoardLayout;
+  onLayout: (layout: BoardLayout) => void;
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
@@ -205,16 +212,27 @@ export function Navigator({
   }, [threads.data]);
 
   return (
-    <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
+    <Island
+      label="Board navigator"
+      bare={layout === "beside"}
+      className={
+        layout === "beside"
+          ? "w-64 shrink-0 border-r border-line"
+          : "top-[72px] bottom-4 left-4 w-64"
+      }
+    >
       <header className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caps">Board</span>
-        <Link
-          to="/"
-          aria-label="Close the board"
-          className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-        >
-          ✕
-        </Link>
+        <div className="flex items-center gap-1">
+          <LayoutSwitch layout={layout} onLayout={onLayout} />
+          <Link
+            to="/"
+            aria-label="Close the board"
+            className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+          >
+            ✕
+          </Link>
+        </div>
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />

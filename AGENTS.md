@@ -131,7 +131,7 @@ One long-running process, the board server, hosts the only writer of the data di
 ### Interface ([interface.md](./docs/internals/interface.md))
 
 - The sky is a projection: `skyModel` decides every anchor, star, and state, purely, and `SkyScene` only eases and draws. A new element of the sky is a field on the model.
-- The board is islands over the sky, and every view is an address: routes are code-based in `router.ts`, views are lazy, and server state lives in TanStack Query.
+- The board is islands over the sky, and every view is an address: routes are code-based in `router.ts`, views are lazy, and server state lives in TanStack Query. The islands sit around the sky or, as one panel, beside it, as each browser chose; both layouts are one tree of elements, so a switch never remounts the open view ([the board](./docs/internals/interface.md#the-board-is-islands-over-the-sky-and-every-view-is-an-address)).
 - An event refreshes what it touched: `staleKeys` in `lib/events.ts` maps each event type to the query keys it makes stale, so a new query whose data an event can change needs an entry there.
 - Live turns are a projection of the turn stream (`LiveStore`, `applyLive`), keyed like the scheduler's sessions, and a stored transcript folds through the same `applyLive`.
 - A new write the interface makes needs a fake in `apps/web/e2e/board.ts`.

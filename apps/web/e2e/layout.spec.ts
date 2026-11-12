@@ -47,6 +47,207 @@ test("the board's content widens by its edge, stays so in this browser, and a do
   expect(await width()).toBe(1136);
 });
 
+/** A browser that chose to put the board beside the sky, from the first frame. */
+async function besideTheSky(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem("stellaris.boardLayout", "beside");
+  });
+}
+
+/** Waits for the scene's next two frames, in which it moves its camera to what changed. */
+async function nextFrames(page: Page): Promise<void> {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}
+
+test("a browser that never chose has the board around the sky, and the header's switch puts it beside the sky and back, keeping the open view as it was", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  const content = page.getByRole("region", { name: "Board content" });
+  const beside = page.getByRole("button", { name: "Put the board beside the sky", exact: true });
+  const around = page.getByRole("button", { name: "Put the board around the sky", exact: true });
+
+  // Around the sky: the navigator island on the left and the content island at the right edge.
+  expect(await boxOf(navigator)).toMatchObject({ x: 16, width: 256 });
+  expect(await boxOf(content)).toMatchObject({ x: 1440 - 16 - 576, width: 576 });
+  await expect(beside).toHaveAttribute("title", "Board beside the sky");
+  const draft = content.getByPlaceholder("Message #general");
+  await draft.fill("half a thought");
+
+  // Beside the sky: one panel from the left margin, the navigator then the content at the same width.
+  await beside.click();
+  await expect(around).toBeVisible();
+  await expect(around).toHaveAttribute("title", "Board around the sky");
+  expect(await boxOf(navigator)).toMatchObject({ x: 16, width: 256 });
+  expect(await boxOf(content)).toMatchObject({ x: 16 + 256, width: 576 });
+  await expect(page).toHaveURL(/\/c\/general$/);
+  // The view stayed mounted, so what was typed is still there.
+  await expect(draft).toHaveValue("half a thought");
+  expect(await page.evaluate(() => localStorage.getItem("stellaris.boardLayout"))).toBe("beside");
+
+  // The choice outlives a reload, and closing and reopening the board.
+  await page.reload();
+  expect(await boxOf(content)).toMatchObject({ x: 16 + 256, width: 576 });
+  await page.keyboard.press("Escape");
+  await expect(content).toHaveCount(0);
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  expect(await boxOf(content)).toMatchObject({ x: 16 + 256, width: 576 });
+
+  // From the keyboard, Enter switches back, and focus stays on the switch.
+  await around.focus();
+  await page.keyboard.press("Enter");
+  await expect(beside).toBeFocused();
+  expect(await boxOf(content)).toMatchObject({ x: 1440 - 16 - 576, width: 576 });
+  expect(await page.evaluate(() => localStorage.getItem("stellaris.boardLayout"))).toBe("around");
+});
+
+test("the sky centers in the room the board leaves it, and again when the board switches sides", async ({
+  page,
+}) => {
+  // Without motion the camera lands at once. On the society's general the camera is home, with
+  // the core in the middle of the room and desk's seat, the first, at the core's center.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  const content = page.getByRole("region", { name: "Board content" });
+  const hint = page.getByRole("button", { name: /to ask$/ });
+  const sky = await boxOf(page.locator("canvas"));
+
+  // Around the sky, the room lies between the islands, 16 px clear of each.
+  const between = {
+    left: (await boxOf(navigator)).x + 256 + 16,
+    right: (await boxOf(content)).x - 16,
+  };
+  const aroundMiddle = (between.left + between.right) / 2;
+  expect(aroundMiddle).toBe(560);
+  expect(await middle(hint)).toBeCloseTo(aroundMiddle, 0);
+  await nextFrames(page);
+  await page.mouse.click(aroundMiddle, sky.y + sky.height / 2);
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+
+  // Beside the sky, the room runs from 16 px past the panel to the window's edge.
+  await page.goto("/c/general");
+  await page.getByRole("button", { name: "Put the board beside the sky", exact: true }).click();
+  const panel = await boxOf(content);
+  const right = { left: panel.x + panel.width + 16, right: 1440 };
+  const besideMiddle = (right.left + right.right) / 2;
+  expect(besideMiddle).toBe(1152);
+  await expect.poll(() => middle(hint)).toBeCloseTo(besideMiddle, 0);
+  await nextFrames(page);
+  await page.mouse.click(besideMiddle, sky.y + sky.height / 2);
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+});
+
+test("beside the sky, the content's right edge widens it, the width is the one around the sky, and the arrows follow the edge", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await besideTheSky(page);
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const content = page.getByRole("region", { name: "Board content" });
+  const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+  const width = async () => (await content.boundingBox())?.width ?? 0;
+  expect(await width()).toBe(576);
+
+  // The handle is on the panel's right edge, and dragging it 200 pixels right widens the content as much.
+  const edge = await boxOf(handle);
+  expect(edge.x + edge.width).toBe(16 + 256 + 576);
+  const y = edge.y + edge.height / 2;
+  await page.mouse.move(edge.x + 4, y);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 100, y);
+  await page.mouse.move(edge.x + 204, y);
+  await page.mouse.up();
+  expect(await width()).toBe(776);
+
+  // One stored width serves both layouts.
+  await page.reload();
+  expect(await width()).toBe(776);
+  await page.getByRole("button", { name: "Put the board around the sky", exact: true }).click();
+  expect(await boxOf(content)).toMatchObject({ x: 1440 - 16 - 776, width: 776 });
+  await page.getByRole("button", { name: "Put the board beside the sky", exact: true }).click();
+  expect(await width()).toBe(776);
+
+  // As wide as it goes takes the panel to the window's right margin; again, and it is back to the default.
+  await handle.dblclick();
+  expect(await width()).toBe(1440 - 256 - 32);
+  expect((await boxOf(content)).x + (await width())).toBe(1440 - 16);
+  await handle.dblclick();
+  expect(await width()).toBe(576);
+
+  // The arrow pointing away from the content widens it, the other narrows it, and Enter widens it all the way.
+  await handle.focus();
+  await page.keyboard.press("ArrowRight");
+  expect(await width()).toBe(608);
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  expect(await width()).toBe(544);
+  await page.keyboard.press("Enter");
+  expect(await width()).toBe(1152);
+});
+
+for (const size of [
+  { width: 1440, height: 900 },
+  // Under 1300 the room between the islands is too narrow for the box, but not the room beside the panel.
+  { width: 1245, height: 800 },
+  { width: 1024, height: 768 },
+]) {
+  test(`beside the sky, the ask box and its hint keep to the middle of the sky's room (${size.width}×${size.height})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await besideTheSky(page);
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    const content = await boxOf(page.getByRole("region", { name: "Board content" }));
+    const room = { left: content.x + content.width + 16, right: size.width };
+    const roomMiddle = (room.left + room.right) / 2;
+    expect(await middle(page.getByRole("button", { name: /to ask$/ }))).toBeCloseTo(roomMiddle, 0);
+
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
+    await page.keyboard.press("Space");
+    const ask = await boxOf(page.getByRole("region", { name: "Ask", exact: true }));
+    expect(ask.x).toBeGreaterThanOrEqual(room.left + 16);
+    expect(ask.x + ask.width).toBeLessThanOrEqual(room.right - 16);
+    expect(ask.x + ask.width / 2).toBeCloseTo(roomMiddle, 0);
+  });
+}
+
+test("beside the sky, the operations log shows whole over the sky's corner, in front of the panel where they meet", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await besideTheSky(page);
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const content = await boxOf(page.getByRole("region", { name: "Board content" }));
+  await page.getByRole("button", { name: "Logs" }).click();
+  const log = page.getByRole("region", { name: "Operations log" });
+  const box = await boxOf(log);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(1024 - 16);
+  expect(box.y + box.height).toBeLessThanOrEqual(768);
+  // At this width the log reaches over the panel's right edge, and is drawn in front of it there.
+  expect(box.x).toBeLessThan(content.x + content.width);
+  const front = await log.evaluate(
+    (element, at) => element.contains(document.elementFromPoint(at.x, at.y)),
+    { x: (box.x + content.x + content.width) / 2, y: box.y + 24 },
+  );
+  expect(front).toBe(true);
+});
+
 for (const size of [
   { width: 1440, height: 900, navigatorScrolls: false },
   // The narrowest window the islands fit side by side, short enough that the navigator scrolls.

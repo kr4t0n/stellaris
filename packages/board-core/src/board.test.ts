@@ -1834,6 +1834,53 @@ describe("Board", () => {
     await reopened.addRunner(USER, "pod");
   });
 
+  it("finishes a rename cut short, after the token moved or after the new record was written", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.placeProject("demo", "pod");
+    const tokensFile = path.join(board.paths.state(), "runners.json");
+    const stored = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+
+    // Stopped right after the token's move, as when the new record's write failed: the server
+    // still answers the token as pod, and the file has it under gpu-1.
+    const { pod, ...rest } = stored;
+    await writeFile(tokensFile, JSON.stringify({ runners: { ...rest, "gpu-1": pod } }));
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    const finished = await board.renameRunner(USER, "pod", "gpu-1");
+    expect(finished.runner.name).toBe("gpu-1");
+    expect(board.resolveRunnerToken(token)).toBe("gpu-1");
+    expect((await board.readProject("demo")).runner).toBe("gpu-1");
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Stopped after the new record was written and before the old one went, then restarted: the
+    // runner connected since under gpu-1, whose record is kept, and pod's goes.
+    await board.markRunner("gpu-1", { status: "connected", version: "9.9.9" });
+    const record = await readFile(board.paths.runner("gpu-1"), "utf8");
+    await writeFile(board.paths.runner("pod"), record.replaceAll("gpu-1", "pod"));
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+      "pod",
+    ]);
+    const again = await reopened.renameRunner(USER, "pod", "gpu-1");
+    expect(again.runner).toMatchObject({ name: "gpu-1", status: "connected", version: "9.9.9" });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+    ]);
+    expect(reopened.resolveRunnerToken(token)).toBe("gpu-1");
+
+    // A name another runner holds with a token of its own is still refused.
+    await reopened.addRunner(USER, "pod");
+    await expect(reopened.renameRunner(USER, "pod", "far")).rejects.toMatchObject({
+      code: "ALREADY_EXISTS",
+    });
+  });
+
   it("keeps the lease of a holder the user's pause holds, then lets it lapse from at least half a lease after", async () => {
     // The board's own lease, thirty minutes.
     const { board } = await society({});

@@ -5145,8 +5145,11 @@ export class Board {
    * answers to `to`. Turn records and events keep the name they were written with. The hub
    * (`RunnerHub.renameRunner`) checks first that nothing runs there.
    *
-   * The records go first and the runner's own file and token last, so a rename cut short by a
-   * crash leaves `to` unknown and can be run again to finish it.
+   * The records go first and the runner's token and own record last, so a rename cut short, by a
+   * crash or a failed write, finishes when run again. Until the token moves, `to` is still free;
+   * once it has, its entry under `to` marks the rename as this one, so a record already written
+   * under `to` is kept, being the one the token answers to, and the old one goes. Once the old
+   * record is gone the rename is whole, though a crash right then leaves it unlogged.
    */
   async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
     this.assertUser(actor, "only the user may rename a runner");
@@ -5163,7 +5166,10 @@ export class Board {
       if (name === from) {
         throw new BoardError("INVALID_STATE", `runner ${from} is already named ${name}`);
       }
-      if (await exists(this.paths.runner(name))) {
+      const tokens = await this.readRunnerTokens();
+      const finishing = tokens[from] === undefined && tokens[name] !== undefined;
+      const written = await exists(this.paths.runner(name));
+      if (written && !finishing) {
         throw new BoardError("ALREADY_EXISTS", `runner ${name} already exists`);
       }
       const projects: Name[] = [];
@@ -5198,19 +5204,24 @@ export class Board {
         );
         sessions += renamed.filter((each) => each).length;
       }
-      const tokens = await this.readRunnerTokens();
-      const { [from]: token, ...others } = tokens;
-      await writeJson(this.runnerTokensFile(), {
-        runners: token === undefined ? others : { ...others, [name]: token },
-      });
-      const doc = await readMarkdown(this.paths.runner(from), RunnerSchema);
-      const runner = RunnerSchema.parse({ ...current, name });
-      const heading = `# ${from}\n`;
-      await writeMarkdown(
-        this.paths.runner(name),
-        runner,
-        doc.body.startsWith(heading) ? `# ${name}\n${doc.body.slice(heading.length)}` : doc.body,
-      );
+      const { [from]: moving, ...others } = tokens;
+      if (moving !== undefined) {
+        await writeJson(this.runnerTokensFile(), { runners: { ...others, [name]: moving } });
+      }
+      const token = moving ?? tokens[name];
+      let runner: Runner;
+      if (written) {
+        runner = await this.readRunner(name);
+      } else {
+        const doc = await readMarkdown(this.paths.runner(from), RunnerSchema);
+        runner = RunnerSchema.parse({ ...current, name });
+        const heading = `# ${from}\n`;
+        await writeMarkdown(
+          this.paths.runner(name),
+          runner,
+          doc.body.startsWith(heading) ? `# ${name}\n${doc.body.slice(heading.length)}` : doc.body,
+        );
+      }
       await rm(this.paths.runner(from), { force: true });
       await this.events.append("runner.renamed", actor.name, {
         from,

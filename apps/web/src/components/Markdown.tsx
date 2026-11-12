@@ -1,8 +1,8 @@
-import { useContext, useMemo, type ReactNode } from "react";
+import { memo, useContext, useMemo, type ReactNode } from "react";
 import { uploadedImageId } from "@stellaris/shared";
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { entityOfHref, remarkEntities } from "../lib/entities.js";
+import { entitiesKey, entitiesOf, entityOfHref, remarkEntities } from "../lib/entities.js";
 import { isCitedPath, linkTarget, rehypeLineTarget, type FileBase } from "../lib/files.js";
 import { remarkMentions } from "../lib/mentions.js";
 import { EnlargeableImage, INLINE_IMAGE, InsideLinkContext } from "./EnlargeableImage.js";
@@ -96,7 +96,7 @@ export function urlTransform(url: string): string {
  * threads, crons, and messages read as links named by their titles. `base` is where a file sits on its branch,
  * for relative links and images inside it, and `line` a source line to mark as `line-target`.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   text,
   base,
   line,
@@ -105,15 +105,18 @@ export function Markdown({
   base?: FileBase | undefined;
   line?: number | undefined;
 }) {
+  // Only the entries of the ids the text names, kept by value: the board's index is built again
+  // on every post, and every body parsed again with it would hold the page for a long thread.
   const index = useEntitiesFor(text);
+  const named = entitiesKey(text, index);
   // Entities run before mentions, so a title that holds an @name is not marked as a mention.
   const plugins = useMemo(
     (): NonNullable<Options["remarkPlugins"]> => [
       remarkGfm,
-      [remarkEntities, { index }],
+      [remarkEntities, { index: entitiesOf(named) }],
       remarkMentions,
     ],
-    [index],
+    [named],
   );
   const rehypePlugins = useMemo(
     (): NonNullable<Options["rehypePlugins"]> =>
@@ -132,18 +135,24 @@ export function Markdown({
     }
     return { source: kind === "task" ? { kind, taskId: id } : { kind, slug: id }, dir };
   }, [kind, id, dir]);
+  // The same element while its text and plugins are, so a render for anything else, such as the
+  // index or the clock, leaves the parse alone: ReactMarkdown parses on every render it gets.
+  const rendered = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={plugins}
+        rehypePlugins={rehypePlugins}
+        components={COMPONENTS}
+        urlTransform={urlTransform}
+      >
+        {text}
+      </ReactMarkdown>
+    ),
+    [plugins, rehypePlugins, text],
+  );
   return (
     <div className="board-markdown">
-      <FileBaseContext value={at}>
-        <ReactMarkdown
-          remarkPlugins={plugins}
-          rehypePlugins={rehypePlugins}
-          components={COMPONENTS}
-          urlTransform={urlTransform}
-        >
-          {text}
-        </ReactMarkdown>
-      </FileBaseContext>
+      <FileBaseContext value={at}>{rendered}</FileBaseContext>
     </div>
   );
-}
+});

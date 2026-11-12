@@ -15,6 +15,15 @@ export const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export const UlidSchema = z.string().regex(ULID_PATTERN, "expected a ULID");
 export type Ulid = z.infer<typeof UlidSchema>;
 
+/**
+ * A key a client gives a write it may send again, such as a post whose answer never arrived: the
+ * board stores the write once and answers a repeat with what it stored. A UUID or random hex fits.
+ */
+export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+export const IdempotencyKeySchema = z
+  .string()
+  .regex(IDEMPOTENCY_KEY_PATTERN, "expected 16-64 letters, digits, hyphens, or underscores");
+
 /** A channel reference is `<channel>` for society channels or `<project>/<channel>` for project channels. */
 export const CHANNEL_REF_PATTERN = /^(?:[a-z0-9][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9-]{0,31}$/;
 export const ChannelRefSchema = z

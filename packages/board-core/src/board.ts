@@ -540,6 +540,13 @@ const PausedSchema = z.object({ paused: z.boolean() });
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 
 /**
+ * How many of an author's latest posts in a thread or channel a post's idempotency key is looked for
+ * among. A client sends a post again within moments of losing its answer, so a key is never further
+ * back than this, and the look reads at most this many small files.
+ */
+export const IDEMPOTENCY_LOOKBACK = 20;
+
+/**
  * Free text quoted in a board notice, its mentions written as plain names so they wake nobody. Every
  * `@name` goes, in code too, since code in the text alone may not be code in the post it is quoted in.
  */
@@ -1940,16 +1947,50 @@ export class Board {
     const args = VerbInputs.post_message.parse(input);
     await this.authorize(actor, "post_message");
     return this.mutex.run(async () => {
+      const keyed =
+        args.idempotency_key === undefined ? {} : { idempotencyKey: args.idempotency_key };
       if (args.thread_id !== undefined) {
         return this.appendThreadMessage(actor.name, args.thread_id, args.body, {
           channel: args.channel,
+          ...keyed,
         });
       }
       if (args.channel === undefined) {
         throw new BoardError("VALIDATION", "a message needs a channel, or a thread_id");
       }
-      return this.appendMessage(actor.name, args.channel, args.body);
+      return this.appendMessage(actor.name, args.channel, args.body, undefined, keyed);
     });
+  }
+
+  /**
+   * The post `author` already stored in `dir` with `key`, among its latest `IDEMPOTENCY_LOOKBACK`
+   * there, or null. A post sent again with its key is answered with it and writes nothing; the key
+   * sent with another body is refused, since a client makes a new key when its text changes.
+   */
+  private async keyedPost(
+    dir: string,
+    author: Name,
+    key: string,
+    body: string,
+  ): Promise<Message | null> {
+    // A message's file is `<id>-<author>.md`, so the author's own are found by name.
+    const own = (await listFiles(dir))
+      .filter((file) => file.slice(27, -".md".length) === author)
+      .slice(-IDEMPOTENCY_LOOKBACK);
+    for (const file of own.toReversed()) {
+      const doc = await readMarkdown(path.join(dir, file), MessageFrontmatterSchema);
+      if (doc.data.idempotencyKey !== key) {
+        continue;
+      }
+      if (doc.body.trim() !== body.trim()) {
+        throw new BoardError(
+          "ALREADY_EXISTS",
+          `idempotency key ${key} was sent with another message, ${doc.data.id}`,
+        );
+      }
+      return { ...doc.data, body: doc.body };
+    }
+    return null;
   }
 
   /**
@@ -6502,17 +6543,34 @@ export class Board {
     return { agent, releasedTasks };
   }
 
-  /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
+  /**
+   * Writes one message and its event, unless `idempotencyKey` names one the author stored there
+   * already, which is answered instead. Callers hold the mutex and have authorized the author.
+   */
   private async appendMessage(
     author: Name,
     channel: ChannelRef,
     body: string,
     notice?: MessageNotice,
+    options: { idempotencyKey?: string | undefined } = {},
   ): Promise<Message> {
     await this.assertChannelOpen(channel);
+    const dir = this.paths.channelDir(channel);
+    const { idempotencyKey } = options;
+    if (idempotencyKey !== undefined) {
+      const stored = await this.keyedPost(dir, author, idempotencyKey, body);
+      if (stored !== null) {
+        return stored;
+      }
+    }
     return this.writeMessage(
-      this.paths.channelDir(channel),
-      { author, channel, ...(notice === undefined ? {} : { notice }) },
+      dir,
+      {
+        author,
+        channel,
+        ...(notice === undefined ? {} : { notice }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      },
       body,
     );
   }
@@ -6522,7 +6580,11 @@ export class Board {
     author: Name,
     threadId: Ulid,
     body: string,
-    options: { channel?: ChannelRef | undefined; step?: MessageStep } = {},
+    options: {
+      channel?: ChannelRef | undefined;
+      step?: MessageStep;
+      idempotencyKey?: string | undefined;
+    } = {},
   ): Promise<Message> {
     const { thread, threads } = await this.findThread(threadId);
     if (thread.state !== "open") {
@@ -6534,13 +6596,22 @@ export class Board {
         `thread ${threadId} belongs to ${thread.channel}; leave channel out or pass that one`,
       );
     }
+    const dir = this.paths.threadMessages(threads, threadId);
+    const { idempotencyKey } = options;
+    if (idempotencyKey !== undefined) {
+      const stored = await this.keyedPost(dir, author, idempotencyKey, body);
+      if (stored !== null) {
+        return stored;
+      }
+    }
     return this.writeMessage(
-      this.paths.threadMessages(threads, threadId),
+      dir,
       {
         author,
         channel: thread.channel,
         thread: threadId,
         ...(options.step === undefined ? {} : { step: options.step }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       },
       body,
     );
@@ -6555,6 +6626,7 @@ export class Board {
       closes?: Ulid;
       step?: MessageStep;
       notice?: MessageNotice;
+      idempotencyKey?: string;
     },
     body: string,
   ): Promise<Message> {

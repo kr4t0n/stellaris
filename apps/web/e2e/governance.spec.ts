@@ -153,6 +153,10 @@ test("needs you gathers a proposal, a stage that names the user, and a question 
   await expect(page.getByRole("button", { name: "2 need you" })).toBeVisible();
   expect(board.writes.at(-1)).toEqual({
     path: "/api/verbs/post_message",
-    body: { thread_id: STAGE_TASK, body: "Yes, include 2025." },
+    body: {
+      thread_id: STAGE_TASK,
+      body: "Yes, include 2025.",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    },
   });
 });

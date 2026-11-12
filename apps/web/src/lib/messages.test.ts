@@ -1,6 +1,6 @@
-import type { MessageRef } from "@stellaris/shared";
+import { IDEMPOTENCY_KEY_PATTERN, type MessageRef } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { MessageLookup } from "./messages.js";
+import { MessageLookup, newIdempotencyKey, withMessage } from "./messages.js";
 
 const ref = (id: string): MessageRef => ({
   id,
@@ -44,5 +44,30 @@ describe("MessageLookup", () => {
     lookup.want([A]);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(lookup.snapshot()).toEqual([]);
+  });
+});
+
+describe("withMessage", () => {
+  const a = { id: "01M3Q2AAAAAAAAAAAAAAAAAAA1" };
+  const b = { id: "01M3Q2AAAAAAAAAAAAAAAAAAA2" };
+  const c = { id: "01M3Q2AAAAAAAAAAAAAAAAAAA3" };
+
+  it("puts a message in its place by id, and keeps the list when it is there already", () => {
+    expect(withMessage([a, b], c)).toEqual([a, b, c]);
+    expect(withMessage([a, c], b)).toEqual([a, b, c]);
+    expect(withMessage([], a)).toEqual([a]);
+    const read = [a, b];
+    expect(withMessage(read, { ...b })).toBe(read);
+  });
+});
+
+describe("newIdempotencyKey", () => {
+  it("is 32 hex digits, which the board's key pattern takes, and new each time", () => {
+    const keys = Array.from({ length: 50 }, () => newIdempotencyKey());
+    for (const key of keys) {
+      expect(key).toMatch(/^[0-9a-f]{32}$/);
+      expect(IDEMPOTENCY_KEY_PATTERN.test(key)).toBe(true);
+    }
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

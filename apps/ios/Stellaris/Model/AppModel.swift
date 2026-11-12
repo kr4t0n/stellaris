@@ -295,20 +295,22 @@ enum SignInFailure: Error, Equatable {
     marks[conversation]?.reached = true
   }
 
-  /// Posts `body` to `conversation` as the user, then, without waiting, reads the conversation
-  /// again, and what waits on the user, which a post answers where it was asked, as the web's
-  /// composer does.
-  func post(_ body: String, to conversation: Conversation) async throws -> Message {
+  /// Posts `body` to `conversation` as the user with `key`, which a post sent again keeps, so the
+  /// board stores it once. The answer carries the message, so the conversation shows it at once;
+  /// the board's event for it reads the conversation again, as the web's composer leaves it to.
+  /// Then, without waiting, reads what waits on the user, which a post answers where it was asked.
+  func post(_ body: String, to conversation: Conversation, key: String = UUID().uuidString)
+    async throws -> Message
+  {
     let request =
       switch conversation {
-      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body)
-      case .thread(let id): BoardAPI.postMessage(thread: id, body: body)
+      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body, key: key)
+      case .thread(let id): BoardAPI.postMessage(thread: id, body: body, key: key)
       }
     let message = try await send(request)
     uploadFailures[conversation.key] = nil
-    let feed = feed(for: conversation)
+    feed(for: conversation).received(message)
     Task {
-      await feed.load(using: self)
       await store.reload(["requests"], using: self)
     }
     return message

@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo } from "react";
 import { Island } from "../components/Island.js";
+import type { BoardLayout } from "../lib/layout.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
@@ -143,9 +144,14 @@ export function Navigator({
   activeGovernance,
   activeOverview,
   embedded = false,
+  layout,
+  onLayout,
 }: {
   /** Prototype: drawn as the board panel's first column instead of an island of its own. */
   embedded?: boolean;
+  /** Prototype: where the board sits, and the switch between the two. */
+  layout: BoardLayout;
+  onLayout: (layout: BoardLayout) => void;
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
@@ -211,13 +217,16 @@ export function Navigator({
     <Frame embedded={embedded}>
       <header className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caps">Board</span>
-        <Link
-          to="/"
-          aria-label="Close the board"
-          className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-        >
-          ✕
-        </Link>
+        <div className="flex items-center gap-1">
+          <LayoutSwitch layout={layout} onLayout={onLayout} />
+          <Link
+            to="/"
+            aria-label="Close the board"
+            className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+          >
+            ✕
+          </Link>
+        </div>
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
@@ -317,5 +326,82 @@ function Frame({ embedded, children }: { embedded: boolean; children: ReactNode 
     <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
       {children}
     </Island>
+  );
+}
+
+const LAYOUT_NAME: Record<BoardLayout, string> = {
+  around: "Board around the sky",
+  beside: "Board beside the sky",
+};
+
+const SWITCH =
+  "grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none";
+
+/** A window with the board's islands in it and a star for the sky: between them, or to the right. */
+function LayoutMark({ layout }: { layout: BoardLayout }) {
+  return (
+    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true">
+      <rect x="1" y="2.5" width="14" height="11" rx="2" fill="none" stroke="currentColor" />
+      {layout === "around" ? (
+        <>
+          <rect x="2.5" y="4" width="2.5" height="8" rx="0.75" fill="currentColor" />
+          <circle cx="7.75" cy="8" r="1.1" fill="currentColor" />
+          <rect x="10.5" y="4" width="3" height="8" rx="0.75" fill="currentColor" />
+        </>
+      ) : (
+        <>
+          <rect x="2.5" y="4" width="6.5" height="8" rx="0.75" fill="currentColor" />
+          <circle cx="11.75" cy="8" r="1.1" fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Prototype: the switch between the two layouts, as one button showing the layout it switches to,
+ * or (with `stellaris.switchForm` set to `pair` in local storage) as two, the current one pressed.
+ */
+function LayoutSwitch({
+  layout,
+  onLayout,
+}: {
+  layout: BoardLayout;
+  onLayout: (layout: BoardLayout) => void;
+}) {
+  const other: BoardLayout = layout === "around" ? "beside" : "around";
+  if (localStorage.getItem("stellaris.switchForm") === "pair") {
+    return (
+      <div role="group" aria-label="Board layout" className="flex rounded-lg bg-surface-2/40 p-0.5">
+        {(["around", "beside"] as const).map((each) => (
+          <button
+            key={each}
+            type="button"
+            aria-label={LAYOUT_NAME[each]}
+            title={LAYOUT_NAME[each]}
+            aria-pressed={each === layout}
+            onClick={() => onLayout(each)}
+            className={`grid h-6 w-7 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+              each === layout
+                ? "bg-surface-2 text-fg-primary"
+                : "text-fg-tertiary hover:text-fg-primary"
+            }`}
+          >
+            <LayoutMark layout={each} />
+          </button>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={LAYOUT_NAME[other]}
+      title={LAYOUT_NAME[other]}
+      onClick={() => onLayout(other)}
+      className={SWITCH}
+    >
+      <LayoutMark layout={other} />
+    </button>
   );
 }

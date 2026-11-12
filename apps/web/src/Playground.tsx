@@ -23,10 +23,13 @@ import {
   ISLAND_MARGIN,
   NAVIGATOR_WIDTH,
   contentWidth as widthFor,
+  readBoardLayout,
   readChosenWidth,
+  saveBoardLayout,
   saveChosenWidth,
   toggledWidth,
   widestContentWidth,
+  type BoardLayout,
   type ChosenWidth,
 } from "./lib/layout.js";
 import { LiveContext, LiveStore } from "./lib/live.js";
@@ -141,27 +144,35 @@ export function Playground() {
   const boardOpen = pathname !== "/";
   // The content island's width is the user's to drag, kept per browser; the sky centers in the rest.
   const [chosenWidth, setChosenWidth] = useState<ChosenWidth>(readChosenWidth);
-  const contentWidth = widthFor(width, chosenWidth);
+  // Prototype: where the board sits, kept per browser.
+  const [layout, setLayout] = useState<BoardLayout>(readBoardLayout);
+  const chooseLayout = (next: BoardLayout): void => {
+    setLayout(next);
+    saveBoardLayout(next);
+  };
+  const contentWidth = widthFor(width, chosenWidth, layout);
   const resizeContent = (next: number, done: boolean): void => {
-    const held = widthFor(width, next);
-    const chosen = held >= widestContentWidth(width) ? "widest" : held;
+    const held = widthFor(width, next, layout);
+    const chosen = held >= widestContentWidth(width, layout) ? "widest" : held;
     setChosenWidth(chosen);
     if (done) {
       saveChosenWidth(chosen);
     }
   };
   const toggleContentWidth = (): void => {
-    const chosen = toggledWidth(width, chosenWidth);
+    const chosen = toggledWidth(width, chosenWidth, layout);
     setChosenWidth(chosen);
     saveChosenWidth(chosen);
   };
   const insets = useMemo<Insets>(
     () =>
-      boardOpen
-        ? // Prototype: one panel on the left, the sky in all the room to its right.
-          { left: NAVIGATOR_WIDTH + contentWidth + 2 * ISLAND_MARGIN, right: 0 }
-        : NO_INSETS,
-    [boardOpen, contentWidth],
+      !boardOpen
+        ? NO_INSETS
+        : layout === "beside"
+          ? // Prototype: one panel on the left, the sky in all the room to its right.
+            { left: NAVIGATOR_WIDTH + contentWidth + 2 * ISLAND_MARGIN, right: 0 }
+          : { left: NAVIGATOR_WIDTH + 2 * ISLAND_MARGIN, right: contentWidth + 2 * ISLAND_MARGIN },
+    [boardOpen, contentWidth, layout],
   );
   // What the open route is about: a channel, directly or through a thread, or a project's tasks,
   // directly or through a task. The navigator highlights it and the sky focuses its project.
@@ -395,7 +406,7 @@ export function Playground() {
                 onToggleLogs={() => setLogsOpen(!logsOpen)}
                 onSignOut={signOut}
               />
-              {boardOpen ? (
+              {boardOpen && layout === "beside" ? (
                 // Prototype: the navigator and the open view in one panel on the left.
                 <Island
                   label="Board"
@@ -404,6 +415,8 @@ export function Playground() {
                 >
                   <Navigator
                     embedded
+                    layout={layout}
+                    onLayout={chooseLayout}
                     activeChannel={activeChannel}
                     activeTasks={activeTasks}
                     activeCitizen={activeCitizen}
@@ -421,10 +434,38 @@ export function Playground() {
                     edge="right"
                     width={contentWidth}
                     min={CONTENT_MIN}
-                    max={widestContentWidth(width)}
+                    max={widestContentWidth(width, layout)}
                     onResize={resizeContent}
                     onToggle={toggleContentWidth}
                   />
+                </Island>
+              ) : null}
+              {boardOpen && layout === "around" ? (
+                <Navigator
+                  layout={layout}
+                  onLayout={chooseLayout}
+                  activeChannel={activeChannel}
+                  activeTasks={activeTasks}
+                  activeCitizen={activeCitizen}
+                  activeScope={activeScope}
+                  activeGovernance={activeGovernance}
+                  activeOverview={activeOverview}
+                />
+              ) : null}
+              {boardOpen && layout === "around" ? (
+                <Island
+                  label="Board content"
+                  className="top-[72px] right-4 bottom-4"
+                  style={{ width: contentWidth }}
+                >
+                  <ResizeHandle
+                    width={contentWidth}
+                    min={CONTENT_MIN}
+                    max={widestContentWidth(width, layout)}
+                    onResize={resizeContent}
+                    onToggle={toggleContentWidth}
+                  />
+                  <Outlet />
                 </Island>
               ) : null}
               {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}

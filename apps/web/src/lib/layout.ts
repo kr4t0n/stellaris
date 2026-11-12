@@ -14,14 +14,38 @@ export function defaultContentWidth(window: number): number {
   return Math.round(Math.min(680, Math.max(CONTENT_MIN, window * 0.4)));
 }
 
-/** Prototype: the widest the view goes, the one board panel then reaching the window's right margin. */
-export function widestContentWidth(window: number): number {
-  return Math.max(CONTENT_MIN, window - NAVIGATOR_WIDTH - 2 * ISLAND_MARGIN);
+/**
+ * Prototype: where the board sits. `around`, today's: the navigator on the left, the view on the
+ * right, the sky between them. `beside`: both in one panel on the left, the sky to its right.
+ */
+export type BoardLayout = "around" | "beside";
+
+const LAYOUT_KEY = "stellaris.boardLayout";
+
+export function readBoardLayout(): BoardLayout {
+  return localStorage.getItem(LAYOUT_KEY) === "beside" ? "beside" : "around";
+}
+
+export function saveBoardLayout(layout: BoardLayout): void {
+  localStorage.setItem(LAYOUT_KEY, layout);
+}
+
+/**
+ * The widest the view goes: up to the navigator with the usual gap, or, in one panel, until the
+ * panel reaches the window's right margin.
+ */
+export function widestContentWidth(window: number, layout: BoardLayout = "around"): number {
+  const gaps = layout === "around" ? 3 : 2;
+  return Math.max(CONTENT_MIN, window - NAVIGATOR_WIDTH - gaps * ISLAND_MARGIN);
 }
 
 /** The width the content island takes: the chosen one, held within what the window allows. */
-export function contentWidth(window: number, chosen: ChosenWidth): number {
-  const widest = widestContentWidth(window);
+export function contentWidth(
+  window: number,
+  chosen: ChosenWidth,
+  layout: BoardLayout = "around",
+): number {
+  const widest = widestContentWidth(window, layout);
   if (chosen === "widest") {
     return widest;
   }
@@ -29,8 +53,14 @@ export function contentWidth(window: number, chosen: ChosenWidth): number {
 }
 
 /** What a double-click on the island's edge chooses: the widest, or back to the default from there. */
-export function toggledWidth(window: number, chosen: ChosenWidth): ChosenWidth {
-  return contentWidth(window, chosen) >= widestContentWidth(window) ? null : "widest";
+export function toggledWidth(
+  window: number,
+  chosen: ChosenWidth,
+  layout: BoardLayout = "around",
+): ChosenWidth {
+  return contentWidth(window, chosen, layout) >= widestContentWidth(window, layout)
+    ? null
+    : "widest";
 }
 
 /** The width this browser chose, if any. */

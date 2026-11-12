@@ -216,3 +216,37 @@ test("at the narrowest panel beside the sky every tab keeps its label on one lin
   expect(new Set(fit.heights).size).toBe(1);
   expect(fit.right).toBeLessThanOrEqual(fit.end);
 });
+
+test("the way back, if chosen: an amber dot on Board while anything waits, named by its count", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("stellaris.boardMark", "dot"));
+  await fakeBoard(page, { enrolling: true, asked: true });
+  await page.goto("/");
+  // 3 need you, 1 runner to approve, 1 cron failing.
+  await expect(corner(page).getByRole("button", { name: "Board, 5 waiting" })).toBeVisible();
+  const names = await corner(page)
+    .getByRole("button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
+    );
+  expect(names).toEqual(["Pause", "Board, 5 waiting", "Sign out"]);
+});
+
+test("with nothing waiting Board wears no dot", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("stellaris.boardMark", "dot"));
+  await fakeBoard(page);
+  await page.route("**/api/requests", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/proposals", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/crons", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/projects/*/tasks", (route) => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Board" }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Board navigator" })
+      .getByRole("link", { name: "Status", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(corner(page).getByRole("button", { name: "Board", exact: true })).toBeVisible();
+});

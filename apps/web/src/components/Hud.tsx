@@ -6,7 +6,17 @@ interface HudProps {
   readonly pauseBusy: boolean;
   readonly boardOpen: boolean;
   readonly onToggleBoard: () => void;
+  /**
+   * PROTOTYPE: how many things wait in the navigator (what needs the user, runners to approve,
+   * crons failing); with `stellaris.boardMark=dot`, Board wears an amber dot while any do.
+   */
+  readonly waiting: number;
   readonly onSignOut: () => void;
+}
+
+/** PROTOTYPE: whether Board shows the dot; off unless the demo turns it on. */
+function boardMark(): boolean {
+  return localStorage.getItem("stellaris.boardMark") === "dot";
 }
 
 /**
@@ -20,8 +30,10 @@ export function Hud({
   pauseBusy,
   boardOpen,
   onToggleBoard,
+  waiting,
   onSignOut,
 }: HudProps) {
+  const dot = waiting > 0 && boardMark();
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
       <div className="flex items-center gap-2.5">
@@ -54,12 +66,14 @@ export function Hud({
         <button
           type="button"
           aria-pressed={boardOpen}
+          aria-label={dot ? `Board, ${waiting} waiting` : undefined}
           onClick={onToggleBoard}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
+          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
             boardOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
           }`}
         >
           Board
+          {dot ? <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" /> : null}
         </button>
         <button
           type="button"

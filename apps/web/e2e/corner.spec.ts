@@ -8,20 +8,49 @@ function corner(page: Page): Locator {
   return page.locator("header").filter({ has: page.getByRole("button", { name: "Board" }) });
 }
 
-test("with the board closed the corner holds only what waits, Pause, Board and Sign out", async ({
+test("with the board closed the corner holds Pause, Board and Sign out, whatever waits", async ({
   page,
 }) => {
   await fakeBoard(page, { enrolling: true, asked: true });
   await page.goto("/");
+  // Wait until what waits has been read, so a chip that would show has had its chance.
+  await page.getByRole("button", { name: "Board" }).click();
+  await expect(
+    page.getByRole("region", { name: "Board navigator" }).getByRole("link", {
+      name: "Status, 1 runner waiting for approval, 1 cron failing",
+    }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL("/");
+  const names = await corner(page)
+    .getByRole("button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
+    );
+  expect(names).toEqual(["Pause", "Board", "Sign out"]);
+});
+
+test("status is the first row, above needs you and proposals", async ({ page }) => {
+  await fakeBoard(page, { enrolling: true, asked: true });
+  await page.goto("/c/general");
+  const governance = page.getByRole("region", { name: "Governance" });
   const names = () =>
-    corner(page)
-      .getByRole("button")
-      .evaluateAll((buttons) =>
-        buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
+    governance
+      .getByRole("link")
+      .evaluateAll((links) =>
+        links.map((link) => link.getAttribute("aria-label") ?? link.textContent),
       );
   await expect
     .poll(names)
-    .toEqual(["3 need you", "1 runner to approve", "1 cron failing", "Pause", "Board", "Sign out"]);
+    .toEqual([
+      "Status, 1 runner waiting for approval, 1 cron failing",
+      "◉needs you3",
+      "◈proposals1",
+    ]);
+  const society = page
+    .locator("section")
+    .filter({ has: page.getByRole("link", { name: "Society" }) });
+  await expect(society.getByRole("link", { name: /^Status/ })).toHaveCount(0);
 });
 
 test("one status row opens the first tab, and the tabs open each view by keyboard at its address", async ({
@@ -87,15 +116,18 @@ test("the log reads as it did, and Esc closes the board from it", async ({ page 
   await expect(page).toHaveURL("/");
 });
 
-test("what waits on the user is one click from the sky, and so is Pause", async ({ page }) => {
+test("what waits on the user is two clicks from the sky, Board then its row; Pause is one", async ({
+  page,
+}) => {
   const board = await fakeBoard(page, { enrolling: true, asked: true });
-  for (const [chip, address] of [
-    ["3 need you", "/needs-you"],
-    ["1 runner to approve", "/runners"],
-    ["1 cron failing", "/crons"],
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  for (const [row, address] of [
+    [/^needs you/, "/needs-you"],
+    ["Status, 1 runner waiting for approval, 1 cron failing", "/citizens"],
   ] as const) {
     await page.goto("/");
-    await corner(page).getByRole("button", { name: chip, exact: true }).click();
+    await corner(page).getByRole("button", { name: "Board" }).click();
+    await navigator.getByRole("link", { name: row }).click();
     await expect(page).toHaveURL(address);
   }
   await page.goto("/");

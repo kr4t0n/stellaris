@@ -1,14 +1,5 @@
 interface HudProps {
   readonly society: string | undefined;
-  /** How many things wait on the user; the chip opens them. */
-  readonly attention: number;
-  readonly onOpenAttention: () => void;
-  /** Runners waiting for the user to approve their enrollment; a chip opens them while any wait. */
-  readonly enrolling: number;
-  readonly onOpenRunners: () => void;
-  /** Crons whose turns keep failing; a chip opens the crons while any fail. */
-  readonly failingCrons: number;
-  readonly onOpenCrons: () => void;
   readonly paused: boolean;
   /** Pauses or resumes the scheduler; while the request runs the switch waits. */
   readonly onTogglePause: () => void;
@@ -18,28 +9,12 @@ interface HudProps {
   readonly onSignOut: () => void;
 }
 
-const CHIP =
-  "card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-amber-300 transition-colors hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none";
-
-/** A count that waits on the user, shown only while it is above zero. */
-function Alert({ count, label, onOpen }: { count: number; label: string; onOpen: () => void }) {
-  return count === 0 ? null : (
-    <button type="button" onClick={onOpen} className={CHIP}>
-      <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
-      {label}
-    </button>
-  );
-}
-
-/** The frame around the sky: the app's icon, what waits on the user, and the way out. */
+/**
+ * The frame around the sky: the app's icon, the pause switch, the board, and the way out.
+ * PROTOTYPE: what waits on the user is counted in the navigator alone.
+ */
 export function Hud({
   society,
-  attention,
-  onOpenAttention,
-  enrolling,
-  onOpenRunners,
-  failingCrons,
-  onOpenCrons,
   paused,
   onTogglePause,
   pauseBusy,
@@ -63,21 +38,6 @@ export function Hud({
         {society === undefined ? null : <span className="text-meta">{society}</span>}
       </div>
       <div className="pointer-events-auto flex items-center gap-2">
-        <Alert
-          count={attention}
-          label={`${attention} ${attention === 1 ? "needs" : "need"} you`}
-          onOpen={onOpenAttention}
-        />
-        <Alert
-          count={enrolling}
-          label={`${enrolling} ${enrolling === 1 ? "runner" : "runners"} to approve`}
-          onOpen={onOpenRunners}
-        />
-        <Alert
-          count={failingCrons}
-          label={`${failingCrons} ${failingCrons === 1 ? "cron" : "crons"} failing`}
-          onOpen={onOpenCrons}
-        />
         <button
           type="button"
           aria-pressed={paused}

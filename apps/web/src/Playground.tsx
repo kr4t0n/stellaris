@@ -3,10 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
-import { failingCron } from "./board/crons.js";
 import { Navigator, type GovernanceView, type SocietyWideView } from "./board/Navigator.js";
 import { StatusTabs } from "./board/StatusTabs.js";
-import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { displayName, SignInContext } from "./board/Avatar.js";
@@ -40,7 +38,6 @@ import { recordVisit } from "./lib/trail.js";
 import {
   useAllTasks,
   useCrons,
-  useEnrollments,
   useMe,
   useMembers,
   useNow,
@@ -200,9 +197,6 @@ export function Playground() {
       : pathname === "/proposals" || pathname.startsWith("/proposal/")
         ? "proposals"
         : null;
-  const attention = useNeedsYou().length;
-  const enrolling = useEnrollments().data?.length ?? 0;
-  const failingCrons = cronList.data?.filter(failingCron).length ?? 0;
   const activeView = SOCIETY_WIDE_VIEWS.get(pathname) ?? null;
   const activeOverview =
     pathname === "/society" || pathname.startsWith("/skills/")
@@ -365,12 +359,6 @@ export function Playground() {
               />
               <Hud
                 society={society.data?.name}
-                attention={attention}
-                onOpenAttention={() => void navigate({ to: "/needs-you" })}
-                enrolling={enrolling}
-                onOpenRunners={() => void navigate({ to: "/runners" })}
-                failingCrons={failingCrons}
-                onOpenCrons={() => void navigate({ to: "/crons" })}
                 paused={scheduler.data?.paused ?? false}
                 onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
                 pauseBusy={pause.isPending}

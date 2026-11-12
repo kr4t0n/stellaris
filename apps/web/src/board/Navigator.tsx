@@ -96,8 +96,17 @@ function Count({ value, title }: { value: number; title: string }) {
   );
 }
 
-/** Where the user decides: what waits on the user and the proposals, each with its count. */
-function Governance({ active }: { active: GovernanceView | null }) {
+/**
+ * Where the user decides: what waits on the user and the proposals, each with its count, under
+ * PROTOTYPE: the society's status, which the user asked to sit first.
+ */
+function Governance({
+  active,
+  statusActive,
+}: {
+  active: GovernanceView | null;
+  statusActive: boolean;
+}) {
   const proposals = useProposals();
   const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
   const attention = useNeedsYou().length;
@@ -107,6 +116,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
         Governance
       </h3>
       <ul>
+        <StatusEntry active={statusActive} />
         <li>
           <Link
             to="/needs-you"
@@ -272,7 +282,7 @@ export function Navigator({
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
-        <Governance active={activeGovernance} />
+        <Governance active={activeGovernance} statusActive={activeView !== null} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="pb-1">
@@ -321,9 +331,7 @@ export function Navigator({
                   </li>
                 );
               })}
-              {group.project === null ? (
-                <StatusEntry active={activeView !== null} />
-              ) : (
+              {group.project === null ? null : (
                 <TasksEntry slug={group.project} active={group.project === activeTasks} />
               )}
             </ul>

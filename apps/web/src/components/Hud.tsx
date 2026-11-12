@@ -21,9 +21,9 @@ function waitingMark(): boolean {
   return localStorage.getItem("stellaris.waitingMark") === "name";
 }
 
-/** The camera's controls' look, so the two cards on the sky's right edge match. */
+/** A bare icon on the sky, as Sign out was bare text: no card, a ground only under the pointer. */
 const ICON =
-  "grid size-7 place-items-center rounded-md transition-colors hover:bg-surface-2/70 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50";
+  "grid size-7 place-items-center rounded-md transition-colors hover:bg-surface-2/60 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50";
 
 /** Two bars, or while paused the triangle that resumes. */
 function PauseMark({ paused }: { paused: boolean }) {
@@ -98,44 +98,39 @@ export function Hud({
           </span>
         ) : null}
       </div>
-      <div className="pointer-events-auto flex items-center gap-2">
+      <div className="pointer-events-auto flex items-center gap-1">
         {boardOpen ? null : (
           <button
             type="button"
             onClick={onOpenBoard}
-            className="card sr-only items-center rounded-md text-xs text-fg-primary focus-visible:not-sr-only focus-visible:inline-flex focus-visible:h-7 focus-visible:px-2.5 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+            className="sr-only items-center rounded-md text-xs text-fg-primary focus-visible:not-sr-only focus-visible:inline-flex focus-visible:h-7 focus-visible:px-2.5 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
           >
             Open the board
           </button>
         )}
-        {/* One card of two, as the camera's three sit in one at the bottom: its 4 px padding hangs
-            outside the row's 28 px line, so its icons line up with the app's and its edge with the
-            camera card's. */}
-        <div className="card -my-1 -mr-1 flex gap-0.5 p-1">
-          <button
-            type="button"
-            aria-label={paused ? "Resume" : "Pause"}
-            title={paused ? "Paused: resume" : "Pause"}
-            disabled={pauseBusy}
-            onClick={onTogglePause}
-            className={`${ICON} ${
-              paused
-                ? "text-amber-300 hover:text-amber-200"
-                : "text-fg-tertiary hover:text-fg-primary"
-            }`}
-          >
-            <PauseMark paused={paused} />
-          </button>
-          <button
-            type="button"
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={onSignOut}
-            className={`${ICON} text-fg-tertiary hover:text-fg-primary`}
-          >
-            <SignOutMark />
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label={paused ? "Resume" : "Pause"}
+          title={paused ? "Paused: resume" : "Pause"}
+          disabled={pauseBusy}
+          onClick={onTogglePause}
+          className={`${ICON} ${
+            paused
+              ? "text-amber-300 hover:text-amber-200"
+              : "text-fg-tertiary hover:text-fg-primary"
+          }`}
+        >
+          <PauseMark paused={paused} />
+        </button>
+        <button
+          type="button"
+          aria-label="Sign out"
+          title="Sign out"
+          onClick={onSignOut}
+          className={`${ICON} text-fg-tertiary hover:text-fg-primary`}
+        >
+          <SignOutMark />
+        </button>
       </div>
     </header>
   );

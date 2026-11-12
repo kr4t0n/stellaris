@@ -39,6 +39,8 @@ test("with the board closed the corner holds two icons, Pause and Sign out, what
     { name: "Pause", text: "", width: 28 },
     { name: "Sign out", text: "", width: 28 },
   ]);
+  // Bare icons, as Sign out was bare text: no card behind them or around them.
+  await expect(corner(page).locator(".card")).toHaveCount(0);
 });
 
 test("status is the first row, above needs you and proposals", async ({ page }) => {

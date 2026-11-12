@@ -20,7 +20,11 @@ export function LogsView() {
     <>
       <PaneHeader
         title="Operations log"
-        subtitle={records.length === 0 ? undefined : `${records.length} signals, newest first`}
+        subtitle={
+          records.length === 0
+            ? undefined
+            : `${records.length === 1 ? "1 signal" : `${records.length} signals`}, newest first`
+        }
       />
       {records.length === 0 ? (
         <PaneNote>

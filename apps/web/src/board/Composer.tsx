@@ -374,122 +374,162 @@ export function Composer({
           ))}
         </ul>
       )}
-      <div
-        onDragOver={(event) => {
-          if (filesDragged(event)) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "copy";
-            setDragging(true);
-          }
-        }}
-        onDragLeave={(event) => {
-          if (
-            !(
-              event.relatedTarget instanceof Node &&
-              event.currentTarget.contains(event.relatedTarget)
-            )
-          ) {
-            setDragging(false);
-          }
-        }}
-        onDrop={(event) => {
-          setDragging(false);
-          if (event.dataTransfer.files.length > 0) {
-            event.preventDefault();
-            attach([...event.dataTransfer.files]);
-          }
-        }}
-        className={`relative flex items-end gap-2 rounded-xl bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
-          dragging
-            ? "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
-            : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-        }`}
-      >
-        {candidates.length > 0 ? (
-          <ul
-            aria-label="Citizens to mention"
-            className="card absolute bottom-full left-2 mb-2 w-60 overflow-hidden py-1"
-          >
-            {candidates.map((member, index) => (
-              <li key={member.name}>
-                <button
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    complete(member.name);
-                  }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-                    index === pick ? "bg-surface-2 text-fg-primary" : "text-fg-secondary"
-                  }`}
-                >
-                  {member.cli === null ? null : <CliIcon cli={member.cli} size={14} />}
-                  <span className="flex-1 truncate">{member.name}</span>
-                  <span className="truncate font-mono text-[11px] text-fg-muted">
-                    {member.role}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <textarea
-          ref={box}
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          onChange={(event) => {
-            setText(event.target.value);
-            setCaret(event.target.selectionStart);
-            setPick(0);
-            setDismissed(false);
-          }}
-          onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-          onKeyDown={onKeyDown}
-          onPaste={(event) => {
-            // Text copied with a picture of it, as from a spreadsheet, pastes as the text.
-            const files = [...event.clipboardData.files];
-            if (files.length > 0 && event.clipboardData.getData("text/plain") === "") {
+      <div className="flex items-end gap-2">
+        <div
+          onDragOver={(event) => {
+            if (filesDragged(event)) {
               event.preventDefault();
-              attach(files);
+              event.dataTransfer.dropEffect = "copy";
+              setDragging(true);
             }
           }}
-          className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
-        />
-        <div className="flex shrink-0 items-center gap-0.5 pb-1.5">
-          <input
-            ref={picker}
-            type="file"
-            accept={IMAGE_TYPES}
-            multiple
-            hidden
-            onChange={(event) => {
-              attach([...(event.currentTarget.files ?? [])]);
-              event.currentTarget.value = "";
-            }}
-          />
-          <Button
-            aria-label="Add images"
-            title="Add images"
-            onClick={() => picker.current?.click()}
-          >
-            <ImageGlyph />
-          </Button>
-          {action === undefined ? null : (
-            <button
-              type="button"
-              disabled={!actionable}
-              title={action.blocked ?? action.title}
-              onClick={() => act.mutate(text.trim())}
-              className="inline-flex h-7 shrink-0 items-center rounded-md bg-emerald-400/15 px-3 text-xs font-medium text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+          onDragLeave={(event) => {
+            if (
+              !(
+                event.relatedTarget instanceof Node &&
+                event.currentTarget.contains(event.relatedTarget)
+              )
+            ) {
+              setDragging(false);
+            }
+          }}
+          onDrop={(event) => {
+            setDragging(false);
+            if (event.dataTransfer.files.length > 0) {
+              event.preventDefault();
+              attach([...event.dataTransfer.files]);
+            }
+          }}
+          className={`relative flex min-w-0 flex-1 items-end gap-2 bg-surface-2/50 pr-1.5 focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] ${
+            FORM === "beside" ? "rounded-[20px]" : "rounded-xl"
+          } ${
+            dragging
+              ? "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
+              : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+          }`}
+        >
+          {candidates.length > 0 ? (
+            <ul
+              aria-label="Citizens to mention"
+              className="card absolute bottom-full left-2 mb-2 w-60 overflow-hidden py-1"
             >
-              {act.isPending ? action.pendingLabel : action.label}
-            </button>
-          )}
-          <Button variant="primary" type="submit" disabled={!sendable}>
-            {send.isPending ? "Sending…" : "Send"}
-          </Button>
+              {candidates.map((member, index) => (
+                <li key={member.name}>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      complete(member.name);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                      index === pick ? "bg-surface-2 text-fg-primary" : "text-fg-secondary"
+                    }`}
+                  >
+                    {member.cli === null ? null : <CliIcon cli={member.cli} size={14} />}
+                    <span className="flex-1 truncate">{member.name}</span>
+                    <span className="truncate font-mono text-[11px] text-fg-muted">
+                      {member.role}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <textarea
+            ref={box}
+            rows={1}
+            value={text}
+            placeholder={placeholder}
+            aria-label={placeholder}
+            onChange={(event) => {
+              setText(event.target.value);
+              setCaret(event.target.selectionStart);
+              setPick(0);
+              setDismissed(false);
+            }}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+            onKeyDown={onKeyDown}
+            onPaste={(event) => {
+              // Text copied with a picture of it, as from a spreadsheet, pastes as the text.
+              const files = [...event.clipboardData.files];
+              if (files.length > 0 && event.clipboardData.getData("text/plain") === "") {
+                event.preventDefault();
+                attach(files);
+              }
+            }}
+            className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
+          />
+          <div className="flex shrink-0 items-center gap-0.5 pb-1.5">
+            <input
+              ref={picker}
+              type="file"
+              accept={IMAGE_TYPES}
+              multiple
+              hidden
+              onChange={(event) => {
+                attach([...(event.currentTarget.files ?? [])]);
+                event.currentTarget.value = "";
+              }}
+            />
+            <Button
+              aria-label="Add images"
+              title="Add images"
+              onClick={() => picker.current?.click()}
+            >
+              <ImageGlyph />
+            </Button>
+            {FORM === "inside" && action !== undefined ? (
+              <button
+                type="button"
+                disabled={!actionable}
+                aria-label={act.isPending ? action.pendingLabel : action.label}
+                title={action.blocked ?? action.title}
+                onClick={() => act.mutate(text.trim())}
+                className="grid size-7 shrink-0 place-items-center rounded-md bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+              >
+                {act.isPending ? <Spinner /> : <CheckGlyph />}
+              </button>
+            ) : null}
+            {FORM === "inside" ? (
+              <button
+                type="submit"
+                disabled={!sendable}
+                aria-label={send.isPending ? "Sending" : "Send"}
+                title="Send"
+                className={`grid size-7 shrink-0 place-items-center rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
+                  sendable ? "bg-fg-primary text-surface-0 hover:bg-white" : "text-fg-muted"
+                }`}
+              >
+                {send.isPending ? <Spinner /> : <ArrowGlyph />}
+              </button>
+            ) : null}
+          </div>
         </div>
+        {FORM === "beside" && action !== undefined ? (
+          <button
+            type="button"
+            disabled={!actionable}
+            aria-label={act.isPending ? action.pendingLabel : action.label}
+            title={action.blocked ?? action.title}
+            onClick={() => act.mutate(text.trim())}
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+          >
+            {act.isPending ? <Spinner /> : <CheckGlyph size={18} />}
+          </button>
+        ) : null}
+        {FORM === "beside" ? (
+          <button
+            type="submit"
+            disabled={!sendable}
+            aria-label={send.isPending ? "Sending" : "Send"}
+            title="Send"
+            className={`grid size-10 shrink-0 place-items-center rounded-full bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:pointer-events-none ${
+              sendable ? "text-fg-primary hover:bg-surface-2" : "text-fg-muted"
+            }`}
+          >
+            {send.isPending ? <Spinner /> : <ArrowGlyph size={18} />}
+          </button>
+        ) : null}
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
@@ -508,6 +548,70 @@ export function Composer({
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * Which of the two forms the prototype draws: round buttons beside the box, as the iOS app's Send
+ * is, or icons inside it. `stellaris.composerForm` set to `inside` picks the second.
+ */
+const FORM: "beside" | "inside" =
+  typeof localStorage !== "undefined" && localStorage.getItem("stellaris.composerForm") === "inside"
+    ? "inside"
+    : "beside";
+
+/** An arrow pointing up, Send's mark, as the iOS app draws it. */
+function ArrowGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 13.5V2.75M3.25 7.5 8 2.75l4.75 4.75" />
+    </svg>
+  );
+}
+
+/** A check, Approve's mark, as the iOS app's Advance has it. */
+function CheckGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 8.5 6.5 12 13 4.25" />
+    </svg>
+  );
+}
+
+/** A ring turning while a post or an approval is on its way. */
+function Spinner() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
+      fill="none"
+      aria-hidden="true"
+      className="animate-spin"
+    >
+      <circle cx={8} cy={8} r={6} stroke="currentColor" strokeOpacity={0.25} strokeWidth={1.8} />
+      <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+    </svg>
   );
 }
 

@@ -137,4 +137,85 @@ describe("renaming a runner", () => {
       runner: "gpu-1",
     });
   });
+
+  it("starts a warm session again under the new name, on the session it kept, and moves the citizen's pin", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "warm-renames" });
+    await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
+    // Each start of a warm CLI says on which runner and session; each turn runs on the warm one.
+    const started: Array<{ runner: string; session: string; newSession: boolean }> = [];
+    const closed: string[] = [];
+    const tokens: string[] = [];
+    let sessions = 0;
+    const done = {
+      events: [],
+      finalText: "done",
+      usage: ZERO_USAGE,
+      costUsd: 0,
+      status: {
+        summary: "done",
+        claimsHeld: [],
+        blockedOn: [],
+        needsUserDecision: false,
+        memoryUpdated: false,
+      },
+      exitReason: "completed" as const,
+    };
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${sessions++}`),
+      runTurn: () => Promise.resolve(done),
+      startResident: (spec, resident) => {
+        tokens.push(resident.mcp.token);
+        started.push({
+          runner: spec.runner,
+          session: resident.session,
+          newSession: resident.newSession,
+        });
+        return Promise.resolve({
+          session: resident.session,
+          runTurn: () => Promise.resolve(done),
+          close: () => {
+            closed.push(`${spec.runner}:${resident.session}`);
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend }),
+    });
+    const dispatch = {
+      agent: "concierge-1",
+      project: "society",
+      trigger: { kind: "manual" as const, fromUser: false, reason: "work" },
+      priority: 1,
+    };
+
+    // The home's first turn pins the concierge to pod and starts its session warm; the next
+    // runs on the warm one.
+    await society.run(dispatch);
+    await society.run(dispatch);
+    expect(started).toEqual([{ runner: "pod", session: "session-0", newSession: true }]);
+    expect((await board.readAgent("concierge-1")).homeRunner).toBe("pod");
+
+    const renamed = await society.app.request("/api/runners/pod/name", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${userToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "gpu-1" }),
+    });
+    expect(await renamed.json()).toMatchObject({ agents: ["concierge-1"], sessions: 1 });
+    expect((await board.readAgent("concierge-1")).homeRunner).toBe("gpu-1");
+    await expect.poll(() => society?.hub.connected).toEqual(["gpu-1"]);
+    // The warm session's token goes at once, rather than when its idle time runs out.
+    expect(board.resolveToken(tokens[0] ?? "")).toBeNull();
+
+    // Its next turn has a new token, so the warm CLI, which stamps the name it started with,
+    // starts again under the new name on the session it kept.
+    const after = await society.run(dispatch);
+    expect(after).toMatchObject({ exitReason: "completed", runner: "gpu-1", session: "session-0" });
+    expect(closed).toEqual(["pod:session-0"]);
+    expect(started.at(-1)).toEqual({ runner: "gpu-1", session: "session-0", newSession: false });
+  });
 });

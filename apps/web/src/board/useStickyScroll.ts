@@ -32,6 +32,7 @@ export function useStickyScroll({
   // until the reader scrolls back up.
   const jumping = useRef<number | null>(null);
   const lastTop = useRef(0);
+  const lastHeight = useRef(0);
   const [away, setAway] = useState(false);
   const newest = ids.at(-1) ?? null;
   const [seen, setSeen] = useState<string | null>(null);
@@ -60,6 +61,22 @@ export function useStickyScroll({
       }
     }
   });
+  // The list's own box can change under a reader at the end, as when something above or below it
+  // opens or the composer grows a line: the end stays in view.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      lastHeight.current = element.clientHeight;
+      if (atEnd.current && follow && jumping.current === null) {
+        element.scrollTop = element.scrollHeight;
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [follow]);
   // Once new items are in: whether they reach past the end where the reader is, as when a link took
   // them to a message, and the newest the reader has seen, which is everything the list opened with.
   useLayoutEffect(() => {
@@ -74,6 +91,14 @@ export function useStickyScroll({
   const onScroll = (): void => {
     const element = ref.current;
     if (element === null) {
+      return;
+    }
+    // A scroll that comes with a new height is the browser's, as scroll anchoring moves the list
+    // when its box shrinks, before the observer above hears of it: a reader at the end stays there.
+    const resized = element.clientHeight !== lastHeight.current;
+    lastHeight.current = element.clientHeight;
+    if (resized && atEnd.current && follow && jumping.current === null) {
+      element.scrollTop = element.scrollHeight;
       return;
     }
     const near = distanceToEnd(element) < NEAR_END;

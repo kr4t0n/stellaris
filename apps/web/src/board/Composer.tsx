@@ -36,6 +36,18 @@ export type Target =
   | { readonly threadId: string }
   | { readonly ask: true };
 
+/**
+ * A second way to send what the box holds, beside Send, such as finishing a stage with the text as
+ * its note. It may go with the box empty; `blocked` says why it can't go at all.
+ */
+export interface ComposerAction {
+  readonly label: string;
+  readonly pendingLabel: string;
+  readonly title: string;
+  readonly blocked: string | null;
+  readonly run: (text: string) => Promise<unknown>;
+}
+
 const MAX_CANDIDATES = 6;
 
 /** The kinds of image the board keeps, which the file picker offers. */
@@ -61,6 +73,7 @@ export function Composer({
   focusOnOpen = false,
   onPosted,
   onEmptyEscape,
+  action,
 }: {
   target: Target;
   placeholder: string;
@@ -72,6 +85,8 @@ export function Composer({
   onPosted?: (message: Message) => void;
   /** Escape in an empty box, for a composer that closes. */
   onEmptyEscape?: () => void;
+  /** A second button beside Send; Enter still sends. */
+  action?: ComposerAction | undefined;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
@@ -119,6 +134,23 @@ export function Composer({
       // A post by the user answers whatever was asked of them where it was posted.
       void client.invalidateQueries({ queryKey: ["requests"] });
       onPosted?.(message);
+    },
+  });
+
+  const act = useMutation({
+    mutationFn: (body: string) => {
+      if (action === undefined) {
+        return Promise.resolve();
+      }
+      return action.run(body);
+    },
+    onSuccess: () => {
+      setText(initialText);
+      setUploadFailure(null);
+      if ("threadId" in target) {
+        void client.invalidateQueries({ queryKey: ["thread", target.threadId] });
+      }
+      void client.invalidateQueries({ queryKey: ["requests"] });
     },
   });
 
@@ -173,7 +205,17 @@ export function Composer({
     setCaret(next.caret);
   };
   const sendable =
-    text.trim() !== "" && text.trim() !== initialText.trim() && !send.isPending && uploading === 0;
+    text.trim() !== "" &&
+    text.trim() !== initialText.trim() &&
+    !send.isPending &&
+    !act.isPending &&
+    uploading === 0;
+  const actionable =
+    action !== undefined &&
+    action.blocked === null &&
+    !send.isPending &&
+    !act.isPending &&
+    uploading === 0;
   const submit = (): void => {
     if (sendable) {
       send.mutate(text.trim());
@@ -433,6 +475,17 @@ export function Composer({
           >
             <ImageGlyph />
           </Button>
+          {action === undefined ? null : (
+            <button
+              type="button"
+              disabled={!actionable}
+              title={action.blocked ?? action.title}
+              onClick={() => act.mutate(text.trim())}
+              className="inline-flex h-7 shrink-0 items-center rounded-md bg-emerald-400/15 px-3 text-xs font-medium text-emerald-200 transition-colors hover:bg-emerald-400/25 focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+            >
+              {act.isPending ? action.pendingLabel : action.label}
+            </button>
+          )}
           <Button variant="primary" type="submit" disabled={!sendable}>
             {send.isPending ? "Sending…" : "Send"}
           </Button>
@@ -441,6 +494,12 @@ export function Composer({
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
           {send.error instanceof ApiError ? send.error.message : "The message was not sent."}
+        </p>
+      )}
+      {action?.blocked == null ? null : <p className="mt-2 text-meta">{action.blocked}</p>}
+      {act.error === null ? null : (
+        <p role="alert" className="mt-2 text-xs text-red-400">
+          {act.error instanceof ApiError ? act.error.message : "The stage was not finished."}
         </p>
       )}
       {uploadFailure === null ? null : (

@@ -40,7 +40,10 @@ function Touched({ last, now }: { last: { author: string; at: string } | undefin
 function Patch({ taskId, path, patch }: { taskId: string; path: string; patch: string }) {
   const rows = useMemo(() => patchRows(patch), [patch]);
   return (
-    <div className="mt-1 max-h-96 overflow-auto rounded-md bg-surface-0/60 py-1.5 font-mono text-[11px] leading-relaxed">
+    <div
+      data-patch
+      className="mt-1 max-h-96 overflow-auto rounded-md bg-surface-0/60 py-1.5 font-mono text-[11px] leading-relaxed"
+    >
       {rows.map((row, at) => (
         <div key={at} className={`flex ${ROW_TONE[row.kind]}`}>
           <span
@@ -295,5 +298,54 @@ export function TaskFiles({ task, now }: { task: Task; now: number }) {
       </div>
       {body}
     </section>
+  );
+}
+
+/** One line for what a task's branch changed: how many files, how many lines, and whose commit. */
+export function useFilesSummary(task: Task, now: number): string {
+  const changes = useTaskChanges(task.id);
+  const projects = useProjects();
+  if (changes.data !== undefined) {
+    const { files, total, head } = changes.data;
+    if (files.length === 0) {
+      return "Nothing changed yet";
+    }
+    const added = files.reduce((sum, file) => sum + (file.added ?? 0), 0);
+    const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
+    return `${total === 1 ? "1 file" : `${total} files`} · +${added} −${removed} · ${head.author} ${ago(head.at, now)}`;
+  }
+  if (changes.error instanceof ApiError && changes.error.status === 404) {
+    return "Nothing changed yet";
+  }
+  if (changes.error instanceof ApiError && changes.error.status === 503) {
+    const project = projects.data?.find((each) => each.slug === task.project);
+    return `${project?.runner ?? "The runner"} is not connected`;
+  }
+  return changes.error === null ? "Reading the branch…" : changes.error.message;
+}
+
+/** The tree of a task's changed files, for a place that has its own heading. */
+export function TaskFileTree({ task, now }: { task: Task; now: number }) {
+  const changes = useTaskChanges(task.id);
+  if (changes.data === undefined || changes.data.files.length === 0) {
+    return null;
+  }
+  const { files, total } = changes.data;
+  return (
+    <>
+      <ChangeTree taskId={task.id} changes={files} now={now} />
+      {total > files.length ? (
+        <p className="mt-2 text-meta">
+          The first {files.length} of {total}
+        </p>
+      ) : null}
+      <FileLink
+        source={{ kind: "task", taskId: task.id }}
+        path=""
+        className="mt-1 inline-block text-meta underline decoration-line underline-offset-2 hover:text-fg-primary"
+      >
+        Browse the branch
+      </FileLink>
+    </>
   );
 }

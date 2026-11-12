@@ -1,13 +1,12 @@
 import type { Member, Stage, Task } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { BackLink } from "../components/BackLink.js";
-import { Button } from "../components/Button.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
 import { ApiError } from "../lib/api.js";
-import { ago } from "../lib/format.js";
+import { ago, firstParagraph } from "../lib/format.js";
 import {
   useMembers,
   useNow,
@@ -18,13 +17,14 @@ import {
   useThreads,
 } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
-import { Composer } from "./Composer.js";
+import { Composer, type ComposerAction } from "./Composer.js";
 import { stageForYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
+import { PlanStrip } from "./PlanStrip.js";
 import { StickyList } from "./StickyList.js";
 import { SubjectThread } from "./SubjectThread.js";
-import { TaskFiles } from "./TaskFiles.js";
-import { Failure, FIELD } from "./ThreadForms.js";
+import { TaskFileTree, useFilesSummary } from "./TaskFiles.js";
+import { Failure } from "./ThreadForms.js";
 import {
   assigneeOf,
   isCurrent,
@@ -102,62 +102,6 @@ function StageItem({
   );
 }
 
-/**
- * Finishes the stage that names the user, as the user, with an optional note for the task's
- * thread; on a task's last stage that is the approval its landing waits for.
- */
-function ApproveStage({ task, stage }: { task: Task; stage: Stage }) {
-  const { api } = useSession();
-  const client = useQueryClient();
-  const [note, setNote] = useState("");
-  const index = task.stages.findIndex((each) => each.id === stage.id);
-  // The board refuses to finish a ghpr task's last stage while no pull request is linked.
-  const unlinked =
-    task.stages[index + 1] === undefined &&
-    task.onDone === "ghpr" &&
-    task.pullRequest === undefined;
-  const approve = useMutation({
-    mutationFn: () =>
-      api.advanceTask({
-        task_id: task.id,
-        ...(note.trim() === "" ? {} : { note: note.trim() }),
-      }),
-    onSuccess: async () => {
-      setNote("");
-      await client.invalidateQueries({ queryKey: ["task", task.id] });
-      await client.invalidateQueries({ queryKey: ["tasks"] });
-    },
-  });
-  return (
-    <form
-      aria-label={`Approve ${stage.name}`}
-      className="mt-1 mb-4 space-y-2 rounded-lg bg-surface-2/40 p-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        approve.mutate();
-      }}
-    >
-      <p className="text-sm text-fg-secondary">
-        {stage.name} waits on you.{unlinked ? " No pull request linked yet." : ""}
-      </p>
-      <textarea
-        value={note}
-        rows={2}
-        aria-label="Note for the task's thread"
-        placeholder="A note for the thread, if any"
-        onChange={(event) => setNote(event.target.value)}
-        className={FIELD}
-      />
-      <div className="flex justify-end">
-        <Button variant="primary" type="submit" disabled={approve.isPending}>
-          {approve.isPending ? "Approving…" : "Approve"}
-        </Button>
-      </div>
-      <Failure error={approve.error} />
-    </form>
-  );
-}
-
 /** A ghpr task's pull request and the merge commit the board will make of it. */
 function PullRequest({ task, now }: { task: Task; now: number }) {
   const link = task.pullRequest;
@@ -168,9 +112,8 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
     .filter((part) => part !== "")
     .join("\n\n");
   return (
-    <section aria-label="Pull request" className="mt-5 border-t border-line pt-4">
-      <h3 className="text-section">Pull request</h3>
-      <p className="mt-2 text-sm">
+    <div>
+      <p className="text-sm">
         <a
           href={link.url}
           target="_blank"
@@ -203,11 +146,258 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
           </pre>
         </>
       )}
+    </div>
+  );
+}
+
+/** Approve with no box, for a stage that waits on the user on a task with no open thread. */
+function ApproveAlone({ action }: { action: ComposerAction }) {
+  const run = useMutation({ mutationFn: () => action.run("") });
+  return (
+    <div className="border-t border-line p-3">
+      <div className="flex items-center justify-end gap-2">
+        {action.blocked === null ? null : <p className="mr-auto text-meta">{action.blocked}</p>}
+        <button
+          type="button"
+          disabled={action.blocked !== null || run.isPending}
+          title={action.blocked ?? action.title}
+          onClick={() => run.mutate()}
+          className="inline-flex h-7 shrink-0 items-center rounded-md bg-emerald-400/15 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-400/25 disabled:opacity-40"
+        >
+          {run.isPending ? action.pendingLabel : action.label}
+        </button>
+      </div>
+      <Failure error={run.error} />
+    </div>
+  );
+}
+
+type Part = "plan" | "files" | "brief" | "pr";
+
+/** A row of the task's top: what it is, one line of where it stands, and a button that opens it. */
+function Disclosure({
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="group flex w-full min-w-0 items-baseline gap-2 rounded-md py-1 text-left hover:bg-surface-2/40"
+    >
+      <span
+        aria-hidden="true"
+        className={`inline-block w-2.5 shrink-0 text-[10px] text-fg-muted transition-transform ${open ? "rotate-90" : ""}`}
+      >
+        ▸
+      </span>
+      <span className="w-[4.75rem] shrink-0 text-caps">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-xs text-fg-tertiary group-hover:text-fg-secondary">
+        {children}
+      </span>
+    </button>
+  );
+}
+
+/** Where the task stands, in one line: its stage, the stage's gate, and who it waits on. */
+function StageLine({ task, now }: { task: Task; now: number }) {
+  const phase = phaseOf(task);
+  const stage = task.stages.find((each) => each.id === task.stage);
+  if (phase === "done" || phase === "abandoned" || stage === undefined) {
+    return <span className="text-sm text-fg-secondary">{progressOf(task)}</span>;
+  }
+  const yours = stageForYou(task) !== null;
+  const who =
+    phase === "landing"
+      ? "landing"
+      : task.status === "claimed" && task.claimedBy !== undefined
+        ? `held by ${task.claimedBy}`
+        : yours
+          ? `waiting on you since ${ago(task.stageSince, now)}`
+          : `for ${assigneeOf(stage)} · waiting ${ago(task.stageSince, now)}`;
+  return (
+    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+      <span className="min-w-0 truncate text-sm text-fg-primary">
+        <span className="text-fg-tertiary">{progressOf(task)} · </span>
+        {stage.name}
+      </span>
+      {stage.gate ? (
+        <span className="shrink-0 rounded-md bg-sky-400/10 px-1.5 py-px text-[11px] text-sky-300">
+          gate
+        </span>
+      ) : null}
+      <span className={`shrink-0 text-meta ${yours ? "text-amber-200" : ""}`}>{who}</span>
+    </span>
+  );
+}
+
+/**
+ * What stays above the thread: the plan's strip and the stage it is at, then a row each for the
+ * plan, the files the branch changed, the brief, and the pull request, each opening in place. It
+ * takes at most half the room between the header and the box, past which it scrolls as one, a
+ * patch included, so the thread keeps the other half.
+ */
+function TaskTop({
+  task,
+  now,
+  members,
+}: {
+  task: Task;
+  now: number;
+  members: readonly Member[] | undefined;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<Part>>(new Set());
+  const toggle = (part: Part): void =>
+    setOpen((was) => {
+      const next = new Set(was);
+      if (!next.delete(part)) {
+        next.add(part);
+      }
+      return next;
+    });
+  const files = useFilesSummary(task, now);
+  const brief = firstParagraph(task.body, 160);
+  const link = task.pullRequest;
+  return (
+    <section
+      aria-label="Where the task stands"
+      className="max-h-[50%] shrink-0 overflow-y-auto border-b border-line px-4 pt-3 pb-2 [&_[data-patch]]:max-h-none"
+    >
+      <PlanStrip task={task} />
+      <div className="mt-2.5 mb-1.5">
+        <StageLine task={task} now={now} />
+      </div>
+      {task.returned === undefined ? null : (
+        <p className="mb-1.5 rounded-lg bg-orange-500/10 px-3 py-1.5 text-xs leading-relaxed text-orange-200">
+          Sent back from {stageName(task, task.returned.from)} by {task.returned.by}{" "}
+          {ago(task.returned.at, now)}.
+        </p>
+      )}
+      <Disclosure label="Plan" open={open.has("plan")} onToggle={() => toggle("plan")}>
+        {task.stages.length === 1 ? "1 stage" : `${task.stages.length} stages`}
+        {" · when done, "}
+        {task.onDone === "merge"
+          ? "merges onto the default branch"
+          : task.onDone === "ghpr"
+            ? link === undefined
+              ? "its pull request merges, once linked"
+              : `#${link.number} merges on GitHub`
+            : "nothing more"}
+        {task.blockedBy.length > 0 ? ` · blocked by ${task.blockedBy.length}` : ""}
+      </Disclosure>
+      {open.has("plan") ? (
+        <div className="mt-2 mb-2 ml-[18px]">
+          <ol>
+            {task.stages.map((stage, index) => (
+              <StageItem
+                key={stage.id}
+                stage={stage}
+                index={index}
+                task={task}
+                members={members}
+                now={now}
+              />
+            ))}
+          </ol>
+          <p className="text-meta">
+            When the last stage is done:{" "}
+            {task.onDone === "merge"
+              ? `task/${task.id} merges onto the default branch`
+              : task.onDone === "ghpr"
+                ? link === undefined
+                  ? "its pull request merges on GitHub, once one is linked"
+                  : `pull request #${link.number} merges on GitHub`
+                : "nothing more"}
+            {task.blockedBy.length > 0 ? (
+              <>
+                {" · blocked by "}
+                <LinkedText text={task.blockedBy.join(", ")} />
+              </>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
+      <Disclosure label="Files" open={open.has("files")} onToggle={() => toggle("files")}>
+        {files}
+      </Disclosure>
+      {open.has("files") ? (
+        <div className="mb-2 ml-[18px]">
+          <TaskFileTree task={task} now={now} />
+        </div>
+      ) : null}
+      {brief === "" ? null : (
+        <>
+          <Disclosure label="Brief" open={open.has("brief")} onToggle={() => toggle("brief")}>
+            {brief}
+          </Disclosure>
+          {open.has("brief") ? (
+            <div className="mt-1 mb-2 ml-[18px]">
+              <Markdown text={task.body} />
+            </div>
+          ) : null}
+        </>
+      )}
+      {task.onDone !== "ghpr" ? null : (
+        <>
+          <Disclosure label="Pull request" open={open.has("pr")} onToggle={() => toggle("pr")}>
+            {link === undefined
+              ? "None linked yet"
+              : `#${link.number} · ${link.subject ?? "linked"} · by ${link.linkedBy} ${ago(link.linkedAt, now)}`}
+          </Disclosure>
+          {open.has("pr") && link !== undefined ? (
+            <div className="mt-1 mb-2 ml-[18px]">
+              <PullRequest task={task} now={now} />
+            </div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
 
-/** One task: where it stands, its plan as a timeline, its brief, and its thread with a composer. */
+/**
+ * Finishing the stage that waits on the user from the thread's box, the box's text as the step's
+ * note; on a ghpr task's last stage the board refuses it while no pull request is linked.
+ */
+function useApprove(task: Task | undefined): ComposerAction | undefined {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const stage = task === undefined ? null : stageForYou(task);
+  if (task === undefined || stage === null) {
+    return undefined;
+  }
+  const index = task.stages.findIndex((each) => each.id === stage.id);
+  const unlinked =
+    task.stages[index + 1] === undefined &&
+    task.onDone === "ghpr" &&
+    task.pullRequest === undefined;
+  const label = stage.gate ? "Approve" : "Advance";
+  return {
+    label,
+    pendingLabel: stage.gate ? "Approving…" : "Advancing…",
+    title: `${label} ${stage.name}, with what the box holds as its note`,
+    blocked: unlinked ? "No pull request linked yet." : null,
+    run: async (text) => {
+      await api.advanceTask({ task_id: task.id, ...(text === "" ? {} : { note: text }) });
+      await client.invalidateQueries({ queryKey: ["task", task.id] });
+      await client.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  };
+}
+
+/**
+ * One task: the plan's strip and the stage it is at above, the rows that open the plan, the
+ * files, the brief and the pull request, then its thread, opening at the newest message and
+ * following new ones, with a box that sends to it or, while a stage waits on the user, finishes it.
+ */
 export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
   const task = useTask(taskId);
@@ -220,6 +410,7 @@ export function TaskView() {
   const messages = useThread(
     threads.data?.some((candidate) => candidate.id === taskId) === true ? taskId : null,
   );
+  const approve = useApprove(task.data);
 
   if (task.data === undefined) {
     return (
@@ -232,7 +423,6 @@ export function TaskView() {
   }
   const current = task.data;
   const phase = phaseOf(current);
-  const yours = stageForYou(current);
   const project = projects.data?.find((candidate) => candidate.slug === current.project);
   const thread = threads.data?.find((candidate) => candidate.id === current.id);
   return (
@@ -255,83 +445,41 @@ export function TaskView() {
         title={current.title}
         subtitle={`${project?.name ?? current.project}${
           current.channel === "general" ? "" : ` #${current.channel}`
-        } · ${progressOf(current)} · created by ${displayName(
-          current.createdBy,
-        )} ${ago(current.createdAt, now)}`}
+        } · created by ${displayName(current.createdBy)} ${ago(current.createdAt, now)}`}
         trailing={
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PHASE_STYLE[phase]}`}
           >
-            {PHASES.find((each) => each.phase === phase)?.label.toLowerCase()}
+            {approve === undefined
+              ? PHASES.find((each) => each.phase === phase)?.label.toLowerCase()
+              : "waiting on you"}
           </span>
         }
       />
       {/* Keyed by its subject: the route keeps the view mounted from one task to the next. */}
-      <StickyList
-        key={current.id}
-        stick={false}
-        follow={false}
-        ids={messages.data?.messages.map((message) => message.id)}
-        className="px-4 py-4"
-      >
-        <h3 className="text-section">Plan</h3>
-        {current.returned === undefined ? null : (
-          <p className="mt-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-200">
-            Sent back from {stageName(current, current.returned.from)} by {current.returned.by}{" "}
-            {ago(current.returned.at, now)}.
-          </p>
-        )}
-        <ol className="mt-3">
-          {current.stages.map((stage, index) => (
-            <StageItem
-              key={stage.id}
-              stage={stage}
-              index={index}
-              task={current}
-              members={members.data}
-              now={now}
-            />
-          ))}
-        </ol>
-        {yours === null ? null : <ApproveStage task={current} stage={yours} />}
-        <p className="text-meta">
-          When the last stage is done:{" "}
-          {current.onDone === "merge"
-            ? `task/${current.id} merges onto the default branch`
-            : current.onDone === "ghpr"
-              ? current.pullRequest === undefined
-                ? "its pull request merges on GitHub, once one is linked"
-                : `pull request #${current.pullRequest.number} merges on GitHub`
-              : "nothing more"}
-          {current.blockedBy.length > 0 ? (
-            <>
-              {" · blocked by "}
-              <LinkedText text={current.blockedBy.join(", ")} />
-            </>
-          ) : null}
-        </p>
-        {current.body.trim() === "" ? null : (
-          <section className="mt-5 border-t border-line pt-4">
-            <h3 className="text-section">Brief</h3>
-            <div className="mt-2">
-              <Markdown text={current.body} />
-            </div>
-          </section>
-        )}
-        <PullRequest task={current} now={now} />
-        <TaskFiles task={current} now={now} />
-        <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
-          <h3 className="text-section">Thread</h3>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <TaskTop key={`top:${current.id}`} task={current} now={now} members={members.data} />
+        <StickyList
+          key={current.id}
+          ids={messages.data?.messages.map((message) => message.id)}
+          className="px-4 pb-3"
+        >
           {threads.data === undefined ? null : thread === undefined ? (
-            <p className="mt-2 text-meta">No thread on this task.</p>
+            <p className="mt-3 text-meta">No thread on this task.</p>
           ) : (
             <SubjectThread thread={thread} now={now} task={current} empty="Nothing said yet." />
           )}
-        </section>
-      </StickyList>
+        </StickyList>
+      </div>
       {thread?.state === "open" ? (
-        <Composer target={{ threadId: current.id }} placeholder="Write in the task's thread" />
-      ) : null}
+        <Composer
+          target={{ threadId: current.id }}
+          placeholder="Write in the task's thread"
+          action={approve}
+        />
+      ) : approve === undefined ? null : (
+        <ApproveAlone action={approve} />
+      )}
     </>
   );
 }

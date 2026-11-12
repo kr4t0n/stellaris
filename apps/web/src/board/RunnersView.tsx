@@ -400,7 +400,11 @@ export function RunnersView() {
                 <span className="truncate text-xs text-fg-muted" title={lives}>
                   {lives}
                 </span>
-                <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
+                {/* On one line, so the narrowest island cuts capabilities and projects before it. */}
+                <span
+                  className={`text-right text-xs whitespace-nowrap ${state.tone}`}
+                  title={state.detail}
+                >
                   {state.label}
                 </span>
                 {/* The runner's own controls share the last column, so the rename takes no gap of its own. */}

@@ -25,10 +25,19 @@ function waitingMark(): boolean {
 const ICON =
   "grid size-7 place-items-center rounded-md transition-colors hover:bg-surface-2/60 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50";
 
+/**
+ * PROTOTYPE: with `stellaris.iconHalo=on`, a dark halo around each icon's strokes, which the sky's
+ * black ground hides and a bright star behind the icon shows, so the icon stays readable there.
+ */
+const HALO = "[filter:drop-shadow(0_0_1px_rgb(0_0_0))_drop-shadow(0_0_2.5px_rgb(0_0_0/0.85))]";
+function haloClass(): string | undefined {
+  return localStorage.getItem("stellaris.iconHalo") === "on" ? HALO : undefined;
+}
+
 /** Two bars, or while paused the triangle that resumes. */
 function PauseMark({ paused }: { paused: boolean }) {
   return (
-    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true">
+    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className={haloClass()}>
       {paused ? (
         <path d="M5.5 3.6 12.4 8l-6.9 4.4z" fill="currentColor" strokeLinejoin="round" />
       ) : (
@@ -49,6 +58,7 @@ function SignOutMark() {
       width={16}
       height={16}
       aria-hidden="true"
+      className={haloClass()}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.4}

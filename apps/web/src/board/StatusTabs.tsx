@@ -71,7 +71,9 @@ export function StatusTabs({ active }: { active: StatusView }) {
     { view: "logs", to: "/logs", label: "Logs" },
   ];
   return (
-    <nav aria-label="Status" className="flex gap-1 border-b border-line px-3 py-2">
+    // The strip wraps: at a larger default font (Chrome's "Large", a 20 px root) the five tabs pass
+    // a 420 px panel's width, and the island would clip the last of them.
+    <nav aria-label="Status" className="flex flex-wrap gap-1 border-b border-line px-3 py-2">
       {tabs.map((tab) => (
         <Link
           key={tab.view}

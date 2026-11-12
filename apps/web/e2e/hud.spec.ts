@@ -104,7 +104,7 @@ test("with the board closed the corner holds two icons, Pause and Sign out, what
     { name: "Pause", text: "", width: 28 },
     { name: "Sign out", text: "", width: 28 },
   ]);
-  // Bare icons, as Sign out was bare text: no card behind them or around them.
+  // The icons stand bare on the sky: nothing in the corner draws a card.
   await expect(hud(page).locator(".card")).toHaveCount(0);
 });
 

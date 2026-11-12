@@ -153,3 +153,44 @@ test("at the narrowest panel beside the sky every tab keeps its label on one lin
   expect(new Set(fit.heights).size).toBe(1);
   expect(fit.right).toBeLessThanOrEqual(fit.end);
 });
+
+for (const layout of ["around", "beside"] as const) {
+  test(`at a 20 px root font every tab stays inside the strip, a row of its own if need be (${layout} the sky, 420 px panel)`, async ({
+    page,
+  }) => {
+    // Chrome's Font size "Large": the app sets no root size, so the browser's scales every rem.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.addInitScript((chosen) => {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.documentElement.style.fontSize = "20px";
+      });
+      localStorage.setItem("stellaris.boardLayout", chosen);
+      localStorage.setItem("stellaris.contentWidth", "420");
+    }, layout);
+    await fakeBoard(page, { enrolling: true });
+    await page.goto("/citizens");
+    const strip = page.getByRole("navigation", { name: "Status" });
+    await expect(
+      strip.getByRole("link", { name: "Runners, 1 waiting for approval" }),
+    ).toBeVisible();
+    const fit = await strip.evaluate((nav) => {
+      const box = nav.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        root: getComputedStyle(document.documentElement).fontSize,
+        tabs: [...nav.querySelectorAll("a")].map((a) => {
+          const r = a.getBoundingClientRect();
+          return { name: a.textContent, left: r.left, right: r.right, height: r.height };
+        }),
+      };
+    });
+    expect(fit.root).toBe("20px");
+    for (const tab of fit.tabs) {
+      expect(tab.right, `${tab.name} ends inside the strip`).toBeLessThanOrEqual(fit.right);
+      expect(tab.left, `${tab.name} starts inside the strip`).toBeGreaterThanOrEqual(fit.left);
+    }
+    // Each label on one line: a tab wraps whole to the next row, never its words.
+    expect(new Set(fit.tabs.map((tab) => tab.height)).size).toBe(1);
+  });
+}

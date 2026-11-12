@@ -533,7 +533,7 @@ test("status opens every citizen with its role and model, and each opens its vie
   });
   await status.click();
   await expect(page).toHaveURL(/\/citizens$/);
-  // The count the top bar's button showed is on the Citizens tab now.
+  // The Citizens tab is current and counts the active citizens with a CLI, as the view's header does.
   const tab = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
     name: /^Citizens/,
   });

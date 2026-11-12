@@ -175,16 +175,12 @@ import Testing
           .utf8))
   }
 
-  @Test func takesAPostedMessageInItsPlaceByIdOnce() throws {
+  @Test func takesAPostedMessageAtItsEndOnce() throws {
     let feed = ConversationFeed(conversation: .general)
-    feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA3"))
     feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA1"))
     feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA2"))
     feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA2"))
-    #expect(
-      feed.messages.map(\.id) == [
-        "01M3Q2AAAAAAAAAAAAAAAAAAA1", "01M3Q2AAAAAAAAAAAAAAAAAAA2", "01M3Q2AAAAAAAAAAAAAAAAAAA3",
-      ])
+    #expect(feed.messages.map(\.id) == ["01M3Q2AAAAAAAAAAAAAAAAAAA1", "01M3Q2AAAAAAAAAAAAAAAAAAA2"])
   }
 }
 

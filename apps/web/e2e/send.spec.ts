@@ -106,6 +106,27 @@ test("a post whose answer was lost goes again with the same key and is stored on
   expect(new Set(keys).size).toBe(3);
 });
 
+test("a post a gateway answered with a 502 after the board stored it goes again with its key, stored once", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const view = viewOf(page);
+  const thread = view.getByRole("region", { name: "Thread" });
+  const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+  await expect(thread).toContainText("Survey done");
+
+  board.loseNextPostAnswer("502");
+  await box.fill("Past the gateway once.");
+  await box.press("Enter");
+  await expect(view.getByRole("alert")).toHaveText("/api/verbs/post_message answered 502");
+  await expect(box).toHaveValue("Past the gateway once.");
+  await box.press("Enter");
+  await expect(box).toHaveValue("");
+  await expect(thread.getByText("Past the gateway once.", { exact: true })).toHaveCount(1);
+  expect(board.stored("Past the gateway once.")).toBe(1);
+});
+
 test("an ask whose post's answer was lost goes again into the thread it opened, stored once", async ({
   page,
 }) => {

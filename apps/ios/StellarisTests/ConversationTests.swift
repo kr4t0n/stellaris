@@ -46,15 +46,15 @@ import Testing
     await general.load(using: model)
     let posted = try await model.post("Ship it", to: .general)
     #expect(posted.author == "user" && posted.channel == "general" && posted.thread == nil)
-    #expect(general.messages.contains { $0.id == posted.id })
+    // The answer put it at the conversation's end, with no read of its own.
+    #expect(general.messages.last?.id == posted.id)
 
     let samples = Conversation.thread(FakeBoard.samples)
     await model.feed(for: samples).load(using: model)
     let reply = try await model.post("Looks right", to: samples)
     #expect(reply.thread == FakeBoard.samples)
-    // The answer put it in the thread, in its place by id, with no read of its own.
-    #expect(model.feed(for: samples).messages.contains { $0.id == reply.id })
-    #expect(!general.messages.contains { $0.id == reply.id }, "the thread's reply went to the channel")
+    #expect(model.feed(for: samples).messages.last?.id == reply.id)
+    #expect(general.messages.last?.body == "Ship it", "the thread's reply went to the channel")
   }
 
   @Test func showsAPostFromItsAnswerBeforeAnyRead() async throws {
@@ -63,7 +63,7 @@ import Testing
     await general.load(using: model)
     let before = general.messages.count
     let posted = try await model.post("Shown at once", to: .general)
-    // No read has run yet: the answer put it there, in its place, once.
+    // No read has run yet: the answer put it there, once.
     #expect(general.messages.last?.id == posted.id)
     #expect(general.messages.count == before + 1)
     general.received(posted)

@@ -696,14 +696,14 @@ extension Proposal {
     staleSince = loads
   }
 
-  /// Puts a message the user posted here in its place by id, unless a read brought it already: a
-  /// post's answer carries the message, so it shows before the read the board's event brings.
+  /// Puts a message the user posted here at the end, where a read puts the newest, unless a read
+  /// brought it already: a post's answer carries the message, so it shows before the read the
+  /// board's event brings, which then lays the conversation out as the board has it.
   func received(_ message: Message) {
     guard !messages.contains(where: { $0.id == message.id }) else {
       return
     }
-    let at = messages.firstIndex { $0.id > message.id } ?? messages.endIndex
-    messages.insert(message, at: at)
+    messages.append(message)
   }
 
   /// Counts loads, so an answer that a later load's overtook changes nothing.

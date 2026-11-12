@@ -1093,8 +1093,11 @@ export interface FakeBoard {
   refuseNext(message: string): void;
   /** Puts this many citizens in a turn at lab, and this many turns in the queue. */
   setWorking(running: number, queued?: number): void;
-  /** Stores the next post but drops its answer, as a link that lost it would. */
-  loseNextPostAnswer(): void;
+  /**
+   * Stores the next post but loses its answer, as a link would: reset (the default), or answered by
+   * a gateway's 502.
+   */
+  loseNextPostAnswer(how?: "reset" | "502"): void;
   /** The posts stored with this body, in the task's thread or an ask's. */
   stored(body: string): number;
 }
@@ -1316,7 +1319,7 @@ export async function fakeBoard(
   let answering: string | null = null;
   const writes: Write[] = [];
   let refusal: string | null = null;
-  let lostAnswers = 0;
+  const lostAnswers: Array<"reset" | "502"> = [];
   let paused = false;
   let working: string[] = [];
   let queued: string[] = [];
@@ -1771,8 +1774,11 @@ export async function fakeBoard(
             return json(route, stored);
           }
           const answer = (posted: Record<string, unknown>): Promise<void> => {
-            if (lostAnswers > 0) {
-              lostAnswers -= 1;
+            const lost = lostAnswers.shift();
+            if (lost === "502") {
+              return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });
+            }
+            if (lost === "reset") {
               return route.abort("connectionreset");
             }
             return json(route, posted);
@@ -2141,8 +2147,8 @@ export async function fakeBoard(
       working = WORKERS.slice(0, running).map((name) => `${name}/lab`);
       queued = WORKERS.slice(running, running + waiting).map((name) => `${name}/lab`);
     },
-    loseNextPostAnswer: () => {
-      lostAnswers += 1;
+    loseNextPostAnswer: (how = "reset") => {
+      lostAnswers.push(how);
     },
     stored: (text) =>
       [...threadMessages, ...[...asks.values()].flatMap((each) => each.messages)].filter(

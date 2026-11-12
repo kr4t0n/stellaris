@@ -209,7 +209,14 @@ test("Pause is an icon that turns to Resume, amber, while paused", async ({ page
   await expect(resume).toHaveClass(/text-amber-300/);
   await expect(resume).toHaveAttribute("title", "Paused: resume");
   await resume.click();
-  await expect(corner(page).getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  const pause = corner(page).getByRole("button", { name: "Pause", exact: true });
+  await expect(pause).toBeVisible();
+  await expect(pause).toHaveAttribute("title", "Pause");
+  await expect(pause).not.toHaveClass(/text-amber-300/);
+  await expect(corner(page).getByRole("button", { name: "Sign out" })).toHaveAttribute(
+    "title",
+    "Sign out",
+  );
 });
 
 test("Sign out signs out", async ({ page }) => {
@@ -292,4 +299,25 @@ test("at the narrowest panel beside the sky every tab keeps its label on one lin
   expect(fit.overflow).toBe(0);
   expect(new Set(fit.heights).size).toBe(1);
   expect(fit.right).toBeLessThanOrEqual(fit.end);
+});
+
+test("the way back, if chosen: an amber dot after the society's name while anything waits", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("stellaris.waitingMark", "name"));
+  await fakeBoard(page, { enrolling: true, asked: true });
+  await page.goto("/");
+  // 3 need you, 1 runner to approve, 1 cron failing; read as text, and no button.
+  await expect(page.locator("header").getByText("5 waiting in the board")).toBeAttached();
+  await expect(page.locator("header").getByTitle("5 waiting in the board")).toBeVisible();
+  await expect(page.locator("header").getByRole("button", { name: /waiting/ })).toHaveCount(0);
+});
+
+test("with the mark off, nothing follows the society's name", async ({ page }) => {
+  await fakeBoard(page, { enrolling: true, asked: true });
+  await page.goto("/c/general");
+  await expect(
+    page.getByRole("region", { name: "Board navigator" }).getByRole("link", { name: /^Status, 1/ }),
+  ).toBeVisible();
+  await expect(page.locator("header").getByText(/waiting in the board/)).toHaveCount(0);
 });

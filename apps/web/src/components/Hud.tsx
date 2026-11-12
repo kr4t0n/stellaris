@@ -7,7 +7,18 @@ interface HudProps {
   readonly boardOpen: boolean;
   /** Opens the board where it was last; a click on the sky does the same. */
   readonly onOpenBoard: () => void;
+  /**
+   * PROTOTYPE: how many things wait in the left list (what needs the user, runners to approve,
+   * crons failing); with `stellaris.waitingMark=name`, an amber dot follows the society's name
+   * while any do.
+   */
+  readonly waiting: number;
   readonly onSignOut: () => void;
+}
+
+/** PROTOTYPE: whether the society's name wears the waiting dot; off unless the demo turns it on. */
+function waitingMark(): boolean {
+  return localStorage.getItem("stellaris.waitingMark") === "name";
 }
 
 /** The camera's controls' look, so the two cards on the sky's right edge match. */
@@ -62,8 +73,10 @@ export function Hud({
   pauseBusy,
   boardOpen,
   onOpenBoard,
+  waiting,
   onSignOut,
 }: HudProps) {
+  const mark = waiting > 0 && waitingMark();
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
       <div className="flex items-center gap-2.5">
@@ -78,6 +91,12 @@ export function Hud({
           className="size-7 shrink-0"
         />
         {society === undefined ? null : <span className="text-meta">{society}</span>}
+        {mark ? (
+          <span title={`${waiting} waiting in the board`} className="flex items-center">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
+            <span className="sr-only">{waiting} waiting in the board</span>
+          </span>
+        ) : null}
       </div>
       <div className="pointer-events-auto flex items-center gap-2">
         {boardOpen ? null : (

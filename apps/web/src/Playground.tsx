@@ -4,7 +4,8 @@ import { Outlet, useNavigate, useRouter, useRouterState, useSearch } from "@tans
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
 import { Navigator, type GovernanceView, type SocietyWideView } from "./board/Navigator.js";
-import { StatusTabs } from "./board/StatusTabs.js";
+import { StatusTabs, useStatusCounts } from "./board/StatusTabs.js";
+import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
 import { displayName, SignInContext } from "./board/Avatar.js";
@@ -214,6 +215,8 @@ export function Playground() {
         ? "proposals"
         : null;
   const activeView = SOCIETY_WIDE_VIEWS.get(pathname) ?? null;
+  const attention = useNeedsYou().length;
+  const status = useStatusCounts();
   const activeOverview =
     pathname === "/society" || pathname.startsWith("/skills/")
       ? SOCIETY_SCOPE
@@ -385,6 +388,7 @@ export function Playground() {
                 pauseBusy={pause.isPending}
                 boardOpen={boardOpen}
                 onOpenBoard={openBoard}
+                waiting={attention + status.enrolling + status.failing}
                 onSignOut={signOut}
               />
               {boardOpen ? (

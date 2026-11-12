@@ -1557,6 +1557,16 @@ export async function fakeBoard(
         if (original === undefined) {
           return json(route, { error: "NOT_FOUND", message: `runner ${from} not found` }, 404);
         }
+        if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(to)) {
+          return json(
+            route,
+            {
+              error: "VALIDATION",
+              message: `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+            },
+            400,
+          );
+        }
         if (records.some((each) => each["name"] === to)) {
           return json(
             route,

@@ -92,8 +92,15 @@ describe("renaming a runner", () => {
       runner: "pod",
     });
 
-    // No one but the user renames a runner.
+    // No one but the user renames a runner, and a name of another shape is refused in words.
     expect((await rename("gpu-1", engToken)).status).toBe(403);
+    const malformed = await rename("GPU 1");
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({
+      error: "VALIDATION",
+      message:
+        '"GPU 1" is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit',
+    });
 
     // While a turn runs there, the rename is refused, saying to pause the runner, and changes nothing.
     gate = Promise.withResolvers<void>();

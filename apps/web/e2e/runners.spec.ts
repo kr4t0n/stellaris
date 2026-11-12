@@ -282,6 +282,11 @@ test("the user renames a runner from its row, and the form says why the board re
   await field.fill("studio");
   await field.press("Enter");
   await expect(form.getByRole("alert")).toHaveText("runner studio already exists");
+  await field.fill("Studio Mac");
+  await field.press("Enter");
+  await expect(form.getByRole("alert")).toHaveText(
+    '"Studio Mac" is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit',
+  );
   await expect(cellsOf(pod).nth(1).getByText("pod", { exact: true })).toBeVisible();
   // Cancel closes the form, and the control it opened from has the focus again.
   await form.getByRole("button", { name: "Cancel" }).click();
@@ -301,6 +306,7 @@ test("the user renames a runner from its row, and the form says why the board re
   expect(board.writes.filter((write) => write.path.endsWith("/name"))).toEqual([
     { path: "/api/runners/pod/name", body: { name: "gpu-1" } },
     { path: "/api/runners/pod/name", body: { name: "studio" } },
+    { path: "/api/runners/pod/name", body: { name: "Studio Mac" } },
     { path: "/api/runners/laptop/name", body: { name: "mac-mini" } },
   ]);
 });

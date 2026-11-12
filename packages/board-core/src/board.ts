@@ -5150,7 +5150,14 @@ export class Board {
    */
   async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
     this.assertUser(actor, "only the user may rename a runner");
-    const name = NameSchema.parse(to);
+    const parsed = NameSchema.safeParse(to);
+    if (!parsed.success) {
+      throw new BoardError(
+        "VALIDATION",
+        `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+      );
+    }
+    const name = parsed.data;
     return this.mutex.run(async () => {
       const current = await this.readRunner(from);
       if (name === from) {

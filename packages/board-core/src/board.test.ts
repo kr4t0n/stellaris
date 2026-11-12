@@ -1774,9 +1774,11 @@ describe("Board", () => {
     await expect(board.renameRunner(USER, "pod", "pod")).rejects.toMatchObject({
       code: "INVALID_STATE",
     });
-    await expect(board.renameRunner(USER, "pod", "Not A Name")).rejects.toThrow(
-      /lowercase letters/,
-    );
+    await expect(board.renameRunner(USER, "pod", "Not A Name")).rejects.toMatchObject({
+      code: "VALIDATION",
+      message:
+        '"Not A Name" is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit',
+    });
     expect((await board.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
       "far",
       "pod",

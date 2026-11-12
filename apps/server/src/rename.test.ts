@@ -1,11 +1,28 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Board } from "@stellaris/board-core";
-import { ZERO_USAGE, type AgentBackend } from "@stellaris/runner-core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Board, BoardError } from "@stellaris/board-core";
+import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
+import { TurnDispatchSchema, type ModelOption } from "@stellaris/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
+
+/** A turn that ends at once, done. */
+const done: TurnResult = {
+  events: [],
+  finalText: "done",
+  usage: ZERO_USAGE,
+  costUsd: 0,
+  status: {
+    summary: "done",
+    claimsHeld: [],
+    blockedOn: [],
+    needsUserDecision: false,
+    memoryUpdated: false,
+  },
+  exitReason: "completed",
+};
 
 describe("renaming a runner", () => {
   let dir: string;
@@ -153,20 +170,6 @@ describe("renaming a runner", () => {
     const closed: string[] = [];
     const tokens: string[] = [];
     let sessions = 0;
-    const done = {
-      events: [],
-      finalText: "done",
-      usage: ZERO_USAGE,
-      costUsd: 0,
-      status: {
-        summary: "done",
-        claimsHeld: [],
-        blockedOn: [],
-        needsUserDecision: false,
-        memoryUpdated: false,
-      },
-      exitReason: "completed" as const,
-    };
     const backend: AgentBackend = {
       kind: "claude",
       newSession: () => Promise.resolve(`session-${sessions++}`),
@@ -224,5 +227,183 @@ describe("renaming a runner", () => {
     expect(after).toMatchObject({ exitReason: "completed", runner: "gpu-1", session: "session-0" });
     expect(closed).toEqual(["pod:session-0"]);
     expect(started.at(-1)).toEqual({ runner: "gpu-1", session: "session-0", newSession: false });
+  });
+
+  it("gives back a placement that a rename overtook, so a pinned citizen's session stays on the renamed runner", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "overtaken" });
+    await addWorkRoles(board);
+    await board.addAgent(USER, { name: "eng-1", role: "engineer", cli: "claude" });
+    const ran: Array<{ runner: string; session: string; newSession: boolean }> = [];
+    let sessions = 0;
+    const backend = (): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`session-${sessions++}`),
+      runTurn: (request) => {
+        ran.push({
+          runner: request.spec.runner,
+          session: request.session,
+          newSession: request.newSession,
+        });
+        return Promise.resolve(done);
+      },
+    });
+    // A runner away past 50 ms has its pinned citizens' turns detour to another.
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      graceMs: 50,
+      backends: () => ({ claude: backend() }),
+      extraRunners: [{ name: "far", backends: () => ({ claude: backend() }) }],
+    });
+    const { app, hub } = society;
+    await board.pinAgent("eng-1", "pod");
+    const dispatch = TurnDispatchSchema.parse({
+      agent: "eng-1",
+      project: "society",
+      trigger: { kind: "manual", fromUser: false, reason: "work" },
+      priority: 1,
+    });
+    await society.run(dispatch);
+    expect(ran).toEqual([{ runner: "pod", session: "session-0", newSession: true }]);
+
+    // A placement reads the citizen pinned to pod, then the rename runs and ends before it goes
+    // on: pod has no seat any more, as if away, and only the rename's count gives the turn back,
+    // where it would have detoured to far and begun the conversation afresh there.
+    const read = board.readAgent.bind(board);
+    const { promise: reading, resolve: inside } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    vi.spyOn(board, "readAgent").mockImplementationOnce(async (name) => {
+      const agent = await read(name);
+      inside();
+      await gate;
+      return agent;
+    });
+    const during = hub.assign(dispatch);
+    await reading;
+    const renamed = await app.request("/api/runners/pod/name", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${userToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "gpu-1" }),
+    });
+    expect(renamed.status).toBe(200);
+    open();
+    expect(await during).toBeNull();
+
+    // Once the runner is back under its new name, the turn goes there and resumes the session.
+    await expect.poll(() => hub.connected).toEqual(["far", "gpu-1"]);
+    await society.run(dispatch);
+    expect(ran.at(-1)).toEqual({ runner: "gpu-1", session: "session-0", newSession: false });
+    expect(await board.readSessions("eng-1", "society")).toEqual({
+      claude: "session-0",
+      runner: "gpu-1",
+    });
+  });
+
+  it("asks nothing of the runner while it is renamed, and waits for a request or a move to end first", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "holds" });
+    await addWorkRoles(board);
+    await board.addProject(USER, { slug: "lab" });
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["lab"],
+    });
+    // pod's model list answers only when the test lets it, and says when it was asked.
+    const asked = Promise.withResolvers<void>();
+    const listing = Promise.withResolvers<ModelOption[]>();
+    const backend = (): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve("session-0"),
+      runTurn: () => Promise.resolve(done),
+      listModels: () => {
+        asked.resolve();
+        return listing.promise;
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend() }),
+      extraRunners: [{ name: "far", backends: () => ({ claude: backend() }) }],
+    });
+    const { app, hub } = society;
+    await board.placeProject("lab", "pod");
+    const rename = async (to: string): Promise<{ status: number; message: unknown }> => {
+      const answer = await app.request("/api/runners/pod/name", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${userToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: to }),
+      });
+      const body: unknown = await answer.json();
+      return {
+        status: answer.status,
+        message:
+          typeof body === "object" && body !== null && "message" in body ? body.message : null,
+      };
+    };
+
+    // A request to pod that waits for its answer holds the rename back.
+    const models = hub.models("claude", "pod");
+    await asked.promise;
+    expect(await rename("gpu-1")).toEqual({
+      status: 409,
+      message:
+        "runner pod cannot be renamed while 1 request(s) to it, such as a landing, wait for an answer; pause it, and rename it once that ends",
+    });
+    listing.resolve([]);
+    expect(await models).toEqual([]);
+
+    // So does a project move under way.
+    const { promise: checking, resolve: inside } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    vi.spyOn(board, "prepareProjectMove").mockImplementationOnce(async () => {
+      inside();
+      await gate;
+      throw new BoardError("INVALID_STATE", "the test ends this move");
+    });
+    const moving = hub.moveProject(USER, "lab", "far");
+    await checking;
+    expect(await rename("gpu-1")).toEqual({
+      status: 409,
+      message:
+        "runner pod cannot be renamed while a move of lab is under way; pause it, and rename it once that ends",
+    });
+    open();
+    await expect(moving).rejects.toThrow("the test ends this move");
+
+    // While the rename runs, pod is offered no turn, asked nothing, and no move starts; a second
+    // rename of it waits for the first.
+    const real = board.renameRunner.bind(board);
+    const { promise: renaming, resolve: started } = Promise.withResolvers<void>();
+    const { promise: release, resolve: finish } = Promise.withResolvers<void>();
+    vi.spyOn(board, "renameRunner").mockImplementationOnce(async (actor, from, to) => {
+      started();
+      await release;
+      return real(actor, from, to);
+    });
+    const first = rename("gpu-1");
+    await renaming;
+    expect(
+      await hub.assign(
+        TurnDispatchSchema.parse({
+          agent: "eng-1",
+          project: "lab",
+          trigger: { kind: "manual", fromUser: false, reason: "work" },
+          priority: 1,
+        }),
+      ),
+    ).toBeNull();
+    await expect(hub.models("claude", "pod")).rejects.toThrow("runner pod is being renamed");
+    await expect(hub.moveProject(USER, "lab", "far")).rejects.toThrow(
+      "runner pod is being renamed; try again once that ends",
+    );
+    expect(await rename("gpu-2")).toEqual({
+      status: 409,
+      message: "runner pod is being renamed already; try again once that ends",
+    });
+    finish();
+    expect((await first).status).toBe(200);
+    expect((await board.readProject("lab")).runner).toBe("gpu-1");
   });
 });

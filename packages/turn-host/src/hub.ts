@@ -998,7 +998,6 @@ export class RunnerHub implements TurnRunner {
     return allowed ? "allowed" : "refused";
   }
 
-  /** Refuses a runner that cannot take a project's turns: its members' CLIs, the capabilities, a git identity. */
   /**
    * Renames a runner, which only the user does, once nothing runs there: no turn in flight or
    * placed and not yet opened, no request it has not answered (a landing, a file read, a sweep),
@@ -1011,6 +1010,12 @@ export class RunnerHub implements TurnRunner {
   async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
     if (actor.role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", "only the user may rename a runner");
+    }
+    if (this.renaming.has(from)) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${from} is being renamed already; try again once that ends`,
+      );
     }
     const busy = this.renameRefusal(from);
     if (busy !== null) {
@@ -1043,7 +1048,6 @@ export class RunnerHub implements TurnRunner {
     const requests = [...this.pending.values()].filter((each) => each.runner === runner).length;
     const moves = [...this.moving.keys()];
     const reasons = [
-      this.renaming.has(runner) ? "it is being renamed" : "",
       turns > 0 ? `${turns} turn(s) run or start there` : "",
       requests > 0 ? `${requests} request(s) to it, such as a landing, wait for an answer` : "",
       moves.length > 0 ? `a move of ${moves.join(", ")} is under way` : "",
@@ -1085,6 +1089,7 @@ export class RunnerHub implements TurnRunner {
     await detached;
   }
 
+  /** Refuses a runner that cannot take a project's turns: its members' CLIs, the capabilities, a git identity. */
   private async assertCanHost(
     seat: Seat,
     project: ProjectMoved["project"],

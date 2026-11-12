@@ -47,10 +47,10 @@ test("status is the first row, above needs you and proposals", async ({ page }) 
       "◉needs you3",
       "◈proposals1",
     ]);
-  const society = page
-    .locator("section")
-    .filter({ has: page.getByRole("link", { name: "Society" }) });
-  await expect(society.getByRole("link", { name: /^Status/ })).toHaveCount(0);
+  // Only there: the society's group lists its channels alone.
+  await expect(
+    page.getByRole("region", { name: "Board navigator" }).getByRole("link", { name: /^Status/ }),
+  ).toHaveCount(1);
 });
 
 test("one status row opens the first tab, and the tabs open each view by keyboard at its address", async ({

@@ -10,6 +10,17 @@ async function boxOf(element: Locator) {
   return box;
 }
 
+/** How many lines of its own line height an element shows, and how many its whole text takes. */
+function linesOf(element: Locator) {
+  return element.evaluate((node) => {
+    const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+    return {
+      shown: node.getBoundingClientRect().height / lineHeight,
+      whole: node.scrollHeight / lineHeight,
+    };
+  });
+}
+
 /**
  * Where an element's text is drawn, leaving out text only screen readers get: a cell's own box
  * spans its whole column, wherever its text sits in it.
@@ -213,6 +224,33 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   // A conflict copy two of its turns left waits at the top until the citizen reconciles it.
   await expect(view.getByRole("heading", { name: "Edits to reconcile" })).toBeVisible();
   await expect(view).toContainText("memory/core.md · core.md.conflict-0000ABCD · left 2 days ago");
+});
+
+test("a closed turn shows at most two lines of its report, and opens to the whole of it", async ({
+  page,
+}) => {
+  // 1440 px gives the island 576 px, where the long report runs past two lines many times over.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page, { longReport: true });
+  await page.goto("/citizen/desk?tab=turns");
+  const view = page.getByRole("region", { name: "Board content" });
+  const rows = view.locator("summary");
+  await expect(rows).toHaveCount(2);
+  const [long, short] = [rows.nth(0), rows.nth(1)];
+  const longPreview = long.getByText(/^Fixed the solver's tie-breaking/);
+  const shortPreview = short.getByText("Routed the survey request to ada and filed the task.", {
+    exact: true,
+  });
+
+  const longLines = await linesOf(longPreview);
+  expect(longLines.whole, "lines the long report takes whole").toBeGreaterThan(4);
+  expect(longLines.shown, "lines the long report shows").toBeCloseTo(2, 1);
+  const shortLines = await linesOf(shortPreview);
+  expect(shortLines.shown, "lines the short report shows").toBeCloseTo(1, 1);
+
+  await long.click();
+  await expect(longPreview).toBeHidden();
+  await expect(view.locator("p", { hasText: "Nothing waits on the user yet." })).toBeVisible();
 });
 
 test("a heartbeat's turn says what it woke for, whole beside a long task title, unless it ran before the board kept that", async ({

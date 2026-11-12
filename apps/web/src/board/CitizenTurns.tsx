@@ -95,9 +95,7 @@ function TurnRow({
             </span>
           </span>
           {text.trim() === "" ? null : (
-            <span
-              className={`mt-1 line-clamp-2 block text-xs leading-relaxed group-open:hidden ${tone}`}
-            >
+            <span className={`mt-1 line-clamp-2 text-xs leading-relaxed group-open:hidden ${tone}`}>
               <LinkedText text={text} links={false} />
             </span>
           )}

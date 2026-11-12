@@ -582,6 +582,23 @@ const DESK_TURN = {
 };
 
 /**
+ * A later turn of desk's whose report, two paragraphs as long as a busy turn's, runs many lines past
+ * the two a closed row shows.
+ */
+const DESK_LONG_TURN = {
+  ...DESK_TURN,
+  id: "01M3Q2DDDDDDDDDDDDDDDDDDF1",
+  turnId: "01M3Q2DDDDDDDDDDDDDDDDDDF2",
+  ts: "2026-09-29T10:12:00.000Z",
+  startedAt: "2026-09-29T10:00:00.000Z",
+  toolCalls: 31,
+  summary:
+    "Fixed the solver's tie-breaking so equal-cost paths come back in a stable order, with a test that failed before the fix on all three city graphs, and opened the pull request against dev with the timings of each graph before and after in its description. " +
+    "The suite passes locally in 4 minutes at a load of 2; CI is green on the head commit.\n\n" +
+    "Left open: the largest graph still takes 41 s to load from its CSV, most of it in parsing, which is a change of its own; the review may ask for the old order behind a flag, which the description offers. Nothing waits on the user yet.",
+};
+
+/**
  * The task ren's heartbeats woke it for, a thread whose title is as long as three in four of a
  * real board's task titles.
  */
@@ -1266,6 +1283,8 @@ export async function fakeBoard(
     retired?: boolean;
     /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
     heartbeats?: boolean;
+    /** Gives desk a second turn, whose report runs many lines past the two a closed row shows. */
+    longReport?: boolean;
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
@@ -1912,7 +1931,7 @@ export async function fakeBoard(
       case "/api/agents/desk/models":
         return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
       case "/api/agents/desk/turns":
-        return json(route, [DESK_TURN]);
+        return json(route, options.longReport === true ? [DESK_TURN, DESK_LONG_TURN] : [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
         return json(route, DESK_TRANSCRIPT);
       case "/api/agents/ren/turns":

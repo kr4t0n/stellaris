@@ -320,6 +320,9 @@ export interface RunnerPatch {
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 
+/** How many conversations' session records a runner's rename reads, or writes, at once. */
+const SESSION_BATCH = 64;
+
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
   runners: z.record(z.string(), z.object({ tokenHash: z.string().min(1) })),
@@ -5171,13 +5174,22 @@ export class Board {
           agents.push(agent.name);
         }
       }
+      // A citizen may have a record for each of hundreds of threads, read under the mutex, so
+      // they are read and written a batch at a time.
       let sessions = 0;
-      for (const file of await this.sessionFiles()) {
-        const record = await readJson(file, SessionsFileSchema);
-        if (record.runner === from) {
-          await writeJson(file, { ...record, runner: name });
-          sessions += 1;
-        }
+      const files = await this.sessionFiles();
+      for (let at = 0; at < files.length; at += SESSION_BATCH) {
+        const renamed = await Promise.all(
+          files.slice(at, at + SESSION_BATCH).map(async (file) => {
+            const record = await readJson(file, SessionsFileSchema);
+            if (record.runner !== from) {
+              return false;
+            }
+            await writeJson(file, { ...record, runner: name });
+            return true;
+          }),
+        );
+        sessions += renamed.filter((each) => each).length;
       }
       const tokens = await this.readRunnerTokens();
       const { [from]: token, ...others } = tokens;
@@ -5211,23 +5223,25 @@ export class Board {
 
   /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
   private async sessionFiles(): Promise<string[]> {
-    const files: string[] = [];
-    const add = async (dir: string): Promise<void> => {
-      const file = path.join(dir, "sessions.json");
-      if (await exists(file)) {
-        files.push(file);
-      }
-    };
+    const dirs: string[] = [];
     for (const agent of await listDirs(this.paths.agents())) {
       for (const scope of await listDirs(this.paths.agentProjects(agent))) {
         const dir = this.paths.agentProject(agent, scope);
-        await add(dir);
+        dirs.push(dir);
         for (const kind of ["threads", "channels", "places"]) {
           for (const part of await listDirs(path.join(dir, kind))) {
-            await add(path.join(dir, kind, part));
+            dirs.push(path.join(dir, kind, part));
           }
         }
       }
+    }
+    const files: string[] = [];
+    for (let at = 0; at < dirs.length; at += SESSION_BATCH) {
+      const batch = dirs
+        .slice(at, at + SESSION_BATCH)
+        .map((dir) => path.join(dir, "sessions.json"));
+      const found = await Promise.all(batch.map((file) => exists(file)));
+      files.push(...batch.filter((_, index) => found[index] === true));
     }
     return files;
   }

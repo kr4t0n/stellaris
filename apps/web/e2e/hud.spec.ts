@@ -53,3 +53,22 @@ test("the HUD no longer spells out the word Stellaris", async ({ page }) => {
   await expect(hud(page).getByText("fixture", { exact: true })).toBeVisible();
   await expect(hud(page).getByText("Stellaris")).toHaveCount(0);
 });
+
+test("in a narrow window the icon keeps its size and the name stays clear of the controls", async ({
+  page,
+}) => {
+  // Half of a 1280 px screen, where the header runs out of room and its blocks shrink.
+  await page.setViewportSize({ width: 640, height: 900 });
+  await fakeBoard(page);
+  await page.goto("/");
+  const name = hud(page).getByText("fixture", { exact: true });
+  await expect(name).toBeVisible();
+
+  const [iconBox, nameBox, firstControl] = await Promise.all([
+    boxOf(hud(page).getByRole("img", { name: "Stellaris", exact: true })),
+    boxOf(name),
+    boxOf(hud(page).getByRole("button").first()),
+  ]);
+  expect(iconBox.width).toBe(28);
+  expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(firstControl.x);
+});

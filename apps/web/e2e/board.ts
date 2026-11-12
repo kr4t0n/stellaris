@@ -1853,6 +1853,14 @@ export async function fakeBoard(
           paused = pathname === "/api/pause";
           return json(route, { paused });
         case `/api/enrollments/${ENROLLING_CODE}/approve`:
+          // The board refuses a name a runner has, as it does any time.
+          if (runnerRecords().some((each) => each["name"] === body["name"])) {
+            return json(
+              route,
+              { error: "ALREADY_EXISTS", message: `runner ${String(body["name"])} already exists` },
+              409,
+            );
+          }
           enrolling = false;
           return json(route, {
             name: body["name"],

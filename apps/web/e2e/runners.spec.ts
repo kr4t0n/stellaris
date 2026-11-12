@@ -315,6 +315,72 @@ test("the user renames a runner from its row, and the form says why the board re
   ]);
 });
 
+test("a refusal from the keyboard leaves the focus in the field, renaming or approving", async ({
+  page,
+}) => {
+  // desk is in a turn on pod, so the board refuses to rename pod, and studio-mac asks to join.
+  await fakeBoard(page, { inFlight: true, enrolling: true });
+  // Registered after the fake board, so it answers first: each answer waits until the test lets
+  // it go, as a slow board's would.
+  let answer = Promise.withResolvers<void>();
+  await page.route(/\/api\/(runners\/[^/]+\/name|enrollments\/[^/]+\/approve)$/, async (route) => {
+    await answer.promise;
+    await route.fallback();
+  });
+  await page.goto("/runners");
+  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  await rows.nth(0).getByRole("button", { name: "Rename pod…" }).click();
+  const form = page.getByRole("form", { name: "Rename pod" });
+  const field = form.getByRole("textbox", { name: "New name" });
+  const rename = form.getByRole("button", { name: "Rename", exact: true });
+  await page.keyboard.type("gpu-1");
+  // Tab to Rename, past Cancel, and press it: while the answer is on its way, both stay in the
+  // tab order, and the focus waits in the field.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(rename).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "Renaming…" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(form.getByRole("button", { name: "Cancel" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(field).toBeFocused();
+  answer.resolve();
+  await expect(form.getByRole("alert")).toHaveText(/^runner pod cannot be renamed while/);
+  await expect(rename).toHaveAttribute("aria-disabled", "false");
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue("gpu-1");
+  // The next key goes to the field, not to the page's ask box.
+  await page.keyboard.press("Space");
+  await expect(field).toHaveValue("gpu-1 ");
+  await page.keyboard.press("Backspace");
+
+  // Approving a waiting runner under a name a runner has is refused the same way.
+  answer = Promise.withResolvers<void>();
+  const approve = page.getByRole("form", { name: "Approve Studio.local" });
+  const name = approve.getByLabel("Runner name");
+  await name.fill("pod");
+  await name.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(approve.getByRole("button", { name: "Approve" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(approve.getByRole("button", { name: "Deny" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(name).toBeFocused();
+  answer.resolve();
+  await expect(
+    page.getByRole("list", { name: "Waiting for approval" }).getByRole("alert"),
+  ).toHaveText("runner pod already exists");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("pod");
+});
+
 test("a runner names the CLI its limit holds, apart from the user's pause", async ({ page }) => {
   await fakeBoard(page, { quotas: "limited" });
   await page.goto("/runners");

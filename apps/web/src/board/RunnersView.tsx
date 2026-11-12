@@ -69,6 +69,7 @@ function WaitingRunner({
     onSuccess: refresh,
   });
   const busy = approve.isPending || deny.isPending;
+  const field = useRef<HTMLInputElement>(null);
 
   return (
     <li
@@ -89,10 +90,15 @@ function WaitingRunner({
         className="mt-2.5 flex items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          approve.mutate();
+          // As in a rename, a refusal leaves the focus in the field.
+          field.current?.focus();
+          if (!busy && name.trim() !== "") {
+            approve.mutate();
+          }
         }}
       >
         <input
+          ref={field}
           value={name}
           maxLength={32}
           spellCheck={false}
@@ -100,10 +106,17 @@ function WaitingRunner({
           onChange={(event) => setTyped(event.target.value)}
           className={`${FIELD} min-w-0 flex-1 font-mono`}
         />
-        <Button onClick={() => deny.mutate()} disabled={busy}>
+        <Button
+          aria-disabled={busy}
+          onClick={() => {
+            if (!busy) {
+              deny.mutate();
+            }
+          }}
+        >
           Deny
         </Button>
-        <Button variant="primary" type="submit" disabled={busy || name.trim() === ""}>
+        <Button variant="primary" type="submit" aria-disabled={busy || name.trim() === ""}>
           {approve.isPending ? "Approving…" : "Approve"}
         </Button>
       </form>
@@ -169,6 +182,9 @@ function RenameRunner({ runner, onDone }: { runner: string; onDone: (renamed?: s
       className="col-span-full mt-1.5 mb-1"
       onSubmit={(event) => {
         event.preventDefault();
+        // The focus waits in the field, wherever the press came from, so a refusal leaves it
+        // where the name is changed.
+        field.current?.focus();
         if (!unchanged && !rename.isPending) {
           rename.mutate();
         }
@@ -184,10 +200,18 @@ function RenameRunner({ runner, onDone }: { runner: string; onDone: (renamed?: s
           onChange={(event) => setName(event.target.value)}
           className={`${FIELD} min-w-0 flex-1 font-mono`}
         />
-        <Button onClick={() => onDone()} disabled={rename.isPending}>
+        {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
+        <Button
+          aria-disabled={rename.isPending}
+          onClick={() => {
+            if (!rename.isPending) {
+              onDone();
+            }
+          }}
+        >
           Cancel
         </Button>
-        <Button variant="primary" type="submit" disabled={rename.isPending || unchanged}>
+        <Button variant="primary" type="submit" aria-disabled={rename.isPending || unchanged}>
           {rename.isPending ? "Renaming…" : "Rename"}
         </Button>
       </div>

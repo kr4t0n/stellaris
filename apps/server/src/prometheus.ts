@@ -35,15 +35,20 @@ function histogram(name: string, { agent, buckets, count, sumMs }: WakeLatencySe
 /** The counters in Prometheus's text format: each counter's help, type, and series. */
 export function prometheusText(counts: TurnCounts): string {
   return [
-    "# HELP stellaris_turn_tokens_total Tokens finished turns used, by citizen, CLI, model, and kind: input, output, cache_read, or cache_write.",
+    "# HELP stellaris_turn_tokens_total Tokens finished turns used, by project (the turn's scope: a project, or society), citizen, CLI, model, and kind: input, output, cache_read, or cache_write.",
     "# TYPE stellaris_turn_tokens_total counter",
-    ...counts.tokens.map(({ agent, cli, model, kind, tokens }) =>
-      sample("stellaris_turn_tokens_total", { agent, cli, model, kind }, tokens),
+    ...counts.tokens.map(({ project, agent, cli, model, kind, tokens }) =>
+      sample("stellaris_turn_tokens_total", { project, agent, cli, model, kind }, tokens),
     ),
     "# HELP stellaris_turns_total Finished turns, by citizen, outcome (completed or failed), and the trigger that woke them.",
     "# TYPE stellaris_turns_total counter",
     ...counts.turns.map(({ agent, outcome, trigger, turns }) =>
       sample("stellaris_turns_total", { agent, outcome, trigger }, turns),
+    ),
+    "# HELP stellaris_turns_running Turns running now, begun and not yet ended, by project (the turn's scope: a project, or society) and citizen; 0 for each that has run a turn.",
+    "# TYPE stellaris_turns_running gauge",
+    ...counts.running.map(({ project, agent, turns }) =>
+      sample("stellaris_turns_running", { project, agent }, turns),
     ),
     "# HELP stellaris_turns_idle_total Completed turns that took no board action, by citizen and trigger; reflections and turns without a transcript are left out.",
     "# TYPE stellaris_turns_idle_total counter",
@@ -78,7 +83,8 @@ export function prometheusText(counts: TurnCounts): string {
 }
 
 /**
- * What the metrics port serves: `GET /metrics`, read from the counters alone, and nothing else.
+ * What the metrics port serves: `GET /metrics`, read from the counters alone, the turns in flight
+ * they read included, and nothing else.
  * It asks for no token, so it carries counts and names, never a message or a secret. Given a
  * function, it answers 503 while that gives no counters, as while the server seeds them.
  */

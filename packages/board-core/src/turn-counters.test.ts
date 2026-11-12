@@ -11,7 +11,7 @@ import {
   type TurnRecord,
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Board } from "./board.js";
+import { Board, type TurnInFlight } from "./board.js";
 import { EventLog } from "./events.js";
 import { TurnCounters, type TurnCounts } from "./turn-counters.js";
 import { tokenUse } from "./turn-history.js";
@@ -59,9 +59,10 @@ function perCitizen(counts: TurnCounts): Map<string, { turns: number; usage: num
   return rows;
 }
 
-/** One citizen's token series on a CLI and model, in the order the counters read them. */
-function seriesOf(agent: string, cli: string, model: string, values: number[]) {
+/** One citizen's token series in `lab` on a CLI and model, in the order the counters read them. */
+function seriesOf(agent: string, cli: string, model: string, values: number[], project = "lab") {
   return (["cache_read", "cache_write", "input", "output"] as const).map((kind, at) => ({
+    project,
     agent,
     cli,
     model,
@@ -301,6 +302,11 @@ describe("TurnCounters", () => {
         { agent: "bo", outcome: "failed", trigger: "heartbeat", turns: 1 },
         { agent: "ghost", outcome: "failed", trigger: "stage", turns: 1 },
       ],
+      running: [
+        { project: "lab", agent: "ada", turns: 0 },
+        { project: "lab", agent: "bo", turns: 0 },
+        { project: "lab", agent: "ghost", turns: 0 },
+      ],
       idle: [],
       failed: [
         { agent: "bo", cli: "codex", reason: "other", turns: 1 },
@@ -310,6 +316,90 @@ describe("TurnCounters", () => {
       wakeLatency: [],
       mentions: [],
     });
+  });
+
+  it("labels a turn's tokens with the scope it ran in, a project or the society, summing to the citizen's", () => {
+    const counters = new TurnCounters(() => "claude");
+    for (const each of [
+      completedEnd("ada", "mention", { usage: usage(1, 2, 3, 4), model: "claude-opus-5-5" }),
+      completedEnd("ada", "mention", { usage: usage(10, 20, 30, 40), model: "claude-opus-5-5" }),
+      // Asked in site's channels while no member there, a turn runs in the society scope.
+      event("turn.completed", "ada", {
+        project: "society",
+        place: "site",
+        trigger: "mention",
+        usage: usage(100, 200, 300, 400),
+        model: "claude-opus-5-5",
+      }),
+      event("turn.failed", "ada", {
+        project: "site",
+        trigger: "stage",
+        usage: usage(5, 0),
+        model: "claude-opus-5-5",
+      }),
+    ]) {
+      counters.add(each);
+    }
+    const read = counters.read();
+    expect(read.tokens).toEqual([
+      ...seriesOf("ada", "claude", "claude-opus-5-5", [33, 44, 11, 22]),
+      ...seriesOf("ada", "claude", "claude-opus-5-5", [0, 0, 5, 0], "site"),
+      ...seriesOf("ada", "claude", "claude-opus-5-5", [300, 400, 100, 200], "society"),
+    ]);
+    expect(perCitizen(read).get("ada")).toEqual({ turns: 4, usage: [116, 222, 333, 444] });
+  });
+
+  it("gives the turns in flight by scope and citizen, at 0 for each that has run one, never a start with no end", () => {
+    let inFlight: { agent: string; scope: string; place?: string }[] = [];
+    const counters = new TurnCounters(
+      () => "claude",
+      () => undefined,
+      new Map(),
+      () => inFlight,
+    );
+    for (const each of [
+      // Ended, and started with no end logged, as a server stopped during the turn leaves it.
+      event("turn.started", "ada", { project: "lab", trigger: "mention", turnId: "x" }),
+      completedEnd("ada", "mention", { turnId: "x" }),
+      event("turn.started", "bo", { project: "lab", trigger: "stage", turnId: "y" }),
+      // Logged before starts were: the end alone names its scope.
+      event("turn.failed", "cy", { project: "site", trigger: "cron" }),
+      event("turn.started", "con-1", { project: "society", place: "lab", turnId: "z" }),
+      // A start the counters cannot read names no scope.
+      event("turn.started", "ghost", { trigger: "mention", turnId: "w" }),
+    ]) {
+      counters.add(each);
+    }
+    const running = () =>
+      counters.read().running.map(({ project, agent, turns }) => [project, agent, turns]);
+    expect(running()).toEqual([
+      ["lab", "ada", 0],
+      ["lab", "bo", 0],
+      ["site", "cy", 0],
+      ["society", "con-1", 0],
+    ]);
+    // Read at each read: two of ada's turns in lab, one of con-1's in the society scope, and a
+    // citizen's first turn, whose start the counters have not seen yet.
+    inFlight = [
+      { agent: "ada", scope: "lab" },
+      { agent: "ada", scope: "lab" },
+      { agent: "con-1", scope: "society", place: "lab" },
+      { agent: "eve", scope: "site" },
+    ];
+    expect(running()).toEqual([
+      ["lab", "ada", 2],
+      ["lab", "bo", 0],
+      ["site", "cy", 0],
+      ["site", "eve", 1],
+      ["society", "con-1", 1],
+    ]);
+    inFlight = [];
+    expect(running()).toEqual([
+      ["lab", "ada", 0],
+      ["lab", "bo", 0],
+      ["site", "cy", 0],
+      ["society", "con-1", 0],
+    ]);
   });
 
   it("counts a completed turn idle when it took no board action, by its end's count or else its transcript's", () => {
@@ -496,6 +586,7 @@ describe("Board.countTurns", () => {
       turns: 1,
     });
     expect(inputOf(before, "eng-2")).toEqual({
+      project: "demo",
       agent: "eng-2",
       cli: "codex",
       model: "gpt-6",
@@ -503,6 +594,51 @@ describe("Board.countTurns", () => {
       tokens: 901,
     });
     expect(inputOf(after, "eng-2")?.tokens).toBe(906);
+  });
+
+  it("reads the turns running after a restart from the turns in flight, never from a start the log holds without an end", async () => {
+    const before = await society();
+    await turn(before, "eng-2", { usage: usage(1, 1) });
+    // The server stopped during eng-1's turn: its start is logged and its end never will be.
+    await before.beginTurn({
+      agent: "eng-1",
+      project: "demo",
+      runner: "server",
+      cli: "claude",
+      session: null,
+      trigger: { kind: "mention", fromUser: false, reason: "" },
+      startedAt: clock.toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: "claude-opus-5-5",
+    });
+
+    // The next process opens the same board, its turn host holding nothing yet.
+    const board = await Board.open(dir, { now: () => clock });
+    let inFlight: TurnInFlight[] = [];
+    board.watchTurns(() => inFlight);
+    const counters = await board.countTurns();
+    const running = () =>
+      counters.read().running.map(({ project, agent, turns }) => [project, agent, turns]);
+    expect(running()).toEqual([
+      ["demo", "eng-1", 0],
+      ["demo", "eng-2", 0],
+    ]);
+    inFlight = [{ agent: "eng-1", scope: "demo" }];
+    expect(running()).toEqual([
+      ["demo", "eng-1", 1],
+      ["demo", "eng-2", 0],
+    ]);
+    inFlight = [];
+    expect(running()).toEqual([
+      ["demo", "eng-1", 0],
+      ["demo", "eng-2", 0],
+    ]);
   });
 
   it("logs the turn's CLI on its end", async () => {

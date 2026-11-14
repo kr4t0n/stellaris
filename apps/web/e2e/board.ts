@@ -1339,9 +1339,12 @@ export async function fakeBoard(
         : { pausedClis: pauses.pausedClis }),
     };
   };
+  // Each runner's name now, by the name it started with; a rename moves its pauses with it.
+  const runnerNames = new Map<string, string>();
+  const named = (runner: string): string => runnerNames.get(runner) ?? runner;
   const runnerRecords = (): Array<Record<string, unknown>> => [
     {
-      name: "pod",
+      name: named("pod"),
       os: "linux",
       clis: ["claude", "codex"],
       capabilities: [],
@@ -1349,10 +1352,10 @@ export async function fakeBoard(
       gitIdentityMissing: ["email"],
       status: "connected",
       quotas: podQuotas,
-      ...pausesOf("pod"),
+      ...pausesOf(named("pod")),
     },
     {
-      name: "studio",
+      name: named("studio"),
       os: "darwin",
       clis: ["claude"],
       capabilities: [],
@@ -1360,17 +1363,17 @@ export async function fakeBoard(
       gitIdentityMissing: [],
       status: "connected",
       quotas: studioQuotas,
-      ...pausesOf("studio"),
+      ...pausesOf(named("studio")),
     },
     {
-      name: "laptop",
+      name: named("laptop"),
       os: "darwin",
       clis: ["claude"],
       capabilities: ["gpu"],
       version: "0.3.10",
       status: "disconnected",
       quotas: laptopQuotas,
-      ...pausesOf("laptop"),
+      ...pausesOf(named("laptop")),
     },
   ];
   const crowded = options.crowded === true;
@@ -1543,6 +1546,65 @@ export async function fakeBoard(
     if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
+      // A rename, refused as the board refuses one: to a name taken, or while desk is in a turn on
+      // pod, where it runs.
+      const rename = /^\/api\/runners\/([^/]+)\/name$/.exec(pathname);
+      if (rename !== null) {
+        const from = decodeURIComponent(rename[1] ?? "");
+        const to = typeof body["name"] === "string" ? body["name"] : "";
+        const records = runnerRecords();
+        const original = ["pod", "studio", "laptop"].find((each) => named(each) === from);
+        if (original === undefined) {
+          return json(route, { error: "NOT_FOUND", message: `runner ${from} not found` }, 404);
+        }
+        if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(to)) {
+          return json(
+            route,
+            {
+              error: "VALIDATION",
+              message: `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+            },
+            400,
+          );
+        }
+        if (records.some((each) => each["name"] === to)) {
+          return json(
+            route,
+            { error: "ALREADY_EXISTS", message: `runner ${to} already exists` },
+            409,
+          );
+        }
+        if (original === "pod" && inFlight) {
+          return json(
+            route,
+            {
+              error: "INVALID_STATE",
+              message: `runner ${from} cannot be renamed while 1 turn(s) run or start there; pause it, and rename it once that ends`,
+            },
+            409,
+          );
+        }
+        runnerNames.set(original, to);
+        const pauses = runnerPauses.get(from);
+        if (pauses !== undefined) {
+          runnerPauses.delete(from);
+          runnerPauses.set(to, pauses);
+        }
+        const projects = lab.runner === from ? [lab.slug] : [];
+        if (lab.runner === from) {
+          lab = { ...lab, runner: to };
+        }
+        const agents = deskRunner === from ? ["desk"] : [];
+        if (deskRunner === from) {
+          deskRunner = to;
+        }
+        return json(route, {
+          runner: runnerRecords().find((each) => each["name"] === to),
+          projects,
+          agents,
+          sessions: projects.length + agents.length,
+        });
+      }
       const pause = /^\/api\/runners\/([^/]+)\/(pause|resume)(?:\/([^/]+))?$/.exec(pathname);
       if (pause !== null) {
         const [, runner = "", verb, cli] = pause;
@@ -1791,6 +1853,14 @@ export async function fakeBoard(
           paused = pathname === "/api/pause";
           return json(route, { paused });
         case `/api/enrollments/${ENROLLING_CODE}/approve`:
+          // The board refuses a name a runner has, as it does any time.
+          if (runnerRecords().some((each) => each["name"] === body["name"])) {
+            return json(
+              route,
+              { error: "ALREADY_EXISTS", message: `runner ${String(body["name"])} already exists` },
+              409,
+            );
+          }
           enrolling = false;
           return json(route, {
             name: body["name"],

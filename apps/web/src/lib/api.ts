@@ -30,6 +30,7 @@ import {
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
+  RunnerRenamedSchema,
   RunnerSchema,
   RunningTurnSchema,
   SkillFileContentSchema,
@@ -493,6 +494,18 @@ export function createApi(token: string) {
         token,
         {},
         RunnerSchema,
+      ),
+    /**
+     * Renames a runner, and every project, pin, and session that names it, once nothing runs
+     * there; the board says what holds it otherwise.
+     */
+    renameRunner: (runner: string, name: string) =>
+      write(
+        "PUT",
+        `/api/runners/${encodeURIComponent(runner)}/name`,
+        token,
+        { name },
+        RunnerRenamedSchema,
       ),
     /** Runners that asked to join and wait for the user's approval, newest first. */
     enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),

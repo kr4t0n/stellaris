@@ -120,6 +120,7 @@ import {
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
+  type RunnerRenamed,
   type Skill,
   type SkillFileContent,
   type SkillFiles,
@@ -318,6 +319,9 @@ export interface RunnerPatch {
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
+
+/** How many conversations' session records a runner's rename reads, or writes, at once. */
+const SESSION_BATCH = 64;
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -5132,6 +5136,132 @@ export class Board {
     for (const [name, { tokenHash }] of Object.entries(await this.readRunnerTokens())) {
       this.runnerTokens.set(tokenHash, name);
     }
+  }
+
+  /**
+   * Renames a runner, which only the user does, and every record that names it: the projects
+   * living on it, archived ones too, the citizens pinned to it, and every conversation's session
+   * record, so sessions begun there go on resuming under the new name. Its token stays, and now
+   * answers to `to`. Turn records and events keep the name they were written with. The hub
+   * (`RunnerHub.renameRunner`) checks first that nothing runs there.
+   *
+   * The records go first and the runner's token and own record last, so a rename cut short, by a
+   * crash or a failed write, finishes when run again. Until the token moves, `to` is still free;
+   * once it has, its entry under `to` marks the rename as this one, so a record already written
+   * under `to` is kept, being the one the token answers to, and the old one goes. Once the old
+   * record is gone the rename is whole, though a crash right then leaves it unlogged.
+   */
+  async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
+    this.assertUser(actor, "only the user may rename a runner");
+    const parsed = NameSchema.safeParse(to);
+    if (!parsed.success) {
+      throw new BoardError(
+        "VALIDATION",
+        `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+      );
+    }
+    const name = parsed.data;
+    return this.mutex.run(async () => {
+      const current = await this.readRunner(from);
+      if (name === from) {
+        throw new BoardError("INVALID_STATE", `runner ${from} is already named ${name}`);
+      }
+      const tokens = await this.readRunnerTokens();
+      const finishing = tokens[from] === undefined && tokens[name] !== undefined;
+      const written = await exists(this.paths.runner(name));
+      if (written && !finishing) {
+        throw new BoardError("ALREADY_EXISTS", `runner ${name} already exists`);
+      }
+      const projects: Name[] = [];
+      for (const slug of await listDirs(this.paths.projects())) {
+        if ((await this.readProject(slug)).runner === from) {
+          await this.updateProject(slug, (project) => ({ ...project, runner: name }));
+          projects.push(slug);
+        }
+      }
+      const agents: Name[] = [];
+      for (const agent of await this.listAgents()) {
+        if (agent.homeRunner === from) {
+          await this.updateAgent(agent.name, (each) => ({ ...each, homeRunner: name }));
+          await this.refreshMember(agent.name);
+          agents.push(agent.name);
+        }
+      }
+      // A citizen may have a record for each of hundreds of threads, read under the mutex, so
+      // they are read and written a batch at a time.
+      let sessions = 0;
+      const files = await this.sessionFiles();
+      for (let at = 0; at < files.length; at += SESSION_BATCH) {
+        const renamed = await Promise.all(
+          files.slice(at, at + SESSION_BATCH).map(async (file) => {
+            const record = await readJson(file, SessionsFileSchema);
+            if (record.runner !== from) {
+              return false;
+            }
+            await writeJson(file, { ...record, runner: name });
+            return true;
+          }),
+        );
+        sessions += renamed.filter((each) => each).length;
+      }
+      const { [from]: moving, ...others } = tokens;
+      if (moving !== undefined) {
+        await writeJson(this.runnerTokensFile(), { runners: { ...others, [name]: moving } });
+      }
+      const token = moving ?? tokens[name];
+      let runner: Runner;
+      if (written) {
+        runner = await this.readRunner(name);
+      } else {
+        const doc = await readMarkdown(this.paths.runner(from), RunnerSchema);
+        runner = RunnerSchema.parse({ ...current, name });
+        const heading = `# ${from}\n`;
+        await writeMarkdown(
+          this.paths.runner(name),
+          runner,
+          doc.body.startsWith(heading) ? `# ${name}\n${doc.body.slice(heading.length)}` : doc.body,
+        );
+      }
+      await rm(this.paths.runner(from), { force: true });
+      await this.events.append("runner.renamed", actor.name, {
+        from,
+        to: name,
+        projects,
+        agents,
+        sessions,
+      });
+      // Last, with no wait after it: the runner's next request, a registration included, names it
+      // `to` only once the caller holds the rename, so the hub re-keys before any arrives.
+      if (token !== undefined) {
+        this.runnerTokens.set(token.tokenHash, name);
+      }
+      return { runner, projects, agents, sessions };
+    });
+  }
+
+  /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
+  private async sessionFiles(): Promise<string[]> {
+    const dirs: string[] = [];
+    for (const agent of await listDirs(this.paths.agents())) {
+      for (const scope of await listDirs(this.paths.agentProjects(agent))) {
+        const dir = this.paths.agentProject(agent, scope);
+        dirs.push(dir);
+        for (const kind of ["threads", "channels", "places"]) {
+          for (const part of await listDirs(path.join(dir, kind))) {
+            dirs.push(path.join(dir, kind, part));
+          }
+        }
+      }
+    }
+    const files: string[] = [];
+    for (let at = 0; at < dirs.length; at += SESSION_BATCH) {
+      const batch = dirs
+        .slice(at, at + SESSION_BATCH)
+        .map((dir) => path.join(dir, "sessions.json"));
+      const found = await Promise.all(batch.map((file) => exists(file)));
+      files.push(...batch.filter((_, index) => found[index] === true));
+    }
+    return files;
   }
 
   /**

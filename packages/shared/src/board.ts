@@ -618,6 +618,18 @@ export const RunnerSchema = z.object({
 export type Runner = z.infer<typeof RunnerSchema>;
 
 /**
+ * A rename's answer: the runner under its new name, and the projects living on it, the citizens
+ * pinned to it, and the count of conversations' session records that it rewrote to name it.
+ */
+export const RunnerRenamedSchema = z.object({
+  runner: RunnerSchema,
+  projects: z.array(NameSchema),
+  agents: z.array(NameSchema),
+  sessions: z.number().int().min(0),
+});
+export type RunnerRenamed = z.infer<typeof RunnerRenamedSchema>;
+
+/**
  * The user's pause that holds `cli`'s turns on a runner, the whole runner's first, or undefined
  * when they may start there.
  */

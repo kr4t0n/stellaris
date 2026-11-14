@@ -501,8 +501,7 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Board" }).click();
+  await page.goto("/c/general");
   await page.getByRole("link", { name: "Lab", exact: true }).click();
 
   await expect(page).toHaveURL(/\/p\/lab$/);
@@ -524,15 +523,22 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
 
-test("the citizen count opens every citizen with its role and model, and each opens its view", async ({
+test("status opens every citizen with its role and model, and each opens its view", async ({
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  const count = page.getByRole("button", { name: "2 citizens" });
-  await count.click();
+  await page.goto("/c/general");
+  const status = page.getByRole("region", { name: "Governance" }).getByRole("link", {
+    name: /^Status/,
+  });
+  await status.click();
   await expect(page).toHaveURL(/\/citizens$/);
-  await expect(count).toHaveAttribute("aria-pressed", "true");
+  // The Citizens tab is current and counts the active citizens with a CLI, as the view's header does.
+  const tab = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: /^Citizens/,
+  });
+  await expect(tab).toHaveAttribute("aria-current", "page");
+  await expect(tab).toHaveText("Citizens2");
 
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("heading", { name: "Citizens" })).toBeVisible();
@@ -555,9 +561,9 @@ test("the citizen count opens every citizen with its role and model, and each op
 
   await desk.click();
   await expect(page).toHaveURL(/\/citizen\/desk$/);
-  await count.click();
+  await status.click();
   await expect(page).toHaveURL(/\/citizens$/);
-  await count.click();
+  await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/$/);
 });
 

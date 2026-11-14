@@ -23,6 +23,8 @@ interface SkyProps {
   readonly onSelectAnchor: (anchor: string) => void;
   readonly onSelectStar: (id: string) => void;
   readonly onSelectTask: (id: string) => void;
+  /** A click on the sky that hits nothing: no star, task or sphere, and no drag. */
+  readonly onSelectSky: () => void;
   /** The live turn stream, whose tool calls flicker stars and whose posts rise from them. */
   readonly live: LiveStore;
   /** Shown beside what is hovered and moved with it every frame. */
@@ -83,6 +85,7 @@ export function Sky({
   onSelectAnchor,
   onSelectStar,
   onSelectTask,
+  onSelectSky,
   live,
   card,
 }: SkyProps) {
@@ -253,6 +256,8 @@ export function Sky({
             onSelectTask(mark);
           } else if (sphere !== null) {
             onSelectAnchor(sphere);
+          } else {
+            onSelectSky();
           }
         }}
       />

@@ -21,9 +21,11 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   expect(await page.evaluate(() => localStorage.getItem("stellaris.token"))).toBe(TOKEN);
-  // The top bar's Runners button is where the view opens from, with the runners waiting counted.
-  const runners = page.getByRole("button", { name: "Runners, 1 waiting for approval" });
-  await expect(runners).toHaveAttribute("aria-pressed", "true");
+  // The Runners tab is the view's, with the runners waiting counted.
+  const runners = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: "Runners, 1 waiting for approval",
+  });
+  await expect(runners).toHaveAttribute("aria-current", "page");
   await expect(runners).toContainText("1");
   await expect(page.getByRole("region", { name: "Governance" })).not.toContainText("runners");
 
@@ -38,7 +40,11 @@ test("a runner's link signs in with GitHub, comes back to the runner, and approv
   expect(board.writes).toEqual([
     { path: `/api/enrollments/${ENROLLING_CODE}/approve`, body: { name: "studio-mac" } },
   ]);
-  await expect(page.getByRole("button", { name: "Runners", exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Status" })
+      .getByRole("link", { name: "Runners", exact: true }),
+  ).toBeVisible();
 });
 
 for (const late of ["enrollments", "runners"] as const) {
@@ -129,11 +135,14 @@ test("the suggested name follows the runners list as it changes, and a typed one
   await expect(form.getByRole("button", { name: "Approve" })).toBeDisabled();
 });
 
-test("Runners in the top bar opens the runners view and closes it again", async ({ page }) => {
+test("the Runners tab opens the runners view, and Esc closes the board", async ({ page }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  const runners = page.getByRole("button", { name: "Runners", exact: true });
-  await expect(runners).toHaveAttribute("aria-pressed", "false");
+  await page.goto("/citizens");
+  const runners = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: "Runners",
+    exact: true,
+  });
+  await expect(runners).not.toHaveAttribute("aria-current", "page");
   await runners.click();
   await expect(page).toHaveURL("/runners");
   await expect(page.getByRole("heading", { name: "Runners" })).toBeVisible();
@@ -175,8 +184,8 @@ test("Runners in the top bar opens the runners view and closes it again", async 
   await expect(gap).toHaveAttribute("title", /carry an empty address or one git made up/);
   await expect(cells(1).nth(1)).toHaveText("studio");
   await expect(page.getByText("●")).toHaveCount(0);
-  await expect(runners).toHaveAttribute("aria-pressed", "true");
-  await runners.click();
+  await expect(runners).toHaveAttribute("aria-current", "page");
+  await page.keyboard.press("Escape");
   await expect(page).toHaveURL("/");
 });
 

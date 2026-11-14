@@ -1,62 +1,87 @@
 interface HudProps {
   readonly society: string | undefined;
-  readonly citizens: number;
-  /** Whether the citizens view is open; the count opens and closes it. */
-  readonly citizensOpen: boolean;
-  readonly onToggleCitizens: () => void;
-  /** Whether the runners view is open; the button opens and closes it. */
-  readonly runnersOpen: boolean;
-  readonly onToggleRunners: () => void;
-  /** Runners waiting for the user to approve their enrollment, counted on the button. */
-  readonly enrolling: number;
-  /** Whether the crons view is open; the button opens and closes it. */
-  readonly cronsOpen: boolean;
-  readonly onToggleCrons: () => void;
-  /** Crons whose turns keep failing, counted on the button. */
-  readonly failingCrons: number;
-  /** How many things wait on the user; the chip opens them. */
-  readonly attention: number;
-  readonly onOpenAttention: () => void;
+  /**
+   * How many things wait in the board: what needs the user, runners to approve, and crons
+   * failing. An amber dot follows the society's name while any do.
+   */
+  readonly waiting: number;
   readonly paused: boolean;
   /** Pauses or resumes the scheduler; while the request runs the switch waits. */
   readonly onTogglePause: () => void;
   readonly pauseBusy: boolean;
   readonly boardOpen: boolean;
-  readonly onToggleBoard: () => void;
-  /** Whether the metrics view is open; the button opens and closes it. */
-  readonly metricsOpen: boolean;
-  readonly onToggleMetrics: () => void;
-  /** Whether the operations log floats open; it is the server's, not the board's. */
-  readonly logsOpen: boolean;
-  readonly onToggleLogs: () => void;
+  /** Opens the board where it was last, as a click on empty sky does. */
+  readonly onOpenBoard: () => void;
   readonly onSignOut: () => void;
 }
 
-/** The frame around the sky: the app's icon, what the society is doing, and the way out. */
+/**
+ * Bare on the sky, with a ground only under the pointer. Its focus ring is twice the app's
+ * strength: with no card behind it, the app's 30% ring is 2.49:1 on the sky's ground, and 60% is
+ * 6.78:1.
+ */
+const ICON =
+  "grid size-7 place-items-center rounded-md transition-colors hover:bg-surface-2/60 focus-visible:ring-2 focus-visible:ring-fg-primary/60 focus-visible:outline-none disabled:opacity-50";
+
+/**
+ * A dark halo around an icon's strokes: the sky's black ground hides it, and a bright star the
+ * camera puts behind the icon shows it, edging the strokes where they meet the star.
+ */
+const HALO = "[filter:drop-shadow(0_0_1px_rgb(0_0_0))_drop-shadow(0_0_2.5px_rgb(0_0_0/0.85))]";
+
+/** Two bars, or while paused the triangle that resumes. */
+function PauseMark({ paused }: { paused: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className={HALO}>
+      {paused ? (
+        <path d="M5.5 3.6 12.4 8l-6.9 4.4z" fill="currentColor" strokeLinejoin="round" />
+      ) : (
+        <>
+          <rect x="4" y="3.5" width="2.75" height="9" rx="0.9" fill="currentColor" />
+          <rect x="9.25" y="3.5" width="2.75" height="9" rx="0.9" fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** A door left open with an arrow leaving through it. */
+function SignOutMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
+      aria-hidden="true"
+      className={HALO}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.5 2.75H4a1.25 1.25 0 0 0-1.25 1.25v8A1.25 1.25 0 0 0 4 13.25h2.5" />
+      <path d="M10.25 5 13.25 8l-3 3M13 8H6.75" />
+    </svg>
+  );
+}
+
+/**
+ * The frame around the sky: the app's icon, the society's name with a dot while something waits
+ * in the board, and two icons, the pause switch and the way out. A click on the sky opens the
+ * board; the keyboard has a button of its own for it, shown only while it has focus.
+ */
 export function Hud({
   society,
-  citizens,
-  citizensOpen,
-  onToggleCitizens,
-  runnersOpen,
-  onToggleRunners,
-  enrolling,
-  cronsOpen,
-  onToggleCrons,
-  failingCrons,
-  attention,
-  onOpenAttention,
+  waiting,
   paused,
   onTogglePause,
   pauseBusy,
   boardOpen,
-  onToggleBoard,
-  metricsOpen,
-  onToggleMetrics,
-  logsOpen,
-  onToggleLogs,
+  onOpenBoard,
   onSignOut,
 }: HudProps) {
+  const said = `${waiting} waiting in the board`;
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
       <div className="flex items-center gap-2.5">
@@ -71,109 +96,45 @@ export function Hud({
           className="size-7 shrink-0"
         />
         {society === undefined ? null : <span className="text-meta">{society}</span>}
+        {waiting === 0 ? null : (
+          <span title={said} className="pointer-events-auto flex items-center">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
+            <span className="sr-only">{said}</span>
+          </span>
+        )}
       </div>
-      <div className="pointer-events-auto flex items-center gap-2">
-        {attention === 0 ? null : (
+      <div className="pointer-events-auto flex items-center gap-1">
+        {boardOpen ? null : (
           <button
             type="button"
-            onClick={onOpenAttention}
-            className="card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-amber-300 transition-colors hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+            onClick={onOpenBoard}
+            className="sr-only items-center rounded-md text-xs text-fg-primary focus-visible:not-sr-only focus-visible:inline-flex focus-visible:h-7 focus-visible:px-2.5 focus-visible:ring-2 focus-visible:ring-fg-primary/60 focus-visible:outline-none"
           >
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
-            {attention} {attention === 1 ? "needs" : "need"} you
+            Open the board
           </button>
         )}
         <button
           type="button"
-          aria-pressed={paused}
+          aria-label={paused ? "Resume" : "Pause"}
+          title={paused ? "Paused: resume" : "Pause"}
           disabled={pauseBusy}
           onClick={onTogglePause}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none disabled:opacity-50 ${
+          className={`${ICON} ${
             paused
               ? "text-amber-300 hover:text-amber-200"
               : "text-fg-tertiary hover:text-fg-primary"
           }`}
         >
-          {paused ? "Paused · resume" : "Pause"}
+          <PauseMark paused={paused} />
         </button>
         <button
           type="button"
-          aria-pressed={citizensOpen}
-          onClick={onToggleCitizens}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            citizensOpen ? "text-fg-primary" : "text-fg-tertiary hover:text-fg-primary"
-          }`}
-        >
-          {citizens === 1 ? "1 citizen" : `${citizens} citizens`}
-        </button>
-        <button
-          type="button"
-          aria-pressed={runnersOpen}
-          aria-label={enrolling === 0 ? "Runners" : `Runners, ${enrolling} waiting for approval`}
-          onClick={onToggleRunners}
-          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            runnersOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Runners
-          {enrolling === 0 ? null : (
-            <span className="rounded bg-amber-500/15 px-1 text-[11px] text-amber-300">
-              {enrolling}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          aria-pressed={cronsOpen}
-          aria-label={failingCrons === 0 ? "Crons" : `Crons, ${failingCrons} failing`}
-          onClick={onToggleCrons}
-          className={`card inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            cronsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Crons
-          {failingCrons === 0 ? null : (
-            <span className="rounded bg-amber-500/15 px-1 text-[11px] text-amber-300">
-              {failingCrons}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          aria-pressed={boardOpen}
-          onClick={onToggleBoard}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            boardOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Board
-        </button>
-        <button
-          type="button"
-          aria-pressed={metricsOpen}
-          onClick={onToggleMetrics}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            metricsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Metrics
-        </button>
-        <button
-          type="button"
-          aria-expanded={logsOpen}
-          onClick={onToggleLogs}
-          className={`card inline-flex h-7 items-center rounded-md px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none ${
-            logsOpen ? "text-fg-primary" : "text-fg-secondary hover:text-fg-primary"
-          }`}
-        >
-          Logs
-        </button>
-        <button
-          type="button"
+          aria-label="Sign out"
+          title="Sign out"
           onClick={onSignOut}
-          className="h-7 rounded-md px-2.5 text-xs text-fg-tertiary transition-colors hover:bg-surface-2/60 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+          className={`${ICON} text-fg-tertiary hover:text-fg-primary`}
         >
-          Sign out
+          <SignOutMark />
         </button>
       </div>
     </header>

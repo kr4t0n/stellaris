@@ -102,6 +102,12 @@ const routeTree = rootRoute.addChildren([
   }),
   createRoute({
     getParentRoute: () => rootRoute,
+    // The operations log, the server's signals, one of the status views.
+    path: "/logs",
+    component: lazyRouteComponent(() => import("./board/LogsView.js"), "LogsView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
     path: "/citizens",
     // `window` picks how far back the citizens' tokens count; a day when none is named.
     validateSearch: (search: Record<string, unknown>): { window?: MetricsWindow } => {

@@ -70,6 +70,39 @@ import Testing
     #expect(general.messages.count == before + 1)
   }
 
+  /// A read under way when the user posts was asked before the board may have had the post: its
+  /// answer leaves the post in place, after what it brings, and a read begun later settles it.
+  @Test(.timeLimit(.minutes(1))) func keepsAPostThroughAReadBegunBeforeIt() async throws {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let first = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    gate.answer()
+    await first.value
+    // A reread under way, as an event of someone else's post would start.
+    let second = Task { await feed.load(using: model) }
+    await gate.arrivals(2)
+    let posted = try await model.post("Sent while a read was out", to: samples)
+    #expect(feed.messages.last?.id == posted.id)
+    try await Task.sleep(for: .milliseconds(300))
+    // The read answers with what the board had when it arrived, before the post.
+    gate.answerAsArrived()
+    await second.value
+    #expect(feed.messages.contains { $0.id == posted.id }, "the earlier read took the post away")
+    // A read begun after the post brings it from the board, once.
+    let third = Task { await feed.load(using: model) }
+    await gate.arrivals(3)
+    gate.answer()
+    await third.value
+    #expect(feed.messages.filter { $0.id == posted.id }.count == 1)
+  }
+
   @Test func opensAThreadWithItsFirstMessageAndShowsIt() async throws {
     let model = try await signedIn()
     model.startingThread = "general"

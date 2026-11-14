@@ -180,3 +180,32 @@ test("what is typed while a post is on its way stays in the box once it is sent"
   await expect(send).toHaveAttribute("aria-busy", "false");
   await expect(box).toHaveValue("First thought. And a second.");
 });
+
+test("what is typed while an approval is on its way stays in the box once it lands", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const view = viewOf(page);
+  const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+  const approve = view.getByRole("button", { name: "Approve", exact: true });
+  await expect(approve).toBeEnabled();
+
+  const held = Promise.withResolvers<void>();
+  await page.route("**/api/verbs/advance_task", async (route) => {
+    await held.promise;
+    await route.fallback();
+  });
+  await box.fill("LGTM.");
+  await approve.click();
+  await expect(approve).toHaveAttribute("aria-busy", "true");
+  await box.press("End");
+  await box.pressSequentially(" One more thing.");
+  held.resolve();
+  await expect(approve).toHaveCount(0);
+  expect(board.writes.at(-1)).toEqual({
+    path: "/api/verbs/advance_task",
+    body: { task_id: STAGE_TASK, note: "LGTM." },
+  });
+  await expect(box).toHaveValue("LGTM. One more thing.");
+});

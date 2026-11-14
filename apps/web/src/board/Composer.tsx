@@ -171,8 +171,9 @@ export function Composer({
       }
       return action.run(body);
     },
-    onSuccess: () => {
-      setText(initialText);
+    onSuccess: (_, body) => {
+      // What was typed while the action went stays in the box, as after a send.
+      setText((now) => (now.trim() === body ? initialText : now));
       setUploadFailure(null);
       if ("threadId" in target) {
         void client.invalidateQueries({ queryKey: ["thread", target.threadId] });

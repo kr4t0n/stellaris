@@ -541,8 +541,9 @@ const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 
 /**
  * How many of an author's latest posts in a thread or channel a post's idempotency key is looked for
- * among. A client sends a post again within moments of losing its answer, so a key is never further
- * back than this, and the look reads at most this many small files.
+ * among. A client sends a post again soon after losing its answer, so its key is among these; one
+ * sent again after the author posted this many more there, as the app can after a fresh start, is
+ * stored as a new post. The look reads at most this many small files.
  */
 export const IDEMPOTENCY_LOOKBACK = 20;
 
@@ -1977,7 +1978,14 @@ export class Board {
     const own = (await listFiles(dir))
       .filter((file) => file.slice(27, -".md".length) === author)
       .slice(-IDEMPOTENCY_LOOKBACK);
-    for (const file of own.toReversed()) {
+    // Read at once, and only a file whose text holds the key is parsed: under the write lock, the
+    // look costs about what one read does.
+    const texts = await Promise.all(own.map((file) => readFile(path.join(dir, file), "utf8")));
+    for (let at = own.length - 1; at >= 0; at -= 1) {
+      const file = own[at];
+      if (file === undefined || texts[at]?.includes(key) !== true) {
+        continue;
+      }
       const doc = await readMarkdown(path.join(dir, file), MessageFrontmatterSchema);
       if (doc.data.idempotencyKey !== key) {
         continue;

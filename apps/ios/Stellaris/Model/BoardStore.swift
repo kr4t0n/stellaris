@@ -696,6 +696,30 @@ extension Proposal {
     staleSince = loads
   }
 
+  /// What the user posted here, each with the number of loads begun when its answer came. A read
+  /// begun by then was asked before the board may have had the post, so its answer can lack it: the
+  /// post stays after what that read brings until a read begun later answers, as the board has it.
+  @ObservationIgnored private var posted: [(message: Message, loadsBefore: Int)] = []
+
+  /// Puts a message the user posted here at the end, where a read puts the newest, unless a read
+  /// brought it already: a post's answer carries the message, so it shows before the read the
+  /// board's event brings, which then lays the conversation out as the board has it.
+  func received(_ message: Message) {
+    guard !messages.contains(where: { $0.id == message.id }) else {
+      return
+    }
+    posted.append((message, loads))
+    messages.append(message)
+  }
+
+  /// What read `load` brought, with what the user posted here that a read begun before the post
+  /// may lack after it. A read begun after a post answered settles it, whether it brought it or
+  /// not, as a channel's read keeps only its newest messages.
+  private func withPosted(_ read: [Message], load: Int) -> [Message] {
+    posted.removeAll { $0.loadsBefore < load }
+    return read + posted.map(\.message).filter { mine in !read.contains { $0.id == mine.id } }
+  }
+
   /// Counts loads, so an answer that a later load's overtook changes nothing.
   @ObservationIgnored private var loads = 0
 
@@ -721,14 +745,14 @@ extension Proposal {
         guard load == loads else {
           return
         }
-        self.messages = messages
+        self.messages = withPosted(messages, load: load)
       case .thread(let id):
         let detail = try await model.send(BoardAPI.thread(id))
         guard load == loads else {
           return
         }
         thread = detail.thread
-        messages = detail.messages
+        messages = withPosted(detail.messages, load: load)
       }
       state = .loaded
       if let since = staleSince, load > since {

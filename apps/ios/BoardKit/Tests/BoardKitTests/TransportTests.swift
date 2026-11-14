@@ -102,7 +102,9 @@
       }
       let client = BoardClient(board: board, token: "secret", session: session)
       let (channel, text) = (try fixture.field("channel"), try fixture.field("body"))
-      let message = try await client.send(BoardAPI.postMessage(channel: channel, body: text))
+      let key = try fixture.field("idempotency_key")
+      let message = try await client.send(
+        BoardAPI.postMessage(channel: channel, body: text, key: key))
       #expect(message.author == "user")
     }
 

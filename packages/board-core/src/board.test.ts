@@ -27,6 +27,7 @@ import {
   Board,
   BoardError,
   computeMetrics,
+  IDEMPOTENCY_LOOKBACK,
   SYSTEM_ACTOR,
   tokenUse,
   type Actor,
@@ -401,6 +402,112 @@ describe("Board", () => {
         "thread.closed",
       ]),
     );
+  });
+
+  it("stores a post sent again with its idempotency key once, in a thread and in a channel", async () => {
+    const { board } = await society();
+    const thread = await board.openThread(USER, { channel: "demo/general", title: "Keys" });
+    const key = "post-key-for-a-retry-0001";
+    const events = async () =>
+      (await board.readEvents(null)).filter((event) => event.type === "message.posted").length;
+    const before = await events();
+
+    // The answer was lost, so the client sends the same post with the same key: one message.
+    const first = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const again = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(first.idempotencyKey).toBe(key);
+    expect(again.id).toBe(first.id);
+    expect((await board.listThread(thread.id)).map((message) => message.id)).toEqual([first.id]);
+    expect(await events()).toBe(before + 1);
+
+    // The same in a channel, where a different key is a different post.
+    const posted = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const repeated = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const other = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: "post-key-for-a-retry-0002",
+    });
+    expect(repeated.id).toBe(posted.id);
+    expect(other.id).not.toBe(posted.id);
+    expect(
+      (await board.listChannel("demo/dev")).filter((m) => m.body.trim() === "Ship it."),
+    ).toHaveLength(2);
+
+    // A key is its author's, in its place: another author, or another place, posts anew.
+    const byEng = await board.postMessage(ENG, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(byEng.id).not.toBe(first.id);
+    const elsewhere = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(elsewhere.id).not.toBe(first.id);
+
+    // The key sent with another text is refused rather than answered with the first.
+    await expect(
+      board.postMessage(USER, { thread_id: thread.id, body: "Ship it now.", idempotency_key: key }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect(await board.listThread(thread.id)).toHaveLength(2);
+  });
+
+  it("looks for a post's key among its author's latest posts there", async () => {
+    const { board } = await society();
+    const thread = await board.openThread(USER, { channel: "demo/general", title: "Keys" });
+    const key = "post-key-for-a-retry-0001";
+    const first = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "One.",
+      idempotency_key: key,
+    });
+    // Others' posts in between don't push it out of reach.
+    for (let n = 0; n < IDEMPOTENCY_LOOKBACK + 5; n += 1) {
+      await board.postMessage(ENG, { thread_id: thread.id, body: `Eng ${n}.` });
+    }
+    for (let n = 0; n < IDEMPOTENCY_LOOKBACK - 1; n += 1) {
+      await board.postMessage(USER, { thread_id: thread.id, body: `User ${n}.` });
+    }
+    expect(
+      (await board.postMessage(USER, { thread_id: thread.id, body: "One.", idempotency_key: key }))
+        .id,
+    ).toBe(first.id);
+    // One more of the author's own posts, and the key is past the look.
+    await board.postMessage(USER, { thread_id: thread.id, body: "Last." });
+    const late = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "One.",
+      idempotency_key: key,
+    });
+    expect(late.id).not.toBe(first.id);
+  });
+
+  it("refuses an idempotency key that isn't 16 to 64 letters, digits, hyphens or underscores", async () => {
+    const { board } = await society();
+    for (const key of ["short", "x".repeat(65), "has a space in it, so no"]) {
+      await expect(
+        board.postMessage(USER, { channel: "demo/general", body: "Hi.", idempotency_key: key }),
+      ).rejects.toThrow("expected 16-64 letters, digits, hyphens, or underscores");
+    }
   });
 
   it("files a citizen's digest by the scope a turn reads it in, with a cursor per scope", async () => {

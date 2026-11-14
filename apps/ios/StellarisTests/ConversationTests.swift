@@ -46,14 +46,61 @@ import Testing
     await general.load(using: model)
     let posted = try await model.post("Ship it", to: .general)
     #expect(posted.author == "user" && posted.channel == "general" && posted.thread == nil)
-    #expect(try await eventually { general.messages.last?.body == "Ship it" })
+    // The answer put it at the conversation's end, with no read of its own.
+    #expect(general.messages.last?.id == posted.id)
 
     let samples = Conversation.thread(FakeBoard.samples)
     await model.feed(for: samples).load(using: model)
     let reply = try await model.post("Looks right", to: samples)
     #expect(reply.thread == FakeBoard.samples)
-    #expect(try await eventually { model.feed(for: samples).messages.last?.id == reply.id })
+    #expect(model.feed(for: samples).messages.last?.id == reply.id)
     #expect(general.messages.last?.body == "Ship it", "the thread's reply went to the channel")
+  }
+
+  @Test func showsAPostFromItsAnswerBeforeAnyRead() async throws {
+    let model = try await signedIn()
+    let general = model.feed(for: .general)
+    await general.load(using: model)
+    let before = general.messages.count
+    let posted = try await model.post("Shown at once", to: .general)
+    // No read has run yet: the answer put it there, once.
+    #expect(general.messages.last?.id == posted.id)
+    #expect(general.messages.count == before + 1)
+    general.received(posted)
+    #expect(general.messages.count == before + 1)
+  }
+
+  /// A read under way when the user posts was asked before the board may have had the post: its
+  /// answer leaves the post in place, after what it brings, and a read begun later settles it.
+  @Test(.timeLimit(.minutes(1))) func keepsAPostThroughAReadBegunBeforeIt() async throws {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let first = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    gate.answer()
+    await first.value
+    // A reread under way, as an event of someone else's post would start.
+    let second = Task { await feed.load(using: model) }
+    await gate.arrivals(2)
+    let posted = try await model.post("Sent while a read was out", to: samples)
+    #expect(feed.messages.last?.id == posted.id)
+    try await Task.sleep(for: .milliseconds(300))
+    // The read answers with what the board had when it arrived, before the post.
+    gate.answerAsArrived()
+    await second.value
+    #expect(feed.messages.contains { $0.id == posted.id }, "the earlier read took the post away")
+    // A read begun after the post brings it from the board, once.
+    let third = Task { await feed.load(using: model) }
+    await gate.arrivals(3)
+    gate.answer()
+    await third.value
+    #expect(feed.messages.filter { $0.id == posted.id }.count == 1)
   }
 
   @Test func opensAThreadWithItsFirstMessageAndShowsIt() async throws {

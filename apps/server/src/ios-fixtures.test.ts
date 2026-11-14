@@ -377,9 +377,11 @@ describe("the answers the iOS client reads", () => {
     await call("dashboard", "GET", "/api/projects/demo/dashboard");
 
     // The writes, each a verb the app runs as the user.
+    // Each with a key, as the app sends every post.
     await call("post-message", "POST", "/api/verbs/post_message", {
       channel: "general",
       body: "Morning. The export view's design is next.",
+      idempotency_key: "00000000-0000-4000-8000-000000000001",
     });
     const thread = IdSchema.parse(
       await call("open-thread", "POST", "/api/verbs/open_thread", {
@@ -390,6 +392,7 @@ describe("the answers the iOS client reads", () => {
     await call("post-message-thread", "POST", "/api/verbs/post_message", {
       thread_id: thread.id,
       body: "Docs first, then the export view.",
+      idempotency_key: "00000000-0000-4000-8000-000000000002",
     });
     await call("advance-task", "POST", "/api/verbs/advance_task", {
       task_id: task?.id,

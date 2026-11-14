@@ -545,7 +545,9 @@ struct DraftField: View {
       && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  /// Posts the draft, then empties it unless it was changed while the post went.
+  /// Posts the draft, then empties it unless it was changed while the post went. A draft sent
+  /// again after a failure goes with the key it went with, so a post the board stored but whose
+  /// answer was lost is stored once.
   private func send(_ text: String) {
     let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard sendable(body) else {
@@ -553,9 +555,11 @@ struct DraftField: View {
     }
     sending = true
     failure = nil
+    let key = model.memory?.postKey(for: body, in: conversation) ?? UUID().uuidString
     Task {
       do {
-        _ = try await model.post(body, to: conversation)
+        _ = try await model.post(body, to: conversation, key: key)
+        model.memory?.posted(in: conversation)
         let now = model.memory?.draft(conversation) ?? ""
         if now.trimmingCharacters(in: .whitespacesAndNewlines) == body {
           model.memory?.setDraft("", for: conversation)

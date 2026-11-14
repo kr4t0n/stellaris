@@ -341,7 +341,11 @@ test("a turn in flight takes a post into its conversation, and stops on a second
   await box.press("Enter");
   await expect
     .poll(() => board.writes.find((write) => write.path === "/api/verbs/post_message")?.body)
-    .toEqual({ channel: "general", body: "@desk also check the runners" });
+    .toEqual({
+      channel: "general",
+      body: "@desk also check the runners",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    });
   await expect(box).toHaveValue("@desk ");
 
   // The first click asks again; only the second stops.

@@ -107,7 +107,8 @@ import Testing
       #expect(dashboard.updatedBy == "eng-1")
     case "post-message":
       let (channel, body) = (try fixture.field("channel"), try fixture.field("body"))
-      let message = try check(fixture, BoardAPI.postMessage(channel: channel, body: body))
+      let key = try fixture.field("idempotency_key")
+      let message = try check(fixture, BoardAPI.postMessage(channel: channel, body: body, key: key))
       #expect(message.thread == nil)
     case "upload-image":
       let image = try #require(fixture.image)
@@ -125,7 +126,8 @@ import Testing
       #expect(error.message == "notes.txt is not a PNG, JPEG, GIF, or WebP image by its first bytes")
     case "post-message-thread":
       let (thread, body) = (try fixture.field("thread_id"), try fixture.field("body"))
-      let message = try check(fixture, BoardAPI.postMessage(thread: thread, body: body))
+      let key = try fixture.field("idempotency_key")
+      let message = try check(fixture, BoardAPI.postMessage(thread: thread, body: body, key: key))
       #expect(message.thread == fixture.optionalField("thread_id"))
     case "open-thread":
       let (channel, title) = (try fixture.field("channel"), try fixture.field("title"))

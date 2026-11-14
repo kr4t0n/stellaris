@@ -1,10 +1,10 @@
 import { SOCIETY_SCOPE } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
+import { Outlet, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
-import { failingCron } from "./board/crons.js";
 import { Navigator, type GovernanceView } from "./board/Navigator.js";
+import { StatusTabs, statusViewOf, useStatusCounts } from "./board/StatusTabs.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
 import { CitizenCard } from "./components/CitizenCard.js";
@@ -12,7 +12,6 @@ import { displayName, SignInContext } from "./board/Avatar.js";
 import { EntityContext, NamedIdsContext } from "./components/Entities.js";
 import { Hud } from "./components/Hud.js";
 import { Island, ISLAND_SURFACE } from "./components/Island.js";
-import { LogsIsland } from "./components/LogsIsland.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { TaskCard } from "./components/TaskCard.js";
 import { ApiError } from "./lib/api.js";
@@ -40,7 +39,6 @@ import { recordVisit } from "./lib/trail.js";
 import {
   useAllTasks,
   useCrons,
-  useEnrollments,
   useMe,
   useMembers,
   useNow,
@@ -127,7 +125,6 @@ export function Playground() {
   const step = useRouterState({ select: (state) => state.location.state.__TSR_index });
   // Where each step of this tab's history went, for the views' back arrows.
   useEffect(() => recordVisit(step, href), [step, href]);
-  const [logsOpen, setLogsOpen] = useState(false);
   // The ask box shows only on the route it was opened on: its asks lead into the board.
   const [askAt, setAskAt] = useState<string | null>(null);
   const askOpen = askAt === pathname;
@@ -135,6 +132,21 @@ export function Playground() {
   // Whether focus last moved by pointer rather than Tab. Chromium matches :focus-visible on a
   // clicked button once any key is pressed, so it cannot tell a keyboard user's control apart.
   const pointerFocus = useRef(true);
+  // Whether the latest press began with the ask box open: that press closes the box, and the
+  // click it ends in on empty sky must not also open the board. Read as the press starts, in the
+  // window's capture phase, before the box's own listener closes it and a render moves on.
+  const askOpenNow = useRef(askOpen);
+  useEffect(() => {
+    askOpenNow.current = askOpen;
+  }, [askOpen]);
+  const pressClosedAsk = useRef(false);
+  useEffect(() => {
+    const onPress = (): void => {
+      pressClosedAsk.current = askOpenNow.current;
+    };
+    window.addEventListener("pointerdown", onPress, { capture: true });
+    return () => window.removeEventListener("pointerdown", onPress, { capture: true });
+  }, []);
   const seen = useSeen();
   const search = useSearch({ strict: false });
   // What is hovered: a star's id, since a citizen in turns in two projects has a star in each, or
@@ -144,6 +156,22 @@ export function Playground() {
   const width = useWindowWidth();
 
   const boardOpen = pathname !== "/";
+  // Where the board was last in this tab, so a click on empty sky brings it back as it was left;
+  // the society's general before it has been anywhere.
+  const lastBoard = useRef<string | null>(null);
+  useEffect(() => {
+    if (boardOpen) {
+      lastBoard.current = href;
+    }
+  }, [boardOpen, href]);
+  const router = useRouter();
+  const openBoard = (): void => {
+    if (lastBoard.current === null) {
+      void navigate({ to: "/c/$", params: { _splat: "general" } });
+    } else {
+      router.history.push(lastBoard.current);
+    }
+  };
   // Where the board sits and the content's width are the user's, kept per browser; the sky
   // centers in the room they leave.
   const [layout, setLayout] = useState<BoardLayout>(readBoardLayout);
@@ -192,9 +220,9 @@ export function Playground() {
       : pathname === "/proposals" || pathname.startsWith("/proposal/")
         ? "proposals"
         : null;
+  const activeView = statusViewOf(pathname);
   const attention = useNeedsYou().length;
-  const enrolling = useEnrollments().data?.length ?? 0;
-  const failingCrons = cronList.data?.filter(failingCron).length ?? 0;
+  const status = useStatusCounts();
   const activeOverview =
     pathname === "/society" || pathname.startsWith("/skills/")
       ? SOCIETY_SCOPE
@@ -235,8 +263,6 @@ export function Playground() {
       // What floats over the board closes first.
       if (askOpen) {
         setAskAt(null);
-      } else if (logsOpen) {
-        setLogsOpen(false);
       } else if (boardOpen) {
         void navigate({ to: "/" });
       }
@@ -247,7 +273,7 @@ export function Playground() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [boardOpen, logsOpen, askOpen, pathname, navigate]);
+  }, [boardOpen, askOpen, pathname, navigate]);
 
   const rejected = [society, members, projects, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
@@ -282,12 +308,8 @@ export function Playground() {
     );
   }
 
-  // Governance, the runners, the crons, and the metrics belong to the society as a whole.
-  const societyWide =
-    activeGovernance !== null ||
-    pathname === "/metrics" ||
-    pathname === "/runners" ||
-    pathname === "/crons";
+  // Governance and the status views belong to the society as a whole.
+  const societyWide = activeGovernance !== null || activeView !== null;
   const focus =
     (societyWide ? SOCIETY_SCOPE : null) ??
     activeOverview ??
@@ -347,6 +369,11 @@ export function Playground() {
                 onSelectAnchor={openProject}
                 onSelectStar={openStar}
                 onSelectTask={openTask}
+                onSelectSky={() => {
+                  if (!boardOpen && !pressClosedAsk.current) {
+                    openBoard();
+                  }
+                }}
                 live={live}
                 card={
                   mark !== undefined ? (
@@ -362,38 +389,12 @@ export function Playground() {
               />
               <Hud
                 society={society.data?.name}
-                citizens={new Set(model.stars.map((candidate) => candidate.name)).size}
-                citizensOpen={pathname === "/citizens"}
-                onToggleCitizens={() =>
-                  void navigate(pathname === "/citizens" ? { to: "/" } : { to: "/citizens" })
-                }
-                runnersOpen={pathname === "/runners"}
-                onToggleRunners={() =>
-                  void navigate(pathname === "/runners" ? { to: "/" } : { to: "/runners" })
-                }
-                enrolling={enrolling}
-                cronsOpen={pathname === "/crons"}
-                onToggleCrons={() =>
-                  void navigate(pathname === "/crons" ? { to: "/" } : { to: "/crons" })
-                }
-                failingCrons={failingCrons}
-                attention={attention}
-                onOpenAttention={() => void navigate({ to: "/needs-you" })}
                 paused={scheduler.data?.paused ?? false}
                 onTogglePause={() => pause.mutate(!(scheduler.data?.paused ?? false))}
                 pauseBusy={pause.isPending}
                 boardOpen={boardOpen}
-                onToggleBoard={() =>
-                  void navigate(
-                    boardOpen ? { to: "/" } : { to: "/c/$", params: { _splat: "general" } },
-                  )
-                }
-                logsOpen={logsOpen}
-                metricsOpen={pathname === "/metrics"}
-                onToggleMetrics={() =>
-                  void navigate(pathname === "/metrics" ? { to: "/" } : { to: "/metrics" })
-                }
-                onToggleLogs={() => setLogsOpen(!logsOpen)}
+                onOpenBoard={openBoard}
+                waiting={attention + status.enrolling + status.failing}
                 onSignOut={signOut}
               />
               {boardOpen ? (
@@ -416,6 +417,7 @@ export function Playground() {
                     activeScope={activeScope}
                     activeGovernance={activeGovernance}
                     activeOverview={activeOverview}
+                    activeView={activeView}
                   />
                   <Island
                     label="Board content"
@@ -431,11 +433,11 @@ export function Playground() {
                       onResize={resizeContent}
                       onToggle={toggleContentWidth}
                     />
+                    {activeView === null ? null : <StatusTabs active={activeView} />}
                     <Outlet />
                   </Island>
                 </div>
               ) : null}
-              {logsOpen ? <LogsIsland onClose={() => setLogsOpen(false)} /> : null}
               {askOpen ? (
                 <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
               ) : (

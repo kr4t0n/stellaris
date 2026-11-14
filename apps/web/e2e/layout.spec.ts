@@ -95,7 +95,8 @@ test("a browser that never chose has the board around the sky, and the header's 
   expect(await boxOf(content)).toMatchObject({ x: 16 + 256, width: 576 });
   await page.keyboard.press("Escape");
   await expect(content).toHaveCount(0);
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("button", { name: "Open the board" }).focus();
+  await page.keyboard.press("Enter");
   expect(await boxOf(content)).toMatchObject({ x: 16 + 256, width: 576 });
 
   // From the keyboard, Enter switches back, and focus stays on the switch.
@@ -224,29 +225,6 @@ for (const size of [
     expect(ask.x + ask.width / 2).toBeCloseTo(roomMiddle, 0);
   });
 }
-
-test("beside the sky, the operations log shows whole over the sky's corner, in front of the panel where they meet", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1024, height: 768 });
-  await besideTheSky(page);
-  await fakeBoard(page);
-  await page.goto("/c/general");
-  const content = await boxOf(page.getByRole("region", { name: "Board content" }));
-  await page.getByRole("button", { name: "Logs" }).click();
-  const log = page.getByRole("region", { name: "Operations log" });
-  const box = await boxOf(log);
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(1024 - 16);
-  expect(box.y + box.height).toBeLessThanOrEqual(768);
-  // At this width the log reaches over the panel's right edge, and is drawn in front of it there.
-  expect(box.x).toBeLessThan(content.x + content.width);
-  const front = await log.evaluate(
-    (element, at) => element.contains(document.elementFromPoint(at.x, at.y)),
-    { x: (box.x + content.x + content.width) / 2, y: box.y + 24 },
-  );
-  expect(front).toBe(true);
-});
 
 for (const size of [
   { width: 1440, height: 900, navigatorScrolls: false },

@@ -120,8 +120,8 @@ test("the pause switch pauses and resumes the society", async ({ page }) => {
   await page.goto("/");
 
   await page.getByRole("button", { name: "Pause", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Paused · resume" })).toBeVisible();
-  await page.getByRole("button", { name: "Paused · resume" }).click();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   expect(board.writes.map((write) => write.path)).toEqual(["/api/pause", "/api/resume"]);
 });
@@ -130,9 +130,13 @@ test("needs you gathers a proposal, a stage that names the user, and a question 
   page,
 }) => {
   const board = await fakeBoard(page, { asked: true });
-  await page.goto("/");
+  await page.goto("/c/general");
 
-  await page.getByRole("button", { name: "3 need you" }).click();
+  const needsYou = page.getByRole("region", { name: "Governance" }).getByRole("link", {
+    name: /^needs you/,
+  });
+  await expect(needsYou).toHaveText("◉needs you3");
+  await needsYou.click();
   await expect(page).toHaveURL(/\/needs-you$/);
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("link", { name: /^Skill refereed-research/ })).toHaveAttribute(
@@ -150,7 +154,7 @@ test("needs you gathers a proposal, a stage that names the user, and a question 
   const box = view.getByRole("textbox", { name: "Write in the task's thread" });
   await box.fill("Yes, include 2025.");
   await box.press("Enter");
-  await expect(page.getByRole("button", { name: "2 need you" })).toBeVisible();
+  await expect(needsYou).toHaveText("◉needs you2");
   expect(board.writes.at(-1)).toEqual({
     path: "/api/verbs/post_message",
     body: {

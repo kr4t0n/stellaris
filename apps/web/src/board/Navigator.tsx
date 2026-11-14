@@ -8,6 +8,7 @@ import { useChannels, useProjects, useProposals, useTasks, useThreads } from "..
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
 import { LayoutSwitch } from "./LayoutSwitch.js";
+import { type StatusView, useStatusCounts } from "./StatusTabs.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
@@ -92,8 +93,17 @@ function Count({ value, title }: { value: number; title: string }) {
   );
 }
 
-/** Where the user decides: what waits on the user and the proposals, each with its count. */
-function Governance({ active }: { active: GovernanceView | null }) {
+/**
+ * Where the user looks first and decides: the society's status, then what waits on the user and
+ * the proposals, each with its count.
+ */
+function Governance({
+  active,
+  statusActive,
+}: {
+  active: GovernanceView | null;
+  statusActive: boolean;
+}) {
   const proposals = useProposals();
   const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
   const attention = useNeedsYou().length;
@@ -103,6 +113,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
         Governance
       </h3>
       <ul>
+        <StatusEntry active={statusActive} />
         <li>
           <Link
             to="/needs-you"
@@ -133,7 +144,38 @@ function Governance({ active }: { active: GovernanceView | null }) {
 }
 
 /**
- * The board's left side, an island of its own or the panel's first column: who is working now, what waits on the user's decision, then the society's channels and every project's in the
+ * The one row for the society's status, which opens its first tab; the strip over the content
+ * switches between citizens, runners, crons, metrics and the operations log. Its amber count adds
+ * up what waits there, and its name says what.
+ */
+function StatusEntry({ active }: { active: boolean }) {
+  const { enrolling, failing } = useStatusCounts();
+  const waiting = [
+    ...(enrolling === 0
+      ? []
+      : [`${enrolling} ${enrolling === 1 ? "runner" : "runners"} waiting for approval`]),
+    ...(failing === 0 ? [] : [`${failing} ${failing === 1 ? "cron" : "crons"} failing`]),
+  ];
+  return (
+    <li>
+      <Link
+        to="/citizens"
+        aria-label={["Status", ...waiting].join(", ")}
+        className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}
+      >
+        <span aria-hidden="true" className="text-fg-muted">
+          ◎
+        </span>
+        <span className="min-w-0 flex-1 truncate">status</span>
+        <Count value={enrolling + failing} title={waiting.join(", ")} />
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * The board's left side, an island of its own or the panel's first column: who is working now, the
+ * society's status and what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and its name in bold when something is new
  * since this browser looked, and last the archived projects, each opening its overview.
  */
@@ -144,9 +186,12 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
+  activeView,
   layout,
   onLayout,
 }: {
+  /** The status view that is open, if one is. */
+  activeView: StatusView | null;
   /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
   layout: BoardLayout;
   onLayout: (layout: BoardLayout) => void;
@@ -236,7 +281,7 @@ export function Navigator({
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
-        <Governance active={activeGovernance} />
+        <Governance active={activeGovernance} statusActive={activeView !== null} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="pb-1">

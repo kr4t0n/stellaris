@@ -58,18 +58,22 @@ test("the ask box closes on Escape or a click away, and Space leaves a focused c
   await expect(box).toBeHidden();
 
   // A clicked button keeps focus but is not a keyboard user's control, so Space still asks.
-  await page.getByRole("button", { name: "Board" }).click();
+  await page.getByRole("button", { name: "Fit the whole sky" }).click();
   await page.keyboard.press("Space");
   await expect(box).toBeVisible();
+  // A click away on empty sky closes the box, and only that: the board stays closed.
   await page.mouse.click(40, 700);
   await expect(box).toBeHidden();
-  await expect(page.getByRole("region", { name: "Board content" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("region", { name: "Board content" })).toHaveCount(0);
 
   // Reached by Tab, a control takes Space as its own press.
-  await page.getByRole("button", { name: /need you/ }).focus();
+  await page.getByRole("button", { name: "Fit the whole sky" }).focus();
+  await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Pause" })).toBeFocused();
   await page.keyboard.press("Space");
   await expect(box).toBeHidden();
-  await expect(page.getByRole("button", { name: /Paused/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
 });

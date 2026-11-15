@@ -96,6 +96,8 @@ const EVENT_PAGE = 100;
 
 const RetireBodySchema = z.object({ reason: z.string().min(1) });
 const RunnerBodySchema = z.object({ name: NameSchema });
+/** A rename's new name, which the board checks, refusing a malformed one in words a form can show. */
+const RunnerRenameBodySchema = z.object({ name: z.string() });
 const EnrollmentApprovalSchema = z.object({ name: NameSchema });
 /** The runner a citizen's work outside any project runs on, or null to pin it again on its next turn. */
 const HomeRunnerBodySchema = z.object({ runner: NameSchema.nullable() });
@@ -281,6 +283,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
       });
     }
   }
+  // The user renames a runner, with every record that names it, once nothing runs there; the hub,
+  // when there is one, checks that and has the runner connect again under its new name.
+  api.put("/runners/:name/name", async (c) => {
+    const from = NameSchema.parse(c.req.param("name"));
+    const body = RunnerRenameBodySchema.parse(await c.req.json());
+    return c.json(
+      deps.runners === undefined
+        ? await board.renameRunner(c.get("actor"), from, body.name)
+        : await deps.runners.renameRunner(c.get("actor"), from, body.name),
+    );
+  });
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.
   api.post("/runners", async (c) => {
     const body = RunnerBodySchema.parse(await c.req.json());

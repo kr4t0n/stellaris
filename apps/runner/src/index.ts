@@ -134,6 +134,7 @@ if (config.token !== null) {
   );
 } else {
   const saved = await readCredentials(layout, config.serverUrl);
+  let enrolledAgain = false;
   try {
     runner = await connect(saved?.token ?? (await enroll()));
   } catch (error) {
@@ -147,7 +148,15 @@ if (config.token !== null) {
       "the server refused this runner's saved token; enrolling again",
     );
     await forgetCredentials(layout);
+    enrolledAgain = true;
     runner = await connect(await enroll()).catch((retry: unknown) => fail(String(retry)));
+  }
+  // The token decides who the runner is; the saved name only labels its log, so it follows a
+  // rename on the board while the saved token is the one the server took.
+  if (saved !== null && !enrolledAgain && saved.name !== runner.name) {
+    await saveCredentials(layout, { ...saved, name: runner.name }).catch((error: unknown) => {
+      log.warn({ error: String(error) }, "could not save the runner's new name");
+    });
   }
 }
 log.info(

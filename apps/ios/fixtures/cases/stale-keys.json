@@ -572,6 +572,22 @@
   },
   {
     "event": {
+      "id": "01M5A00000000000000000E072",
+      "ts": "2026-10-26T08:00:00.000Z",
+      "type": "runner.renamed",
+      "actor": "user",
+      "payload": {
+        "from": "runner-1",
+        "to": "runner-2",
+        "projects": ["lab"],
+        "agents": ["eng-1"],
+        "sessions": 3
+      }
+    },
+    "keys": [["runners"], ["models"], ["projects"], ["members"]]
+  },
+  {
+    "event": {
       "id": "01M5A00000000000000000E049",
       "ts": "2026-10-26T08:00:00.000Z",
       "type": "ops.signal",

@@ -1,7 +1,7 @@
 import type { CliKind, PendingEnrollment, Runner } from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
@@ -69,6 +69,7 @@ function WaitingRunner({
     onSuccess: refresh,
   });
   const busy = approve.isPending || deny.isPending;
+  const field = useRef<HTMLInputElement>(null);
 
   return (
     <li
@@ -89,10 +90,15 @@ function WaitingRunner({
         className="mt-2.5 flex items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          approve.mutate();
+          // As in a rename, a refusal leaves the focus in the field.
+          field.current?.focus();
+          if (!busy && name.trim() !== "") {
+            approve.mutate();
+          }
         }}
       >
         <input
+          ref={field}
           value={name}
           maxLength={32}
           spellCheck={false}
@@ -100,10 +106,17 @@ function WaitingRunner({
           onChange={(event) => setTyped(event.target.value)}
           className={`${FIELD} min-w-0 flex-1 font-mono`}
         />
-        <Button onClick={() => deny.mutate()} disabled={busy}>
+        <Button
+          aria-disabled={busy}
+          onClick={() => {
+            if (!busy) {
+              deny.mutate();
+            }
+          }}
+        >
           Deny
         </Button>
-        <Button variant="primary" type="submit" disabled={busy || name.trim() === ""}>
+        <Button variant="primary" type="submit" aria-disabled={busy || name.trim() === ""}>
           {approve.isPending ? "Approving…" : "Approve"}
         </Button>
       </form>
@@ -126,10 +139,93 @@ function PauseMark({ paused }: { paused: boolean }) {
   );
 }
 
+/** A pencil, to rename. Decorative: its button's label says what it does. */
+function RenameMark() {
+  return (
+    <svg viewBox="0 0 12 12" width={12} height={12} aria-hidden="true" className="shrink-0">
+      <path
+        d="M8.25 1.5l2.25 2.25-6.5 6.5H1.75V8z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.25}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A runner's new name, under its row. The board renames it with every project, pin, and session
+ * that names it, and refuses while anything runs there, saying what; the runner keeps its token.
+ */
+function RenameRunner({ runner, onDone }: { runner: string; onDone: (renamed?: string) => void }) {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const [name, setName] = useState(runner);
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => field.current?.select(), []);
+  const rename = useMutation({
+    mutationFn: () => api.renameRunner(runner, name.trim()),
+    onSuccess: async (renamed) => {
+      await Promise.all(
+        ["runners", "projects", "members", "models"].map((key) =>
+          client.invalidateQueries({ queryKey: [key] }),
+        ),
+      );
+      onDone(renamed.runner.name);
+    },
+  });
+  const unchanged = name.trim() === "" || name.trim() === runner;
+  return (
+    <form
+      aria-label={`Rename ${runner}`}
+      className="col-span-full mt-1.5 mb-1"
+      onSubmit={(event) => {
+        event.preventDefault();
+        // The focus waits in the field, wherever the press came from, so a refusal leaves it
+        // where the name is changed.
+        field.current?.focus();
+        if (!unchanged && !rename.isPending) {
+          rename.mutate();
+        }
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <input
+          ref={field}
+          value={name}
+          maxLength={32}
+          spellCheck={false}
+          aria-label="New name"
+          onChange={(event) => setName(event.target.value)}
+          className={`${FIELD} min-w-0 flex-1 font-mono`}
+        />
+        {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
+        <Button
+          aria-disabled={rename.isPending}
+          onClick={() => {
+            if (!rename.isPending) {
+              onDone();
+            }
+          }}
+        >
+          Cancel
+        </Button>
+        <Button variant="primary" type="submit" aria-disabled={rename.isPending || unchanged}>
+          {rename.isPending ? "Renaming…" : "Rename"}
+        </Button>
+      </div>
+      <div className="mt-1.5">
+        <Failure error={rename.error} />
+      </div>
+    </form>
+  );
+}
+
 /**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
  * marked when it is not the server's, capabilities, the projects living on it, whether it is
- * connected or paused, and its pause; above them, those asking to join. A runner started without a
+ * connected or paused, its pause, and its rename; above them, those asking to join. A runner started without a
  * token asks the board to enroll it and prints a link here with its code; approving it under a name
  * registers it, and the runner picks up its token on its next poll. Each CLI's mark pauses that CLI
  * on the runner alone. Under them, each CLI login's plan quota.
@@ -159,6 +255,11 @@ export function RunnersView() {
       pause.mutate(change);
     }
   };
+  // The runner whose rename is open, and the one whose rename control takes the focus back when it
+  // closes, under the name it has then.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [refocus, setRefocus] = useState<string | null>(null);
+  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
   const enrollments = useEnrollments();
   const runners = useRunners();
   const projects = useProjects();
@@ -183,6 +284,13 @@ export function RunnersView() {
     code === undefined ? undefined : waiting.find((each) => sameCode(each.userCode, code));
   const ordered =
     followed === undefined ? waiting : [followed, ...waiting.filter((each) => each !== followed)];
+  useEffect(() => {
+    const button = refocus === null ? undefined : renameButtons.current.get(refocus);
+    if (button !== undefined) {
+      button.focus();
+      setRefocus(null);
+    }
+  }, [refocus]);
   const living = (runner: Runner): string[] =>
     (projects.data ?? [])
       .filter((project) => project.runner === runner.name && project.archived === undefined)
@@ -292,21 +400,54 @@ export function RunnersView() {
                 <span className="truncate text-xs text-fg-muted" title={lives}>
                   {lives}
                 </span>
-                <span className={`text-right text-xs ${state.tone}`} title={state.detail}>
+                {/* On one line, so the narrowest island cuts capabilities and projects before it. */}
+                <span
+                  className={`text-right text-xs whitespace-nowrap ${state.tone}`}
+                  title={state.detail}
+                >
                   {state.label}
                 </span>
-                <button
-                  type="button"
-                  aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                  title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                  aria-disabled={pause.isPending}
-                  onClick={() =>
-                    toggle({ runner: runner.name, paused: runner.paused === undefined })
-                  }
-                  className="-mr-1 rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                >
-                  <PauseMark paused={runner.paused !== undefined} />
-                </button>
+                {/* The runner's own controls share the last column, so the rename takes no gap of its own. */}
+                <span className="-mr-1 flex items-center">
+                  <button
+                    type="button"
+                    aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                    title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                    aria-disabled={pause.isPending}
+                    onClick={() =>
+                      toggle({ runner: runner.name, paused: runner.paused === undefined })
+                    }
+                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                  >
+                    <PauseMark paused={runner.paused !== undefined} />
+                  </button>
+                  <button
+                    type="button"
+                    ref={(button) => {
+                      if (button === null) {
+                        renameButtons.current.delete(runner.name);
+                      } else {
+                        renameButtons.current.set(runner.name, button);
+                      }
+                    }}
+                    aria-label={`Rename ${runner.name}…`}
+                    title={`Rename ${runner.name}…`}
+                    aria-expanded={renaming === runner.name}
+                    onClick={() => setRenaming(renaming === runner.name ? null : runner.name)}
+                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                  >
+                    <RenameMark />
+                  </button>
+                </span>
+                {renaming === runner.name ? (
+                  <RenameRunner
+                    runner={runner.name}
+                    onDone={(renamed) => {
+                      setRenaming(null);
+                      setRefocus(renamed ?? runner.name);
+                    }}
+                  />
+                ) : null}
               </li>
             );
           })}

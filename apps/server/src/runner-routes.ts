@@ -90,20 +90,26 @@ export function runnerRoutes(
     return streamSSE(c, async (stream) => {
       const queue: RunnerMessage[] = [];
       let wake: (() => void) | null = null;
+      // Aborted when the hub ends the stream, as after a rename, so the runner connects again.
+      const ending = new AbortController();
       stream.onAbort(() => wake?.());
       const send = (message: RunnerMessage): boolean => {
-        if (stream.aborted || stream.closed) {
+        if (stream.aborted || stream.closed || ending.signal.aborted) {
           return false;
         }
         queue.push(message);
         wake?.();
         return true;
       };
-      const detach = await hub.attach(runner, send);
+      const end = (): void => {
+        ending.abort();
+        wake?.();
+      };
+      const detach = await hub.attach(runner, send, end);
       try {
         // Headers go out with the first write, so the runner knows it is attached once this arrives.
         await stream.write(": attached\n\n");
-        while (!stream.aborted && !stream.closed) {
+        while (!stream.aborted && !stream.closed && !ending.signal.aborted) {
           for (let message = queue.shift(); message !== undefined; message = queue.shift()) {
             await stream.writeSSE({ event: message.type, data: JSON.stringify(message) });
           }

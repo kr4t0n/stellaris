@@ -1,4 +1,4 @@
-import { MESSAGE_LOOKUP_LIMIT, type MessageRef } from "@stellaris/shared";
+import { MESSAGE_LOOKUP_LIMIT, type Message, type MessageRef } from "@stellaris/shared";
 
 /**
  * The messages text names by id, looked up from the board as the text shows: every id asked for
@@ -60,4 +60,29 @@ export class MessageLookup {
 
   /** Every message found so far; the same array until another is found. */
   readonly snapshot = (): readonly MessageRef[] => this.refs;
+}
+
+/**
+ * `messages` with `message` in its place by id, as a read of its thread or channel would have it,
+ * or `messages` itself when it is there already. A post's answer carries the message, so the view
+ * shows it at once, before the read the board's event brings.
+ */
+export function withMessage<T extends Pick<Message, "id">>(messages: T[], message: T): T[] {
+  if (messages.some((each) => each.id === message.id)) {
+    return messages;
+  }
+  const at = messages.findIndex((each) => each.id > message.id);
+  return at === -1
+    ? [...messages, message]
+    : [...messages.slice(0, at), message, ...messages.slice(at)];
+}
+
+/**
+ * A key for one post, sent again with it if its answer never arrives, so the board stores it
+ * once. Random bytes rather than `crypto.randomUUID`, which a board served over plain HTTP to
+ * another machine doesn't have.
+ */
+export function newIdempotencyKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

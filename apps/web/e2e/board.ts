@@ -1093,6 +1093,13 @@ export interface FakeBoard {
   refuseNext(message: string): void;
   /** Puts this many citizens in a turn at lab, and this many turns in the queue. */
   setWorking(running: number, queued?: number): void;
+  /**
+   * Stores the next post but loses its answer, as a link would: reset (the default), or answered by
+   * a gateway's 502.
+   */
+  loseNextPostAnswer(how?: "reset" | "502"): void;
+  /** The posts stored with this body, in the task's thread or an ask's. */
+  stored(body: string): number;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1312,6 +1319,7 @@ export async function fakeBoard(
   let answering: string | null = null;
   const writes: Write[] = [];
   let refusal: string | null = null;
+  const lostAnswers: Array<"reset" | "502"> = [];
   let paused = false;
   let working: string[] = [];
   let queued: string[] = [];
@@ -1756,7 +1764,25 @@ export async function fakeBoard(
           return json(route, thread);
         }
         case "/api/verbs/post_message": {
+          // A post sent again with its key is answered with the one stored, as the board does.
+          const key = body["idempotency_key"];
+          const keyed = key === undefined ? {} : { idempotencyKey: key };
           const ask = asks.get(String(body["thread_id"]));
+          const place = ask?.messages ?? threadMessages;
+          const stored = place.find((each) => key !== undefined && each["idempotencyKey"] === key);
+          if (stored !== undefined) {
+            return json(route, stored);
+          }
+          const answer = (posted: Record<string, unknown>): Promise<void> => {
+            const lost = lostAnswers.shift();
+            if (lost === "502") {
+              return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });
+            }
+            if (lost === "reset") {
+              return route.abort("connectionreset");
+            }
+            return json(route, posted);
+          };
           if (ask !== undefined) {
             const posted = {
               ...askMessage(
@@ -1766,10 +1792,11 @@ export async function fakeBoard(
                 String(body["body"]),
               ),
               ts: "2026-09-29T10:00:00.000Z",
+              ...keyed,
             };
             ask.messages.push(posted);
             answering = String(ask.thread["id"]);
-            return json(route, posted);
+            return answer(posted);
           }
           const posted = {
             id: `01M3Q2AAAAAAAAAAAAAAAAAAB${threadMessages.length + 1}`,
@@ -1779,12 +1806,13 @@ export async function fakeBoard(
             ts: "2026-09-29T10:00:00.000Z",
             mentions: [],
             body: body["body"],
+            ...keyed,
           };
           threadMessages.push(posted);
           if (body["thread_id"] === STAGE_TASK) {
             waitingAsk = false;
           }
-          return json(route, posted);
+          return answer(posted);
         }
         case "/api/pause":
         case "/api/resume":
@@ -2119,5 +2147,12 @@ export async function fakeBoard(
       working = WORKERS.slice(0, running).map((name) => `${name}/lab`);
       queued = WORKERS.slice(running, running + waiting).map((name) => `${name}/lab`);
     },
+    loseNextPostAnswer: (how = "reset") => {
+      lostAnswers.push(how);
+    },
+    stored: (text) =>
+      [...threadMessages, ...[...asks.values()].flatMap((each) => each.messages)].filter(
+        (each) => each["body"] === text,
+      ).length,
   };
 }

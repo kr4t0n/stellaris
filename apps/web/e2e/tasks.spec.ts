@@ -37,7 +37,11 @@ test("a task's view holds its thread: each handover with its step, and what the 
   await expect(thread).toContainText("Reading it now; I'll sign off today.");
   expect(board.writes.at(-1)).toEqual({
     path: "/api/verbs/post_message",
-    body: { thread_id: STAGE_TASK, body: "Reading it now; I'll sign off today." },
+    body: {
+      thread_id: STAGE_TASK,
+      body: "Reading it now; I'll sign off today.",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    },
   });
 });
 

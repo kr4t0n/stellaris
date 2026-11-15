@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   channelRef,
   ChannelRefSchema,
+  IdempotencyKeySchema,
   IsoDateTimeSchema,
   NameSchema,
   UlidSchema,
@@ -325,6 +326,8 @@ export const MessageFrontmatterSchema = z.object({
   step: MessageStepSchema.optional(),
   /** On a post a verb made about its work, such as a knowledge topic's note: what it records. */
   notice: MessageNoticeSchema.optional(),
+  /** The key its author sent it with, which a post sent again with the same key is answered by. */
+  idempotencyKey: IdempotencyKeySchema.optional(),
   ts: IsoDateTimeSchema,
   mentions: z.array(NameSchema),
 });

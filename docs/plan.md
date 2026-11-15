@@ -185,7 +185,7 @@ data/
 ### 4.3 Verbs
 
 ```
-Messages      post_message(channel?, body, thread_id?)   # in a thread, the thread's channel
+Messages      post_message(channel?, body, thread_id?, idempotency_key?)   # in a thread, the thread's channel; a key sent again answers the post it stored
               read_inbox(since_cursor, limit)   # the digest again, or past its first page
               search(query, project?, channel?)
 Threads       open_thread(channel, title)     # a topic; a task's and a proposal's open with them

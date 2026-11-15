@@ -10,7 +10,8 @@ import {
 } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, type Api } from "../lib/api.js";
+import { newIdempotencyKey, withMessage } from "../lib/messages.js";
 import { useMembers, useSession, useUploadedImage } from "../lib/session.js";
 import { askTitle } from "./asks.js";
 import {
@@ -112,26 +113,48 @@ export function Composer({
   // the next keystroke can land.
   const pendingCaret = useRef<number | null>(null);
 
+  /**
+   * The post on its way, or that failed, with its key, and in the ask box the thread it opened:
+   * sent again with the same text, as after an answer that never arrived, it goes with the same
+   * key into the same thread, so the board stores it once. Changed text is a new post.
+   */
+  const pending = useRef<{ body: string; key: string; threadId?: string } | null>(null);
+
   const send = useMutation({
     mutationFn: async (body: string) => {
+      const post =
+        pending.current?.body === body ? pending.current : { body, key: newIdempotencyKey() };
+      pending.current = post;
+      const keyed = { body, idempotency_key: post.key };
       if ("channel" in target) {
-        return api.sendMessage({ channel: target.channel, body });
+        return api.sendMessage({ channel: target.channel, ...keyed });
       }
       if ("threadId" in target) {
-        return api.sendMessage({ thread_id: target.threadId, body });
+        return api.sendMessage({ thread_id: target.threadId, ...keyed });
       }
-      const thread = await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) });
-      return api.sendMessage({ thread_id: thread.id, body });
+      post.threadId ??= (await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) })).id;
+      return api.sendMessage({ thread_id: post.threadId, ...keyed });
     },
     // A refusal of the action says no more once the user posts again.
     onMutate: () => act.reset(),
-    onSuccess: (message) => {
-      setText(initialText);
+    onSuccess: (message, body) => {
+      pending.current = null;
+      // What was typed while the post was on its way stays in the box.
+      setText((now) => (now.trim() === body ? initialText : now));
       setUploadFailure(null);
-      void client.invalidateQueries({
-        queryKey:
-          message.thread === undefined ? ["channel", message.channel] : ["thread", message.thread],
-      });
+      // The answer carries the message, so it shows now; the board's event for it reads the thread
+      // or channel again, once, which a read here would only repeat.
+      if (message.thread === undefined) {
+        client.setQueryData<Message[]>(["channel", message.channel], (read) =>
+          read === undefined ? read : withMessage(read, message),
+        );
+      } else {
+        client.setQueryData<Awaited<ReturnType<Api["thread"]>>>(
+          ["thread", message.thread],
+          (read) =>
+            read === undefined ? read : { ...read, messages: withMessage(read.messages, message) },
+        );
+      }
       if ("ask" in target) {
         void client.invalidateQueries({ queryKey: ["threads"] });
       }
@@ -148,8 +171,9 @@ export function Composer({
       }
       return action.run(body);
     },
-    onSuccess: () => {
-      setText(initialText);
+    onSuccess: (_, body) => {
+      // What was typed while the action went stays in the box, as after a send.
+      setText((now) => (now.trim() === body ? initialText : now));
       setUploadFailure(null);
       if ("threadId" in target) {
         void client.invalidateQueries({ queryKey: ["thread", target.threadId] });

@@ -1,3 +1,4 @@
+import BoardKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -130,8 +131,56 @@ import Testing
     let memory = ConversationMemory(board: board, defaults: defaults)
     memory.setDraft("Half a thought", for: .general)
     memory.setDraft("", for: .thread("t1"))
+    let key = memory.postKey(for: "Unanswered", in: .general)
     memory.forget()
-    #expect(ConversationMemory(board: board, defaults: defaults).draft(.general) == "")
+    let relaunched = ConversationMemory(board: board, defaults: defaults)
+    #expect(relaunched.draft(.general) == "")
+    #expect(relaunched.postKey(for: "Unanswered", in: .general) != key)
+  }
+
+  @Test func keepsAnUnansweredPostsKeyForTheSameTextAcrossALaunch() throws {
+    let defaults = try #require(UserDefaults(suiteName: "memory-\(UUID().uuidString)"))
+    let memory = ConversationMemory(board: board, defaults: defaults)
+    let key = memory.postKey(for: "Ship it", in: .general)
+    #expect(memory.postKey(for: "Ship it", in: .general) == key)
+    #expect(memory.postKey(for: "Ship it", in: .thread("t1")) != key)
+
+    // An answer that never came: a fresh start sends the same text with the same key.
+    let relaunched = ConversationMemory(board: board, defaults: defaults)
+    #expect(relaunched.postKey(for: "Ship it", in: .general) == key)
+    // Changed text is a new post, with a new key.
+    let changed = relaunched.postKey(for: "Ship it now", in: .general)
+    #expect(changed != key)
+    // Once the board answers, the next post goes with a new key, whatever its text.
+    relaunched.posted(in: .general)
+    #expect(relaunched.postKey(for: "Ship it now", in: .general) != changed)
+  }
+
+  @Test func readsWhatAnOlderBuildSavedWithoutPostKeys() throws {
+    let defaults = try #require(UserDefaults(suiteName: "memory-\(UUID().uuidString)"))
+    defaults.set(
+      Data(#"{"drafts":{"channel:general":"Half a thought"},"anchors":{}}"#.utf8),
+      forKey: "conversations.\(board.absoluteString)")
+    let memory = ConversationMemory(board: board, defaults: defaults)
+    #expect(memory.draft(.general) == "Half a thought")
+  }
+}
+
+@MainActor @Suite struct ConversationFeedTests {
+  private func message(_ id: String) throws -> Message {
+    try JSONDecoder().decode(
+      Message.self,
+      from: Data(
+        #"{"id":"\#(id)","author":"user","channel":"general","ts":"2026-01-01T00:00:00.000Z","mentions":[],"body":"Hi"}"#
+          .utf8))
+  }
+
+  @Test func takesAPostedMessageAtItsEndOnce() throws {
+    let feed = ConversationFeed(conversation: .general)
+    feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA1"))
+    feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA2"))
+    feed.received(try message("01M3Q2AAAAAAAAAAAAAAAAAAA2"))
+    #expect(feed.messages.map(\.id) == ["01M3Q2AAAAAAAAAAAAAAAAAAA1", "01M3Q2AAAAAAAAAAAAAAAAAAA2"])
   }
 }
 

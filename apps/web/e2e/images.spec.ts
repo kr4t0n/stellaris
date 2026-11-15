@@ -576,7 +576,11 @@ test("an image pasted into a composer holds its place while it uploads, then its
   expect(board.writes.filter((write) => write.path === "/api/verbs/post_message")).toEqual([
     {
       path: "/api/verbs/post_message",
-      body: { thread_id: STAGE_TASK, body: `The board now: ${markdown}! and after.` },
+      body: {
+        thread_id: STAGE_TASK,
+        body: `The board now: ${markdown}! and after.`,
+        idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      },
     },
   ]);
   const image = taskThread(page).getByRole("img", { name: "board.png" });

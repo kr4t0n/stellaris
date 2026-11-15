@@ -52,6 +52,24 @@ import Testing
     #expect(String(decoding: body, as: UTF8.self) == #"{"body":"Hello","channel":"general"}"#)
   }
 
+  @Test func sendsAPostsKeySoTheBoardStoresItOnce() throws {
+    let key = "00000000-0000-4000-8000-000000000001"
+    let inThread = try #require(
+      BoardAPI.postMessage(thread: "01M3Q2AAAAAAAAAAAAAAAAAAA1", body: "Hi", key: key)
+        .endpoint.urlRequest(board: board, token: "secret").httpBody)
+    #expect(
+      String(decoding: inThread, as: UTF8.self)
+        == #"{"body":"Hi","idempotency_key":"00000000-0000-4000-8000-000000000001","thread_id":"01M3Q2AAAAAAAAAAAAAAAAAAA1"}"#
+    )
+    let inChannel = try #require(
+      BoardAPI.postMessage(channel: "general", body: "Hi", key: key)
+        .endpoint.urlRequest(board: board, token: "secret").httpBody)
+    #expect(
+      String(decoding: inChannel, as: UTF8.self)
+        == #"{"body":"Hi","channel":"general","idempotency_key":"00000000-0000-4000-8000-000000000001"}"#
+    )
+  }
+
   @Test func postsAnImageAsItsBytesUnderItsName() throws {
     let png = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1])
     let request = BoardAPI.uploadImage(png, name: "the plot [v2].png").endpoint

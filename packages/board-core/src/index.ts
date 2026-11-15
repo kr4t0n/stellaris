@@ -1,4 +1,10 @@
-export { Board, CHANNEL_POST_WAIT_MS, CLOSING_ATTEMPTS, SYSTEM_ACTOR } from "./board.js";
+export {
+  Board,
+  CHANNEL_POST_WAIT_MS,
+  CLOSING_ATTEMPTS,
+  IDEMPOTENCY_LOOKBACK,
+  SYSTEM_ACTOR,
+} from "./board.js";
 export type {
   UserRequest,
   Actor,

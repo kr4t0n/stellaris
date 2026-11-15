@@ -424,8 +424,13 @@ export function createApi(token: string) {
         token,
         TopicSchema.array(),
       ),
-    sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
-      invoke("post_message", token, input, MessageSchema),
+    /** A post; sent again with its `idempotency_key`, as after a lost answer, it is stored once. */
+    sendMessage: (input: {
+      channel?: string;
+      thread_id?: string;
+      body: string;
+      idempotency_key?: string;
+    }) => invoke("post_message", token, input, MessageSchema),
     openThread: (input: { channel: string; title: string }) =>
       invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>

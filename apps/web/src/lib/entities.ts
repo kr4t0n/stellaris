@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { describeCharter, IMAGE_SCHEME, type MessageRef, type Proposal } from "@stellaris/shared";
 
 export type EntityKind = "task" | "proposal" | "thread" | "cron" | "message";
@@ -149,6 +150,41 @@ export function unknownIds(text: string, index: EntityIndex): string[] {
     .filter((match) => !text.endsWith(IMAGE_SCHEME, match.index))
     .map((match) => match[0]);
   return [...new Set(ids)].filter((id) => !index.has(id));
+}
+
+/** Anything shaped like an id, wherever it stands, so no id the text holds is missed. */
+const ANY_ULID = /[0-9A-HJKMNP-TV-Z]{26}/g;
+
+/**
+ * The entries of `index` for the ids `text` holds, written as text: the same string while those
+ * entries are the same, however the rest of the index changed. The board's index is built again on
+ * every post, since the threads' list changes, and a message whose markdown is parsed again each
+ * time holds the page for every message in view; keyed by this, a body is parsed again only when
+ * what it names changes.
+ */
+export function entitiesKey(text: string, index: EntityIndex): string {
+  const named: Entity[] = [];
+  for (const id of new Set(text.match(ANY_ULID))) {
+    const entity = index.get(id);
+    if (entity !== undefined) {
+      named.push(entity);
+    }
+  }
+  return JSON.stringify(named);
+}
+
+const NamedSchema = z.array(
+  z.object({
+    kind: z.enum(["task", "proposal", "thread", "cron", "message"]),
+    id: z.string(),
+    title: z.string(),
+    place: z.object({ channel: z.string(), thread: z.string().optional() }).optional(),
+  }),
+);
+
+/** The index `entitiesKey` wrote. */
+export function entitiesOf(key: string): EntityIndex {
+  return new Map(NamedSchema.parse(JSON.parse(key)).map((entity) => [entity.id, entity]));
 }
 
 /** The text with each known id read as its title, for places that cannot hold a link. */

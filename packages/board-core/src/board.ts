@@ -5292,8 +5292,10 @@ export class Board {
   /**
    * Removes a runner, which only the user does, with what names it: `runner` on the archived
    * projects that lived on it, the pins of the citizens pinned to it, so each is pinned again on its
-   * next turn outside a project, and every conversation's session record begun there, so a runner
-   * later given the name never tries to resume them. Its token stops answering. A project that still
+   * next turn outside a project, and the CLIs' session ids in every conversation's session record
+   * begun there, so a runner later given the name never tries to resume them, while the record
+   * keeps naming the runner, so the conversation's next turn elsewhere starts afresh as one after a
+   * move does, not as a first turn. Its token stops answering. A project that still
    * lives there refuses the removal, since its repository is there: the user moves it first. Turn
    * records and events keep the name. The hub (`RunnerHub.removeRunner`) checks first that nothing
    * runs there and that the runner is paused or away.
@@ -5337,17 +5339,22 @@ export class Board {
           agents.push(agent.name);
         }
       }
-      // Read and written a batch at a time, as a rename does.
+      // Read and written a batch at a time, as a rename does. Only the sessions' ids go, as when a
+      // session ends: a record that kept none, as a removal cut short leaves, counts no more.
       let sessions = 0;
       const files = await this.sessionFiles();
       for (let at = 0; at < files.length; at += SESSION_BATCH) {
         const cleared = await Promise.all(
           files.slice(at, at + SESSION_BATCH).map(async (file) => {
             const record = await readJson(file, SessionsFileSchema);
-            if (record.runner !== parsed) {
+            if (
+              record.runner !== parsed ||
+              (record.claude === undefined && record.codex === undefined)
+            ) {
               return false;
             }
-            await writeJson(file, {});
+            const { claude: _claude, codex: _codex, ...kept } = record;
+            await writeJson(file, kept);
             return true;
           }),
         );

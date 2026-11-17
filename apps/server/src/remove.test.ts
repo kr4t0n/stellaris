@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Board, BoardError } from "@stellaris/board-core";
 import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
-import type { ModelOption } from "@stellaris/shared";
+import { TurnDispatchSchema, type ModelOption } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTestSociety, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
@@ -191,7 +191,7 @@ describe("removing a runner", () => {
     await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await board.readProject("lab")).runner).toBeUndefined();
     expect((await board.readAgent("concierge-1")).homeRunner).toBeUndefined();
-    expect(await board.readSessions("concierge-1", "society")).toEqual({});
+    expect(await board.readSessions("concierge-1", "society")).toEqual({ runner: "pod" });
     expect(hub.connected).toEqual(["far"]);
     // The warm session's token goes with it.
     expect(warmTokens).toHaveLength(1);
@@ -340,5 +340,55 @@ describe("removing a runner", () => {
       "runner pod is not connected with claude",
     );
     await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("gives back a placement that a removal overtook once it had pinned the citizen there", async () => {
+    const { board, userToken } = await Board.init(dir, { name: "overtaken" });
+    await addWorkRoles(board);
+    await board.addAgent(USER, { name: "eng-1", role: "engineer", cli: "claude" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-0"),
+      runTurn: () => Promise.resolve(done),
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend }),
+    });
+    const { app, hub } = society;
+
+    // A placement finds pod free, unpaused, for a citizen not pinned yet, and pins it there; then
+    // the user pauses pod and removes it before the placement goes on. Only the removal's count
+    // gives the turn back, where it would have gone to a seat the hub has let go.
+    const real = board.pinAgent.bind(board);
+    const { promise: pinning, resolve: pinned } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    vi.spyOn(board, "pinAgent").mockImplementationOnce(async (name, runner, from) => {
+      const home = await real(name, runner, from);
+      pinned();
+      await gate;
+      return home;
+    });
+    const during = hub.assign(
+      TurnDispatchSchema.parse({
+        agent: "eng-1",
+        project: "society",
+        trigger: { kind: "manual", fromUser: false, reason: "work" },
+        priority: 1,
+      }),
+    );
+    await pinning;
+    expect((await board.readAgent("eng-1")).homeRunner).toBe("pod");
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    const removed = await app.request("/api/runners/pod", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(await removed.json()).toMatchObject({ name: "pod", agents: ["eng-1"] });
+    open();
+    expect(await during).toBeNull();
+    expect((await board.readAgent("eng-1")).homeRunner).toBeUndefined();
+    expect(hub.connected).toEqual([]);
   });
 });

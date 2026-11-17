@@ -2011,6 +2011,10 @@ describe("Board", () => {
       await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
     }
     await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    // A session ended there, whose record names the runner and holds no id.
+    await board.writeSession("rev-1", "society", "codex", "ended", "pod");
+    await board.dropSession("rev-1", "society", "codex", "ended");
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
     const projected = (name: string) => readFile(board.paths.member(name), "utf8");
 
     // Only the user removes, a runner the board knows, and none a project lives on.
@@ -2051,9 +2055,12 @@ describe("Board", () => {
     expect((await board.readAgent("eng-1")).homeRunner).toBeUndefined();
     expect(await projected("eng-1")).not.toContain("homeRunner");
     expect((await board.readAgent("rev-1")).homeRunner).toBe("far");
+    // Each record keeps naming the runner, so the conversation's next turn elsewhere starts afresh as
+    // after a move, with no session to resume; one that held no id counts for nothing.
     for (const [scope, part] of records) {
-      expect(await board.readSessions("eng-1", scope, part)).toEqual({});
+      expect(await board.readSessions("eng-1", scope, part)).toEqual({ runner: "pod" });
     }
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
     expect(await board.readSessions("rev-1", "demo")).toEqual({
       codex: "far-session",
       runner: "far",

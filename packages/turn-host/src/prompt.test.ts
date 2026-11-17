@@ -48,6 +48,18 @@ function turn(fields: Partial<TurnRecord>): TurnRecord {
   };
 }
 
+/** The notice of a previous turn that did not finish, with its line on the cause. */
+function notice(line: string): string {
+  return `## Your previous turn did not finish\n\n${line}\nThe worktree may hold uncommitted changes.`;
+}
+
+/** The notice for a failure that was not the citizen's, naming its cause. */
+function cutOff(cause: string): string {
+  return notice(
+    `It was cut off by ${cause}, which is not yours to fix or look into: carry on with the work.`,
+  );
+}
+
 const cronlessDispatch = {
   agent: "eng-1",
   project: "demo",
@@ -1062,6 +1074,62 @@ describe("buildTurnPrompt", () => {
     const timedOut = { ...reflected, exitReason: "timeout" as const, error: "turn timed out" };
     expect(after(timedOut, kept)).not.toContain("## Your session started afresh");
     expect(after(timedOut, kept)).toContain("## Your previous turn did not finish");
+  });
+
+  it("names a failure that was not the citizen's in a fixed line, and keeps the words of one that may be", () => {
+    const dispatch = {
+      agent: "eng-1",
+      project: "society",
+      trigger: TriggerSchema.parse({ kind: "manual", reason: "work" }),
+      priority: 1,
+      onboarding: false,
+    };
+    const after = (lastTurn: TurnRecord) =>
+      buildTurnPrompt({ dispatch, messages: [], heldClaims: [], lastTurn, onboarding: null });
+    // Failures outside the citizen's work, in the words the live board logged: the line names the
+    // cause, and the error's own words stay on the turn record.
+    const notYours: ReadonlyArray<readonly [string, string]> = [
+      [
+        "usage limit reached: You've hit your 5-hour limit · resets 9:20pm (UTC)",
+        "your CLI's usage limit",
+      ],
+      [
+        "API Error: Your account can't receive replies from Claude right now. You can find the next step in the Anthropic Verification Portal: https://portal.anthropic.com/verify?org=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "a problem with your CLI's sign-in or account",
+      ],
+      [
+        "Claude Code can't use your Claude subscription, usually because a payment is past due · Pay or renew at https://claude.ai/settings/billing (if you just paid, try again shortly), or use an Anthropic API key instead",
+        "a problem with your CLI's sign-in or account",
+      ],
+      ["Not logged in · Please run /login", "a problem with your CLI's sign-in or account"],
+      ["API Error: 529 Overloaded", "the model service turning a request away or cutting it off"],
+      [
+        "the runner could not run the turn: TypeError: fetch failed, caused by SocketError: other side closed (UND_ERR_SOCKET)",
+        "your runner losing its connection to the board",
+      ],
+      ["runner pod went away during the turn", "your runner going away"],
+      ["unrecognized_model: the model is not available", "a model your CLI does not know"],
+    ];
+    for (const [error, cause] of notYours) {
+      const prompt = after(turn({ exitReason: "error", error }));
+      expect(prompt).toContain(cutOff(cause));
+      expect(prompt).not.toContain(error);
+    }
+    // What may be the citizen's to act on keeps its words: a timeout, a turn or context limit, a
+    // missing status object, a session its CLI could not resume, and anything unrecognised.
+    const maybeYours: ReadonlyArray<readonly [TurnRecord["exitReason"], string]> = [
+      ["timeout", "turn exceeded 3600000 ms"],
+      ["error", "turn limit reached: 200 turns"],
+      ["error", "the turn ended without a parsable status object"],
+      ["error", "Prompt is too long"],
+      ["error", "No conversation found with session ID: s-1"],
+      ["error", "the CLI ended"],
+    ];
+    for (const [exitReason, error] of maybeYours) {
+      expect(after(turn({ exitReason, error }))).toContain(
+        notice(`It ended with ${exitReason}: ${error}.`),
+      );
+    }
   });
 
   it("tells a home's new session after earlier ones why it is new, and its first turn nothing of it", () => {

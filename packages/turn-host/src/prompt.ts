@@ -36,6 +36,7 @@ import {
   type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
+import { failureReason, type FailureReason } from "@stellaris/board-core";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 
 /** What the front desk reads to route: every project with its channels, every citizen with its roster line. */
@@ -200,6 +201,20 @@ function afreshReason(afresh: SessionAfresh): string {
   }
   return "None of your earlier turns here left a session to resume";
 }
+
+/**
+ * What cut a failed turn off when it was nothing the citizen did or can fix, by `failureReason`,
+ * named in place of the error's own words, which the turn record keeps for the user. A timeout, a
+ * resume, the context, and anything unrecognised keep their words, which may be the citizen's to act on.
+ */
+const NOT_YOURS: Partial<Record<FailureReason, string>> = {
+  limit: "your CLI's usage limit",
+  auth: "a problem with your CLI's sign-in or account",
+  service: "the model service turning a request away or cutting it off",
+  network: "your runner losing its connection to the board",
+  runner_dropped: "your runner going away",
+  model: "a model your CLI does not know",
+};
 
 /** What a home's new session after earlier ones has to go on. */
 const AFRESH_KEPT =
@@ -639,11 +654,14 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     );
   }
   if (last !== null && (last.exitReason === "error" || last.exitReason === "timeout")) {
+    const cause = NOT_YOURS[failureReason(last)];
     lines.push(
       "",
       "## Your previous turn did not finish",
       "",
-      `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`,
+      cause === undefined
+        ? `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`
+        : `It was cut off by ${cause}, which is not yours to fix or look into: carry on with the work.`,
       // A home's new session says so below, with why.
       ...(last.sessionDropped === true && afresh === null
         ? [

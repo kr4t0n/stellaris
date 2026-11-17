@@ -2015,6 +2015,44 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).not.toContain(afresh);
   });
 
+  it("tells the turn after one a usage limit cut off what cut it, keeping the limit's words on its record only", async () => {
+    const { board } = await Board.init(dir, { name: "limited" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const words = "usage limit reached: You've hit your 5-hour limit · resets 9:20pm (UTC)";
+    const prompts: string[] = [];
+    let limited = true;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        if (limited) {
+          limited = false;
+          return Promise.resolve({
+            ...completed(""),
+            status: null,
+            exitReason: "error" as const,
+            error: words,
+          });
+        }
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const steward = { ...stewardTurn, agent: "steward-1" };
+    expect(await run(steward)).toMatchObject({ exitReason: "error", error: words });
+    await run(steward);
+    expect(prompts.at(-1)).toContain(
+      "## Your previous turn did not finish\n\nIt was cut off by your CLI's usage limit, which is not yours to fix or look into: carry on with the work.\nThe worktree may hold uncommitted changes.",
+    );
+    expect(prompts.at(-1)).not.toContain("You've hit your 5-hour limit");
+    expect((await board.readLastTurn("steward-1", "society"))?.error).toBeNull();
+    const failed = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(failed.map((event) => event.payload["error"])).toEqual([words]);
+  });
+
   it("tells the turn after a home's reflection why it starts afresh when the reflection began the session, here or on another runner", async () => {
     const { board } = await Board.init(dir, { name: "reflected-first" });
     await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });

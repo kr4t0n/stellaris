@@ -255,7 +255,6 @@ function quotaPhrase(cli: string, quota: CliQuota, now: Date): string {
   } as of ${quota.observedAt}`;
 }
 
-/** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
 /** A connected runner's board sync while it holds its turns, with its count and its last failure. */
 function syncPhrase(runner: Runner): string[] {
   const sync = runnerSyncing(runner);
@@ -272,6 +271,10 @@ function syncPhrase(runner: Runner): string[] {
   ];
 }
 
+/**
+ * One runner as a planner sees it: whether it is there, what it runs and offers, what lives on it,
+ * and what holds its turns.
+ */
 function runnerLine(runner: Runner, projects: readonly Project[], now: Date): string {
   const living = projects
     .filter((project) => project.runner === runner.name)

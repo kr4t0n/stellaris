@@ -57,6 +57,11 @@ const host = new TurnHost({
   },
 });
 const runners = new RunnerHub({ board, host, version: VERSION, log });
+// No runner is attached yet, whatever the records a stopped server left say.
+const away = await runners.markAllAway();
+if (away.length > 0) {
+  log.info({ runners: away }, "marked runners away until they connect again");
+}
 // The board refuses to end a conversation under someone else's turn in flight.
 board.watchTurns(() => host.inFlight());
 // An image a citizen uploads is read on the runner its turn runs on.

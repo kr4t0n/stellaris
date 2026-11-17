@@ -405,6 +405,24 @@ export class RunnerHub implements TurnRunner {
   }
 
   /**
+   * Marks away every runner whose record says it is connected, as the server starts with none
+   * attached, before its routes open: a server that stopped, or crashed, leaves its runners'
+   * records `connected`, and a sync one was in would go on holding it (`runnerSyncing`) until that
+   * runner came back, which it may never do. Answers the runners it marked.
+   */
+  async markAllAway(): Promise<Name[]> {
+    const marked: Name[] = [];
+    for (const runner of await this.board.listRunners()) {
+      const seat = this.seats.get(runner.name);
+      if (runner.status === "connected" && (seat === undefined || seat.send === null)) {
+        await this.board.markRunner(runner.name, { status: "disconnected" });
+        marked.push(runner.name);
+      }
+    }
+    return marked;
+  }
+
+  /**
    * Lets every runner go, as the server stops: streams count as closed from here on, and the
    * disconnects under way are recorded before this resolves.
    */

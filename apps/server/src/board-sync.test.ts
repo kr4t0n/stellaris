@@ -99,9 +99,11 @@ describe("a runner's board sync as it connects", () => {
     const { board } = await seed();
     const ran: string[] = [];
     // The first copy's stream answers only once the test lets it.
+    const asked = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const gated: typeof fetch = async (input, init) => {
       if (urlOf(input).pathname === "/runner/board/stream") {
+        asked.resolve();
         await release.promise;
       }
       return fetch(input, init);
@@ -120,11 +122,11 @@ describe("a runner's board sync as it connects", () => {
       timings: { debounceMs: 0, userDebounceMs: 0, heartbeatMs: 3_600_000 },
     });
 
-    // The runner says it is copying, and everything that reads its record sees it held.
-    await expect
-      .poll(async () => (await board.readRunner("pod")).sync?.phase, { timeout: 10_000 })
-      .toBe("copying");
+    // The runner asks for the whole board, and everything that reads its record sees it held,
+    // its sync as the hello started it until the stream's first record gives the totals.
+    await asked.promise;
     const syncing = await board.readRunner("pod");
+    expect(syncing.sync).toMatchObject({ phase: "starting", files: 0, totalFiles: null });
     expect(runnerSyncing(syncing)).toBeDefined();
     expect(heldOn([syncing], "pod", "claude", new Date())).toBe(true);
     expect(syncing.paused).toBeUndefined();
@@ -347,6 +349,53 @@ describe("a runner's board sync as it connects", () => {
     await hub.register("new", hello);
     expect((await board.readRunner("new")).sync).toMatchObject({ phase: "starting", files: 0 });
     expect(await hub.assign(dispatch("eng-2", "yard"))).toBeNull();
+  });
+
+  it("marks a runner away as the server starts, so a sync a stopped server cut holds nothing", async () => {
+    const { board } = await seed();
+    // The first copy's stream never answers, until the runner stops and gives it up.
+    const asked = Promise.withResolvers<void>();
+    const stuck: typeof fetch = async (input, init) => {
+      if (urlOf(input).pathname === "/runner/board/stream") {
+        asked.resolve();
+        await new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("stopped")));
+        });
+      }
+      return fetch(input, init);
+    };
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: recording([])("claude") }),
+      fetch: stuck,
+      waitForSync: false,
+    });
+    await asked.promise;
+    await board.placeProject("lab", "pod");
+    expect(heldOn(await board.listRunners(), "pod", "claude", new Date())).toBe(true);
+
+    // The server stops first, as on a SIGTERM, then the runner goes for good: the record still
+    // says it is connected and syncing, so it holds the runner's turns, its holders' leases, and
+    // the quiet signals.
+    await society.hub.close();
+    await society.stop();
+    society = null;
+    const left = await board.readRunner("pod");
+    expect(left.status).toBe("connected");
+    expect(runnerSyncing(left)).toBeDefined();
+
+    // A server started again marks it away before it answers, so nothing holds it any more.
+    society = await startTestSociety({
+      board,
+      runnerName: "far",
+      backends: () => ({ claude: recording([])("claude") }),
+    });
+    const away = await board.readRunner("pod");
+    expect(away.status).toBe("disconnected");
+    expect(runnerSyncing(away)).toBeUndefined();
+    expect(heldOn(await board.listRunners(), "pod", "claude", new Date())).toBe(false);
+    expect((await board.readRunner("far")).status).toBe("connected");
   });
 
   it("streams the board only to a runner's token, from a relative path, as the runner reads it", async () => {

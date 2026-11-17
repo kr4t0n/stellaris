@@ -127,7 +127,8 @@ export async function syncBoard(options: BoardSyncOptions): Promise<boolean> {
       try {
         const plan = await copy.plan();
         if (plan.kind === "copy") {
-          reporter.note({ ...progress, phase: "copying", attempt });
+          // Reported from the stream's first record, which counts what a cut copy wrote already,
+          // so the progress the server kept from before a restart stands until then.
           await copy.copy(options.stream, signal, noted);
         } else {
           await copy.pull(options.remote, noted);

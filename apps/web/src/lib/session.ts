@@ -352,10 +352,9 @@ export function useKnowledge(scope: string) {
   });
 }
 
-/** The society's runners and whether each is connected. */
 /**
- * The runners, read again every minute, and every second while one syncs its board copy: its
- * progress is written to its record with no event, which marks only the sync's start and end.
+ * The society's runners and whether each is connected, read again every minute, and every second
+ * while one syncs its board copy, whose progress is written to its record with no event.
  */
 export function useRunners() {
   const { api } = useSession();

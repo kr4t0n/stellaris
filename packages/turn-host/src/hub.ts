@@ -290,6 +290,14 @@ export class RunnerHub implements TurnRunner {
       }
     }
     const now = this.now().toISOString();
+    // A sync the runner had not finished when it connected again goes on as it was, its progress
+    // and its last failure included, so the row neither starts again from nothing nor forgets why.
+    const unfinished = hello.boardSync
+      ? await this.board
+          .readRunner(name)
+          .then((runner) => (runner.sync?.phase === "done" ? undefined : runner.sync))
+          .catch(() => undefined)
+      : undefined;
     const marked = await this.board.markRunner(name, {
       os: hello.os,
       clis: hello.clis,
@@ -298,7 +306,7 @@ export class RunnerHub implements TurnRunner {
       gitIdentityMissing: hello.gitIdentityMissing ?? null,
       // Each connection brings the runner's board copy up to date before its first turn there.
       sync: hello.boardSync
-        ? {
+        ? (unfinished ?? {
             phase: "starting",
             files: 0,
             totalFiles: null,
@@ -307,7 +315,7 @@ export class RunnerHub implements TurnRunner {
             attempt: 1,
             startedAt: now,
             updatedAt: now,
-          }
+          })
         : null,
     });
     // As the record says once written, which a report of the sync that ended just before this

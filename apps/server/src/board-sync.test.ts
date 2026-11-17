@@ -314,13 +314,26 @@ describe("a runner's board sync as it connects", () => {
       retryInMs: 4_000,
     });
     expect(await hub.assign(dispatch("eng-2", "yard"))).toBeNull();
-    expect((await board.readRunner("new")).sync).toMatchObject({
+    const failed = {
       phase: "copying",
       files: 6_200,
       totalFiles: 15_152,
       attempt: 3,
       error: "fetch failed, caused by SocketError: other side closed",
+    };
+    expect((await board.readRunner("new")).sync).toMatchObject(failed);
+    // Connecting again mid-sync keeps the sync as it was, held, rather than starting it from none.
+    const hello = RunnerHelloSchema.parse({
+      protocol: RUNNER_PROTOCOL,
+      version: "test",
+      os: "linux",
+      clis: ["claude"],
+      slots: null,
+      boardSync: true,
     });
+    await hub.register("new", hello);
+    expect((await board.readRunner("new")).sync).toMatchObject(failed);
+    expect(await hub.assign(dispatch("eng-2", "yard"))).toBeNull();
     await hub.boardSync("new", {
       phase: "done",
       files: 15_152,
@@ -330,6 +343,10 @@ describe("a runner's board sync as it connects", () => {
       attempt: 4,
     });
     expect(await hub.assign(dispatch("eng-2", "yard"))).toEqual({ runner: "new" });
+    // Once done, the next connection syncs from the start again, and holds the runner meanwhile.
+    await hub.register("new", hello);
+    expect((await board.readRunner("new")).sync).toMatchObject({ phase: "starting", files: 0 });
+    expect(await hub.assign(dispatch("eng-2", "yard"))).toBeNull();
   });
 
   it("streams the board only to a runner's token, from a relative path, as the runner reads it", async () => {

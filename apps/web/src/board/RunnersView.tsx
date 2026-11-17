@@ -551,12 +551,14 @@ export function RunnersView() {
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. Under 25
             root ems, which a 420 px island holds at a 16 px root font but not at a larger one, a
             row takes two lines: the marks, the name, the state, and the controls, and under the
-            name the OS, the version, the capabilities, and the projects to the row's end. */}
+            name the OS, the version, the capabilities, and the projects to the row's end. The
+            query counts the room the view's scrollbar takes, so the gaps are pixels, 12 as at a
+            16 px root, which leaves one line at a 20 px root room for it from 25 ems up. */}
         <ul
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-3 @max-[25rem]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto]"
+          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto]"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");

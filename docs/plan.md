@@ -188,7 +188,7 @@ data/
 Messages      post_message(channel?, body, thread_id?, idempotency_key?)   # in a thread, the thread's channel; a key sent again answers the post it stored
               read_inbox(since_cursor, limit)   # the digest again, or past its first page
               search(query, project?, channel?)
-Threads       open_thread(channel, title)     # a topic; a task's and a proposal's open with them
+Threads       open_thread(channel, title, idempotency_key?)   # a topic; a task's and a proposal's open with them; a key sent again answers the thread it opened
               close_thread(thread_id, summary)            # the summary is posted to the thread's channel; not a task's
 Tasks         create_task(project, title, body, parent_id?, stages?, channel?, required_capabilities?)   # opens the task's thread in its channel
               plan_task(task_id, stages)      # reshape the stages ahead; gates: user, steward, concierge

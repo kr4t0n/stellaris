@@ -72,6 +72,10 @@ enum SignInFailure: Error, Equatable {
   /// What each channel's new thread says so far, kept until it opens, so a sheet dismissed or built
   /// again comes back with its text.
   var newThreads: [String: NewThreadDraft] = [:]
+  /// The keys each channel's new thread last went with, kept until it opens, so one sent again
+  /// after a lost answer, or cancelled and sent again with the same text, is opened once. Signing
+  /// in or out drops them with the drafts.
+  private(set) var newThreadKeys: [String: NewThreadKeys] = [:]
   /// The message a link named in each conversation, marked and scrolled to once, as the web marks
   /// the message its address names.
   private(set) var marks: [Conversation: MessageMark] = [:]
@@ -408,14 +412,16 @@ enum SignInFailure: Error, Equatable {
   /// it in Chat and forgets the draft, as the web's New thread does.
   func openThread(in channel: String) async throws {
     let draft = newThreads[channel] ?? NewThreadDraft()
-    let thread = try await send(
-      BoardAPI.openThread(
-        channel: channel, title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
     let first = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    let keys = NewThreadKeys(title: title, first: first, after: newThreadKeys[channel])
+    newThreadKeys[channel] = keys
+    let thread = try await send(BoardAPI.openThread(channel: channel, title: title, key: keys.open))
     if !first.isEmpty {
-      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first))
+      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first, key: keys.post))
     }
     newThreads[channel] = nil
+    newThreadKeys[channel] = nil
     if startingThread == channel {
       startingThread = nil
     }
@@ -760,6 +766,7 @@ enum SignInFailure: Error, Equatable {
     browsing = nil
     marks = [:]
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     live.clear()
     feeds = [:]
@@ -801,6 +808,7 @@ enum SignInFailure: Error, Equatable {
     viewing = nil
     startingThread = nil
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     marks = [:]
     live.clear()

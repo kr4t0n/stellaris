@@ -70,6 +70,23 @@ import Testing
     )
   }
 
+  @Test func sendsAnOpensKeySoTheBoardOpensTheThreadOnce() throws {
+    let keyed = try #require(
+      BoardAPI.openThread(
+        channel: "general", title: "Rollout order", key: "00000000-0000-4000-8000-000000000003"
+      )
+      .endpoint.urlRequest(board: board, token: "secret").httpBody)
+    #expect(
+      String(decoding: keyed, as: UTF8.self)
+        == #"{"channel":"general","idempotency_key":"00000000-0000-4000-8000-000000000003","title":"Rollout order"}"#
+    )
+    let plain = try #require(
+      BoardAPI.openThread(channel: "general", title: "Rollout order")
+        .endpoint.urlRequest(board: board, token: "secret").httpBody)
+    #expect(
+      String(decoding: plain, as: UTF8.self) == #"{"channel":"general","title":"Rollout order"}"#)
+  }
+
   @Test func postsAnImageAsItsBytesUnderItsName() throws {
     let png = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1])
     let request = BoardAPI.uploadImage(png, name: "the plot [v2].png").endpoint

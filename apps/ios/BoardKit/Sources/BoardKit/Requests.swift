@@ -233,8 +233,12 @@ public enum BoardAPI {
       "post_message", PostInput(channel: nil, thread_id: thread, body: body, idempotency_key: key))
   }
 
-  public static func openThread(channel: String, title: String) -> BoardRequest<BoardThread> {
-    fixed("open_thread", OpenThreadInput(channel: channel, title: title))
+  /// A new thread on a channel. Opened again with the same `key`, as after an answer that never
+  /// arrived, the board opens it once and answers with the thread it opened.
+  public static func openThread(channel: String, title: String, key: String? = nil)
+    -> BoardRequest<BoardThread>
+  {
+    fixed("open_thread", OpenThreadInput(channel: channel, title: title, idempotency_key: key))
   }
 
   /// Finishes the task's current stage as the user, with a note for its thread.
@@ -293,6 +297,7 @@ public enum BoardAPI {
   private struct OpenThreadInput: Encodable {
     let channel: String
     let title: String
+    let idempotency_key: String?
   }
 
   private struct AdvanceInput: Encodable {

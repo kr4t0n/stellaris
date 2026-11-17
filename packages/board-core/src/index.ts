@@ -3,6 +3,7 @@ export {
   CHANNEL_POST_WAIT_MS,
   CLOSING_ATTEMPTS,
   IDEMPOTENCY_LOOKBACK,
+  THREAD_IDEMPOTENCY_LOOKBACK,
   SYSTEM_ACTOR,
 } from "./board.js";
 export type {

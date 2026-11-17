@@ -54,6 +54,11 @@ export const VerbInputs = {
   open_thread: z.object({
     channel: ChannelRefSchema,
     title: z.string().min(1).max(200),
+    /**
+     * Sent again with the same key, as after an answer that never arrived, the thread is opened
+     * once: the board answers with the thread it opened, among the newest threads of the scope.
+     */
+    idempotency_key: IdempotencyKeySchema.optional(),
   }),
   close_thread: z.object({ thread_id: UlidSchema, summary: z.string().min(1) }),
   create_task: z.object({

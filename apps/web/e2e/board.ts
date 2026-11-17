@@ -57,6 +57,20 @@ function json(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+/** How a link loses an answer the board sent: a reset, or a gateway's 502. */
+type Loss = "reset" | "502";
+
+/** Answers a write the fake stored, or loses the answer as `lost` says. */
+function answerOrLose(route: Route, stored: unknown, lost: Loss | undefined): Promise<void> {
+  if (lost === "502") {
+    return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });
+  }
+  if (lost === "reset") {
+    return route.abort("connectionreset");
+  }
+  return json(route, stored);
+}
+
 interface Proposal {
   id: string;
   kind: string;
@@ -1097,9 +1111,13 @@ export interface FakeBoard {
    * Stores the next post but loses its answer, as a link would: reset (the default), or answered by
    * a gateway's 502.
    */
-  loseNextPostAnswer(how?: "reset" | "502"): void;
+  loseNextPostAnswer(how?: Loss): void;
+  /** Opens the next thread but loses the answer, as `loseNextPostAnswer` does a post's. */
+  loseNextOpenAnswer(how?: Loss): void;
   /** The posts stored with this body, in the task's thread or an ask's. */
   stored(body: string): number;
+  /** The threads opened with this title. */
+  opened(title: string): number;
   /** Gives studio's record this board sync, as its runner reported it, or none. */
   setSync(sync: Record<string, unknown> | null): void;
 }
@@ -1321,7 +1339,8 @@ export async function fakeBoard(
   let answering: string | null = null;
   const writes: Write[] = [];
   let refusal: string | null = null;
-  const lostAnswers: Array<"reset" | "502"> = [];
+  const lostAnswers: Loss[] = [];
+  const lostOpens: Loss[] = [];
   let paused = false;
   let working: string[] = [];
   let queued: string[] = [];
@@ -1858,6 +1877,14 @@ export async function fakeBoard(
             payload: body,
           });
         case "/api/verbs/open_thread": {
+          // An open sent again with its key is answered with the thread it opened, as the board does.
+          const key = body["idempotency_key"];
+          const opened = [...asks.values()].find(
+            (each) => key !== undefined && each.thread["idempotencyKey"] === key,
+          );
+          if (opened !== undefined) {
+            return json(route, opened.thread);
+          }
           const thread = {
             id: `01M3Q2HHHHHHHHHHHHHHHHHHH${asks.size + 2}`,
             channel: body["channel"],
@@ -1865,10 +1892,11 @@ export async function fakeBoard(
             state: "open",
             openedBy: "user",
             openedAt: "2026-09-29T10:00:00.000Z",
+            ...(key === undefined ? {} : { idempotencyKey: key }),
             body: "",
           };
           asks.set(thread.id, { thread, messages: [] });
-          return json(route, thread);
+          return answerOrLose(route, thread, lostOpens.shift());
         }
         case "/api/verbs/post_message": {
           // A post sent again with its key is answered with the one stored, as the board does.
@@ -1880,16 +1908,8 @@ export async function fakeBoard(
           if (stored !== undefined) {
             return json(route, stored);
           }
-          const answer = (posted: Record<string, unknown>): Promise<void> => {
-            const lost = lostAnswers.shift();
-            if (lost === "502") {
-              return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });
-            }
-            if (lost === "reset") {
-              return route.abort("connectionreset");
-            }
-            return json(route, posted);
-          };
+          const answer = (posted: Record<string, unknown>): Promise<void> =>
+            answerOrLose(route, posted, lostAnswers.shift());
           if (ask !== undefined) {
             const posted = {
               ...askMessage(
@@ -2265,10 +2285,14 @@ export async function fakeBoard(
     loseNextPostAnswer: (how = "reset") => {
       lostAnswers.push(how);
     },
+    loseNextOpenAnswer: (how = "reset") => {
+      lostOpens.push(how);
+    },
     stored: (text) =>
       [...threadMessages, ...[...asks.values()].flatMap((each) => each.messages)].filter(
         (each) => each["body"] === text,
       ).length,
+    opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
     setSync: (sync) => {
       studioSync = sync;
     },

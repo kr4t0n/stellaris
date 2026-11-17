@@ -114,11 +114,17 @@ export function Composer({
   const pendingCaret = useRef<number | null>(null);
 
   /**
-   * The post on its way, or that failed, with its key, and in the ask box the thread it opened:
-   * sent again with the same text, as after an answer that never arrived, it goes with the same
-   * key into the same thread, so the board stores it once. Changed text is a new post.
+   * The post on its way, or that failed, with its key, and in the ask box the key of the thread's
+   * open and the thread once opened: sent again with the same text, as after an answer that never
+   * arrived, it goes with the same keys into the same thread, so the board opens the thread and
+   * stores the post once. Changed text is a new post.
    */
-  const pending = useRef<{ body: string; key: string; threadId?: string } | null>(null);
+  const pending = useRef<{
+    body: string;
+    key: string;
+    openKey?: string;
+    threadId?: string;
+  } | null>(null);
 
   const send = useMutation({
     mutationFn: async (body: string) => {
@@ -132,7 +138,14 @@ export function Composer({
       if ("threadId" in target) {
         return api.sendMessage({ thread_id: target.threadId, ...keyed });
       }
-      post.threadId ??= (await api.openThread({ channel: ASK_CHANNEL, title: askTitle(body) })).id;
+      post.openKey ??= newIdempotencyKey();
+      post.threadId ??= (
+        await api.openThread({
+          channel: ASK_CHANNEL,
+          title: askTitle(body),
+          idempotency_key: post.openKey,
+        })
+      ).id;
       return api.sendMessage({ thread_id: post.threadId, ...keyed });
     },
     // A refusal of the action says no more once the user posts again.

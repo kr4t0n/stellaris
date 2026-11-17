@@ -559,6 +559,15 @@ const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 export const IDEMPOTENCY_LOOKBACK = 20;
 
 /**
+ * How many of the newest threads of a channel's project, or of the society's channels, an open's
+ * idempotency key is looked for among, whoever opened them: a thread's file is named by its id
+ * alone, so its opener's own can't be picked by name as a post's can. A client opens again soon
+ * after losing the answer; one that opens again after this many more threads opened there, by
+ * anyone, gets a new thread. The look reads at most this many small files.
+ */
+export const THREAD_IDEMPOTENCY_LOOKBACK = 50;
+
+/**
  * Free text quoted in a board notice, its mentions written as plain names so they wake nobody. Every
  * `@name` goes, in code too, since code in the text alone may not be code in the post it is quoted in.
  */
@@ -3192,20 +3201,74 @@ export class Board {
     await this.authorize(actor, "open_thread");
     return this.mutex.run(async () => {
       await this.assertChannelOpen(args.channel);
+      const key = args.idempotency_key;
+      if (key !== undefined) {
+        const opened = await this.keyedThread(args.channel, actor.name, key, args.title);
+        if (opened !== null) {
+          return opened;
+        }
+      }
       return this.openThreadUnlocked(actor.name, {
         id: this.newId(),
         channel: args.channel,
         title: args.title,
+        ...(key === undefined ? {} : { idempotencyKey: key }),
       });
     });
+  }
+
+  /**
+   * The thread `author` already opened on `channel` with `key`, among the newest
+   * `THREAD_IDEMPOTENCY_LOOKBACK` threads of the channel's scope, or null. An open sent again with
+   * its key is answered with it and writes nothing; the key sent with another title is refused, as
+   * a post's with another body is.
+   */
+  private async keyedThread(
+    channel: ChannelRef,
+    author: Name,
+    key: string,
+    title: string,
+  ): Promise<Thread | null> {
+    const threads = this.paths.threadsOf(channel);
+    // A thread's file is `<id>.md`, so the newest are found by name, whoever opened them.
+    const newest = (await listFiles(threads)).slice(-THREAD_IDEMPOTENCY_LOOKBACK);
+    // Read at once, and only a file whose text holds the key is parsed, as for a post.
+    const texts = await Promise.all(
+      newest.map((file) => readFile(path.join(threads, file), "utf8")),
+    );
+    for (let at = newest.length - 1; at >= 0; at -= 1) {
+      const file = newest[at];
+      if (file === undefined || texts[at]?.includes(key) !== true) {
+        continue;
+      }
+      const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+      const { data } = doc;
+      if (data.idempotencyKey !== key || data.openedBy !== author || data.channel !== channel) {
+        continue;
+      }
+      if (data.title.trim() !== title.trim()) {
+        throw new BoardError(
+          "ALREADY_EXISTS",
+          `idempotency key ${key} was sent with another title, opening thread ${data.id}`,
+        );
+      }
+      return { ...data, body: doc.body };
+    }
+    return null;
   }
 
   /** Writes a new open thread and its event. Callers hold the mutex and chose where it hangs. */
   private async openThreadUnlocked(
     by: Name,
-    opening: { id: Ulid; channel: ChannelRef; title: string; subject?: ThreadSubject },
+    opening: {
+      id: Ulid;
+      channel: ChannelRef;
+      title: string;
+      subject?: ThreadSubject;
+      idempotencyKey?: string;
+    },
   ): Promise<Thread> {
-    const { id, channel, title, subject } = opening;
+    const { id, channel, title, subject, idempotencyKey } = opening;
     const threads = this.paths.threadsOf(channel);
     await ensureDir(this.paths.threadMessages(threads, id));
     const thread = await this.writeThread(threads, {
@@ -3216,6 +3279,7 @@ export class Board {
       state: "open",
       openedBy: by,
       openedAt: this.now().toISOString(),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       body: "",
     });
     await this.events.append("thread.opened", by, {

@@ -28,9 +28,14 @@ test("Space opens a composer in the sky, and an ask opens a thread in asks for t
   await expect(asks.getByRole("listitem").first()).toContainText("Should lab fix a seed policy?");
   await expect(asks.getByRole("listitem").first()).toContainText("desk is answering…");
   const [opened, posted] = board.writes;
+  // Each with a key, so an open or a post sent again after a lost answer is stored once.
   expect(opened).toEqual({
     path: "/api/verbs/open_thread",
-    body: { channel: "asks", title: "Should lab fix a seed policy?" },
+    body: {
+      channel: "asks",
+      title: "Should lab fix a seed policy?",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    },
   });
   expect(posted?.path).toBe("/api/verbs/post_message");
   expect(posted?.body).toMatchObject({ body: "Should lab fix a seed policy?" });

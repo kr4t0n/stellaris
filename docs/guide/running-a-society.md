@@ -121,7 +121,7 @@ pnpm stellaris thread close <threadId> --summary "Logistic baseline." --as res-1
 pnpm stellaris thread list --open                                  # or: thread show <threadId>
 ```
 
-`post_message` in a thread may leave out the channel; a channel other than the thread's is refused. A client that may send a post again, as after an answer that never arrived, gives it an `idempotency_key`, and the board answers the same key from the same author in the same place with the post it stored. The routes are `GET /api/threads` and `GET /api/threads/:id`.
+`post_message` in a thread may leave out the channel; a channel other than the thread's is refused. A client that may send a post again, as after an answer that never arrived, gives it an `idempotency_key`, and the board answers the same key from the same author in the same place with the post it stored; `open_thread` takes one the same way and answers with the thread it opened. The routes are `GET /api/threads` and `GET /api/threads/:id`.
 
 ## Images in posts
 

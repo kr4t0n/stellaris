@@ -104,6 +104,9 @@ for (const loss of LOSSES) {
       await page.goto(proxy.url);
       await page.getByLabel("Board token").fill(token);
       await page.getByRole("button", { name: "Enter the playground" }).click();
+      // The gate keeps the token once the board has checked it, so a page loaded before then
+      // shows the gate again.
+      await expect(page.getByLabel("Board token")).toHaveCount(0);
       await page.goto(`${proxy.url}/c/demo/general`);
       const box = page.getByRole("textbox", { name: "Message #general" });
       await box.fill(TEXT);

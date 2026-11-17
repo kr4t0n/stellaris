@@ -112,11 +112,15 @@ const GOVERNANCE = [
  * new session there is told why it is new instead (`SessionAfresh`).
  */
 export function renderOnboardingPreamble(context: OnboardingContext): string {
-  const newcomer = !context.memoryWritten && !context.profileWritten;
+  // What the citizen wrote elsewhere, named alone, so the notes never call written what they ask for.
+  const written = [
+    ...(context.memoryWritten ? ["memory"] : []),
+    ...(context.profileWritten ? ["profile"] : []),
+  ];
   return [
-    newcomer
+    written.length === 0
       ? `This is your first turn as ${context.agentName}.`
-      : `This is your first turn here as ${context.agentName}. Your home, with your memory and profile, is the one your turns elsewhere use.`,
+      : `This is your first turn here as ${context.agentName}. Your home, with your ${written.join(" and ")}, is the one your turns elsewhere use.`,
     "",
     `Your role in one paragraph: ${context.roleSummary}`,
     "",

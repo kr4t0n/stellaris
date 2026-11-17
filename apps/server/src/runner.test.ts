@@ -2015,6 +2015,71 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).not.toContain(afresh);
   });
 
+  it("tells the turn after a home's reflection why it starts afresh when the reflection began the session, here or on another runner", async () => {
+    const { board } = await Board.init(dir, { name: "reflected-first" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "steward-2", role: "steward", cli: "claude" });
+    const topic = await board.openThread(USER, { channel: "general", title: "a question" });
+    const ran: Array<{ runner: string; session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    const instructions: string[] = [];
+    let made = 0;
+    const backend = (): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        ran.push({
+          runner: request.spec.runner,
+          session: request.session,
+          newSession: request.newSession,
+        });
+        prompts.push(request.prompt);
+        instructions.push(request.instructions);
+        return Promise.resolve(completed("ran"));
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend() }),
+      extraRunners: [{ name: "far", backends: () => ({ claude: backend() }) }],
+    });
+    await board.pinAgent("steward-1", "pod");
+    await board.pinAgent("steward-2", "pod");
+    const first = "## First turn";
+    const afresh =
+      "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one:";
+
+    // A home whose first turn is a reflection, after a turn in a thread: the reflection begins the
+    // home's session, which ends with it, and the record names its runner.
+    const steward1 = { ...stewardTurn, agent: "steward-1" };
+    await society.run({ ...steward1, thread: { id: topic.id, task: false } });
+    const reflected = await society.run(reflection("steward-1"));
+    expect(reflected).toMatchObject({ exitReason: "completed", sessionDropped: true });
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-2", newSession: true });
+    expect(await board.readSessions("steward-1", "society")).toEqual({ runner: "pod" });
+    await society.run(steward1);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-3", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(instructions.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(afresh);
+
+    // A reflection on another runner than its home's session ends that session too, so the home
+    // back on its own runner starts afresh rather than resuming what came before the reflection.
+    const steward2 = { ...stewardTurn, agent: "steward-2" };
+    await society.run(steward2);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-4", newSession: true });
+    await board.pinAgent("steward-2", "far", "pod");
+    await society.run(reflection("steward-2"));
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-5", newSession: true });
+    expect(await board.readSessions("steward-2", "society")).toEqual({ runner: "far" });
+    await board.pinAgent("steward-2", "pod", "far");
+    await society.run(steward2);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-6", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(afresh);
+  });
+
   it("starts a society role's home afresh once a reflection there completes, warm or cold, and tells its next turn", async () => {
     const { board } = await Board.init(dir, { name: "afresh" });
     await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });

@@ -4710,6 +4710,30 @@ export class Board {
     });
   }
 
+  /**
+   * Records that a conversation's session for a CLI ended on `runner` and none is kept, as when a
+   * reflection that began its own session completes: the record names the runner, so the
+   * conversation's next turn is no first turn, and holds no session for the CLI. A record of
+   * another runner goes, as `writeSession` replaces one, since sessions do not move between machines.
+   */
+  async endSession(
+    agent: Name,
+    project: Name,
+    cli: CliKind,
+    runner: Name,
+    part?: string,
+  ): Promise<void> {
+    await this.mutex.run(async () => {
+      const dir = this.sessionDir(agent, project, part);
+      await ensureDir(dir);
+      const file = path.join(dir, "sessions.json");
+      const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
+      const { [cli]: _ended, ...kept } =
+        current.runner === undefined || current.runner === runner ? current : {};
+      await writeJson(file, { ...kept, runner });
+    });
+  }
+
   /** The last turn of one conversation: the scope's home, a channel's, a project's, or a thread's. */
   async readLastTurn(agent: Name, project: Name, part?: string): Promise<TurnRecord | null> {
     const file = path.join(this.sessionDir(agent, project, part), "last-turn.json");

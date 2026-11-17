@@ -4067,6 +4067,31 @@ describe("Board", () => {
     expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: false });
   });
 
+  it("ends a conversation's session on a runner, keeping the runner's name and no session for the CLI", async () => {
+    const { board } = await society();
+    // A home where no session began yet records the runner the ended one ran on.
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "pod" });
+    // On the same runner it keeps another CLI's session.
+    await board.writeSession("eng-1", "demo", "codex", "codex-session", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "claude-session", "pod");
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      codex: "codex-session",
+      runner: "pod",
+    });
+    // On another runner the record of the first goes whole, as a session written there replaces it.
+    await board.endSession("eng-1", "demo", "claude", "far");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "far" });
+    // Beside a thread's record, which it leaves alone.
+    await board.writeSession("eng-1", "demo", "claude", "thread-session", "pod", "#dev");
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo", "#dev")).toEqual({
+      claude: "thread-session",
+      runner: "pod",
+    });
+  });
+
   it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {
     const { board } = await society();
     // A colon in an unquoted value, as a live front desk wrote it in a reflection.

@@ -95,11 +95,16 @@ describe("config-home rendering", () => {
     );
     expect(returning).not.toContain(memory);
     expect(returning).not.toContain(profile);
-    // Each request goes with its own file.
+    // Each request goes with its own file, and the home is said to carry only what it holds.
+    const home = "Your home, with your";
     expect(preamble(true, false)).not.toContain(memory);
     expect(preamble(true, false)).toContain(profile);
+    expect(preamble(true, false)).toContain(`${home} memory, is the one your turns elsewhere use.`);
     expect(preamble(false, true)).toContain(memory);
     expect(preamble(false, true)).not.toContain(profile);
+    expect(preamble(false, true)).toContain(
+      `${home} profile, is the one your turns elsewhere use.`,
+    );
     // And the rest of the notes stay.
     for (const each of [newcomer, returning]) {
       expect(each).toContain("Your role in one paragraph: Builds things.");

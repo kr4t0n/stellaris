@@ -938,9 +938,13 @@ export class TurnHost {
           "dropped a session its CLI could not resume",
         );
       } else if (reflected) {
-        // The session the reflection ran in goes, and one it started is never kept.
+        // The session the reflection ran in goes, and one it started is never kept: its record
+        // names the reflection's runner, so the next turn is told why it starts afresh rather
+        // than given the first-turn notes, and a session left on another runner goes too.
         if (job.session !== null) {
           await this.board.dropSession(job.agent, job.scope, job.cli, job.session, part);
+        } else {
+          await this.board.endSession(job.agent, job.scope, job.cli, turn.runner, part);
         }
         this.log.info(
           { agent: job.agent, project: job.scope, session: outcome.session },

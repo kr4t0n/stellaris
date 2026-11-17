@@ -604,6 +604,21 @@
   },
   {
     "event": {
+      "id": "01M5A00000000000000000E074",
+      "ts": "2026-10-26T08:05:00.000Z",
+      "type": "runner.removed",
+      "actor": "user",
+      "payload": {
+        "name": "runner-2",
+        "projects": ["archive"],
+        "agents": ["eng-1"],
+        "sessions": 2
+      }
+    },
+    "keys": [["runners"], ["models"], ["projects"], ["members"]]
+  },
+  {
+    "event": {
       "id": "01M5A00000000000000000E049",
       "ts": "2026-10-26T08:00:00.000Z",
       "type": "ops.signal",

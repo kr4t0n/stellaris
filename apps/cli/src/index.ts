@@ -225,6 +225,24 @@ runner
   });
 
 runner
+  .command("remove <name>")
+  .description(
+    "Remove a runner, unpinning its citizens and clearing its sessions; its token stops working. Refused while a project lives there. Stop the server first, or remove it from the runners view",
+  )
+  .action(async (name: string) => {
+    const board = await open();
+    const removed = await board.removeRunner(board.userActor(), name);
+    print(removed, () =>
+      [
+        `Runner ${removed.name} removed`,
+        `Archived projects that lived on it: ${removed.projects.join(", ") || "none"}`,
+        `Citizens unpinned: ${removed.agents.join(", ") || "none"}`,
+        `Session records cleared: ${removed.sessions}`,
+      ].join("\n"),
+    );
+  });
+
+runner
   .command("list")
   .description("List runners and what they offer")
   .action(async () => {

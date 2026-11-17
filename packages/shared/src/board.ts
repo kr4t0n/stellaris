@@ -700,6 +700,19 @@ export const RunnerRenamedSchema = z.object({
 export type RunnerRenamed = z.infer<typeof RunnerRenamedSchema>;
 
 /**
+ * A removal's answer: the runner's name, and what named it that the removal cleared: the archived
+ * projects that had lived on it, the citizens pinned to it, and the count of conversations' session
+ * records begun there.
+ */
+export const RunnerRemovedSchema = z.object({
+  name: NameSchema,
+  projects: z.array(NameSchema),
+  agents: z.array(NameSchema),
+  sessions: z.number().int().min(0),
+});
+export type RunnerRemoved = z.infer<typeof RunnerRemovedSchema>;
+
+/**
  * The user's pause that holds `cli`'s turns on a runner, the whole runner's first, or undefined
  * when they may start there.
  */

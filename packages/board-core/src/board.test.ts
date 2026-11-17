@@ -1988,6 +1988,167 @@ describe("Board", () => {
     });
   });
 
+  it("removes a runner, for the user alone and with no project living there, clearing the pins and sessions that name it, and its token", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.placeProject("demo", "far");
+    await board.addProject(USER, { slug: "lab" });
+    await board.placeProject("lab", "pod");
+    await board.addProject(USER, { slug: "yard" });
+    await board.placeProject("yard", "pod");
+    await board.pinAgent("eng-1", "pod");
+    await board.pinAgent("rev-1", "far");
+    // Every kind of conversation's session record that names it, and one that names another.
+    const thread = await board.createTask(USER, { project: "demo", title: "build" });
+    const records: Array<[string, string | undefined]> = [
+      ["demo", undefined],
+      ["demo", thread.id],
+      ["demo", "#dev"],
+      ["society", "~demo"],
+    ];
+    for (const [scope, part] of records) {
+      await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
+    }
+    await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    // A session ended there, whose record names the runner and holds no id.
+    await board.writeSession("rev-1", "society", "codex", "ended", "pod");
+    await board.dropSession("rev-1", "society", "codex", "ended");
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
+    const projected = (name: string) => readFile(board.paths.member(name), "utf8");
+
+    // Only the user removes, a runner the board knows, and none a project lives on.
+    await expect(board.removeRunner(ENG, "pod")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.removeRunner(USER, "ghost")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(board.removeRunner(USER, "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message:
+        "runner pod cannot be removed while lab, yard live there; move them to another runner first",
+    });
+    await board.archiveProject(USER, { project: "yard", reason: "done" });
+    await expect(board.removeRunner(USER, "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message:
+        "runner pod cannot be removed while lab lives there; move it to another runner first",
+    });
+    // A refusal changes nothing.
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    expect((await board.readAgent("eng-1")).homeRunner).toBe("pod");
+    expect((await board.readSessions("eng-1", "demo")).runner).toBe("pod");
+    expect((await board.readProject("yard")).runner).toBe("pod");
+
+    // Once lab is archived too, nothing lives there.
+    await board.archiveProject(USER, { project: "lab", reason: "done" });
+    const removed = await board.removeRunner(USER, "pod");
+    expect(removed).toEqual({
+      name: "pod",
+      projects: ["lab", "yard"],
+      agents: ["eng-1"],
+      sessions: 4,
+    });
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await board.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
+    expect((await board.readProject("lab")).runner).toBeUndefined();
+    expect((await board.readProject("yard")).runner).toBeUndefined();
+    expect((await board.readProject("demo")).runner).toBe("far");
+    // Pinned again on the next turn outside a project, as after `agent runner <name> none`.
+    expect((await board.readAgent("eng-1")).homeRunner).toBeUndefined();
+    expect(await projected("eng-1")).not.toContain("homeRunner");
+    expect((await board.readAgent("rev-1")).homeRunner).toBe("far");
+    // Each record keeps naming the runner, so the conversation's next turn elsewhere starts afresh as
+    // after a move, with no session to resume; one that held no id counts for nothing.
+    for (const [scope, part] of records) {
+      expect(await board.readSessions("eng-1", scope, part)).toEqual({ runner: "pod" });
+    }
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
+    expect(await board.readSessions("rev-1", "demo")).toEqual({
+      codex: "far-session",
+      runner: "far",
+    });
+    // Its token answers to no runner, now and after a restart.
+    expect(board.resolveRunnerToken(token)).toBeNull();
+    const reopened = await Board.open(dir, { now });
+    expect(reopened.resolveRunnerToken(token)).toBeNull();
+    expect(await readFile(path.join(board.paths.state(), "runners.json"), "utf8")).not.toContain(
+      '"pod"',
+    );
+
+    // One event says what the removal did; those before it keep the name.
+    const events = await reopened.readEvents(null);
+    expect(events.filter((event) => event.type === "runner.removed")).toMatchObject([
+      {
+        actor: "user",
+        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 4 },
+      },
+    ]);
+    expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({
+      name: "pod",
+    });
+    // Gone, it is unknown, and its name is free for a new runner with a token of its own.
+    await expect(reopened.removeRunner(USER, "pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const { token: next } = await reopened.addRunner(USER, "pod");
+    expect(next).not.toBe(token);
+    expect(reopened.resolveRunnerToken(token)).toBeNull();
+    expect(reopened.resolveRunnerToken(next)).toBe("pod");
+  });
+
+  it("finishes a removal cut short, after the token went or with the token left and the record gone", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.pinAgent("eng-1", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "session-0", "pod");
+    const tokensFile = path.join(board.paths.state(), "runners.json");
+    const stored = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+
+    // Stopped right after the token's entry went, as when the record's removal failed: the server
+    // still answers the token as pod, and the record is left.
+    const { pod: _pod, ...rest } = stored;
+    await writeFile(tokensFile, JSON.stringify({ runners: rest }));
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    const finished = await board.removeRunner(USER, "pod");
+    expect(finished).toEqual({ name: "pod", projects: [], agents: ["eng-1"], sessions: 1 });
+    expect(board.resolveRunnerToken(token)).toBeNull();
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Restarted with the record left and its token's entry gone: the runner is still known, so the
+    // removal finishes, with nothing left to clear but the record.
+    await board.addRunner(USER, "gpu-1");
+    const gpu = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+    const { "gpu-1": _left, ...without } = gpu;
+    await writeFile(tokensFile, JSON.stringify({ runners: without }));
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+    ]);
+    expect(await reopened.removeRunner(USER, "gpu-1")).toEqual({
+      name: "gpu-1",
+      projects: [],
+      agents: [],
+      sessions: 0,
+    });
+    expect((await reopened.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
+
+    // A token's entry left with no record, which no removal of this order leaves but a hand
+    // might, is still the runner's, and goes.
+    const { token: spareToken } = await reopened.addRunner(USER, "spare");
+    await rm(reopened.paths.runner("spare"));
+    expect(reopened.resolveRunnerToken(spareToken)).toBe("spare");
+    expect(await reopened.removeRunner(USER, "spare")).toMatchObject({ name: "spare" });
+    expect(reopened.resolveRunnerToken(spareToken)).toBeNull();
+    await expect(reopened.removeRunner(USER, "spare")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(
+      (await reopened.readEvents(null)).filter((event) => event.type === "runner.removed"),
+    ).toHaveLength(3);
+  });
+
   it("keeps the lease of a holder the user's pause holds, then lets it lapse from at least half a lease after", async () => {
     // The board's own lease, thirty minutes.
     const { board } = await society({});

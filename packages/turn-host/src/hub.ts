@@ -38,6 +38,7 @@ import {
   type RunnerAnswer,
   type RunnerHello,
   type Runner,
+  type RunnerRemoved,
   type RunnerRenamed,
   type RunnerMessage,
   type RunnerSyncReport,
@@ -189,10 +190,16 @@ export class RunnerHub implements TurnRunner {
   private readonly starting = new Map<Name, number>();
   /** Moves started since the hub did, so a placement that a move overtook gives its turn back. */
   private moveStarts = 0;
-  /** The runners being renamed, by their old name: nothing is placed or asked there until it ends. */
-  private readonly renaming = new Set<Name>();
-  /** Renames started since the hub did, so a placement that a rename overtook gives its turn back. */
-  private renameStarts = 0;
+  /**
+   * The runners being renamed, by their old name, or removed: nothing is placed or asked there
+   * until it ends.
+   */
+  private readonly changing = new Map<Name, "renamed" | "removed">();
+  /**
+   * Renames and removals started since the hub did, so a placement that one overtook gives its
+   * turn back.
+   */
+  private changeStarts = 0;
   /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
   private readonly limitReads = new Map<string, number>();
   /**
@@ -629,7 +636,7 @@ export class RunnerHub implements TurnRunner {
 
   async assign(dispatch: TurnDispatch): Promise<TurnAssignment | null> {
     const starts = this.moveStarts;
-    const renames = this.renameStarts;
+    const changes = this.changeStarts;
     const agent = await this.board.readAgent(dispatch.agent).catch(() => null);
     if (agent === null) {
       return { refused: `no agent ${dispatch.agent}` };
@@ -650,7 +657,7 @@ export class RunnerHub implements TurnRunner {
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
       !seat.syncing &&
-      !this.renaming.has(seat.name) &&
+      !this.changing.has(seat.name) &&
       !receiptOverdue(seat) &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
@@ -709,9 +716,9 @@ export class RunnerHub implements TurnRunner {
     ) {
       return null;
     }
-    // A rename that started meanwhile may have renamed the runner the turn would go to, or be about
-    // to, which counts on nothing being placed there.
-    if (this.renameStarts !== renames) {
+    // A rename or a removal that started meanwhile may have renamed or removed the runner the turn
+    // would go to, or be about to, which counts on nothing being placed there.
+    if (this.changeStarts !== changes) {
       return null;
     }
     chosen.inUse += 1;
@@ -941,11 +948,9 @@ export class RunnerHub implements TurnRunner {
         `a move of ${under.join(", ")} is under way; try again once it ends`,
       );
     }
-    if (this.renaming.size > 0) {
-      throw new BoardError(
-        "INVALID_STATE",
-        `runner ${[...this.renaming].join(", ")} is being renamed; try again once that ends`,
-      );
+    if (this.changing.size > 0) {
+      const changes = [...this.changing].map(([name, how]) => `runner ${name} is being ${how}`);
+      throw new BoardError("INVALID_STATE", `${changes.join(" and ")}; try again once that ends`);
     }
     const move: Move = { id: null, from: null, to, phase: "checking" };
     this.moving.set(slug, move);
@@ -1098,27 +1103,22 @@ export class RunnerHub implements TurnRunner {
     if (actor.role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", "only the user may rename a runner");
     }
-    if (this.renaming.has(from)) {
-      throw new BoardError(
-        "INVALID_STATE",
-        `runner ${from} is being renamed already; try again once that ends`,
-      );
-    }
-    const busy = this.renameRefusal(from);
+    this.assertUnchanging(from, "renamed");
+    const busy = this.busyOn(from);
     if (busy !== null) {
       throw new BoardError(
         "INVALID_STATE",
         `runner ${from} cannot be renamed while ${busy}; pause it, and rename it once that ends`,
       );
     }
-    this.renaming.add(from);
-    this.renameStarts += 1;
+    this.changing.set(from, "renamed");
+    this.changeStarts += 1;
     let renamed: RunnerRenamed;
     try {
       renamed = await this.board.renameRunner(actor, from, to);
       this.rekey(from, renamed.runner.name);
     } finally {
-      this.renaming.delete(from);
+      this.changing.delete(from);
     }
     this.log.info({ from, to: renamed.runner.name }, "runner renamed");
     const seat = this.seats.get(renamed.runner.name);
@@ -1128,8 +1128,75 @@ export class RunnerHub implements TurnRunner {
     return renamed;
   }
 
-  /** What runs on a runner, or is under way, that a rename would cut; null when nothing does. */
-  private renameRefusal(runner: Name): string | null {
+  /**
+   * Removes a runner, which only the user does, once nothing runs there, as for a rename, and once
+   * the user has paused it or it is away: a connected runner nobody paused may be given a turn at
+   * any moment, so the user stops its work first. The board clears every record that names it
+   * (`Board.removeRunner`). The hub then lets go of its seat, its limit reads and tries, and its
+   * warm sessions' tokens, has the model catalog forget it, and ends its stream without recording a
+   * disconnect, since its record is gone. Its token is refused from then on: a runner still running
+   * asks again every 15 seconds until its process stops, and one started again asks to enroll, or
+   * exits when its token came from the environment.
+   */
+  async removeRunner(actor: Actor, name: Name): Promise<RunnerRemoved> {
+    if (actor.role !== USER_ROLE) {
+      throw new BoardError("FORBIDDEN", "only the user may remove a runner");
+    }
+    // Read before the checks, which run with no wait between them and the start of the removal, so
+    // nothing is placed there in between. One the board no longer has a record of is the board's
+    // to judge, as when an earlier removal was cut short.
+    const record = await this.board.readRunner(name).catch(() => null);
+    this.assertUnchanging(name, "removed");
+    const busy = this.busyOn(name);
+    const seat = this.seats.get(name);
+    const unpaused =
+      seat !== undefined && seat.send !== null && record !== null && record.paused === undefined;
+    if (busy !== null || unpaused) {
+      const reasons = [unpaused ? "it is connected and not paused" : "", busy ?? ""].filter(
+        (reason) => reason !== "",
+      );
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${name} cannot be removed while ${reasons.join(" and ")}; ${busy === null ? "pause it first" : "pause it, and remove it once that ends"}`,
+      );
+    }
+    this.changing.set(name, "removed");
+    this.changeStarts += 1;
+    let removed: RunnerRemoved;
+    try {
+      removed = await this.board.removeRunner(actor, name);
+      this.forget(name);
+    } finally {
+      this.changing.delete(name);
+    }
+    this.log.info(
+      {
+        runner: name,
+        projects: removed.projects,
+        agents: removed.agents,
+        sessions: removed.sessions,
+      },
+      "runner removed",
+    );
+    return removed;
+  }
+
+  /** Refuses a rename or a removal of a runner while one of either runs. */
+  private assertUnchanging(runner: Name, how: "renamed" | "removed"): void {
+    const under = this.changing.get(runner);
+    if (under !== undefined) {
+      throw new BoardError(
+        "INVALID_STATE",
+        `runner ${runner} is being ${under}${under === how ? " already" : ""}; try again once that ends`,
+      );
+    }
+  }
+
+  /**
+   * What runs on a runner, or is under way, that a rename or a removal would cut; null when nothing
+   * does.
+   */
+  private busyOn(runner: Name): string | null {
     const seat = this.seats.get(runner);
     const turns = Math.max(seat?.inUse ?? 0, this.host.turnsOn(runner).length);
     const requests = [...this.pending.values()].filter((each) => each.runner === runner).length;
@@ -1157,6 +1224,40 @@ export class RunnerHub implements TurnRunner {
     this.host.warmChanged(from, []);
     this.runnerChanged(from);
     this.runnerChanged(to);
+  }
+
+  /**
+   * Lets go of what the hub holds of a removed runner: its seat, with its timers, its limit reads
+   * and tries, and its warm sessions' tokens, and has the model catalog forget it. Its stream ends
+   * last, and records no disconnect: `attach`'s close finds the seat let go.
+   */
+  private forget(runner: Name): void {
+    const seat = this.seats.get(runner);
+    for (const map of [this.limitReads, this.limitTries]) {
+      for (const key of map.keys()) {
+        if (key.startsWith(`${runner}/`)) {
+          map.delete(key);
+        }
+      }
+    }
+    // No turn runs there, so every warm session's token is idle.
+    this.host.warmChanged(runner, []);
+    if (seat !== undefined) {
+      this.seats.delete(runner);
+      if (seat.grace !== null) {
+        clearTimeout(seat.grace);
+        seat.grace = null;
+      }
+      for (const { timer } of seat.unacked.values()) {
+        clearTimeout(timer);
+      }
+      seat.unacked.clear();
+      const end = seat.end;
+      seat.send = null;
+      seat.end = null;
+      end?.();
+    }
+    this.runnerChanged(runner);
   }
 
   /**
@@ -1771,10 +1872,12 @@ export class RunnerHub implements TurnRunner {
         reject(new RunnerAwayError(`runner ${seat.name} did not answer in time`));
       }, timeoutMs);
       timer.unref?.();
-      // A rename counts on no request being unanswered, since the answer comes under the new name.
-      if (this.renaming.has(seat.name)) {
+      // A rename counts on no request being unanswered, since the answer comes under the new name,
+      // and a removal on none being asked of a runner that will not be there to answer.
+      const how = this.changing.get(seat.name);
+      if (how !== undefined) {
         clearTimeout(timer);
-        reject(new RunnerAwayError(`runner ${seat.name} is being renamed`));
+        reject(new RunnerAwayError(`runner ${seat.name} is being ${how}`));
         return;
       }
       this.pending.set(request, { runner: seat.name, resolve, reject, timer });

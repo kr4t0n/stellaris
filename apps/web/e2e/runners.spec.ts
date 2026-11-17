@@ -171,8 +171,8 @@ test("the Runners tab opens the runners view, and Esc closes the board", async (
     /^claude\s*studio\s*darwin\s*v0\.3\.11\s*no projects\s*connected$/,
     /^claude\s*laptop\s*darwin\s*v0\.3\.10, not the server's v0\.3\.11\s*gpu\s*lab\s*away$/,
   ]);
-  // Every row keeps the same eight cells, so each column holds the same thing; the runner's pause
-  // and rename share the last.
+  // Every row keeps the same eight cells, so each column holds the same thing; the runner's pause,
+  // rename, and removal share the last.
   const cells = (row: number) => rows.nth(row).locator(":scope > *");
   for (const row of [0, 1, 2]) {
     await expect(cells(row)).toHaveCount(8);
@@ -188,9 +188,10 @@ test("the Runners tab opens the runners view, and Esc closes the board", async (
     "",
   ]);
   const controls = cells(2).nth(7).getByRole("button");
-  await expect(controls).toHaveCount(2);
+  await expect(controls).toHaveCount(3);
   await expect(controls.nth(0)).toHaveAccessibleName("Pause laptop");
   await expect(controls.nth(1)).toHaveAccessibleName("Rename laptop…");
+  await expect(controls.nth(2)).toHaveAccessibleName("Remove laptop…");
   await expect(rows.nth(2).getByText("away")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(2).getByText("v0.3.10")).toHaveClass(/text-amber-300/);
   await expect(rows.nth(0).getByText("v0.3.11")).not.toHaveClass(/text-amber-300/);
@@ -393,6 +394,244 @@ test("a refusal from the keyboard leaves the focus in the field, renaming or app
   ).toHaveText("runner pod already exists");
   await expect(name).toBeFocused();
   await expect(name).toHaveValue("pod");
+});
+
+test("the user removes a runner from a red button in its row, which names what changes and says why the board refused", async ({
+  page,
+}) => {
+  // desk is pinned to pod and in a turn there; lab lives on laptop, and iphone, archived, did.
+  const board = await fakeBoard(page, { inFlight: true, archived: true });
+  await page.goto("/runners");
+  const list = page.getByRole("list", { name: "Registered" });
+  const rows = list.getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
+
+  // The bin turns into a red Remove in the same cell, in place of the row's controls, named for
+  // what it changes. It takes no press for its first moments, so a double click on the bin, its
+  // second click 150 ms later and landing on the Remove, removes nothing.
+  const laptop = rows.nth(2);
+  const bin = laptop.getByRole("button", { name: "Remove laptop…" });
+  const at = await bin.boundingBox();
+  if (at === null) {
+    throw new Error("the bin has no box");
+  }
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
+  await expect(remove).toBeFocused();
+  await expect(remove).toHaveText("Remove");
+  // The user's muted red, read with the mouse off it.
+  await page.mouse.move(0, 0);
+  await expect(remove).toHaveCSS("background-color", "rgb(220, 63, 63)");
+  const changes = "Clears archived iphone · its token stops working";
+  await expect(remove).toHaveAttribute("title", changes);
+  await expect(remove).toHaveAccessibleDescription(changes);
+  await expect(cellsOf(laptop)).toHaveCount(8);
+  await expect(cellsOf(laptop).nth(7).getByRole("button")).toHaveCount(1);
+  expect(removals()).toEqual([]);
+  // Once it takes a press, the board refuses while lab lives there, on a line under the row.
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await remove.click();
+  await expect(laptop.getByRole("alert")).toHaveText(
+    "runner laptop cannot be removed while lab lives there; move it to another runner first",
+  );
+  await expect(remove).toBeFocused();
+  // Escape puts the controls back with the bin focused, and the refusal goes; the board stays open.
+  await page.keyboard.press("Escape");
+  await expect(remove).toHaveCount(0);
+  await expect(bin).toBeFocused();
+  await expect(laptop.getByRole("alert")).toHaveCount(0);
+  await expect(page).toHaveURL("/runners");
+
+  // pod's names the citizen pinned there; connected, unpaused, and running desk's turn, it stays,
+  // and a click elsewhere puts its controls back.
+  const pod = rows.nth(0);
+  await pod.getByRole("button", { name: "Remove pod…" }).click();
+  const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
+  await expect(removePod).toHaveAttribute("title", "Unpins desk · its token stops working");
+  await expect(removePod).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("Enter");
+  await expect(pod.getByRole("alert")).toHaveText(
+    "runner pod cannot be removed while it is connected and not paused and 1 turn(s) run or start there; pause it, and remove it once that ends",
+  );
+  await page.getByRole("heading", { name: "Runners" }).click();
+  await expect(removePod).toHaveCount(0);
+  await expect(pod.getByRole("button", { name: "Rename pod…" })).toBeVisible();
+  await expect(pod.getByRole("alert")).toHaveCount(0);
+
+  // studio, paused from its row, goes, and the list keeps the focus.
+  const studio = rows.nth(1);
+  await studio.getByRole("button", { name: "Pause studio" }).click();
+  await expect(studio.getByRole("button", { name: "Resume studio" })).toBeVisible();
+  await studio.getByRole("button", { name: "Remove studio…" }).click();
+  const removeStudio = studio.getByRole("button", { name: "Remove studio", exact: true });
+  await expect(removeStudio).toHaveAttribute("title", "Its token stops working");
+  await expect(removeStudio).toHaveAttribute("aria-disabled", "false");
+  await removeStudio.click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("pod");
+  await expect(rows.nth(1)).toContainText("laptop");
+  await expect(list).toBeFocused();
+  await expect(page.getByText(/^1 connected · 1 away/)).toBeVisible();
+  expect(removals()).toEqual([
+    { path: "/api/runners/laptop", body: {} },
+    { path: "/api/runners/pod", body: {} },
+    { path: "/api/runners/studio", body: {} },
+  ]);
+});
+
+test("a second press, or a held key, on the bin removes nothing", async ({ page }) => {
+  const board = await fakeBoard(page);
+  await page.goto("/runners");
+  const laptop = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(2);
+  const bin = laptop.getByRole("button", { name: "Remove laptop…" });
+  const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
+  const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
+
+  // Reached by Tab, as a keyboard user does, so the bin takes Space as its own press. Enter twice,
+  // 150 ms apart: the second lands on the Remove before it takes presses.
+  await laptop.getByRole("button", { name: "Rename laptop…" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(bin).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  await page.keyboard.press("Enter");
+  await expect(remove).toBeFocused();
+  await page.waitForTimeout(300);
+  expect(removals()).toEqual([]);
+  // Enter held: its repeats, past the first moments, still press nothing.
+  await page.keyboard.press("Escape");
+  await expect(bin).toBeFocused();
+  await page.keyboard.down("Enter");
+  await expect(remove).toBeFocused();
+  await page.waitForTimeout(600);
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  // Space, which presses as it is let go, twice 150 ms apart.
+  await page.keyboard.press("Escape");
+  await expect(bin).toBeFocused();
+  await page.keyboard.press(" ");
+  await page.waitForTimeout(150);
+  await page.keyboard.press(" ");
+  await expect(remove).toBeFocused();
+  await page.waitForTimeout(300);
+  expect(removals()).toEqual([]);
+  await expect(laptop.getByRole("alert")).toHaveCount(0);
+  // A deliberate press goes.
+  await page.keyboard.press("Escape");
+  await bin.press("Enter");
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("Enter");
+  await expect(laptop.getByRole("alert")).toHaveText(
+    /^runner laptop cannot be removed while lab lives there/,
+  );
+  expect(removals()).toHaveLength(1);
+});
+
+test("an answer that comes once the focus left the red Remove puts the controls back, a refusal under them, and leaves the focus where it went", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page, { archived: true });
+  // Registered after the fake board, so it answers first: each removal answers 300 ms late.
+  await page.route(/\/api\/runners\/[^/]+$/, async (route) => {
+    if (route.request().method() === "DELETE") {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    await route.fallback();
+  });
+  await page.goto("/runners");
+  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  const focused = () =>
+    page.evaluate(() => {
+      const element = document.activeElement;
+      return element === document.body ? "page" : (element?.getAttribute("aria-label") ?? "");
+    });
+  const refusal =
+    "runner laptop cannot be removed while lab lives there; move it to another runner first";
+
+  // A click elsewhere while the board answers: its refusal puts laptop's controls back, the refusal
+  // under them, and the focus stays on the page the click left it on.
+  const laptop = rows.nth(2);
+  const bin = laptop.getByRole("button", { name: "Remove laptop…" });
+  const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
+  await bin.click();
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await remove.click();
+  await page.getByRole("heading", { name: "Runners" }).click();
+  await expect(remove).toHaveAttribute("aria-disabled", "true");
+  await expect(laptop.getByRole("alert")).toHaveText(refusal);
+  await expect(remove).toHaveCount(0);
+  await expect(bin).toBeVisible();
+  await expect(laptop.getByRole("button", { name: "Rename laptop…" })).toBeVisible();
+  expect(await focused()).toBe("page");
+  // The row's next form takes the refusal away.
+  await bin.click();
+  await expect(laptop.getByRole("alert")).toHaveCount(0);
+
+  // Tab away while the board answers: the same, and the focus stays where Tab took it.
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  const tabbed = await focused();
+  expect(tabbed).not.toBe("Remove laptop");
+  await expect(laptop.getByRole("alert")).toHaveText(refusal);
+  await expect(remove).toHaveCount(0);
+  expect(await focused()).toBe(tabbed);
+
+  // Escape while the board answers keeps the board open, and its refusal puts the controls back,
+  // the refusal under them and the focus on the bin.
+  await bin.click();
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await remove.click();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL("/runners");
+  await expect(laptop.getByRole("alert")).toHaveText(refusal);
+  await expect(remove).toHaveCount(0);
+  await expect(bin).toBeFocused();
+
+  // studio, paused, goes while the focus has moved to pod's rename: the field keeps it.
+  const studio = rows.nth(1);
+  await studio.getByRole("button", { name: "Pause studio" }).click();
+  await expect(studio.getByRole("button", { name: "Resume studio" })).toBeVisible();
+  await studio.getByRole("button", { name: "Remove studio…" }).click();
+  const removeStudio = studio.getByRole("button", { name: "Remove studio", exact: true });
+  await expect(removeStudio).toHaveAttribute("aria-disabled", "false");
+  await removeStudio.click();
+  await rows.nth(0).getByRole("button", { name: "Rename pod…" }).click();
+  const field = page.getByRole("form", { name: "Rename pod" }).getByRole("textbox");
+  await expect(field).toBeFocused();
+  await expect(rows).toHaveCount(2);
+  await expect(field).toBeFocused();
+  await expect(page.getByRole("form", { name: "Rename pod" })).toBeVisible();
+
+  // pod, paused, goes after an Escape while the board answers: the board stays open and the list
+  // takes the focus.
+  await page
+    .getByRole("form", { name: "Rename pod" })
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  const pod = rows.nth(0);
+  await pod.getByRole("button", { name: "Pause pod" }).click();
+  await expect(pod.getByRole("button", { name: "Resume pod" })).toBeVisible();
+  await pod.getByRole("button", { name: "Remove pod…" }).click();
+  const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
+  await expect(removePod).toHaveAttribute("aria-disabled", "false");
+  await removePod.click();
+  await page.keyboard.press("Escape");
+  await expect(rows).toHaveCount(1);
+  await expect(page).toHaveURL("/runners");
+  await expect(page.getByRole("list", { name: "Registered" })).toBeFocused();
+  expect(board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path))).toEqual([
+    { path: "/api/runners/laptop", body: {} },
+    { path: "/api/runners/laptop", body: {} },
+    { path: "/api/runners/laptop", body: {} },
+    { path: "/api/runners/studio", body: {} },
+    { path: "/api/runners/pod", body: {} },
+  ]);
 });
 
 test("a runner names the CLI its limit holds, apart from the user's pause", async ({ page }) => {

@@ -222,6 +222,8 @@ function RemoveRunner({
   // so the answer closes the button.
   const answering = useRef(false);
   const left = useRef(false);
+  // Escape while the board answers waits for the answer, which then gives the bin the focus.
+  const escaped = useRef(false);
   useEffect(() => {
     button.current?.focus();
     const timer = setTimeout(() => setArmed(true), REMOVE_ARMS_MS);
@@ -236,12 +238,12 @@ function RemoveRunner({
         ),
       );
       onDone("removed", {
-        focusList: !left.current || document.activeElement === document.body,
+        focusList: !left.current || escaped.current || document.activeElement === document.body,
       });
     },
     onError: (error) => {
       if (left.current) {
-        onDone("left", { refused: error });
+        onDone(escaped.current ? "escaped" : "left", { refused: error });
       }
     },
     onSettled: () => {
@@ -269,6 +271,7 @@ function RemoveRunner({
             if (!waiting && !answering.current) {
               answering.current = true;
               left.current = false;
+              escaped.current = false;
               remove.mutate();
             }
           }}
@@ -278,14 +281,21 @@ function RemoveRunner({
               event.preventDefault();
               return;
             }
-            if (event.key === "Escape" && !answering.current) {
+            if (event.key === "Escape") {
+              // Never the board's Escape, which would close it with the answer on its way.
               event.stopPropagation();
-              onDone("escaped");
+              if (answering.current) {
+                left.current = true;
+                escaped.current = true;
+              } else {
+                onDone("escaped");
+              }
             }
           }}
           onBlur={() => {
             if (answering.current) {
               left.current = true;
+              escaped.current = false;
             } else {
               onDone("left");
             }

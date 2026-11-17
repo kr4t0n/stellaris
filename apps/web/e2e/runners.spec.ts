@@ -582,6 +582,17 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await expect(remove).toHaveCount(0);
   expect(await focused()).toBe(tabbed);
 
+  // Escape while the board answers keeps the board open, and its refusal puts the controls back,
+  // the refusal under them and the focus on the bin.
+  await bin.click();
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await remove.click();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL("/runners");
+  await expect(laptop.getByRole("alert")).toHaveText(refusal);
+  await expect(remove).toHaveCount(0);
+  await expect(bin).toBeFocused();
+
   // studio, paused, goes while the focus has moved to pod's rename: the field keeps it.
   const studio = rows.nth(1);
   await studio.getByRole("button", { name: "Pause studio" }).click();
@@ -596,10 +607,30 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await expect(rows).toHaveCount(2);
   await expect(field).toBeFocused();
   await expect(page.getByRole("form", { name: "Rename pod" })).toBeVisible();
+
+  // pod, paused, goes after an Escape while the board answers: the board stays open and the list
+  // takes the focus.
+  await page
+    .getByRole("form", { name: "Rename pod" })
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  const pod = rows.nth(0);
+  await pod.getByRole("button", { name: "Pause pod" }).click();
+  await expect(pod.getByRole("button", { name: "Resume pod" })).toBeVisible();
+  await pod.getByRole("button", { name: "Remove pod…" }).click();
+  const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
+  await expect(removePod).toHaveAttribute("aria-disabled", "false");
+  await removePod.click();
+  await page.keyboard.press("Escape");
+  await expect(rows).toHaveCount(1);
+  await expect(page).toHaveURL("/runners");
+  await expect(page.getByRole("list", { name: "Registered" })).toBeFocused();
   expect(board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path))).toEqual([
     { path: "/api/runners/laptop", body: {} },
     { path: "/api/runners/laptop", body: {} },
+    { path: "/api/runners/laptop", body: {} },
     { path: "/api/runners/studio", body: {} },
+    { path: "/api/runners/pod", body: {} },
   ]);
 });
 

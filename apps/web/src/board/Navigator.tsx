@@ -262,8 +262,8 @@ export function Navigator({
       bare={layout === "beside"}
       className={
         layout === "beside"
-          ? "w-64 shrink-0 border-r border-line"
-          : "top-[72px] bottom-4 left-4 w-64"
+          ? "w-[256px] shrink-0 border-r border-line"
+          : "top-[72px] bottom-[16px] left-[16px] w-[256px]"
       }
     >
       <header className="flex items-center justify-between px-4 pt-4 pb-1">

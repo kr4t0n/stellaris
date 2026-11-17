@@ -54,6 +54,19 @@ async function besideTheSky(page: Page): Promise<void> {
   });
 }
 
+/**
+ * A browser set to Chrome's Font size "Large", a 20 px root font, with the board where it chose:
+ * the app sets no root size, so the browser's scales every rem.
+ */
+async function atLargeFont(page: Page, layout: "around" | "beside"): Promise<void> {
+  await page.addInitScript((chosen) => {
+    document.addEventListener("DOMContentLoaded", () => {
+      document.documentElement.style.fontSize = "20px";
+    });
+    localStorage.setItem("stellaris.boardLayout", chosen);
+  }, layout);
+}
+
 /** Waits for the scene's next two frames, in which it moves its camera to what changed. */
 async function nextFrames(page: Page): Promise<void> {
   await page.evaluate(
@@ -223,6 +236,71 @@ for (const size of [
     expect(ask.x).toBeGreaterThanOrEqual(room.left + 16);
     expect(ask.x + ask.width).toBeLessThanOrEqual(room.right - 16);
     expect(ask.x + ask.width / 2).toBeCloseTo(roomMiddle, 0);
+  });
+}
+
+test("at a 20 px root font, around the sky, the sky centers between the islands, and the widest content stops 16 px short of the navigator", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await atLargeFont(page, "around");
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  const content = page.getByRole("region", { name: "Board content" });
+  await expect(content).toBeVisible();
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(
+    "20px",
+  );
+  const sky = await boxOf(page.locator("canvas"));
+
+  // The room lies between the islands as drawn, 16 px clear of each, and the sky's middle is its.
+  const nav = await boxOf(navigator);
+  const between = { left: nav.x + nav.width + 16, right: (await boxOf(content)).x - 16 };
+  const roomMiddle = (between.left + between.right) / 2;
+  expect(await middle(page.getByRole("button", { name: /to ask$/ }))).toBeCloseTo(roomMiddle, 0);
+  await nextFrames(page);
+  await page.mouse.click(roomMiddle, sky.y + sky.height / 2);
+  await expect(page).toHaveURL(/\/citizen\/desk$/);
+  // The islands keep the places and widths they have at a 16 px root.
+  await page.goto("/c/general");
+  expect(await boxOf(navigator)).toMatchObject({ x: 16, width: 256 });
+  expect(await boxOf(content)).toMatchObject({ x: 1440 - 16 - 576, width: 576 });
+
+  // As wide as it goes, the content keeps the usual gap to the navigator.
+  await page.getByRole("button", { name: /^Width of the board's content/ }).dblclick();
+  const widest = await boxOf(content);
+  expect(widest.x - (nav.x + nav.width)).toBe(16);
+  expect(widest).toMatchObject({ x: 16 + 256 + 16, width: 1440 - 256 - 48 });
+});
+
+for (const window of [1024, 1440]) {
+  test(`at a 20 px root font, beside the sky, the content is as wide as chosen, or as the default, beside the navigator (${window} px window)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: window, height: 768 });
+    await atLargeFont(page, "beside");
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    const navigator = page.getByRole("region", { name: "Board navigator" });
+    const content = page.getByRole("region", { name: "Board content" });
+    await expect(content).toBeVisible();
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(
+      "20px",
+    );
+    // Two fifths of the window, 420 at the least.
+    const fallback = Math.max(420, Math.round(window * 0.4));
+    expect((await boxOf(content)).width).toBe(fallback);
+    expect(await boxOf(navigator)).toMatchObject({ x: 16, width: 256 });
+    expect((await boxOf(content)).x).toBe(16 + 256);
+
+    // The narrowest width a browser can choose.
+    await page.evaluate(() => localStorage.setItem("stellaris.contentWidth", "420"));
+    await page.reload();
+    await expect(content).toBeVisible();
+    expect((await boxOf(content)).width).toBe(420);
+    expect((await boxOf(content)).x).toBe(16 + 256);
   });
 }
 

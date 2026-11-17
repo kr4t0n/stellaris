@@ -63,7 +63,7 @@ public func staleKeys(for event: BoardEvent) -> [ReadKey] {
   if type == "runner.quota" || type == "runner.paused" || type == "runner.resumed" {
     return [["runners"]]
   }
-  if type == "runner.renamed" {
+  if type == "runner.renamed" || type == "runner.removed" {
     return [["runners"], ["models"], ["projects"], ["members"]]
   }
   if type.hasPrefix("runner.") {

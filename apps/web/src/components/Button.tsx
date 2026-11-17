@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentPropsWithRef } from "react";
 
 const VARIANTS = {
   primary: "bg-fg-primary font-medium text-surface-0 hover:bg-white",
@@ -14,7 +14,7 @@ export function Button({
   variant = "ghost",
   className = "",
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: keyof typeof VARIANTS }) {
+}: ComponentPropsWithRef<"button"> & { variant?: keyof typeof VARIANTS }) {
   return (
     <button
       type="button"

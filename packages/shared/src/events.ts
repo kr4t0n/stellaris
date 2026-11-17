@@ -51,6 +51,7 @@ export const BOARD_EVENT_TYPES = [
   "runner.paused",
   "runner.resumed",
   "runner.renamed",
+  "runner.removed",
   "ops.signal",
   "paused.changed",
   "wake.requested",

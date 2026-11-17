@@ -120,6 +120,7 @@ import {
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
+  type RunnerRemoved,
   type RunnerRenamed,
   type Skill,
   type SkillFileContent,
@@ -5285,6 +5286,90 @@ export class Board {
         this.runnerTokens.set(token.tokenHash, name);
       }
       return { runner, projects, agents, sessions };
+    });
+  }
+
+  /**
+   * Removes a runner, which only the user does, with what names it: `runner` on the archived
+   * projects that lived on it, the pins of the citizens pinned to it, so each is pinned again on its
+   * next turn outside a project, and every conversation's session record begun there, so a runner
+   * later given the name never tries to resume them. Its token stops answering. A project that still
+   * lives there refuses the removal, since its repository is there: the user moves it first. Turn
+   * records and events keep the name. The hub (`RunnerHub.removeRunner`) checks first that nothing
+   * runs there and that the runner is paused or away.
+   *
+   * The records go first, then the token, and the runner's own record last, so a removal cut short,
+   * by a crash or a failed write, finishes when run again: the runner counts as known while its
+   * record or its token's entry is left. Once both are gone the removal is whole, though a crash
+   * right then leaves it unlogged.
+   */
+  async removeRunner(actor: Actor, name: Name): Promise<RunnerRemoved> {
+    this.assertUser(actor, "only the user may remove a runner");
+    const parsed = NameSchema.parse(name);
+    return this.mutex.run(async () => {
+      const tokens = await this.readRunnerTokens();
+      if (!(await exists(this.paths.runner(parsed))) && tokens[parsed] === undefined) {
+        throw new BoardError("NOT_FOUND", `runner ${parsed} not found`);
+      }
+      const living: Name[] = [];
+      const projects: Name[] = [];
+      for (const slug of await listDirs(this.paths.projects())) {
+        const project = await this.readProject(slug);
+        if (project.runner === parsed) {
+          (project.archived === undefined ? living : projects).push(slug);
+        }
+      }
+      if (living.length > 0) {
+        const one = living.length === 1;
+        throw new BoardError(
+          "INVALID_STATE",
+          `runner ${parsed} cannot be removed while ${living.join(", ")} ${one ? "lives" : "live"} there; move ${one ? "it" : "them"} to another runner first`,
+        );
+      }
+      for (const slug of projects) {
+        await this.updateProject(slug, ({ runner: _removed, ...rest }) => rest);
+      }
+      const agents: Name[] = [];
+      for (const agent of await this.listAgents()) {
+        if (agent.homeRunner === parsed) {
+          await this.updateAgent(agent.name, ({ homeRunner: _removed, ...rest }) => rest);
+          await this.refreshMember(agent.name);
+          agents.push(agent.name);
+        }
+      }
+      // Read and written a batch at a time, as a rename does.
+      let sessions = 0;
+      const files = await this.sessionFiles();
+      for (let at = 0; at < files.length; at += SESSION_BATCH) {
+        const cleared = await Promise.all(
+          files.slice(at, at + SESSION_BATCH).map(async (file) => {
+            const record = await readJson(file, SessionsFileSchema);
+            if (record.runner !== parsed) {
+              return false;
+            }
+            await writeJson(file, {});
+            return true;
+          }),
+        );
+        sessions += cleared.filter((each) => each).length;
+      }
+      const { [parsed]: removed, ...others } = tokens;
+      if (removed !== undefined) {
+        await writeJson(this.runnerTokensFile(), { runners: others });
+      }
+      for (const [hash, owner] of this.runnerTokens) {
+        if (owner === parsed) {
+          this.runnerTokens.delete(hash);
+        }
+      }
+      await rm(this.paths.runner(parsed), { force: true });
+      await this.events.append("runner.removed", actor.name, {
+        name: parsed,
+        projects,
+        agents,
+        sessions,
+      });
+      return { name: parsed, projects, agents, sessions };
     });
   }
 

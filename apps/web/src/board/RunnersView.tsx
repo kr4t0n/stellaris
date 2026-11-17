@@ -7,6 +7,7 @@ import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
 import {
   useEnrollments,
+  useMembers,
   useNow,
   useProjects,
   useRunners,
@@ -24,6 +25,9 @@ import {
   suggestRunnerName,
 } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
+
+/** The forms a runner's row opens under it. */
+type Form = "rename" | "remove";
 
 /** Connected runners first, each group by name. */
 function byStatus(a: Runner, b: Runner): number {
@@ -154,6 +158,98 @@ function RenameMark() {
   );
 }
 
+/** A bin, to remove. Decorative: its button's label says what it does. */
+function RemoveMark() {
+  return (
+    <svg viewBox="0 0 12 12" width={12} height={12} aria-hidden="true" className="shrink-0">
+      <path
+        d="M1.75 3h8.5M4.5 3V1.75h3V3M2.75 3l.5 7.25h5.5L9.25 3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.25}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The removal of a runner, under its row: what it changes, the citizens pinned there, who are
+ * pinned again on their next turn, the archived projects that lived there, and its token, which
+ * stops working. The board refuses while a project lives there, anything runs there, or it is
+ * connected and not paused, saying what.
+ */
+function RemoveRunner({
+  runner,
+  pinned,
+  archived,
+  onDone,
+}: {
+  runner: string;
+  pinned: readonly string[];
+  archived: readonly string[];
+  onDone: (removed: boolean) => void;
+}) {
+  const { api } = useSession();
+  const client = useQueryClient();
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  const remove = useMutation({
+    mutationFn: () => api.removeRunner(runner),
+    onSuccess: async () => {
+      await Promise.all(
+        ["runners", "projects", "members", "models"].map((key) =>
+          client.invalidateQueries({ queryKey: [key] }),
+        ),
+      );
+      onDone(true);
+    },
+  });
+  const changes = [
+    ...(pinned.length === 0 ? [] : [`unpins ${pinned.join(", ")}`]),
+    ...(archived.length === 0 ? [] : [`clears archived ${archived.join(", ")}`]),
+    "its token stops working",
+  ].join(" · ");
+  return (
+    <form
+      aria-label={`Remove ${runner}`}
+      className="col-span-full mt-1.5 mb-1"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!remove.isPending) {
+          remove.mutate();
+        }
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 text-meta">
+          {changes.charAt(0).toUpperCase()}
+          {changes.slice(1)}
+        </p>
+        {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
+        <Button
+          ref={cancel}
+          aria-disabled={remove.isPending}
+          onClick={() => {
+            if (!remove.isPending) {
+              onDone(false);
+            }
+          }}
+        >
+          Cancel
+        </Button>
+        <Button variant="primary" type="submit" aria-disabled={remove.isPending}>
+          {remove.isPending ? "Removing…" : "Remove"}
+        </Button>
+      </div>
+      <div className="mt-1.5">
+        <Failure error={remove.error} />
+      </div>
+    </form>
+  );
+}
+
 /**
  * A runner's new name, under its row. The board renames it with every project, pin, and session
  * that names it, and refuses while anything runs there, saying what; the runner keeps its token.
@@ -225,7 +321,7 @@ function RenameRunner({ runner, onDone }: { runner: string; onDone: (renamed?: s
 /**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
  * marked when it is not the server's, capabilities, the projects living on it, whether it is
- * connected or paused, its pause, and its rename; above them, those asking to join. A runner started without a
+ * connected or paused, its pause, its rename, and its removal; above them, those asking to join. A runner started without a
  * token asks the board to enroll it and prints a link here with its code; approving it under a name
  * registers it, and the runner picks up its token on its next poll. Each CLI's mark pauses that CLI
  * on the runner alone. Under them, each CLI login's plan quota.
@@ -255,11 +351,19 @@ export function RunnersView() {
       pause.mutate(change);
     }
   };
-  // The runner whose rename is open, and the one whose rename control takes the focus back when it
-  // closes, under the name it has then.
-  const [renaming, setRenaming] = useState<string | null>(null);
+  // The runner whose rename or removal is open, and the control that takes the focus back when it
+  // closes, a rename's under the name it has then; after a removal, the list has it.
+  const [opened, setOpened] = useState<{ runner: string; form: Form } | null>(null);
   const [refocus, setRefocus] = useState<string | null>(null);
-  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
+  const controls = useRef(new Map<string, HTMLElement>());
+  const control = (key: string) => (element: HTMLElement | null) => {
+    if (element === null) {
+      controls.current.delete(key);
+    } else {
+      controls.current.set(key, element);
+    }
+  };
+  const members = useMembers();
   const enrollments = useEnrollments();
   const runners = useRunners();
   const projects = useProjects();
@@ -285,16 +389,18 @@ export function RunnersView() {
   const ordered =
     followed === undefined ? waiting : [followed, ...waiting.filter((each) => each !== followed)];
   useEffect(() => {
-    const button = refocus === null ? undefined : renameButtons.current.get(refocus);
-    if (button !== undefined) {
-      button.focus();
+    const element = refocus === null ? undefined : controls.current.get(refocus);
+    if (element !== undefined) {
+      element.focus();
       setRefocus(null);
     }
-  }, [refocus]);
+  }, [refocus, controls]);
   const living = (runner: Runner): string[] =>
     (projects.data ?? [])
       .filter((project) => project.runner === runner.name && project.archived === undefined)
       .map((project) => project.slug);
+  const toggleForm = (runner: string, form: Form): void =>
+    setOpened(opened?.runner === runner && opened.form === form ? null : { runner, form });
 
   return (
     <>
@@ -337,8 +443,10 @@ export function RunnersView() {
         ) : null}
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
         <ul
+          ref={control("list")}
+          tabIndex={-1}
           aria-label="Registered"
-          className="grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto] gap-x-3"
+          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -346,6 +454,7 @@ export function RunnersView() {
             const lives = places.length === 0 ? "no projects" : places.join(", ");
             const gap = identityGap(runner);
             const state = runnerState(runner, now);
+            const form = opened?.runner === runner.name ? opened.form : null;
             return (
               <li
                 key={runner.name}
@@ -407,7 +516,7 @@ export function RunnersView() {
                 >
                   {state.label}
                 </span>
-                {/* The runner's own controls share the last column, so the rename takes no gap of its own. */}
+                {/* The runner's own controls share the last column, so rename and remove take no gap of their own. */}
                 <span className="-mr-1 flex items-center">
                   <button
                     type="button"
@@ -423,28 +532,50 @@ export function RunnersView() {
                   </button>
                   <button
                     type="button"
-                    ref={(button) => {
-                      if (button === null) {
-                        renameButtons.current.delete(runner.name);
-                      } else {
-                        renameButtons.current.set(runner.name, button);
-                      }
-                    }}
+                    ref={control(`rename:${runner.name}`)}
                     aria-label={`Rename ${runner.name}…`}
                     title={`Rename ${runner.name}…`}
-                    aria-expanded={renaming === runner.name}
-                    onClick={() => setRenaming(renaming === runner.name ? null : runner.name)}
+                    aria-expanded={form === "rename"}
+                    onClick={() => toggleForm(runner.name, "rename")}
                     className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
                   >
                     <RenameMark />
                   </button>
+                  <button
+                    type="button"
+                    ref={control(`remove:${runner.name}`)}
+                    aria-label={`Remove ${runner.name}…`}
+                    title={`Remove ${runner.name}…`}
+                    aria-expanded={form === "remove"}
+                    onClick={() => toggleForm(runner.name, "remove")}
+                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                  >
+                    <RemoveMark />
+                  </button>
                 </span>
-                {renaming === runner.name ? (
+                {form === "rename" ? (
                   <RenameRunner
                     runner={runner.name}
                     onDone={(renamed) => {
-                      setRenaming(null);
-                      setRefocus(renamed ?? runner.name);
+                      setOpened(null);
+                      setRefocus(`rename:${renamed ?? runner.name}`);
+                    }}
+                  />
+                ) : form === "remove" ? (
+                  <RemoveRunner
+                    runner={runner.name}
+                    pinned={(members.data ?? [])
+                      .filter((member) => member.homeRunner === runner.name)
+                      .map((member) => member.name)}
+                    archived={(projects.data ?? [])
+                      .filter(
+                        (project) =>
+                          project.runner === runner.name && project.archived !== undefined,
+                      )
+                      .map((project) => project.slug)}
+                    onDone={(removed) => {
+                      setOpened(null);
+                      setRefocus(removed ? "list" : `remove:${runner.name}`);
                     }}
                   />
                 ) : null}

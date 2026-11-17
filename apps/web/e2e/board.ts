@@ -1350,7 +1350,7 @@ export async function fakeBoard(
   // Each runner's name now, by the name it started with; a rename moves its pauses with it.
   const runnerNames = new Map<string, string>();
   const named = (runner: string): string => runnerNames.get(runner) ?? runner;
-  const runnerRecords = (): Array<Record<string, unknown>> => [
+  const everyRunner = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
       os: "linux",
@@ -1384,6 +1384,10 @@ export async function fakeBoard(
       ...pausesOf(named("laptop")),
     },
   ];
+  // The runners removed, by the name each had then.
+  const removedRunners = new Set<string>();
+  const runnerRecords = (): Array<Record<string, unknown>> =>
+    everyRunner().filter((each) => !removedRunners.has(String(each["name"])));
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1612,6 +1616,42 @@ export async function fakeBoard(
           agents,
           sessions: projects.length + agents.length,
         });
+      }
+      // A removal, refused as the hub and then the board refuse one: while the runner is connected
+      // and not paused, while desk is in a turn on pod, or while lab lives there.
+      const removal =
+        request.method() === "DELETE" ? /^\/api\/runners\/([^/]+)$/.exec(pathname) : null;
+      if (removal !== null) {
+        const name = decodeURIComponent(removal[1] ?? "");
+        const record = runnerRecords().find((each) => each["name"] === name);
+        if (record === undefined) {
+          return json(route, { error: "NOT_FOUND", message: `runner ${name} not found` }, 404);
+        }
+        const refuse = (message: string) => json(route, { error: "INVALID_STATE", message }, 409);
+        const turns = name === named("pod") && inFlight;
+        if (record["status"] === "connected" && record["paused"] === undefined) {
+          return refuse(
+            `runner ${name} cannot be removed while it is connected and not paused${turns ? " and 1 turn(s) run or start there; pause it, and remove it once that ends" : "; pause it first"}`,
+          );
+        }
+        if (turns) {
+          return refuse(
+            `runner ${name} cannot be removed while 1 turn(s) run or start there; pause it, and remove it once that ends`,
+          );
+        }
+        if (lab.runner === name) {
+          return refuse(
+            `runner ${name} cannot be removed while lab lives there; move it to another runner first`,
+          );
+        }
+        removedRunners.add(name);
+        runnerPauses.delete(name);
+        const projects = archived && ARCHIVED_PROJECT.runner === name ? ["iphone"] : [];
+        const agents = deskRunner === name ? ["desk"] : [];
+        if (deskRunner === name) {
+          deskRunner = null;
+        }
+        return json(route, { name, projects, agents, sessions: agents.length });
       }
       const pause = /^\/api\/runners\/([^/]+)\/(pause|resume)(?:\/([^/]+))?$/.exec(pathname);
       if (pause !== null) {

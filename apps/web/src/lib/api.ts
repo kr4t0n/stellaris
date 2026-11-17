@@ -30,6 +30,7 @@ import {
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
+  RunnerRemovedSchema,
   RunnerRenamedSchema,
   RunnerSchema,
   RunningTurnSchema,
@@ -512,6 +513,12 @@ export function createApi(token: string) {
         { name },
         RunnerRenamedSchema,
       ),
+    /**
+     * Removes a runner, unpinning its citizens and clearing its sessions, once no project lives
+     * there, nothing runs there, and it is paused or away; the board says what holds it otherwise.
+     */
+    removeRunner: (runner: string) =>
+      write("DELETE", `/api/runners/${encodeURIComponent(runner)}`, token, {}, RunnerRemovedSchema),
     /** Runners that asked to join and wait for the user's approval, newest first. */
     enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),
     /** Registers a waiting runner under `name`; the runner picks up its token on its next poll. */

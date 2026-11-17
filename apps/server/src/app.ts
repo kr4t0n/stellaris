@@ -294,6 +294,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
         : await deps.runners.renameRunner(c.get("actor"), from, body.name),
     );
   });
+  // The user removes a runner, with the pins and sessions that name it, once no project lives there
+  // and nothing runs there; the hub, when there is one, checks that it is paused or away too, and
+  // lets go of it.
+  api.delete("/runners/:name", async (c) => {
+    const name = NameSchema.parse(c.req.param("name"));
+    return c.json(
+      deps.runners === undefined
+        ? await board.removeRunner(c.get("actor"), name)
+        : await deps.runners.removeRunner(c.get("actor"), name),
+    );
+  });
   // A new runner's token is shown once, here; the runner reports what it offers when it connects.
   api.post("/runners", async (c) => {
     const body = RunnerBodySchema.parse(await c.req.json());

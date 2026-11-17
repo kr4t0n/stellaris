@@ -378,6 +378,8 @@ export const ThreadFrontmatterSchema = z.object({
   state: ThreadStateSchema,
   openedBy: NameSchema,
   openedAt: IsoDateTimeSchema,
+  /** The key its opener sent, which an open sent again with the same key is answered by. */
+  idempotencyKey: IdempotencyKeySchema.optional(),
   closedBy: NameSchema.optional(),
   closedAt: IsoDateTimeSchema.optional(),
 });

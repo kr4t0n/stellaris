@@ -432,7 +432,8 @@ export function createApi(token: string) {
       body: string;
       idempotency_key?: string;
     }) => invoke("post_message", token, input, MessageSchema),
-    openThread: (input: { channel: string; title: string }) =>
+    /** A new thread; opened again with its `idempotency_key`, as after a lost answer, it is opened once. */
+    openThread: (input: { channel: string; title: string; idempotency_key?: string }) =>
       invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>
       invoke("close_thread", token, input, MessageSchema),

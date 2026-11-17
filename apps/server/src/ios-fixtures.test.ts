@@ -377,7 +377,7 @@ describe("the answers the iOS client reads", () => {
     await call("dashboard", "GET", "/api/projects/demo/dashboard");
 
     // The writes, each a verb the app runs as the user.
-    // Each with a key, as the app sends every post.
+    // Each with a key, as the app sends every post and every new thread.
     await call("post-message", "POST", "/api/verbs/post_message", {
       channel: "general",
       body: "Morning. The export view's design is next.",
@@ -387,6 +387,7 @@ describe("the answers the iOS client reads", () => {
       await call("open-thread", "POST", "/api/verbs/open_thread", {
         channel: "demo/general",
         title: "Rollout order",
+        idempotency_key: "00000000-0000-4000-8000-000000000003",
       }),
     );
     await call("post-message-thread", "POST", "/api/verbs/post_message", {

@@ -154,6 +154,134 @@ test("an ask whose post's answer was lost goes again into the thread it opened, 
   expect(board.stored("Who owns the nightly?")).toBe(1);
 });
 
+for (const loss of ["reset", "502"] as const) {
+  test(`an ask whose thread's open lost its answer to a ${loss} opens one thread, with one post`, async ({
+    page,
+  }) => {
+    const board = await fakeBoard(page, { asks: true });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: /to ask$/ })).toBeVisible();
+    await page.keyboard.press("Space");
+    const ask = page.getByRole("region", { name: "Ask", exact: true });
+    const field = ask.getByRole("textbox", { name: "Ask the front desk" });
+    await expect(field).toBeFocused();
+
+    // The board opens the thread, but its answer never arrives, so nothing is posted yet.
+    board.loseNextOpenAnswer(loss);
+    await field.fill("Who runs the nightly?");
+    await field.press("Enter");
+    await expect(ask.getByRole("alert")).toHaveText(
+      loss === "502" ? "/api/verbs/open_thread answered 502" : "The board server is not reachable.",
+    );
+    await expect(field).toHaveValue("Who runs the nightly?");
+    // Sent again, the open carries the same key, and the board answers with the thread it opened.
+    await field.press("Enter");
+    await expect(field).toHaveValue("");
+
+    const opens = board.writes.filter((write) => write.path === "/api/verbs/open_thread");
+    expect(opens).toHaveLength(2);
+    expect(board.opened(String(opens[0]?.body["title"]))).toBe(1);
+    expect(board.stored("Who runs the nightly?")).toBe(1);
+    expect(opens[0]?.body["idempotency_key"]).toMatch(KEY);
+    expect(opens[1]?.body).toEqual(opens[0]?.body);
+  });
+
+  test(`a new thread whose open lost its answer to a ${loss} is opened once, with one first message`, async ({
+    page,
+  }) => {
+    const board = await fakeBoard(page);
+    await page.goto("/c/lab/general");
+    const view = viewOf(page);
+    await view.getByRole("button", { name: "New thread" }).click();
+    await view.getByRole("textbox", { name: "Thread title" }).fill("Rollout order");
+    await view.getByRole("textbox", { name: "First message" }).fill("Docs first.");
+
+    board.loseNextOpenAnswer(loss);
+    await view.getByRole("button", { name: "Open thread" }).click();
+    await expect(view.getByRole("alert")).toHaveText(
+      loss === "502" ? "/api/verbs/open_thread answered 502" : "The board server is not reachable.",
+    );
+    await view.getByRole("button", { name: "Open thread" }).click();
+    await expect(page).toHaveURL(/\/thread\//);
+
+    const opens = board.writes.filter((write) => write.path === "/api/verbs/open_thread");
+    const posts = board.writes.filter((write) => write.path === "/api/verbs/post_message");
+    expect(opens).toHaveLength(2);
+    expect(posts).toHaveLength(1);
+    expect(board.opened("Rollout order")).toBe(1);
+    expect(board.stored("Docs first.")).toBe(1);
+    expect(opens[0]?.body["idempotency_key"]).toMatch(KEY);
+    expect(opens[1]?.body).toEqual(opens[0]?.body);
+    expect(posts[0]?.body["idempotency_key"]).toMatch(KEY);
+  });
+}
+
+test("a new thread whose first message lost its answer goes again into the same thread, stored once", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/c/lab/general");
+  const view = viewOf(page);
+  await view.getByRole("button", { name: "New thread" }).click();
+  await view.getByRole("textbox", { name: "Thread title" }).fill("Rollout order");
+  await view.getByRole("textbox", { name: "First message" }).fill("Docs first.");
+
+  board.loseNextPostAnswer();
+  await view.getByRole("button", { name: "Open thread" }).click();
+  await expect(view.getByRole("alert")).toHaveText("The board server is not reachable.");
+  await view.getByRole("button", { name: "Open thread" }).click();
+  await expect(page).toHaveURL(/\/thread\//);
+
+  const opens = board.writes.filter((write) => write.path === "/api/verbs/open_thread");
+  const posts = board.writes.filter((write) => write.path === "/api/verbs/post_message");
+  expect(opens).toHaveLength(2);
+  expect(posts).toHaveLength(2);
+  expect(board.opened("Rollout order")).toBe(1);
+  expect(board.stored("Docs first.")).toBe(1);
+  expect(opens[1]?.body).toEqual(opens[0]?.body);
+  expect(posts[1]?.body).toEqual(posts[0]?.body);
+});
+
+test("a new thread's changed title goes with a new key, and its changed first message too", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/c/lab/general");
+  const view = viewOf(page);
+  await view.getByRole("button", { name: "New thread" }).click();
+  const title = view.getByRole("textbox", { name: "Thread title" });
+  const first = view.getByRole("textbox", { name: "First message" });
+  await title.fill("Rollout order");
+  await first.fill("Docs first.");
+
+  // The open's answer is lost, then the title changes: a new open, with a new key.
+  board.loseNextOpenAnswer();
+  await view.getByRole("button", { name: "Open thread" }).click();
+  await expect(view.getByRole("alert")).toHaveText("The board server is not reachable.");
+  await title.fill("Rollout order, revised");
+  // The next first message's answer is lost, then the message changes: a new post, new key.
+  board.loseNextPostAnswer();
+  await view.getByRole("button", { name: "Open thread" }).click();
+  await expect(view.getByRole("alert")).toHaveText("The board server is not reachable.");
+  await first.fill("Docs first, then the export view.");
+  await view.getByRole("button", { name: "Open thread" }).click();
+  await expect(page).toHaveURL(/\/thread\//);
+
+  const opens = board.writes
+    .filter((write) => write.path === "/api/verbs/open_thread")
+    .map((write) => write.body["idempotency_key"]);
+  const posts = board.writes
+    .filter((write) => write.path === "/api/verbs/post_message")
+    .map((write) => write.body["idempotency_key"]);
+  expect(opens).toHaveLength(3);
+  expect(opens[1]).not.toBe(opens[0]);
+  expect(opens[2]).toBe(opens[1]);
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).not.toBe(posts[0]);
+  expect(board.opened("Rollout order, revised")).toBe(1);
+  expect(board.stored("Docs first, then the export view.")).toBe(1);
+});
+
 test("what is typed while a post is on its way stays in the box once it is sent", async ({
   page,
 }) => {

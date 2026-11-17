@@ -1,4 +1,5 @@
 import BoardKit
+import Foundation
 
 /// What Chat shows: a channel by its ref (`general`, `demo/general`), or a thread by its id, where
 /// a task's or a proposal's thread has its subject's id.
@@ -48,6 +49,25 @@ struct NewThreadDraft: Equatable, Sendable {
       kept = kept.dropLast()
     }
     return String(kept)
+  }
+}
+
+/// The keys a new thread's open and its first message went with, and the text each went with: sent
+/// again, as after an answer that never arrived, the open keeps its key while its title is the same
+/// and the first message its key while it is the same, so the board opens the thread and stores
+/// the message once, as the web's New thread does. Changed text goes with a new key.
+struct NewThreadKeys: Equatable, Sendable {
+  let title: String
+  let open: String
+  let first: String
+  let post: String
+
+  /// The keys for `title` and `first`: those `earlier` went with for the same text, else new ones.
+  init(title: String, first: String, after earlier: NewThreadKeys?) {
+    self.title = title
+    self.first = first
+    open = earlier.flatMap { $0.title == title ? $0.open : nil } ?? UUID().uuidString
+    post = earlier.flatMap { $0.first == first ? $0.post : nil } ?? UUID().uuidString
   }
 }
 

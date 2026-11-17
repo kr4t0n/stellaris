@@ -156,6 +156,18 @@ import Testing
     #expect(relaunched.postKey(for: "Ship it now", in: .general) != changed)
   }
 
+  @Test func keepsANewThreadsKeysWhileItsTextIsTheSame() {
+    let first = NewThreadKeys(title: "Rollout order", first: "Docs first.", after: nil)
+    #expect(NewThreadKeys(title: "Rollout order", first: "Docs first.", after: first) == first)
+    let fresh = NewThreadKeys(title: "Rollout order", first: "Docs first.", after: nil)
+    #expect(fresh.open != first.open && fresh.post != first.post)
+    // A changed title is a new open, and a changed first message a new post.
+    let retitled = NewThreadKeys(title: "Rollout, revised", first: "Docs first.", after: first)
+    #expect(retitled.open != first.open && retitled.post == first.post)
+    let rewritten = NewThreadKeys(title: "Rollout order", first: "Docs, then export.", after: first)
+    #expect(rewritten.open == first.open && rewritten.post != first.post)
+  }
+
   @Test func readsWhatAnOlderBuildSavedWithoutPostKeys() throws {
     let defaults = try #require(UserDefaults(suiteName: "memory-\(UUID().uuidString)"))
     defaults.set(

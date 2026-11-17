@@ -29,6 +29,7 @@ import {
   computeMetrics,
   IDEMPOTENCY_LOOKBACK,
   SYSTEM_ACTOR,
+  THREAD_IDEMPOTENCY_LOOKBACK,
   tokenUse,
   type Actor,
   type BoardOptions,
@@ -507,7 +508,101 @@ describe("Board", () => {
       await expect(
         board.postMessage(USER, { channel: "demo/general", body: "Hi.", idempotency_key: key }),
       ).rejects.toThrow("expected 16-64 letters, digits, hyphens, or underscores");
+      await expect(
+        board.openThread(USER, { channel: "demo/general", title: "Hi", idempotency_key: key }),
+      ).rejects.toThrow("expected 16-64 letters, digits, hyphens, or underscores");
     }
+    expect(await board.listThreads()).toHaveLength(0);
+  });
+
+  it("opens a thread sent again with its idempotency key once, after a restart too", async () => {
+    const { board } = await society();
+    const key = "open-key-for-a-retry-0001";
+    const opened = async () =>
+      (await board.readEvents(null)).filter((event) => event.type === "thread.opened").length;
+    const titled = async (title: string) =>
+      (await board.listThreads()).filter((thread) => thread.title === title);
+    const before = await opened();
+
+    // The answer was lost, so the client opens again with the same key: one thread, one event.
+    const first = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const again = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    expect(first.idempotencyKey).toBe(key);
+    expect(again).toEqual(first);
+    expect(await titled("Rollout order")).toHaveLength(1);
+    expect(await opened()).toBe(before + 1);
+
+    // The key is in the thread's record, so a board opened again on the same data still has it.
+    const reopened = await Board.open(dir, { now });
+    expect(
+      await reopened.openThread(USER, {
+        channel: "demo/general",
+        title: "Rollout order",
+        idempotency_key: key,
+      }),
+    ).toEqual(first);
+
+    // The key sent with another title is refused rather than answered with the first.
+    await expect(
+      board.openThread(USER, { channel: "demo/general", title: "Rollback", idempotency_key: key }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect(await titled("Rollback")).toHaveLength(0);
+
+    // A key is its opener's, on its channel: another author, another channel of the project, or a
+    // channel of the society opens a thread of its own.
+    const byEng = await board.openThread(ENG, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const onDev = await board.openThread(USER, {
+      channel: "demo/dev",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const inSociety = await board.openThread(USER, {
+      channel: "general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    expect(new Set([first.id, byEng.id, onDev.id, inSociety.id]).size).toBe(4);
+    expect(await titled("Rollout order")).toHaveLength(4);
+    expect(await opened()).toBe(before + 4);
+
+    // An open without a key, and the threads a task opens, keep none.
+    const plain = await board.openThread(USER, { channel: "demo/general", title: "Rollout order" });
+    expect(plain.id).not.toBe(first.id);
+    expect(plain).not.toHaveProperty("idempotencyKey");
+    const task = await board.createTask(USER, { project: "demo", title: "build" });
+    expect(await board.readThread(task.id)).not.toHaveProperty("idempotencyKey");
+  });
+
+  it("looks for an open's key among the newest threads of the scope, whoever opened them", async () => {
+    const { board } = await society();
+    const key = "open-key-for-a-retry-0001";
+    const open = () =>
+      board.openThread(USER, { channel: "demo/general", title: "Keyed", idempotency_key: key });
+    const first = await open();
+    // Threads opened in the society's channels sit in another scope, so they don't count.
+    for (let n = 0; n < THREAD_IDEMPOTENCY_LOOKBACK; n += 1) {
+      await board.openThread(USER, { channel: "general", title: `Society ${n}` });
+    }
+    // Anyone's threads in the project do: one less than the look, and the key is still found.
+    for (let n = 0; n < THREAD_IDEMPOTENCY_LOOKBACK - 1; n += 1) {
+      await board.openThread(ENG, { channel: "demo/dev", title: `Eng ${n}` });
+    }
+    expect((await open()).id).toBe(first.id);
+    // One more, and the key is past the look: the open makes a thread of its own.
+    await board.openThread(ENG, { channel: "demo/dev", title: "One more" });
+    expect((await open()).id).not.toBe(first.id);
   });
 
   it("files a citizen's digest by the scope a turn reads it in, with a cursor per scope", async () => {

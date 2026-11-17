@@ -131,7 +131,8 @@ import Testing
       #expect(message.thread == fixture.optionalField("thread_id"))
     case "open-thread":
       let (channel, title) = (try fixture.field("channel"), try fixture.field("title"))
-      let thread = try check(fixture, BoardAPI.openThread(channel: channel, title: title))
+      let key = try fixture.field("idempotency_key")
+      let thread = try check(fixture, BoardAPI.openThread(channel: channel, title: title, key: key))
       #expect(thread.state == .known(.open))
     case "advance-task":
       let task = try check(

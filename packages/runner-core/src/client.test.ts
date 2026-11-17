@@ -121,4 +121,44 @@ describe("RunnerClient", () => {
     );
     expect(describeError("plain")).toBe("plain");
   });
+
+  it("reads the board's files again when the network cut a read, and not when the server refused it", async () => {
+    const calls: string[] = [];
+    let cuts = 2;
+    const flaky: typeof fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      if (url.pathname === "/runner/board/read" && cuts > 0) {
+        cuts -= 1;
+        // A connection the server closed just as the request left on it.
+        return Promise.reject(
+          new TypeError("fetch failed", { cause: new Error("other side closed") }),
+        );
+      }
+      if (url.pathname === "/runner/board/manifest") {
+        return Promise.resolve(new Response("refused", { status: 403 }));
+      }
+      return Promise.resolve(
+        Response.json({ files: { "society/society.md": "IyBzb2NpZXR5Cg==" } }),
+      );
+    };
+    const tree = new RunnerClient("http://server", "token", flaky).boardTree();
+    expect(await tree.read(["society/society.md"])).toEqual({
+      "society/society.md": "IyBzb2NpZXR5Cg==",
+    });
+    expect(calls).toEqual([
+      "POST /runner/board/read",
+      "POST /runner/board/read",
+      "POST /runner/board/read",
+    ]);
+
+    // A third cut in a row fails the read, and a refusal is never sent again.
+    cuts = 3;
+    calls.length = 0;
+    await expect(tree.read(["society/society.md"])).rejects.toThrow("fetch failed");
+    expect(calls).toHaveLength(3);
+    calls.length = 0;
+    await expect(tree.manifest()).rejects.toThrow("answered 403");
+    expect(calls).toEqual(["GET /runner/board/manifest"]);
+  });
 });

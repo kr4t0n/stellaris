@@ -46,6 +46,15 @@ export function unreachable(error: unknown): boolean {
 }
 
 /**
+ * The waits before a read of the board's files goes again after the network cut it. A connection
+ * kept alive between requests may be closed by the server just as the next request leaves on it,
+ * which a slow link makes likely: the server's keep-alive starts once it has handed the last of an
+ * answer to the network, while the runner is still reading it, and then reuses the connection.
+ * Both reads are safe to send again, and the next goes on a new connection.
+ */
+const BOARD_READ_RETRY_MS = [0, 1_000];
+
+/**
  * How long the event stream may stay silent before the runner takes it for dead: the server writes
  * a comment every 15 seconds, so this is three missed. Node's fetch alone waits five minutes.
  */
@@ -197,14 +206,34 @@ export class RunnerClient {
     await this.call("POST", "/runner/workspaces", { workspaces });
   }
 
-  /** The board's projection, read only. */
+  /**
+   * The board's projection, read only. A read the network cut, or the server failed, goes again
+   * twice (`BOARD_READ_RETRY_MS`) before it fails.
+   */
   boardTree(): RemoteTree {
     return {
       manifest: async () =>
-        FileManifestSchema.parse(await this.call("GET", "/runner/board/manifest")).files,
+        FileManifestSchema.parse(await this.again(() => this.call("GET", "/runner/board/manifest")))
+          .files,
       read: async (paths) =>
-        FileContentsSchema.parse(await this.call("POST", "/runner/board/read", { paths })).files,
+        FileContentsSchema.parse(
+          await this.again(() => this.call("POST", "/runner/board/read", { paths })),
+        ).files,
     };
+  }
+
+  private async again<T>(call: () => Promise<T>): Promise<T> {
+    for (const wait of BOARD_READ_RETRY_MS) {
+      try {
+        return await call();
+      } catch (error) {
+        if (!unreachable(error)) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    }
+    return call();
   }
 
   /** How far the runner's sync of its board copy has come, which the server holds its turns for. */

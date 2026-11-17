@@ -475,6 +475,53 @@ test("the user removes a runner from a red button in its row, which names what c
   ]);
 });
 
+test("a second press, or a held key, on the bin removes nothing", async ({ page }) => {
+  const board = await fakeBoard(page);
+  await page.goto("/runners");
+  const laptop = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(2);
+  const bin = laptop.getByRole("button", { name: "Remove laptop…" });
+  const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
+  const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
+
+  // Reached by Tab, as a keyboard user does, so the bin takes Space as its own press. Enter twice,
+  // 150 ms apart: the second lands on the Remove before it takes presses.
+  await laptop.getByRole("button", { name: "Rename laptop…" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(bin).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  await page.keyboard.press("Enter");
+  await expect(remove).toBeFocused();
+  // Enter held: its repeats, past the first moments, still press nothing.
+  await page.keyboard.press("Escape");
+  await expect(bin).toBeFocused();
+  await page.keyboard.down("Enter");
+  await expect(remove).toBeFocused();
+  await page.waitForTimeout(600);
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  // Space, which presses as it is let go, twice 150 ms apart.
+  await page.keyboard.press("Escape");
+  await expect(bin).toBeFocused();
+  await page.keyboard.press(" ");
+  await page.waitForTimeout(150);
+  await page.keyboard.press(" ");
+  await expect(remove).toBeFocused();
+  await page.waitForTimeout(300);
+  expect(removals()).toEqual([]);
+  await expect(laptop.getByRole("alert")).toHaveCount(0);
+  // A deliberate press goes.
+  await page.keyboard.press("Escape");
+  await bin.press("Enter");
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("Enter");
+  await expect(laptop.getByRole("alert")).toHaveText(
+    /^runner laptop cannot be removed while lab lives there/,
+  );
+  expect(removals()).toHaveLength(1);
+});
+
 test("a runner names the CLI its limit holds, apart from the user's pause", async ({ page }) => {
   await fakeBoard(page, { quotas: "limited" });
   await page.goto("/runners");

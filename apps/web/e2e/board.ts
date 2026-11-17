@@ -1100,6 +1100,8 @@ export interface FakeBoard {
   loseNextPostAnswer(how?: "reset" | "502"): void;
   /** The posts stored with this body, in the task's thread or an ask's. */
   stored(body: string): number;
+  /** Gives studio's record this board sync, as its runner reported it, or none. */
+  setSync(sync: Record<string, unknown> | null): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1350,6 +1352,8 @@ export async function fakeBoard(
   // Each runner's name now, by the name it started with; a rename moves its pauses with it.
   const runnerNames = new Map<string, string>();
   const named = (runner: string): string => runnerNames.get(runner) ?? runner;
+  // studio's board sync, as its runner last reported it; the view reads it while it holds studio.
+  let studioSync: Record<string, unknown> | null = null;
   const everyRunner = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
@@ -1372,6 +1376,7 @@ export async function fakeBoard(
       status: "connected",
       quotas: studioQuotas,
       ...pausesOf(named("studio")),
+      ...(studioSync === null ? {} : { sync: studioSync }),
     },
     {
       name: named("laptop"),
@@ -2264,5 +2269,8 @@ export async function fakeBoard(
       [...threadMessages, ...[...asks.values()].flatMap((each) => each.messages)].filter(
         (each) => each["body"] === text,
       ).length,
+    setSync: (sync) => {
+      studioSync = sync;
+    },
   };
 }

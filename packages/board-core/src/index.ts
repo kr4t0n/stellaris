@@ -28,6 +28,7 @@ export type {
   UnreadConversation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";
+export type { StreamedFile } from "./files.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export { MetricsIndex } from "./metrics-index.js";

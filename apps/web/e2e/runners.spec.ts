@@ -1,6 +1,11 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { ENROLLING_CODE, fakeBoard, TOKEN } from "./board.js";
 
+/** The time `ms` from now. */
+function fromNow(ms: number): string {
+  return new Date(Date.now() + ms).toISOString();
+}
+
 /** A runner row's cells, one a column. */
 function cellsOf(row: Locator): Locator {
   return row.locator(":scope > *");
@@ -711,4 +716,69 @@ test("the runners view reads numbers missing or old once on opening, and again o
     "/api/runners/pod/quota/codex",
     "/api/runners/studio/quota/claude",
   ]);
+});
+
+test("a runner syncing its board copy says how far it has come, and after a failed try why and when the next is, until it is done", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  const copying = {
+    phase: "copying",
+    files: 6_200,
+    totalFiles: 15_152,
+    bytes: 11_000_000,
+    totalBytes: 27_000_000,
+    attempt: 1,
+    startedAt: fromNow(-90_000),
+    updatedAt: fromNow(-1_000),
+  };
+  board.setSync(copying);
+  await page.goto("/runners");
+  await expect(page.getByText(/· 1 syncing ·/)).toBeVisible();
+  const studio = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(1);
+  const cells = studio.locator(":scope > *");
+  // The state names the sync, which is not the user's pause: the pause control still offers Pause.
+  await expect(cells.nth(6)).toHaveText("syncing");
+  await expect(cells.nth(6)).toHaveAttribute("title", /^connected; syncing its board copy since/);
+  await expect(studio.getByRole("button", { name: "Pause studio" })).toBeVisible();
+  // Under the row, from the name's column on: the count, and a bar of the share done.
+  await expect(cells).toHaveCount(9);
+  const line = cells.nth(8);
+  await expect(line).toHaveText("Syncing board 6,200 / 15,152 files");
+  await expect(line.getByText("Syncing board 6,200 / 15,152 files")).not.toHaveClass(
+    /text-amber-300/,
+  );
+  const bar = line.locator("[aria-hidden=true] > div");
+  await expect(bar).toHaveAttribute("style", "width: 40.9%;");
+
+  // A failed try: when the next is, counting down, and why, read again as the runner reports.
+  board.setSync({
+    ...copying,
+    attempt: 3,
+    error: "fetch failed, caused by SocketError: other side closed (UND_ERR_SOCKET)",
+    nextTryAt: fromNow(20_000),
+  });
+  await expect(line.locator("p").first()).toHaveText(
+    /^Syncing board 6,200 \/ 15,152 files · try 3 failed, next in (1\d|20)s$/,
+  );
+  await expect(line.locator("p").first()).toHaveClass(/text-amber-300/);
+  await expect(
+    line.getByText("fetch failed, caused by SocketError: other side closed"),
+  ).toHaveAttribute(
+    "title",
+    "fetch failed, caused by SocketError: other side closed (UND_ERR_SOCKET)",
+  );
+  await expect(cells.nth(6)).toHaveClass(/text-amber-300/);
+
+  // Done: the row is a connected runner's again, and the view stops reading every second.
+  board.setSync({
+    ...copying,
+    phase: "done",
+    files: 15_152,
+    attempt: 4,
+    finishedAt: fromNow(0),
+  });
+  await expect(cells).toHaveCount(8);
+  await expect(cells.nth(6)).toHaveText("connected");
+  await expect(page.getByText(/syncing/)).toHaveCount(0);
 });

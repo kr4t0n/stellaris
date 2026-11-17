@@ -591,6 +591,40 @@ export type GitIdentityPart = z.infer<typeof GitIdentityPartSchema>;
 export const RunnerPauseSchema = z.object({ at: IsoDateTimeSchema, by: NameSchema });
 export type RunnerPause = z.infer<typeof RunnerPauseSchema>;
 
+/**
+ * How far a runner's sync of its board copy has come: `starting` until it first reports, `copying`
+ * the whole projection in one stream when it has no copy yet, `listing` the server's files and
+ * `fetching` those that differ when it has one, then `done`.
+ */
+export const RunnerSyncPhaseSchema = z.enum(["starting", "copying", "listing", "fetching", "done"]);
+export type RunnerSyncPhase = z.infer<typeof RunnerSyncPhaseSchema>;
+
+/** What a runner reports of its board sync as it goes, the server stamping the times. */
+export const RunnerSyncProgressSchema = z.object({
+  phase: RunnerSyncPhaseSchema,
+  /** Files written of the total, which is null until the runner knows it. */
+  files: z.number().int().nonnegative(),
+  totalFiles: z.number().int().nonnegative().nullable(),
+  bytes: z.number().int().nonnegative(),
+  totalBytes: z.number().int().nonnegative().nullable(),
+  /** The try under way, or the one that failed and will be made again. */
+  attempt: z.number().int().positive(),
+  /** Why the last try failed, while the runner waits to try again. */
+  error: z.string().max(1000).optional(),
+});
+export type RunnerSyncProgress = z.infer<typeof RunnerSyncProgressSchema>;
+
+/** A runner's board sync as its record keeps it, from the hello that started it. */
+export const RunnerSyncSchema = RunnerSyncProgressSchema.extend({
+  startedAt: IsoDateTimeSchema,
+  /** When the runner last reported. */
+  updatedAt: IsoDateTimeSchema,
+  /** When the runner tries again, after a failure. */
+  nextTryAt: IsoDateTimeSchema.optional(),
+  finishedAt: IsoDateTimeSchema.optional(),
+});
+export type RunnerSync = z.infer<typeof RunnerSyncSchema>;
+
 export const RunnerSchema = z.object({
   name: NameSchema,
   os: RunnerOsSchema,
@@ -617,8 +651,41 @@ export const RunnerSchema = z.object({
    * that CLI starts on it until the user resumes it.
    */
   pausedClis: z.partialRecord(CliKindSchema, RunnerPauseSchema).optional(),
+  /**
+   * The sync of the runner's board copy since it last connected: no turn starts on it until the
+   * sync is done. Absent for a runner from before connecting synced, which is never held for it.
+   */
+  sync: RunnerSyncSchema.optional(),
 });
 export type Runner = z.infer<typeof RunnerSchema>;
+
+/** A count with its thousands grouped, the same in every locale. */
+function grouped(count: number): string {
+  return String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * How many files a runner's sync has written, of how many once it knows, as "6,200 / 15,152
+ * files"; null while it has not started writing or counting.
+ */
+export function syncedFiles(sync: RunnerSyncProgress): string | null {
+  if (sync.phase === "starting" || (sync.phase === "listing" && sync.files === 0)) {
+    return null;
+  }
+  return sync.totalFiles === null
+    ? `${grouped(sync.files)} files`
+    : `${grouped(sync.files)} / ${grouped(sync.totalFiles)} files`;
+}
+
+/**
+ * The sync that holds a connected runner's turns until its board copy is up to date, or undefined
+ * when none does: none started, it is done, or the runner is away, which holds nothing.
+ */
+export function runnerSyncing(runner: Runner): RunnerSync | undefined {
+  return runner.status === "connected" && runner.sync !== undefined && runner.sync.phase !== "done"
+    ? runner.sync
+    : undefined;
+}
 
 /**
  * A rename's answer: the runner under its new name, and the projects living on it, the citizens
@@ -665,8 +732,8 @@ export function runnerLimitHold(runner: Runner, cli: CliKind, now: Date): LimitH
 /**
  * Whether a citizen's turns in a place would wait: the runner they would run on, the project's for
  * a project's turns and the citizen's home runner for its society scope's, paused by the user as a
- * whole or for the citizen's CLI, or holding that CLI's turns for its limit until it lifts. Neither
- * placed yet holds nothing.
+ * whole or for the citizen's CLI, holding that CLI's turns for its limit until it lifts, or syncing
+ * its board copy as it connects (`runnerSyncing`). Neither placed yet holds nothing.
  */
 export function heldOn(
   runners: readonly Runner[],
@@ -680,7 +747,9 @@ export function heldOn(
   const record = runners.find((each) => each.name === runner);
   return (
     record !== undefined &&
-    (runnerPause(record, cli) !== undefined || runnerLimitHold(record, cli, now) !== null)
+    (runnerPause(record, cli) !== undefined ||
+      runnerLimitHold(record, cli, now) !== null ||
+      runnerSyncing(record) !== undefined)
   );
 }
 

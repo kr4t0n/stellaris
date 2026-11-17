@@ -73,7 +73,8 @@ enum SignInFailure: Error, Equatable {
   /// again comes back with its text.
   var newThreads: [String: NewThreadDraft] = [:]
   /// The keys each channel's new thread last went with, kept until it opens, so one sent again
-  /// after a lost answer, or cancelled and sent again with the same text, is opened once.
+  /// after a lost answer, or cancelled and sent again with the same text, is opened once. Signing
+  /// in or out drops them with the drafts.
   private(set) var newThreadKeys: [String: NewThreadKeys] = [:]
   /// The message a link named in each conversation, marked and scrolled to once, as the web marks
   /// the message its address names.
@@ -765,6 +766,7 @@ enum SignInFailure: Error, Equatable {
     browsing = nil
     marks = [:]
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     live.clear()
     feeds = [:]
@@ -806,6 +808,7 @@ enum SignInFailure: Error, Equatable {
     viewing = nil
     startingThread = nil
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     marks = [:]
     live.clear()

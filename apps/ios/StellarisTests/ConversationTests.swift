@@ -159,6 +159,40 @@ import Testing
     #expect(model.newThreadKeys["general"] == nil)
   }
 
+  /// A new thread's keys outlast Cancel, so the same text after a lost answer opens the thread the
+  /// board stored, and go with the drafts when the user signs out.
+  @Test(.timeLimit(.minutes(1))) func keepsANewThreadsKeysThroughCancelUntilSignOut()
+    async throws
+  {
+    let gate = HeldBoard.Gate(paths: ["/api/verbs/open_thread"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.newThreads["general"] = NewThreadDraft(title: "Rollout order", body: "")
+    let lost = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(1)
+    gate.fail()
+    await #expect(throws: (any Error).self) { try await lost.value }
+    // Cancelled, as the sheet's Cancel drops the draft, then written again with the same title.
+    model.newThreads["general"] = nil
+    model.newThreads["general"] = NewThreadDraft(title: "Rollout order", body: "")
+    let again = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(2)
+    gate.answerAsArrived()
+    try await again.value
+    #expect(model.store.threads.filter { $0.thread.title == "Rollout order" }.count == 1)
+
+    model.newThreads["general"] = NewThreadDraft(title: "Release notes", body: "")
+    let failed = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(3)
+    gate.fail()
+    await #expect(throws: (any Error).self) { try await failed.value }
+    #expect(model.newThreadKeys["general"] != nil)
+    await model.signOut()
+    #expect(model.newThreadKeys.isEmpty)
+  }
+
   @Test func keepsANewThreadsTextUntilItOpensOrIsCancelled() async throws {
     let model = try await signedIn()
     model.startingThread = "general"

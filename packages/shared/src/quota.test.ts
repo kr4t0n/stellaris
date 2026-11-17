@@ -16,6 +16,8 @@ import {
   heldOn,
   RunnerHelloSchema,
   RunnerSchema,
+  runnerSyncing,
+  syncedFiles,
   TurnOutcomeSchema,
   type Runner,
 } from "./index.js";
@@ -218,6 +220,42 @@ describe("limitHold", () => {
     expect(heldOn([pod], undefined, "claude", NOW)).toBe(false);
     const paused = { ...pod, pausedClis: { codex: { at: AT, by: "user" } } };
     expect(heldOn([paused], "pod", "codex", NOW)).toBe(true);
+  });
+
+  it("holds every CLI of a connected runner while it syncs its board copy, and nothing once it is done or away", () => {
+    const sync = {
+      phase: "copying" as const,
+      files: 6_200,
+      totalFiles: 15_152,
+      bytes: 11_000_000,
+      totalBytes: 27_000_000,
+      attempt: 1,
+      startedAt: AT,
+      updatedAt: AT,
+    };
+    const pod: Runner = RunnerSchema.parse({
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "codex"],
+      capabilities: [],
+      status: "connected",
+      sync,
+    });
+    expect(runnerSyncing(pod)).toEqual(sync);
+    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
+    expect(heldOn([pod], "pod", "codex", NOW)).toBe(true);
+    for (const settled of [
+      { ...pod, sync: { ...sync, phase: "done" as const, finishedAt: AT } },
+      { ...pod, status: "disconnected" as const },
+      { ...pod, sync: undefined },
+    ]) {
+      expect(runnerSyncing(settled)).toBeUndefined();
+      expect(heldOn([settled], "pod", "claude", NOW)).toBe(false);
+    }
+    expect(syncedFiles(sync)).toBe("6,200 / 15,152 files");
+    expect(syncedFiles({ ...sync, files: 1_234_567, totalFiles: null })).toBe("1,234,567 files");
+    expect(syncedFiles({ ...sync, phase: "starting", files: 0, totalFiles: null })).toBeNull();
+    expect(syncedFiles({ ...sync, phase: "listing", files: 0, totalFiles: null })).toBeNull();
   });
 });
 

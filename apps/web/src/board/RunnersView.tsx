@@ -1,4 +1,9 @@
-import type { CliKind, PendingEnrollment, Runner } from "@stellaris/shared";
+import {
+  runnerSyncing,
+  type CliKind,
+  type PendingEnrollment,
+  type Runner,
+} from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -22,6 +27,7 @@ import {
   runnerState,
   sameCode,
   suggestRunnerName,
+  syncLine,
 } from "./runners.js";
 import { Failure, FIELD } from "./ThreadForms.js";
 
@@ -223,12 +229,45 @@ function RenameRunner({ runner, onDone }: { runner: string; onDone: (renamed?: s
 }
 
 /**
+ * How far a runner's board sync has come, under its row: the count, a bar while the total is
+ * known, and after a failed try, when the next is and why it failed.
+ */
+function SyncProgress({ runner, now }: { runner: Runner; now: number }) {
+  const line = syncLine(runner, now);
+  if (line === null) {
+    return null;
+  }
+  return (
+    <div className="col-[2/-1] mt-0.5 mb-1 min-w-0">
+      <p className={`text-xs ${line.error === null ? "text-fg-secondary" : "text-amber-300"}`}>
+        {line.label}
+      </p>
+      {line.fraction === null ? null : (
+        <div aria-hidden="true" className="mt-1 h-0.5 overflow-hidden rounded-full bg-surface-2">
+          <div
+            className="h-full rounded-full bg-fg-tertiary"
+            style={{ width: `${(line.fraction * 100).toFixed(1)}%` }}
+          />
+        </div>
+      )}
+      {line.error === null ? null : (
+        <p className="mt-0.5 truncate text-xs text-fg-muted" title={line.error}>
+          {line.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * The society's runners, one row each in columns as the citizens are: its CLIs, name, OS, version,
  * marked when it is not the server's, capabilities, the projects living on it, whether it is
- * connected or paused, its pause, and its rename; above them, those asking to join. A runner started without a
+ * connected, paused, or syncing, its pause, and its rename, and under a syncing one how far its
+ * board copy has come; above them, those asking to join. A runner started without a
  * token asks the board to enroll it and prints a link here with its code; approving it under a name
- * registers it, and the runner picks up its token on its next poll. Each CLI's mark pauses that CLI
- * on the runner alone. Under them, each CLI login's plan quota.
+ * registers it, and the runner picks up its token on its next poll, then syncs its board copy
+ * before it takes a turn. Each CLI's mark pauses that CLI on the runner alone. Under them, each CLI
+ * login's plan quota.
  */
 export function RunnersView() {
   const { code } = useSearch({ from: "/runners" });
@@ -264,10 +303,12 @@ export function RunnersView() {
   const runners = useRunners();
   const projects = useProjects();
   const server = useServerVersion().data;
-  const now = useNow(30_000);
   const waiting = enrollments.data ?? [];
   const taken = (runners.data ?? []).map((runner) => runner.name);
   const registered = (runners.data ?? []).toSorted(byStatus);
+  const syncing = registered.filter((runner) => runnerSyncing(runner) !== undefined).length;
+  // A failed try's countdown to the next goes by the second.
+  const now = useNow(syncing === 0 ? 30_000 : 1_000);
   const connected = registered.filter((runner) => runner.status === "connected").length;
   const away = registered.length - connected;
   const off = registered.filter((runner) => offVersion(runner, server)).length;
@@ -305,6 +346,7 @@ export function RunnersView() {
           ...(away === 0 ? [] : [`${away} away`]),
           ...(paused === 0 ? [] : [`${paused} paused`]),
           ...(limited === 0 ? [] : [`${limited} held by a limit`]),
+          ...(syncing === 0 ? [] : [`${syncing} syncing`]),
           ...(waiting.length === 0 ? [] : [`${waiting.length} waiting for approval`]),
           ...(server === undefined ? [] : [`server v${server}`]),
           ...(off === 0 ? [] : [`${off} on another version`]),
@@ -439,6 +481,7 @@ export function RunnersView() {
                     <RenameMark />
                   </button>
                 </span>
+                <SyncProgress runner={runner} now={now} />
                 {renaming === runner.name ? (
                   <RenameRunner
                     runner={runner.name}

@@ -1118,6 +1118,8 @@ export interface FakeBoard {
   stored(body: string): number;
   /** The threads opened with this title. */
   opened(title: string): number;
+  /** Gives studio's record this board sync, as its runner reported it, or none. */
+  setSync(sync: Record<string, unknown> | null): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1369,6 +1371,8 @@ export async function fakeBoard(
   // Each runner's name now, by the name it started with; a rename moves its pauses with it.
   const runnerNames = new Map<string, string>();
   const named = (runner: string): string => runnerNames.get(runner) ?? runner;
+  // studio's board sync, as its runner last reported it; the view reads it while it holds studio.
+  let studioSync: Record<string, unknown> | null = null;
   const runnerRecords = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
@@ -1391,6 +1395,7 @@ export async function fakeBoard(
       status: "connected",
       quotas: studioQuotas,
       ...pausesOf(named("studio")),
+      ...(studioSync === null ? {} : { sync: studioSync }),
     },
     {
       name: named("laptop"),
@@ -2248,5 +2253,8 @@ export async function fakeBoard(
         (each) => each["body"] === text,
       ).length,
     opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
+    setSync: (sync) => {
+      studioSync = sync;
+    },
   };
 }

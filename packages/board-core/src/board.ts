@@ -67,6 +67,7 @@ import {
   RetirementProposalSchema,
   RoleCharterSchema,
   RunnerSchema,
+  RunnerSyncSchema,
   mergeQuota,
   quotaChanged,
   SEED_ROLES,
@@ -121,6 +122,9 @@ import {
   type RoleCharterInput,
   type Runner,
   type RunnerRenamed,
+  type RunnerSync,
+  type RunnerSyncProgress,
+  type BoardStreamStart,
   type Skill,
   type SkillFileContent,
   type SkillFiles,
@@ -162,7 +166,7 @@ import {
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
-import { FileTree } from "./files.js";
+import { FileTree, type StreamedFile } from "./files.js";
 import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
@@ -315,6 +319,8 @@ export interface RunnerPatch {
    * said nothing, as an older runner's does, which drops what an earlier one reported.
    */
   readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
+  /** The sync of the runner's board copy its hello started; null drops it, as an older runner's does. */
+  readonly sync?: RunnerSync | null | undefined;
 }
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
@@ -1715,11 +1721,13 @@ export class Board {
         throw new BoardError("NOT_FOUND", `runner ${name} not found`);
       }
       const doc = await readMarkdown(file, RunnerSchema);
-      const { gitIdentityMissing: reported, ...rest } = doc.data;
+      const { gitIdentityMissing: reported, sync: syncing, ...rest } = doc.data;
       const gitIdentityMissing =
         patch.gitIdentityMissing === undefined ? reported : (patch.gitIdentityMissing ?? undefined);
+      const sync = patch.sync === undefined ? syncing : (patch.sync ?? undefined);
       const next: Runner = RunnerSchema.parse({
         ...rest,
+        ...(sync === undefined ? {} : { sync }),
         ...(gitIdentityMissing === undefined
           ? {}
           : { gitIdentityMissing: [...gitIdentityMissing] }),
@@ -1746,6 +1754,49 @@ export class Board {
           key: `runner:${name}`,
           summary: `runner ${name} is ${next.status}${clis}${capabilities}`,
           value: next.status === "connected" ? 1 : 0,
+        });
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Records how far a runner's board sync has come, as the runner reported it, over the sync its
+   * hello started. The record is written on every report, which the interface reads again while a
+   * sync runs; `runner.synced` is appended once it is done, which lifts the hold on its turns.
+   */
+  async recordRunnerSync(
+    name: Name,
+    report: RunnerSyncProgress & { readonly retryInMs?: number | undefined },
+  ): Promise<Runner> {
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const now = this.now();
+      const { retryInMs, ...progress } = report;
+      const startedAt = doc.data.sync?.startedAt ?? now.toISOString();
+      const done = progress.phase === "done";
+      const sync: RunnerSync = RunnerSyncSchema.parse({
+        ...progress,
+        startedAt,
+        updatedAt: now.toISOString(),
+        ...(retryInMs === undefined || done
+          ? {}
+          : { nextTryAt: new Date(now.getTime() + retryInMs).toISOString() }),
+        ...(done ? { finishedAt: now.toISOString() } : {}),
+      });
+      const next: Runner = RunnerSchema.parse({ ...doc.data, sync });
+      await writeMarkdown(file, next, doc.body);
+      if (done && doc.data.sync?.phase !== "done") {
+        await this.events.append("runner.synced", SYSTEM_ACTOR.name, {
+          name,
+          files: sync.files,
+          bytes: sync.bytes,
+          attempts: sync.attempt,
+          ms: now.getTime() - Date.parse(startedAt),
         });
       }
       return next;
@@ -5611,6 +5662,14 @@ export class Board {
 
   async readBoardFiles(paths: readonly string[]): Promise<Record<string, string>> {
     return this.files.read(this.paths.board, paths, () => true);
+  }
+
+  /**
+   * The whole projection, for a runner's first copy: its totals, then each file whose path sorts
+   * after `after`, in order, read as it is reached (`FileTree.stream`).
+   */
+  boardStream(after: string | null): AsyncGenerator<BoardStreamStart | StreamedFile> {
+    return this.files.stream(this.paths.board, after, () => true);
   }
 
   private async writeTurnRecord(record: TurnRecord): Promise<void> {

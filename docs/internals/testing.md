@@ -74,6 +74,8 @@ The server notices a closed stream asynchronously and then writes the runner's s
 
 ### CI's account has no git identity
 
+Every runner a test society starts syncs its board copy as it connects, and the hub holds its turns until it is done ([a runner's sync](runners.md#a-runner-syncs-its-board-copy-as-it-connects-and-takes-no-turn-until-it-is-done)), so `startTestSociety` answers only once each has reported its copy synced, and `society.run` waits out a sync that held a runner as its placement began, as after a rename or a runner coming back, which the scheduler's next pass would place; a test of the sync itself passes `waitForSync: false` and watches the record and the scheduler, as `apps/server/src/board-sync.test.ts` does. A test that sends its own hello, through `RunnerHub.register`, names `boardSync: false`, a runner from before, unless it reports a sync.
+
 A runner reports what its account lacks of a git identity in its hello, and a move refuses a new runner that lacks one, so a test whose runners must have one passes `gitIdentity` to `startTestSociety`, as `moves.test.ts` does. Every runner otherwise reads the test account's own, which is there on a developer's machine and missing on CI: PR #85's two-runner moves passed locally and were refused on CI. To see what CI sees, run the tests with `HOME` pointed at an empty folder, where git finds no global configuration.
 
 ### Claude Code will not wait on a foreground `sleep`

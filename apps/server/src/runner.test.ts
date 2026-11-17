@@ -3622,6 +3622,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -3753,6 +3754,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -4105,6 +4107,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -4192,6 +4195,7 @@ describe("turns on a runner over the runner protocol", () => {
     // The runner's new connections to the server fail while the stream it opened before keeps
     // delivering, as when connecting timed out for a while and the stream lived through it.
     let down = false;
+    let boardDown = false;
     society = await startTestSociety({
       board,
       backends: () => ({
@@ -4202,7 +4206,13 @@ describe("turns on a runner over the runner protocol", () => {
         },
       }),
       ackTimeoutMs: 200,
-      drop: (request) => down && new URL(request.url).pathname !== "/runner/stream",
+      drop: (request) => {
+        const { pathname } = new URL(request.url);
+        return (
+          (down && pathname !== "/runner/stream") ||
+          (boardDown && pathname.startsWith("/runner/board/"))
+        );
+      },
     });
     const { run, hub, runner } = society;
     const dispatch = {
@@ -4217,8 +4227,10 @@ describe("turns on a runner over the runner protocol", () => {
     // The job arrives; its receipt and the board's copy do not, so the turn fails before its CLI
     // starts and its outcome waits for the network. Past the hub's 200 ms the runner gets no more
     // turns; 600 ms also outlasts the 400 ms (retryMs 50 × 2³) after which a runner up to 0.4.0
-    // gave up on its receipt.
+    // gave up on its receipt. The board's copy stays out of reach until the turn has failed, past
+    // its reads sent again at once and after a second.
     down = true;
+    boardDown = true;
     const failed = run(dispatch);
     await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
     const [turnId] = runner.turns;
@@ -4245,6 +4257,7 @@ describe("turns on a runner over the runner protocol", () => {
       exitReason: "error",
       error: expect.stringMatching(/^the runner could not run the turn/),
     });
+    boardDown = false;
     expect(await hub.runTurn(TurnDispatchSchema.parse(dispatch), placed)).toMatchObject({
       exitReason: "completed",
       runner: "pod",
@@ -4621,6 +4634,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [ended],
@@ -4685,6 +4699,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -4792,6 +4807,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -5387,6 +5403,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -5496,6 +5513,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],
@@ -5601,6 +5619,7 @@ describe("turns on a runner over the runner protocol", () => {
           imageReads: false,
           imageWrites: false,
           projectMoves: false,
+          boardSync: false,
           capabilities: [],
           slots: null,
           turns: society.runner.turns,
@@ -5877,6 +5896,7 @@ describe("turns on a runner over the runner protocol", () => {
           imageReads: true,
           imageWrites: false,
           projectMoves: false,
+          boardSync: false,
           capabilities: [],
           slots: null,
           turns: society.runner.turns,
@@ -6080,6 +6100,7 @@ describe("turns on a runner over the runner protocol", () => {
       imageReads: false,
       imageWrites: false,
       projectMoves: false,
+      boardSync: false,
       capabilities: [],
       slots: null,
       turns: [],

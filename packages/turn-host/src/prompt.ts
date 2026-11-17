@@ -9,6 +9,8 @@ import {
   PATH_TOKENS,
   quotaLevel,
   runnerLimitHold,
+  runnerSyncing,
+  syncedFiles,
   SOCIETY_SCOPE,
   stageIndex,
   windowCurrent,
@@ -253,7 +255,26 @@ function quotaPhrase(cli: string, quota: CliQuota, now: Date): string {
   } as of ${quota.observedAt}`;
 }
 
-/** One runner as a planner sees it: whether it is there, what it runs and offers, and what lives on it. */
+/** A connected runner's board sync while it holds its turns, with its count and its last failure. */
+function syncPhrase(runner: Runner): string[] {
+  const sync = runnerSyncing(runner);
+  if (sync === undefined) {
+    return [];
+  }
+  const count = syncedFiles(sync);
+  const failed =
+    sync.error === undefined
+      ? ""
+      : `, try ${sync.attempt} failed (${sync.error})${sync.nextTryAt === undefined ? "" : `, next at ${sync.nextTryAt}`}`;
+  return [
+    `syncing its board copy since ${sync.startedAt}${count === null ? "" : ` (${count})`}${failed}`,
+  ];
+}
+
+/**
+ * One runner as a planner sees it: whether it is there, what it runs and offers, what lives on it,
+ * and what holds its turns.
+ */
 function runnerLine(runner: Runner, projects: readonly Project[], now: Date): string {
   const living = projects
     .filter((project) => project.runner === runner.name)
@@ -263,6 +284,7 @@ function runnerLine(runner: Runner, projects: readonly Project[], now: Date): st
       ? "connected"
       : `away${runner.lastSeen === undefined ? "" : ` since ${runner.lastSeen}`}`,
     ...(runner.paused === undefined ? [] : [`paused by the user since ${runner.paused.at}`]),
+    ...syncPhrase(runner),
   ].join(", ");
   const pauses = runner.clis.flatMap((cli) => {
     const pause = runner.pausedClis?.[cli];
@@ -650,7 +672,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, at the reset the CLI gave or, with none given, half an hour after the report: they wait, and the stages their citizens hold keep their leases.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, at the reset the CLI gave or, with none given, half an hour after the report, and a runner syncing its board copy as it connects starts none until the copy is up to date: they wait, and the stages their citizens hold keep their leases.",
       "",
     );
     if (machines.runners.length === 0) {

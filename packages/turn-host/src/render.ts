@@ -108,7 +108,7 @@ const GOVERNANCE = [
 
 /**
  * The onboarding preamble. It appears on the first turn of a citizen's home in a scope, the one no
- * session began before, and on the onboarding turn of each project the citizen joins; every later
+ * session was recorded before, and on the onboarding turn of each project the citizen joins; every later
  * new session there is told why it is new instead (`SessionAfresh`).
  */
 export function renderOnboardingPreamble(context: OnboardingContext): string {

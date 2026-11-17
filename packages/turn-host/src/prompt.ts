@@ -162,7 +162,7 @@ export type SessionAfresh =
 /**
  * Why a home's session on `runner` is new, from the conversation's session record and its last
  * turn; null when the session resumes, and for the home's first turn, before which no session
- * began, so no record names a runner.
+ * was recorded, so no record names a runner.
  */
 export function sessionAfresh(
   sessions: SessionsFile,

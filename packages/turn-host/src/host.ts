@@ -385,8 +385,8 @@ export class TurnHost {
       agent.role !== USER_ROLE &&
       part === undefined &&
       (societyScope ? charter.societyScope : charter.reflects);
-    // A home's new session is its first turn only while no session began there, so none names a
-    // runner; any later one, after a reflection, a resume its CLI could not make, or on another
+    // A home's new session is its first turn only while no session was recorded there, so none
+    // names a runner; any later one, after a reflection, a resume its CLI could not make, or on another
     // runner, is told why it is new in place of the first-turn notes.
     const firstTurn = newSession && part === undefined && sessions.runner === undefined;
 

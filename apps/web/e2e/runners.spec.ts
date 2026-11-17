@@ -403,11 +403,17 @@ test("the user removes a runner from a red button in its row, which names what c
   const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
 
   // The bin turns into a red Remove in the same cell, in place of the row's controls, named for
-  // what it changes. It takes no press for its first moments, so a double click on the bin, whose
-  // second click lands on it, removes nothing.
+  // what it changes. It takes no press for its first moments, so a double click on the bin, its
+  // second click 150 ms later and landing on the Remove, removes nothing.
   const laptop = rows.nth(2);
   const bin = laptop.getByRole("button", { name: "Remove laptop…" });
-  await bin.dblclick();
+  const at = await bin.boundingBox();
+  if (at === null) {
+    throw new Error("the bin has no box");
+  }
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
   const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
   await expect(remove).toBeFocused();
   await expect(remove).toHaveText("Remove");

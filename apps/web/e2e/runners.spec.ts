@@ -422,7 +422,9 @@ test("the user removes a runner from a red button in its row, which names what c
   const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
   await expect(remove).toBeFocused();
   await expect(remove).toHaveText("Remove");
-  await expect(remove).toHaveClass(/bg-red-600/);
+  // A muted red, white on it 4.56:1, AA for its 12 px label, read with the mouse off it.
+  await page.mouse.move(0, 0);
+  await expect(remove).toHaveCSS("background-color", "rgb(216, 59, 59)");
   const changes = "Clears archived iphone · its token stops working";
   await expect(remove).toHaveAttribute("title", changes);
   await expect(remove).toHaveAccessibleDescription(changes);

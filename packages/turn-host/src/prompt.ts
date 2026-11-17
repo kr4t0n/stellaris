@@ -17,6 +17,7 @@ import {
   windowName,
   WORKSPACE_TOKEN,
   type ChannelRef,
+  type CliKind,
   type CliQuota,
   type Cron,
   type HomeConflict,
@@ -30,11 +31,14 @@ import {
   type Task,
   isTaskStep,
   type MessageStep,
+  type Name,
+  type SessionsFile,
   type Thread,
   type TurnDispatch,
   type TurnRecord,
   type Ulid,
 } from "@stellaris/shared";
+import { failureReason, type FailureReason } from "@stellaris/board-core";
 import { renderOnboardingPreamble, type OnboardingContext } from "./render.js";
 
 /** What the front desk reads to route: every project with its channels, every citizen with its roster line. */
@@ -91,6 +95,12 @@ export interface TurnPromptInput {
   readonly changedInstructions?: string | null | undefined;
   readonly onboarding: OnboardingContext | null;
   /**
+   * Why a home's session is new after an earlier one there, which the prompt says in place of the
+   * first-turn notes. Absent for a resumed session, a first turn, a join's onboarding turn, and any
+   * other conversation.
+   */
+  readonly afresh?: SessionAfresh | null | undefined;
+  /**
    * Whether a reflection that completes in this conversation ends its session: a society role's or
    * a project member's home.
    */
@@ -140,6 +150,77 @@ export interface Conversation {
   /** For a closed thread, where to say what still needs saying: its channel, or the place's general. */
   readonly replyIn?: ChannelRef | undefined;
 }
+
+/**
+ * Why a home starts a new session after an earlier one began there: the last turn ended it, a
+ * completed reflection or a resume its CLI could not make; the session began on another runner,
+ * where it stays; or no earlier turn here left one, as when the last ended before its CLI started.
+ */
+export type SessionAfresh =
+  | { readonly reason: "reflection" }
+  | { readonly reason: "resume" }
+  | { readonly reason: "runner"; readonly began: Name; readonly runs: Name }
+  | { readonly reason: "unkept" };
+
+/**
+ * Why a home's session on `runner` is new, from the conversation's session record and its last
+ * turn; null when the session resumes, and for the home's first turn, before which no session
+ * was recorded, so no record names a runner.
+ */
+export function sessionAfresh(
+  sessions: SessionsFile,
+  lastTurn: TurnRecord | null,
+  cli: CliKind,
+  runner: Name,
+): SessionAfresh | null {
+  if (
+    sessions.runner === undefined ||
+    (sessions.runner === runner && sessions[cli] !== undefined)
+  ) {
+    return null;
+  }
+  if (lastTurn?.sessionDropped === true) {
+    return lastTurn.trigger.kind === "reflection" && lastTurn.exitReason === "completed"
+      ? { reason: "reflection" }
+      : { reason: "resume" };
+  }
+  if (sessions[cli] !== undefined) {
+    return { reason: "runner", began: sessions.runner, runs: runner };
+  }
+  return { reason: "unkept" };
+}
+
+/** Why the session is new, as the start of the sentence that ends with what carries over. */
+function afreshReason(afresh: SessionAfresh): string {
+  if (afresh.reason === "runner") {
+    return `This conversation's session began on runner ${afresh.began} and stays there, and this turn runs on ${afresh.runs}`;
+  }
+  if (afresh.reason === "reflection") {
+    return "Your last turn here was a reflection, and this conversation's session ended with it";
+  }
+  if (afresh.reason === "resume") {
+    return "Your last turn here failed because its CLI could not resume this conversation's session, which was dropped";
+  }
+  return "None of your earlier turns here left a session to resume";
+}
+
+/**
+ * What cut a failed turn off when it was nothing the citizen did or can fix, by `failureReason`,
+ * named in place of the error's own words, which the turn record keeps for the user. A timeout, a
+ * resume, the context, and anything unrecognised keep their words, which may be the citizen's to act on.
+ */
+const NOT_YOURS: Partial<Record<FailureReason, string>> = {
+  limit: "your CLI's usage limit",
+  auth: "a problem with your CLI's sign-in or account",
+  service: "the model service turning a request away or cutting it off",
+  network: "your runner losing its connection to the board",
+  runner_dropped: "your runner going away",
+  model: "a model your CLI does not know",
+};
+
+/** What a home's new session after earlier ones has to go on. */
+const AFRESH_KEPT =
+  "so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.";
 
 /** What a reflection turn is for. It replaces new work, not the unread messages. */
 const REFLECTION_INTRO =
@@ -585,6 +666,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
 
   const last = input.lastTurn;
+  const afresh = input.afresh ?? null;
   if (last?.exitReason === "stopped") {
     lines.push(
       "",
@@ -594,12 +676,16 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     );
   }
   if (last !== null && (last.exitReason === "error" || last.exitReason === "timeout")) {
+    const cause = NOT_YOURS[failureReason(last)];
     lines.push(
       "",
       "## Your previous turn did not finish",
       "",
-      `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`,
-      ...(last.sessionDropped === true
+      cause === undefined
+        ? `It ended with ${last.exitReason}${last.error === null ? "" : `: ${last.error}`}.`
+        : `It was cut off by ${cause}, which is not yours to fix or look into: carry on with the work.`,
+      // A home's new session says so below, with why.
+      ...(last.sessionDropped === true && afresh === null
         ? [
             "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one: nothing of your earlier turns here carries over but what is on the board and in your home.",
           ]
@@ -622,17 +708,8 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       ...failed.flatMap((cron) => cronLines(cron, timeZone)),
     );
   }
-  if (
-    last?.trigger.kind === "reflection" &&
-    last.exitReason === "completed" &&
-    last.sessionDropped === true
-  ) {
-    lines.push(
-      "",
-      "## Your session started afresh",
-      "",
-      "Your last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.",
-    );
+  if (afresh !== null) {
+    lines.push("", "## Your session started afresh", "", `${afreshReason(afresh)}, ${AFRESH_KEPT}`);
   }
 
   const society = input.societyView;

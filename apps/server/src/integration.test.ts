@@ -580,7 +580,12 @@ describe("Phase 6 exit criterion", () => {
     expect(joined.status).toBe(200);
     await settle();
     const onboarding = backend.prompts.findLast((p) => p.includes('project "beta"'));
-    expect(onboarding).toContain("This is your first turn as mem-1");
+    // Its home is the one it wrote on alpha, so the notes ask for no memory or profile again.
+    expect(onboarding).toContain(
+      "This is your first turn here as mem-1. Your home, with your memory and profile, is the one your turns elsewhere use.",
+    );
+    expect(onboarding).not.toContain("Your memory is empty.");
+    expect(onboarding).not.toContain("Write profile.md");
     expect(onboarding).toContain("## Knowledge of beta\n\nNone yet.");
     expect((await board.listKnowledge("beta")).map((k) => k.body)).toEqual([
       expect.stringContaining("carried over from alpha"),

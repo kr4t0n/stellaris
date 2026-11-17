@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { instructionsHash, renderInstructions } from "./render.js";
+import { instructionsHash, renderInstructions, renderOnboardingPreamble } from "./render.js";
 
 const places = { homeDir: "/data/agents/eng-1", boardDir: "/data/board" };
 
@@ -12,6 +12,18 @@ function at(channelPostWaitMs: number) {
     ...places,
     channelPostWaitMs,
   };
+}
+
+/** An engineer's first-turn notes, in a home holding what it wrote of its memory and profile. */
+function preamble(memoryWritten: boolean, profileWritten: boolean): string {
+  return renderOnboardingPreamble({
+    agentName: "eng-1",
+    roleSummary: "Builds things.",
+    project: "demo",
+    worktree: "/tmp/wt",
+    memoryWritten,
+    profileWritten,
+  });
 }
 
 describe("config-home rendering", () => {
@@ -40,6 +52,8 @@ describe("config-home rendering", () => {
         roleSummary: "Builds things.",
         project: "demo",
         worktree: "/tmp/wt",
+        memoryWritten: false,
+        profileWritten: false,
       },
     });
     expect(first).toContain("## First turn");
@@ -58,11 +72,39 @@ describe("config-home rendering", () => {
         project: "demo",
         worktree: "/tmp/wt",
         otherChannels: ["demo/release-1"],
+        memoryWritten: false,
+        profileWritten: false,
       },
     });
     expect(joined).toContain(
       "You follow its general channel. It also has #demo/release-1, each a workstream such as a release",
     );
+  });
+
+  it("asks a first turn for memory and a profile only while the home holds neither", () => {
+    const memory = "Your memory is empty.";
+    const profile = "Write profile.md in your home directory";
+    const newcomer = preamble(false, false);
+    expect(newcomer).toContain("This is your first turn as eng-1.\n");
+    expect(newcomer).toContain(memory);
+    expect(newcomer).toContain(profile);
+    // A citizen that joins a project with a home it wrote elsewhere is told the home carries over.
+    const returning = preamble(true, true);
+    expect(returning).toContain(
+      "This is your first turn here as eng-1. Your home, with your memory and profile, is the one your turns elsewhere use.",
+    );
+    expect(returning).not.toContain(memory);
+    expect(returning).not.toContain(profile);
+    // Each request goes with its own file.
+    expect(preamble(true, false)).not.toContain(memory);
+    expect(preamble(true, false)).toContain(profile);
+    expect(preamble(false, true)).toContain(memory);
+    expect(preamble(false, true)).not.toContain(profile);
+    // And the rest of the notes stay.
+    for (const each of [newcomer, returning]) {
+      expect(each).toContain("Your role in one paragraph: Builds things.");
+      expect(each).toContain("Read the project's instructions file");
+    }
   });
 
   it("loads the norms in full and the skills as an index of summaries and paths", () => {
@@ -252,6 +294,8 @@ describe("config-home rendering", () => {
       roleSummary: "Builds things.",
       project: "demo",
       worktree: "/tmp/wt",
+      memoryWritten: false,
+      profileWritten: false,
     };
     const later = instructionsHash(input);
     expect(later).toMatch(/^[0-9a-f]{64}$/);

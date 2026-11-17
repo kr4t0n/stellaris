@@ -4049,6 +4049,24 @@ describe("Board", () => {
     ]);
   });
 
+  it("tells whether a citizen wrote its memory and profile past the templates it was added with", async () => {
+    const { board } = await society();
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: false });
+    const memory = board.paths.agentMemoryCore("eng-1");
+    const profile = board.paths.agentProfile("eng-1");
+    // A lesson under the template's heading is written; the template saved again is not.
+    const template = await readFile(memory, "utf8");
+    await writeFile(memory, `${template}\n- The user prefers small pull requests.\n`, "utf8");
+    await writeFile(profile, `${await readFile(profile, "utf8")}\n\n`, "utf8");
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: true, profile: false });
+    // A profile without frontmatter counts, and a missing or blank file does not.
+    await writeFile(profile, "I build web apps.\n", "utf8");
+    await rm(memory);
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: true });
+    await writeFile(profile, "\n\n", "utf8");
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: false });
+  });
+
   it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {
     const { board } = await society();
     // A colon in an unquoted value, as a live front desk wrote it in a reflection.

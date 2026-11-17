@@ -2,12 +2,13 @@ export { TurnHost } from "./host.js";
 export type { HostLog, Opened, RunnerSeat, TurnConversation, TurnHostOptions } from "./host.js";
 export { MoveSourceAwayError, RunnerAwayError, RunnerHub, RunnerProtocolError } from "./hub.js";
 export type { RunnerHubOptions, RunnerSend } from "./hub.js";
-export { buildSteerText, buildTurnPrompt } from "./prompt.js";
+export { buildSteerText, buildTurnPrompt, sessionAfresh } from "./prompt.js";
 export type {
   Conversation,
   Ending,
   KnowledgeView,
   RunnersView,
+  SessionAfresh,
   SocietyView,
   TurnPromptInput,
 } from "./prompt.js";

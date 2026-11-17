@@ -174,11 +174,16 @@ function RemoveMark() {
   );
 }
 
+/** How long a removal's button waits before it takes a press, so a double click on the bin removes nothing. */
+const REMOVE_ARMS_MS = 400;
+
 /**
- * The removal of a runner, under its row: what it changes, the citizens pinned there, who are
- * pinned again on their next turn, the archived projects that lived there, and its token, which
- * stops working. The board refuses while a project lives there, anything runs there, or it is
- * connected and not paused, saying what.
+ * A runner's removal, in place of its row's controls: one red button, its title and description
+ * naming what it changes (the citizens pinned there, who are pinned again on their next turn, the
+ * archived projects that lived there, and its token, which stops working). It takes no press for
+ * its first moments, and Escape or the focus leaving it puts the controls back. The board refuses
+ * while a project lives there, anything runs there, or it is connected and not paused, saying what
+ * on a line under the row.
  */
 function RemoveRunner({
   runner,
@@ -189,12 +194,18 @@ function RemoveRunner({
   runner: string;
   pinned: readonly string[];
   archived: readonly string[];
-  onDone: (removed: boolean) => void;
+  /** Called with how it ended: removed, put back with Escape, or left. */
+  onDone: (how: "removed" | "escaped" | "left") => void;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
+  const button = useRef<HTMLButtonElement>(null);
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    button.current?.focus();
+    const timer = setTimeout(() => setArmed(true), REMOVE_ARMS_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const remove = useMutation({
     mutationFn: () => api.removeRunner(runner),
     onSuccess: async () => {
@@ -203,7 +214,7 @@ function RemoveRunner({
           client.invalidateQueries({ queryKey: [key] }),
         ),
       );
-      onDone(true);
+      onDone("removed");
     },
   });
   const changes = [
@@ -211,42 +222,46 @@ function RemoveRunner({
     ...(archived.length === 0 ? [] : [`clears archived ${archived.join(", ")}`]),
     "its token stops working",
   ].join(" · ");
+  const described = `${changes.charAt(0).toUpperCase()}${changes.slice(1)}`;
+  const waiting = !armed || remove.isPending;
   return (
-    <form
-      aria-label={`Remove ${runner}`}
-      className="col-span-full mt-1.5 mb-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!remove.isPending) {
-          remove.mutate();
-        }
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1 text-meta">
-          {changes.charAt(0).toUpperCase()}
-          {changes.slice(1)}
-        </p>
+    <>
+      <span className="flex items-center justify-end">
         {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
-        <Button
-          ref={cancel}
-          aria-disabled={remove.isPending}
+        <button
+          ref={button}
+          type="button"
+          aria-label={`Remove ${runner}`}
+          aria-description={described}
+          title={described}
+          aria-disabled={waiting}
           onClick={() => {
-            if (!remove.isPending) {
-              onDone(false);
+            if (!waiting) {
+              remove.mutate();
             }
           }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !remove.isPending) {
+              event.stopPropagation();
+              onDone("escaped");
+            }
+          }}
+          onBlur={() => {
+            if (!remove.isPending) {
+              onDone("left");
+            }
+          }}
+          className="inline-flex h-5 shrink-0 items-center rounded-md bg-red-600 px-1.5 text-xs leading-none font-medium text-white transition-colors hover:bg-red-500 focus-visible:ring-2 focus-visible:ring-red-400/40 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
-          Cancel
-        </Button>
-        <Button variant="primary" type="submit" aria-disabled={remove.isPending}>
           {remove.isPending ? "Removing…" : "Remove"}
-        </Button>
-      </div>
-      <div className="mt-1.5">
-        <Failure error={remove.error} />
-      </div>
-    </form>
+        </button>
+      </span>
+      {remove.error === null ? null : (
+        <div className="col-span-full mt-1.5 mb-1">
+          <Failure error={remove.error} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -516,52 +531,9 @@ export function RunnersView() {
                 >
                   {state.label}
                 </span>
-                {/* The runner's own controls share the last column, so rename and remove take no gap of their own. */}
-                <span className="-mr-0.5 flex items-center">
-                  <button
-                    type="button"
-                    aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                    title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
-                    aria-disabled={pause.isPending}
-                    onClick={() =>
-                      toggle({ runner: runner.name, paused: runner.paused === undefined })
-                    }
-                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                  >
-                    <PauseMark paused={runner.paused !== undefined} />
-                  </button>
-                  <button
-                    type="button"
-                    ref={control(`rename:${runner.name}`)}
-                    aria-label={`Rename ${runner.name}…`}
-                    title={`Rename ${runner.name}…`}
-                    aria-expanded={form === "rename"}
-                    onClick={() => toggleForm(runner.name, "rename")}
-                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                  >
-                    <RenameMark />
-                  </button>
-                  <button
-                    type="button"
-                    ref={control(`remove:${runner.name}`)}
-                    aria-label={`Remove ${runner.name}…`}
-                    title={`Remove ${runner.name}…`}
-                    aria-expanded={form === "remove"}
-                    onClick={() => toggleForm(runner.name, "remove")}
-                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-                  >
-                    <RemoveMark />
-                  </button>
-                </span>
-                {form === "rename" ? (
-                  <RenameRunner
-                    runner={runner.name}
-                    onDone={(renamed) => {
-                      setOpened(null);
-                      setRefocus(`rename:${renamed ?? runner.name}`);
-                    }}
-                  />
-                ) : form === "remove" ? (
+                {/* The runner's own controls share the last column, so rename and remove take no gap
+                    of their own; a removal's button takes their place. */}
+                {form === "remove" ? (
                   <RemoveRunner
                     runner={runner.name}
                     pinned={(members.data ?? [])
@@ -573,9 +545,56 @@ export function RunnersView() {
                           project.runner === runner.name && project.archived !== undefined,
                       )
                       .map((project) => project.slug)}
-                    onDone={(removed) => {
+                    onDone={(how) => {
                       setOpened(null);
-                      setRefocus(removed ? "list" : `remove:${runner.name}`);
+                      if (how !== "left") {
+                        setRefocus(how === "removed" ? "list" : `remove:${runner.name}`);
+                      }
+                    }}
+                  />
+                ) : (
+                  <span className="-mr-0.5 flex items-center">
+                    <button
+                      type="button"
+                      aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                      title={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
+                      aria-disabled={pause.isPending}
+                      onClick={() =>
+                        toggle({ runner: runner.name, paused: runner.paused === undefined })
+                      }
+                      className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    >
+                      <PauseMark paused={runner.paused !== undefined} />
+                    </button>
+                    <button
+                      type="button"
+                      ref={control(`rename:${runner.name}`)}
+                      aria-label={`Rename ${runner.name}…`}
+                      title={`Rename ${runner.name}…`}
+                      aria-expanded={form === "rename"}
+                      onClick={() => toggleForm(runner.name, "rename")}
+                      className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    >
+                      <RenameMark />
+                    </button>
+                    <button
+                      type="button"
+                      ref={control(`remove:${runner.name}`)}
+                      aria-label={`Remove ${runner.name}…`}
+                      title={`Remove ${runner.name}…`}
+                      onClick={() => toggleForm(runner.name, "remove")}
+                      className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    >
+                      <RemoveMark />
+                    </button>
+                  </span>
+                )}
+                {form === "rename" ? (
+                  <RenameRunner
+                    runner={runner.name}
+                    onDone={(renamed) => {
+                      setOpened(null);
+                      setRefocus(`rename:${renamed ?? runner.name}`);
                     }}
                   />
                 ) : null}

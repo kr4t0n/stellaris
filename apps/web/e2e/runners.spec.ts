@@ -391,67 +391,78 @@ test("a refusal from the keyboard leaves the focus in the field, renaming or app
   await expect(name).toHaveValue("pod");
 });
 
-test("the user removes a runner from its row, after a confirm that names what changes, and sees why the board refused", async ({
+test("the user removes a runner from a red button in its row, which names what changes and says why the board refused", async ({
   page,
 }) => {
   // desk is pinned to pod and in a turn there; lab lives on laptop, and iphone, archived, did.
   const board = await fakeBoard(page, { inFlight: true, archived: true });
   await page.goto("/runners");
-  const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
+  const list = page.getByRole("list", { name: "Registered" });
+  const rows = list.getByRole("listitem");
   await expect(rows).toHaveCount(3);
+  const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
 
-  // laptop's confirm names the archived project it clears; the board refuses while lab lives there.
+  // The bin turns into a red Remove in the same cell, in place of the row's controls, named for
+  // what it changes. It takes no press for its first moments, so a double click on the bin, whose
+  // second click lands on it, removes nothing.
   const laptop = rows.nth(2);
-  const openLaptop = laptop.getByRole("button", { name: "Remove laptop…" });
-  await expect(openLaptop).toHaveAttribute("aria-expanded", "false");
-  await openLaptop.click();
-  await expect(openLaptop).toHaveAttribute("aria-expanded", "true");
-  const laptopForm = page.getByRole("form", { name: "Remove laptop" });
-  await expect(laptopForm.getByRole("paragraph")).toHaveText(
-    "Clears archived iphone · its token stops working",
-  );
-  // The focus waits on Cancel, so a stray Enter removes nothing.
-  await expect(laptopForm.getByRole("button", { name: "Cancel" })).toBeFocused();
-  await laptopForm.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(laptopForm.getByRole("alert")).toHaveText(
+  const bin = laptop.getByRole("button", { name: "Remove laptop…" });
+  await bin.dblclick();
+  const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
+  await expect(remove).toBeFocused();
+  await expect(remove).toHaveText("Remove");
+  await expect(remove).toHaveClass(/bg-red-600/);
+  const changes = "Clears archived iphone · its token stops working";
+  await expect(remove).toHaveAttribute("title", changes);
+  await expect(remove).toHaveAccessibleDescription(changes);
+  await expect(cellsOf(laptop)).toHaveCount(8);
+  await expect(cellsOf(laptop).nth(7).getByRole("button")).toHaveCount(1);
+  expect(removals()).toEqual([]);
+  // Once it takes a press, the board refuses while lab lives there, on a line under the row.
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
+  await remove.click();
+  await expect(laptop.getByRole("alert")).toHaveText(
     "runner laptop cannot be removed while lab lives there; move it to another runner first",
   );
-  await laptopForm.getByRole("button", { name: "Cancel" }).click();
-  await expect(laptopForm).toHaveCount(0);
-  await expect(openLaptop).toBeFocused();
+  await expect(remove).toBeFocused();
+  // Escape puts the controls back with the bin focused, and the refusal goes; the board stays open.
+  await page.keyboard.press("Escape");
+  await expect(remove).toHaveCount(0);
+  await expect(bin).toBeFocused();
+  await expect(laptop.getByRole("alert")).toHaveCount(0);
+  await expect(page).toHaveURL("/runners");
 
-  // pod's names the citizen pinned there; connected, unpaused, and running desk's turn, it stays.
+  // pod's names the citizen pinned there; connected, unpaused, and running desk's turn, it stays,
+  // and a click elsewhere puts its controls back.
   const pod = rows.nth(0);
   await pod.getByRole("button", { name: "Remove pod…" }).click();
-  const podForm = page.getByRole("form", { name: "Remove pod" });
-  await expect(podForm.getByRole("paragraph")).toHaveText("Unpins desk · its token stops working");
-  await podForm.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(podForm.getByRole("alert")).toHaveText(
+  const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
+  await expect(removePod).toHaveAttribute("title", "Unpins desk · its token stops working");
+  await expect(removePod).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("Enter");
+  await expect(pod.getByRole("alert")).toHaveText(
     "runner pod cannot be removed while it is connected and not paused and 1 turn(s) run or start there; pause it, and remove it once that ends",
   );
-  // A row opens one form at a time: its rename closes its removal.
-  await pod.getByRole("button", { name: "Rename pod…" }).click();
-  await expect(podForm).toHaveCount(0);
-  await expect(page.getByRole("form", { name: "Rename pod" })).toBeVisible();
-  await expect(pod.getByRole("button", { name: "Remove pod…" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
+  await page.getByRole("heading", { name: "Runners" }).click();
+  await expect(removePod).toHaveCount(0);
+  await expect(pod.getByRole("button", { name: "Rename pod…" })).toBeVisible();
+  await expect(pod.getByRole("alert")).toHaveCount(0);
 
   // studio, paused from its row, goes, and the list keeps the focus.
   const studio = rows.nth(1);
   await studio.getByRole("button", { name: "Pause studio" }).click();
   await expect(studio.getByRole("button", { name: "Resume studio" })).toBeVisible();
   await studio.getByRole("button", { name: "Remove studio…" }).click();
-  const studioForm = page.getByRole("form", { name: "Remove studio" });
-  await expect(studioForm.getByRole("paragraph")).toHaveText("Its token stops working");
-  await studioForm.getByRole("button", { name: "Remove", exact: true }).click();
+  const removeStudio = studio.getByRole("button", { name: "Remove studio", exact: true });
+  await expect(removeStudio).toHaveAttribute("title", "Its token stops working");
+  await expect(removeStudio).toHaveAttribute("aria-disabled", "false");
+  await removeStudio.click();
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText("pod");
   await expect(rows.nth(1)).toContainText("laptop");
-  await expect(page.getByRole("list", { name: "Registered" })).toBeFocused();
+  await expect(list).toBeFocused();
   await expect(page.getByText(/^1 connected · 1 away/)).toBeVisible();
-  expect(board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path))).toEqual([
+  expect(removals()).toEqual([
     { path: "/api/runners/laptop", body: {} },
     { path: "/api/runners/pod", body: {} },
     { path: "/api/runners/studio", body: {} },

@@ -2005,6 +2005,14 @@ describe("turns on a runner over the runner protocol", () => {
     expect(prompts.at(-1)).toContain(
       `${afresh}\n\nThis conversation's session began on runner far and stays there, and this turn runs on pod,`,
     );
+
+    // An onboarding turn, as a join fires, gets the notes in a home that had a session, and no
+    // reason beside them: here on far, where the session pod began does not resume.
+    await board.pinAgent("eng-1", "far", "pod");
+    await society.run({ ...home, onboarding: true });
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-4", newSession: true });
+    expect(prompts.at(-1)).toContain(first);
+    expect(prompts.at(-1)).not.toContain(afresh);
   });
 
   it("starts a society role's home afresh once a reflection there completes, warm or cold, and tells its next turn", async () => {

@@ -290,7 +290,7 @@ function RemoveRunner({
               onDone("left");
             }
           }}
-          className="inline-flex h-5 shrink-0 items-center rounded-md bg-[#d83b3b] px-1 text-xs leading-none text-white transition-colors hover:bg-[#c03434] focus-visible:ring-2 focus-visible:ring-red-400/40 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          className="inline-flex h-5 shrink-0 items-center rounded-md bg-[#dc3f3f] px-1 text-xs leading-none text-white transition-colors hover:bg-[#c03434] focus-visible:ring-2 focus-visible:ring-red-400/40 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
           {/* One label throughout, so the column never widens while the board answers. */}
           Remove

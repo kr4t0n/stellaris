@@ -446,7 +446,7 @@ export function RunnersView() {
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(3rem,1fr)_auto_auto] gap-x-3"
+          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-3"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -517,7 +517,7 @@ export function RunnersView() {
                   {state.label}
                 </span>
                 {/* The runner's own controls share the last column, so rename and remove take no gap of their own. */}
-                <span className="-mr-1 flex items-center">
+                <span className="-mr-0.5 flex items-center">
                   <button
                     type="button"
                     aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}
@@ -526,7 +526,7 @@ export function RunnersView() {
                     onClick={() =>
                       toggle({ runner: runner.name, paused: runner.paused === undefined })
                     }
-                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
                   >
                     <PauseMark paused={runner.paused !== undefined} />
                   </button>
@@ -537,7 +537,7 @@ export function RunnersView() {
                     title={`Rename ${runner.name}…`}
                     aria-expanded={form === "rename"}
                     onClick={() => toggleForm(runner.name, "rename")}
-                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
                   >
                     <RenameMark />
                   </button>
@@ -548,7 +548,7 @@ export function RunnersView() {
                     title={`Remove ${runner.name}…`}
                     aria-expanded={form === "remove"}
                     onClick={() => toggleForm(runner.name, "remove")}
-                    className="rounded p-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
+                    className="rounded px-0.5 py-1 text-fg-tertiary transition-colors hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
                   >
                     <RemoveMark />
                   </button>

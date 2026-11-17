@@ -625,8 +625,16 @@ const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 /** Roles that may add a citizen to a project or remove one, beyond the citizen itself. */
 const REALLOCATING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 
+/** What a new citizen's memory/core.md and profile.md hold until the citizen writes them. */
+const MEMORY_CORE_TEMPLATE =
+  "# Core memory\n\nShort, curated, loaded on every turn. Keep entries that change future behavior and hold across tasks.\n";
 const PROFILE_TEMPLATE =
   "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n";
+
+/** Whether a file's body holds more than the template the board wrote, whitespace aside. */
+function writtenPast(body: string, template: string): boolean {
+  return body.trim().length > 0 && body.trim() !== template.trim();
+}
 
 /** A plain rendering of a provisioning summary value for a post, without falling back to `[object Object]`. */
 function plain(value: unknown): string {
@@ -4620,6 +4628,17 @@ export class Board {
   }
 
   /**
+   * Whether a citizen has written its memory/core.md and its profile.md: each holds more than the
+   * template the board wrote when the citizen was added.
+   */
+  async readHomeWritten(agent: Name): Promise<{ memory: boolean; profile: boolean }> {
+    return {
+      memory: writtenPast(await this.readMemoryCore(agent), MEMORY_CORE_TEMPLATE),
+      profile: writtenPast(await this.readProfile(agent), PROFILE_TEMPLATE),
+    };
+  }
+
+  /**
    * Moves a conversation's cursor forward to `cursor` once a turn there has delivered up to it. It
    * never moves back, so a turn that ends after a later one in the same conversation cannot rewind it.
    * `part` names the conversation beside the scope's home: a thread's id or `#channel`.
@@ -4740,6 +4759,30 @@ export class Board {
       const { [cli]: _dropped, ...kept } = current;
       await writeJson(file, kept);
       return true;
+    });
+  }
+
+  /**
+   * Records that a conversation's session for a CLI ended on `runner` and none is kept, as when a
+   * reflection that began its own session completes: the record names the runner, so the
+   * conversation's next turn is no first turn, and holds no session for the CLI. A record of
+   * another runner goes, as `writeSession` replaces one, since sessions do not move between machines.
+   */
+  async endSession(
+    agent: Name,
+    project: Name,
+    cli: CliKind,
+    runner: Name,
+    part?: string,
+  ): Promise<void> {
+    await this.mutex.run(async () => {
+      const dir = this.sessionDir(agent, project, part);
+      await ensureDir(dir);
+      const file = path.join(dir, "sessions.json");
+      const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
+      const { [cli]: _ended, ...kept } =
+        current.runner === undefined || current.runner === runner ? current : {};
+      await writeJson(file, { ...kept, runner });
     });
   }
 
@@ -5810,7 +5853,7 @@ export class Board {
       await writeMarkdown(
         this.paths.agentMemoryCore(agent.name),
         { agent: agent.name, updatedAt: agent.createdAt },
-        `# Core memory\n\nShort, curated, loaded on every turn. Keep entries that change future behavior and hold across tasks.\n`,
+        MEMORY_CORE_TEMPLATE,
       );
     }
     if (!(await exists(this.paths.agentProfile(agent.name)))) {

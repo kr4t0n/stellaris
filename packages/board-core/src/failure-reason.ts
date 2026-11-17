@@ -55,11 +55,11 @@ const WORDS: readonly (readonly [FailureReason, RegExp])[] = [
   ["context", /Prompt is too long|ran out of room in the model's context window/],
   // Claude Code's plan limits and 429s, Codex's 429 once its own retries ran out.
   ["limit", /usage limit reached|You've hit your \w+ limit|rate limit|Too Many Requests/],
-  // Claude Code's sign-in, git's, cloning a workspace with no credential, and Codex's sign-in it
-  // could not refresh.
+  // Claude Code's sign-in and its account's refusals (one held for verification, a subscription
+  // past due), git's, cloning a workspace with no credential, and Codex's sign-in it could not refresh.
   [
     "auth",
-    /Failed to authenticate|Not logged in|could not read Username|Your access token could not be refreshed/,
+    /Failed to authenticate|Not logged in|Your account can't receive replies|can't use your Claude subscription|could not read Username|Your access token could not be refreshed/,
   ],
   ["model", /unrecognized_model/],
   // The model service turning a request away or cutting it off: Claude Code's 5xx, 529, or 499,

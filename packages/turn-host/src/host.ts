@@ -48,6 +48,7 @@ import {
   type Ending,
   type KnowledgeView,
   type RunnersView,
+  sessionAfresh,
   type SocietyView,
 } from "./prompt.js";
 import {
@@ -379,14 +380,15 @@ export class TurnHost {
         ? (lastTurn.resumeRetries ?? 1)
         : 0;
     // A home keeps no session past a reflection, which saved what it keeps into the home's files: a
-    // society role's in the society scope, and a project member's whose role reflects. The turn
-    // after one starts afresh, and is no citizen's first turn.
+    // society role's in the society scope, and a project member's whose role reflects.
     const afreshAfterReflection =
       agent.role !== USER_ROLE &&
       part === undefined &&
       (societyScope ? charter.societyScope : charter.reflects);
-    const afterReflection =
-      lastTurn?.trigger.kind === "reflection" && lastTurn.sessionDropped === true;
+    // A home's new session is its first turn only while no session was recorded there, so none
+    // names a runner; any later one, after a reflection, a resume its CLI could not make, or on another
+    // runner, is told why it is new in place of the first-turn notes.
+    const firstTurn = newSession && part === undefined && sessions.runner === undefined;
 
     // The digest of this turn's conversation only: a citizen's turns in its other conversations
     // may run at the same time, and each reads and acts on its own. A new thread conversation
@@ -423,9 +425,12 @@ export class TurnHost {
       task === null
         ? []
         : (await this.board.heldClaims(agent.name)).filter((each) => each.id === task.id);
+    const written =
+      dispatch.onboarding || firstTurn ? await this.board.readHomeWritten(agent.name) : null;
     const onboarding: OnboardingContext | null =
-      dispatch.onboarding || (newSession && part === undefined && !afterReflection)
-        ? {
+      written === null
+        ? null
+        : {
             agentName: agent.name,
             roleSummary: charter.purpose,
             project: dispatch.project,
@@ -433,7 +438,13 @@ export class TurnHost {
             otherChannels: (project?.channels ?? [])
               .map((name) => channelRef(dispatch.project, name))
               .filter((ref) => !agent.subscriptions.includes(ref)),
-          }
+            memoryWritten: written.memory,
+            profileWritten: written.profile,
+          };
+    // A join's onboarding turn in a home that had a session is told it is onboarding, not why.
+    const afresh =
+      part === undefined && onboarding === null
+        ? sessionAfresh(sessions, lastTurn, agent.cli, runner.name)
         : null;
     const rendered: RenderInstructionsInput = {
       agentName: agent.name,
@@ -568,6 +579,7 @@ export class TurnHost {
         : { recentlyRead: { since: recentSince.toISOString(), messages: recentlyRead } }),
       ...(changedInstructions ? { changedInstructions: instructions } : {}),
       onboarding,
+      afresh,
       afreshAfterReflection,
       societyView,
       runners,
@@ -926,9 +938,13 @@ export class TurnHost {
           "dropped a session its CLI could not resume",
         );
       } else if (reflected) {
-        // The session the reflection ran in goes, and one it started is never kept.
+        // The session the reflection ran in goes, and one it started is never kept: its record
+        // names the reflection's runner, so the next turn is told why it starts afresh rather
+        // than given the first-turn notes, and a session left on another runner goes too.
         if (job.session !== null) {
           await this.board.dropSession(job.agent, job.scope, job.cli, job.session, part);
+        } else {
+          await this.board.endSession(job.agent, job.scope, job.cli, turn.runner, part);
         }
         this.log.info(
           { agent: job.agent, project: job.scope, session: outcome.session },

@@ -1909,8 +1909,8 @@ describe("turns on a runner over the runner protocol", () => {
     expect(handed.at(-1)).toEqual({ session: "s-new-1", newSession: false });
     expect(prompts.at(-1)).not.toContain(note);
 
-    // At home, a warm session that cannot be resumed fails as it starts, and the next one is new
-    // and gets the first-turn notes.
+    // At home, a warm session that cannot be resumed fails as it starts, and the next one is new,
+    // told why once, under the new session, rather than given the first-turn notes.
     const home = await run(deskPost);
     expect(home).toMatchObject({ exitReason: "error", resumeFailed: "lost", sessionDropped: true });
     expect(await board.readSessions("desk", "society")).toEqual({ runner: "pod" });
@@ -1919,8 +1919,12 @@ describe("turns on a runner over the runner protocol", () => {
       { session: "s-gone", newSession: false },
       { session: "s-new-2", newSession: true },
     ]);
-    expect(prompts.at(-1)).toContain("## First turn");
-    expect(prompts.at(-1)).toContain(note);
+    expect(prompts.at(-1)).not.toContain("## First turn");
+    expect(prompts.at(-1)).toContain(
+      "## Your session started afresh\n\nYour last turn here failed because its CLI could not resume this conversation's session, which was dropped, so this turn starts a new one:",
+    );
+    expect(prompts.at(-1)).toContain(`It ended with error: ${words}.`);
+    expect(prompts.at(-1)).not.toContain(note);
     const failed = (await board.readEvents(null, 1_000)).filter(
       (event) => event.type === "turn.failed",
     );
@@ -1928,6 +1932,190 @@ describe("turns on a runner over the runner protocol", () => {
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
       expect.objectContaining({ resumeFailed: "lost", sessionDropped: true, error: words }),
     ]);
+  });
+
+  it("gives a home's first turn the first-turn notes, and its first turn on another runner the reason it starts afresh", async () => {
+    const { board } = await Board.init(dir, { name: "elsewhere" });
+    await board.setRoleCharter(USER, {
+      name: "engineer",
+      purpose: "Builds.",
+      verbs: [...MEMBER_VERBS],
+      wakeTriggers: ["heartbeat"],
+    });
+    await board.addAgent(USER, { name: "eng-1", role: "engineer", cli: "claude" });
+    const ran: Array<{ runner: string; session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    const instructions: string[] = [];
+    let made = 0;
+    const backend = (): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        ran.push({
+          runner: request.spec.runner,
+          session: request.session,
+          newSession: request.newSession,
+        });
+        prompts.push(request.prompt);
+        instructions.push(request.instructions);
+        return Promise.resolve(completed("ran"));
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend() }),
+      extraRunners: [{ name: "far", backends: () => ({ claude: backend() }) }],
+    });
+    await board.pinAgent("eng-1", "pod");
+    const home = manual("eng-1", "society");
+    const first = "## First turn";
+    const afresh = "## Your session started afresh";
+
+    // The home's first turn starts its session on pod with the notes, and the next resumes it.
+    await society.run(home);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-1", newSession: true });
+    expect(prompts.at(-1)).toContain(first);
+    expect(prompts.at(-1)).toContain("This is your first turn as eng-1.");
+    expect(prompts.at(-1)).toContain("Your memory is empty.");
+    expect(instructions.at(-1)).toContain(first);
+    expect(prompts.at(-1)).not.toContain(afresh);
+    await society.run(home);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-1", newSession: false });
+    expect(prompts.at(-1)).not.toContain(first);
+
+    // Moved to far, the home starts a session there, told why rather than given the notes again.
+    await board.pinAgent("eng-1", "far", "pod");
+    await society.run(home);
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-2", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(instructions.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(
+      `${afresh}\n\nThis conversation's session began on runner pod and stays there, and this turn runs on far, so this turn starts a new one:`,
+    );
+    await society.run(home);
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-2", newSession: false });
+    expect(prompts.at(-1)).not.toContain(afresh);
+
+    // Back on pod, the session far began stays there, so pod starts another, told so too.
+    await board.pinAgent("eng-1", "pod", "far");
+    await society.run(home);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-3", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(
+      `${afresh}\n\nThis conversation's session began on runner far and stays there, and this turn runs on pod,`,
+    );
+
+    // An onboarding turn, as a join fires, gets the notes in a home that had a session, and no
+    // reason beside them: here on far, where the session pod began does not resume.
+    await board.pinAgent("eng-1", "far", "pod");
+    await society.run({ ...home, onboarding: true });
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-4", newSession: true });
+    expect(prompts.at(-1)).toContain(first);
+    expect(prompts.at(-1)).not.toContain(afresh);
+  });
+
+  it("tells the turn after one a usage limit cut off what cut it, keeping the limit's words on its record only", async () => {
+    const { board } = await Board.init(dir, { name: "limited" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    const words = "usage limit reached: You've hit your 5-hour limit · resets 9:20pm (UTC)";
+    const prompts: string[] = [];
+    let limited = true;
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: (request) => {
+        prompts.push(request.prompt);
+        if (limited) {
+          limited = false;
+          return Promise.resolve({
+            ...completed(""),
+            status: null,
+            exitReason: "error" as const,
+            error: words,
+          });
+        }
+        return Promise.resolve(completed("ran"));
+      },
+    };
+    const { run } = await start(board, backend);
+    const steward = { ...stewardTurn, agent: "steward-1" };
+    expect(await run(steward)).toMatchObject({ exitReason: "error", error: words });
+    await run(steward);
+    expect(prompts.at(-1)).toContain(
+      "## Your previous turn did not finish\n\nIt was cut off by your CLI's usage limit, which is not yours to fix or look into: carry on with the work.\nThe worktree may hold uncommitted changes.",
+    );
+    expect(prompts.at(-1)).not.toContain("You've hit your 5-hour limit");
+    expect((await board.readLastTurn("steward-1", "society"))?.error).toBeNull();
+    const failed = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(failed.map((event) => event.payload["error"])).toEqual([words]);
+  });
+
+  it("tells the turn after a home's reflection why it starts afresh when the reflection began the session, here or on another runner", async () => {
+    const { board } = await Board.init(dir, { name: "reflected-first" });
+    await board.addAgent(USER, { name: "steward-1", role: "steward", cli: "claude" });
+    await board.addAgent(USER, { name: "steward-2", role: "steward", cli: "claude" });
+    const topic = await board.openThread(USER, { channel: "general", title: "a question" });
+    const ran: Array<{ runner: string; session: string; newSession: boolean }> = [];
+    const prompts: string[] = [];
+    const instructions: string[] = [];
+    let made = 0;
+    const backend = (): AgentBackend => ({
+      kind: "claude",
+      newSession: () => Promise.resolve(`s-${(made += 1)}`),
+      runTurn: (request) => {
+        ran.push({
+          runner: request.spec.runner,
+          session: request.session,
+          newSession: request.newSession,
+        });
+        prompts.push(request.prompt);
+        instructions.push(request.instructions);
+        return Promise.resolve(completed("ran"));
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({ claude: backend() }),
+      extraRunners: [{ name: "far", backends: () => ({ claude: backend() }) }],
+    });
+    await board.pinAgent("steward-1", "pod");
+    await board.pinAgent("steward-2", "pod");
+    const first = "## First turn";
+    const afresh =
+      "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one:";
+
+    // A home whose first turn is a reflection, after a turn in a thread: the reflection begins the
+    // home's session, which ends with it, and the record names its runner.
+    const steward1 = { ...stewardTurn, agent: "steward-1" };
+    await society.run({ ...steward1, thread: { id: topic.id, task: false } });
+    const reflected = await society.run(reflection("steward-1"));
+    expect(reflected).toMatchObject({ exitReason: "completed", sessionDropped: true });
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-2", newSession: true });
+    expect(await board.readSessions("steward-1", "society")).toEqual({ runner: "pod" });
+    await society.run(steward1);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-3", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(instructions.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(afresh);
+
+    // A reflection on another runner than its home's session ends that session too, so the home
+    // back on its own runner starts afresh rather than resuming what came before the reflection.
+    const steward2 = { ...stewardTurn, agent: "steward-2" };
+    await society.run(steward2);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-4", newSession: true });
+    await board.pinAgent("steward-2", "far", "pod");
+    await society.run(reflection("steward-2"));
+    expect(ran.at(-1)).toEqual({ runner: "far", session: "s-5", newSession: true });
+    expect(await board.readSessions("steward-2", "society")).toEqual({ runner: "far" });
+    await board.pinAgent("steward-2", "pod", "far");
+    await society.run(steward2);
+    expect(ran.at(-1)).toEqual({ runner: "pod", session: "s-6", newSession: true });
+    expect(prompts.at(-1)).not.toContain(first);
+    expect(prompts.at(-1)).toContain(afresh);
   });
 
   it("starts a society role's home afresh once a reflection there completes, warm or cold, and tells its next turn", async () => {

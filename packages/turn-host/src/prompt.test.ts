@@ -6,7 +6,7 @@ import {
   type TurnRecord,
 } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
-import { buildTurnPrompt } from "./prompt.js";
+import { buildTurnPrompt, sessionAfresh } from "./prompt.js";
 
 /** A project as the board lists it, placed on a runner or not yet. */
 function listedProject(slug: string, runner?: string) {
@@ -24,6 +24,40 @@ function listedProject(slug: string, runner?: string) {
     onDone: "none" as const,
     ...(runner === undefined ? {} : { runner }),
   };
+}
+
+/** A home turn of eng-1's on pod that completed in session s-1, but for `fields`. */
+function turn(fields: Partial<TurnRecord>): TurnRecord {
+  return {
+    agent: "eng-1",
+    project: "society",
+    runner: "pod",
+    cli: "claude",
+    session: "s-1",
+    trigger: TriggerSchema.parse({ kind: "manual", reason: "work" }),
+    startedAt: "2026-09-28T09:00:00.000Z",
+    endedAt: "2026-09-28T09:05:00.000Z",
+    exitReason: "completed",
+    status: null,
+    error: null,
+    usage: null,
+    costUsd: 0,
+    toolCalls: 0,
+    model: null,
+    ...fields,
+  };
+}
+
+/** The notice of a previous turn that did not finish, with its line on the cause. */
+function notice(line: string): string {
+  return `## Your previous turn did not finish\n\n${line}\nThe worktree may hold uncommitted changes.`;
+}
+
+/** The notice for a failure that was not the citizen's, naming its cause. */
+function cutOff(cause: string): string {
+  return notice(
+    `It was cut off by ${cause}, which is not yours to fix or look into: carry on with the work.`,
+  );
 }
 
 const cronlessDispatch = {
@@ -351,6 +385,8 @@ describe("buildTurnPrompt", () => {
         roleSummary: "Builds things.",
         project: "demo",
         worktree: "/tmp/wt",
+        memoryWritten: false,
+        profileWritten: false,
       },
     });
     expect(prompt).toContain("This is your first turn as eng-1");
@@ -1091,16 +1127,163 @@ describe("buildTurnPrompt", () => {
       toolCalls: 0,
       model: null,
     };
-    const after = (lastTurn: TurnRecord) =>
-      buildTurnPrompt({ ...base, dispatch: heartbeat, lastTurn });
+    // The home's session record after the reflection: the session went with it, or stayed.
+    const dropped = { runner: "server" };
+    const kept = { claude: "s", runner: "server" };
+    const after = (lastTurn: TurnRecord, sessions: typeof dropped) =>
+      buildTurnPrompt({
+        ...base,
+        dispatch: heartbeat,
+        lastTurn,
+        afresh: sessionAfresh(sessions, lastTurn, "claude", "server"),
+      });
     const note =
       "## Your session started afresh\n\nYour last turn here was a reflection, and this conversation's session ended with it, so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.";
-    expect(after({ ...reflected, sessionDropped: true })).toContain(note);
+    expect(after({ ...reflected, sessionDropped: true }, dropped)).toContain(note);
     // A reflection that kept its session, or failed, says nothing of a new one.
-    expect(after(reflected)).not.toContain("## Your session started afresh");
+    expect(after(reflected, kept)).not.toContain("## Your session started afresh");
     const timedOut = { ...reflected, exitReason: "timeout" as const, error: "turn timed out" };
-    expect(after(timedOut)).not.toContain("## Your session started afresh");
-    expect(after(timedOut)).toContain("## Your previous turn did not finish");
+    expect(after(timedOut, kept)).not.toContain("## Your session started afresh");
+    expect(after(timedOut, kept)).toContain("## Your previous turn did not finish");
+  });
+
+  it("names a failure that was not the citizen's in a fixed line, and keeps the words of one that may be", () => {
+    const dispatch = {
+      agent: "eng-1",
+      project: "society",
+      trigger: TriggerSchema.parse({ kind: "manual", reason: "work" }),
+      priority: 1,
+      onboarding: false,
+    };
+    const after = (lastTurn: TurnRecord) =>
+      buildTurnPrompt({ dispatch, messages: [], heldClaims: [], lastTurn, onboarding: null });
+    // Failures outside the citizen's work, in the words the live board logged: the line names the
+    // cause, and the error's own words stay on the turn record.
+    const notYours: ReadonlyArray<readonly [string, string]> = [
+      [
+        "usage limit reached: You've hit your 5-hour limit · resets 9:20pm (UTC)",
+        "your CLI's usage limit",
+      ],
+      [
+        "API Error: Your account can't receive replies from Claude right now. You can find the next step in the Anthropic Verification Portal: https://portal.anthropic.com/verify?org=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "a problem with your CLI's sign-in or account",
+      ],
+      [
+        "Claude Code can't use your Claude subscription, usually because a payment is past due · Pay or renew at https://claude.ai/settings/billing (if you just paid, try again shortly), or use an Anthropic API key instead",
+        "a problem with your CLI's sign-in or account",
+      ],
+      ["Not logged in · Please run /login", "a problem with your CLI's sign-in or account"],
+      ["API Error: 529 Overloaded", "the model service turning a request away or cutting it off"],
+      [
+        "the runner could not run the turn: TypeError: fetch failed, caused by SocketError: other side closed (UND_ERR_SOCKET)",
+        "your runner losing its connection to the board",
+      ],
+      ["runner pod went away during the turn", "your runner going away"],
+      ["unrecognized_model: the model is not available", "a model your CLI does not know"],
+    ];
+    for (const [error, cause] of notYours) {
+      const prompt = after(turn({ exitReason: "error", error }));
+      expect(prompt).toContain(cutOff(cause));
+      expect(prompt).not.toContain(error);
+    }
+    // What may be the citizen's to act on keeps its words: a timeout, a turn or context limit, a
+    // missing status object, a session its CLI could not resume, and anything unrecognised.
+    const maybeYours: ReadonlyArray<readonly [TurnRecord["exitReason"], string]> = [
+      ["timeout", "turn exceeded 3600000 ms"],
+      ["error", "turn limit reached: 200 turns"],
+      ["error", "the turn ended without a parsable status object"],
+      ["error", "Prompt is too long"],
+      ["error", "No conversation found with session ID: s-1"],
+      ["error", "the CLI ended"],
+    ];
+    for (const [exitReason, error] of maybeYours) {
+      expect(after(turn({ exitReason, error }))).toContain(
+        notice(`It ended with ${exitReason}: ${error}.`),
+      );
+    }
+  });
+
+  it("tells a home's new session after earlier ones why it is new, and its first turn nothing of it", () => {
+    const done = turn({});
+    const lost = turn({
+      exitReason: "error",
+      error: "No conversation found with session ID: s-1",
+      resumeFailed: "lost",
+      sessionDropped: true,
+    });
+    const reflected = turn({
+      trigger: TriggerSchema.parse({ kind: "reflection", reason: "scheduled reflection" }),
+      sessionDropped: true,
+    });
+    // A reflection whose resume failed lost its session to the resume, not to the reflection.
+    const reflectionLost = { ...lost, trigger: reflected.trigger };
+    const stoppedFirst = turn({ session: null, exitReason: "stopped" });
+    const onPod = { claude: "s-1", runner: "pod" };
+
+    // Which reason each record gives, or none.
+    expect(sessionAfresh({}, null, "claude", "pod")).toBeNull();
+    // A first turn that ended before its CLI started left no session, so the next is still first.
+    expect(sessionAfresh({}, stoppedFirst, "claude", "pod")).toBeNull();
+    expect(sessionAfresh(onPod, done, "claude", "pod")).toBeNull();
+    expect(sessionAfresh(onPod, done, "claude", "far")).toEqual({
+      reason: "runner",
+      began: "pod",
+      runs: "far",
+    });
+    expect(sessionAfresh({ runner: "pod" }, lost, "claude", "pod")).toEqual({ reason: "resume" });
+    // The session was dropped wherever the turn now runs.
+    expect(sessionAfresh({ runner: "pod" }, lost, "claude", "far")).toEqual({ reason: "resume" });
+    expect(sessionAfresh({ runner: "pod" }, reflected, "claude", "far")).toEqual({
+      reason: "reflection",
+    });
+    expect(sessionAfresh({ runner: "pod" }, reflectionLost, "claude", "pod")).toEqual({
+      reason: "resume",
+    });
+    // A turn after the drop that ended before its CLI started left none either.
+    expect(sessionAfresh({ runner: "pod" }, stoppedFirst, "claude", "pod")).toEqual({
+      reason: "unkept",
+    });
+
+    const dispatch = {
+      agent: "eng-1",
+      project: "society",
+      trigger: TriggerSchema.parse({ kind: "manual", reason: "work" }),
+      priority: 1,
+      onboarding: false,
+    };
+    const prompt = (lastTurn: TurnRecord, afresh: ReturnType<typeof sessionAfresh>) =>
+      buildTurnPrompt({
+        dispatch,
+        messages: [],
+        heldClaims: [],
+        lastTurn,
+        onboarding: null,
+        afresh,
+      });
+    const kept =
+      "so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.";
+    expect(prompt(done, { reason: "runner", began: "pod", runs: "far" })).toContain(
+      `## Your session started afresh\n\nThis conversation's session began on runner pod and stays there, and this turn runs on far, ${kept}`,
+    );
+    expect(prompt(stoppedFirst, { reason: "unkept" })).toContain(
+      `## Your session started afresh\n\nNone of your earlier turns here left a session to resume, ${kept}`,
+    );
+    // A lost resume is told once, under the new session, beside the failure it caused.
+    const resumed = prompt(lost, { reason: "resume" });
+    expect(resumed).toContain(
+      `## Your session started afresh\n\nYour last turn here failed because its CLI could not resume this conversation's session, which was dropped, ${kept}`,
+    );
+    expect(resumed).toContain(
+      "## Your previous turn did not finish\n\nIt ended with error: No conversation found with session ID: s-1.\nThe worktree may hold",
+    );
+    expect(resumed.split("could not resume").length - 1).toBe(1);
+    // A thread's new session has no such section, so its failure says why.
+    const inThread = prompt(lost, null);
+    expect(inThread).not.toContain("## Your session started afresh");
+    expect(inThread).toContain(
+      "Its CLI could not resume this conversation's session, so the session was dropped and this turn starts a new one",
+    );
+    expect(prompt(done, null)).not.toContain("## Your session started afresh");
   });
 
   it("shows a home's new session the posts read there before it, above its unread ones, and no heading for none", () => {

@@ -226,13 +226,12 @@ function RemoveRunner({
   const waiting = !armed || remove.isPending;
   return (
     <>
-      <span className="flex items-center justify-end">
+      <span className="-mr-0.5 flex items-center justify-end">
         {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
         <button
           ref={button}
           type="button"
           aria-label={`Remove ${runner}`}
-          aria-description={described}
           title={described}
           aria-disabled={waiting}
           onClick={() => {
@@ -251,9 +250,10 @@ function RemoveRunner({
               onDone("left");
             }
           }}
-          className="inline-flex h-5 shrink-0 items-center rounded-md bg-red-600 px-1.5 text-xs leading-none font-medium text-white transition-colors hover:bg-red-500 focus-visible:ring-2 focus-visible:ring-red-400/40 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          className="inline-flex h-5 shrink-0 items-center rounded-md bg-red-600 px-1 text-xs leading-none text-white transition-colors hover:bg-red-500 focus-visible:ring-2 focus-visible:ring-red-400/40 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
-          {remove.isPending ? "Removing…" : "Remove"}
+          {/* One label throughout, so the column never widens while the board answers. */}
+          Remove
         </button>
       </span>
       {remove.error === null ? null : (

@@ -16,12 +16,12 @@ import {
   PlanEditSchema,
   PlanSchema,
   ProposalKindSchema,
-  runnerLimitHold,
   stageIndex,
   VerbNameSchema,
   type Cron,
   type Task,
 } from "@stellaris/shared";
+import { runnerListLine } from "./runner-list.js";
 
 const program = new Command();
 
@@ -234,23 +234,7 @@ runner
     print(runners, () =>
       runners.length === 0
         ? "No runners yet; add one with `runner add <name>`."
-        : runners
-            .map(
-              (each) =>
-                `${each.name}  ${each.status}${each.paused === undefined ? "" : "  paused"}  ${each.os}${
-                  each.version === undefined ? "" : `  v${each.version}`
-                }  ${each.clis.join(",") || "no CLIs yet"}${
-                  each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
-                }${Object.keys(each.pausedClis ?? {})
-                  .map((cli) => `  ${cli} paused`)
-                  .join("")}${each.clis
-                  .map((cli) => {
-                    const hold = runnerLimitHold(each, cli, now);
-                    return hold === null ? "" : `  ${cli} held until ${hold.until}`;
-                  })
-                  .join("")}`,
-            )
-            .join("\n"),
+        : runners.map((each) => runnerListLine(each, now)).join("\n"),
     );
   });
 

@@ -550,6 +550,7 @@ describe("moving a project to another runner", () => {
           os: "linux",
           clis: ["claude"],
           projectMoves: true,
+          boardSync: false,
           slots: null,
           ...hello,
         }),

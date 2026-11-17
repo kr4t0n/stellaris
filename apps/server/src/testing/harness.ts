@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Board } from "@stellaris/board-core";
@@ -82,6 +83,11 @@ export interface TestSocietyOptions {
   readonly now?: (() => Date) | undefined;
   /** The runner hub's clock, which decides when a CLI's limit stops holding its turns. */
   readonly hubNow?: (() => Date) | undefined;
+  /**
+   * Whether to wait, before answering, until every runner has synced its board copy, which the hub
+   * holds its turns for as it connects; yes unless a test watches the sync itself.
+   */
+  readonly waitForSync?: boolean | undefined;
 }
 
 export interface TestSociety {
@@ -96,6 +102,29 @@ export interface TestSociety {
   /** One turn start to finish, placed and run as the scheduler would. */
   readonly run: (dispatch: z.input<typeof TurnDispatchSchema>) => Promise<TurnRecord>;
   readonly stop: () => Promise<void>;
+}
+
+/**
+ * Waits until each of the runners has reported its board copy synced since its hello, and the hub
+ * holds its turns no more.
+ */
+async function synced(board: Board, hub: RunnerHub, names: readonly string[]): Promise<void> {
+  const until = Date.now() + 20_000;
+  for (;;) {
+    const runners = await board.listRunners();
+    const syncing = runners.filter(
+      (runner) =>
+        names.includes(runner.name) &&
+        (runner.sync?.phase !== "done" || hub.syncing.includes(runner.name)),
+    );
+    if (syncing.length === 0) {
+      return;
+    }
+    if (Date.now() > until) {
+      throw new Error(`runners ${syncing.map((runner) => runner.name).join(", ")} never synced`);
+    }
+    await delay(10);
+  }
 }
 
 /**
@@ -203,6 +232,9 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   if (runner === undefined) {
     throw new Error("the society has no runner");
   }
+  if (options.waitForSync !== false) {
+    await synced(board, hub, [...runners.keys()]);
+  }
 
   return {
     url,
@@ -214,7 +246,23 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
     turns,
     run: async (input) => {
       const dispatch = TurnDispatchSchema.parse(input);
-      const assignment = await hub.assign(dispatch);
+      // A runner that connected again syncs its board copy first, and the scheduler's pass after
+      // that places the turn; so does this, while a sync held a runner as the placement began. Its
+      // record may still say it is away from the connection before, which the hub has replaced.
+      const until = Date.now() + 20_000;
+      let assignment: Awaited<ReturnType<typeof hub.assign>> = null;
+      for (;;) {
+        const holding =
+          hub.syncing.length > 0 ||
+          (await board.listRunners()).some(
+            (each) => each.sync !== undefined && each.sync.phase !== "done",
+          );
+        assignment = await hub.assign(dispatch);
+        if (assignment !== null || !holding || Date.now() > until) {
+          break;
+        }
+        await delay(10);
+      }
       if (assignment === null) {
         throw new Error(`no runner could take ${dispatch.agent}'s turn on ${dispatch.project}`);
       }

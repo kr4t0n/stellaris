@@ -890,6 +890,77 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain(
       "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts",
     );
+    expect(prompt).toContain(
+      "and a runner syncing its board copy as it connects starts none until the copy is up to date: they wait, and the stages their citizens hold keep their leases.",
+    );
+  });
+
+  it("names a runner syncing its board copy in the Runners section, with how far it has come and its last failure", () => {
+    const sync = {
+      phase: "copying" as const,
+      files: 6_200,
+      totalFiles: 15_152,
+      bytes: 11_000_000,
+      totalBytes: 27_000_000,
+      attempt: 1,
+      startedAt: "2026-10-13T11:58:00.000Z",
+      updatedAt: "2026-10-13T11:59:59.000Z",
+    };
+    const prompt = buildTurnPrompt({
+      dispatch: {
+        agent: "eng-1",
+        project: "society",
+        trigger: TriggerSchema.parse({ kind: "user_post", fromUser: true }),
+        priority: 2,
+        onboarding: false,
+      },
+      messages: [],
+      heldClaims: [],
+      lastTurn: null,
+      onboarding: null,
+      runners: {
+        runners: [
+          {
+            name: "pod",
+            os: "linux",
+            clis: ["claude"],
+            capabilities: [],
+            status: "connected",
+            sync,
+          },
+          {
+            name: "far",
+            os: "linux",
+            clis: ["claude"],
+            capabilities: [],
+            status: "connected",
+            sync: {
+              ...sync,
+              attempt: 3,
+              error: "fetch failed, caused by SocketError: other side closed",
+              nextTryAt: "2026-10-13T12:00:20.000Z",
+            },
+          },
+          {
+            name: "done",
+            os: "linux",
+            clis: ["claude"],
+            capabilities: [],
+            status: "connected",
+            sync: { ...sync, phase: "done", finishedAt: "2026-10-13T11:59:00.000Z" },
+          },
+        ],
+        projects: [listedProject("lab", "pod")],
+      },
+      clock: { now: new Date("2026-10-13T12:00:00.000Z"), timeZone: "UTC" },
+    });
+    expect(prompt).toContain(
+      "- pod: connected, syncing its board copy since 2026-10-13T11:58:00.000Z (6,200 / 15,152 files); linux;",
+    );
+    expect(prompt).toContain(
+      "- far: connected, syncing its board copy since 2026-10-13T11:58:00.000Z (6,200 / 15,152 files), try 3 failed (fetch failed, caused by SocketError: other side closed), next at 2026-10-13T12:00:20.000Z; linux;",
+    );
+    expect(prompt).toContain("- done: connected; linux;");
   });
 
   it("tells a turn outside projects when it was asked from a project the citizen is not in", () => {

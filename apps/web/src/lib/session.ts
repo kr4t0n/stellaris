@@ -1,4 +1,4 @@
-import type { Task } from "@stellaris/shared";
+import { runnerSyncing, type Task } from "@stellaris/shared";
 import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { MetricsWindow } from "@stellaris/shared";
@@ -353,9 +353,20 @@ export function useKnowledge(scope: string) {
 }
 
 /** The society's runners and whether each is connected. */
+/**
+ * The runners, read again every minute, and every second while one syncs its board copy: its
+ * progress is written to its record with no event, which marks only the sync's start and end.
+ */
 export function useRunners() {
   const { api } = useSession();
-  return useQuery({ queryKey: ["runners"], queryFn: () => api.runners(), refetchInterval: 60_000 });
+  return useQuery({
+    queryKey: ["runners"],
+    queryFn: () => api.runners(),
+    refetchInterval: (query) =>
+      query.state.data?.some((runner) => runnerSyncing(runner) !== undefined) === true
+        ? 1_000
+        : 60_000,
+  });
 }
 
 /** Runners waiting for the user's approval. They live in the server's memory and no event announces them, so this polls. */

@@ -40,6 +40,7 @@ import {
   type Runner,
   type RunnerRenamed,
   type RunnerMessage,
+  type RunnerSyncReport,
   type RunnerWelcome,
   type RunningTurn,
   type TranscriptEntry,
@@ -89,6 +90,11 @@ interface Seat {
   grace: ReturnType<typeof setTimeout> | null;
   /** Jobs sent down its stream that it has not acknowledged, sent again when it reconnects. */
   readonly unacked: Map<Ulid, Unacked>;
+  /**
+   * Syncing its board copy, from a hello that said it would until it reports the sync done: no
+   * turn goes to it meanwhile, as its record says to everything that reads it (`runnerSyncing`).
+   */
+  syncing: boolean;
 }
 
 interface Unacked {
@@ -218,6 +224,14 @@ export class RunnerHub implements TurnRunner {
       .toSorted();
   }
 
+  /** Runners whose board sync holds their turns now, until each reports its copy synced. */
+  get syncing(): Name[] {
+    return [...this.seats.values()]
+      .filter((seat) => seat.syncing)
+      .map((seat) => seat.name)
+      .toSorted();
+  }
+
   /** Conversations a connected runner keeps warm, as session keys. */
   get residentPairs(): string[] {
     return [...this.seats.values()]
@@ -259,11 +273,13 @@ export class RunnerHub implements TurnRunner {
         disconnectedAt: null,
         grace: null,
         unacked: new Map(),
+        syncing: hello.boardSync,
       };
       this.seats.set(name, seat);
     } else {
       seat.hello = hello;
       seat.warm = new Set();
+      seat.syncing = hello.boardSync;
     }
     const still = new Set(hello.turns);
     for (const turnId of this.host.turnsOn(name)) {
@@ -273,19 +289,62 @@ export class RunnerHub implements TurnRunner {
         await this.host.abortTurn(turnId, `runner ${name} restarted during the turn`);
       }
     }
-    await this.board.markRunner(name, {
+    const now = this.now().toISOString();
+    const marked = await this.board.markRunner(name, {
       os: hello.os,
       clis: hello.clis,
       capabilities: hello.capabilities,
       version: hello.version,
       gitIdentityMissing: hello.gitIdentityMissing ?? null,
+      // Each connection brings the runner's board copy up to date before its first turn there.
+      sync: hello.boardSync
+        ? {
+            phase: "starting",
+            files: 0,
+            totalFiles: null,
+            bytes: 0,
+            totalBytes: null,
+            attempt: 1,
+            startedAt: now,
+            updatedAt: now,
+          }
+        : null,
     });
+    // As the record says once written, which a report of the sync that ended just before this
+    // hello may have been written ahead of: the runner syncs again after each hello it sends.
+    seat.syncing = marked.sync !== undefined && marked.sync.phase !== "done";
     this.runnerChanged(name);
     this.log.info(
       { runner: name, version: hello.version, clis: hello.clis, slots: hello.slots },
       "runner registered",
     );
-    return { name, version: this.version };
+    return { name, version: this.version, boardSync: true };
+  }
+
+  /**
+   * How far a runner's sync of its board copy has come, which its record keeps; once it is done,
+   * turns go to the runner again, the queued ones at the scheduler's next pass.
+   */
+  async boardSync(runner: Name, report: RunnerSyncReport): Promise<void> {
+    const recorded = await this.board.recordRunnerSync(runner, report);
+    // Set from the record once written, so the seat and the record agree whatever order this and
+    // a hello came in: writes take turns, and each sets the flag as it lands.
+    const seat = this.seats.get(runner);
+    if (seat !== undefined) {
+      seat.syncing = recorded.sync !== undefined && recorded.sync.phase !== "done";
+    }
+    if (report.phase === "done") {
+      this.log.info(
+        {
+          runner,
+          files: report.files,
+          bytes: report.bytes,
+          attempts: report.attempt,
+          since: recorded.sync?.startedAt,
+        },
+        "runner synced its board copy",
+      );
+    }
   }
 
   /**
@@ -556,13 +615,15 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
-    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed, and
-    // one whose CLI is limited none of that CLI's until the limit lifts. It is still there and still
-    // has the CLI, so a project living on it and a citizen pinned to it wait.
+    // A runner the user paused, or paused for this CLI, takes none of its turns until resumed, one
+    // whose CLI is limited none of that CLI's until the limit lifts, and one syncing its board copy
+    // none until the copy is up to date. It is still there and still has the CLI, so a project
+    // living on it and a citizen pinned to it wait.
     const runners = await this.board.listRunners();
     const now = this.now();
     const free = (seat: Seat): boolean =>
       seat.send !== null &&
+      !seat.syncing &&
       !this.renaming.has(seat.name) &&
       !receiptOverdue(seat) &&
       seat.hello.clis.includes(cli) &&

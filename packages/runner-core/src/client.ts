@@ -8,6 +8,7 @@ import {
   type RunnerAnswer,
   type RunnerHelloInput,
   type RunnerMessage,
+  type RunnerSyncReport,
   type RunnerWelcome,
   type TranscriptEntry,
   type TurnAck,
@@ -15,7 +16,7 @@ import {
 } from "@stellaris/shared";
 import type { MoveRemote } from "./executor.js";
 import type { HomeRemote } from "./home.js";
-import type { RemoteTree } from "./sync.js";
+import type { RemoteTree, TreeStream } from "./sync.js";
 
 export class RunnerHttpError extends Error {
   constructor(
@@ -203,6 +204,32 @@ export class RunnerClient {
         FileManifestSchema.parse(await this.call("GET", "/runner/board/manifest")).files,
       read: async (paths) =>
         FileContentsSchema.parse(await this.call("POST", "/runner/board/read", { paths })).files,
+    };
+  }
+
+  /** How far the runner's sync of its board copy has come, which the server holds its turns for. */
+  async syncReport(report: RunnerSyncReport): Promise<void> {
+    await this.call("POST", "/runner/sync", report);
+  }
+
+  /** The board's whole projection in one answer, for a first copy, from the path after `after` on. */
+  boardStream(): TreeStream {
+    return {
+      open: async (after, signal) => {
+        const query = after === null ? "" : `?after=${encodeURIComponent(after)}`;
+        const response = await this.fetchImpl(`${this.baseUrl}/runner/board/stream${query}`, {
+          headers: { authorization: `Bearer ${this.token}` },
+          signal,
+        });
+        if (!response.ok || response.body === null) {
+          const text = await response.text().catch(() => "");
+          throw new RunnerHttpError(
+            response.status,
+            `GET /runner/board/stream answered ${response.status}: ${text.slice(0, 500)}`,
+          );
+        }
+        return response.body;
+      },
     };
   }
 

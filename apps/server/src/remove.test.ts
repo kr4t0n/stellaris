@@ -83,6 +83,7 @@ describe("removing a runner", () => {
     const warmTokens: string[] = [];
     let gate: PromiseWithResolvers<void> | null = null;
     let turns = 0;
+    const prompts: string[] = [];
     let sessions = 0;
     const backend = (): AgentBackend => ({
       kind: "claude",
@@ -97,7 +98,8 @@ describe("removing a runner", () => {
         });
         return Promise.resolve({
           session: resident.session,
-          runTurn: async () => {
+          runTurn: async (prompt) => {
+            prompts.push(prompt);
             turns += 1;
             await gate?.promise;
             return done;
@@ -215,10 +217,13 @@ describe("removing a runner", () => {
     expect(hub.connected).toEqual(["far"]);
     expect((await board.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
 
-    // The concierge's next turn runs on far, which pins it, afresh.
+    // The concierge's next turn runs on far, which pins it, afresh: its record still names pod, so
+    // the turn is told its session started afresh, not given the first-turn notes.
     const after = await society.run(dispatch);
     expect(after).toMatchObject({ exitReason: "completed", runner: "far" });
     expect(started.at(-1)).toEqual({ runner: "far", session: "session-1", newSession: true });
+    expect(prompts.at(-1)).toContain("## Your session started afresh");
+    expect(prompts.at(-1)).not.toContain("## First turn");
     expect((await board.readAgent("concierge-1")).homeRunner).toBe("far");
   });
 

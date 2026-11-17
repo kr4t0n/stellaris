@@ -180,16 +180,19 @@ function RemoveMark() {
   );
 }
 
-/** How long a removal's button waits before it takes a press, so a double click on the bin removes nothing. */
-const REMOVE_ARMS_MS = 400;
+/**
+ * How long a removal's button waits before it takes a press, so a double click on the bin removes
+ * nothing, a slow one too: the systems' own double-click times are about 500 ms.
+ */
+const REMOVE_ARMS_MS = 500;
 
 /**
  * A runner's removal, in place of its row's controls: one red button, its title and description
  * naming what it changes (the citizens pinned there, who are pinned again on their next turn, the
  * archived projects that lived there, and its token, which stops working). It takes no press for
- * its first moments, and Escape or the focus leaving it puts the controls back. The board refuses
- * while a project lives there, anything runs there, or it is connected and not paused, saying what
- * on a line under the row.
+ * its first moments, and Escape or the focus leaving it puts the controls back, or, when the focus
+ * leaves while the board answers, the answer does. The board refuses while a project lives there,
+ * anything runs there, or it is connected and not paused, saying what on a line under the row.
  */
 function RemoveRunner({
   runner,
@@ -200,13 +203,25 @@ function RemoveRunner({
   runner: string;
   pinned: readonly string[];
   archived: readonly string[];
-  /** Called with how it ended: removed, put back with Escape, or left. */
-  onDone: (how: "removed" | "escaped" | "left") => void;
+  /**
+   * Called with how it ended: removed, put back with Escape, or left, with the board's refusal when
+   * the focus left before it came, and after a removal whether the list takes the focus: unless it
+   * left for a control the user moved to meanwhile.
+   */
+  onDone: (
+    how: "removed" | "escaped" | "left",
+    after?: { refused?: Error; focusList?: boolean },
+  ) => void;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
   const button = useRef<HTMLButtonElement>(null);
   const [armed, setArmed] = useState(false);
+  // Whether a press is waiting for the board's answer, set as it goes, since `isPending` reaches a
+  // render only after a key or click that follows at once; and whether the focus left meanwhile,
+  // so the answer closes the button.
+  const answering = useRef(false);
+  const left = useRef(false);
   useEffect(() => {
     button.current?.focus();
     const timer = setTimeout(() => setArmed(true), REMOVE_ARMS_MS);
@@ -220,7 +235,17 @@ function RemoveRunner({
           client.invalidateQueries({ queryKey: [key] }),
         ),
       );
-      onDone("removed");
+      onDone("removed", {
+        focusList: !left.current || document.activeElement === document.body,
+      });
+    },
+    onError: (error) => {
+      if (left.current) {
+        onDone("left", { refused: error });
+      }
+    },
+    onSettled: () => {
+      answering.current = false;
     },
   });
   const changes = [
@@ -241,7 +266,9 @@ function RemoveRunner({
           title={described}
           aria-disabled={waiting}
           onClick={() => {
-            if (!waiting) {
+            if (!waiting && !answering.current) {
+              answering.current = true;
+              left.current = false;
               remove.mutate();
             }
           }}
@@ -251,13 +278,15 @@ function RemoveRunner({
               event.preventDefault();
               return;
             }
-            if (event.key === "Escape" && !remove.isPending) {
+            if (event.key === "Escape" && !answering.current) {
               event.stopPropagation();
               onDone("escaped");
             }
           }}
           onBlur={() => {
-            if (!remove.isPending) {
+            if (answering.current) {
+              left.current = true;
+            } else {
               onDone("left");
             }
           }}
@@ -414,6 +443,8 @@ export function RunnersView() {
   // closes, a rename's under the name it has then; after a removal, the list has it.
   const [opened, setOpened] = useState<{ runner: string; form: Form } | null>(null);
   const [refocus, setRefocus] = useState<string | null>(null);
+  // A removal's refusal that came once the focus had left it, under its row until the row's next form.
+  const [refused, setRefused] = useState<{ runner: string; error: Error } | null>(null);
   const controls = useRef(new Map<string, HTMLElement>());
   const control = (key: string) => (element: HTMLElement | null) => {
     if (element === null) {
@@ -460,8 +491,12 @@ export function RunnersView() {
     (projects.data ?? [])
       .filter((project) => project.runner === runner.name && project.archived === undefined)
       .map((project) => project.slug);
-  const toggleForm = (runner: string, form: Form): void =>
+  const toggleForm = (runner: string, form: Form): void => {
+    if (refused?.runner === runner) {
+      setRefused(null);
+    }
     setOpened(opened?.runner === runner && opened.form === form ? null : { runner, form });
+  };
 
   return (
     <>
@@ -592,10 +627,21 @@ export function RunnersView() {
                           project.runner === runner.name && project.archived !== undefined,
                       )
                       .map((project) => project.slug)}
-                    onDone={(how) => {
-                      setOpened(null);
-                      if (how !== "left") {
-                        setRefocus(how === "removed" ? "list" : `remove:${runner.name}`);
+                    onDone={(how, after) => {
+                      // An answer that comes after the focus left may find another form open.
+                      setOpened((current) =>
+                        current?.runner === runner.name && current.form === "remove"
+                          ? null
+                          : current,
+                      );
+                      if (after?.refused !== undefined) {
+                        setRefused({ runner: runner.name, error: after.refused });
+                      }
+                      if (how === "escaped") {
+                        setRefocus(`remove:${runner.name}`);
+                      }
+                      if (how === "removed" && after?.focusList === true) {
+                        setRefocus("list");
                       }
                     }}
                   />
@@ -636,6 +682,11 @@ export function RunnersView() {
                     </button>
                   </span>
                 )}
+                {form !== "remove" && refused?.runner === runner.name ? (
+                  <div className="col-span-full mt-1.5 mb-1">
+                    <Failure error={refused.error} />
+                  </div>
+                ) : null}
                 <SyncProgress runner={runner} now={now} />
                 {form === "rename" ? (
                   <RenameRunner

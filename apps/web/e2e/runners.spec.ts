@@ -492,6 +492,8 @@ test("a second press, or a held key, on the bin removes nothing", async ({ page 
   await page.waitForTimeout(150);
   await page.keyboard.press("Enter");
   await expect(remove).toBeFocused();
+  await page.waitForTimeout(300);
+  expect(removals()).toEqual([]);
   // Enter held: its repeats, past the first moments, still press nothing.
   await page.keyboard.press("Escape");
   await expect(bin).toBeFocused();

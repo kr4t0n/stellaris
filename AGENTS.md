@@ -185,6 +185,7 @@ One long-running process, the board server, hosts the only writer of the data di
 
 - Tests live beside the code as `*.test.ts`, and a script's under `scripts/` as `*.test.mjs`, and run with Vitest from the root. Board and scheduler tests use a temporary data directory and an injected clock. `apps/server`'s `integration.test.ts` and `runner.test.ts` run a server and a runner in one process over real HTTP with a scripted backend (`startTestSociety`).
 - Browser tests are `apps/web/e2e/*.spec.ts`, run by Playwright against the built interface with every `/api` request answered by the fake board, except the `society` project's, `*society.spec.ts`: the exit test and `resend.society.spec.ts`, each starting a board server of its own per test.
+- A browser test that checks the page while a request is on its way holds that request until the test lets it go, never for a fixed time ([holding an answer](./docs/internals/testing.md#the-fake-board)).
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
 
 ## Gotchas

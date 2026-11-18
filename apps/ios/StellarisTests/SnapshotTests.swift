@@ -537,7 +537,7 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// The Advance and Reject sheets, with what they say so far.
+  /// The Advance sheet and Decide's turned to Reject, with what they say so far.
   @MainActor func testTheAdvanceAndRejectSheets() async throws {
     let model = try await signedIn()
     model.advanceNotes[exportView] =

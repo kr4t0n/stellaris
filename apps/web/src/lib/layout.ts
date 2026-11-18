@@ -1,4 +1,8 @@
-/** The gap every island keeps to the window's edge and to the next island. */
+/**
+ * The gap every island keeps to the window's edge and to the next island. The islands' places and
+ * the navigator's width are pixels in their classes too (`left-[16px]`, `w-[256px]`), never rems,
+ * so a larger default font sets their text larger and moves none of them.
+ */
 export const ISLAND_MARGIN = 16;
 export const NAVIGATOR_WIDTH = 256;
 /** The narrowest the content island goes, which still holds a plan, a composer, and a header. */

@@ -259,7 +259,7 @@ function RemoveRunner({
   const waiting = !armed || remove.isPending;
   return (
     <>
-      <span className="-mr-0.5 flex items-center justify-end">
+      <span className="-mr-0.5 flex items-center justify-end @max-[25rem]:col-start-7 @max-[25rem]:row-start-1">
         {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
         <button
           ref={button}
@@ -524,7 +524,7 @@ export function RunnersView() {
           ...(unidentified === 0 ? [] : [`${unidentified} without a git identity`]),
         ].join(" · ")}
       />
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div className="@container flex-1 overflow-y-auto px-2 py-2">
         {code !== undefined && enrollments.data !== undefined && followed === undefined ? (
           <output className="block px-2 pb-2 text-meta">
             No runner waits with the code {code}.
@@ -548,12 +548,17 @@ export function RunnersView() {
         ) : registered.length === 0 ? (
           <p className="px-2 py-2 text-meta">No runners yet.</p>
         ) : null}
-        {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. */}
+        {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. Under 25
+            root ems, which a 420 px island holds at a 16 px root font but not at a larger one, a
+            row takes two lines: the marks, the name, the state, and the controls, and under the
+            name the OS, the version, the capabilities, and the projects to the row's end. The
+            query counts the room the view's scrollbar takes, so the gaps are pixels, 12 as at a
+            16 px root, which leaves one line at a 20 px root room for it from 25 ems up. */}
         <ul
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-3"
+          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto]"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -588,7 +593,7 @@ export function RunnersView() {
                   <span className="sr-only">{clis}</span>
                 </span>
                 {/* A gap in the account's git identity sits under the name, so it takes no column. */}
-                <span>
+                <span className="@max-[25rem]:col-[2/6] @max-[25rem]:row-start-1">
                   <span className="block text-fg-primary">{runner.name}</span>
                   {gap === null ? null : (
                     <span className="block text-xs text-amber-300" title={gap.detail}>
@@ -596,29 +601,37 @@ export function RunnersView() {
                     </span>
                   )}
                 </span>
-                <span className="text-fg-secondary">{runner.os}</span>
+                <span className="text-fg-secondary @max-[25rem]:col-start-2 @max-[25rem]:row-start-2">
+                  {runner.os}
+                </span>
                 {offVersion(runner, server) ? (
-                  <span className="text-xs text-amber-300" title={`the server runs v${server}`}>
+                  <span
+                    className="text-xs text-amber-300 @max-[25rem]:col-start-3 @max-[25rem]:row-start-2"
+                    title={`the server runs v${server}`}
+                  >
                     v{runner.version}
                     <span className="sr-only">, not the server's v{server}</span>
                   </span>
                 ) : (
-                  <span className="text-xs text-fg-muted">
+                  <span className="text-xs text-fg-muted @max-[25rem]:col-start-3 @max-[25rem]:row-start-2">
                     {runner.version === undefined ? "" : `v${runner.version}`}
                   </span>
                 )}
                 <span
-                  className="truncate text-xs text-fg-muted"
+                  className="truncate text-xs text-fg-muted @max-[25rem]:col-start-4 @max-[25rem]:row-start-2"
                   title={runner.capabilities.join(", ")}
                 >
                   {runner.capabilities.join(", ")}
                 </span>
-                <span className="truncate text-xs text-fg-muted" title={lives}>
+                <span
+                  className="truncate text-xs text-fg-muted @max-[25rem]:col-[5/-1] @max-[25rem]:row-start-2"
+                  title={lives}
+                >
                   {lives}
                 </span>
                 {/* On one line, so the narrowest island cuts capabilities and projects before it. */}
                 <span
-                  className={`text-right text-xs whitespace-nowrap ${state.tone}`}
+                  className={`text-right text-xs whitespace-nowrap @max-[25rem]:col-start-6 @max-[25rem]:row-start-1 ${state.tone}`}
                   title={state.detail}
                 >
                   {state.label}
@@ -656,7 +669,7 @@ export function RunnersView() {
                     }}
                   />
                 ) : (
-                  <span className="-mr-0.5 flex items-center">
+                  <span className="-mr-0.5 flex items-center @max-[25rem]:col-start-7 @max-[25rem]:row-start-1">
                     <button
                       type="button"
                       aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}

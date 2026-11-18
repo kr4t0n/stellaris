@@ -403,7 +403,7 @@ export function Playground() {
                 <div
                   className={
                     beside
-                      ? `absolute top-[72px] bottom-4 left-4 flex overflow-clip ${ISLAND_SURFACE}`
+                      ? `absolute top-[72px] bottom-[16px] left-[16px] flex overflow-clip ${ISLAND_SURFACE}`
                       : "contents"
                   }
                   style={beside ? { width: NAVIGATOR_WIDTH + contentWidth } : undefined}
@@ -422,7 +422,7 @@ export function Playground() {
                   <Island
                     label="Board content"
                     bare={beside}
-                    className={beside ? "min-w-0 flex-1" : "top-[72px] right-4 bottom-4"}
+                    className={beside ? "min-w-0 flex-1" : "top-[72px] right-[16px] bottom-[16px]"}
                     style={beside ? undefined : { width: contentWidth }}
                   >
                     <ResizeHandle

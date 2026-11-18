@@ -162,8 +162,10 @@ for (const press of ["mouse", "keyboard"] as const) {
     page,
   }) => {
     await fakeBoard(page);
+    // The refusal waits until the test lets it go.
+    const answer = Promise.withResolvers<void>();
     await page.route("**/api/verbs/advance_task", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await answer.promise;
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -190,6 +192,7 @@ for (const press of ["mouse", "keyboard"] as const) {
     // While it goes, and once it is refused, the keyboard is in the box, never on the page.
     await expect(approve).toHaveAttribute("aria-busy", "true");
     await expect(box).toBeFocused();
+    answer.resolve();
     await expect(view.getByRole("alert")).toHaveText("The stage Sign off is no longer current.");
     await expect(box).toBeFocused();
     await expect(box).toHaveValue("LGTM");

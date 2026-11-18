@@ -290,18 +290,23 @@ const MOVE_TIMEOUT_MS = moveTransferMs(MOVE_PACK_LIMIT_BYTES);
  */
 const MOVE_LOW_SPEED = { GIT_HTTP_LOW_SPEED_LIMIT: "1000", GIT_HTTP_LOW_SPEED_TIME: "300" };
 
-/** `http.<url>.extraHeader` for one address, added to whatever configuration the environment gives git. */
-function authEnv(auth: GitAuth | null): Record<string, string> {
-  if (auth === null) {
-    return {};
-  }
+/**
+ * One git setting through the environment, added to whatever configuration the environment gives
+ * git already: a secret given as `-c` would be in git's arguments, which any process may read.
+ */
+export function configEnv(key: string, value: string): Record<string, string> {
   const given = Number.parseInt(process.env["GIT_CONFIG_COUNT"] ?? "0", 10);
   const index = Number.isInteger(given) && given > 0 ? given : 0;
   return {
     GIT_CONFIG_COUNT: String(index + 1),
-    [`GIT_CONFIG_KEY_${index}`]: `http.${auth.url}.extraHeader`,
-    [`GIT_CONFIG_VALUE_${index}`]: auth.header,
+    [`GIT_CONFIG_KEY_${index}`]: key,
+    [`GIT_CONFIG_VALUE_${index}`]: value,
   };
+}
+
+/** `http.<url>.extraHeader` for one address, added to whatever configuration the environment gives git. */
+function authEnv(auth: GitAuth | null): Record<string, string> {
+  return auth === null ? {} : configEnv(`http.${auth.url}.extraHeader`, auth.header);
 }
 
 /** The branch a task's work lives on, shared by whoever holds its stages. */

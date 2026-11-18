@@ -3,6 +3,7 @@ import path from "node:path";
 import { HOME_FILE_LIMIT_BYTES, type Name } from "@stellaris/shared";
 import { execa } from "execa";
 import type { RunnerLog } from "./executor.js";
+import { configEnv } from "./git.js";
 import type { RunnerLayout } from "./layout.js";
 
 /** Where an agent's home repository is, and the header that lets this runner reach it. */
@@ -146,8 +147,8 @@ export class HomeSync {
     await mkdir(path.dirname(home), { recursive: true });
     const cloned = await execa(
       "git",
-      [...this.auth(), "clone", "--quiet", "--branch", "main", this.remote.url(agent), home],
-      { reject: false, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+      ["clone", "--quiet", "--branch", "main", this.remote.url(agent), home],
+      { reject: false, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...this.auth() } },
     );
     if (cloned.exitCode !== 0) {
       throw new Error(`could not clone ${agent}'s home: ${cloned.stderr.trim()}`);
@@ -205,17 +206,18 @@ export class HomeSync {
     return ["-c", `user.name=${agent}`, "-c", `user.email=${agent}@stellaris.local`];
   }
 
-  private auth(): string[] {
+  /** The runner's authorization for the board, in git's environment rather than its arguments. */
+  private auth(): Record<string, string> {
     return this.remote.authorization === null
-      ? []
-      : ["-c", `http.extraHeader=${this.remote.authorization}`];
+      ? {}
+      : configEnv("http.extraHeader", this.remote.authorization);
   }
 
   private async git(home: string, args: readonly string[], network = false): Promise<GitResult> {
-    const result = await execa("git", [...(network ? this.auth() : []), ...args], {
+    const result = await execa("git", args, {
       cwd: home,
       reject: false,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(network ? this.auth() : {}) },
     });
     return { ok: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr };
   }

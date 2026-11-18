@@ -159,15 +159,6 @@ struct ChatView: View {
                   .accessibilityIdentifier("advance")
                 }
               }
-              ToolbarItem(placement: .primaryAction) {
-                Button {
-                  toggleInspector(task.id)
-                } label: {
-                  Label("Plan", systemImage: "list.number")
-                }
-                .accessibilityIdentifier("plan")
-              }
-              .visibilityPriority(.high)
             }
             if case .proposal(let proposal)? = subject {
               if waitingOnYou(proposal) {
